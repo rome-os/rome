@@ -42,6 +42,7 @@ import {
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import { ChatRepository } from "../chats/chat-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -117,7 +118,11 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   );
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    chatRepo: new ChatRepository(db, channelRecords),
+  });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const actionExecutionsRepo = new ActionExecutionsRepository(db);

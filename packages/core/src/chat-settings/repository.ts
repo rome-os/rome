@@ -1,9 +1,10 @@
 import { and, asc, eq, like } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { channelChatId } from "../db/repositories/webchat.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
+import { chatKey } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
-import { isChannelConversation } from "../db/session-kind.js";
+import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredChatRow = typeof romeSessions.$inferSelect;
@@ -24,7 +25,10 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: Chat
 }
 
 export class ChatSettingsRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(
+    private readonly db: DrizzleDb,
+    private readonly chats: ChatRepository,
+  ) {}
 
   find(channel: string, chatId: ChatId): StoredChatRow | null {
     return rowByAddress(this.db, channel, chatId) ?? null;
@@ -57,10 +61,14 @@ export class ChatSettingsRepository {
     );
   }
 
-  /** Create if missing, then mutate one aggregate in one SQLite transaction. Callers
-   * serialize by address before entering this method. `channel` is the name of
-   * the channel the conversation belongs to, which a connection kind's later channels
-   * do not share with it. */
+  /**
+   * Set the reply rule of the conversation `descriptor` names, through the
+   * account `channel` speaks as, starting the chat when Rome holds none there
+   * yet, and bind its row to `agentName` unless that is undefined. One SQLite
+   * transaction. Callers serialize by address before entering this method.
+   * `channel` is the name of the channel the conversation belongs to, which a
+   * connection kind's later channels do not share with it.
+   */
   mutate(
     descriptor: ChatDescriptor,
     channel: string,
@@ -73,6 +81,45 @@ export class ChatSettingsRepository {
     if (descriptor.connectionKind === "webchat") {
       throw new Error("Webchat chats have no conversation settings");
     }
+    if (descriptor.parent) {
+      this.mutateThread(descriptor, channel, input);
+      return;
+    }
+    this.db.transaction((tx) => {
+      const via = this.chats.accountOn(channel);
+      const key = chatKey(via.platform, descriptor.ref.chatId);
+      const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
+      this.chats.startIfMissing(
+        key,
+        descriptor.kind === "dm" ? "dm" : "group",
+        via,
+        descriptor.displayName,
+        { threadType: sourceThreadType },
+      );
+      this.chats.update(key, (chat) => {
+        chat.rename(descriptor.displayName);
+        chat.setReplyRule(via, input.settings);
+      });
+      tx.update(romeSessions)
+        .set({
+          sourceThreadType,
+          ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
+        })
+        .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+        .run();
+    });
+  }
+
+  /** A native thread's row. A thread is no chat of its own, so its row is
+   *  written as it stands until threads have a home in the chat. */
+  private mutateThread(
+    descriptor: ChatDescriptor,
+    channel: string,
+    input: {
+      settings: StoredChatSettings | null;
+      agentName: string | null | undefined;
+    },
+  ): void {
     this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent

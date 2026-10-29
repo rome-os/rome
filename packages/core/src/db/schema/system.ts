@@ -9,7 +9,7 @@ import {
   type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
+import type { Account, AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { DeliveryState } from "../../chats/delivery.js";
 import type { SessionActor } from "../../lib/session-actor.js";
@@ -508,6 +508,10 @@ export const romeSessions = sqliteTable(
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
     channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
+    // The chat's participants other than Rome's own accounts, as the platform
+    // last reported them. Rome's accounts in the chat are its channel rows.
+    // NULL until a platform reports a member list.
+    participants: text("participants", { mode: "json" }).$type<Account[]>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),

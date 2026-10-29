@@ -7,7 +7,7 @@ import { createApiHandler } from "../../../../rome_apps/system/src/api/index.js"
 import { getRecapSettings } from "../../../../rome_apps/system/src/settings.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
 import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
 import { packArtifact } from "./packaging/index.js";
 import { preserveRecapOptOutAtBoot } from "./recap-upgrade.js";
@@ -60,6 +60,7 @@ describe("recap to system upgrade", () => {
     return createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo: new WebChatRepository(testDb.db),
+      chatRepo: testChatRepository(testDb.db),
     });
   }
 

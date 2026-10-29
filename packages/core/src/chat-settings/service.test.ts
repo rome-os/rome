@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
-import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, testChatRepository, type TestDb } from "../test/helpers.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -107,7 +107,7 @@ describe("ChatSettingsService", () => {
     const discord = await connectLive(registry, "discord");
     const feishu = await connectLive(registry, "feishu");
     const wechat = await connectLive(registry, "wechat");
-    const repository = new ChatSettingsRepository(testDb.db);
+    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
     const service = new ChatSettingsService({
       repository,
       connections: registry,
@@ -554,7 +554,7 @@ describe("ChatSettingsService", () => {
     });
     // discord has lost its channel record, as while `registry.remove` evicts it.
     const unrecorded = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb!.db),
+      repository: new ChatSettingsRepository(testDb!.db, testChatRepository(testDb!.db)),
       connections: registry,
       channelOf: (connection) => (connection.id === discord.id ? null : connection.connectionKind),
       channels: () => [],
@@ -652,7 +652,7 @@ describe("ChatSettingsService", () => {
     );
     await connectLive(registry, "discord");
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db),
+      repository: new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db)),
       connections: registry,
       channelOf: kindChannelOf,
       channels: channelsOver(registry),
@@ -682,7 +682,7 @@ describe("ChatSettingsService", () => {
     });
     registry.register(directoryDescriptor("discord", () => []));
     const discord = await connectLive(registry, "discord");
-    const repository = new ChatSettingsRepository(testDb.db);
+    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {
         connectionId: discord.id,
@@ -733,7 +733,7 @@ describe("ChatSettingsService", () => {
   it("keeps guardian chats out of conversation settings", async () => {
     testDb = createTestDb();
     await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
-    const repository = new ChatSettingsRepository(testDb.db);
+    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
 
     expect(repository.find("webchat", "chat-1" as ChatId)).toBeNull();
     expect(() =>
