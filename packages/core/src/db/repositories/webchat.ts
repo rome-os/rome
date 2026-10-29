@@ -1565,35 +1565,22 @@ export class WebChatRepository {
                 sql`${romeAgentMessages}.rowid < (select rowid from ${romeAgentMessages} as "cursor" where "cursor"."id" = ${before.id})`,
               ),
             ),
-          or(
-            isNull(romeAgentMessages.platformMessageId),
-            sql`not exists (
-              select 1 from ${romeAgentMessages} as "copy"
-              where "copy"."session_id" in ${chats}
-                and "copy"."platform_message_id" = ${romeAgentMessages.platformMessageId}
-                and "copy".rowid < ${romeAgentMessages}.rowid
-            )`,
-          ),
           // A reply shown as several messages keeps its other parts' ids beside
-          // its row, so a part another account received is a copy of it too,
-          // while the whole is read. A whole that is itself an earlier copy's
-          // duplicate is not, and its parts stand in for it.
-          or(
-            isNull(romeAgentMessages.platformMessageId),
-            sql`not exists (
-              select 1 from ${romeAgentMessagePlatformIds} as "part"
-              join ${romeAgentMessages} as "whole" on "whole"."id" = "part"."message_id"
-              where "part"."session_id" in ${chats}
-                and "part"."platform_message_id" = ${romeAgentMessages.platformMessageId}
-                and "whole".rowid < ${romeAgentMessages}.rowid
-                and not exists (
-                  select 1 from ${romeAgentMessages} as "earlier"
-                  where "earlier"."session_id" in ${chats}
-                    and "earlier"."platform_message_id" = "whole"."platform_message_id"
-                    and "earlier".rowid < "whole".rowid
-                )
-            )`,
-          ),
+          // its row, so a row is every platform id it holds. A row another
+          // earlier row shares an id with is a copy of it, unless that earlier
+          // row is itself a copy: then it is not read, and this row stands.
+          sql`not exists (
+            select 1 from ${romeAgentMessages} as "copy"
+            where "copy"."session_id" in ${chats}
+              and "copy".rowid < ${romeAgentMessages}.rowid
+              and ${sharesAnId(sql`"copy"`, romeAgentMessages)}
+              and not exists (
+                select 1 from ${romeAgentMessages} as "earlier"
+                where "earlier"."session_id" in ${chats}
+                  and "earlier".rowid < "copy".rowid
+                  and ${sharesAnId(sql`"earlier"`, sql`"copy"`)}
+              )
+          )`,
         ),
       )
       .orderBy(desc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid desc`)
@@ -3329,4 +3316,12 @@ export class WebChatRepository {
       });
     return inserted[0] ?? null;
   }
+}
+
+/** Whether the message rows `a` and `b` hold a platform id in common: their
+ *  own, or one of a multipart reply's other parts. */
+function sharesAnId(a: SQL | typeof romeAgentMessages, b: SQL | typeof romeAgentMessages): SQL {
+  const idsOf = (row: SQL | typeof romeAgentMessages) =>
+    sql`select ${row}."platform_message_id" union all select "alias"."platform_message_id" from ${romeAgentMessagePlatformIds} as "alias" where "alias"."message_id" = ${row}."id"`;
+  return sql`exists (select 1 from (${idsOf(a)}) as "theirs" where "theirs"."platform_message_id" in (${idsOf(b)}))`;
 }

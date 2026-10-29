@@ -223,6 +223,37 @@ describe("StoredMessages reads", () => {
     expect(read.map((message) => message.body.text)).toEqual(["r-1", "r-2"]);
   });
 
+  it("reads a streamed reply's parts when an earlier part outranks a whole named by its last", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    // A streamed reply is named by its last block. Sales hears the first,
+    // Rome records the whole, then sales hears the last.
+    await said(sales.id, "Looking.", minute(1), "s-1");
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("Looking.\n\nAnswer"),
+      platformMessageId: "s-2",
+      otherPlatformMessageIds: ["s-1"],
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+    await said(sales.id, "Answer", minute(1), "s-2");
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual(["Looking.", "Answer"]);
+  });
+
   it("reads a group as one account heard it when the read names that account", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
