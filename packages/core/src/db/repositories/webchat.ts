@@ -1593,8 +1593,9 @@ export class WebChatRepository {
    * created_at keeps whole seconds. `before` names a message by its time and
    * id. A message two of the rows hold, such as a group's message that reached
    * two of Rome's accounts, is answered once, as the copy written first, so a
-   * copy that arrives later never moves it. Only a group is read across
-   * channels; any other chat is the one `ownChannel` keeps. Trace rows belong to no chat and are left
+   * copy that arrives later never moves it. With `ownChannel`, only that
+   * channel's record is read. Without it, only a group is read across
+   * channels. Trace rows belong to no chat and are left
    * out.
    */
   async saidMessagesAt(input: {
@@ -1611,17 +1612,18 @@ export class WebChatRepository {
       eq(romeSessions.sourceThreadId, input.address),
     );
     const isGroup = sql`coalesce(${romeSessions.sourceThreadType}, '') = 'group'`;
-    // Only a group's address names one chat across Rome's accounts. Any other
-    // chat is one account's own: Telegram keys a direct message by the other
-    // person alone, so the same address on two channels is two chats. It is
-    // read from `ownChannel`, or from the one channel that holds it.
-    const ownChat = input.ownChannel
+    // Read through one channel, the chat is that channel's record alone.
+    // Otherwise only a group's address names one chat across Rome's accounts.
+    // Any other chat is one account's own: Telegram keys a direct message by
+    // the other person alone, so the same address on two channels is two
+    // chats, and it is read only while one channel holds it.
+    const which = input.ownChannel
       ? eq(romeSessions.sourceChannel, input.ownChannel)
-      : sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`;
-    const chats = this.db
-      .select({ id: romeSessions.id })
-      .from(romeSessions)
-      .where(and(at, or(isGroup, ownChat)));
+      : or(
+          isGroup,
+          sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`,
+        );
+    const chats = this.db.select({ id: romeSessions.id }).from(romeSessions).where(and(at, which));
     const { before } = input;
     return await this.db
       .select({
@@ -1662,7 +1664,9 @@ export class WebChatRepository {
             )`,
           ),
           // A reply shown as several messages keeps its other parts' ids beside
-          // its row, so a part another account received is a copy of it too.
+          // its row, so a part another account received is a copy of it too,
+          // while the whole is read. A whole that is itself an earlier copy's
+          // duplicate is not, and its parts stand in for it.
           or(
             isNull(romeAgentMessages.platformMessageId),
             sql`not exists (
@@ -1671,6 +1675,12 @@ export class WebChatRepository {
               where "part"."session_id" in ${chats}
                 and "part"."platform_message_id" = ${romeAgentMessages.platformMessageId}
                 and "whole".rowid < ${romeAgentMessages}.rowid
+                and not exists (
+                  select 1 from ${romeAgentMessages} as "earlier"
+                  where "earlier"."session_id" in ${chats}
+                    and "earlier"."platform_message_id" = "whole"."platform_message_id"
+                    and "earlier".rowid < "whole".rowid
+                )
             )`,
           ),
         ),

@@ -56,11 +56,11 @@ export interface MessageRepository {
    * still pending, or one the platform refused, was not said and is not here.
    * A place Rome holds no messages in answers an empty page.
    *
-   * `via` is the one of Rome's accounts reading, over today's storage. A
-   * group reads the same through every account in it, but a direct message
-   * is read through `via`'s, since its address alone may name a direct
-   * message with each of Rome's accounts. Absent, a direct message reads only
-   * while one account holds it.
+   * `via` is the one of Rome's accounts reading, over today's storage, and
+   * the place reads as that account heard it. Absent, a group reads as one
+   * chat across every account in it, and a direct message reads only while
+   * one account holds it, since its address alone may name a direct message
+   * with each of Rome's accounts.
    */
   recent(place: Place, limit: number, via?: Pick<Via, "channel">): Promise<MessagePage>;
 

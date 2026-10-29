@@ -218,6 +218,59 @@ describe("StoredMessages reads", () => {
     expect((await read()).sort()).toEqual(["p-1 p-2", "q-1", "q-2"]);
   });
 
+  it("keeps a reply's later parts when an earlier part outranks the whole", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    // Sales hears the first part, Rome records the whole, then sales hears the second.
+    await said(sales.id, "r-1", minute(1), "r-1");
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("r-1 r-2"),
+      platformMessageId: "r-1",
+      otherPlatformMessageIds: ["r-2"],
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+    await said(sales.id, "r-2", minute(1), "r-2");
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual(["r-1", "r-2"]);
+  });
+
+  it("reads a group as one account heard it when the read names that account", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(support.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "sales only", minute(2), "m-2");
+
+    const viaSales = await messages.recent(group, 10, { channel: "telegram-sales" });
+    expect(viaSales.messages.map((message) => message.id)).toHaveLength(2);
+    const viaSupport = await messages.recent(group, 10, { channel: "telegram" });
+    expect(viaSupport.messages.map((message) => message.platformMessageId)).toEqual(["m-1"]);
+  });
+
   it("keeps a direct message to the one of Rome's accounts it was written to", async () => {
     // Telegram keys a direct message by the other person, so Alice writing to
     // two of Rome's bots leaves two chats at one address.

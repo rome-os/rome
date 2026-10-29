@@ -215,30 +215,25 @@ const CATCH_UP_PAGE = 50;
 /**
  * The newest of `unseen` as the place's record holds them, oldest first, at
  * most {@link CATCH_UP_LIMIT}, and how many more there were
- * (docs/domains/participation.md#projection), read through the account the
- * agent was woken on. The place is read back page by
- * page from its newest message until that many are found. A message the chat
- * keeps under another of Rome's accounts is the same message when the
- * platform's id for it is.
+ * (docs/domains/participation.md#projection), read as the account the agent
+ * was woken on heard it, which is the record the unseen ids name. The place
+ * is read back page by page from its newest message until that many are
+ * found.
  */
 async function catchUp(
   messages: Pick<MessageRepository, "recent" | "before">,
   place: Place,
   via: Pick<Via, "channel">,
-  unseen: readonly { id: string; platformMessageId: string | null }[],
+  unseen: readonly { id: string }[],
 ): Promise<{ lines: SaidMessage[]; omitted: number }> {
   const want = Math.min(unseen.length, CATCH_UP_LIMIT);
   if (want === 0) return { lines: [], omitted: 0 };
   const ids = new Set(unseen.map((message) => message.id));
-  const platformIds = new Set(unseen.flatMap((message) => message.platformMessageId ?? []));
   const found: SaidMessage[] = [];
   let page = await messages.recent(place, CATCH_UP_PAGE, via);
   for (;;) {
     for (const message of [...page.messages].reverse()) {
-      const isUnseen =
-        ids.has(message.id) ||
-        (message.platformMessageId !== undefined && platformIds.has(message.platformMessageId));
-      if (isUnseen) found.push(message);
+      if (ids.has(message.id)) found.push(message);
       if (found.length === want) break;
     }
     if (found.length === want || !page.older) break;
