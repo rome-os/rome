@@ -273,6 +273,21 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("chat_start answers the started chat when naming it fails", async () => {
+    const s = setup();
+    rs.mocked(s.deps.webchatRepo.updateSessionName).mockRejectedValueOnce(new Error("disk full"));
+    const result = await s.tool("chat_start", {
+      title: "Flights",
+      brief: "Find flights",
+      card: true,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.content[0].text)).toEqual({ chatId: "task-1" });
+    expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
+      { type: "task_chat", chatId: "task-1", title: "Flights" },
+    ]);
+  });
+
   it("chat_start takes a project by the absolute path the prompt lists", async () => {
     const s = setup();
     const root = mkdtempSync(join(tmpdir(), "rome-concierge-projects-"));

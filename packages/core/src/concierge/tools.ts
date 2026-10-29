@@ -212,7 +212,14 @@ export async function buildConciergeTools(
           await sendInput(chatId, brief);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
-            await webchatRepo.updateSessionName(chatId, title);
+            // The task already runs, so a failure here must not read as a
+            // failed start that the agent retries.
+            await webchatRepo.updateSessionName(chatId, title).catch((error: unknown) =>
+              log.warn("failed to name a task chat", {
+                chatId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
           } else {
             log.warn("task chat title too long to name the chat", { chatId });
           }
