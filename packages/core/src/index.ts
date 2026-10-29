@@ -1498,7 +1498,7 @@ async function main() {
       messages: storedMessages,
       events: chatEvents,
       platformOfChannel,
-      accountAgentOf: hookAgentOf,
+      listens: (connectionId) => accountListening.listens(connectionId),
     },
     hookChannels,
   );

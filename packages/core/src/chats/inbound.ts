@@ -7,7 +7,6 @@
 // it from MessageRecorded and decides the wake there.
 
 import type {
-  Account,
   Channel,
   InboundEvent,
   RecordedInboundEvent,
@@ -30,10 +29,11 @@ export interface InboundRecordingDeps {
   /** The platform a channel's accounts are on, for a message that names no
    *  account it arrived on. */
   platformOfChannel: (channel: string) => string;
-  /** The agent of one of Rome's accounts, as the channel-message hook reads
-   *  it. Null means the account takes an agent and has none, and Rome does not
-   *  listen to it, so nothing it receives is recorded. */
-  accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /** Whether Rome listens to the account behind connection `connectionId`,
+   *  as its inbound port reads it. An account linked to an agent that is not
+   *  loaded is still listened to, so what it receives is recorded and
+   *  Participation decides whether anything answers it. */
+  listens?: (connectionId: string) => boolean;
 }
 
 export interface InboundRecording {
@@ -67,9 +67,8 @@ export function inboundRecording(
 
   const record = (channel: Channel) => async (event: InboundEvent) => {
     if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
-    // An account Rome holds without an agent is not listened to, so what
-    // reaches it never forms a chat.
-    if (deps.accountAgentOf?.(event.message.account ?? channel.name) === null) return;
+    // What reaches an account Rome does not listen to never forms a chat.
+    if (deps.listens?.(event.ref.connectionId) === false) return;
     const saved = await materialized(channel, event);
     // Named by the channel it was recorded on, which a subscriber finds the
     // channel by to answer it.
