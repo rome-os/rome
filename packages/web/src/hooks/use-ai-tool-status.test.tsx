@@ -79,7 +79,7 @@ describe("useAiToolStatus", () => {
     await act(async () => resolve(Response.json({ claude: { loggedIn: false } })));
     expect(reader.result.current.data?.claude?.loggedIn).toBe(true);
     const error = rs.spyOn(console, "error").mockImplementation(() => {});
-    await act(async () => push(socket, { claude: { loggedIn: "garbage" } }));
+    await act(async () => push(socket, "garbage"));
     expect(error).toHaveBeenCalled();
     expect(reader.result.current.data?.claude?.loggedIn).toBe(true);
     act(() => socket.close());
@@ -137,5 +137,21 @@ describe("useAiToolStatus", () => {
     const reader = renderHook(() => useAiToolStatus(), { wrapper });
     await waitFor(() => expect(reader.result.current.data?.claude?.loggedIn).toBe(true));
     expect(reader.result.current.data?.claude?.email).toBeUndefined();
+  });
+  it("drops only a field off the schema, keeping the rest of the status", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        claude: { loggedIn: true, accountType: 5, usage: { source: 1 } },
+        codex: { loggedIn: false },
+        anthropicCompatible: { provider: "no-such-provider" },
+      }),
+    );
+    const { wrapper } = setup();
+    const reader = renderHook(() => useAiToolStatus(), { wrapper });
+    await waitFor(() => expect(reader.result.current.data?.claude?.loggedIn).toBe(true));
+    expect(reader.result.current.data?.claude?.accountType).toBeUndefined();
+    expect(reader.result.current.data?.claude?.usage).toBeUndefined();
+    expect(reader.result.current.data?.codex?.loggedIn).toBe(false);
+    expect(reader.result.current.data?.anthropicCompatible).toBeNull();
   });
 });

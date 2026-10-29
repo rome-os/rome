@@ -47,6 +47,21 @@ describe("UsageMenu", () => {
     );
     expect(screen.getByText(formatUsageReset(usage.fiveHour.resetsAt, "en")!)).toBeTruthy();
   });
+  it("reads a window whose reset has passed as reset, not as old numbers", async () => {
+    mount({
+      claude: {
+        loggedIn: true,
+        usage: {
+          ...usage,
+          fiveHour: { usedPercent: 100, resetsAt: new Date(Date.now() - 60_000).toISOString() },
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Usage remaining" }));
+    expect(screen.getByText("Reset")).toBeTruthy();
+    expect(screen.queryByText("0%")).toBeNull();
+    expect(screen.getByText("88%")).toBeTruthy();
+  });
   it("shows unavailable rather than stale bars on usage errors", async () => {
     mount({ claude: { loggedIn: true, usage: { ...usage, error: "429" } } });
     await userEvent.click(await screen.findByRole("button", { name: "Usage remaining" }));

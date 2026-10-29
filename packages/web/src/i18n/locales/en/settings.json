@@ -660,6 +660,7 @@
       "shortFiveHour": "5h",
       "weekly": "Weekly",
       "manage": "Manage in AI Tools",
+      "windowReset": "Reset",
       "updatedJustNow": "Updated just now",
       "updatedHours": "Updated {{count}} h ago",
       "updated": "Updated {{count}} min ago"

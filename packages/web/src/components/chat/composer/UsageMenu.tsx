@@ -52,14 +52,21 @@ export function UsageMenu({
     return null;
   const row = (label: string, window: UsageWindowStatus | undefined) => {
     if (!window) return null;
+    // A window whose reset has passed is fresh again, though no reading since
+    // says how much of it is used, so it reads "Reset" rather than old numbers.
+    const resetPassed = Date.parse(window.resetsAt ?? "") <= Date.now();
     const remaining =
       window.usedPercent === undefined ? window.remainingPercent : 100 - window.usedPercent;
-    const reset = formatUsageReset(window.resetsAt, i18n.language);
+    const reset = resetPassed ? null : formatUsageReset(window.resetsAt, i18n.language);
     return (
       <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-4 text-ui">
         <span className="text-muted-foreground">{label}</span>
         <span className="text-foreground tabular-nums">
-          {remaining === undefined ? t("aiTools.usage.unavailable") : `${Math.round(remaining)}%`}
+          {resetPassed
+            ? t("aiTools.usage.windowReset")
+            : remaining === undefined
+              ? t("aiTools.usage.unavailable")
+              : `${Math.round(remaining)}%`}
         </span>
         <span className="min-w-16 text-end text-muted-foreground tabular-nums">{reset}</span>
       </div>

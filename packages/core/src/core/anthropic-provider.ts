@@ -1,4 +1,3 @@
-import { claudeUsesApiKey } from "@rome/api-types/ai-tools";
 import { claudeRateLimitUsage } from "./claude-rate-limit.js";
 import type { AIToolUsageStatus } from "../lib/provider-usage.js";
 import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
@@ -598,10 +597,8 @@ export class AnthropicProvider implements ModelProvider {
     // `this`): update runtime state before classified terminals become observable.
     const onAuthRevoked = this.options.onAuthRevoked;
     const onQuotaExhausted = this.options.onQuotaExhausted;
-    const usageUsesApiKey = claudeUsesApiKey({
-      authMethod: queryContext.funding === "byok" ? "environment" : undefined,
-    });
-    const onUsage = usageUsesApiKey ? undefined : this.options.onUsage;
+    // Only a subscription turn reports subscription usage.
+    const onUsage = queryContext.funding === "subscription" ? this.options.onUsage : undefined;
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const queryProcess = createClaudeQueryProcess();

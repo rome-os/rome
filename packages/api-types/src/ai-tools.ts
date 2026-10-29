@@ -13,10 +13,11 @@ const anthropicCompatibleCredentialsSummarySchema = z.object({
 
 /**
  * The Claude and Codex CLIs report an unknown field as null, as in
- * `email: null`. A null reads as absent instead of failing the whole status.
+ * `email: null`, and pass through values Rome does not shape. Such a field
+ * reads as absent, so it never fails the whole status every surface reads.
  */
 const optional = <T extends z.ZodType>(schema: T) =>
-  z.preprocess((value) => (value === null ? undefined : value), schema.optional());
+  z.preprocess((value) => (value === null ? undefined : value), schema.optional()).catch(undefined);
 
 export const usageWindowStatusSchema = z.object({
   usedPercent: optional(z.number().finite().min(0).max(100)),
@@ -33,7 +34,10 @@ export const aiToolUsageStatusSchema = z.object({
 export const aiToolStatusSchema = z.object({
   solAccess: optional(z.boolean()),
   lunaAccess: optional(z.boolean()),
-  anthropicCompatible: anthropicCompatibleCredentialsSummarySchema.nullable().optional(),
+  anthropicCompatible: anthropicCompatibleCredentialsSummarySchema
+    .nullable()
+    .optional()
+    .catch(null),
   loggedIn: optional(z.boolean()),
   quotaExhausted: optional(z.boolean()),
   quotaExhaustedUntil: optional(z.string()),
@@ -64,7 +68,10 @@ export const aiToolsStatusSchema = z.object({
       lastError: z.string().nullable().optional(),
     })
     .optional(),
-  anthropicCompatible: anthropicCompatibleCredentialsSummarySchema.nullable().optional(),
+  anthropicCompatible: anthropicCompatibleCredentialsSummarySchema
+    .nullable()
+    .optional()
+    .catch(null),
 });
 export type UsageWindowStatus = z.infer<typeof usageWindowStatusSchema>;
 export type AIToolUsageStatus = z.infer<typeof aiToolUsageStatusSchema>;

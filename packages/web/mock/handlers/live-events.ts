@@ -1,7 +1,7 @@
 import { ws } from "msw";
 
 import { AI_TOOLS_STATUS_TOPIC } from "@rome/api-types/live-events";
-import { mockAiToolsStatus, subscribeMockAiToolsStatus } from "./settings";
+import { subscribeMockAiToolsStatus } from "./settings";
 
 const liveEvents = ws.link(/\/ws\/events$/);
 
@@ -23,15 +23,22 @@ export const liveEventsHandlers = [
       if (message.type === "subscribe" && typeof message.topic === "string") {
         client.send(JSON.stringify({ type: "subscribed", topic: message.topic }));
         if (message.topic === AI_TOOLS_STATUS_TOPIC && !unsubscribe) {
+          // Push whatever the status GET answers, so a page that overrides
+          // that GET (as e2e fixtures do) gets the same state over the socket.
           const send = () =>
-            client.send(
-              JSON.stringify({
-                type: "event",
-                topic: AI_TOOLS_STATUS_TOPIC,
-                event: "status",
-                data: mockAiToolsStatus(),
-              }),
-            );
+            void fetch("/api/ai-tools/status")
+              .then((res) => res.json())
+              .then((data) =>
+                client.send(
+                  JSON.stringify({
+                    type: "event",
+                    topic: AI_TOOLS_STATUS_TOPIC,
+                    event: "status",
+                    data,
+                  }),
+                ),
+              )
+              .catch(() => {});
           send();
           unsubscribe = subscribeMockAiToolsStatus(send);
         }

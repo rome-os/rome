@@ -1,4 +1,4 @@
-import { claudeUsesApiKey } from "@rome/api-types/ai-tools";
+import { claudeUsesApiKey, type AIToolProviderId } from "@rome/api-types/ai-tools";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
 import {
@@ -22,7 +22,7 @@ const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const QUOTA_FALLBACK_MS = 5 * 60 * 60 * 1000;
 
 export { claudeUsesApiKey } from "@rome/api-types/ai-tools";
-export type AIToolProviderId = "openai" | "anthropic";
+export type { AIToolProviderId } from "@rome/api-types/ai-tools";
 
 export interface ProviderState
   extends Omit<AIToolStatusProbeResult, "loggedIn" | "authMode" | "planType"> {
@@ -377,7 +377,11 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       pendingReplays[provider] += 1;
       const replay = (): void => {
         pendingReplays[provider] -= 1;
-        if (usageRevision[provider] !== revisionAtFailure) return;
+        if (usageRevision[provider] !== revisionAtFailure) {
+          // The live update skipped its own log while this replay was pending.
+          logQuotaChange(provider, "live usage");
+          return;
+        }
         const applied = applyRuntimeSignal();
         logQuotaChange(provider, applied ? "failed run" : "usage check");
         notify();

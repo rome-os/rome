@@ -660,6 +660,7 @@
       "shortFiveHour": "5 小时",
       "weekly": "每周",
       "manage": "在 AI 工具中管理",
+      "windowReset": "已重置",
       "updatedJustNow": "刚刚更新",
       "updatedHours": "{{count}} 小时前更新",
       "updated": "{{count}} 分钟前更新"
