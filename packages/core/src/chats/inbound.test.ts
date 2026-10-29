@@ -70,18 +70,21 @@ describe("inboundRecording", () => {
   let testDb: TestDb;
   let rows: WebChatRepository;
   let events: ChatEvents;
+  let messages: StoredMessages;
 
   beforeEach(() => {
     testDb = createTestDb();
     rows = new WebChatRepository(testDb.db);
     events = new ChatEvents();
+    messages = new StoredMessages(rows, events);
+    rows.leaveOutOfCatchUp((id) => messages.isWakeUndecided(id));
   });
 
   const recording = (channels: Channel[], accountAgentOf?: () => string | null | undefined) =>
     inboundRecording(
       {
         chats: rows,
-        messages: new StoredMessages(rows, events),
+        messages,
         events,
         platformOfChannel: () => "telegram",
         ...(accountAgentOf ? { accountAgentOf } : {}),
@@ -234,9 +237,19 @@ describe("inboundRecording", () => {
     expect(await catchUp()).toEqual([b!.messageId]);
   });
 
-  it("refuses to record into a chat that does not exist", async () => {
-    const messages = new StoredMessages(rows, events);
+  it("decides the wake of a message nobody hears, so it is not left out for good", async () => {
+    const telegram = fakeChannel("telegram");
+    const recorder = recording([telegram.channel]);
+    const leave = recorder.recordedMessages.subscribe(async () => undefined);
+    leave();
 
+    await telegram.deliver(message());
+
+    const chat = channelChatId("telegram", GROUP);
+    expect((await rows.loadConversationContext(chat)).pendingNotificationIds).toHaveLength(1);
+  });
+
+  it("refuses to record into a chat that does not exist", async () => {
     await expect(
       messages.record(
         {

@@ -743,6 +743,9 @@ export class WebChatRepository {
 
   constructor(private db: DrizzleDb) {}
 
+  /** Set by {@link leaveOutOfCatchUp}. */
+  private wakeUndecided: (messageId: string) => boolean = () => false;
+
   onMessageInserted(listener: WebchatMessageInsertedListener): () => void {
     this.messageInsertedListeners.add(listener);
     return () => {
@@ -1114,11 +1117,6 @@ export class WebChatRepository {
     senderId?: string;
     senderName?: string;
     replyToPlatformMessageId?: string;
-    /** The agent a delegate's message is said by, on the account's behalf. */
-    onBehalfOf?: string;
-    /** Whether the wake for it is still to be decided. A turn does not catch
-     *  up on such a message until {@link markWakeDecided} or a promotion. */
-    wakePending?: boolean;
     createdAt?: Date;
   }): Promise<{ inserted: boolean }> {
     const createdAt = input.createdAt ?? new Date();
@@ -1138,8 +1136,6 @@ export class WebChatRepository {
           senderId: input.senderId ?? null,
           senderName: input.senderName ?? null,
           replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-          onBehalfOf: input.onBehalfOf ?? null,
-          wakePending: input.wakePending ? true : null,
           contextInjectedTurnId: null,
           createdAt,
         })
@@ -1163,7 +1159,7 @@ export class WebChatRepository {
   ): Promise<void> {
     await this.db
       .update(romeAgentMessages)
-      .set({ role: "user", wakePending: null })
+      .set({ role: "user" })
       .where(
         and(
           eq(romeAgentMessages.sessionId, sessionId),
@@ -1171,24 +1167,6 @@ export class WebChatRepository {
           eq(romeAgentMessages.role, "notification"),
         ),
       );
-  }
-
-  /** Mark the wake for a message decided, so a turn catches up on it if it
-   *  was not made a prompt. An id that names no row changes nothing. */
-  async markWakeDecided(id: string): Promise<void> {
-    await this.db
-      .update(romeAgentMessages)
-      .set({ wakePending: null })
-      .where(eq(romeAgentMessages.id, id));
-  }
-
-  /** Mark every pending wake decided. A decision in flight does not survive a
-   *  restart, so at boot nothing is still being decided. */
-  async markEveryWakeDecided(): Promise<void> {
-    await this.db
-      .update(romeAgentMessages)
-      .set({ wakePending: null })
-      .where(eq(romeAgentMessages.wakePending, true));
   }
 
   async assignConversationMessageTurn(
@@ -1418,13 +1396,14 @@ export class WebChatRepository {
           // A send still pending reaches the agent once it is sent, and one the
           // platform refused never does.
           saidMessage,
-          // A message whose wake is still being decided may become its own
-          // turn's prompt, so no other turn catches up on it yet.
-          isNull(romeAgentMessages.wakePending),
         ),
       )
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const pendingNotificationIds = pendingNotificationRows.map((row) => row.id);
+    const pendingNotificationIds = pendingNotificationRows
+      .map((row) => row.id)
+      // Its wake is still being decided, so it may become a turn's prompt of
+      // its own.
+      .filter((id) => !this.wakeUndecided(id));
     const projectedNotificationIds = pendingNotificationIds.slice(
       -CONVERSATION_CONTEXT_NOTIFICATION_LIMIT,
     );
@@ -1577,6 +1556,15 @@ export class WebChatRepository {
     if (nameMissing && updated[0]?.name === threadName) {
       this.emitSessionNameChanged(row.id, threadName);
     }
+  }
+
+  /**
+   * Leave every message `undecided` answers true for out of what a turn
+   * catches up on ({@link loadConversationContext}). It is asked once per
+   * pending message at each catch-up read, so it answers from memory.
+   */
+  leaveOutOfCatchUp(undecided: (messageId: string) => boolean): void {
+    this.wakeUndecided = undecided;
   }
 
   /** The id of a channel's chat row for the platform's chat id, or null when

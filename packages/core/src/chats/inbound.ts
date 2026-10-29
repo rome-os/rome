@@ -60,6 +60,7 @@ export function inboundRecording(
   const known: Channel[] = [...channels];
   const subscribed = new Set<string>();
   let started = false;
+  let hearers = 0;
 
   const record = (channel: Channel) => async (event: InboundEvent) => {
     if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
@@ -84,7 +85,7 @@ export function inboundRecording(
     });
     const platform = message.account?.platform ?? deps.platformOfChannel(channel.name);
     const replyTo = message.replyTo?.messageId.trim();
-    await deps.messages.record(
+    const recorded = await deps.messages.record(
       messageToRome({
         place: placeIn(
           chatKey(platform, message.parentChatId ?? message.chatId),
@@ -101,6 +102,9 @@ export function inboundRecording(
       }),
       { channel: channel.name, heard },
     );
+    // Heard by nobody, as while a hook is being swapped, nothing will decide
+    // its wake, so it stands decided as a message no agent answered.
+    if (recorded && hearers === 0) await deps.messages.wakeDecided(recorded.id);
   };
 
   const subscribe = (channel: Channel): void => {
@@ -119,11 +123,18 @@ export function inboundRecording(
         };
         await handler(recorded);
       });
+      hearers += 1;
       if (!started) {
         started = true;
         for (const channel of known) subscribe(channel);
       }
-      return unsubscribe;
+      let left = false;
+      return () => {
+        if (left) return;
+        left = true;
+        hearers -= 1;
+        unsubscribe();
+      };
     },
     decided: (recorded) => deps.messages.wakeDecided(recorded.messageId),
   };
