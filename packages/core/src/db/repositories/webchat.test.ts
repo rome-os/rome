@@ -1351,6 +1351,73 @@ describe("WebChatRepository", () => {
     });
   });
 
+  describe("an outbound message's delivery", () => {
+    const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+    const pending = async (sessionId: string, text: string) =>
+      (
+        await repo.recordPendingOutbound({
+          sessionId,
+          content: textContent(text),
+          senderId: "rome",
+          senderName: "Rome",
+          at: new Date(Date.UTC(2026, 7, 3, 8, 0)),
+        })
+      ).id;
+
+    it("shows a message only once it is sent, to the transcript and to the agent", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "discord",
+        threadId: "delivery",
+        agentName: "main",
+      });
+      const sent = await pending(conversation.id, "went out");
+      const failed = await pending(conversation.id, "refused");
+      await pending(conversation.id, "still going");
+      const at = new Date(Date.UTC(2026, 7, 3, 8, 1));
+      await repo.setDelivery(sent, { state: "sent", at }, "platform-1");
+      await repo.setDelivery(failed, { state: "failed", error: "no such chat", at });
+
+      const said = [textContent("went out")];
+      expect((await repo.getMessages(conversation.id)).map((row) => row.content)).toEqual(said);
+      expect(
+        (await repo.getMessagesPage(conversation.id, { limit: 10 })).rows.map((row) => row.content),
+      ).toEqual(said);
+      expect((await repo.getMessagesBatch([conversation.id])).map((row) => row.content)).toEqual(
+        said,
+      );
+      const context = await repo.loadConversationContext(conversation.id);
+      expect(context.notifications.map((row) => row.content)).toEqual(said);
+      expect(context.pendingNotificationIds).toEqual([sent]);
+    });
+
+    it("keeps the platform's id and moves the chat's activity when sent", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "discord",
+        threadId: "delivery-activity",
+        agentName: "main",
+      });
+      const before = (await repo.getSession(conversation.id))?.activityAt;
+      const id = await pending(conversation.id, "went out");
+      expect((await repo.getSession(conversation.id))?.activityAt).toEqual(before);
+
+      const at = new Date(Date.UTC(2030, 0, 1));
+      await repo.setDelivery(id, { state: "sent", at }, "platform-1");
+
+      expect((await repo.getSession(conversation.id))?.activityAt).toEqual(at);
+      const [row] = testDb.db
+        .select()
+        .from(romeAgentMessages)
+        .where(eq(romeAgentMessages.id, id))
+        .all();
+      expect(row).toMatchObject({
+        delivery: "sent",
+        deliveryAt: at,
+        deliveryError: null,
+        platformMessageId: "platform-1",
+      });
+    });
+  });
+
   describe("a reply written as several messages", () => {
     const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 

@@ -58,6 +58,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
 - Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
+- The People and Assistants pages send to a place, the direct message that reaches the account, and a message Rome sends is recorded with its delivery before the platform is asked. A failed one reads as never said.
 - An assistant's chat is on one Assistants page that switches between assistants, each marked with its kind, from the moment Rome knows the assistant, and the guardian can add the page to the sidebar. Other Romes are left out.
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.

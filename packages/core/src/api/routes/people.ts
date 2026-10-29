@@ -26,7 +26,8 @@ import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
-import { sendToAccount, type SendResult } from "../../people/send.js";
+import { send, type SendResult } from "../../chats/send.js";
+import { directPlace } from "../../people/send.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
 import { accountOfWire, wireOf } from "../../people/wire.js";
@@ -213,12 +214,14 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 
     // The account the message goes out from has to be one of Rome's accounts
     // on the link's platform. Rome never substitutes another for it.
-    // `sendToAccount` checks it.
+    // `directPlace` and `send` check it.
     // TODO(people-send-from dashboard PR): require `from` once the dashboard
     // sends it. Until then a send without it goes out from Rome's only account
     // on the platform, and is refused while Rome holds several.
-    const result = await sendToAccount(deps, account, parsed.request.text, parsed.request.from);
-    return respondToSend(c, result);
+    const from = parsed.request.from;
+    const found = await directPlace(deps, account, from);
+    if (!found.ok) return respondToSend(c, found);
+    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, from));
   });
 
   app.get("/people/:id/messages", async (c) => {

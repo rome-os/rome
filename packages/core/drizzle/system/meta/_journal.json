@@ -715,6 +715,13 @@
       "when": 1793121384012,
       "tag": "0102_drop_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "6",
+      "when": 1793240559024,
+      "tag": "0103_message_delivery",
+      "breakpoints": true
     }
   ]
 }

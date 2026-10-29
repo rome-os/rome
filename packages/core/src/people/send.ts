@@ -4,6 +4,9 @@
 // Vocabulary: docs/concepts/people.md. The wire shapes are the People
 // contract's (`@rome/api-types/people`).
 //
+// Saying the message is `chats/send.ts`'s, which takes a place. This module
+// finds the place: the direct message that reaches the account a send names.
+//
 // A send names its account. There is no entry point here that takes a person
 // and picks for them, because every rule that could pick decides who receives
 // a message on evidence too thin to carry it — a timeline entry names its
@@ -24,42 +27,19 @@
 // through anything.
 
 import type { Account, ChatId } from "@rome-os/app-runtime";
-import type { AccountSendState, SentMessage } from "@rome/api-types/people";
-import { platformOf } from "@rome/api-types/platform";
+import type { AccountSendState } from "@rome/api-types/people";
+import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import { chatKey, placeIn, type Place } from "../chats/place.js";
 import {
-  ChannelNotConnected,
-  channelsOn,
-  type ChannelSend,
-  type Channels,
-  type PlatformOfChannel,
-} from "../channels/channel.js";
-import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import { createLogger } from "../logger.js";
+  senderNamed,
+  sendersOf,
+  type RefusedState,
+  type SendDeps,
+  type SendIntoPlaceDeps,
+  type SendResult,
+} from "../chats/send.js";
 
-const log = createLogger("people-send");
-
-export interface SendDeps {
-  channels: Channels;
-  /** The platform each channel's accounts live on. Absent, the platform of
-   *  the connection kind a channel is named after. */
-  platformOfChannel?: PlatformOfChannel;
-  /** The channels of Rome's accounts on a platform a Connection backs.
-   *  Absent, or null for a platform, every channel on it. */
-  sendersOn?: SendersOn;
-}
-
-/**
- * The channels of Rome's accounts a send to an account on `platform` may go
- * out from, oldest first: each one a Connection backs, or, on a platform only
- * Rome's own channels serve, those channels. Asked at send time and never
- * stored, since a Connection that ends changes the answer and writes no link.
- */
-export function sendersOf(deps: SendDeps, platform: string): string[] {
-  return (
-    deps.sendersOn?.(platform) ??
-    channelsOn(deps.channels, deps.platformOfChannel ?? platformOf, platform)
-  );
-}
+export { sendersOf, type SendDeps };
 
 /** A resolved target: the channel it is on, that channel's send port, and the
  *  conversation on it that reaches this account. It names the channel, not
@@ -67,15 +47,13 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
  *  sends. A channel holds at most one Connection, so that is the one the
  *  conversation was resolved on, unless the Connection was replaced in
  *  between. This is deliberate. */
-export interface SendTarget {
+interface SendTarget {
   channel: string;
   send: ChannelSend;
   chatId: ChatId;
 }
 
 export type Resolution = { ok: true; target: SendTarget } | { ok: false; send: RefusedState };
-
-export type RefusedState = Exclude<AccountSendState, "yes">;
 
 /**
  * Everything true before a body may be handed to a channel, or which of the
@@ -176,147 +154,25 @@ export async function readSendStates(
   );
 }
 
-/** What a channel said when it took the message: its own id for it, which
- *  Rome's transcript of the send is recorded under. */
-export interface SendReceipt {
-  messageId: string | null;
-}
-
 /**
- * Hand the text to the channel.
+ * The direct message that reaches `account`, as a place a send can name, with
+ * `from` the one of Rome's accounts it goes out from. Absent `from`, Rome has
+ * to hold one account on the platform. Refused with the same state the person
+ * read carries, or `invalid` when `from` is none of Rome's accounts there.
  *
- * Throws whatever the channel throws — the caller answers the failure, and
- * nothing is recorded for a message the channel did not take.
+ * Its key is the address the sender's channel holds for the direct message,
+ * which is the platform's own id for it over today's storage.
  */
-export async function sendToTarget(target: SendTarget, text: string): Promise<SendReceipt> {
-  const receipt = await target.send.send(target.chatId, { text });
-  return { messageId: receipt.messageId ?? null };
-}
-
-/** The slice of the conversation repository a send needs: a channel thread's
- *  session, and Rome's own record of what it said there. Named as `ApiDeps`
- *  names it so no adapter sits between the two. */
-export interface ChatStore {
-  ensureChannelChat(input: {
-    channel: string;
-    threadId: string;
-    agentName?: string;
-  }): Promise<{ id: string }>;
-  recordOutboundConversationMessage(input: {
-    sessionId: string;
-    content: string;
-    platformMessageId?: string;
-    senderId?: string;
-    senderName?: string;
-    knownToProvider: boolean;
-  }): Promise<void>;
-}
-
-export interface SendToAccountDeps extends SendDeps {
-  webchatRepo: ChatStore;
-  /** Rome's own account on a channel, which a send names as `from`. Absent,
-   *  no channel answers to one. */
-  accountOf?: ChannelRecordsRepository["accountOf"];
-}
-
-/** What Rome writes into its own transcript when it sends. `senderId` is the
- *  mark every outbound path stamps, and `messages-agent.ts` reads it back to
- *  put the line on Rome's side of the conversation. */
-const ROME_SENDER = { senderId: "rome", senderName: "Rome" } as const;
-
-export type SendResult =
-  | { ok: true; sent: SentMessage }
-  | { ok: false; send: RefusedState }
-  | { ok: false; error: string }
-  | { ok: false; invalid: string };
-
-/**
- * Send to one account, and answer whether the channel took it.
- *
- * One provider call inside one request, and nothing kept between them. The
- * channel refusing is answered as `error` with its own words; the guardian
- * keeps the text and sends again. A channel that accepted and then could not
- * be heard from is the one case this cannot tell apart from a refusal, and
- * the guardian sees it as the message missing from the chat.
- */
-export async function sendToAccount(
-  deps: SendToAccountDeps,
+export async function directPlace(
+  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf">,
   account: Account,
-  text: string,
   from?: Account,
-): Promise<SendResult> {
+): Promise<{ ok: true; place: Place } | Extract<SendResult, { ok: false }>> {
   const sender = from && senderNamed(deps, account.platform, from);
   if (sender === null) {
     return { ok: false, invalid: "Rome holds no account by that id that can send to this account" };
   }
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
-  const target = resolution.target;
-
-  let receipt: SendReceipt;
-  try {
-    receipt = await sendToTarget(target, text);
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-
-  // Rome's own transcript of what it said, the same record every other outbound
-  // path writes. On a channel with no mirror of its own this IS the timeline
-  // entry; on one with a mirror it sits behind the provider's copy, which is
-  // the store precedence in timeline-sources.ts and not a special case here.
-  //
-  // Once the provider has returned, the message is out on a network Rome does
-  // not own, so a failure here is logged and the send still answers as sent:
-  // reporting it as failed invites a retry and a second real message.
-  try {
-    await record(deps, target, text, receipt.messageId);
-  } catch (error) {
-    log.warn("outbound message delivered but recording failed", {
-      channel: target.channel,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  return {
-    ok: true,
-    sent: {
-      ref: receipt.messageId === null ? null : `${target.chatId}:${receipt.messageId}`,
-      timestamp: Math.floor(Date.now() / 1000),
-    },
-  };
-}
-
-/** The channel of Rome's account `from` on `platform`, if a send there may go
- *  out from it, and null if not. */
-function senderNamed(deps: SendToAccountDeps, platform: string, from: Account): string | null {
-  return (
-    sendersOf(deps, platform).find((channel) => {
-      const own = deps.accountOf?.(channel);
-      return own?.platform === from.platform && own.id === from.id;
-    }) ?? null
-  );
-}
-
-/** Written under the channel that sent, so the line joins the conversation
- *  Rome holds there. */
-async function record(
-  deps: SendToAccountDeps,
-  target: SendTarget,
-  text: string,
-  messageId: string | null,
-): Promise<void> {
-  const conversation = await deps.webchatRepo.ensureChannelChat({
-    channel: target.channel,
-    threadId: target.chatId,
-  });
-  await deps.webchatRepo.recordOutboundConversationMessage({
-    sessionId: conversation.id,
-    content: JSON.stringify([{ type: "text", content: text }]),
-    ...(messageId ? { platformMessageId: messageId } : {}),
-    ...ROME_SENDER,
-    // False: this line was not produced by an agent turn. It decides the role
-    // the row is stored under, which `agentMessageOutbound` then reads back
-    // together with the sender to put it on Rome's side.
-    knownToProvider: false,
-  });
+  return { ok: true, place: placeIn(chatKey(account.platform, resolution.target.chatId)) };
 }

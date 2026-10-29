@@ -11,6 +11,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type { DeliveryState } from "../../chats/delivery.js";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
@@ -714,6 +715,16 @@ export const romeAgentMessages = sqliteTable(
     cacheWriteTokens: integer("cache_write_tokens"),
     costUsd: real("cost_usd"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    // An outbound message's delivery (docs/domains/chats.md#delivery): the
+    // state, the platform's words when it refused, and when the state was set.
+    // Null on every row the send service did not write, which readers take as
+    // delivered.
+    delivery: text("delivery").$type<DeliveryState>(),
+    deliveryError: text("delivery_error"),
+    deliveryAt: integer("delivery_at", { mode: "timestamp" }),
+    // The agent a delegate's reply is said by, on the guardian's behalf under
+    // the guardian's account. Nothing writes it yet.
+    onBehalfOf: text("on_behalf_of"),
   },
   (table) => [
     index("idx_rome_agent_messages_session_id").on(table.sessionId),

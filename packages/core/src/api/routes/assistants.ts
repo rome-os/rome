@@ -12,7 +12,8 @@ import { timelinePageLimit } from "@rome/api-types/people";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
 import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
-import { sendToAccount } from "../../people/send.js";
+import { send } from "../../chats/send.js";
+import { directPlace } from "../../people/send.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
 import type { ApiDeps } from "../deps.js";
@@ -96,7 +97,10 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     const parsed = parseAssistantSendRequest(await c.req.json().catch(() => null));
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
-    return respondToSend(c, await sendToAccount(deps, address, parsed.request.text));
+    // The assistant's chat is the direct message that reaches its address.
+    const found = await directPlace(deps, address);
+    if (!found.ok) return respondToSend(c, found);
+    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }));
   });
 
   return app;
