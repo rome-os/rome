@@ -1611,7 +1611,9 @@ export class WebChatRepository {
       inArray(romeSessions.sourceChannel, [...input.channels]),
       eq(romeSessions.sourceThreadId, input.address),
     );
-    const isGroup = sql`coalesce(${romeSessions.sourceThreadType}, '') = 'group'`;
+    // A native thread opens only inside a group, and its row may not name its
+    // type, so a row under a parent chat is a group's too.
+    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') = 'group' or ${romeSessions.parentSessionId} is not null)`;
     // Read through one channel, the chat is that channel's record alone.
     // Otherwise only a group's address names one chat across Rome's accounts.
     // Any other chat is one account's own: Telegram keys a direct message by

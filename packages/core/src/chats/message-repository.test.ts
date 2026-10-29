@@ -325,6 +325,27 @@ describe("StoredMessages reads", () => {
     ]);
   });
 
+  it("reads a group's thread two of Rome's accounts are in as one", async () => {
+    const thread = (channel: string) =>
+      rows.ensureChannelChat({
+        channel,
+        threadId: "group-1:topic-9",
+        parentThreadId: "group-1",
+        agentName: "main",
+      });
+    const support = await thread("telegram");
+    const sales = await thread("telegram-sales");
+    await said(support.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "sales only", minute(2), "m-2");
+
+    const inThread = placeIn(chatKey("telegram", "group-1" as ChatId), "group-1:topic-9" as ChatId);
+    expect((await messages.recent(inThread, 10)).messages.map((m) => m.platformMessageId)).toEqual([
+      "m-1",
+      "m-2",
+    ]);
+  });
+
   it("answers an empty page for a place Rome holds nothing in", async () => {
     await expect(messages.recent(group, 10)).resolves.toEqual({ messages: [], older: null });
     const elsewhere = placeIn(chatKey("discord", "group-1" as ChatId));
