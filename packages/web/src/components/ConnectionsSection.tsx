@@ -84,9 +84,9 @@ export function ConnectionsSection({
   };
   const selected = cards.find((card) => card.route === selectedRoute) ?? null;
 
-  // Until the guardian picks a tab or opens a row, open on Connected when
-  // anything is connected, otherwise on Available. Opening a row pins the tab,
-  // so connecting the first service does not move the guardian off Available.
+  // The page opens on Connected when anything is connected, otherwise on
+  // Available. The choice is made once, when the list first loads, so a later
+  // refresh never moves the guardian to the other tab.
   const [chosenTab, setChosenTab] = useState<ConnectionTab | null>(null);
   const [query, setQuery] = useState("");
   const needle = query.trim().toLocaleLowerCase();
@@ -109,6 +109,7 @@ export function ConnectionsSection({
     available: available.filter((card) => matches(card, true)),
   };
   const tab: ConnectionTab = chosenTab ?? (connected.length > 0 ? "connected" : "available");
+  if (chosenTab === null && !loading && !error && cards.length > 0) setChosenTab(tab);
   const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
   const showAppKeys =
     tab === "connected" && (!needle || t("appKeys.title").toLocaleLowerCase().includes(needle));
@@ -260,10 +261,7 @@ export function ConnectionsSection({
                       variant="outline"
                       size="default"
                       align="between"
-                      onClick={() => {
-                        setChosenTab(tab);
-                        select(card.route);
-                      }}
+                      onClick={() => select(card.route)}
                       className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
                       aria-label={`Open ${card.label}`}
                     >

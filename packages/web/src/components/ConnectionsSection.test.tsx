@@ -353,6 +353,22 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     ).toBe("true");
   });
 
+  it("keeps the opening tab when a refresh brings the first connection", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    rerender(
+      sectionWith(
+        [
+          telegramBot("unauthorized"),
+          connection({ connectionKind: "whatsapp", grants: { session: "authorized" } }),
+        ],
+        onRefresh,
+      ),
+    );
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+  });
+
   it("shows App keys without a no-match message when only App keys matches", () => {
     renderSection(mixed());
     fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "app" } });
