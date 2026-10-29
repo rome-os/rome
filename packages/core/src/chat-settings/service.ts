@@ -375,7 +375,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       });
       return snapshot;
     }
-    const stored = row?.channelSettings ?? null;
+    const stored = this.storedRule(ref, row);
     const direct = this.directOverrides(row, stored);
     const effective = overlay(defaultConversationSettings(), direct);
     const supportedFields = this.supportedFields(descriptor, row);
@@ -517,6 +517,16 @@ export class ChatSettingsService implements ChatSettingsControl {
       (overrides.routing ??= {}).agentName = row.agentName;
     }
     return overrides;
+  }
+
+  /** The rule stored for the chat `ref` names, read through the chat so a
+   *  group's rule set through another of Rome's accounts reads here too. */
+  private storedRule(ref: ChatRef, row: StoredChatRow | null): StoredChatSettings | null {
+    let channel = row?.sourceChannel ?? null;
+    if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
+      channel = this.channelName(ref);
+    }
+    return channel === null ? null : this.deps.repository.ruleOf(channel, ref.chatId);
   }
 
   private async discover(
@@ -682,11 +692,15 @@ export class ChatSettingsService implements ChatSettingsControl {
     return `${ref.connectionId}\0${ref.chatId}`;
   }
 
-  /** A conversation on no channel stores nothing, so it locks on its own
-   *  key, which no channel's conversation shares. */
+  /** The lock a conversation's read-modify-write holds: its chat's platform
+   *  and id, since a write to a group reaches the row of every one of Rome's
+   *  accounts in it. A conversation on no channel stores nothing, so it locks
+   *  on its own key, which no channel's conversation shares. */
   private storageKey(ref: ChatRef): string {
     const channel = this.channelName(ref);
-    return channel === null ? this.key(ref) : `${channel}\0${ref.chatId}`;
+    return channel === null
+      ? this.key(ref)
+      : `${this.deps.repository.platformOf(channel)}\0${ref.chatId}`;
   }
 
   /** The channel the conversation `ref` addresses belongs to, or null when

@@ -2,10 +2,17 @@
 //
 // A chat is stored as one `rome_sessions` channel row per one of Rome's
 // accounts in it: the row of the channel that account speaks through, at the
-// chat's platform id. So a group two of Rome's accounts are in is two rows,
-// read here as one chat and written to both. Rome's accounts in a chat are its
-// rows, and the `participants` column holds everyone else. A thread's row,
-// which names a parent row, is no chat of its own and is never read here.
+// chat's platform id. A group two of Rome's accounts are in is two rows, read
+// here as one chat and written to both. Only a row its channel marks as a group
+// or a channel joins another account's: a direct message is named by both its
+// ends, and a platform such as Telegram gives a direct message the other
+// account's id whichever of Rome's accounts it writes to, so the same id on two
+// channels is two direct messages.
+//
+// Rome's accounts in a chat are its rows, less those marked as left, which stay
+// to keep what was said through them. The `participants` column holds everyone
+// else. A thread's row, which names a parent row, is no chat of its own and is
+// never read here.
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Account } from "@rome-os/app-runtime";
@@ -20,6 +27,16 @@ import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 import { Chat, ChatRefusal, sameAccount, type ChatKind, type ReplyRule } from "./chat.js";
 import type { ChatKey } from "./place.js";
+
+/** A chat row's `participants`: the chat's participants other than Rome's
+ *  own accounts, and whether the row's own account has left the chat. */
+export interface StoredChatMembers {
+  others: Account[];
+  left?: true;
+}
+
+/** Row thread types that one group shared by several of Rome's accounts has. */
+const SHARED_THREAD_TYPES: ReadonlySet<string> = new Set(["group", "channel"]);
 
 type Row = typeof romeSessions.$inferSelect;
 type Exec = DrizzleDb | DrizzleTx;
@@ -65,17 +82,21 @@ export class ChatRepository {
     );
   }
 
-  /** The chat at `key`, or null when Rome holds none there. */
-  byKey(key: ChatKey): Chat | null {
-    const rows = this.rowsOf(this.db, key);
+  /**
+   * The chat at `key`, or null when Rome holds none there. A direct message is
+   * read as the one `through` writes to, and a key with direct messages on
+   * several of Rome's accounts throws when `through` is absent.
+   */
+  byKey(key: ChatKey, through?: Account): Chat | null {
+    const rows = present(this.rowsOf(this.db, key, through));
     return rows.length === 0 ? null : this.toChat(key, rows);
   }
 
   /**
    * The chat at `key`, started through `via` when Rome holds none there yet.
-   * When the chat exists and `via` has no row in it, `via` joins it. `kind`,
-   * `name` and `seed` apply only to a row this call writes. Refuses a `via`
-   * that is none of Rome's accounts on the key's platform.
+   * When a group exists and `via` is not in it, `via` joins it. `kind`, `name`
+   * and `seed` apply only to a row this call writes. Refuses a `via` that is
+   * none of Rome's accounts on the key's platform.
    */
   startIfMissing(
     key: ChatKey,
@@ -86,69 +107,85 @@ export class ChatRepository {
   ): Chat {
     return this.db.transaction((tx) => {
       const channel = this.channelOf(key.platform, via);
-      const rows = this.rowsOf(tx, key);
-      if (rows.some((row) => row.sourceChannel === channel)) return this.toChat(key, rows);
-      const chat = rows.length === 0 ? Chat.start(key, kind, via, name) : this.toChat(key, rows);
-      if (rows.length > 0) {
-        chat.setParticipants([...chat.participants, { account: via, romes: true }]);
+      const rows = this.rowsOf(tx, key, via);
+      const live = present(rows);
+      const own = rows.find((row) => row.sourceChannel === channel);
+      if (own && live.includes(own)) return this.toChat(key, live);
+      if (live.length === 0 && own === undefined) {
+        const chat = Chat.start(key, kind, via, name);
+        this.insertRow(tx, chat, channel, {
+          threadType: kind === "dm" ? "private" : "group",
+          ...seed,
+        });
+        return chat;
       }
-      this.insertRow(tx, chat, channel, { threadType: kind === "dm" ? "private" : null, ...seed });
+      if (live.length === 0) {
+        // Every one of Rome's accounts in it had left, so it starts again.
+        this.markLeft(tx, own!, false);
+        return this.toChat(key, [
+          { ...own!, participants: members(own!.participants?.others ?? [], false) },
+        ]);
+      }
+      const chat = this.toChat(key, live);
+      chat.setParticipants([...chat.participants, { account: via, romes: true }]);
+      this.save(tx, chat, rows, { ...seed, threadType: live[0]!.sourceThreadType });
       return chat;
     });
   }
 
   /**
    * Load the chat at `key`, apply `change` to it, and store the result, all in
-   * one transaction. A refusal from `change` stores nothing. Throws when Rome
-   * holds no chat at `key`. An ended chat's rows go, with their threads and
-   * messages.
+   * one transaction. `through` names which of Rome's accounts a direct message
+   * is read through, as for `byKey`. A refusal from `change` stores nothing.
+   * Throws when Rome holds no chat at `key`. An ended chat's rows go, with
+   * their threads and messages.
    */
-  update(key: ChatKey, change: (chat: Chat) => void): Chat {
+  update(key: ChatKey, change: (chat: Chat) => void, through?: Account): Chat {
     return this.db.transaction((tx) => {
-      const rows = this.rowsOf(tx, key);
-      if (rows.length === 0) throw new Error(`No chat at ${key.platform}:${key.id}`);
-      const chat = this.toChat(key, rows);
+      const rows = this.rowsOf(tx, key, through);
+      const live = present(rows);
+      if (live.length === 0) throw new Error(`No chat at ${key.platform}:${key.id}`);
+      const chat = this.toChat(key, live);
       change(chat);
-      this.save(tx, chat, rows);
+      this.save(tx, chat, rows, { threadType: live[0]!.sourceThreadType });
       return chat;
     });
   }
 
-  private save(tx: DrizzleTx, chat: Chat, rows: Row[]): void {
+  /** Store `chat` over `rows`, every row its key reads, left ones included.
+   *  `seed` is what a row written for one of Rome's accounts with none holds. */
+  private save(tx: DrizzleTx, chat: Chat, rows: Row[], seed: ChatRowSeed): void {
     if (chat.ended) {
       this.deleteRows(tx, rows);
       return;
     }
     const others = chat.participants.filter((p) => !p.romes).map((p) => p.account);
     const romes = chat.participants.filter((p) => p.romes).map((p) => p.account);
-    const kept: Row[] = [];
-    const left: Row[] = [];
     for (const row of rows) {
-      (romes.some((account) => sameAccount(account, this.accountOn(row.sourceChannel!)))
-        ? kept
-        : left
-      ).push(row);
-    }
-    // A row is one of Rome's accounts' copy of the chat, so an account that
-    // left takes its copy with it and the rows of those still in it keep theirs.
-    this.deleteRows(tx, left);
-    for (const row of kept) {
+      const inChat = romes.some((account) =>
+        sameAccount(account, this.accountOn(row.sourceChannel!)),
+      );
       tx.update(romeSessions)
         .set({
           ...(chat.name === null ? {} : { name: chat.name, sourceThreadName: chat.name }),
           channelSettings: chat.replyRule,
-          participants: others.length === 0 ? null : others,
+          participants: members(others, !inChat),
         })
         .where(eq(romeSessions.id, row.id))
         .run();
     }
     for (const account of romes) {
       const channel = this.channelOf(chat.key.platform, account);
-      if (kept.some((row) => row.sourceChannel === channel)) continue;
-      this.insertRow(tx, chat, channel, {
-        threadType: kept[0]?.sourceThreadType ?? (chat.kind === "dm" ? "private" : null),
-      });
+      if (rows.some((row) => row.sourceChannel === channel)) continue;
+      this.insertRow(tx, chat, channel, seed);
     }
+  }
+
+  private markLeft(tx: DrizzleTx, row: Row, left: boolean): void {
+    tx.update(romeSessions)
+      .set({ participants: members(row.participants?.others ?? [], left) })
+      .where(eq(romeSessions.id, row.id))
+      .run();
   }
 
   private insertRow(tx: DrizzleTx, chat: Chat, channel: string, seed: ChatRowSeed): void {
@@ -169,7 +206,7 @@ export class ChatRepository {
         sourceThreadName: chat.name,
         sourceThreadType: seed.threadType ?? null,
         channelSettings: chat.replyRule,
-        participants: others.length === 0 ? null : others,
+        participants: members(others, false),
         parentSessionId: null,
         createdAt: now,
         activityAt: now,
@@ -201,8 +238,9 @@ export class ChatRepository {
     tx.delete(romeSessions).where(inArray(romeSessions.id, ids)).run();
   }
 
+  /** The chat `rows` store. Every row is one of Rome's accounts in it. */
   private toChat(key: ChatKey, rows: Row[]): Chat {
-    const others = rows.flatMap((row) => row.participants ?? []);
+    const others = rows.flatMap((row) => row.participants?.others ?? []);
     const rule = rows
       .map((row) => row.channelSettings)
       .filter((settings): settings is ReplyRule => settings !== null)
@@ -220,10 +258,15 @@ export class ChatRepository {
     });
   }
 
-  // Matched on the platform id alone and filtered by platform here, since a
-  // channel no record holds still stores rows under its own name.
-  private rowsOf(exec: Exec, key: ChatKey): Row[] {
-    return exec
+  /**
+   * The rows of the chat at `key`, left ones included: every shared group row
+   * there, or the one direct message row of the channel `through` speaks
+   * through. Absent `through`, a key with one direct message row reads it.
+   * The id is matched alone and the platform checked here, since a channel no
+   * record holds still stores rows under its own name.
+   */
+  private rowsOf(exec: Exec, key: ChatKey, through?: Account): Row[] {
+    const rows = exec
       .select()
       .from(romeSessions)
       .where(
@@ -239,20 +282,49 @@ export class ChatRepository {
           row.sourceChannel !== null &&
           this.channels.platformOfChannel(row.sourceChannel) === key.platform,
       );
+    const shared = rows.filter((row) => SHARED_THREAD_TYPES.has(row.sourceThreadType ?? ""));
+    const direct = rows.filter((row) => !shared.includes(row));
+    if (through !== undefined) {
+      const channel = this.channelOrNull(key.platform, through);
+      const own = direct.find((row) => row.sourceChannel === channel);
+      return own ? [own] : shared;
+    }
+    if (direct.length === 0) return shared;
+    if (direct.length === 1 && shared.length === 0) return direct;
+    throw new Error(
+      `${key.platform}:${key.id} names a chat on several of Rome's accounts; name the account`,
+    );
   }
 
-  /** The channel Rome's `account` on `platform` speaks through: a recorded
-   *  one, or the unrecorded channel the account stands in for by name. */
+  /** The channel Rome's `account` on `platform` speaks through. */
   private channelOf(platform: string, account: Account): string {
-    const candidates = [...this.channels.namesOn(platform), account.id];
-    const channel = candidates.find(
-      (name) =>
-        this.channels.platformOfChannel(name) === platform &&
-        sameAccount(this.accountOn(name), account),
-    );
-    if (channel === undefined) {
+    const channel = this.channelOrNull(platform, account);
+    if (channel === null) {
       throw new ChatRefusal(`${account.platform}:${account.id} is none of Rome's accounts`);
     }
     return channel;
   }
+
+  /** A recorded channel of `account`, or the unrecorded channel the account
+   *  stands in for by name, or null for none. */
+  private channelOrNull(platform: string, account: Account): string | null {
+    const candidates = [...this.channels.namesOn(platform), account.id];
+    return (
+      candidates.find(
+        (name) =>
+          this.channels.platformOfChannel(name) === platform &&
+          sameAccount(this.accountOn(name), account),
+      ) ?? null
+    );
+  }
+}
+
+/** The rows whose account is still in the chat. */
+function present(rows: Row[]): Row[] {
+  return rows.filter((row) => !row.participants?.left);
+}
+
+function members(others: Account[], left: boolean): StoredChatMembers | null {
+  if (others.length === 0 && !left) return null;
+  return left ? { others, left: true } : { others };
 }

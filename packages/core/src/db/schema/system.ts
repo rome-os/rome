@@ -9,8 +9,9 @@ import {
   type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import type { Account, AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
+import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type { StoredChatMembers } from "../../chats/chat-repository.js";
 import type { DeliveryState } from "../../chats/delivery.js";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
@@ -509,9 +510,10 @@ export const romeSessions = sqliteTable(
     // intentionally not duplicated here; agentName is its canonical column.
     channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
     // The chat's participants other than Rome's own accounts, as the platform
-    // last reported them. Rome's accounts in the chat are its channel rows.
-    // NULL until a platform reports a member list.
-    participants: text("participants", { mode: "json" }).$type<Account[]>(),
+    // last reported them, and whether this row's account has left the chat.
+    // Rome's accounts in the chat are its channel rows. NULL while neither is
+    // known.
+    participants: text("participants", { mode: "json" }).$type<StoredChatMembers>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),

@@ -122,7 +122,7 @@ describe("ChatRepository", () => {
       ]),
     );
 
-    expect(row("feishu", "oc_group")?.participants).toEqual([ALICE]);
+    expect(row("feishu", "oc_group")?.participants).toEqual({ others: [ALICE] });
     expect(chats.byKey(GROUP)?.participants).toEqual([
       { account: SALES, romes: true },
       { account: ALICE, romes: false },
@@ -156,6 +156,49 @@ describe("ChatRepository", () => {
     expect(
       testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all(),
     ).toEqual([]);
+  });
+
+  it("keeps what was said through one of Rome's accounts that leaves a live chat", () => {
+    chats.startIfMissing(GROUP, "group", SALES, null);
+    chats.startIfMissing(GROUP, "group", SUPPORT, null);
+    const id = channelChatId("feishu", "oc_group");
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({ id: "m1", sessionId: id, role: "user", content: "hi", createdAt: new Date() })
+      .run();
+
+    chats.update(GROUP, (chat) => chat.setParticipants([{ account: SUPPORT, romes: true }]));
+
+    expect(chats.byKey(GROUP)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
+    expect(row("feishu", "oc_group")?.participants).toEqual({ others: [], left: true });
+    expect(
+      testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all(),
+    ).toHaveLength(1);
+
+    const back = chats.startIfMissing(GROUP, "group", SALES, null);
+    expect(back.isRomes(SALES)).toBe(true);
+    expect(row("feishu", "oc_group")?.participants).toBeNull();
+  });
+
+  it("reads the same peer id on two of Rome's accounts as two direct messages", () => {
+    const peer = chatKey("feishu", "ou_alice" as ChatId);
+    chats.startIfMissing(peer, "dm", SALES, "Alice");
+    chats.startIfMissing(peer, "dm", SUPPORT, "Alice");
+
+    chats.update(peer, (chat) => chat.setReplyRule(SALES, RULE), SALES);
+
+    expect(chats.byKey(peer, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
+    expect(chats.byKey(peer, SUPPORT)?.replyRule).toBeNull();
+    expect(row("feishu-2", "ou_alice")?.channelSettings).toBeNull();
+    expect(() => chats.byKey(peer)).toThrow("name the account");
+  });
+
+  it("never joins a row of unknown type to another account's chat", () => {
+    chats.startIfMissing(GROUP, "group", SALES, null, { threadType: null });
+    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
+
+    expect(chats.byKey(GROUP, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
+    expect(chats.byKey(GROUP, SUPPORT)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
   });
 
   it("stands a channel no record holds for an account by its own name", () => {

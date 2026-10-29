@@ -9,6 +9,7 @@ import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { ChatRepository } from "../chats/chat-repository.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 
@@ -629,6 +630,74 @@ describe("ChatSettingsService", () => {
     expect(onChanged).toHaveBeenCalledTimes(2);
     expect((await service.get(parent)).effective.enabled).toBe(true);
     expect((await service.get(parent)).updatedBy).toEqual({ kind: "guardian", id: "second" });
+  });
+
+  it("serializes writers through two of Rome's accounts in one group", async () => {
+    testDb = createTestDb();
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
+    // Two of Rome's accounts on one platform. A second account of one kind is
+    // stood in for by another kind whose channel the fake records put there.
+    registry.register(directoryDescriptor("feishu", () => []));
+    registry.register(directoryDescriptor("wechat", () => []));
+    const sales = await connectLive(registry, "feishu");
+    const support = await connectLive(registry, "wechat");
+    const channelOf = (connection: { id: string }) =>
+      connection.id === sales.id ? "feishu" : "feishu-2";
+    const chats = new ChatRepository(testDb.db, {
+      namesOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
+      accountOf: (name) =>
+        name === "feishu"
+          ? { platform: "feishu", id: "ou_sales" }
+          : name === "feishu-2"
+            ? { platform: "feishu", id: "ou_support" }
+            : null,
+      platformOfChannel: (name) => (name.startsWith("feishu") ? "feishu" : name),
+    });
+    const service = new ChatSettingsService({
+      repository: new ChatSettingsRepository(testDb.db, chats),
+      connections: registry,
+      channelOf,
+      channels: () => [],
+      listAgents: () => [],
+      onChanged: () => {},
+    });
+    const throughSales = { connectionId: sales.id, chatId: "oc_group" as ChatId };
+    const throughSupport = { connectionId: support.id, chatId: "oc_group" as ChatId };
+    for (const ref of [throughSales, throughSupport]) {
+      service.observe({
+        ref,
+        connectionKind: "feishu",
+        service: "feishu",
+        kind: "group",
+        displayName: "Launch",
+      });
+    }
+
+    // Both start before either writes, so each would read the rule before
+    // the other's change without one lock for the chat.
+    await Promise.all([
+      service.update({
+        ref: throughSales,
+        set: { enabled: false },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+      service.update({
+        ref: throughSupport,
+        set: { activation: { mode: "all" } },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+    ]);
+
+    for (const ref of [throughSales, throughSupport]) {
+      expect((await service.get(ref)).effective).toMatchObject({
+        enabled: false,
+        activation: { mode: "all" },
+      });
+    }
   });
 
   it("paginates beyond a bounded live directory first page", async () => {

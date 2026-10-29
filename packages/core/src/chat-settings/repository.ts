@@ -50,6 +50,19 @@ export class ChatSettingsRepository {
       .all();
   }
 
+  /** The reply rule of the chat at `chatId` as the account `channel` speaks
+   *  as sees it: the group's, whichever of Rome's accounts set it, or the
+   *  account's own direct message's. Null when none is set. */
+  ruleOf(channel: string, chatId: ChatId): StoredChatSettings | null {
+    const via = this.chats.accountOn(channel);
+    return this.chats.byKey(chatKey(via.platform, chatId), via)?.replyRule ?? null;
+  }
+
+  /** The platform channel `channel`'s accounts live on. */
+  platformOf(channel: string): string {
+    return this.chats.accountOn(channel).platform;
+  }
+
   hasMessageHistory(sessionId: string): boolean {
     return (
       this.db
@@ -96,10 +109,14 @@ export class ChatSettingsRepository {
         descriptor.displayName,
         { threadType: sourceThreadType },
       );
-      this.chats.update(key, (chat) => {
-        chat.rename(descriptor.displayName);
-        chat.setReplyRule(via, input.settings);
-      });
+      this.chats.update(
+        key,
+        (chat) => {
+          chat.rename(descriptor.displayName);
+          chat.setReplyRule(via, input.settings);
+        },
+        via,
+      );
       tx.update(romeSessions)
         .set({
           sourceThreadType,
