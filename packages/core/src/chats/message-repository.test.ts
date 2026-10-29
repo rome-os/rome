@@ -504,6 +504,36 @@ describe("StoredMessages reads", () => {
     }
   });
 
+  it("keeps each account's record apart in a Telegram basic group", async () => {
+    // A basic group gives each member account its own message ids, so the
+    // bot's message 1 and the user account's message 1 are two lines.
+    const basic = placeIn(chatKey("telegram", "-555" as ChatId));
+    const bot = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "-555",
+      threadType: "group",
+      agentName: "main",
+    });
+    const user = await rows.ensureChannelChat({
+      channel: "telegram-ops",
+      threadId: "-555",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(bot.id, "the bot's first", minute(1), "1");
+    await said(user.id, "the user account's first", minute(2), "1");
+
+    const { messages: read } = await messages.recent(basic, 10);
+    expect(read.map((message) => message.body.text)).toEqual([
+      "the bot's first",
+      "the user account's first",
+    ]);
+    for (const message of read) {
+      const found = await messages.find(basic, [message.id]);
+      expect(found.map((each) => each.body.text)).toEqual([message.body.text]);
+    }
+  });
+
   it("reads a group as one account heard it when the read names that account", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",

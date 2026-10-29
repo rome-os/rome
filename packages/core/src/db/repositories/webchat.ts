@@ -1508,7 +1508,10 @@ export class WebChatRepository {
    * order are its first copy's, so a copy that arrives later never moves it.
    * What it says and who said it come from the multipart reply that holds it,
    * else from Rome's own record of it, else from that first copy. With
-   * `ownChannel`, only that channel's record is read. With `ids`, only the
+   * `ownChannel`, only that channel's record is read. With `localIds`, each
+   * account numbers the chat's messages itself, so a platform id names a
+   * message only within one account's record, and copies across accounts are
+   * not matched. With `ids`, only the
    * messages one of their copies is named for are. Without `ownChannel`, only
    * a group is read across channels.
    * Trace rows belong to no chat and are left out.
@@ -1517,6 +1520,7 @@ export class WebChatRepository {
     channels: readonly string[];
     address: string;
     ownChannel?: string;
+    localIds?: boolean;
     ids?: readonly string[];
     before?: { at: Date; id: string };
     limit: number;
@@ -1556,6 +1560,10 @@ export class WebChatRepository {
       sql`, `,
     );
     const { before } = input;
+    // Where each account numbers its own messages, a platform id is matched
+    // only within the record that holds it.
+    const sameRecord = (other: SQL) =>
+      input.localIds ? sql`and ${other}."sid" = "r"."sid"` : sql``;
     // Reading named messages, only their copies are grouped: the rows that
     // share a platform id with them, through the reply that holds them.
     const asked = input.ids
@@ -1598,14 +1606,14 @@ export class WebChatRepository {
       with
         "chats" as materialized (select "id" from ${romeSessions} where ${and(at, which)}),
         "held" as materialized (
-          select "message_id", "platform_message_id" as "pid"
+          select "message_id", "platform_message_id" as "pid", "session_id" as "sid"
           from ${romeAgentMessagePlatformIds}
           where "session_id" in (select "id" from "chats")
         ),
         ${asked}
         "said" as materialized (
           select "m".rowid as "rid", "m"."id", "m"."platform_message_id" as "pid",
-            "m"."role", "m"."sender_id"
+            "m"."session_id" as "sid", "m"."role", "m"."sender_id"
           from ${
             input.ids
               ? sql`(
@@ -1624,12 +1632,12 @@ export class WebChatRepository {
         "holder" as materialized (
           select "r"."rid", "w"."rid" as "wrid"
           from "said" as "r"
-          join "said" as "w" on "w"."pid" = "r"."pid"
+          join "said" as "w" on "w"."pid" = "r"."pid" ${sameRecord(sql`"w"`)}
           where "w"."id" in (select "message_id" from "held")
           union all
           select "r"."rid", "w"."rid"
           from "said" as "r"
-          join "held" as "h" on "h"."pid" = "r"."pid"
+          join "held" as "h" on "h"."pid" = "r"."pid" ${sameRecord(sql`"h"`)}
           join "said" as "w" on "w"."id" = "h"."message_id"
         ),
         -- Each row's message: the reply that holds it, else its platform id.
@@ -1638,7 +1646,7 @@ export class WebChatRepository {
             ${input.ids ? sql`"r"."id" in (select "id" from "asked")` : sql`0`} as "named",
             case
               when min("x"."wrid") is not null then 'w' || min("x"."wrid")
-              when "r"."pid" is not null then 'p' || "r"."pid"
+              when "r"."pid" is not null then ${input.localIds ? sql`'p' || "r"."sid" || ':' || "r"."pid"` : sql`'p' || "r"."pid"`}
               else 'r' || "r"."rid"
             end as "message",
             min("x"."wrid") as "wrid"

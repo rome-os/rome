@@ -147,6 +147,7 @@ export class StoredMessages implements MessageRepository {
       channels: this.history.channelsOn(place.chat.platform),
       address: addressOf(place),
       ...(via ? { ownChannel: via.channel } : {}),
+      localIds: numbersPerAccount(place),
       ids,
       limit: ids.length,
     });
@@ -164,6 +165,7 @@ export class StoredMessages implements MessageRepository {
       channels: this.history.channelsOn(place.chat.platform),
       address: addressOf(place),
       ...(via ? { ownChannel: via.channel } : {}),
+      localIds: numbersPerAccount(place),
       ...(before ? { before } : {}),
       limit: limit + 1,
     });
@@ -267,4 +269,15 @@ function personSaidBy(place: Place, row: StoredSaidMessage): SaidBy | undefined 
     account: { platform: place.chat.platform, id: row.senderId },
     ...(row.senderName === null ? {} : { name: row.senderName }),
   };
+}
+
+/**
+ * Whether each of Rome's accounts numbers this place's messages itself. A
+ * Telegram basic group, addressed `-<id>` where a supergroup or channel is
+ * `-100<id>`, gives every member account its own message ids, so the same id
+ * on two accounts names two messages.
+ */
+function numbersPerAccount(place: Place): boolean {
+  const { platform, id } = place.chat;
+  return platform === "telegram" && id.startsWith("-") && !id.startsWith("-100");
 }
