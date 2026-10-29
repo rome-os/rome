@@ -221,7 +221,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const from = parsed.request.from;
     const found = await directPlace(deps, account, from);
     if (!found.ok) return respondToSend(c, found);
-    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, from));
+    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, found.as));
   });
 
   app.get("/people/:id/messages", async (c) => {
