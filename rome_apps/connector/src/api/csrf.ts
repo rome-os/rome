@@ -8,7 +8,7 @@ const TTL_MS = 30 * 60 * 1000;
 
 /**
  * Where the connect was initiated, so the OAuth callback knows where to land the
- * authorize tab: the connector dashboard (`dashboard`), or a terminal "you're
+ * authorize tab: Settings › Connections (`dashboard`), or a terminal "you're
  * connected, return to your chat" page when an inline card in the chat
  * transcript started the flow (`webchat`).
  */

@@ -1204,9 +1204,6 @@ importers:
       '@octokit/webhooks-methods':
         specifier: ^6.0.0
         version: 6.0.0
-      '@radix-ui/react-slot':
-        specifier: ^1.1.2
-        version: 1.2.3(@types/react@19.2.15)(react@19.2.6)
       '@rome-os/app-runtime':
         specifier: ^0.7.0
         version: link:../../packages/app-runtime-sdk
@@ -1216,12 +1213,6 @@ importers:
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
-      '@tanstack/react-query':
-        specifier: ^5.62.0
-        version: 5.101.0(react@19.2.6)
-      class-variance-authority:
-        specifier: ^0.7.1
-        version: 0.7.1
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@13.0.3)(pg@8.18.0)

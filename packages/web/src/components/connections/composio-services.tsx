@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ComposioServiceBadge } from "@/components/brand-icons/composio-glyphs";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import {
   fetchComposioWebhookStatus,
   registerComposioWebhook,
   startComposioConnect,
+  type ComposioCatalogEntry,
   type ComposioServiceRow,
 } from "@/lib/composio-services";
 import { StatusIndicator, type ConnectionStatus } from "@/lib/connection-status";
@@ -56,6 +58,7 @@ export function useComposioServices({
     catalog.data && (!signedIn || accounts.data)
       ? composioServiceRows(catalog.data, signedIn ? (accounts.data ?? []) : [])
       : { connected: [], available: [] };
+  useConnectReturnNotice(catalog.data, catalog.data !== undefined || catalog.isError);
   return {
     rows,
     error: catalog.error ?? (signedIn ? accounts.error : null),
@@ -64,6 +67,43 @@ export function useComposioServices({
       if (signedIn) void accounts.refetch();
     },
   };
+}
+
+/**
+ * The Connector's OAuth callback sends the authorize tab back here with
+ * `?connector=<slug>&status=<status>`. Says whether the connect finished, once
+ * the catalog can name the service, then drops just those params so a reload
+ * does not say it again.
+ */
+function useConnectReturnNotice(catalog: ComposioCatalogEntry[] | undefined, settled: boolean) {
+  const { t } = useTranslation("settings");
+  const client = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const slug = params.get("connector");
+  const status = params.get("status");
+  useEffect(() => {
+    if (!slug || !settled) return;
+    const name = catalog?.find((entry) => entry.slug === slug.toLowerCase())?.name ?? slug;
+    // One id per return, so a re-run of this effect cannot stack a second
+    // toast. Only an active result reads as success: a declined or failed
+    // round trip must not.
+    const id = `composio-return-${slug}`;
+    if ((status ?? "").toUpperCase() === "ACTIVE") {
+      toast.success(t("connections.composioServices.returnConnected", { name }), { id });
+      void client.invalidateQueries({ queryKey: COMPOSIO_ACCOUNTS_QUERY_KEY });
+    } else {
+      toast.error(t("connections.composioServices.returnFailed", { name }), { id });
+    }
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("connector");
+        next.delete("status");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [slug, status, catalog, settled, client, setParams, t]);
 }
 
 function rowStatus(row: ComposioServiceRow): ConnectionStatus {
@@ -89,8 +129,17 @@ export function useComposioConnect(onFlash: (message: string) => void) {
         await client.invalidateQueries({ queryKey: COMPOSIO_ACCOUNTS_QUERY_KEY });
         toast(t("connections.composioServices.alreadyConnected", { name: row.name }));
       } else if (result.authorizationUrl) {
-        window.open(result.authorizationUrl, "_blank", "noopener,noreferrer");
-        toast(t("connections.composioServices.authorize", { name: row.name }));
+        const url = result.authorizationUrl;
+        window.open(url, "_blank", "noopener,noreferrer");
+        // The tab opens after the request returns, which a strict popup blocker
+        // (iOS Safari) can refuse, and `noopener` hides whether it did. The
+        // action opens it again from a click of its own.
+        toast(t("connections.composioServices.authorize", { name: row.name }), {
+          action: {
+            label: t("connections.composioServices.openTab"),
+            onClick: () => window.open(url, "_blank", "noopener,noreferrer"),
+          },
+        });
       } else {
         onFlash(t("connections.composioServices.connectFailed"));
       }
