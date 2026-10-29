@@ -127,6 +127,41 @@ describe("connector_proxy response mapping", () => {
     });
   });
 
+  // Google Calendar's flags (singleEvents, showDeleted, …) are booleans, and an
+  // agent naturally writes them as JSON booleans. The client serializes them.
+  it.each([true, false])("accepts a boolean query value (singleEvents: %s)", async (flag) => {
+    let received: unknown;
+    loadConnectorClient.mockResolvedValueOnce({
+      findActiveConnectedAccount: async () => ({ kind: "ok", id: "acc_1" }),
+      proxyTool: async (args: unknown) => {
+        received = args;
+        return { status: 200, data: {}, headers: {} };
+      },
+    });
+    const result = await run({
+      toolkit: "googlecalendar",
+      path: "/calendar/v3/calendars/primary/events",
+      method: "GET",
+      query: { singleEvents: flag, maxResults: 10 },
+    });
+    expect(result.status).toBe("ok");
+    expect(received).toMatchObject({ query: { singleEvents: flag, maxResults: 10 } });
+  });
+
+  it("rejects a non-scalar query value before loading the client", async () => {
+    const result = await run({
+      toolkit: "googlecalendar",
+      path: "/calendar/v3/calendars/primary/events",
+      method: "GET",
+      query: { singleEvents: { value: true } },
+    });
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/query\.singleEvents/),
+    });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+
   it("fills in the toolkit's default host when host is omitted (path-only call)", async () => {
     let received: { endpoint?: string } | undefined;
     loadConnectorClient.mockResolvedValueOnce({
