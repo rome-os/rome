@@ -92,6 +92,12 @@ export type SendResult =
   | { ok: false; error: string; delivery: Delivery }
   | { ok: false; invalid: string };
 
+/**
+ * Who a send goes out as: one of Rome's accounts, or, over today's storage,
+ * the channel that stands for one no record names yet.
+ */
+export type Sender = Account | { readonly channel: string };
+
 /** The sender Rome stamps on its own messages. `messages-agent.ts` reads it
  *  back to put the line on Rome's side of the chat. */
 const ROME_SENDER = { senderId: "rome", senderName: "Rome" } as const;
@@ -111,13 +117,19 @@ export async function send(
   deps: SendIntoPlaceDeps,
   place: Place,
   body: Body,
-  as?: Account,
+  as?: Sender,
 ): Promise<SendResult> {
   const platform = place.chat.platform;
   // Absent `as`, Rome has to hold one account on the platform. With none or
   // several, no Connection answers for the place as such, and connecting or
-  // removing an account is what settles it, so it reads as not connected.
-  const sender = as === undefined ? soleSender(deps, platform) : senderNamed(deps, platform, as);
+  // removing an account is what settles it, so it reads as not connected. A
+  // channel named as the sender that no longer sends there reads the same.
+  const sender =
+    as === undefined
+      ? soleSender(deps, platform)
+      : "channel" in as
+        ? sendersOf(deps, platform).find((channel) => channel === as.channel)
+        : senderNamed(deps, platform, as);
   if (sender === null) {
     return { ok: false, invalid: "Rome holds no account by that id that can send to this chat" };
   }
@@ -167,7 +179,9 @@ export function senderNamed(
   );
 }
 
-function soleSender(deps: SendDeps, platform: string): string | undefined {
+/** The channel of Rome's only account on `platform`, or undefined while it
+ *  holds none or several. */
+export function soleSender(deps: SendDeps, platform: string): string | undefined {
   const senders = sendersOf(deps, platform);
   return senders.length === 1 ? senders[0] : undefined;
 }

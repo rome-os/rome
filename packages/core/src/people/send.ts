@@ -31,7 +31,9 @@ import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
 import {
+  type Sender,
   senderNamed,
+  soleSender,
   sendersOf,
   type RefusedState,
   type SendDeps,
@@ -156,28 +158,31 @@ export async function readSendStates(
 
 /**
  * The direct message that reaches `account`, as a place a send can name, and
- * `as`, the one of Rome's accounts whose channel found it. Absent `from`, Rome
- * has to hold one account on the platform. Refused with the same state the
- * person read carries, or `invalid` when `from` is none of Rome's accounts
- * there.
+ * `as`, the sender whose channel found it. Absent `from`, Rome has to hold one
+ * account on the platform. Refused with the same state the person read
+ * carries, or `invalid` when `from` is none of Rome's accounts there.
  *
  * Its key is the address the sender's channel holds for the direct message,
  * which is the platform's own id for it over today's storage, so the send has
- * to go out as `as`: another account's channel may hold another address. `as`
- * is absent only when no record names the channel's account.
+ * to go out as `as`: another account's channel may hold another address.
  */
 export async function directPlace(
   deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf">,
   account: Account,
   from?: Account,
-): Promise<{ ok: true; place: Place; as?: Account } | Extract<SendResult, { ok: false }>> {
-  const sender = from && senderNamed(deps, account.platform, from);
+): Promise<{ ok: true; place: Place; as: Sender } | Extract<SendResult, { ok: false }>> {
+  const sender =
+    from === undefined
+      ? soleSender(deps, account.platform)
+      : senderNamed(deps, account.platform, from);
   if (sender === null) {
     return { ok: false, invalid: "Rome holds no account by that id that can send to this account" };
   }
+  if (sender === undefined) return { ok: false, send: "not-connected" };
+  // Taken before the lookup awaits: a disconnect meanwhile clears the record
+  // of the channel's account, and the send must still go out as this one.
+  const as: Sender = from ?? deps.accountOf?.(sender) ?? { channel: sender };
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
-  const { channel, chatId } = resolution.target;
-  const as = from ?? deps.accountOf?.(channel) ?? undefined;
-  return { ok: true, place: placeIn(chatKey(account.platform, chatId)), ...(as ? { as } : {}) };
+  return { ok: true, place: placeIn(chatKey(account.platform, resolution.target.chatId)), as };
 }
