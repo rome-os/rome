@@ -13,10 +13,10 @@
 // Rome's accounts in a chat are its rows. Today's rows hold no one else, so a
 // chat read here lists only Rome's accounts, and the other participants a
 // change names are not kept. A thread's row, which names a parent row, is no
-// chat of its own and is never read here.
+// chat of its own and is read here only for the place it stands for.
 
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
-import type { Account } from "@rome-os/app-runtime";
+import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   romeAgentMessagePlatformIds,
@@ -28,7 +28,7 @@ import {
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 import { Chat, ChatRefusal, sameAccount, type ChatKind, type ReplyRule } from "./chat.js";
-import type { ChatKey } from "./place.js";
+import { chatKey, placeIn, type ChatKey, type Place } from "./place.js";
 
 /** Row thread types that one group shared by several of Rome's accounts has. */
 const SHARED_THREAD_TYPES: ReadonlySet<string> = new Set(["group", "channel"]);
@@ -87,6 +87,31 @@ export class ChatRepository {
   byKey(key: ChatKey, through?: Account, joinUntyped = false): Chat | null {
     const rows = this.rowsOf(this.db, key, through, joinUntyped);
     return rows.length === 0 ? null : this.toChat(key, rows);
+  }
+
+  /**
+   * The place a chat's or a thread's row stands for, and the channel of the
+   * one of Rome's accounts that keeps it, or null when `recordId` names no
+   * row on a messaging channel. For callers that still hold a row from
+   * today's storage, such as the conversation an agent turn is recorded in.
+   */
+  placeOfRecord(recordId: string): { place: Place; channel: string } | null {
+    const row = this.channelRow(recordId);
+    if (!row?.sourceChannel || !row.sourceThreadId) return null;
+    const channel = row.sourceChannel;
+    const platform = this.channels.platformOfChannel(channel);
+    if (row.parentSessionId === null) {
+      return { place: placeIn(chatKey(platform, row.sourceThreadId as ChatId)), channel };
+    }
+    const parent = this.channelRow(row.parentSessionId);
+    if (!parent?.sourceThreadId) return null;
+    return {
+      place: placeIn(
+        chatKey(platform, parent.sourceThreadId as ChatId),
+        row.sourceThreadId as ChatId,
+      ),
+      channel,
+    };
   }
 
   /**
@@ -310,6 +335,14 @@ export class ChatRepository {
     throw new Error(
       `${key.platform}:${key.id} names a chat on several of Rome's accounts; name the account`,
     );
+  }
+
+  private channelRow(id: string): Row | undefined {
+    return this.db
+      .select()
+      .from(romeSessions)
+      .where(and(eq(romeSessions.id, id), isChannelConversation))
+      .get();
   }
 
   /** Every channel a chat on `platform` may be stored under: the recorded

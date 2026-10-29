@@ -5,6 +5,7 @@
 // delivery of a message Rome sends.
 
 import type { Account, Attachment } from "@rome-os/app-runtime";
+import type { MessagePart } from "../types.js";
 import type { Place } from "./place.js";
 
 /** Every message goes one way: to Rome, or from Rome. */
@@ -45,9 +46,36 @@ export interface InboundMessage {
   readonly at: Date;
 }
 
-/** A message for {@link MessageRepository.record}. Only messages to Rome are
- *  recorded through it so far; a send still records its own. */
+/** A message for {@link MessageRepository.record}: one that reached Rome. */
 export type Message = InboundMessage;
+
+/**
+ * A message Rome said, which its platform took or may have taken. Rome's
+ * account in the place is the one the message went out from, so it is not
+ * named here. `parts` is the message as it was composed, which reads as plain
+ * text the way any recorded message does.
+ *
+ * `platformMessageId` is the platform's id for the message, absent while its
+ * send is unsettled. A reply the platform showed as several messages names
+ * the one it starts with there and the rest in `otherPlatformMessageIds`, so
+ * a quote of any of them reaches it. `replyTo` is the platform id of the
+ * message it answers.
+ *
+ * `turnId` names the agent turn that said it, an id in Agents that Chats
+ * keeps and never reads. `turnAnswer` says the turn holds the message as its
+ * own answer. Otherwise the agent learns of it as something said in the chat,
+ * like a message it was away for.
+ */
+export interface OutboundMessage {
+  readonly direction: "fromRome";
+  readonly place: Place;
+  readonly parts: readonly MessagePart[];
+  readonly platformMessageId?: string;
+  readonly otherPlatformMessageIds?: readonly string[];
+  readonly replyTo?: string;
+  readonly turnId?: string;
+  readonly turnAnswer: boolean;
+}
 
 /** A message once it is on record: the id Rome gave it. */
 export type RecordedMessage = Message & { readonly id: string };

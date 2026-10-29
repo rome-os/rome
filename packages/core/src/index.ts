@@ -398,13 +398,23 @@ async function main() {
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
+  const chatRepo = new ChatRepository(db, channelRecords);
+  // What was said in each place (docs/domains/chats.md#message). Reads find a
+  // platform's chats under every channel it is kept under, built or released.
+  // `channels` is built further down, before anything reads.
+  const chatEvents = new ChatEvents();
+  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
+    channelsOn: (platform) =>
+      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
+    accountOf: (channel) => channelRecords.accountOf(channel),
+  });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
-  const chatRepo = new ChatRepository(db, channelRecords);
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
     chatRepo,
+    chatMessages,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -502,7 +512,8 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    chats: webchatRepo,
+    messages: chatMessages,
+    places: chatRepo,
   });
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
@@ -997,15 +1008,6 @@ async function main() {
       return access ? credentialFingerprint(access.token) : null;
     },
   });
-  // What was said in each place (docs/domains/chats.md#message). Reads find a
-  // platform's chats under every channel it is kept under, built or released.
-  // `channels` is built further down, before anything reads.
-  const chatEvents = new ChatEvents();
-  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
-    channelsOn: (platform) =>
-      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
-    accountOf: (channel) => channelRecords.accountOf(channel),
-  });
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
@@ -1114,6 +1116,8 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
+    messages: chatMessages,
+    places: chatRepo,
     isTextPrivate: (agentName) =>
       agentLoader.has(agentName) &&
       resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",

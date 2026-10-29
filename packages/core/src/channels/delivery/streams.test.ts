@@ -1,4 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { ChatEvents } from "../../chats/events.js";
+import { StoredMessages } from "../../chats/message-repository.js";
+import { chatKey, placeIn } from "../../chats/place.js";
+import type { ChatId } from "@rome-os/app-runtime";
+import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import { systemClock } from "../../lib/clock.js";
 import { Pacer } from "./pacer.js";
 import { ReplyStreams } from "./streams.js";
@@ -21,6 +26,28 @@ const target = {
   turnId: "turn-1",
 };
 const replies = () => ({ transport, pacer: new Pacer(budget, systemClock) });
+
+/** Messages over a conversation row that writes into `record`, at the place
+ *  the target's conversation stands for. */
+function recordingInto(record: WebChatRepository["recordOutboundConversationMessage"]) {
+  const rows = {
+    findChannelChat: async (channel: string, address: string) =>
+      channel === target.channel && address === target.chatId ? { id: target.romeSessionId } : null,
+    recordOutboundConversationMessage: record,
+  } as unknown as WebChatRepository;
+  return {
+    messages: new StoredMessages(rows, new ChatEvents(), { channelsOn: () => [] }),
+    places: {
+      placeOfRecord: (id: string) =>
+        id === target.romeSessionId
+          ? {
+              place: placeIn(chatKey("telegram", target.chatId as ChatId)),
+              channel: target.channel,
+            }
+          : null,
+    },
+  };
+}
 
 describe("ReplyStreams", () => {
   it("opens no stream while reply streaming is off, and does not look at the channel", async () => {
@@ -59,12 +86,12 @@ describe("ReplyStreams", () => {
 
   it("records the delivered reply once, as the text the user was shown", async () => {
     const recordOutboundConversationMessage = rs.fn(async () => undefined);
-    const chats = { recordOutboundConversationMessage };
+    const chats = recordingInto(recordOutboundConversationMessage);
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
       clock: systemClock,
-      chats,
+      ...chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -94,7 +121,7 @@ describe("ReplyStreams", () => {
       streaming: async () => true,
       replies: () => ({ transport: wrapped, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      chats: { recordOutboundConversationMessage },
+      ...recordingInto(recordOutboundConversationMessage),
     });
     const stream = (await streams.open(target))!;
 
@@ -108,12 +135,12 @@ describe("ReplyStreams", () => {
 
   it("records each block as its own paragraph, under the first message of the last block", async () => {
     const recordOutboundConversationMessage = rs.fn(async () => undefined);
-    const chats = { recordOutboundConversationMessage };
+    const chats = recordingInto(recordOutboundConversationMessage);
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
       clock: systemClock,
-      chats,
+      ...chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -132,7 +159,7 @@ describe("ReplyStreams", () => {
 
   it("records the reply under the last block with a message id, when the answer's create is unknown", async () => {
     const recordOutboundConversationMessage = rs.fn(async () => undefined);
-    const chats = { recordOutboundConversationMessage };
+    const chats = recordingInto(recordOutboundConversationMessage);
     const answerUnknown: DeliveryTransport = {
       ...transport,
       create: async (conversation, text) => {
@@ -144,7 +171,7 @@ describe("ReplyStreams", () => {
       streaming: async () => true,
       replies: () => ({ transport: answerUnknown, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      chats,
+      ...chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -163,12 +190,12 @@ describe("ReplyStreams", () => {
 
   it("shows the answer WebChat shows, for a structured result and for a turn that ends mid-block", async () => {
     const recordOutboundConversationMessage = rs.fn(async () => undefined);
-    const chats = { recordOutboundConversationMessage };
+    const chats = recordingInto(recordOutboundConversationMessage);
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
       clock: systemClock,
-      chats,
+      ...chats,
     });
     const shown = () =>
       recordOutboundConversationMessage.mock.calls.map(
@@ -199,7 +226,7 @@ describe("ReplyStreams", () => {
 
   it("records nothing when no message was written, so a failed stream leaves no history", async () => {
     const recordOutboundConversationMessage = rs.fn(async () => undefined);
-    const chats = { recordOutboundConversationMessage };
+    const chats = recordingInto(recordOutboundConversationMessage);
     const refusing: DeliveryTransport = {
       ...transport,
       create: async () => {
@@ -210,7 +237,7 @@ describe("ReplyStreams", () => {
       streaming: async () => true,
       replies: () => ({ transport: refusing, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      chats,
+      ...chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -221,7 +248,7 @@ describe("ReplyStreams", () => {
 
   it("records a message whose create may have landed, since nothing sends it again", async () => {
     const recordOutboundConversationMessage = rs.fn(async () => undefined);
-    const chats = { recordOutboundConversationMessage };
+    const chats = recordingInto(recordOutboundConversationMessage);
     const unanswered: DeliveryTransport = {
       ...transport,
       create: async () => {
@@ -232,7 +259,7 @@ describe("ReplyStreams", () => {
       streaming: async () => true,
       replies: () => ({ transport: unanswered, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      chats,
+      ...chats,
     });
     const stream = (await streams.open(target))!;
 

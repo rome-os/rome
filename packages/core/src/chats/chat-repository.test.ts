@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Account, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
+import { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -288,6 +289,36 @@ describe("ChatRepository", () => {
       .run();
 
     expect(chats.byKey(GROUP)).toBeNull();
+  });
+
+  it("names the place a chat's row stands for, and the channel that keeps it", () => {
+    chats.startIfMissing(GROUP, "group", SUPPORT, null);
+
+    expect(chats.placeOfRecord(channelChatId("feishu-2", "oc_group"))).toEqual({
+      place: { chat: GROUP },
+      channel: "feishu-2",
+    });
+  });
+
+  it("names a thread's row as the thread in its parent's chat", async () => {
+    await new WebChatRepository(testDb.db).ensureChannelChat({
+      channel: "feishu",
+      threadId: "om_thread",
+      parentThreadId: "oc_group",
+      agentName: "main",
+    });
+
+    expect(chats.placeOfRecord(channelChatId("feishu", "om_thread"))).toEqual({
+      place: { chat: GROUP, threadId: "om_thread" },
+      channel: "feishu",
+    });
+  });
+
+  it("names no place for a row that is no conversation on a messaging channel", async () => {
+    await new WebChatRepository(testDb.db).createSession("chat-1", "A dashboard chat");
+
+    expect(chats.placeOfRecord("chat-1")).toBeNull();
+    expect(chats.placeOfRecord("no-such-row")).toBeNull();
   });
 
   it("takes the write lock before it reads, so another connection's commit fails no join", () => {

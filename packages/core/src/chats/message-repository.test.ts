@@ -695,3 +695,96 @@ describe("StoredMessages reads", () => {
     await expect(messages.recent(elsewhere, 10)).resolves.toEqual({ messages: [], older: null });
   });
 });
+
+// Recording what Rome said. What these pin: the message lands in the chat its
+// place names, as Rome's, and recording a reply again leaves one message.
+describe("StoredMessages records Rome's messages", () => {
+  let testDb: TestDb;
+  let rows: WebChatRepository;
+  let messages: StoredMessages;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    rows = new WebChatRepository(testDb.db);
+    messages = new StoredMessages(rows, new ChatEvents(), {
+      channelsOn: (platform) => (platform === "telegram" ? ["telegram"] : []),
+      accountOf: (channel) =>
+        channel === "telegram" ? { platform: "telegram", id: "rome-bot" } : null,
+    });
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  const group = placeIn(chatKey("telegram", "group-1" as ChatId));
+  const reply = {
+    direction: "fromRome" as const,
+    place: group,
+    parts: [{ type: "text" as const, content: "on it" }],
+    platformMessageId: "m-9",
+    replyTo: "m-1",
+    turnId: "turn-1",
+    turnAnswer: true,
+  };
+
+  it("records a sent message in its place as said by Rome", async () => {
+    await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+
+    await messages.recordSent(reply, { channel: "telegram" });
+
+    const { messages: said } = await messages.recent(group, 10);
+    expect(said).toMatchObject([
+      {
+        direction: "fromRome",
+        saidBy: { account: { platform: "telegram", id: "rome-bot" }, name: "Rome" },
+        body: { text: "on it" },
+        platformMessageId: "m-9",
+        replyTo: "m-1",
+        turnId: "turn-1",
+      },
+    ]);
+  });
+
+  it("leaves one message when the same reply is recorded again", async () => {
+    await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+
+    await messages.recordSent(reply, { channel: "telegram" });
+    await messages.recordSent(reply, { channel: "telegram" });
+
+    expect((await messages.recent(group, 10)).messages).toHaveLength(1);
+  });
+
+  it("reads a message no turn said as Rome's too", async () => {
+    await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+
+    await messages.recordSent(
+      { direction: "fromRome", place: group, parts: reply.parts, turnAnswer: false },
+      { channel: "telegram" },
+    );
+
+    const { messages: said } = await messages.recent(group, 10);
+    expect(said.map((message) => message.direction)).toEqual(["fromRome"]);
+  });
+
+  it("refuses a place whose chat Rome does not hold", async () => {
+    await expect(messages.recordSent(reply, { channel: "telegram" })).rejects.toThrow(
+      "No chat at telegram:group-1",
+    );
+  });
+});

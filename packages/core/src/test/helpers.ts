@@ -609,6 +609,7 @@ export async function buildTestDeps(
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
+    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1175,6 +1176,7 @@ export async function createAppLifecycleHarness(
       settingsRepo,
       webchatRepo,
       chatRepo: testChatRepository(db),
+      chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
