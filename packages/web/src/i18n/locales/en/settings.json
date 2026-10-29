@@ -52,6 +52,33 @@
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",
     "emptyTitle": "No connections available",
+    "connect": "Connect",
+    "search": {
+      "placeholder": "Search connections",
+      "clear": "Clear search",
+      "noMatch": {
+        "connected": "No connected service matches “{{query}}”.",
+        "available": "No available service matches “{{query}}”."
+      }
+    },
+    "tabs": {
+      "label": "Connections",
+      "connected": "Connected",
+      "available": "Available",
+      "empty": {
+        "connected": "Nothing is connected yet.",
+        "available": "Everything here is connected."
+      },
+      "show": {
+        "connected": "Show {{count}} in Connected",
+        "available": "Show {{count}} in Available"
+      }
+    },
+    "groups": {
+      "messaging": "Messaging",
+      "accounts": "Accounts and tools",
+      "other": "Other"
+    },
     "loadFailedFallback": "Failed to load connections.",
     "accounts": {
       "add": "Add another account",
