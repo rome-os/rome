@@ -2019,8 +2019,8 @@ export interface RecordedInboundEvent extends InboundEvent {
  * chat's messages one at a time, in the order they were recorded, and the
  * chat's next message is recorded only once every subscriber has handled this
  * one: a handler that does not settle stops its chat. Different chats never
- * wait on each other. The host starts recording when the first subscriber
- * subscribes.
+ * wait on each other. The host records only while at least one subscriber
+ * is subscribed.
  */
 export interface RecordedMessages {
   subscribe(handler: (event: RecordedInboundEvent) => Promise<void>): () => void;

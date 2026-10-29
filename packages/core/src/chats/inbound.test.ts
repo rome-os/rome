@@ -8,6 +8,7 @@ import type {
   RecordedInboundEvent,
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
+import { type AccountAgents, AccountListening } from "../channels/account-agents.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { channelChatId } from "../db/session-kind.js";
@@ -80,17 +81,28 @@ describe("inboundRecording", () => {
     rows.leaveOutOfCatchUp((id) => messages.isWakeUndecided(id));
   });
 
-  const recording = (channels: Channel[], accountAgentOf?: () => string | null | undefined) =>
+  const recording = (channels: Channel[], listens?: (connectionId: string) => boolean) =>
     inboundRecording(
       {
         chats: rows,
         messages,
         events,
         platformOfChannel: () => "telegram",
-        ...(accountAgentOf ? { accountAgentOf } : {}),
+        ...(listens ? { listens } : {}),
       },
       channels,
     );
+
+  /** Rome's listening to the telegram connection's account, which takes an
+   *  agent and has `agent` linked, null for none. */
+  const listeningWith = (agent: string | null) => {
+    const listening = new AccountListening({
+      kindOf: () => "telegram",
+      linkOf: () => "account",
+      accounts: { agentOf: () => agent },
+    } as unknown as AccountAgents);
+    return (connectionId: string) => listening.listens(connectionId);
+  };
 
   const messagesIn = (chatId: ChatId) =>
     testDb.db
@@ -170,12 +182,27 @@ describe("inboundRecording", () => {
   it("records nothing that reaches an account with no agent", async () => {
     const telegram = fakeChannel("telegram");
     const heard = rs.fn(async () => undefined);
-    recording([telegram.channel], () => null).recordedMessages.subscribe(heard);
+    recording([telegram.channel], listeningWith(null)).recordedMessages.subscribe(heard);
 
     await telegram.deliver(message());
 
     expect(messagesIn(GROUP)).toEqual([]);
     expect(heard).not.toHaveBeenCalled();
+  });
+
+  it("records and hands on what reaches an account whose linked agent is not loaded", async () => {
+    // Listening follows the stored link, not whether the agent is loaded, so
+    // a /stop still reaches Participation while the agent's app is down.
+    const telegram = fakeChannel("telegram");
+    const heard = rs.fn(async () => undefined);
+    recording([telegram.channel], listeningWith("unloaded-agent")).recordedMessages.subscribe(
+      heard,
+    );
+
+    await telegram.deliver(message({ text: "/stop" }));
+
+    expect(messagesIn(GROUP)).toHaveLength(1);
+    expect(heard).toHaveBeenCalledTimes(1);
   });
 
   it("saves attachments before recording, and hands on the saved ones", async () => {
@@ -238,14 +265,50 @@ describe("inboundRecording", () => {
     expect(await catchUp()).toEqual([b!.messageId]);
   });
 
-  it("decides the wake of a message nobody hears, so it is not left out for good", async () => {
+  it("stops recording when the last subscriber leaves, so a hook that stores for itself stores alone", async () => {
     const telegram = fakeChannel("telegram");
     const recorder = recording([telegram.channel]);
     const leave = recorder.recordedMessages.subscribe(async () => undefined);
+    expect(telegram.handlers).toHaveLength(1);
+
     leave();
+
+    expect(telegram.handlers).toHaveLength(0);
+    await telegram.deliver(message());
+    expect(messagesIn(GROUP)).toEqual([]);
+
+    recorder.recordedMessages.subscribe(async () => undefined);
+    expect(telegram.handlers).toHaveLength(1);
+  });
+
+  it("decides the wake of a message handed to nobody, even if someone subscribes while it records", async () => {
+    const telegram = fakeChannel("telegram");
+    let recorder: ReturnType<typeof recording> | undefined;
+    let leave: () => void = () => undefined;
+    const heard = rs.fn(async () => undefined);
+    recorder = inboundRecording(
+      {
+        chats: rows,
+        messages: {
+          record: async (incoming, via) => {
+            leave();
+            const recorded = await messages.record(incoming, via);
+            recorder?.recordedMessages.subscribe(heard);
+            return recorded;
+          },
+          wakeDecided: (id) => messages.wakeDecided(id),
+          isWakeUndecided: (id) => messages.isWakeUndecided(id),
+        },
+        events,
+        platformOfChannel: () => "telegram",
+      },
+      [telegram.channel],
+    );
+    leave = recorder.recordedMessages.subscribe(async () => undefined);
 
     await telegram.deliver(message());
 
+    expect(heard).not.toHaveBeenCalled();
     const chat = channelChatId("telegram", GROUP);
     expect((await rows.loadConversationContext(chat)).unseen).toHaveLength(1);
   });
