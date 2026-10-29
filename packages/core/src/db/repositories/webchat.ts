@@ -52,16 +52,7 @@ import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
-import type { Delivery } from "../../chats/delivery.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
-
-/**
- * The rows that were said: every row but an outbound message whose delivery is
- * pending or failed (docs/domains/chats.md#delivery). A transcript reader keeps
- * to these until it learns to show a delivery, so a send the platform refused
- * reads as never said, as it did before deliveries were stored.
- */
-const saidMessage = sql`coalesce(${romeAgentMessages.delivery}, 'sent') = 'sent'`;
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -102,7 +93,6 @@ export interface StoredSaidMessage {
   platformMessageId: string | null;
   senderId: string | null;
   senderName: string | null;
-  onBehalfOf: string | null;
   replyToPlatformMessageId: string | null;
   createdAt: Date;
 }
@@ -759,6 +749,9 @@ export class WebChatRepository {
 
   constructor(private db: DrizzleDb) {}
 
+  /** Set by {@link leaveOutOfCatchUp}. */
+  private wakeUndecided: (messageId: string) => boolean = () => false;
+
   onMessageInserted(listener: WebchatMessageInsertedListener): () => void {
     this.messageInsertedListeners.add(listener);
     return () => {
@@ -1130,11 +1123,6 @@ export class WebChatRepository {
     senderId?: string;
     senderName?: string;
     replyToPlatformMessageId?: string;
-    /** The agent a delegate's message is said by, on the account's behalf. */
-    onBehalfOf?: string;
-    /** Whether the wake for it is still to be decided. A turn does not catch
-     *  up on such a message until {@link markWakeDecided} or a promotion. */
-    wakePending?: boolean;
     createdAt?: Date;
   }): Promise<{ inserted: boolean }> {
     const createdAt = input.createdAt ?? new Date();
@@ -1154,8 +1142,6 @@ export class WebChatRepository {
           senderId: input.senderId ?? null,
           senderName: input.senderName ?? null,
           replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-          onBehalfOf: input.onBehalfOf ?? null,
-          wakePending: input.wakePending ? true : null,
           contextInjectedTurnId: null,
           createdAt,
         })
@@ -1179,7 +1165,7 @@ export class WebChatRepository {
   ): Promise<void> {
     await this.db
       .update(romeAgentMessages)
-      .set({ role: "user", wakePending: null })
+      .set({ role: "user" })
       .where(
         and(
           eq(romeAgentMessages.sessionId, sessionId),
@@ -1187,24 +1173,6 @@ export class WebChatRepository {
           eq(romeAgentMessages.role, "notification"),
         ),
       );
-  }
-
-  /** Mark the wake for a message decided, so a turn catches up on it if it
-   *  was not made a prompt. An id that names no row changes nothing. */
-  async markWakeDecided(id: string): Promise<void> {
-    await this.db
-      .update(romeAgentMessages)
-      .set({ wakePending: null })
-      .where(eq(romeAgentMessages.id, id));
-  }
-
-  /** Mark every pending wake decided. A decision in flight does not survive a
-   *  restart, so at boot nothing is still being decided. */
-  async markEveryWakeDecided(): Promise<void> {
-    await this.db
-      .update(romeAgentMessages)
-      .set({ wakePending: null })
-      .where(eq(romeAgentMessages.wakePending, true));
   }
 
   async assignConversationMessageTurn(
@@ -1326,68 +1294,6 @@ export class WebChatRepository {
     });
   }
 
-  /**
-   * Record a message Rome is about to send, with its delivery pending, and
-   * answer its id. It is said outside any turn. Transcript readers leave it
-   * out, and the session's activity stays put, until {@link setDelivery} marks
-   * it sent.
-   */
-  async recordPendingOutbound(input: {
-    sessionId: string;
-    content: string;
-    senderId: string;
-    senderName: string;
-    at: Date;
-  }): Promise<{ id: string }> {
-    const id = randomUUID();
-    await this.db.insert(romeAgentMessages).values({
-      id,
-      sessionId: input.sessionId,
-      turnId: null,
-      // Not produced by an agent turn. `agentMessageOutbound` reads the role
-      // together with the sender to put the line on Rome's side.
-      role: "notification",
-      content: stripHostOnlyPartsFromContent(input.content),
-      platformMessageId: null,
-      senderId: input.senderId,
-      senderName: input.senderName,
-      replyToPlatformMessageId: null,
-      contextInjectedTurnId: null,
-      createdAt: input.at,
-      delivery: "pending",
-      deliveryError: null,
-      deliveryAt: input.at,
-    });
-    return { id };
-  }
-
-  /**
-   * Set the delivery of a message {@link recordPendingOutbound} wrote. A sent
-   * delivery also keeps the platform's id for the message and moves the
-   * session's activity to when it was sent. An id that names no row changes
-   * nothing.
-   */
-  async setDelivery(id: string, delivery: Delivery, platformMessageId?: string): Promise<void> {
-    await this.db.transaction((tx) => {
-      const [row] = tx
-        .update(romeAgentMessages)
-        .set({
-          delivery: delivery.state,
-          deliveryError: delivery.state === "failed" ? delivery.error : null,
-          deliveryAt: delivery.at,
-          ...(platformMessageId === undefined ? {} : { platformMessageId }),
-        })
-        .where(eq(romeAgentMessages.id, id))
-        .returning({ sessionId: romeAgentMessages.sessionId })
-        .all();
-      if (!row || delivery.state !== "sent") return;
-      tx.update(romeSessions)
-        .set(advanceSessionActivitySet(delivery.at))
-        .where(eq(romeSessions.id, row.sessionId))
-        .run();
-    });
-  }
-
   private otherPlatformMessageIdRows(
     input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
     messageId: string,
@@ -1412,9 +1318,8 @@ export class WebChatRepository {
 
   /**
    * What the agent has not seen in a channel conversation, by id: the
-   * notifications no turn has taken in yet. A send still pending reaches the
-   * agent once it is sent, and one the platform refused never does. The
-   * messages themselves are read from the chat (`MessageRepository.recent`).
+   * notifications no turn has taken in yet, leaving out any whose wake is
+   * still undecided. The messages themselves are read from the chat (`MessageRepository.recent`).
    *
    * Also the two messages a turn quotes from beyond its place: the starter of
    * a new thread, carried with Rome's first reply in it, and the message
@@ -1442,17 +1347,14 @@ export class WebChatRepository {
           eq(romeAgentMessages.sessionId, sessionId),
           eq(romeAgentMessages.role, "notification"),
           isNull(romeAgentMessages.contextInjectedTurnId),
-          saidMessage,
-          // A message whose wake is still being decided may become its own
-          // turn's prompt, so no other turn catches up on it yet.
-          isNull(romeAgentMessages.wakePending),
         ),
       )
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const unseen = pendingNotificationRows.map(({ id, platformMessageId }) => ({
-      id,
-      platformMessageId,
-    }));
+    const unseen = pendingNotificationRows
+      // Its wake is still being decided, so it may become a turn's prompt of
+      // its own.
+      .filter(({ id }) => !this.wakeUndecided(id))
+      .map(({ id, platformMessageId }) => ({ id, platformMessageId }));
     const contextColumns = {
       id: romeAgentMessages.id,
       content: romeAgentMessages.content,
@@ -1587,14 +1489,24 @@ export class WebChatRepository {
   }
 
   /**
+   * Leave every message `undecided` answers true for out of what a turn
+   * catches up on ({@link loadConversationContext}). It is asked once per
+   * pending message at each catch-up read, so it answers from memory.
+   */
+  leaveOutOfCatchUp(undecided: (messageId: string) => boolean): void {
+    this.wakeUndecided = undecided;
+  }
+
+  /**
    * The said messages of the chat rows `channels` keep for one address, newest
    * first: at most `limit`, and only those before `before` when it is given.
    * The order is created_at, then the order the rows were written in, since
    * created_at keeps whole seconds. `before` names a message by its time and
    * id. A message two of the rows hold, such as a group's message that reached
    * two of Rome's accounts, is answered once, as the copy written first, so a
-   * copy that arrives later never moves it. Only a group is read across
-   * channels; any other chat is the one `ownChannel` keeps. Trace rows belong to no chat and are left
+   * copy that arrives later never moves it. With `ownChannel`, only that
+   * channel's record is read. Without it, only a group is read across
+   * channels. Trace rows belong to no chat and are left
    * out.
    */
   async saidMessagesAt(input: {
@@ -1610,18 +1522,21 @@ export class WebChatRepository {
       inArray(romeSessions.sourceChannel, [...input.channels]),
       eq(romeSessions.sourceThreadId, input.address),
     );
-    const isGroup = sql`coalesce(${romeSessions.sourceThreadType}, '') = 'group'`;
-    // Only a group's address names one chat across Rome's accounts. Any other
-    // chat is one account's own: Telegram keys a direct message by the other
-    // person alone, so the same address on two channels is two chats. It is
-    // read from `ownChannel`, or from the one channel that holds it.
-    const ownChat = input.ownChannel
+    // A native thread opens only inside a group, and its row may not name its
+    // type, so a row under a parent chat is a group's too.
+    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') = 'group' or ${romeSessions.parentSessionId} is not null)`;
+    // Read through one channel, the chat is that channel's record alone.
+    // Otherwise only a group's address names one chat across Rome's accounts.
+    // Any other chat is one account's own: Telegram keys a direct message by
+    // the other person alone, so the same address on two channels is two
+    // chats, and it is read only while one channel holds it.
+    const which = input.ownChannel
       ? eq(romeSessions.sourceChannel, input.ownChannel)
-      : sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`;
-    const chats = this.db
-      .select({ id: romeSessions.id })
-      .from(romeSessions)
-      .where(and(at, or(isGroup, ownChat)));
+      : or(
+          isGroup,
+          sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`,
+        );
+    const chats = this.db.select({ id: romeSessions.id }).from(romeSessions).where(and(at, which));
     const { before } = input;
     return await this.db
       .select({
@@ -1633,7 +1548,6 @@ export class WebChatRepository {
         platformMessageId: romeAgentMessages.platformMessageId,
         senderId: romeAgentMessages.senderId,
         senderName: romeAgentMessages.senderName,
-        onBehalfOf: romeAgentMessages.onBehalfOf,
         replyToPlatformMessageId: romeAgentMessages.replyToPlatformMessageId,
         createdAt: romeAgentMessages.createdAt,
       })
@@ -1643,7 +1557,6 @@ export class WebChatRepository {
         and(
           inArray(romeAgentMessages.sessionId, chats),
           inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          saidMessage,
           before &&
             or(
               lt(romeAgentMessages.createdAt, before.at),
@@ -1662,7 +1575,9 @@ export class WebChatRepository {
             )`,
           ),
           // A reply shown as several messages keeps its other parts' ids beside
-          // its row, so a part another account received is a copy of it too.
+          // its row, so a part another account received is a copy of it too,
+          // while the whole is read. A whole that is itself an earlier copy's
+          // duplicate is not, and its parts stand in for it.
           or(
             isNull(romeAgentMessages.platformMessageId),
             sql`not exists (
@@ -1671,6 +1586,12 @@ export class WebChatRepository {
               where "part"."session_id" in ${chats}
                 and "part"."platform_message_id" = ${romeAgentMessages.platformMessageId}
                 and "whole".rowid < ${romeAgentMessages}.rowid
+                and not exists (
+                  select 1 from ${romeAgentMessages} as "earlier"
+                  where "earlier"."session_id" in ${chats}
+                    and "earlier"."platform_message_id" = "whole"."platform_message_id"
+                    and "earlier".rowid < "whole".rowid
+                )
             )`,
           ),
         ),
@@ -2665,7 +2586,7 @@ export class WebChatRepository {
         SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
                MIN(${romeAgentMessages.createdAt}) AS startedAt
         FROM ${romeAgentMessages}
-        WHERE ${romeAgentMessages.sessionId} = ${sessionId} AND ${saidMessage}
+        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
         GROUP BY key
       )
       ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
@@ -2710,7 +2631,7 @@ export class WebChatRepository {
         createdAt: romeAgentMessages.createdAt,
       })
       .from(romeAgentMessages)
-      .where(and(where, saidMessage))
+      .where(where)
       .orderBy(
         sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
         asc(romeAgentMessages.turnId),
@@ -2803,7 +2724,7 @@ export class WebChatRepository {
         createdAt: romeAgentMessages.createdAt,
       })
       .from(romeAgentMessages)
-      .where(and(inArray(romeAgentMessages.sessionId, sessionIds), saidMessage))
+      .where(inArray(romeAgentMessages.sessionId, sessionIds))
       .orderBy(
         asc(romeAgentMessages.sessionId),
         sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY ${romeAgentMessages.sessionId}, COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
@@ -2830,7 +2751,6 @@ export class WebChatRepository {
         SELECT session_id, max(created_at) AS last_message_at FROM ${romeAgentMessages}
         WHERE session_id IN (SELECT ancestor_id FROM ancestors)
           AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
-          AND ${saidMessage}
         GROUP BY session_id
       )
       SELECT ancestors.session_id AS sessionId, max(activity.last_message_at) AS lastMessageAt

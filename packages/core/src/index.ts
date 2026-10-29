@@ -1501,8 +1501,7 @@ async function main() {
   // Every message the channels deliver is put on record in its chat before the
   // hook hears it (docs/domains/participation.md#wake). It records through the
   // hook's channels, so the hook's trace covers recording as well.
-  // A wake being decided when Rome stopped was decided by the stop.
-  await webchatRepo.markEveryWakeDecided();
+  webchatRepo.leaveOutOfCatchUp((id) => chatMessages.isWakeUndecided(id));
   const inboundRecorder = inboundRecording(
     {
       chats: webchatRepo,

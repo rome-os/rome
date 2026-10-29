@@ -53,9 +53,8 @@ export type Message = InboundMessage;
 export type RecordedMessage = Message & { readonly id: string };
 
 /**
- * A message as a read of its place finds it, either way it went. Reads see
- * only what was said, so a message from Rome is one the platform took, or one
- * recorded before deliveries were (docs/domains/chats.md#delivery).
+ * A message as a read of its place finds it, either way it went. A message
+ * from Rome is on record only once the platform took it.
  *
  * `saidBy` is absent when the record kept no account for the message: an
  * older row, or one of Rome's lines on a channel that has no account of its

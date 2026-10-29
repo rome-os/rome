@@ -7,8 +7,8 @@ import { StoredMessages } from "./message-repository.js";
 import { chatKey, placeIn } from "./place.js";
 
 // Reading a place's messages. What these pin: pages run newest to oldest and
-// each answers oldest first, only what was said is read, and a group two of
-// Rome's accounts are in reads as one chat.
+// each answers oldest first, and a group two of Rome's accounts are in reads as
+// one chat.
 
 const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 const minute = (n: number) => new Date(Date.UTC(2026, 9, 29, 1, n));
@@ -103,31 +103,6 @@ describe("StoredMessages reads", () => {
     ]);
   });
 
-  it("reads only what was said: no pending or refused send", async () => {
-    const chat = await rows.ensureChannelChat({
-      channel: "telegram",
-      threadId: "group-1",
-      threadType: "group",
-      agentName: "main",
-    });
-    const pending = (text: string) =>
-      rows.recordPendingOutbound({
-        sessionId: chat.id,
-        content: textContent(text),
-        senderId: "rome",
-        senderName: "Rome",
-        at: minute(1),
-      });
-    const sent = await pending("went out");
-    const failed = await pending("refused");
-    await pending("still going");
-    await rows.setDelivery(sent.id, { state: "sent", at: minute(2) }, "m-sent");
-    await rows.setDelivery(failed.id, { state: "failed", error: "no such chat", at: minute(2) });
-
-    const { messages: read } = await messages.recent(group, 10);
-    expect(read.map((message) => message.body.text)).toEqual(["went out"]);
-  });
-
   it("reads a group two of Rome's accounts are in as one chat", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
@@ -218,6 +193,59 @@ describe("StoredMessages reads", () => {
     expect((await read()).sort()).toEqual(["p-1 p-2", "q-1", "q-2"]);
   });
 
+  it("keeps a reply's later parts when an earlier part outranks the whole", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    // Sales hears the first part, Rome records the whole, then sales hears the second.
+    await said(sales.id, "r-1", minute(1), "r-1");
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("r-1 r-2"),
+      platformMessageId: "r-1",
+      otherPlatformMessageIds: ["r-2"],
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+    await said(sales.id, "r-2", minute(1), "r-2");
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual(["r-1", "r-2"]);
+  });
+
+  it("reads a group as one account heard it when the read names that account", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(support.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "sales only", minute(2), "m-2");
+
+    const viaSales = await messages.recent(group, 10, { channel: "telegram-sales" });
+    expect(viaSales.messages.map((message) => message.id)).toHaveLength(2);
+    const viaSupport = await messages.recent(group, 10, { channel: "telegram" });
+    expect(viaSupport.messages.map((message) => message.platformMessageId)).toEqual(["m-1"]);
+  });
+
   it("keeps a direct message to the one of Rome's accounts it was written to", async () => {
     // Telegram keys a direct message by the other person, so Alice writing to
     // two of Rome's bots leaves two chats at one address.
@@ -269,6 +297,27 @@ describe("StoredMessages reads", () => {
     ]);
     expect((await messages.recent(group, 10)).messages.map((m) => m.body.text)).toEqual([
       "in the chat",
+    ]);
+  });
+
+  it("reads a group's thread two of Rome's accounts are in as one", async () => {
+    const thread = (channel: string) =>
+      rows.ensureChannelChat({
+        channel,
+        threadId: "group-1:topic-9",
+        parentThreadId: "group-1",
+        agentName: "main",
+      });
+    const support = await thread("telegram");
+    const sales = await thread("telegram-sales");
+    await said(support.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "both heard", minute(1), "m-1");
+    await said(sales.id, "sales only", minute(2), "m-2");
+
+    const inThread = placeIn(chatKey("telegram", "group-1" as ChatId), "group-1:topic-9" as ChatId);
+    expect((await messages.recent(inThread, 10)).messages.map((m) => m.platformMessageId)).toEqual([
+      "m-1",
+      "m-2",
     ]);
   });
 

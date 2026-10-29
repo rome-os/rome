@@ -89,7 +89,11 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
     });
     messages.set(place.chat.id, list);
     posted.push(id);
-    return { ok: true, sent: { ref: `${place.chat.id}:${id}`, timestamp: 0 } };
+    return {
+      ok: true,
+      sent: { ref: `${place.chat.id}:${id}`, timestamp: 0 },
+      delivery: { state: "sent", at: new Date(0) },
+    };
   });
   const deps = {
     settingsRepo: {
@@ -325,7 +329,8 @@ describe("Concierge tools", () => {
   it("chat_send fails with the send's own words when the chat refuses it", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    s.refuseSends({ ok: false, error: "This chat is archived and read-only" });
+    const error = "This chat is archived and read-only";
+    s.refuseSends({ ok: false, error, delivery: { state: "failed", error, at: new Date(0) } });
     const result = await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("This chat is archived and read-only");
