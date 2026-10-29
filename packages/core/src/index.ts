@@ -1508,7 +1508,7 @@ async function main() {
       messages: chatMessages,
       events: chatEvents,
       platformOfChannel,
-      accountAgentOf: hookAgentOf,
+      listens: (connectionId) => accountListening.listens(connectionId),
     },
     hookChannels,
   );

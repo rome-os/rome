@@ -25,17 +25,17 @@ export interface Via {
   readonly heard?: InboundEvent;
 }
 
-/** A message is on record, and was not before. A message recorded again,
- *  such as a platform redelivery, raises nothing. */
-export interface MessageRecorded {
-  readonly type: "MessageRecorded";
+/** A message was said in a chat, and is now on record there. A message
+ *  recorded again, such as a platform redelivery, raises nothing. */
+export interface MessageSaid {
+  readonly type: "MessageSaid";
   readonly message: RecordedMessage;
   /** The id of the row the message's chat is over today's storage. */
   readonly chatRecordId: string;
   readonly via: Via;
 }
 
-export type ChatEvent = MessageRecorded;
+export type ChatEvent = MessageSaid;
 
 export type ChatEventListener = (event: ChatEvent) => void | Promise<void>;
 

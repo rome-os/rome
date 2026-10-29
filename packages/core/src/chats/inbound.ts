@@ -4,10 +4,9 @@
 //
 // Every answerable message a channel delivers is recorded in its chat before
 // anything acts on it, whether or not an agent answers it. Participation hears
-// it from MessageRecorded and decides the wake there.
+// it from MessageSaid and decides the wake there.
 
 import type {
-  Account,
   Channel,
   InboundEvent,
   RecordedInboundEvent,
@@ -30,16 +29,17 @@ export interface InboundRecordingDeps {
   /** The platform a channel's accounts are on, for a message that names no
    *  account it arrived on. */
   platformOfChannel: (channel: string) => string;
-  /** The agent of one of Rome's accounts, as the channel-message hook reads
-   *  it. Null means the account takes an agent and has none, and Rome does not
-   *  listen to it, so nothing it receives is recorded. */
-  accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /** Whether Rome listens to the account behind connection `connectionId`,
+   *  as its inbound port reads it. An account linked to an agent that is not
+   *  loaded is still listened to, so what it receives is recorded and
+   *  Participation decides whether anything answers it. */
+  listens?: (connectionId: string) => boolean;
 }
 
 export interface InboundRecording {
-  /** Hearing each message once recorded. The first subscription starts the
-   *  recording, so a host whose hook stores messages itself records nothing
-   *  twice. Recording goes on after the last subscriber leaves. */
+  /** Hearing each message once recorded. Recording runs only while someone
+   *  subscribes here, so nothing is stored twice while a hook stores messages
+   *  itself. */
   readonly recordedMessages: RecordedMessages;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
@@ -58,15 +58,17 @@ export function inboundRecording(
   channels: readonly Channel[],
 ): InboundRecording {
   const known: Channel[] = [...channels];
-  const subscribed = new Set<string>();
-  let started = false;
+  /** Each recorded channel's unsubscribe, by channel name. Empty while no
+   *  one hears recorded messages. */
+  const recording = new Map<string, () => void>();
   let hearers = 0;
+  /** The ids of recorded messages a subscriber was handed. */
+  const delivered = new Set<string>();
 
   const record = (channel: Channel) => async (event: InboundEvent) => {
     if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
-    // An account Rome holds without an agent is not listened to, so what
-    // reaches it never forms a chat.
-    if (deps.accountAgentOf?.(event.message.account ?? channel.name) === null) return;
+    // What reaches an account Rome does not listen to never forms a chat.
+    if (deps.listens?.(event.ref.connectionId) === false) return;
     const saved = await materialized(channel, event);
     // Named by the channel it was recorded on, which a subscriber finds the
     // channel by to answer it.
@@ -102,38 +104,43 @@ export function inboundRecording(
       }),
       { channel: channel.name, heard },
     );
-    // Heard by nobody, as while a hook is being swapped, nothing will decide
+    if (!recorded) return;
+    // Handed to nobody, as while a hook is being swapped, nothing will decide
     // its wake, so it stands decided as a message no agent answered.
-    if (recorded && hearers === 0) await deps.messages.wakeDecided(recorded.id);
+    if (!delivered.delete(recorded.id)) await deps.messages.wakeDecided(recorded.id);
   };
 
   const subscribe = (channel: Channel): void => {
-    if (!channel.inbound || subscribed.has(channel.name)) return;
-    subscribed.add(channel.name);
-    channel.inbound.subscribe(record(channel));
+    if (!channel.inbound || recording.has(channel.name)) return;
+    recording.set(channel.name, channel.inbound.subscribe(record(channel)));
   };
 
   const recordedMessages: RecordedMessages = {
     subscribe(handler) {
       const unsubscribe = deps.events.subscribe(async (event) => {
-        if (event.type !== "MessageRecorded" || !event.via.heard) return;
+        if (event.type !== "MessageSaid" || !event.via.heard) return;
         const recorded: RecordedInboundEvent = {
           ...event.via.heard,
           recorded: { chatRecordId: event.chatRecordId, messageId: event.message.id },
         };
+        delivered.add(event.message.id);
         await handler(recorded);
       });
       hearers += 1;
-      if (!started) {
-        started = true;
-        for (const channel of known) subscribe(channel);
-      }
+      for (const channel of known) subscribe(channel);
       let left = false;
       return () => {
         if (left) return;
         left = true;
         hearers -= 1;
         unsubscribe();
+        // With nobody hearing, recording stops, so a hook that stores messages
+        // itself, such as an older one a reload brings back, is the only one
+        // storing them. Messages still waiting on a channel are dropped (R3),
+        // as they are for any hook swap.
+        if (hearers > 0) return;
+        for (const leave of recording.values()) leave();
+        recording.clear();
       };
     },
     decided: (recorded) => deps.messages.wakeDecided(recorded.messageId),
@@ -143,7 +150,7 @@ export function inboundRecording(
     recordedMessages,
     addChannels(added) {
       known.push(...added);
-      if (started) for (const channel of added) subscribe(channel);
+      if (hearers > 0) for (const channel of added) subscribe(channel);
     },
   };
 }

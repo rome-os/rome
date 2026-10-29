@@ -41,7 +41,7 @@ export interface MessagePage {
 
 export interface MessageRepository {
   /**
-   * Put `message` on record in its place, and raise MessageRecorded once it
+   * Put `message` on record in its place, and raise MessageSaid once it
    * is committed. Answers the recorded message, or null when the platform's
    * id for it is already on record in that place: recording again changes
    * nothing and raises nothing.
@@ -232,7 +232,7 @@ export class StoredMessages implements MessageRepository {
     }
     const recorded: RecordedMessage = { ...message, id };
     await this.events.publish({
-      type: "MessageRecorded",
+      type: "MessageSaid",
       message: recorded,
       chatRecordId: chat.id,
       via,
