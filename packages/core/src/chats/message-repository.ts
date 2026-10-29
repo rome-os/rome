@@ -273,11 +273,14 @@ function personSaidBy(place: Place, row: StoredSaidMessage): SaidBy | undefined 
 
 /**
  * Whether each of Rome's accounts numbers this place's messages itself. A
- * Telegram basic group, addressed `-<id>` where a supergroup or channel is
- * `-100<id>`, gives every member account its own message ids, so the same id
- * on two accounts names two messages.
+ * Telegram basic group gives every member account its own message ids, so
+ * the same id on two accounts names two messages. Telegram addresses a basic
+ * group as `-<id>` below 10^12 and a supergroup or channel as
+ * `-(10^12 + <id>)`, so the range tells them apart
+ * (https://core.telegram.org/api/bots/ids).
  */
 function numbersPerAccount(place: Place): boolean {
   const { platform, id } = place.chat;
-  return platform === "telegram" && id.startsWith("-") && !id.startsWith("-100");
+  if (platform !== "telegram" || !/^-[1-9]\d*$/.test(id)) return false;
+  return BigInt(id.slice(1)) < 1_000_000_000_000n;
 }
