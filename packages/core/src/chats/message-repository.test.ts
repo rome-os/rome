@@ -433,6 +433,77 @@ describe("StoredMessages reads", () => {
     expect(older.messages).toMatchObject([{ direction: "fromRome", body: { text: "on it" } }]);
   });
 
+  it("reads a reply once across pages when its whole arrives between them", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(sales.id, "before", minute(1), "m-0");
+    await said(sales.id, "w-1", minute(2), "w-1");
+    await said(sales.id, "w-2", minute(2), "w-2");
+    // The page ends on the second part's echo.
+    const newest = await messages.recent(group, 1);
+    expect(newest.messages.map((message) => message.body.text)).toEqual(["w-2"]);
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("w-1 w-2"),
+      platformMessageId: "w-1",
+      otherPlatformMessageIds: ["w-2"],
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+
+    const older = await messages.before(group, newest.older!, 10);
+    expect(older.messages.map((message) => message.body.text)).toEqual(["before"]);
+  });
+
+  it("finds a reply once by any copy when a later part was heard first", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(sales.id, "s-2", minute(1), "s-2");
+    await said(sales.id, "s-1", minute(1), "s-1");
+    const [second, first] = (
+      await messages.recent(group, 10, { channel: "telegram-sales" })
+    ).messages.map((message) => message.id);
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("s-1 s-2"),
+      platformMessageId: "s-1",
+      otherPlatformMessageIds: ["s-2"],
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => [message.id, message.body.text])).toEqual([[second, "s-1 s-2"]]);
+    for (const id of [first, second]) {
+      const found = await messages.find(group, [id]);
+      expect(found.map((message) => [message.id, message.body.text])).toEqual([
+        [second, "s-1 s-2"],
+      ]);
+    }
+  });
+
   it("reads a group as one account heard it when the read names that account", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
