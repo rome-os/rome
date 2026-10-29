@@ -24,7 +24,7 @@ const log = createLogger("chats-inbound");
 export interface InboundRecordingDeps {
   /** Opens the chat a message is said in, or finds it. */
   chats: Pick<WebChatRepository, "ensureChannelChat">;
-  messages: MessageRepository;
+  messages: Pick<MessageRepository, "record" | "wakeDecided" | "isWakeUndecided">;
   events: ChatEvents;
   /** The platform a channel's accounts are on, for a message that names no
    *  account it arrived on. */
