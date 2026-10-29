@@ -4,6 +4,7 @@
 import type { ChatId } from "@rome-os/app-runtime";
 import type { SaidMessage } from "../chats/message.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
+import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import { DASHBOARD_PLATFORM, type SendResult } from "../chats/send.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -44,6 +45,9 @@ function statusOf(running: boolean, chat: { awaitingGuardian: boolean } | undefi
   return chat?.awaitingGuardian ? "waiting_input" : "idle";
 }
 
+/** A task chat is a direct message on the dashboard, read through its channel. */
+const DASHBOARD = { channel: WEBCHAT_CHANNEL };
+
 function taskChatPlace(chatId: string): Place {
   return placeIn(chatKey(DASHBOARD_PLATFORM, chatId as ChatId));
 }
@@ -66,11 +70,11 @@ async function latestSaid(
 ): Promise<SaidMessage[]> {
   const pageSize = Math.max(limit, MAX_READ_LIMIT);
   const found: SaidMessage[] = [];
-  let page = await messages.recent(place, pageSize);
+  let page = await messages.recent(place, pageSize, DASHBOARD);
   for (;;) {
     found.unshift(...page.messages.filter(keep));
     if (found.length >= limit || !page.older) return found.slice(-limit);
-    page = await messages.before(place, page.older, pageSize);
+    page = await messages.before(place, page.older, pageSize, DASHBOARD);
   }
 }
 
