@@ -49,10 +49,13 @@ export function useComposioServices({
     staleTime: 0,
   });
   // The catalog says which toolkits Rome manages, so no row shows before it
-  // loads: an account read without it could be a bridged GitHub one.
-  const rows = catalog.data
-    ? composioServiceRows(catalog.data, signedIn ? (accounts.data ?? []) : [])
-    : { connected: [], available: [] };
+  // loads: an account read without it could be a bridged GitHub one. Signed
+  // in, the accounts must load too, or a connected service would pass for an
+  // available one.
+  const rows =
+    catalog.data && (!signedIn || accounts.data)
+      ? composioServiceRows(catalog.data, signedIn ? (accounts.data ?? []) : [])
+      : { connected: [], available: [] };
   return {
     rows,
     error: catalog.error ?? (signedIn ? accounts.error : null),
@@ -167,8 +170,8 @@ export function ComposioSignInBanner({ onSignIn }: { onSignIn: () => void }) {
   );
 }
 
-/** A connected Composio service: what it lets Rome do, Reconnect, and a
- *  confirmed Disconnect. */
+/** A connected Composio service: what it lets Rome do, Reconnect when it is
+ *  broken, and a confirmed Disconnect. */
 export function ComposioServiceDialog({
   row,
   busy,
@@ -246,9 +249,13 @@ export function ComposioServiceDialog({
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" disabled={busy} onClick={() => onReconnect(row)}>
-                    {t("connections.composioServices.reconnect")}
-                  </Button>
+                  {/* A working service has nothing to reconnect: Composio would
+                      answer that it is already connected. */}
+                  {row.needsAttention ? (
+                    <Button type="button" disabled={busy} onClick={() => onReconnect(row)}>
+                      {t("connections.composioServices.reconnect")}
+                    </Button>
+                  ) : null}
                   <Button type="button" variant="outline" onClick={() => setConfirming(true)}>
                     {t("common.disconnect")}
                   </Button>

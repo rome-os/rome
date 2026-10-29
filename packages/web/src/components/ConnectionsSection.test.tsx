@@ -663,6 +663,8 @@ describe("ConnectionsSection — Composio services", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Reads and sends your email.")).toBeTruthy();
+    // Gmail works, so there is nothing to reconnect.
+    expect(within(dialog).queryByRole("button", { name: "Reconnect" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     expect(calls.some((call) => call.method === "DELETE")).toBe(false);
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
@@ -707,6 +709,34 @@ describe("ConnectionsSection — Composio services", () => {
     // Without the catalog, the bridged GitHub account could pass for a service.
     expect(screen.queryByRole("button", { name: "Open github" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open Gmail" })).toBeNull();
+  });
+
+  it("lists no Composio service until the connected accounts load", async () => {
+    let release: () => void = () => {};
+    const accountsLoaded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    rs.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      calls.push({ url, method: "GET" });
+      if (url === "/api/apps/connector/catalog") return Response.json({ items: catalog });
+      if (url === "/api/apps/connector/connectors") {
+        await accountsLoaded;
+        return Response.json({ items: accounts });
+      }
+      return new Response(url === "/api/approvals" ? "[]" : "{}", { status: 200 });
+    });
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    await waitFor(() =>
+      expect(calls.some((call) => call.url === "/api/apps/connector/catalog")).toBe(true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Connected Gmail must not show as one to connect while its account loads.
+    expect(screen.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+    release();
+    expect(await screen.findByRole("button", { name: "Connect Linear" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
   });
 
   it("opens the next service fresh after one vanishes mid-confirmation", async () => {
