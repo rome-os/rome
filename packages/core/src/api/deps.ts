@@ -117,7 +117,7 @@ export interface ApiDeps {
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recent" | "before">;
+  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

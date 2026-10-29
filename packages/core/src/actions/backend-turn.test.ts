@@ -1,6 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChatRepository } from "@rome-os/app-runtime";
+import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
+import { chatKey, placeIn } from "../chats/place.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
@@ -33,15 +34,18 @@ describe("backend turn delivery", () => {
       id: "channel:wechat:wechat-thread-1",
       agentName: null,
     }));
-    const recordOutboundMessage = rs.fn(async () => {});
-    const chats = {
-      ensureChannelChat,
-      recordOutboundMessage,
-    } as unknown as ChatRepository;
+    const chats = { ensureChannelChat } as unknown as ChatRepository;
+    const recordSent = rs.fn(async () => {});
+    const place = placeIn(chatKey("wechat", "wechat-thread-1" as ChatId));
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "wechat" ? wechat : null),
       chats,
+      messages: { recordSent },
+      places: {
+        placeOfRecord: (id) =>
+          id === "channel:wechat:wechat-thread-1" ? { place, channel: "wechat" } : null,
+      },
     });
 
     await runner.runAndDeliver({
@@ -62,15 +66,17 @@ describe("backend turn delivery", () => {
       threadId: "wechat-thread-1",
       agentName: "main",
     });
-    expect(recordOutboundMessage).toHaveBeenCalledWith({
-      sessionId: "channel:wechat:wechat-thread-1",
-      content: JSON.stringify([{ type: "text", content: "The deferred check is complete." }]),
-      platformMessageId: "wechat-message-1",
-      senderId: "rome",
-      senderName: "Rome",
-      turnId: "turn-1",
-      knownToProvider: true,
-    });
+    expect(recordSent).toHaveBeenCalledWith(
+      {
+        direction: "fromRome",
+        place,
+        parts: [{ type: "text", content: "The deferred check is complete." }],
+        platformMessageId: "wechat-message-1",
+        turnId: "turn-1",
+        turnAnswer: true,
+      },
+      { channel: "wechat" },
+    );
   });
   it("delivers a webchat continuation on the send port after showing it on the session stream", async () => {
     const agentRunner = createMockAgentRunner([

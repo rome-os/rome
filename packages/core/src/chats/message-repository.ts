@@ -16,6 +16,7 @@ import type { ChatEvents, Via } from "./events.js";
 import {
   plainText,
   type Message,
+  type OutboundMessage,
   type RecordedMessage,
   type SaidBy,
   type SaidMessage,
@@ -50,6 +51,17 @@ export interface MessageRepository {
    * Throws when it does not.
    */
   record(message: Message, via: Via): Promise<RecordedMessage | null>;
+
+  /**
+   * Put a message Rome said through the channel `via` names on record in its
+   * place. A message whose platform id is already on record there updates
+   * that record, and one its turn already holds as the answer joins it, so
+   * recording a reply again leaves one message. Raises nothing: nothing
+   * listens for Rome's own messages yet.
+   *
+   * The place's chat must already exist, as for {@link record}.
+   */
+  recordSent(message: OutboundMessage, via: Pick<Via, "channel">): Promise<void>;
 
   /**
    * The newest `limit` messages on record in `place`, oldest first. A place
@@ -107,7 +119,10 @@ export interface MessageHistory {
 
 type MessageRows = Pick<
   WebChatRepository,
-  "findChannelChat" | "addConversationMessage" | "saidMessagesAt"
+  | "findChannelChat"
+  | "addConversationMessage"
+  | "recordOutboundConversationMessage"
+  | "saidMessagesAt"
 >;
 
 export class StoredMessages implements MessageRepository {
@@ -243,6 +258,28 @@ export class StoredMessages implements MessageRepository {
     return recorded;
   }
 
+  async recordSent(message: OutboundMessage, via: Pick<Via, "channel">): Promise<void> {
+    const address = addressOf(message.place);
+    const chat = await this.rows.findChannelChat(via.channel, address);
+    if (!chat) {
+      throw new Error(`No chat at ${via.channel}:${address} to record a message in`);
+    }
+    await this.rows.recordOutboundConversationMessage({
+      sessionId: chat.id,
+      content: JSON.stringify(message.parts),
+      ...(message.platformMessageId === undefined
+        ? {}
+        : { platformMessageId: message.platformMessageId }),
+      ...(message.otherPlatformMessageIds === undefined
+        ? {}
+        : { otherPlatformMessageIds: [...message.otherPlatformMessageIds] }),
+      ...ROME_SENDER,
+      ...(message.replyTo === undefined ? {} : { replyToPlatformMessageId: message.replyTo }),
+      ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
+      knownToProvider: message.turnAnswer,
+    });
+  }
+
   async wakeDecided(id: string): Promise<void> {
     this.undecided.delete(id);
   }
@@ -251,6 +288,10 @@ export class StoredMessages implements MessageRepository {
     return this.undecided.has(id);
   }
 }
+
+/** The sender a row of Rome's own keeps. `isAgentMessageOutbound` reads it
+ *  back to put the line on Rome's side of the chat. */
+const ROME_SENDER = { senderId: "rome", senderName: "Rome" } as const;
 
 /** Rome's line, said as the channel's own account. */
 function romeSaidBy(account: Account | null, row: StoredSaidMessage): SaidBy | undefined {

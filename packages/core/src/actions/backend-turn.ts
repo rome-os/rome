@@ -28,6 +28,8 @@ import type {
   ChatRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
+import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
+import type { MessageRepository } from "../chats/message-repository.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
@@ -89,8 +91,12 @@ export interface BackendTurnRunnerDeps {
     channel: string,
     threadId: string,
   ) => Promise<ThreadContext["deviceFolder"] | undefined>;
-  /** Durable conversation projection used to attach provider delivery ids. */
+  /** Opens the chat a delivered reply is recorded in. */
   chats?: ChatRepository;
+  /** Where a delivered reply is put on record, in the place its chat's row
+   *  stands for. Absent, nothing records it. */
+  messages?: Pick<MessageRepository, "recordSent">;
+  places?: Pick<ChatsByKey, "placeOfRecord">;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -209,22 +215,27 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         text: reply,
         ...(turnId ? { turnId } : {}),
       });
-      if (deps.chats) {
+      const { chats, messages, places } = deps;
+      if (chats && messages && places) {
         try {
-          const conversation = await deps.chats.ensureChannelChat({
+          const conversation = await chats.ensureChannelChat({
             channel: params.channel,
             threadId: params.threadId,
             agentName: params.agentName,
           });
-          await deps.chats.recordOutboundMessage({
-            sessionId: conversation.id,
-            content: JSON.stringify([{ type: "text", content: reply }]),
-            platformMessageId: delivery?.messageId,
-            senderId: "rome",
-            senderName: "Rome",
-            ...(turnId ? { turnId } : {}),
-            knownToProvider: true,
-          });
+          const at = places.placeOfRecord(conversation.id);
+          if (!at) throw new Error(`No place for conversation ${conversation.id}`);
+          await messages.recordSent(
+            {
+              direction: "fromRome",
+              place: at.place,
+              parts: [{ type: "text", content: reply }],
+              ...(delivery?.messageId ? { platformMessageId: delivery.messageId } : {}),
+              ...(turnId ? { turnId } : {}),
+              turnAnswer: true,
+            },
+            { channel: at.channel },
+          );
         } catch (err) {
           // Delivery already succeeded. A persistence failure must not make the
           // continuation retry and send the same provider message twice.

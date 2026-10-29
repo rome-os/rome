@@ -131,7 +131,8 @@ describe("a link on a platform Rome holds accounts on", () => {
         sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
         accountOf: (name: string) =>
           recorded && !vacated.has(name) ? { platform: "telegram", id: `${name}-account` } : null,
-        webchatRepo: { ensureChannelChat: unused, recordOutboundConversationMessage: unused },
+        webchatRepo: { ensureChannelChat: unused },
+        chatMessages: { recordSent: unused },
       };
 
       const found = await directPlace(deps, link);

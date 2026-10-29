@@ -61,6 +61,7 @@ describe("recap to system upgrade", () => {
       settingsRepo,
       webchatRepo: new WebChatRepository(testDb.db),
       chatRepo: testChatRepository(testDb.db),
+      chatMessages: { recordSent: async () => undefined },
     });
   }
 

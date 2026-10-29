@@ -28,6 +28,7 @@ import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import type { Delivery } from "./delivery.js";
+import type { MessageRepository } from "./message-repository.js";
 import { addressOf, type Place } from "./place.js";
 
 const log = createLogger("chats-send");
@@ -55,25 +56,19 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
   );
 }
 
-/** The slice of the conversation repository a send writes through. */
-interface OutboundMessages {
+/** The slice of the conversation repository a send opens its chat through. */
+interface OutboundChats {
   ensureChannelChat(input: {
     channel: string;
     threadId: string;
     parentThreadId?: string;
   }): Promise<{ id: string }>;
-  recordOutboundConversationMessage(input: {
-    sessionId: string;
-    content: string;
-    platformMessageId?: string;
-    senderId?: string;
-    senderName?: string;
-    knownToProvider: boolean;
-  }): Promise<void>;
 }
 
 export interface SendIntoPlaceDeps extends SendDeps {
-  webchatRepo: OutboundMessages;
+  webchatRepo: OutboundChats;
+  /** Where a sent message is put on record. */
+  chatMessages: Pick<MessageRepository, "recordSent">;
   /** Rome's own account on a channel, which a send names as `as`. Absent, no
    *  channel answers to one. */
   accountOf?: ChannelRecordsRepository["accountOf"];
@@ -121,10 +116,6 @@ export type SendResult =
  * the channel that stands for one no record names yet.
  */
 export type Sender = Account | { readonly channel: string };
-
-/** The sender Rome stamps on its own messages. `messages-agent.ts` reads it
- *  back to put the line on Rome's side of the chat. */
-const ROME_SENDER = { senderId: "rome", senderName: "Rome" } as const;
 
 /**
  * Say `body` in `place` as `as`, one of Rome's accounts on the place's
@@ -259,21 +250,22 @@ async function record(
   messageId: string | null,
 ): Promise<void> {
   try {
-    const chat = await deps.webchatRepo.ensureChannelChat({
+    await deps.webchatRepo.ensureChannelChat({
       channel,
       threadId: addressOf(place),
       ...(place.threadId === undefined ? {} : { parentThreadId: place.chat.id }),
     });
-    await deps.webchatRepo.recordOutboundConversationMessage({
-      sessionId: chat.id,
-      content: JSON.stringify([{ type: "text", content: body.text }]),
-      ...(messageId ? { platformMessageId: messageId } : {}),
-      ...ROME_SENDER,
-      // Not produced by an agent turn. It decides the role the row is stored
-      // under, which `agentMessageOutbound` reads together with the sender to
-      // put the line on Rome's side.
-      knownToProvider: false,
-    });
+    await deps.chatMessages.recordSent(
+      {
+        direction: "fromRome",
+        place,
+        parts: [{ type: "text", content: body.text }],
+        ...(messageId ? { platformMessageId: messageId } : {}),
+        // Not said by an agent turn.
+        turnAnswer: false,
+      },
+      { channel },
+    );
   } catch (error) {
     log.warn("outbound message delivered but recording failed", {
       channel,
