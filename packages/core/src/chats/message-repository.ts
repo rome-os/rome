@@ -52,9 +52,10 @@ export interface MessageRepository {
   record(message: Message, via: Via): Promise<RecordedMessage | null>;
 
   /**
-   * The newest `limit` messages said in `place`, oldest first. A message
-   * still pending, or one the platform refused, was not said and is not here.
-   * A place Rome holds no messages in answers an empty page.
+   * The newest `limit` messages on record in `place`, oldest first. A place
+   * Rome holds no messages in answers an empty page. Today's storage keeps no
+   * delivery, so an agent's reply whose send is pending or was refused is
+   * read too (see {@link SaidMessage}).
    *
    * `via` is the one of Rome's accounts reading, over today's storage, and
    * the place reads as that account heard it. Absent, a group reads as one
