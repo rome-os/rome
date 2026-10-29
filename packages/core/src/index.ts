@@ -236,6 +236,7 @@ import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
 import { createAppRuntimeRepositories } from "./apps/repositories.js";
+import { ChatRepository } from "./chats/chat-repository.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
@@ -400,9 +401,11 @@ async function main() {
   }
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
+  const chatRepo = new ChatRepository(db, channelRecords);
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
+    chatRepo,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -906,7 +909,7 @@ async function main() {
     run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
   });
   const chatSettings = new ChatSettingsService({
-    repository: new ChatSettingsRepository(db),
+    repository: new ChatSettingsRepository(db, chatRepo),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,

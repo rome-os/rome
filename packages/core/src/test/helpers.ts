@@ -1,4 +1,5 @@
 import type { ExternalAgents } from "../channels/agents-accounts.js";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -94,6 +95,7 @@ import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import { ChatRepository } from "../chats/chat-repository.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { AppManager } from "../apps/manager.js";
@@ -155,6 +157,11 @@ export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
 /** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
 export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
 
+/** The chats by key over `db`, reading the channel records `db` holds. */
+export function testChatRepository(db: DrizzleDb): ChatRepository {
+  return new ChatRepository(db, new ChannelRecordsRepository(db, testAccountLinkOf));
+}
+
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
 export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
@@ -177,6 +184,23 @@ export function createTestDb(): TestDb {
   return {
     db,
     close: () => sqlite.close(),
+  };
+}
+
+/** Writes a database at the latest system schema to `path`, and returns a
+ *  way to open further connections to it, as Rome's main process and its
+ *  action workers each hold one. */
+export function createTestDbFile(path: string): () => TestDb & { sqlite: Database.Database } {
+  writeFileSync(path, migratedSystemImage());
+  return () => {
+    const sqlite = new Database(path);
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    return {
+      db: drizzle(sqlite, { schema }) as unknown as DrizzleDb,
+      sqlite,
+      close: () => sqlite.close(),
+    };
   };
 }
 
@@ -584,6 +608,7 @@ export async function buildTestDeps(
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
+    chatRepo: new ChatRepository(db, channelRecords),
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1146,7 +1171,11 @@ export async function createAppLifecycleHarness(
     });
     const settingsRepo = new SettingsRepository(db);
     const webchatRepo = new WebChatRepository(db);
-    const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+    const appRuntimeRepositories = createAppRuntimeRepositories({
+      settingsRepo,
+      webchatRepo,
+      chatRepo: testChatRepository(db),
+    });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
       actionRegistry.unregisterOwnedBy("app", event.appId);
