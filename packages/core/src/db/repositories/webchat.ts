@@ -1539,15 +1539,17 @@ export class WebChatRepository {
     // type, so a row under a parent chat is a group's too.
     const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') = 'group' or ${romeSessions.parentSessionId} is not null)`;
     // Read through one channel, the chat is that channel's record alone.
-    // Otherwise only a group's address names one chat across Rome's accounts.
-    // Any other chat is one account's own: Telegram keys a direct message by
-    // the other person alone, so the same address on two channels is two
-    // chats, and it is read only while one channel holds it.
+    // Otherwise only a group's address names one chat across Rome's accounts,
+    // and one account knowing it for a group is enough: a send opens its row
+    // without knowing the kind. Any other chat is one account's own: Telegram
+    // keys a direct message by the other person alone, so the same address on
+    // two channels is two chats, and it is read only while one channel holds
+    // it.
     const which = input.ownChannel
       ? eq(romeSessions.sourceChannel, input.ownChannel)
       : or(
-          isGroup,
-          sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`,
+          sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+          sql`(select count(*) from ${romeSessions} where ${at}) = 1`,
         );
     const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);
     const roles = sql.join(

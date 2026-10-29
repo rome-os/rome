@@ -384,6 +384,31 @@ describe("StoredMessages reads", () => {
     expect(read.map((message) => message.body.text)).toEqual(["line 1", "line 2"]);
   });
 
+  it("reads every account's record of a group one account knows for a group", async () => {
+    // Two accounts only sent there, so their rows do not know the kind.
+    const sentOnly = await Promise.all(
+      ["telegram", "telegram-ops"].map((channel) =>
+        rows.ensureChannelChat({ channel, threadId: "group-1", agentName: "main" }),
+      ),
+    );
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(sentOnly[0]!.id, "support heard", minute(1), "m-1");
+    await said(sentOnly[1]!.id, "ops heard", minute(2), "m-2");
+    await said(sales.id, "sales heard", minute(3), "m-3");
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual([
+      "support heard",
+      "ops heard",
+      "sales heard",
+    ]);
+  });
+
   it("keeps a message where its echo was written when Rome's record of it arrives between pages", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
