@@ -129,98 +129,66 @@ describe("Concierge layout", () => {
   describe("with a pointer that can hover", () => {
     beforeEach(() => stubHover(true));
 
-    it("draws no action row under a settled turn", () => {
+    // jsdom has no layout, so these pin the wiring that decides where the toolbar
+    // sits; the measured placement is checked in a real browser.
+    const toolbarOf = (content: string) => {
+      const toolbar = bubbleOf(content)
+        .closest(".group\\/bubble")
+        ?.querySelector<HTMLElement>(":scope > [data-bubble-toolbar]");
+      if (!toolbar) throw new Error(`no toolbar for ${content}`);
+      return toolbar;
+    };
+
+    it("draws no action row under a settled turn and no details menu", () => {
       renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
 
-      expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
-      expect(screen.queryByTestId("feedback")).toBeNull();
-      expect(screen.getByRole("button", { name: "Message details" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Message details" })).toBeNull();
+      expect(document.querySelector("[data-slot=popover-trigger]")).toBeNull();
+      expect(toolbarOf("Found three.").parentElement?.nextElementSibling).toBeNull();
     });
 
-    // jsdom has no layout, so these pin the wiring that decides where the popover
-    // opens; the measured placement is checked in a real browser.
-    it("anchors the popover to the more button, not to the bubble", () => {
-      renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
-      const more = screen.getByRole("button", { name: "Message details" });
-
-      fireEvent.click(more);
-
-      expect(document.querySelector("[data-slot=popover-anchor]")).toBeNull();
-      expect(more.getAttribute("aria-controls")).toBe(
-        document.querySelector("[data-slot=popover-content]")?.id,
-      );
-    });
-
-    // jsdom has no layout, so the column and the button get fixed rects: a 1000px
-    // column, and the button's left edge at `buttonLeft`.
-    function stubRects(buttonLeft: number) {
-      const rect = (left: number, right: number) =>
-        ({ left, right, top: 0, bottom: 28, width: right - left, height: 28 }) as DOMRect;
-      rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
-        this: HTMLElement,
-      ) {
-        if (this.matches("[data-chat-transcript]")) return rect(0, 1000);
-        if (this.getAttribute("aria-label") === "Message details") {
-          return rect(buttonLeft, buttonLeft + 28);
-        }
-        return rect(0, 0);
-      });
-    }
-    const popover = () => document.querySelector("[data-slot=popover-content]");
-
-    it("opens the agent's popover to the right of the button", () => {
-      stubRects(100);
+    it("puts the time, copy, and feedback straight in the toolbar", () => {
       renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
 
-      fireEvent.click(screen.getByRole("button", { name: "Message details" }));
-
-      expect(popover()?.getAttribute("data-side")).toBe("right");
-      expect(popover()?.getAttribute("data-align")).toBe("center");
+      const toolbar = toolbarOf("Found three.");
+      expect(toolbar.querySelector("time")?.getAttribute("dateTime")).toBe(at(0));
+      expect(within(toolbar).getByRole("button", { name: "Copy message" })).toBeTruthy();
+      expect(within(toolbar).getByTestId("feedback").dataset.turn).toBe("turn-1");
+      for (const button of within(toolbar).getAllByRole("button")) {
+        if (button.dataset.size) expect(button.dataset.size).toBe("xs");
+      }
     });
 
-    it("opens the guardian's popover to the left of the button", () => {
-      stubRects(800);
-      renderTranscript([userRow(guardian("u1", 0, "Find me a cafe"))]);
-
-      fireEvent.click(screen.getByRole("button", { name: "Message details" }));
-
-      expect(popover()?.getAttribute("data-side")).toBe("left");
-      expect(popover()?.getAttribute("data-align")).toBe("center");
-    });
-
-    it("opens below the button, toward the bubble, when the empty side is too narrow", () => {
-      // The agent's button is 100px from the column's right edge.
-      stubRects(872);
-      renderTranscript([agentRow(agent("a1", 0, [text("A long reply that fills the column.")]))]);
-
-      fireEvent.click(screen.getByRole("button", { name: "Message details" }));
-
-      expect(popover()?.getAttribute("data-side")).toBe("bottom");
-      expect(popover()?.getAttribute("data-align")).toBe("end");
-    });
-
-    it("keeps the more button out of the layout", () => {
+    it("floats the toolbar over the bubble's top edge, out of the layout", () => {
       renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
 
-      const more = screen.getByRole("button", { name: "Message details" });
-      expect(more.closest(".absolute")).toBeTruthy();
-      expect(more.className).toContain("opacity-0");
-      expect(more.className).toContain("group-hover/bubble:opacity-100");
-      expect(more.className).toContain("aria-expanded:opacity-100");
+      const toolbar = toolbarOf("Found three.");
+      expect(toolbar.className).toContain("absolute");
+      expect(toolbar.className).toContain("bottom-full");
+      expect(toolbar.className).toContain("translate-y-3");
+      expect(toolbar.className).toContain("w-max");
+      expect(toolbar.contains(bubbleOf("Found three."))).toBe(false);
     });
 
-    it("opens the time, copy, and feedback from the more button", () => {
+    it("aligns the toolbar to the bubble's outer corner", () => {
+      renderTranscript([
+        userRow(guardian("u1", 0, "Find me a cafe")),
+        agentRow(agent("a1", 2_000, [text("Found three.")])),
+      ]);
+
+      expect(toolbarOf("Find me a cafe").className).toContain("right-0");
+      expect(toolbarOf("Found three.").className).toContain("left-0");
+    });
+
+    it("shows the toolbar on hover or focus, and while a feedback form is open", () => {
       renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
+      const toolbar = toolbarOf("Found three.");
 
-      fireEvent.click(screen.getByRole("button", { name: "Message details" }));
-
-      const popover = document.querySelector<HTMLElement>("[data-slot=popover-content]");
-      expect(popover).toBeTruthy();
-      expect(
-        within(popover as HTMLElement).getByRole("button", { name: "Copy message" }),
-      ).toBeTruthy();
-      expect(within(popover as HTMLElement).getByTestId("feedback").dataset.turn).toBe("turn-1");
-      expect((popover as HTMLElement).querySelector("time")).toBeTruthy();
+      expect(toolbar.className).toContain("opacity-0");
+      expect(toolbar.className).toContain("pointer-events-none");
+      expect(toolbar.className).toContain("group-hover/bubble:opacity-100");
+      expect(toolbar.className).toContain("group-focus-within/bubble:opacity-100");
+      expect(toolbar.className).toContain("has-data-[state=open]:opacity-100");
     });
 
     it("offers a turn's feedback from its last bubble only", () => {
@@ -228,12 +196,8 @@ describe("Concierge layout", () => {
         agentRow(agent("a1", 0, [text("On it.")]), agent("a2", 4_000, [text("Done.")])),
       ]);
 
-      const [first, second] = screen.getAllByRole("button", { name: "Message details" });
-      fireEvent.click(first);
-      expect(screen.queryByTestId("feedback")).toBeNull();
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
-      fireEvent.click(second);
-      expect(screen.getByTestId("feedback")).toBeTruthy();
+      expect(within(toolbarOf("On it.")).queryByTestId("feedback")).toBeNull();
+      expect(within(toolbarOf("Done.")).getByTestId("feedback")).toBeTruthy();
     });
 
     it("holds back feedback while the turn runs", () => {
@@ -241,10 +205,18 @@ describe("Concierge layout", () => {
         live: { ...idle, isStreaming: true, runningTurnId: "turn-1" },
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "Message details" }));
-
       expect(screen.queryByTestId("feedback")).toBeNull();
       expect(screen.getAllByRole("button", { name: "Copy message" })).toHaveLength(1);
+    });
+
+    it("offers no copy on a task chat card", () => {
+      renderTranscript([
+        agentRow(agent("c1", 0, [{ type: "task_chat", chatId: "chat-7", title: "Trip" }])),
+      ]);
+
+      const toolbar = screen.getByTestId("task-card").closest(".group\\/bubble");
+      expect(toolbar?.querySelector("[data-bubble-toolbar] time")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
     });
   });
 
@@ -441,7 +413,7 @@ describe("Concierge reply", () => {
     );
   const replyButtons = () => screen.getAllByRole("button", { name: "Reply" });
 
-  it("puts Reply beside the more button, next to the bubble, and not in the menu", () => {
+  it("puts Reply in the toolbar of each bubble", () => {
     const draft = draftOf();
     inChat(draft, [
       agentRow(
@@ -450,19 +422,15 @@ describe("Concierge reply", () => {
       ),
     ]);
 
-    const more = screen.getAllByRole("button", { name: "Message details" })[1];
-    expect(more.parentElement?.firstElementChild).toBe(replyButtons()[1]);
+    const toolbar = replyButtons()[1].closest("[data-bubble-toolbar]") as HTMLElement;
+    expect(toolbar.contains(screen.getByText("Second bubble."))).toBe(false);
+    expect(toolbar.parentElement?.contains(screen.getByText("Second bubble."))).toBe(true);
     fireEvent.click(replyButtons()[1]);
     expect(draft.set).toHaveBeenCalledWith({
       messageId: "a2",
       author: "agent",
       preview: "Second bubble.",
     });
-
-    fireEvent.click(more);
-    const menu = document.querySelector("[data-slot=popover-content]") as HTMLElement;
-    expect(within(menu).getByRole("button", { name: "Copy message" })).toBeTruthy();
-    expect(within(menu).queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
   it("puts Reply in the row a tap opens on touch", () => {
@@ -503,7 +471,6 @@ describe("Concierge reply", () => {
     ]);
 
     expect(screen.getByTestId("task-card")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Message details" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 
     expect(draft.set).toHaveBeenCalledWith(
@@ -526,8 +493,7 @@ describe("Concierge reply", () => {
   it("offers no Reply where the chat has no reply state", () => {
     renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Message details" }));
-
+    expect(screen.getByRole("button", { name: "Copy message" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 

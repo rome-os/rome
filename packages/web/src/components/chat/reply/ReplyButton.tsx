@@ -14,11 +14,13 @@ import { findMessageAnchor, replyPreview, selectedQuote, type ReplySource } from
 export function ReplyButton({
   source,
   onReply,
+  size = "sm",
   className,
 }: {
   source: ReplySource;
   /** Called after the reply is set, e.g. to close the menu holding the button. */
   onReply?: () => void;
+  size?: "xs" | "sm";
   className?: string;
 }) {
   const { t } = useTranslation("chat");
@@ -26,7 +28,7 @@ export function ReplyButton({
   if (!draft || draft.sessionId !== source.sessionId) return null;
   return (
     <IconButton
-      size="sm"
+      size={size}
       label={t("reply.action")}
       icon={<Reply />}
       className={cn("text-muted-foreground hover:text-foreground", className)}
