@@ -52,10 +52,11 @@ export class ChatSettingsRepository {
 
   /** The reply rule of the chat at `chatId` as the account `channel` speaks
    *  as sees it: the group's, whichever of Rome's accounts set it, or the
-   *  account's own direct message's. Null when none is set. */
-  ruleOf(channel: string, chatId: ChatId): StoredChatSettings | null {
+   *  account's own direct message's. A row stored with no type reads as the
+   *  `kind` it is known by, as `mutate` will store it. Null when none is set. */
+  ruleOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): StoredChatSettings | null {
     const via = this.chats.accountOn(channel);
-    return this.chats.byKey(chatKey(via.platform, chatId), via)?.replyRule ?? null;
+    return this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null;
   }
 
   /**
@@ -63,9 +64,9 @@ export class ChatSettingsRepository {
    * that kind when its row was stored with none, so it reads as one chat with
    * the rows of Rome's other accounts in it. Changes no other row.
    */
-  classify(descriptor: ChatDescriptor, channel: string): void {
-    if (descriptor.parent || (descriptor.kind !== "group" && descriptor.kind !== "channel")) return;
-    this.db
+  private classify(exec: DrizzleTx, descriptor: ChatDescriptor, channel: string): void {
+    if (!isShared(descriptor.kind)) return;
+    exec
       .update(romeSessions)
       .set({ sourceThreadType: descriptor.kind })
       .where(
@@ -119,6 +120,9 @@ export class ChatSettingsRepository {
       return;
     }
     this.db.transaction((tx) => {
+      // A row stored before its type was known joins its group's other rows
+      // first, so the rule below is written to the whole group.
+      this.classify(tx, descriptor, channel);
       const via = this.chats.accountOn(channel);
       const key = chatKey(via.platform, descriptor.ref.chatId);
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
@@ -205,4 +209,8 @@ export class ChatSettingsRepository {
         .run();
     });
   }
+}
+
+function isShared(kind: ChatDescriptor["kind"]): boolean {
+  return kind === "group" || kind === "channel";
 }

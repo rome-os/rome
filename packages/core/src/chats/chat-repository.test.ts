@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Account, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
-import type Database from "better-sqlite3";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
-import { channelChatId, isChannelConversation } from "../db/session-kind.js";
+import { channelChatId } from "../db/session-kind.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatRefusal } from "./chat.js";
 import { ChatRepository, type ChatChannels } from "./chat-repository.js";
@@ -60,7 +59,6 @@ describe("ChatRepository", () => {
       sourceThreadName: "Launch",
       name: "Launch",
       agentName: "sales",
-      participants: null,
     });
     expect(chats.byKey(GROUP)?.state()).toMatchObject({ kind: "group", name: "Launch" });
   });
@@ -113,7 +111,7 @@ describe("ChatRepository", () => {
     });
   });
 
-  it("keeps the others the platform reports, and Rome's accounts as its rows", () => {
+  it("keeps Rome's accounts as its rows and no one else, over today's rows", () => {
     chats.startIfMissing(GROUP, "group", SALES, null);
 
     chats.update(GROUP, (chat) =>
@@ -123,11 +121,7 @@ describe("ChatRepository", () => {
       ]),
     );
 
-    expect(row("feishu", "oc_group")?.participants).toEqual({ others: [ALICE] });
-    expect(chats.byKey(GROUP)?.participants).toEqual([
-      { account: SALES, romes: true },
-      { account: ALICE, romes: false },
-    ]);
+    expect(chats.byKey(GROUP)?.participants).toEqual([{ account: SALES, romes: true }]);
   });
 
   it("gives one of Rome's accounts that joins a row of its own", () => {
@@ -159,26 +153,15 @@ describe("ChatRepository", () => {
     ).toEqual([]);
   });
 
-  it("keeps what was said through one of Rome's accounts that leaves a live chat", () => {
+  it("refuses one of Rome's accounts leaving a live chat, and keeps its row", () => {
     chats.startIfMissing(GROUP, "group", SALES, null);
     chats.startIfMissing(GROUP, "group", SUPPORT, null);
-    const id = channelChatId("feishu", "oc_group");
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({ id: "m1", sessionId: id, role: "user", content: "hi", createdAt: new Date() })
-      .run();
 
-    chats.update(GROUP, (chat) => chat.setParticipants([{ account: SUPPORT, romes: true }]));
-
-    expect(chats.byKey(GROUP)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
-    expect(row("feishu", "oc_group")?.participants).toEqual({ others: [], left: true });
-    expect(
-      testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all(),
-    ).toHaveLength(1);
-
-    const back = chats.startIfMissing(GROUP, "group", SALES, null);
-    expect(back.isRomes(SALES)).toBe(true);
-    expect(row("feishu", "oc_group")?.participants).toBeNull();
+    expect(() =>
+      chats.update(GROUP, (chat) => chat.setParticipants([{ account: SUPPORT, romes: true }])),
+    ).toThrow(ChatRefusal);
+    expect(row("feishu", "oc_group")).toBeDefined();
+    expect(chats.byKey(GROUP)?.participants).toHaveLength(2);
   });
 
   it("reads the same peer id on two of Rome's accounts as two direct messages", () => {
@@ -194,12 +177,41 @@ describe("ChatRepository", () => {
     expect(() => chats.byKey(peer)).toThrow("name the account");
   });
 
-  it("never joins a row of unknown type to another account's chat", () => {
+  it("never joins a row of unknown type or a direct message to a group", () => {
     chats.startIfMissing(GROUP, "group", SALES, null, { threadType: null });
     chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
 
     expect(chats.byKey(GROUP, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
     expect(chats.byKey(GROUP, SUPPORT)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
+  });
+
+  it("starts a chat of its own for an untyped or private row beside a typed group", () => {
+    chats.startIfMissing(GROUP, "group", SALES, null);
+    chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE));
+
+    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
+
+    expect(row("feishu-2", "oc_group")).toMatchObject({
+      sourceThreadType: null,
+      channelSettings: null,
+    });
+    expect(chats.byKey(GROUP, SUPPORT)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
+    expect(chats.byKey(GROUP, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
+
+    const dm = chatKey("feishu", "ou_alice" as ChatId);
+    chats.startIfMissing(dm, "group", SALES, null);
+    chats.startIfMissing(dm, "dm", SUPPORT, null);
+    expect(row("feishu-2", "ou_alice")).toMatchObject({ sourceThreadType: "private" });
+    expect(chats.byKey(dm, SALES)?.participants).toHaveLength(1);
+  });
+
+  it("reads an untyped row with the group when asked to", () => {
+    chats.startIfMissing(GROUP, "group", SALES, null);
+    chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE));
+    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
+
+    expect(chats.byKey(GROUP, SUPPORT, true)?.replyRule).toEqual(RULE);
+    expect(chats.byKey(GROUP, SUPPORT)?.replyRule).toBeNull();
   });
 
   it("stands a channel no record holds for an account by its own name", () => {
@@ -213,24 +225,6 @@ describe("ChatRepository", () => {
 
   it("refuses to start through an account Rome does not hold", () => {
     expect(() => chats.startIfMissing(GROUP, "group", ALICE, null)).toThrow(ChatRefusal);
-  });
-
-  it("finds a chat's rows through the chat id index", () => {
-    const query = testDb.db
-      .select()
-      .from(romeSessions)
-      .where(
-        and(
-          isChannelConversation,
-          eq(romeSessions.sourceThreadId, "oc_group"),
-          isNull(romeSessions.parentSessionId),
-        ),
-      )
-      .toSQL();
-    const client = (testDb.db as unknown as { $client: Database.Database }).$client;
-    const plan = client.prepare(`explain query plan ${query.sql}`).all(...query.params);
-
-    expect(JSON.stringify(plan)).toContain("idx_rome_sessions_chat_id");
   });
 
   it("reads no thread row as a chat", () => {

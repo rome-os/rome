@@ -375,7 +375,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       });
       return snapshot;
     }
-    const stored = this.storedRule(ref, row);
+    const stored = this.storedRule(ref, descriptor, row);
     const direct = this.directOverrides(row, stored);
     const effective = overlay(defaultConversationSettings(), direct);
     const supportedFields = this.supportedFields(descriptor, row);
@@ -405,9 +405,6 @@ export class ChatSettingsService implements ChatSettingsControl {
       .runExclusive(this.storageKey(input.ref), async () => {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
-        // A row stored before its type was known joins its group's other rows
-        // now, so the write below starts from the group's rule, not the row's.
-        this.deps.repository.classify(descriptor, this.storedChannel(input.ref));
         const supportedFields = this.supportedFields(descriptor, row);
         const supported = new Set(supportedFields);
         // `get` returns a fresh, already-normalized overrides object.
@@ -492,9 +489,6 @@ export class ChatSettingsService implements ChatSettingsControl {
       .runExclusive(this.storageKey(input.ref), async () => {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
-        // A row stored before its type was known joins its group's other rows
-        // now, so the write below starts from the group's rule, not the row's.
-        this.deps.repository.classify(descriptor, this.storedChannel(input.ref));
         const fields = [...this.supportedFields(descriptor, row)];
         this.deps.repository.mutate(descriptor, this.storedChannel(input.ref), {
           settings: null,
@@ -527,12 +521,18 @@ export class ChatSettingsService implements ChatSettingsControl {
 
   /** The rule stored for the chat `ref` names, read through the chat so a
    *  group's rule set through another of Rome's accounts reads here too. */
-  private storedRule(ref: ChatRef, row: StoredChatRow | null): StoredChatSettings | null {
+  private storedRule(
+    ref: ChatRef,
+    descriptor: ChatDescriptor,
+    row: StoredChatRow | null,
+  ): StoredChatSettings | null {
     let channel = row?.sourceChannel ?? null;
     if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
       channel = this.channelName(ref);
     }
-    return channel === null ? null : this.deps.repository.ruleOf(channel, ref.chatId);
+    return channel === null
+      ? null
+      : this.deps.repository.ruleOf(channel, ref.chatId, descriptor.kind);
   }
 
   private async discover(

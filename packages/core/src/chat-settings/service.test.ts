@@ -739,6 +739,31 @@ describe("ChatSettingsService", () => {
     }
   });
 
+  it("leaves a row stored with no type apart when its edit is refused", async () => {
+    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
+    const key = chatKey("feishu", "oc_group" as ChatId);
+    const support = { platform: "feishu", id: "ou_support" };
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
+    chats.startIfMissing(key, "group", support, null, { threadType: null });
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    await expect(
+      service.update({
+        ref: throughSupport,
+        set: { session: { reset: { mode: "idle", idleMinutes: 0 } as never } },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+    ).rejects.toThrow("idleMinutes");
+
+    expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
+  });
+
   it("paginates beyond a bounded live directory first page", async () => {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({

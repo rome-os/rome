@@ -11,7 +11,6 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type { StoredChatMembers } from "../../chats/chat-repository.js";
 import type { DeliveryState } from "../../chats/delivery.js";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
@@ -509,11 +508,6 @@ export const romeSessions = sqliteTable(
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
     channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
-    // The chat's participants other than Rome's own accounts, as the platform
-    // last reported them, and whether this row's account has left the chat.
-    // Rome's accounts in the chat are its channel rows. NULL while neither is
-    // known.
-    participants: text("participants", { mode: "json" }).$type<StoredChatMembers>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),
@@ -562,9 +556,6 @@ export const romeSessions = sqliteTable(
         sql`${table.type} = 'channel' AND ${table.sourceChannel} IS NOT NULL AND ${table.sourceThreadId} IS NOT NULL`,
       ),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
-    // A chat is found by its platform id alone, across the channels of every
-    // one of Rome's accounts on the platform.
-    index("idx_rome_sessions_chat_id").on(table.sourceThreadId, table.parentSessionId),
   ],
 );
 
