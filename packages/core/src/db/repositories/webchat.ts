@@ -52,6 +52,7 @@ import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
+import { agentMessageOutbound } from "../../channels/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 
 export interface StoredTurnFeedback {
@@ -1539,6 +1540,13 @@ export class WebChatRepository {
           sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`,
         );
     const chats = this.db.select({ id: romeSessions.id }).from(romeSessions).where(and(at, which));
+    // The rows that are a reply shown as several messages.
+    const wholes = sql`(select "held"."message_id" from ${romeAgentMessagePlatformIds} as "held" where "held"."session_id" in ${chats})`;
+    const ownOutbound = agentMessageOutbound(
+      sql`${romeAgentMessages}."role"`,
+      sql`${romeAgentMessages}."sender_id"`,
+    );
+    const copyOutbound = agentMessageOutbound(sql`"copy"."role"`, sql`"copy"."sender_id"`);
     const { before } = input;
     return await this.db
       .select({
@@ -1570,12 +1578,13 @@ export class WebChatRepository {
             ),
           // A reply shown as several messages is one row that keeps its other
           // parts' ids beside it, and it stands for every part another account
-          // heard, whichever came first. Any other message is read as its first
-          // copy. Each check is an index lookup by platform id, so a page costs
-          // a few lookups per message the place holds.
+          // heard, whichever came first. Any other message is read once: Rome's
+          // own record of a line it sent over another account's echo of it,
+          // else the first copy. Each check is an index lookup by platform id,
+          // and the set of wholes is built once per read.
           or(
             isNull(romeAgentMessages.platformMessageId),
-            sql`exists (${heldAsParts(sql`${romeAgentMessages}`)})`,
+            sql`${romeAgentMessages}."id" in ${wholes}`,
             and(
               sql`not exists (
                 select 1 from ${romeAgentMessagePlatformIds} as "part"
@@ -1587,7 +1596,11 @@ export class WebChatRepository {
                 where "copy"."session_id" in ${chats}
                   and "copy"."platform_message_id" = ${romeAgentMessages.platformMessageId}
                   and "copy"."id" != ${romeAgentMessages.id}
-                  and ("copy".rowid < ${romeAgentMessages}.rowid or exists (${heldAsParts(sql`"copy"`)}))
+                  and (
+                    "copy"."id" in ${wholes}
+                    or ${copyOutbound} > ${ownOutbound}
+                    or (${copyOutbound} = ${ownOutbound} and "copy".rowid < ${romeAgentMessages}.rowid)
+                  )
               )`,
             ),
           ),
@@ -3334,11 +3347,4 @@ export class WebChatRepository {
       });
     return inserted[0] ?? null;
   }
-}
-
-/** The other parts' ids `row` keeps, when it is a reply shown as several
- *  messages. */
-function heldAsParts(row: SQL): SQL {
-  return sql`select 1 from ${romeAgentMessagePlatformIds} as "held"
-    where "held"."session_id" = ${row}."session_id" and "held"."message_id" = ${row}."id"`;
 }

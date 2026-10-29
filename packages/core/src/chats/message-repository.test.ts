@@ -311,6 +311,41 @@ describe("StoredMessages reads", () => {
     expect(read.map((message) => message.body.text)).toEqual(["r-1 r-2"]);
   });
 
+  it("reads Rome's own record of a line another account heard before it was recorded", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await rows.addConversationMessage({
+      sessionId: sales.id,
+      role: "notification",
+      content: textContent("on it"),
+      platformMessageId: "e-1",
+      senderId: "rome-bot",
+      senderName: "Rome",
+      createdAt: minute(1),
+    });
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("on it"),
+      platformMessageId: "e-1",
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read).toMatchObject([{ direction: "fromRome", body: { text: "on it" } }]);
+  });
+
   it("reads a group as one account heard it when the read names that account", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
