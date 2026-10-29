@@ -125,6 +125,14 @@ describe("send", () => {
           id: "rome-bot",
         },
       );
+      const byChannel = await send(
+        { ...deps, dashboard },
+        DASHBOARD_CHAT,
+        { text: "hi" },
+        {
+          channel: "webchat",
+        },
+      );
       const threaded = await send(
         { ...deps, dashboard },
         placeIn(chatKey("webchat", "chat-1" as ChatId), "t-1" as ChatId),
@@ -132,11 +140,9 @@ describe("send", () => {
         CONCIERGE,
       );
 
-      expect([unnamed, elsewhere, threaded].map((result) => "invalid" in result)).toEqual([
-        true,
-        true,
-        true,
-      ]);
+      expect(
+        [unnamed, elsewhere, byChannel, threaded].map((result) => "invalid" in result),
+      ).toEqual([true, true, true, true]);
       expect(dashboard.post).not.toHaveBeenCalled();
     });
 

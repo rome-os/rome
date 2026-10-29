@@ -181,7 +181,7 @@ describe("ConnectionsSection — list of rows", () => {
   });
 
   it("opens services in dialogs and links to app keys", () => {
-    renderSection([...minimalConnections(), oauth("github")]);
+    renderSection([...minimalConnections(), oauth("github", "authorized")]);
 
     const links = screen.queryAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
@@ -194,12 +194,12 @@ describe("ConnectionsSection — list of rows", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
     // Dialog is closed initially.
-    expect(screen.queryByText("Connect")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
 
     // The dialog mounts the ceremony body.
-    expect(screen.getByText("Connect")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
   });
 
   it("a broken OAuth connection reads Broken with an attention-toned dot on the row (#1472)", () => {
@@ -244,6 +244,147 @@ describe("ConnectionsSection — list of rows", () => {
   });
 });
 
+describe("ConnectionsSection — tabs, search and groups", () => {
+  function mixed(): ApiConnection[] {
+    return [
+      telegramBot("authorized", "rome_bot"),
+      connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
+      oauth("github", "authorized"),
+      oauth("slack", "degraded"),
+      oauth("google"),
+    ];
+  }
+  const tabRadio = (name: RegExp) => screen.getByRole("radio", { name });
+  const rowNames = () =>
+    screen
+      .queryAllByRole("button", { name: /^Open / })
+      .map((row) => row.getAttribute("aria-label"));
+
+  it("opens on Connected and lists working and broken connections there", () => {
+    renderSection(mixed());
+    expect(tabRadio(/Connected/).getAttribute("aria-checked")).toBe("true");
+    // A broken connection stays connected and leads its group.
+    expect(rowNames()).toEqual(["Open Telegram", "Open Slack", "Open GitHub"]);
+    expect(within(tabRadio(/Connected/)).getByText("3")).toBeTruthy();
+    expect(within(tabRadio(/Available/)).getByText("2")).toBeTruthy();
+  });
+
+  it("opens on Available when nothing is connected", () => {
+    renderSection(minimalConnections());
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryAllByRole("link")).toEqual([]);
+  });
+
+  it("shows what an available connection does, under its group", () => {
+    renderSection(mixed());
+    fireEvent.click(tabRadio(/Available/));
+    expect(rowNames()).toEqual(["Open WhatsApp", "Open Google"]);
+    const accounts = screen.getByRole("region", { name: "Accounts and tools" });
+    expect(within(accounts).getByText("Work across your Google services as you")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Messaging" })).toBeTruthy();
+  });
+
+  it("filters both tabs and offers the other tab when only it matches", () => {
+    renderSection(mixed());
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "google" },
+    });
+    expect(rowNames()).toEqual([]);
+    expect(screen.getByText("No connected service matches “google”.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 in Available" }));
+    expect(rowNames()).toEqual(["Open Google"]);
+  });
+
+  it("matches what a connection does, not only its name", () => {
+    renderSection(mixed());
+    fireEvent.click(tabRadio(/Available/));
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "google services" },
+    });
+    expect(rowNames()).toEqual(["Open Google"]);
+  });
+
+  it("keeps an offered service the host cannot connect marked Unavailable", () => {
+    renderSection([
+      connection({
+        connectionKind: "shopify",
+        grants: { store: "unauthorized" },
+        connect: { url: null, available: false, unavailableReason: "Not configured" },
+      }),
+    ]);
+    const row = screen.getByRole("button", { name: "Open Shopify" });
+    expect(within(row).getByText("Unavailable")).toBeTruthy();
+    expect(within(row).queryByText("Connect")).toBeNull();
+  });
+
+  it("says nothing is connected and offers Available, above App keys", () => {
+    renderSection(minimalConnections());
+    fireEvent.click(tabRadio(/Connected/));
+    expect(screen.getByText("Nothing is connected yet.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show 2 in Available" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
+  });
+
+  it("matches only names on Connected, where descriptions are not shown", () => {
+    renderSection(mixed());
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "repositories" },
+    });
+    expect(rowNames()).toEqual([]);
+  });
+
+  it("stays on Available after the first service connects from it", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Open WhatsApp" }));
+    rerender(
+      sectionWith(
+        [
+          telegramBot("unauthorized"),
+          connection({ connectionKind: "whatsapp", grants: { session: "authorized" } }),
+        ],
+        onRefresh,
+      ),
+    );
+    // The open dialog hides the page from the accessibility tree.
+    expect(
+      screen.getByRole("radio", { name: /Available/, hidden: true }).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("keeps the opening tab when a refresh brings the first connection", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    rerender(
+      sectionWith(
+        [
+          telegramBot("unauthorized"),
+          connection({ connectionKind: "whatsapp", grants: { session: "authorized" } }),
+        ],
+        onRefresh,
+      ),
+    );
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("shows App keys without a no-match message when only App keys matches", () => {
+    renderSection(mixed());
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "app" } });
+    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
+    expect(screen.queryByText("No connected service matches “app”.")).toBeNull();
+  });
+
+  it("clears the search on Escape", () => {
+    renderSection(mixed());
+    const input = screen.getByLabelText("Search connections") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "slack" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("");
+  });
+});
+
 describe("ConnectionsSection — Telegram fold row status", () => {
   function telegramRow(connections: ApiConnection[]): HTMLElement {
     renderSection(connections);
@@ -284,11 +425,14 @@ describe("ConnectionsSection — Composio row", () => {
     expect(screen.queryByText("Composio")).toBeNull();
   });
 
-  it("shows a Composio row when installed but signed out (Not connected)", () => {
+  it("lists a signed-out Composio row under Available", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
-    expect(screen.getByRole("button", { name: "Open Composio" })).toBeTruthy();
-    // Installed-but-signed-out reads as "Not connected".
-    expect(screen.getAllByText("Not connected").length).toBeGreaterThan(0);
+    // Installed-but-signed-out is something to add, offered with a Connect cue.
+    const row = screen.getByRole("button", { name: "Open Composio" });
+    expect(within(row).getByText("Connect")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 
   it("shows a connected Composio row when signed in", () => {
@@ -304,7 +448,7 @@ describe("ConnectionsSection — Composio row", () => {
   it("clicking a signed-out Composio row opens the connect ceremony", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
-    expect(screen.getByText("Connect")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
   });
 });
 
