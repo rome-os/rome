@@ -58,7 +58,7 @@ export function UsageMenu({
     return (
       <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-4 text-ui">
         <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium tabular-nums">
+        <span className="text-foreground tabular-nums">
           {remaining === undefined ? t("aiTools.usage.unavailable") : `${Math.round(remaining)}%`}
         </span>
         <span className="min-w-16 text-end text-muted-foreground tabular-nums">{reset}</span>
@@ -87,7 +87,7 @@ export function UsageMenu({
         aria-label={t("aiTools.usage.remaining")}
         className={`w-72 p-4 ${CHAT_POPOVER_FIT.className}`}
       >
-        <h3 className="text-ui font-medium">{t("aiTools.usage.remaining")}</h3>
+        <h3 className="text-section text-foreground">{t("aiTools.usage.remaining")}</h3>
         {usage.error ? (
           <p role="status" className="text-ui text-muted-foreground">
             {t("aiTools.usage.unavailable")}
