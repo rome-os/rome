@@ -238,6 +238,25 @@ describe("ChatRepository", () => {
     expect(chats.byKey(dm, SALES)?.participants).toHaveLength(1);
   });
 
+  it("joins a row stored with no type to the group once a message names its type", () => {
+    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
+    chats.startIfMissing(GROUP, "group", SALES, null);
+    chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE), SALES);
+
+    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: "group" });
+
+    expect(row("feishu-2", "oc_group")).toMatchObject({
+      sourceThreadType: "group",
+      channelSettings: RULE,
+    });
+    expect(chats.byKey(GROUP)?.participants).toHaveLength(2);
+
+    const dm = chatKey("feishu", "ou_alice" as ChatId);
+    chats.startIfMissing(dm, "dm", SUPPORT, null, { threadType: null });
+    chats.startIfMissing(dm, "dm", SUPPORT, null, { threadType: "private" });
+    expect(row("feishu-2", "ou_alice")?.sourceThreadType).toBeNull();
+  });
+
   it("reads an untyped row with the group when asked to", () => {
     chats.startIfMissing(GROUP, "group", SALES, null);
     chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE));

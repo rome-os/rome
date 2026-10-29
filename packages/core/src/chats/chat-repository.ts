@@ -93,7 +93,8 @@ export class ChatRepository {
    * The chat at `key`, started through `via` when Rome holds none there yet.
    * When a group exists and `via` is not in it, `via` joins it, unless the row
    * `via` would write is a direct message or of no type, which starts a chat
-   * of its own. `kind`, `name` and `seed` apply only to a row this call writes.
+   * of its own. A row of `via` stored with no type joins the group when
+   * `seed` names it a group or channel. `kind`, `name` and `seed` apply only to a row this call writes.
    * Refuses a `via` that is none of Rome's accounts on the key's platform.
    */
   startIfMissing(
@@ -106,7 +107,23 @@ export class ChatRepository {
     return this.write((tx) => {
       const channel = this.channelOf(key.platform, via);
       const rows = this.rowsOf(tx, key, via);
-      if (rows.some((row) => row.sourceChannel === channel)) return this.toChat(key, rows);
+      const own = rows.find((row) => row.sourceChannel === channel);
+      if (own !== undefined) {
+        const known = seed.threadType ?? null;
+        if (own.sourceThreadType !== null || !SHARED_THREAD_TYPES.has(known ?? "")) {
+          return this.toChat(key, rows);
+        }
+        // A row stored before its type was known, such as one an outbound send
+        // wrote, joins the group a message now names it part of.
+        tx.update(romeSessions)
+          .set({ sourceThreadType: known })
+          .where(eq(romeSessions.id, own.id))
+          .run();
+        const joined = this.rowsOf(tx, key, via);
+        const chat = this.toChat(key, joined);
+        this.save(tx, chat, joined, { ...seed, threadType: known });
+        return chat;
+      }
       const threadType =
         "threadType" in seed ? (seed.threadType ?? null) : kind === "dm" ? "private" : "group";
       if (rows.length === 0 || !SHARED_THREAD_TYPES.has(threadType ?? "")) {
