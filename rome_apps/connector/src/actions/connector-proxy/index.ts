@@ -84,10 +84,10 @@ const inputSchema = z.object({
       "JSON request body for POST/PUT/PATCH (a GraphQL { query } object, a REST payload, …)",
     ),
   query: z
-    .record(z.string(), z.union([z.string(), z.number()]))
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
     .optional()
     .describe(
-      "Query-string parameters as { name: value }, e.g. { profile: handle, limit: 10 }. Pass dynamic or step-sourced values HERE — never string-build them into the path (query-param injection).",
+      "Query-string parameters as { name: value }, e.g. { profile: handle, limit: 10, singleEvents: true }. Booleans are sent as 'true'/'false'. Pass dynamic or step-sourced values HERE — never string-build them into the path (query-param injection).",
     ),
   headers: z
     .record(z.string(), z.string())

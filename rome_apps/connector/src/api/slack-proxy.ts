@@ -104,7 +104,7 @@ export async function slackProxyCall(params: {
   endpoint: string;
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD";
   body?: unknown;
-  query?: Record<string, string | number>;
+  query?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
 }): Promise<ProxiedResponse> {
   const token = selectSlackToken(params.endpoint, params.tokens);
