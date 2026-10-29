@@ -53,9 +53,14 @@ export class ChatSettingsRepository {
   /** The reply rule of the chat at `chatId` as the account `channel` speaks
    *  as sees it: the group's, whichever of Rome's accounts set it, or the
    *  account's own direct message's. A row stored with no type reads as the
-   *  `kind` it is known by, as `mutate` will store it. The routing marker is
+   *  `kind` its platform described, as `mutate` will store it, and alone when
+   *  `kind` is null. The routing marker is
    *  the account's own row's. Null when none is set. */
-  ruleOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): StoredChatSettings | null {
+  ruleOf(
+    channel: string,
+    chatId: ChatId,
+    kind: ChatDescriptor["kind"] | null,
+  ): StoredChatSettings | null {
     const via = this.chats.accountOn(channel);
     return withRoutingOf(
       rowByAddress(this.db, channel, chatId)?.channelSettings ?? null,
@@ -113,6 +118,10 @@ export class ChatSettingsRepository {
     input: {
       settings: StoredChatSettings | null;
       agentName: string | null | undefined;
+      /** False when `descriptor.kind` is only a guess, made for a row stored
+       *  with no type that its platform has never described. The row then
+       *  keeps no type, and joins no group. */
+      kindKnown?: boolean;
     },
   ): void {
     // A webchat address is a guardian chat, which has no conversation settings.
@@ -126,10 +135,15 @@ export class ChatSettingsRepository {
     this.db.transaction((tx) => {
       // A row stored before its type was known joins its group's other rows
       // first, so the rule below is written to the whole group.
-      this.classify(tx, descriptor, channel);
+      const kindKnown = input.kindKnown ?? true;
+      if (kindKnown) this.classify(tx, descriptor, channel);
       const via = this.chats.accountOn(channel);
       const key = chatKey(via.platform, descriptor.ref.chatId);
-      const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
+      const sourceThreadType = !kindKnown
+        ? null
+        : descriptor.kind === "dm"
+          ? "private"
+          : descriptor.kind;
       this.chats.startIfMissing(
         key,
         descriptor.kind === "dm" ? "dm" : "group",
@@ -147,7 +161,7 @@ export class ChatSettingsRepository {
       );
       tx.update(romeSessions)
         .set({
-          sourceThreadType,
+          ...(sourceThreadType === null ? {} : { sourceThreadType }),
           // The routing marker is this account's alone, so only its row holds it.
           channelSettings: input.settings,
           ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
@@ -217,6 +231,6 @@ export class ChatSettingsRepository {
   }
 }
 
-function isShared(kind: ChatDescriptor["kind"]): boolean {
+function isShared(kind: ChatDescriptor["kind"] | null): boolean {
   return kind === "group" || kind === "channel";
 }

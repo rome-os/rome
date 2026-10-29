@@ -15,7 +15,7 @@
 // change names are not kept. A thread's row, which names a parent row, is no
 // chat of its own and is never read here.
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { Account } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
@@ -23,6 +23,7 @@ import {
   romeAgentMessages,
   romeAgentTraceBlocks,
   romeSessions,
+  sessions,
 } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -199,19 +200,31 @@ export class ChatRepository {
   }
 
   /** Delete `rows`, the thread rows under them, and everything said in
-   *  either, as deleting a dashboard chat does. */
+   *  either, as deleting a dashboard chat does. The agent sessions that served
+   *  them are completed, so a chat started again at the same address resumes
+   *  none of the ended one's context. Live handles to those sessions are the
+   *  caller's to close. */
   private deleteRows(tx: DrizzleTx, rows: Row[]): void {
     if (rows.length === 0) return;
     const chatIds = rows.map((row) => row.id);
-    const ids = [
-      ...chatIds,
-      ...tx
-        .select({ id: romeSessions.id })
-        .from(romeSessions)
-        .where(inArray(romeSessions.parentSessionId, chatIds))
-        .all()
-        .map((row) => row.id),
+    const all = [
+      ...rows,
+      ...tx.select().from(romeSessions).where(inArray(romeSessions.parentSessionId, chatIds)).all(),
     ];
+    const ids = all.map((row) => row.id);
+    const keys = all.flatMap((row) => {
+      const key = `${row.sourceChannel}:${row.sourceThreadId}`;
+      return [key, `sentinel:${key}`];
+    });
+    tx.update(sessions)
+      .set({ status: "completed", lastActiveAt: new Date() })
+      .where(
+        and(
+          eq(sessions.status, "active"),
+          or(inArray(sessions.chatId, ids), inArray(sessions.channelThreadKey, keys)),
+        ),
+      )
+      .run();
     tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, ids)).run();
     tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, ids)).run();
     tx.delete(romeAgentMessagePlatformIds)

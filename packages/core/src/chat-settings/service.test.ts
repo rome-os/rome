@@ -669,7 +669,7 @@ describe("ChatSettingsService", () => {
   /** A service over one group two of Rome's accounts on Feishu are in. A
    *  second account of one kind is stood in for by another kind, whose channel
    *  the fake records put on Feishu. */
-  async function twoAccountsInOneGroup(agents: string[] = []) {
+  async function twoAccountsInOneGroup(agents: string[] = [], observed = true) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(testDb.db),
@@ -700,7 +700,7 @@ describe("ChatSettingsService", () => {
     });
     const throughSales = { connectionId: sales.id, chatId: "oc_group" as ChatId };
     const throughSupport = { connectionId: support.id, chatId: "oc_group" as ChatId };
-    for (const ref of [throughSales, throughSupport]) {
+    for (const ref of observed ? [throughSales, throughSupport] : []) {
       service.observe({
         ref,
         connectionKind: "feishu",
@@ -798,6 +798,31 @@ describe("ChatSettingsService", () => {
     expect((await service.get(throughSupport)).overrides.routing).toEqual({
       agentName: "pm-assistant",
     });
+  });
+
+  it("keeps a row with no type apart from a group its platform never named it in", async () => {
+    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
+    const key = chatKey("feishu", "oc_group" as ChatId);
+    const support = { platform: "feishu", id: "ou_support" };
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
+    chats.startIfMissing(key, "group", support, null, { threadType: null });
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
+    await service.update({
+      ref: throughSupport,
+      set: { routing: { agentName: "main" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
+    expect((await service.get(throughSales)).effective.enabled).toBe(false);
+    expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
   });
 
   it("leaves a row stored with no type apart when its edit is refused", async () => {

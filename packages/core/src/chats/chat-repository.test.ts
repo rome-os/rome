@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Account, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
 import { channelChatId } from "../db/session-kind.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatRefusal } from "./chat.js";
@@ -151,6 +151,36 @@ describe("ChatRepository", () => {
     expect(
       testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all(),
     ).toEqual([]);
+  });
+
+  it("completes the agent sessions of an ended chat, so starting it again resumes none", () => {
+    chats.startIfMissing(GROUP, "group", SALES, null);
+    const now = new Date();
+    const session = (id: string, values: { channelThreadKey?: string; chatId?: string }) => ({
+      id,
+      agentName: "main",
+      status: "active" as const,
+      createdAt: now,
+      lastActiveAt: now,
+      ...values,
+    });
+    testDb.db
+      .insert(sessions)
+      .values([
+        session("by-key", { channelThreadKey: "feishu:oc_group" }),
+        session("by-chat", { chatId: channelChatId("feishu", "oc_group") }),
+        session("elsewhere", { channelThreadKey: "feishu:oc_other" }),
+      ])
+      .run();
+
+    chats.update(GROUP, (chat) => chat.end());
+    chats.startIfMissing(GROUP, "group", SALES, null);
+
+    const status = (id: string) =>
+      testDb.db.select().from(sessions).where(eq(sessions.id, id)).get()?.status;
+    expect(status("by-key")).toBe("completed");
+    expect(status("by-chat")).toBe("completed");
+    expect(status("elsewhere")).toBe("active");
   });
 
   it("refuses one of Rome's accounts leaving a live chat, and keeps its row", () => {
