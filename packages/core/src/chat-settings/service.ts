@@ -559,14 +559,14 @@ export class ChatSettingsService implements ChatSettingsControl {
   }
 
   /** The kind of the conversation as its row or its platform states it, or
-   *  null when `descriptor.kind` is only the guess made for a row with no
-   *  type, which must not join a group on that guess. */
+   *  null when `descriptor.kind` is only the guess made for an address with
+   *  no row or a row with no type, which must not join a group on that guess. */
   private knownKind(
     ref: ChatRef,
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): ChatDescriptor["kind"] | null {
-    if (row === null || row.sourceThreadType !== null) return descriptor.kind;
+    if (row !== null && row.sourceThreadType !== null) return descriptor.kind;
     return this.describedKinds.get(this.key(ref)) ?? null;
   }
 

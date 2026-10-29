@@ -825,6 +825,29 @@ describe("ChatSettingsService", () => {
     expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
   });
 
+  it("starts no group at an address neither a row nor its platform has named", async () => {
+    const { service, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
+
+    await service.update({
+      ref: throughSales,
+      set: { session: { reset: { mode: "daily", atHour: 4 } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    await service.update({
+      ref: throughSupport,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect((await service.get(throughSales)).effective.session.reset).toEqual({
+      mode: "daily",
+      atHour: 4,
+    });
+    expect((await service.get(throughSupport)).effective.session.reset).toEqual({ mode: "none" });
+  });
+
   it("leaves a row stored with no type apart when its edit is refused", async () => {
     const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
     const key = chatKey("feishu", "oc_group" as ChatId);
