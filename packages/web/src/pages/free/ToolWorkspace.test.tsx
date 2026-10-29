@@ -15,6 +15,7 @@ import type { ToolView, WidgetPlacement } from "./use-free-cells";
 rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
 
 let viewportWidth = 1200;
+let stripWidth: number | null = null;
 const mounted = rs.fn();
 function ToolContent({ id }: { id: string }) {
   useEffect(() => {
@@ -31,14 +32,21 @@ beforeEach(() => {
   mounted.mockClear();
   localStorage.clear();
   viewportWidth = 1200;
+  stripWidth = null;
   rs.stubGlobal(
     "ResizeObserver",
     class {
       constructor(private callback: ResizeObserverCallback) {}
       observe(target: Element) {
-        if (target.getAttribute("data-testid") === "tool-workspace") {
+        const width =
+          target.getAttribute("data-testid") === "tool-workspace"
+            ? viewportWidth
+            : target.getAttribute("role") === "tablist"
+              ? stripWidth
+              : null;
+        if (width !== null) {
           this.callback(
-            [{ target, contentRect: { width: viewportWidth } } as ResizeObserverEntry],
+            [{ target, contentRect: { width } } as ResizeObserverEntry],
             this as unknown as ResizeObserver,
           );
         }
@@ -63,6 +71,7 @@ function workspace(
   items = placements,
   addWidget = rs.fn(),
   onOpenIntent = rs.fn(),
+  label = (widget: WidgetPlacement) => widget.type,
 ) {
   return (
     <ToolWorkspace
@@ -72,7 +81,7 @@ function workspace(
       setCollapsed={rs.fn()}
       addWidget={addWidget}
       removeWidget={rs.fn()}
-      label={(widget) => widget.type}
+      label={label}
       icon={() => null}
       content={(widget) => <ToolContent id={widget.id} />}
       fullHref={(widget) => (widget.type === "desktop" ? "/desktop" : null)}
@@ -121,6 +130,49 @@ describe("ToolWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "Draft a" })).toBe(first);
     expect((first as HTMLInputElement).value).toBe("unfinished work");
     expect(mounted).toHaveBeenCalledTimes(2);
+  });
+
+  describe("when the tabs do not fit the strip", () => {
+    const many: WidgetPlacement[] = ["a", "b", "c", "d", "e"].map((id, order) => ({
+      id,
+      type: "desktop",
+      order,
+    }));
+    const tabNames = () => screen.getAllByRole("tab").map((tab) => tab.getAttribute("title"));
+    const labelled = (view: ToolView) =>
+      workspace(view, many, rs.fn(), rs.fn(), (widget) => `app ${widget.id}`);
+
+    it("draws the tabs that fit, and counts the rest on the all-apps menu", () => {
+      stripWidth = 3 * 128 + 2 * 4;
+      render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
+      expect(tabNames()).toEqual(["app a", "app b", "app c"]);
+      expect(screen.getByRole("button", { name: "All open apps, 2 more" }).textContent).toBe("+2");
+    });
+
+    it("moves a hidden active tab into the last slot", () => {
+      stripWidth = 3 * 128 + 2 * 4;
+      render(labelled({ activeId: "e", collapsed: false, unreadIds: [] }));
+      expect(tabNames()).toEqual(["app a", "app b", "app e"]);
+    });
+
+    it("lists every tab on the menu and keeps the plain label when all fit", async () => {
+      const user = userEvent.setup();
+      stripWidth = 3 * 128 + 2 * 4;
+      const { unmount } = render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
+      await user.click(screen.getByRole("button", { name: "All open apps, 2 more" }));
+      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+        "app a",
+        "app b",
+        "app c",
+        "app d",
+        "app e",
+      ]);
+      unmount();
+      stripWidth = 5000;
+      render(labelled({ activeId: "a", collapsed: false, unreadIds: [] }));
+      expect(tabNames()).toHaveLength(5);
+      expect(screen.getByRole("button", { name: "All open apps" }).textContent).toBe("");
+    });
   });
 
   it("adjusts and resets the separator with the keyboard without losing chat input", async () => {
@@ -197,6 +249,16 @@ describe("ToolWorkspace in the Mac app's title bar", () => {
     expect(Number.parseFloat(header.style.width) + Number.parseFloat(chat.style.width) + 1).toBe(
       viewportWidth,
     );
+  });
+
+  it("fits the tabs to the strip in the title bar too", () => {
+    stripWidth = 128;
+    render(inTitlebar({ activeId: "b", collapsed: false, unreadIds: [] }));
+    const end = screen.getByTestId("titlebar-end");
+    expect(Array.from(end.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)).toEqual([
+      "projects",
+    ]);
+    expect(screen.getByRole("button", { name: "All open apps, 1 more" })).toBeTruthy();
   });
 
   it("leaves the title bar when the panel is collapsed", () => {

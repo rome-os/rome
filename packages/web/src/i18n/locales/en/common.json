@@ -259,6 +259,8 @@
     "openToolNewTab": "Open {{name}} in new tab",
     "closeTool": "Close {{name}}",
     "allTools": "All open apps",
+    "allToolsHidden_one": "All open apps, {{count}} more",
+    "allToolsHidden_other": "All open apps, {{count}} more",
     "collapseTools": "Hide apps",
     "expandTools": "Show apps",
     "resizeTools": "Resize chat and apps",

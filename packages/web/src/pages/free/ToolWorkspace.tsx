@@ -36,6 +36,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
+import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
 
@@ -68,22 +69,18 @@ interface ToolTabProps {
 
 function ToolTab({ id, label, icon, active, unread = false, liveLabel, onClose }: ToolTabProps) {
   const { t } = useTranslation("common");
-  const tabRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (active) tabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [active]);
 
   return (
     <div
-      ref={tabRef}
-      className={`relative flex h-9 shrink-0 items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+      style={{ minWidth: MIN_TAB_WIDTH }}
+      className={`relative flex h-9 shrink items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
     >
       <TabsTrigger
         value={id}
         role="tab"
         aria-selected={active}
         title={label}
-        className="h-full max-w-48 gap-2 after:hidden"
+        className="h-full min-w-0 max-w-48 flex-1 gap-2 after:hidden"
         onKeyDown={(event) => {
           if (event.key === "Delete") {
             event.preventDefault();
@@ -158,6 +155,8 @@ export function ToolWorkspace({
   const [ratio, setRatio] = useState(readRatio);
   const [resizing, setResizing] = useState(false);
   const [outlet, setOutlet] = useState<HTMLDivElement | null>(null);
+  const [strip, setStrip] = useState<HTMLDivElement | null>(null);
+  const [stripWidth, setStripWidth] = useState<number | null>(null);
 
   // The Trace tab is view state, not layout: it lives here, never reaches
   // `use-free-cells`, and so is not saved with the session. Selecting it leaves
@@ -268,20 +267,40 @@ export function ToolWorkspace({
     return () => observer.disconnect();
   }, []);
 
+  // The strip is a state-held element, not a ref, because the title bar portal
+  // and the in-pane header swap it for a new one.
+  useEffect(() => {
+    if (!strip) return;
+    const observer = new ResizeObserver(([entry]) => setStripWidth(entry.contentRect.width));
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [strip]);
+
   // In the Mac app the tabs move up into the title bar, over this panel, so the
   // window has one row on top. The header there is as wide as the panel.
   const inTitlebar = useSlotOutlet(TITLEBAR_END_SLOT);
   const toolsWidth = compact ? width : Math.max(0, width - chatWidth - SEPARATOR_WIDTH);
   // The tabs keep the `Tabs` root's context through the portal, but not its
-  // CSS group, so the list states its full height itself.
+  // CSS group, so the list states its full height itself. The kit's own list
+  // height is shorter than a tab, so inside the group the list takes the row's
+  // height too, or it would clip the tabs. The strip never scrolls: tabs that
+  // do not fit at their minimum width leave it, and the all-tools menu lists
+  // them. The same `header` renders in the title bar, so both share this.
+  const tabIds = [...(trace ? [TRACE_TAB_ID] : []), ...sorted.map((widget) => widget.id)];
+  const activeTabId = traceActive ? TRACE_TAB_ID : (view.activeId ?? null);
+  const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
+  const hiddenCount = tabIds.length - shownIds.size;
+  const allToolsLabel =
+    hiddenCount > 0 ? t("chat.allToolsHidden", { count: hiddenCount }) : t("chat.allTools");
   const header = (
     <>
       {hasTabs ? (
         <TabsList
+          ref={setStrip}
           aria-label={t("chat.tools")}
-          className="h-full min-w-0 flex-1 justify-start overflow-x-auto p-0"
+          className="h-full min-w-0 flex-1 justify-start overflow-hidden group-data-horizontal/tabs:h-full p-0"
         >
-          {trace && (
+          {trace && shownIds.has(TRACE_TAB_ID) && (
             <ToolTab
               id={TRACE_TAB_ID}
               label={tActivity("trace.drawer.title")}
@@ -291,17 +310,19 @@ export function ToolWorkspace({
               onClose={() => traceCloseRef.current?.()}
             />
           )}
-          {sorted.map((widget) => (
-            <ToolTab
-              key={widget.id}
-              id={widget.id}
-              label={label(widget)}
-              icon={icon(widget)}
-              active={!traceActive && widget.id === view.activeId}
-              unread={view.unreadIds.includes(widget.id)}
-              onClose={() => closeTab(widget.id)}
-            />
-          ))}
+          {sorted
+            .filter((widget) => shownIds.has(widget.id))
+            .map((widget) => (
+              <ToolTab
+                key={widget.id}
+                id={widget.id}
+                label={label(widget)}
+                icon={icon(widget)}
+                active={!traceActive && widget.id === view.activeId}
+                unread={view.unreadIds.includes(widget.id)}
+                onClose={() => closeTab(widget.id)}
+              />
+            ))}
         </TabsList>
       ) : (
         <span className="flex h-full flex-1 items-center px-2 text-ui text-muted-foreground">
@@ -328,7 +349,20 @@ export function ToolWorkspace({
       {hasTabs && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <IconButton size="sm" label={t("chat.allTools")} icon={<ChevronDown />} />
+            {hiddenCount > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={allToolsLabel}
+                title={allToolsLabel}
+                className="shrink-0"
+              >
+                <ChevronDown />
+                <span className="text-aux tabular-nums">+{hiddenCount}</span>
+              </Button>
+            ) : (
+              <IconButton size="sm" label={allToolsLabel} icon={<ChevronDown />} />
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {trace && (
