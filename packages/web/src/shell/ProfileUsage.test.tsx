@@ -50,18 +50,18 @@ function mount(status: unknown, settings: Record<string, unknown> = {}) {
 }
 
 describe("ProfileUsage", () => {
-  it("shows each signed-in subscription tool's remaining windows, local resets and age", async () => {
+  it("shows each signed-in subscription tool's used windows, local resets and age", async () => {
     mount({
       claude: { loggedIn: true, usage },
       codex: { loggedIn: true, usage: { ...usage, fiveHour: { usedPercent: 99 } } },
     });
     const claude = await screen.findByRole("group", { name: "Claude" });
-    expect(within(claude).getByText("5h")).toBeTruthy();
-    expect(within(claude).getByText("71%")).toBeTruthy();
-    expect(within(claude).getByText("88%")).toBeTruthy();
+    expect(within(claude).getByText("5h used")).toBeTruthy();
+    expect(within(claude).getByText("29%")).toBeTruthy();
+    expect(within(claude).getByText("12%")).toBeTruthy();
     expect(within(claude).getByText(formatUsageReset(usage.fiveHour.resetsAt, "en")!)).toBeTruthy();
     const chatgpt = screen.getByRole("group", { name: "ChatGPT" });
-    expect(within(chatgpt).getByText("1%")).toBeTruthy();
+    expect(within(chatgpt).getByText("99%")).toBeTruthy();
     expect(screen.getByText("Updated 5 min ago")).toBeTruthy();
   });
 
@@ -83,25 +83,25 @@ describe("ProfileUsage", () => {
       },
     });
     expect(await screen.findByText("Reset")).toBeTruthy();
-    expect(screen.queryByText("0%")).toBeNull();
-    expect(screen.getByText("88%")).toBeTruthy();
+    expect(screen.queryByText("100%")).toBeNull();
+    expect(screen.getByText("12%")).toBeTruthy();
   });
 
   it("shows unavailable rather than stale numbers on usage errors", async () => {
     mount({ claude: { loggedIn: true, usage: { ...usage, error: "429" } } });
     expect(await screen.findByText("Usage is unavailable right now.")).toBeTruthy();
-    expect(screen.queryByText("71%")).toBeNull();
+    expect(screen.queryByText("29%")).toBeNull();
   });
 
   it("collapses and expands without closing the menu, and links to AI Tools", async () => {
     mount({ claude: { loggedIn: true, usage } });
-    const toggle = await screen.findByRole("menuitem", { name: "Usage remaining" });
+    const toggle = await screen.findByRole("menuitem", { name: "Usage" });
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     await userEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("71%")).toBeNull();
+    expect(screen.queryByText("29%")).toBeNull();
     await userEvent.click(toggle);
-    expect(screen.getByText("71%")).toBeTruthy();
+    expect(screen.getByText("29%")).toBeTruthy();
     await userEvent.click(screen.getByRole("menuitem", { name: "Manage in AI Tools" }));
     expect(await screen.findByText("AI Tools page")).toBeTruthy();
   });
@@ -116,6 +116,6 @@ describe("ProfileUsage", () => {
   ])("shows nothing for a signed-out, windowless, API-key or hidden case (%#)", async (status, settings) => {
     mount(status, settings);
     await new Promise((done) => setTimeout(done, 50));
-    expect(screen.queryByRole("menuitem", { name: "Usage remaining" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Usage" })).toBeNull();
   });
 });

@@ -48,7 +48,7 @@ function showsUsage(status: AIToolStatus | undefined): status is AIToolStatus & 
 }
 
 /**
- * The usage section of the account menu: remaining 5-hour and weekly share
+ * The usage section of the account menu: used 5-hour and weekly share
  * for each signed-in subscription tool. It reads the shared status cache and
  * never asks a provider. The menu mounts it on open, so a reset that passed
  * while the menu was closed shows as reset.
@@ -76,17 +76,22 @@ export function ProfileUsage() {
     // A window whose reset has passed is fresh again, though no reading since
     // says how much of it is used, so it reads "Reset" rather than old numbers.
     const resetPassed = Date.parse(window.resetsAt ?? "") <= now;
-    const remaining =
-      window.usedPercent === undefined ? window.remainingPercent : 100 - window.usedPercent;
+    // Used, not remaining, to read the same as the AI Tools meters.
+    const used =
+      window.usedPercent === undefined
+        ? window.remainingPercent === undefined
+          ? undefined
+          : 100 - window.remainingPercent
+        : window.usedPercent;
     return (
-      <div className="col-span-3 grid grid-cols-subgrid items-baseline py-1">
+      <div className="col-span-3 grid grid-cols-subgrid items-baseline py-1 whitespace-nowrap">
         <span>{label}</span>
         <span className="text-muted-foreground tabular-nums">
           {resetPassed
             ? t("aiTools.usage.windowReset")
-            : remaining === undefined
+            : used === undefined
               ? t("aiTools.usage.unavailable")
-              : `${Math.round(remaining)}%`}
+              : `${Math.round(used)}%`}
         </span>
         <span className="text-end text-muted-foreground tabular-nums">
           {resetPassed ? null : formatUsageReset(window.resetsAt, i18n.language, now)}
@@ -109,7 +114,7 @@ export function ProfileUsage() {
         }}
       >
         <Gauge aria-hidden />
-        {t("aiTools.usage.remaining")}
+        {t("aiTools.usage.menuTitle")}
         <ChevronDown
           aria-hidden
           className={cn("ms-auto transition-transform", !expanded && "-rotate-90")}
@@ -131,8 +136,8 @@ export function ProfileUsage() {
               ) : (
                 // One grid for the tool's rows keeps their columns aligned.
                 <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 pr-2 pl-8 text-ui">
-                  {row(t("aiTools.usage.shortFiveHour"), tool.status.usage.fiveHour)}
-                  {row(t("aiTools.usage.weekly"), tool.status.usage.sevenDay)}
+                  {row(t("aiTools.usage.fiveHourUsed"), tool.status.usage.fiveHour)}
+                  {row(t("aiTools.usage.weeklyUsed"), tool.status.usage.sevenDay)}
                 </div>
               )}
             </div>

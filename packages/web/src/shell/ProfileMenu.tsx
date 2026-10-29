@@ -87,7 +87,7 @@ export function ProfileMenu() {
             </Avatar>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" className="w-64">
+        <DropdownMenuContent side="top" align="start" className="w-72">
           {title ? (
             <>
               <DropdownMenuLabel className="flex flex-col gap-1">
