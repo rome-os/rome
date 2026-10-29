@@ -317,6 +317,22 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     expect(within(row).queryByText("Connect")).toBeNull();
   });
 
+  it("says nothing is connected and offers Available, above App keys", () => {
+    renderSection(minimalConnections());
+    fireEvent.click(tabRadio(/Connected/));
+    expect(screen.getByText("Nothing is connected yet.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show 2 in Available" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
+  });
+
+  it("matches only names on Connected, where descriptions are not shown", () => {
+    renderSection(mixed());
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "repositories" },
+    });
+    expect(rowNames()).toEqual([]);
+  });
+
   it("clears the search on Escape", () => {
     renderSection(mixed());
     const input = screen.getByLabelText("Search connections") as HTMLInputElement;

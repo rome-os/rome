@@ -96,13 +96,16 @@ export function ConnectionsSection({
       : null;
     return bullet ? t(bullet.key, bullet.params) : "";
   };
-  const matches = (card: ConnectionCard) =>
-    !needle || `${card.label} ${describe(card)}`.toLocaleLowerCase().includes(needle);
+  // Search matches what a row shows: the name, plus what the service does on
+  // Available, the only tab that shows it.
+  const matches = (card: ConnectionCard, withDescription: boolean) =>
+    !needle ||
+    `${card.label} ${withDescription ? describe(card) : ""}`.toLocaleLowerCase().includes(needle);
   const connected = cards.filter(isConnectedCard);
   const available = cards.filter((card) => !isConnectedCard(card));
   const shown: Record<ConnectionTab, ConnectionCard[]> = {
-    connected: connected.filter(matches),
-    available: available.filter(matches),
+    connected: connected.filter((card) => matches(card, false)),
+    available: available.filter((card) => matches(card, true)),
   };
   const tab: ConnectionTab = chosenTab ?? (connected.length > 0 ? "connected" : "available");
   const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
@@ -218,7 +221,7 @@ export function ConnectionsSection({
                 ),
               }))}
             />
-            {shown[tab].length === 0 && !showAppKeys ? (
+            {shown[tab].length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-8 border border-dashed border-border px-4 py-6 text-center text-ui text-muted-foreground">
                 <p>
                   {needle
