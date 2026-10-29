@@ -110,6 +110,22 @@ describe("Assistants API", () => {
     expect(first!.lastMessageAt).not.toBeNull();
   });
 
+  it("reads the chat newest first, a page at a time", async () => {
+    for (const text of ["one", "two", "three"]) {
+      expect((await send(DOT, { text })).status).toBe(200);
+    }
+    const read = async (query: string) =>
+      (await (await app.request(`/assistants/${DOT}/messages${query}`)).json()) as TimelinePage;
+
+    const newest = await read("?limit=2");
+    expect(newest.entries.map((entry) => entry.body)).toEqual(["three", "two"]);
+    expect(newest.nextCursor).not.toBeNull();
+
+    const older = await read(`?limit=2&cursor=${encodeURIComponent(newest.nextCursor!)}`);
+    expect(older.entries.map((entry) => entry.body)).toEqual(["one"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
   it("answers a refused send with the channel's error, and keeps nothing", async () => {
     rs.spyOn(deps.transports.get("agents")!, "send").mockRejectedValue(new Error("not reachable"));
     const res = await send(DOT, { text: "Are you there?" });

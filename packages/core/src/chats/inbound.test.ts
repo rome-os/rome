@@ -81,7 +81,7 @@ describe("inboundRecording", () => {
     inboundRecording(
       {
         chats: rows,
-        messages: new StoredMessages(rows, events),
+        messages: new StoredMessages(rows, events, { channelsOn: () => ["telegram"] }),
         events,
         platformOfChannel: () => "telegram",
         ...(accountAgentOf ? { accountAgentOf } : {}),
@@ -209,7 +209,7 @@ describe("inboundRecording", () => {
   });
 
   it("refuses to record into a chat that does not exist", async () => {
-    const messages = new StoredMessages(rows, events);
+    const messages = new StoredMessages(rows, events, { channelsOn: () => ["telegram"] });
 
     await expect(
       messages.record(

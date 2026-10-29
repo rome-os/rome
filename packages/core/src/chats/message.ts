@@ -53,6 +53,30 @@ export type Message = InboundMessage;
 export type RecordedMessage = Message & { readonly id: string };
 
 /**
+ * A message as a read of its place finds it, either way it went. Reads see
+ * only what was said, so a message from Rome is one the platform took, or one
+ * recorded before deliveries were (docs/domains/chats.md#delivery).
+ *
+ * `saidBy` is absent when the record kept no account for the message: an
+ * older row, or one of Rome's lines on a channel that has no account of its
+ * own. `senderName` is what the line called its sender, kept even then, so a
+ * reader can still say who spoke. `turnId` names the agent turn that said the message or was woken by
+ * it. It is an id in Agents, which Chats keeps and never reads.
+ */
+export interface SaidMessage {
+  readonly id: string;
+  readonly direction: Direction;
+  readonly place: Place;
+  readonly saidBy?: SaidBy;
+  readonly senderName?: string;
+  readonly body: Body;
+  readonly platformMessageId?: string;
+  readonly replyTo?: string;
+  readonly at: Date;
+  readonly turnId?: string;
+}
+
+/**
  * A message to Rome. Refuses a sender on another platform than the place,
  * since a chat's participants are all on its platform, and a message with no
  * platform id, since nothing could tell a redelivery from a new message.

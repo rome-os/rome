@@ -91,6 +91,7 @@ import { AccountProfilesRepository } from "./db/repositories/account-profiles.js
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
+import { storedOn } from "./channels/channel.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
 import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrant } from "./channels/platform.js";
@@ -1004,6 +1005,15 @@ async function main() {
     chatApi: createLoopbackChatApi(),
     runBackendTurn: (params) => backendTurnRunner.runAndDeliver(params),
   });
+  // What was said in each place (docs/domains/chats.md#message). Reads find a
+  // platform's chats under every channel it is kept under, built or released.
+  // `channels` is built further down, before anything reads.
+  const chatEvents = new ChatEvents();
+  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
+    channelsOn: (platform) =>
+      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
+    accountOf: (channel) => channelRecords.accountOf(channel),
+  });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -1018,6 +1028,8 @@ async function main() {
       skillCatalog,
       lifecycleDispatcher,
       webchatRepo,
+      chatMessages,
+      platformOfChannel,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
@@ -1489,11 +1501,10 @@ async function main() {
   // Every message the channels deliver is put on record in its chat before the
   // hook hears it (docs/domains/participation.md#wake). It records through the
   // hook's channels, so the hook's trace covers recording as well.
-  const chatEvents = new ChatEvents();
   const inboundRecorder = inboundRecording(
     {
       chats: webchatRepo,
-      messages: new StoredMessages(webchatRepo, chatEvents),
+      messages: chatMessages,
       events: chatEvents,
       platformOfChannel,
       accountAgentOf: hookAgentOf,
@@ -1845,6 +1856,7 @@ async function main() {
       accountNames,
       assistants: listedAgents,
       webchatRepo,
+      chatMessages,
       webhookInvocationsRepo,
       approvalsRepo,
       approvalHandler,

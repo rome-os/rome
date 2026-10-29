@@ -4257,9 +4257,8 @@ describe("AgentRunner", () => {
       expect(prompt.indexOf("<reply_context>")).toBeLessThan(prompt.indexOf("<current_message>"));
 
       await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        notifications: [],
-        pendingNotificationIds: [],
-        omittedNotificationCount: 0,
+        unseen: [],
+        threadStarter: null,
         repliedTo: null,
       });
     });
@@ -4336,9 +4335,8 @@ describe("AgentRunner", () => {
         prompt.indexOf("<current_message>"),
       );
       await expect(webchatRepo.loadConversationContext(child.id)).resolves.toEqual({
-        notifications: [],
-        pendingNotificationIds: [],
-        omittedNotificationCount: 0,
+        unseen: [],
+        threadStarter: null,
         repliedTo: null,
       });
     });
@@ -4394,9 +4392,8 @@ describe("AgentRunner", () => {
       expect(prompt).toContain("Participant: ambient 2");
       expect(prompt).toContain("Participant: ambient 21");
       await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        notifications: [],
-        pendingNotificationIds: [],
-        omittedNotificationCount: 0,
+        unseen: [],
+        threadStarter: null,
         repliedTo: null,
       });
     });
@@ -4446,9 +4443,8 @@ describe("AgentRunner", () => {
       await expect(
         webchatRepo.loadConversationContext(conversation.id, "wechat-server-42"),
       ).resolves.toEqual({
-        notifications: [],
-        pendingNotificationIds: [],
-        omittedNotificationCount: 0,
+        unseen: [],
+        threadStarter: null,
         repliedTo: null,
       });
     });

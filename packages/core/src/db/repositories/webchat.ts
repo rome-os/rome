@@ -14,6 +14,7 @@ import {
   isNotNull,
   isNull,
   like,
+  lt,
   or,
   sql,
   type SQL,
@@ -87,6 +88,22 @@ export interface StoredConversationContextMessage {
   id: string;
   content: string;
   senderName: string | null;
+  createdAt: Date;
+}
+
+/** A said message's row, as {@link WebChatRepository.saidMessagesAt} reads
+ *  it, with the channel of the chat row that holds it. */
+export interface StoredSaidMessage {
+  id: string;
+  channel: string;
+  turnId: string | null;
+  role: string;
+  content: string;
+  platformMessageId: string | null;
+  senderId: string | null;
+  senderName: string | null;
+  onBehalfOf: string | null;
+  replyToPlatformMessageId: string | null;
   createdAt: Date;
 }
 
@@ -423,7 +440,6 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
-const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;
 const SQL_LIKE_ESCAPE = "\\";
 
 // Transcript search: how many LIKE-prefiltered message rows the JS confirm
@@ -1372,18 +1388,29 @@ export class WebChatRepository {
     await this.db.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing();
   }
 
+  /**
+   * What the agent has not seen in a channel conversation, by id: the
+   * notifications no turn has taken in yet. A send still pending reaches the
+   * agent once it is sent, and one the platform refused never does. The
+   * messages themselves are read from the chat (`MessageRepository.recent`).
+   *
+   * Also the two messages a turn quotes from beyond its place: the starter of
+   * a new thread, carried with Rome's first reply in it, and the message
+   * `replyToPlatformMessageId` names, looked up in the parent chat when the
+   * thread does not hold it.
+   */
   async loadConversationContext(
     sessionId: string,
     replyToPlatformMessageId?: string,
   ): Promise<{
-    notifications: StoredConversationContextMessage[];
-    pendingNotificationIds: string[];
-    omittedNotificationCount: number;
+    unseen: { id: string; platformMessageId: string | null }[];
+    threadStarter: StoredConversationContextMessage | null;
     repliedTo: StoredConversationContextMessage | null;
   }> {
     const pendingNotificationRows = await this.db
       .select({
         id: romeAgentMessages.id,
+        platformMessageId: romeAgentMessages.platformMessageId,
         senderId: romeAgentMessages.senderId,
         replyToPlatformMessageId: romeAgentMessages.replyToPlatformMessageId,
       })
@@ -1393,29 +1420,14 @@ export class WebChatRepository {
           eq(romeAgentMessages.sessionId, sessionId),
           eq(romeAgentMessages.role, "notification"),
           isNull(romeAgentMessages.contextInjectedTurnId),
-          // A send still pending reaches the agent once it is sent, and one the
-          // platform refused never does.
           saidMessage,
         ),
       )
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const pendingNotificationIds = pendingNotificationRows.map((row) => row.id);
-    const projectedNotificationIds = pendingNotificationIds.slice(
-      -CONVERSATION_CONTEXT_NOTIFICATION_LIMIT,
-    );
-    const notifications =
-      projectedNotificationIds.length === 0
-        ? []
-        : await this.db
-            .select({
-              id: romeAgentMessages.id,
-              content: romeAgentMessages.content,
-              senderName: romeAgentMessages.senderName,
-              createdAt: romeAgentMessages.createdAt,
-            })
-            .from(romeAgentMessages)
-            .where(inArray(romeAgentMessages.id, projectedNotificationIds))
-            .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
+    const unseen = pendingNotificationRows.map(({ id, platformMessageId }) => ({
+      id,
+      platformMessageId,
+    }));
     const contextColumns = {
       id: romeAgentMessages.id,
       content: romeAgentMessages.content,
@@ -1469,7 +1481,7 @@ export class WebChatRepository {
     const parentReferenceMessageId = pendingNotificationRows.find(
       (row) => row.senderId === "rome" && row.replyToPlatformMessageId,
     )?.replyToPlatformMessageId;
-    let contextualNotifications = notifications;
+    let threadStarter: StoredConversationContextMessage | null = null;
     if (parentReferenceMessageId) {
       const referencedParentSessionId = await loadParentSessionId();
       if (referencedParentSessionId) {
@@ -1477,15 +1489,10 @@ export class WebChatRepository {
           referencedParentSessionId,
           parentReferenceMessageId,
         );
-        const parentMessage = parentMessageRows[0];
-        if (parentMessage) contextualNotifications = [parentMessage, ...notifications];
+        threadStarter = parentMessageRows[0] ?? null;
       }
     }
-    const context = {
-      notifications: contextualNotifications,
-      pendingNotificationIds,
-      omittedNotificationCount: pendingNotificationIds.length - notifications.length,
-    };
+    const context = { unseen, threadStarter };
 
     if (!replyToPlatformMessageId) return { ...context, repliedTo: null };
     const repliedRows = await findMessageInSession(sessionId, replyToPlatformMessageId);
@@ -1552,6 +1559,77 @@ export class WebChatRepository {
     if (nameMissing && updated[0]?.name === threadName) {
       this.emitSessionNameChanged(row.id, threadName);
     }
+  }
+
+  /**
+   * The said messages of the chat rows `channels` keep for one address, newest
+   * first: at most `limit`, and only those before `before` when it is given.
+   * The order is created_at, then the order the rows were written in, since
+   * created_at keeps whole seconds. `before` names a message by its time and
+   * id. A message two of the rows hold, such as a group's message that reached
+   * two of Rome's accounts, is answered once, as the copy with the smallest id. Trace rows belong to no chat and are left
+   * out.
+   */
+  async saidMessagesAt(input: {
+    channels: readonly string[];
+    address: string;
+    before?: { at: Date; id: string };
+    limit: number;
+  }): Promise<StoredSaidMessage[]> {
+    if (input.channels.length === 0 || input.limit < 1) return [];
+    const chats = this.db
+      .select({ id: romeSessions.id })
+      .from(romeSessions)
+      .where(
+        and(
+          eq(romeSessions.type, "channel"),
+          inArray(romeSessions.sourceChannel, [...input.channels]),
+          eq(romeSessions.sourceThreadId, input.address),
+        ),
+      );
+    const { before } = input;
+    return await this.db
+      .select({
+        id: romeAgentMessages.id,
+        channel: sql<string>`${romeSessions.sourceChannel}`,
+        turnId: romeAgentMessages.turnId,
+        role: romeAgentMessages.role,
+        content: romeAgentMessages.content,
+        platformMessageId: romeAgentMessages.platformMessageId,
+        senderId: romeAgentMessages.senderId,
+        senderName: romeAgentMessages.senderName,
+        onBehalfOf: romeAgentMessages.onBehalfOf,
+        replyToPlatformMessageId: romeAgentMessages.replyToPlatformMessageId,
+        createdAt: romeAgentMessages.createdAt,
+      })
+      .from(romeAgentMessages)
+      .innerJoin(romeSessions, eq(romeSessions.id, romeAgentMessages.sessionId))
+      .where(
+        and(
+          inArray(romeAgentMessages.sessionId, chats),
+          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
+          saidMessage,
+          before &&
+            or(
+              lt(romeAgentMessages.createdAt, before.at),
+              and(
+                eq(romeAgentMessages.createdAt, before.at),
+                sql`${romeAgentMessages}.rowid < (select rowid from ${romeAgentMessages} as "cursor" where "cursor"."id" = ${before.id})`,
+              ),
+            ),
+          or(
+            isNull(romeAgentMessages.platformMessageId),
+            sql`not exists (
+              select 1 from ${romeAgentMessages} as "copy"
+              where "copy"."session_id" in ${chats}
+                and "copy"."platform_message_id" = ${romeAgentMessages.platformMessageId}
+                and "copy"."id" < ${romeAgentMessages.id}
+            )`,
+          ),
+        ),
+      )
+      .orderBy(desc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid desc`)
+      .limit(input.limit);
   }
 
   /** The id of a channel's chat row for the platform's chat id, or null when

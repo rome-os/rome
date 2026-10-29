@@ -46,6 +46,12 @@ export function agentMessageOutbound(role: SQL, senderId: SQL): SQL {
   END`;
 }
 
+/** {@link agentMessageOutbound} over one row already read, for a reader that
+ *  holds the row rather than a query. */
+export function isAgentMessageOutbound(role: string, senderId: string | null): boolean {
+  return role === "assistant" || (role === "notification" && senderId === ROME_SENDER_ID);
+}
+
 /**
  * Rome's own transcript of a channel conversation, read for accounts.
  *
