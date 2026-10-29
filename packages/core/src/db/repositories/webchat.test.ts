@@ -1085,7 +1085,7 @@ describe("WebChatRepository", () => {
       });
     });
 
-    it("loads pending notifications and the exact replied-to message, then marks only notifications injected", async () => {
+    it("names the unseen notifications and loads the exact replied-to message, then marks only notifications injected", async () => {
       const conversation = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "thread-context",
@@ -1117,58 +1117,24 @@ describe("WebChatRepository", () => {
       });
 
       const context = await repo.loadConversationContext(conversation.id, "original");
-      expect(context.notifications.map((message) => message.content)).toEqual([
-        textContent("first ambient message"),
-        textContent("second ambient message"),
+      expect(context.unseen.map((message) => message.platformMessageId)).toEqual([
+        "ambient-1",
+        "ambient-2",
       ]);
-      expect(context.pendingNotificationIds).toHaveLength(2);
-      expect(context.omittedNotificationCount).toBe(0);
+      expect(context.threadStarter).toBeNull();
       expect(context.repliedTo).toMatchObject({
         content: textContent("the original question"),
         senderName: "Alice",
       });
 
-      await repo.markConversationContextInjected(context.pendingNotificationIds, "turn-1");
+      await repo.markConversationContextInjected(
+        context.unseen.map((message) => message.id),
+        "turn-1",
+      );
 
       const afterInjection = await repo.loadConversationContext(conversation.id, "original");
-      expect(afterInjection.notifications).toEqual([]);
-      expect(afterInjection.pendingNotificationIds).toEqual([]);
-      expect(afterInjection.omittedNotificationCount).toBe(0);
+      expect(afterInjection.unseen).toEqual([]);
       expect(afterInjection.repliedTo?.content).toBe(textContent("the original question"));
-    });
-
-    it("projects the latest 20 notifications and consumes the full pending snapshot", async () => {
-      const conversation = await repo.ensureChannelChat({
-        channel: "discord",
-        threadId: "bounded-context",
-        agentName: "main",
-      });
-      for (let index = 0; index < 23; index += 1) {
-        await repo.addConversationMessage({
-          sessionId: conversation.id,
-          role: "notification",
-          content: textContent(`ambient ${index + 1}`),
-          platformMessageId: `ambient-${index + 1}`,
-          senderName: "Participant",
-          createdAt: new Date(Date.UTC(2026, 7, 3, 8, index)),
-        });
-      }
-
-      const context = await repo.loadConversationContext(conversation.id);
-      expect(context.notifications).toHaveLength(20);
-      expect(context.notifications[0]?.content).toBe(textContent("ambient 4"));
-      expect(context.notifications.at(-1)?.content).toBe(textContent("ambient 23"));
-      expect(context.pendingNotificationIds).toHaveLength(23);
-      expect(context.omittedNotificationCount).toBe(3);
-
-      await repo.markConversationContextInjected(context.pendingNotificationIds, "turn-bounded");
-
-      await expect(repo.loadConversationContext(conversation.id)).resolves.toEqual({
-        notifications: [],
-        pendingNotificationIds: [],
-        omittedNotificationCount: 0,
-        repliedTo: null,
-      });
     });
 
     it("resolves a native thread reply target from its parent conversation", async () => {
@@ -1194,7 +1160,7 @@ describe("WebChatRepository", () => {
       await expect(
         repo.loadConversationContext(child.id, "starter-message"),
       ).resolves.toMatchObject({
-        notifications: [],
+        unseen: [],
         repliedTo: {
           content: textContent("thread starter"),
           senderName: "Alice",
@@ -1232,20 +1198,20 @@ describe("WebChatRepository", () => {
       });
 
       const context = await repo.loadConversationContext(child.id);
-      expect(context.notifications.map((message) => message.content)).toEqual([
-        textContent("thread starter question"),
-        textContent("Rome's first thread reply"),
+      expect(context.threadStarter?.content).toBe(textContent("thread starter question"));
+      expect(context.unseen.map((message) => message.platformMessageId)).toEqual([
+        "first-thread-reply",
       ]);
-      expect(context.pendingNotificationIds).toHaveLength(1);
-      expect(context.omittedNotificationCount).toBe(0);
       expect(context.repliedTo).toBeNull();
 
-      await repo.markConversationContextInjected(context.pendingNotificationIds, "child-turn-1");
+      await repo.markConversationContextInjected(
+        context.unseen.map((message) => message.id),
+        "child-turn-1",
+      );
 
       await expect(repo.loadConversationContext(child.id)).resolves.toEqual({
-        notifications: [],
-        pendingNotificationIds: [],
-        omittedNotificationCount: 0,
+        unseen: [],
+        threadStarter: null,
         repliedTo: null,
       });
     });
@@ -1295,11 +1261,10 @@ describe("WebChatRepository", () => {
       });
 
       const context = await repo.loadConversationContext(child.id);
-      expect(context.notifications.map((message) => message.content)).toEqual([
-        textContent("Rome reply without a stored root"),
+      expect(context.threadStarter).toBeNull();
+      expect(context.unseen.map((message) => message.platformMessageId)).toEqual([
+        "orphaned-thread-reply",
       ]);
-      expect(context.pendingNotificationIds).toHaveLength(1);
-      expect(context.omittedNotificationCount).toBe(0);
       expect(context.repliedTo).toBeNull();
     });
 

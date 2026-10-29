@@ -126,6 +126,11 @@ import type {
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
+import type { PlatformOfChannel } from "../channels/channel.js";
+import { ChatEvents, type Via } from "../chats/events.js";
+import type { SaidMessage } from "../chats/message.js";
+import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";
+import { chatKey, placeIn, type Place } from "../chats/place.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
@@ -157,24 +162,83 @@ function conversationMessageText(content: string): string {
   }
 }
 
-type ConversationContextMessage = Omit<StoredConversationContextMessage, "createdAt"> & {
+/** One line of the context a turn's prompt opens with. */
+interface ConversationContextLine {
+  id: string;
+  sender: string | null;
+  text: string;
   createdAt?: Date;
-};
+}
 
-function conversationContextLine(message: ConversationContextMessage): string {
-  return replyContextLine({
-    createdAt: message.createdAt,
-    sender: message.senderName?.trim() || "Unknown sender",
+function storedContextLine(
+  message: Omit<StoredConversationContextMessage, "createdAt"> & { createdAt?: Date },
+): ConversationContextLine {
+  return {
+    id: message.id,
+    sender: message.senderName,
     text: conversationMessageText(message.content),
+    ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+  };
+}
+
+function saidContextLine(message: SaidMessage): ConversationContextLine {
+  return {
+    id: message.id,
+    sender: message.senderName ?? null,
+    text: message.body.text,
+    createdAt: message.at,
+  };
+}
+
+function conversationContextLine(line: ConversationContextLine): string {
+  return replyContextLine({
+    createdAt: line.createdAt,
+    sender: line.sender?.trim() || "Unknown sender",
+    text: line.text,
   });
+}
+
+/** The record of one channel's chats alone, for a manager given no
+ *  {@link MessageRepository}. Nothing is recorded through it. */
+function channelMessages(
+  rows: WebChatRepository,
+  channel: string,
+): Pick<MessageRepository, "find"> {
+  return new StoredMessages(rows, new ChatEvents(), { channelsOn: () => [channel] });
+}
+
+/** How many of the messages the agent has not seen a turn's prompt carries.
+ *  The rest are counted, not shown. */
+const CATCH_UP_LIMIT = 20;
+
+/**
+ * The newest of `unseen` as the place's record holds them, oldest first, at
+ * most {@link CATCH_UP_LIMIT}, and how many more there were
+ * (docs/domains/participation.md#projection), read as the account the agent
+ * was woken on heard it, which is the record the unseen ids name. `unseen`
+ * comes oldest first.
+ */
+async function catchUp(
+  messages: Pick<MessageRepository, "find">,
+  place: Place,
+  via: Pick<Via, "channel">,
+  unseen: readonly { id: string }[],
+): Promise<{ lines: SaidMessage[]; omitted: number }> {
+  const shown = unseen.slice(-CATCH_UP_LIMIT);
+  const lines = await messages.find(
+    place,
+    shown.map((message) => message.id),
+    via,
+  );
+  return { lines, omitted: unseen.length - shown.length };
 }
 
 function prependConversationContext(
   prompt: string,
   context: {
-    notifications: StoredConversationContextMessage[];
+    notifications: ConversationContextLine[];
     omittedNotificationCount: number;
-    repliedTo: ConversationContextMessage | null;
+    repliedTo: ConversationContextLine | null;
   },
 ): string {
   const sections: string[] = [];
@@ -400,6 +464,12 @@ interface ManagerDeps {
   lifecycleDispatcher: AgentLifecycleDispatcher;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
+  /** What was said in each place, read for the agent's catch-up at a wake.
+   *  Absent, the catch-up reads the woken channel's own record only. */
+  chatMessages?: Pick<MessageRepository, "find">;
+  /** The platform a channel's accounts live on. Absent, a channel's name
+   *  is its platform. */
+  platformOfChannel?: PlatformOfChannel;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
@@ -3585,6 +3655,7 @@ class AgentSessionImpl implements AgentSession {
         this.deps.webchatRepo &&
         sink.romeSessionType === "channel" &&
         sink.romeSessionId &&
+        sink.threadContext &&
         channel &&
         channelSurfaceOf(this.deps, channel).promptContext
       ) {
@@ -3592,19 +3663,43 @@ class AgentSessionImpl implements AgentSession {
           sink.romeSessionId,
           sink.replyTo?.messageId,
         );
-        const conversationContext =
-          storedContext.repliedTo || !sink.replyTo?.content
-            ? storedContext
-            : {
-                ...storedContext,
-                repliedTo: {
-                  id: `runtime-reply:${sink.replyTo.messageId}`,
-                  content: JSON.stringify([{ type: "text", content: sink.replyTo.content }]),
-                  senderName: sink.replyTo.senderName ?? null,
-                },
-              };
-        pendingConversationMessageIds = storedContext.pendingNotificationIds;
-        userPrompt = prependConversationContext(userPrompt, conversationContext);
+        // The agent catches up on the place the waking message was said in:
+        // the chat, or the thread in it.
+        const woken = sink.threadContext;
+        const parent = woken.parentThreadId;
+        const place = placeIn(
+          chatKey(
+            this.deps.platformOfChannel?.(channel) ?? channel,
+            (parent ?? woken.threadId) as ChatId,
+          ),
+          parent === undefined ? undefined : (woken.threadId as ChatId),
+        );
+        const caughtUp = await catchUp(
+          this.deps.chatMessages ?? channelMessages(this.deps.webchatRepo, channel),
+          place,
+          { channel },
+          storedContext.unseen,
+        );
+        const repliedTo = storedContext.repliedTo
+          ? storedContextLine(storedContext.repliedTo)
+          : sink.replyTo?.content
+            ? {
+                id: `runtime-reply:${sink.replyTo.messageId}`,
+                sender: sink.replyTo.senderName ?? null,
+                text: sink.replyTo.content,
+              }
+            : null;
+        pendingConversationMessageIds = storedContext.unseen.map((message) => message.id);
+        userPrompt = prependConversationContext(userPrompt, {
+          notifications: [
+            ...(storedContext.threadStarter
+              ? [storedContextLine(storedContext.threadStarter)]
+              : []),
+            ...caughtUp.lines.map(saidContextLine),
+          ],
+          omittedNotificationCount: caughtUp.omitted,
+          repliedTo,
+        });
       }
       // Every turn, subagents included: the folder is where the work happens.
       const deviceFolderBlock = buildDeviceFolderBlock(tc);

@@ -77,7 +77,7 @@ describe("inboundRecording", () => {
     testDb = createTestDb();
     rows = new WebChatRepository(testDb.db);
     events = new ChatEvents();
-    messages = new StoredMessages(rows, events);
+    messages = new StoredMessages(rows, events, { channelsOn: () => ["telegram"] });
     rows.leaveOutOfCatchUp((id) => messages.isWakeUndecided(id));
   });
 
@@ -244,7 +244,8 @@ describe("inboundRecording", () => {
       heard.push(event);
     });
     const chat = channelChatId("telegram", GROUP);
-    const catchUp = async () => (await rows.loadConversationContext(chat)).pendingNotificationIds;
+    const catchUp = async () =>
+      (await rows.loadConversationContext(chat)).unseen.map((message) => message.id);
 
     await telegram.deliver(message({ messageId: "tg-a" }));
     await telegram.deliver(message({ messageId: "tg-b" }));
@@ -307,7 +308,7 @@ describe("inboundRecording", () => {
 
     expect(heard).not.toHaveBeenCalled();
     const chat = channelChatId("telegram", GROUP);
-    expect((await rows.loadConversationContext(chat)).pendingNotificationIds).toHaveLength(1);
+    expect((await rows.loadConversationContext(chat)).unseen).toHaveLength(1);
   });
 
   it("keeps a chat's order when recording restarts while a message is still being recorded", async () => {

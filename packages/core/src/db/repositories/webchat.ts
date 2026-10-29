@@ -14,6 +14,7 @@ import {
   isNotNull,
   isNull,
   like,
+  lt,
   or,
   sql,
   type SQL,
@@ -51,6 +52,7 @@ import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
+import { agentMessageOutbound } from "../../channels/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 
 export interface StoredTurnFeedback {
@@ -78,6 +80,21 @@ export interface StoredConversationContextMessage {
   id: string;
   content: string;
   senderName: string | null;
+  createdAt: Date;
+}
+
+/** A said message's row, as {@link WebChatRepository.saidMessagesAt} reads
+ *  it, with the channel of the chat row that holds it. */
+export interface StoredSaidMessage {
+  id: string;
+  channel: string;
+  turnId: string | null;
+  role: string;
+  content: string;
+  platformMessageId: string | null;
+  senderId: string | null;
+  senderName: string | null;
+  replyToPlatformMessageId: string | null;
   createdAt: Date;
 }
 
@@ -414,7 +431,6 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
-const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;
 const SQL_LIKE_ESCAPE = "\\";
 
 // Transcript search: how many LIKE-prefiltered message rows the JS confirm
@@ -1301,18 +1317,28 @@ export class WebChatRepository {
     await this.db.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing();
   }
 
+  /**
+   * What the agent has not seen in a channel conversation, by id: the
+   * notifications no turn has taken in yet, leaving out any whose wake is
+   * still undecided. The messages themselves are read from the chat (`MessageRepository.recent`).
+   *
+   * Also the two messages a turn quotes from beyond its place: the starter of
+   * a new thread, carried with Rome's first reply in it, and the message
+   * `replyToPlatformMessageId` names, looked up in the parent chat when the
+   * thread does not hold it.
+   */
   async loadConversationContext(
     sessionId: string,
     replyToPlatformMessageId?: string,
   ): Promise<{
-    notifications: StoredConversationContextMessage[];
-    pendingNotificationIds: string[];
-    omittedNotificationCount: number;
+    unseen: { id: string; platformMessageId: string | null }[];
+    threadStarter: StoredConversationContextMessage | null;
     repliedTo: StoredConversationContextMessage | null;
   }> {
     const pendingNotificationRows = await this.db
       .select({
         id: romeAgentMessages.id,
+        platformMessageId: romeAgentMessages.platformMessageId,
         senderId: romeAgentMessages.senderId,
         replyToPlatformMessageId: romeAgentMessages.replyToPlatformMessageId,
       })
@@ -1325,27 +1351,11 @@ export class WebChatRepository {
         ),
       )
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const pendingNotificationIds = pendingNotificationRows
-      .map((row) => row.id)
+    const unseen = pendingNotificationRows
       // Its wake is still being decided, so it may become a turn's prompt of
       // its own.
-      .filter((id) => !this.wakeUndecided(id));
-    const projectedNotificationIds = pendingNotificationIds.slice(
-      -CONVERSATION_CONTEXT_NOTIFICATION_LIMIT,
-    );
-    const notifications =
-      projectedNotificationIds.length === 0
-        ? []
-        : await this.db
-            .select({
-              id: romeAgentMessages.id,
-              content: romeAgentMessages.content,
-              senderName: romeAgentMessages.senderName,
-              createdAt: romeAgentMessages.createdAt,
-            })
-            .from(romeAgentMessages)
-            .where(inArray(romeAgentMessages.id, projectedNotificationIds))
-            .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
+      .filter(({ id }) => !this.wakeUndecided(id))
+      .map(({ id, platformMessageId }) => ({ id, platformMessageId }));
     const contextColumns = {
       id: romeAgentMessages.id,
       content: romeAgentMessages.content,
@@ -1399,7 +1409,7 @@ export class WebChatRepository {
     const parentReferenceMessageId = pendingNotificationRows.find(
       (row) => row.senderId === "rome" && row.replyToPlatformMessageId,
     )?.replyToPlatformMessageId;
-    let contextualNotifications = notifications;
+    let threadStarter: StoredConversationContextMessage | null = null;
     if (parentReferenceMessageId) {
       const referencedParentSessionId = await loadParentSessionId();
       if (referencedParentSessionId) {
@@ -1407,15 +1417,10 @@ export class WebChatRepository {
           referencedParentSessionId,
           parentReferenceMessageId,
         );
-        const parentMessage = parentMessageRows[0];
-        if (parentMessage) contextualNotifications = [parentMessage, ...notifications];
+        threadStarter = parentMessageRows[0] ?? null;
       }
     }
-    const context = {
-      notifications: contextualNotifications,
-      pendingNotificationIds,
-      omittedNotificationCount: pendingNotificationIds.length - notifications.length,
-    };
+    const context = { unseen, threadStarter };
 
     if (!replyToPlatformMessageId) return { ...context, repliedTo: null };
     const repliedRows = await findMessageInSession(sessionId, replyToPlatformMessageId);
@@ -1491,6 +1496,193 @@ export class WebChatRepository {
    */
   leaveOutOfCatchUp(undecided: (messageId: string) => boolean): void {
     this.wakeUndecided = undecided;
+  }
+
+  /**
+   * The said messages of the chat rows `channels` keep for one address, newest
+   * first: at most `limit`, and only those before `before` when it is given.
+   * The order is created_at, then the order the rows were written in, since
+   * created_at keeps whole seconds. `before` names a message by its time and
+   * id. A message two of the rows hold, such as a group's message that reached
+   * two of Rome's accounts, is answered once. Its id, time and place in the
+   * order are its first copy's, so a copy that arrives later never moves it.
+   * What it says and who said it come from the multipart reply that holds it,
+   * else from Rome's own record of it, else from that first copy. With
+   * `ownChannel`, only that channel's record is read. With `ids`, only the
+   * messages one of their copies is named for are. Without `ownChannel`, only
+   * a group is read across channels.
+   * Trace rows belong to no chat and are left out.
+   */
+  async saidMessagesAt(input: {
+    channels: readonly string[];
+    address: string;
+    ownChannel?: string;
+    ids?: readonly string[];
+    before?: { at: Date; id: string };
+    limit: number;
+  }): Promise<StoredSaidMessage[]> {
+    if (input.channels.length === 0 || input.limit < 1) return [];
+    const at = and(
+      eq(romeSessions.type, "channel"),
+      inArray(romeSessions.sourceChannel, [...input.channels]),
+      eq(romeSessions.sourceThreadId, input.address),
+    );
+    // A group or a channel is shared. A native thread opens only inside one,
+    // and its row may not name its type, so a row under a parent chat is
+    // shared too.
+    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') in ('group', 'channel') or ${romeSessions.parentSessionId} is not null)`;
+    // A row that names a kind other than a group's is a direct message.
+    const isDirect = sql`(${romeSessions.sourceThreadType} is not null and not ${isGroup})`;
+    // Read through one channel, the chat is that channel's record alone.
+    // Otherwise only a group's address names one chat across Rome's accounts.
+    // One account knowing it for a group is enough, since a send opens its row
+    // without knowing the kind, unless another account knows it for a direct
+    // message: Telegram keys a direct message by the other person alone, and
+    // a user account may label one a group, so the address then names two
+    // chats and neither is read. A chat no account knows for a group is one
+    // account's own, read only while one channel holds it.
+    const which = input.ownChannel
+      ? eq(romeSessions.sourceChannel, input.ownChannel)
+      : or(
+          and(
+            sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+            sql`not exists (select 1 from ${romeSessions} where ${and(at, isDirect)})`,
+          ),
+          sql`(select count(*) from ${romeSessions} where ${at}) = 1`,
+        );
+    const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);
+    const roles = sql.join(
+      ["user", "assistant", "notification"].map((role) => sql`${role}`),
+      sql`, `,
+    );
+    const { before } = input;
+    // Reading named messages, only their copies are grouped: the rows that
+    // share a platform id with them, through the reply that holds them.
+    const asked = input.ids
+      ? sql`
+        "asked" as materialized (
+          select "id", "platform_message_id" as "pid" from ${romeAgentMessages}
+          where "id" in (${sql.join(
+            input.ids.map((id) => sql`${id}`),
+            sql`, `,
+          )}) and "session_id" in (select "id" from "chats")
+        ),
+        "asked_wholes" as materialized (
+          select "message_id" from "held" where "pid" in (select "pid" from "asked")
+          union select "id" from "asked" where "id" in (select "message_id" from "held")
+          -- A whole named by the platform id an asked row holds.
+          union select "m"."id" from "chats" as "c"
+          cross join "asked" as "a"
+          cross join ${romeAgentMessages} as "m"
+            on "m"."session_id" = "c"."id" and "m"."platform_message_id" = "a"."pid"
+        ),
+        "asked_pids" as materialized (
+          select "pid" from "asked" where "pid" is not null
+          union select "pid" from "held" where "message_id" in (select "message_id" from "asked_wholes")
+          union select "platform_message_id" from ${romeAgentMessages}
+          where "id" in (select "message_id" from "asked_wholes") and "platform_message_id" is not null
+        ),`
+      : sql``;
+    const rows = await this.db.all<{
+      id: string;
+      channel: string;
+      turnId: string | null;
+      role: string;
+      content: string;
+      platformMessageId: string | null;
+      senderId: string | null;
+      senderName: string | null;
+      replyToPlatformMessageId: string | null;
+      createdAt: number;
+    }>(sql`
+      with
+        "chats" as materialized (select "id" from ${romeSessions} where ${and(at, which)}),
+        "held" as materialized (
+          select "message_id", "platform_message_id" as "pid"
+          from ${romeAgentMessagePlatformIds}
+          where "session_id" in (select "id" from "chats")
+        ),
+        ${asked}
+        "said" as materialized (
+          select "m".rowid as "rid", "m"."id", "m"."platform_message_id" as "pid",
+            "m"."role", "m"."sender_id"
+          from ${
+            input.ids
+              ? sql`(
+                  select rowid as "picked" from ${romeAgentMessages} where "id" in (select "id" from "asked")
+                  union select rowid from ${romeAgentMessages} where "id" in (select "message_id" from "asked_wholes")
+                  union select rowid from ${romeAgentMessages}
+                  where "session_id" in (select "id" from "chats")
+                    and "platform_message_id" in (select "pid" from "asked_pids")
+                ) as "pick" cross join ${romeAgentMessages} as "m" on "m".rowid = "pick"."picked"`
+              : sql`${romeAgentMessages} as "m"`
+          }
+          where "m"."session_id" in (select "id" from "chats") and "m"."role" in (${roles})
+        ),
+        -- The reply shown as several messages that holds a row's platform id:
+        -- the row itself, or the row that keeps it as another part.
+        "holder" as materialized (
+          select "r"."rid", "w"."rid" as "wrid"
+          from "said" as "r"
+          join "said" as "w" on "w"."pid" = "r"."pid"
+          where "w"."id" in (select "message_id" from "held")
+          union all
+          select "r"."rid", "w"."rid"
+          from "said" as "r"
+          join "held" as "h" on "h"."pid" = "r"."pid"
+          join "said" as "w" on "w"."id" = "h"."message_id"
+        ),
+        -- Each row's message: the reply that holds it, else its platform id.
+        "copies" as materialized (
+          select "r"."rid", ${outbound} as "outbound",
+            ${input.ids ? sql`"r"."id" in (select "id" from "asked")` : sql`0`} as "named",
+            case
+              when min("x"."wrid") is not null then 'w' || min("x"."wrid")
+              when "r"."pid" is not null then 'p' || "r"."pid"
+              else 'r' || "r"."rid"
+            end as "message",
+            min("x"."wrid") as "wrid"
+          from "said" as "r"
+          left join "holder" as "x" on "x"."rid" = "r"."rid"
+          group by "r"."rid"
+        ),
+        -- A message stands where its first copy was written, so a copy that
+        -- arrives later never moves it across a page. It reads as the reply
+        -- that holds it, else as Rome's own record of it, else as that copy.
+        "messages" as (
+          select "message", min("rid") as "at_rid", max("named") as "named",
+            coalesce(min("wrid"), min(case when "outbound" = 1 then "rid" end), min("rid")) as "as_rid"
+          from "copies"
+          group by "message"
+        )
+      select "first"."id" as "id", "s"."source_channel" as "channel",
+        "shown"."turn_id" as "turnId", "shown"."role" as "role", "shown"."content" as "content",
+        "shown"."platform_message_id" as "platformMessageId", "shown"."sender_id" as "senderId",
+        "shown"."sender_name" as "senderName",
+        "shown"."reply_to_platform_message_id" as "replyToPlatformMessageId",
+        "first"."created_at" as "createdAt"
+      from "messages" as "k"
+      join ${romeAgentMessages} as "first" on "first".rowid = "k"."at_rid"
+      join ${romeAgentMessages} as "shown" on "shown".rowid = "k"."as_rid"
+      join ${romeSessions} as "s" on "s"."id" = "shown"."session_id"
+      where 1 = 1
+        ${input.ids ? sql`and "k"."named" = 1` : sql``}
+        ${
+          before
+            ? sql`and ("first"."created_at" < ${Math.floor(before.at.getTime() / 1000)}
+                or ("first"."created_at" = ${Math.floor(before.at.getTime() / 1000)}
+                  and "first".rowid < (select rowid from ${romeAgentMessages} where "id" = ${before.id})))
+              -- The cursor's message was read, even when a copy written
+              -- earlier has since become its first.
+              and "k"."message" is not (
+                select "message" from "copies"
+                where "rid" = (select rowid from ${romeAgentMessages} where "id" = ${before.id}))`
+            : sql``
+        }
+      order by "first"."created_at" desc, "first".rowid desc
+      limit ${input.limit}
+    `);
+    return rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt * 1000) }));
   }
 
   /** The id of a channel's chat row for the platform's chat id, or null when
