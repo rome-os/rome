@@ -25,11 +25,20 @@ export type StoredErrorPart = Pick<
   "type" | "error" | "code" | "provider" | "reason"
 >;
 
+/** The task chat a forwarded message came from. `title` is the chat's name
+ * when it was forwarded. */
+export interface ForwardedFrom {
+  chatId: string;
+  title: string;
+}
+
 /** A text part as WebChat stores it. `format` is a display hint only the
  * `say` tool sets: `long` shows the text as one long message, `bubble` or
- * absent as a chat bubble where the chat shows bubbles. */
+ * absent as a chat bubble where the chat shows bubbles. `forwardedFrom` is set
+ * only on text forwarded word for word from a task chat. */
 export type WebchatTextPart = Extract<MessagePart, { type: "text" }> & {
   format?: "bubble" | "long";
+  forwardedFrom?: ForwardedFrom;
 };
 
 /** A card for a chat that another agent's tool started on the guardian's

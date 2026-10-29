@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Ellipsis } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ConciergeMessageMeta } from "@/components/chat/ConciergeMessageMeta";
@@ -61,6 +61,9 @@ export function ConciergeBubble({
   const { t } = useTranslation("chat");
   const touch = useMediaQuery(NO_HOVER_QUERY);
   const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // A selection is quoted from this bubble, though a message of several bubbles anchors its first.
+  const scopedReply: ReplySource | null = reply ? { ...reply, scope: () => boxRef.current } : null;
 
   const onTap = (event: MouseEvent<HTMLElement>) => {
     if (!touch) return;
@@ -84,6 +87,7 @@ export function ConciergeBubble({
           touch && "[-webkit-tap-highlight-color:transparent]",
         )}
         onClick={onTap}
+        ref={boxRef}
       >
         {children}
         {touch ? (
@@ -118,7 +122,7 @@ export function ConciergeBubble({
               copyText={copyText}
               createdAt={createdAt}
               feedbackTurn={feedbackTurn}
-              reply={reply}
+              reply={scopedReply}
             />
           </div>
         )}
@@ -129,7 +133,7 @@ export function ConciergeBubble({
             copyText={copyText}
             createdAt={createdAt}
             feedbackTurn={feedbackTurn}
-            reply={reply}
+            reply={scopedReply}
             onReply={() => setOpen(false)}
           />
         </div>

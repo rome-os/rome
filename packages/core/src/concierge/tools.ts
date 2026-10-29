@@ -1,6 +1,7 @@
 // Concierge's facade tools: `say` is its only way to speak, and the `chat_*`
 // tools run its task chats.
 
+import type { ForwardedFrom } from "@rome/api-types/chat";
 import type { ChatId } from "@rome-os/app-runtime";
 import type { SaidMessage } from "../chats/message.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
@@ -130,6 +131,16 @@ export async function buildConciergeTools(
     const { chatId, turnId } = currentTurn();
     await webchatRepo.addBackendMessage(chatId, turnId, [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
+    ]);
+  };
+
+  // One message, so the lead-in and the report always arrive together. The
+  // transcript still shows them as two bubbles.
+  const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
+    const { chatId, turnId } = currentTurn();
+    await webchatRepo.addBackendMessage(chatId, turnId, [
+      ...(intro ? [{ type: "text" as const, content: intro }] : []),
+      { type: "text", content: text, format: "long", forwardedFrom: from },
     ]);
   };
 
@@ -346,7 +357,7 @@ export async function buildConciergeTools(
       handler: (input) =>
         runFacadeTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
-          await requireTaskChat(chatId);
+          const chat = await requireTaskChat(chatId);
           const [latest] = await latestSaid(
             messages,
             taskChatPlace(chatId),
@@ -355,9 +366,7 @@ export async function buildConciergeTools(
           );
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
-          const intro = optionalString(args, "intro");
-          if (intro) await say(intro, "bubble");
-          await say(answer, "long");
+          await forward(answer, { chatId, title: chat.name }, optionalString(args, "intro"));
           return { forwardedChars: answer.length };
         }),
     },

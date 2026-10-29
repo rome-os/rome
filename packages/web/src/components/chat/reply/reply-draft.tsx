@@ -14,7 +14,7 @@ export interface ReplyTarget {
   messageId: string;
   author: "guardian" | "agent";
   name?: string;
-  /** The selected snippet, sent as `replyQuote`. Absent when the whole message is quoted. */
+  /** The selected snippet, or the text of the one bubble replied to in a message of several. Sent as `replyQuote`. Absent when the whole message is quoted. */
   quote?: string;
   /** What the chip and the optimistic bubble show: the quote, or the message's text. */
   preview: string;
@@ -36,6 +36,14 @@ export interface ReplyDraft {
   /** Whether the loaded transcript holds the message, so a quote can link to it. */
   has: (messageId: string) => boolean;
   jump: (messageId: string) => void;
+}
+
+/** The form fields that carry a reply to the server. */
+export function replyFormFields(target: ReplyTarget): Record<string, string> {
+  return {
+    replyToMessageId: target.messageId,
+    ...(target.quote ? { replyQuote: target.quote } : {}),
+  };
 }
 
 const ReplyDraftContext = createContext<ReplyDraft | null>(null);

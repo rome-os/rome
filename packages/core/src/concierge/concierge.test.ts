@@ -381,7 +381,14 @@ describe("Concierge tools", () => {
     const result = await s.tool("chat_forward", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toEqual({ forwardedChars: 8 });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [{ type: "text", content: "# Report", format: "long" }],
+      [
+        {
+          type: "text",
+          content: "# Report",
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ],
     ]);
   });
 
@@ -413,6 +420,56 @@ describe("Concierge tools", () => {
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
       [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
     ]);
+  });
+
+  it("chat_forward stores the task chat it came from, and the intro in the same message", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.messages.get("task-1")?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "# Report\n\nThree options." }]),
+    });
+    const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Here it is" });
+    expect(result.isError).toBeFalsy();
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [
+        { type: "text", content: "Here it is" },
+        {
+          type: "text",
+          content: "# Report\n\nThree options.",
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ],
+    ]);
+  });
+
+  it("chat_forward without an intro stores the report alone", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.messages.get("task-1")?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "Three options." }]),
+    });
+    await s.tool("chat_forward", { chatId: "task-1" });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [
+        {
+          type: "text",
+          content: "Three options.",
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ],
+    ]);
+  });
+
+  it("say marks no origin on what the agent writes itself", async () => {
+    const s = setup();
+    await s.tool("say", { text: "# Plan", format: "long" });
+    expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")[0]).not.toHaveProperty(
+      "forwardedFrom",
+    );
   });
 
   it("chat_card refuses chats it did not start", async () => {

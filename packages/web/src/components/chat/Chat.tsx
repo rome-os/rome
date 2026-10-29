@@ -75,7 +75,11 @@ import {
   useOlderMessages,
 } from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
-import { ReplyDraftProvider, useReplyDraftState } from "@/components/chat/reply/reply-draft";
+import {
+  ReplyDraftProvider,
+  replyFormFields,
+  useReplyDraftState,
+} from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
@@ -1641,8 +1645,9 @@ export function Chat({
           formData.set("reasoningEffort", snapshot.reasoningEffort);
           if (concierge) formData.set("priority", "now");
           if (replyTo) {
-            formData.set("replyToMessageId", replyTo.messageId);
-            if (replyTo.quote) formData.set("replyQuote", replyTo.quote);
+            for (const [name, value] of Object.entries(replyFormFields(replyTo))) {
+              formData.set(name, value);
+            }
           }
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
