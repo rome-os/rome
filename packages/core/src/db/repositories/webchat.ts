@@ -2688,6 +2688,7 @@ export class WebChatRepository {
         SELECT session_id, max(created_at) AS last_message_at FROM ${romeAgentMessages}
         WHERE session_id IN (SELECT ancestor_id FROM ancestors)
           AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
+          AND ${saidMessage}
         GROUP BY session_id
       )
       SELECT ancestors.session_id AS sessionId, max(activity.last_message_at) AS lastMessageAt

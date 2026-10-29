@@ -100,7 +100,7 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     // The assistant's chat is the direct message that reaches its address.
     const found = await directPlace(deps, address);
     if (!found.ok) return respondToSend(c, found);
-    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }));
+    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, found.as));
   });
 
   return app;
