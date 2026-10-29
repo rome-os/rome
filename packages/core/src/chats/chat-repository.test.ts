@@ -3,7 +3,10 @@ import type { Account, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
 import { channelChatId } from "../db/session-kind.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createTestDb, createTestDbFile, type TestDb } from "../test/helpers.js";
 import { ChatRefusal } from "./chat.js";
 import { ChatRepository, type ChatChannels } from "./chat-repository.js";
 import { chatKey } from "./place.js";
@@ -266,5 +269,45 @@ describe("ChatRepository", () => {
       .run();
 
     expect(chats.byKey(GROUP)).toBeNull();
+  });
+
+  it("takes the write lock before it reads, so another connection's commit fails no join", () => {
+    const dir = mkdtempSync(join(tmpdir(), "chat-repository-"));
+    const open = createTestDbFile(join(dir, "rome.db"));
+    const main = open();
+    const worker = open();
+    worker.sqlite.pragma("busy_timeout = 0");
+    try {
+      new ChatRepository(main.db, channels).startIfMissing(GROUP, "group", SALES, null);
+      let otherWrite: unknown = null;
+      // Reached after the join has read the group's rows and before it writes.
+      const racing: ChatChannels = {
+        ...channels,
+        accountOf: (name) => {
+          if (otherWrite === null) {
+            try {
+              worker.db
+                .update(romeSessions)
+                .set({ name: "elsewhere" })
+                .where(eq(romeSessions.id, channelChatId("feishu", "oc_group")))
+                .run();
+              otherWrite = "committed";
+            } catch (err) {
+              otherWrite = err;
+            }
+          }
+          return channels.accountOf(name);
+        },
+      };
+
+      new ChatRepository(main.db, racing).startIfMissing(GROUP, "group", SUPPORT, null);
+
+      expect(String(otherWrite)).toContain("database is locked");
+      expect(new ChatRepository(main.db, channels).byKey(GROUP)?.participants).toHaveLength(2);
+    } finally {
+      main.close();
+      worker.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -103,7 +103,7 @@ export class ChatRepository {
     name: string | null,
     seed: ChatRowSeed = {},
   ): Chat {
-    return this.db.transaction((tx) => {
+    return this.write((tx) => {
       const channel = this.channelOf(key.platform, via);
       const rows = this.rowsOf(tx, key, via);
       if (rows.some((row) => row.sourceChannel === channel)) return this.toChat(key, rows);
@@ -131,7 +131,7 @@ export class ChatRepository {
    * their threads and messages.
    */
   update(key: ChatKey, change: (chat: Chat) => void, through?: Account): Chat {
-    return this.db.transaction((tx) => {
+    return this.write((tx) => {
       const rows = this.rowsOf(tx, key, through);
       if (rows.length === 0) throw new Error(`No chat at ${key.platform}:${key.id}`);
       const chat = this.toChat(key, rows);
@@ -139,6 +139,14 @@ export class ChatRepository {
       this.save(tx, chat, rows, { threadType: rows[0]!.sourceThreadType });
       return chat;
     });
+  }
+
+  /** Run `fn` in a transaction that takes the write lock before it reads.
+   *  Rome's action workers write the same database on connections of their
+   *  own, and a deferred transaction that reads first fails its first write
+   *  once another connection has committed since that read. */
+  private write<T>(fn: (tx: DrizzleTx) => T): T {
+    return this.db.transaction(fn, { behavior: "immediate" });
   }
 
   /** Store `chat` over `rows`, every row its key reads. `seed` is what a row

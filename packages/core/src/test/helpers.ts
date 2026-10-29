@@ -1,4 +1,5 @@
 import type { ExternalAgents } from "../channels/agents-accounts.js";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -181,6 +182,23 @@ export function createTestDb(): TestDb {
   return {
     db,
     close: () => sqlite.close(),
+  };
+}
+
+/** Writes a database at the latest system schema to `path`, and returns a
+ *  way to open further connections to it, as Rome's main process and its
+ *  action workers each hold one. */
+export function createTestDbFile(path: string): () => TestDb & { sqlite: Database.Database } {
+  writeFileSync(path, migratedSystemImage());
+  return () => {
+    const sqlite = new Database(path);
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    return {
+      db: drizzle(sqlite, { schema }) as unknown as DrizzleDb,
+      sqlite,
+      close: () => sqlite.close(),
+    };
   };
 }
 

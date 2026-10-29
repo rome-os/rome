@@ -135,43 +135,48 @@ export class ChatSettingsRepository {
       this.mutateThread(descriptor, channel, input);
       return;
     }
-    this.db.transaction((tx) => {
-      // A row stored before its type was known joins its group's other rows
-      // first, so the rule below is written to the whole group.
-      const kindKnown = input.kindKnown ?? true;
-      if (kindKnown) this.classify(tx, descriptor, channel);
-      const via = this.chats.accountOn(channel);
-      const key = chatKey(via.platform, descriptor.ref.chatId);
-      const sourceThreadType = !kindKnown
-        ? null
-        : descriptor.kind === "dm"
-          ? "private"
-          : descriptor.kind;
-      this.chats.startIfMissing(
-        key,
-        descriptor.kind === "dm" ? "dm" : "group",
-        via,
-        descriptor.displayName,
-        { threadType: sourceThreadType },
-      );
-      this.chats.update(
-        key,
-        (chat) => {
-          chat.rename(descriptor.displayName);
-          chat.setReplyRule(via, input.settings && withoutRouting(input.settings));
-        },
-        via,
-      );
-      tx.update(romeSessions)
-        .set({
-          ...(sourceThreadType === null ? {} : { sourceThreadType }),
-          // The routing marker is this account's alone, so only its row holds it.
-          channelSettings: input.settings,
-          ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
-        })
-        .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
-        .run();
-    });
+    // Immediate, as the chat repository's writes are: it reads before it
+    // writes, and another connection may commit in between.
+    this.db.transaction(
+      (tx) => {
+        // A row stored before its type was known joins its group's other rows
+        // first, so the rule below is written to the whole group.
+        const kindKnown = input.kindKnown ?? true;
+        if (kindKnown) this.classify(tx, descriptor, channel);
+        const via = this.chats.accountOn(channel);
+        const key = chatKey(via.platform, descriptor.ref.chatId);
+        const sourceThreadType = !kindKnown
+          ? null
+          : descriptor.kind === "dm"
+            ? "private"
+            : descriptor.kind;
+        this.chats.startIfMissing(
+          key,
+          descriptor.kind === "dm" ? "dm" : "group",
+          via,
+          descriptor.displayName,
+          { threadType: sourceThreadType },
+        );
+        this.chats.update(
+          key,
+          (chat) => {
+            chat.rename(descriptor.displayName);
+            chat.setReplyRule(via, input.settings && withoutRouting(input.settings));
+          },
+          via,
+        );
+        tx.update(romeSessions)
+          .set({
+            ...(sourceThreadType === null ? {} : { sourceThreadType }),
+            // The routing marker is this account's alone, so only its row holds it.
+            channelSettings: input.settings,
+            ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
+          })
+          .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /** A native thread's row. A thread is no chat of its own, so its row is
