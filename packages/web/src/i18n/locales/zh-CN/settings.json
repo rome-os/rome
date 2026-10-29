@@ -52,6 +52,33 @@
     "loading": "正在加载连接",
     "errorTitle": "无法加载连接",
     "emptyTitle": "暂无可用连接",
+    "connect": "连接",
+    "search": {
+      "placeholder": "搜索连接",
+      "clear": "清除搜索",
+      "noMatch": {
+        "connected": "没有与“{{query}}”匹配的已连接服务。",
+        "available": "没有与“{{query}}”匹配的可添加服务。"
+      }
+    },
+    "tabs": {
+      "label": "连接",
+      "connected": "已连接",
+      "available": "可添加",
+      "empty": {
+        "connected": "还没有任何连接。",
+        "available": "这里的服务都已连接。"
+      },
+      "show": {
+        "connected": "在已连接中查看 {{count}} 个",
+        "available": "在可添加中查看 {{count}} 个"
+      }
+    },
+    "groups": {
+      "messaging": "消息渠道",
+      "accounts": "账号和工具",
+      "other": "其他"
+    },
     "loadFailedFallback": "加载连接失败。",
     "accounts": {
       "add": "添加另一个账号",

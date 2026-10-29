@@ -103,41 +103,47 @@ describe("a link on a platform Rome holds accounts on", () => {
     expect(await readSendStates(deps, [link])).toEqual(["yes"]);
   });
 
-  it("sends as the account whose channel found the chat, even if Rome's accounts change", async () => {
-    const sent: string[] = [];
-    let senders = ["tg-first"];
-    const recording = (name: string) =>
-      channel(name, {
-        ...sending({
-          chatFor: async (id) => {
-            // Another account replaces the first while the chat is looked up.
-            senders = ["tg-second"];
-            return id as ChatId;
+  // The first account is disconnected while its channel looks the chat up,
+  // which clears the record of its account, and a second takes its place.
+  for (const recorded of [true, false]) {
+    it(`sends only as the sender that found the chat (${recorded ? "with" : "without"} an account record)`, async () => {
+      const sent: string[] = [];
+      let senders = ["tg-first"];
+      const vacated = new Set<string>();
+      const recording = (name: string) =>
+        channel(name, {
+          ...sending({
+            chatFor: async (id) => {
+              senders = ["tg-second"];
+              vacated.add("tg-first");
+              return id as ChatId;
+            },
+          }),
+          send: async (chatId) => {
+            sent.push(name);
+            return { chatId };
           },
-        }),
-        send: async (chatId) => {
-          sent.push(name);
-          return { chatId };
-        },
-      });
-    const unused = () => Promise.reject(new Error("nothing is recorded for a refused send"));
-    const deps = {
-      channels: [recording("tg-first"), recording("tg-second")],
-      platformOfChannel,
-      sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
-      accountOf: (name: string) => ({ platform: "telegram", id: `${name}-account` }),
-      webchatRepo: {
-        ensureChannelChat: unused,
-        recordOutboundConversationMessage: unused,
-      },
-    };
+        });
+      const unused = () => Promise.reject(new Error("nothing is recorded for a refused send"));
+      const deps = {
+        channels: [recording("tg-first"), recording("tg-second")],
+        platformOfChannel,
+        sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
+        accountOf: (name: string) =>
+          recorded && !vacated.has(name) ? { platform: "telegram", id: `${name}-account` } : null,
+        webchatRepo: { ensureChannelChat: unused, recordOutboundConversationMessage: unused },
+      };
 
-    const found = await directPlace(deps, link);
-    expect(found).toMatchObject({ ok: true, as: { id: "tg-first-account" } });
-    if (!found.ok) return;
-    expect(await send(deps, found.place, { text: "hi" }, found.as)).toMatchObject({ ok: false });
-    expect(sent).toEqual([]);
-  });
+      const found = await directPlace(deps, link);
+      expect(found).toMatchObject({
+        ok: true,
+        as: recorded ? { id: "tg-first-account" } : { channel: "tg-first" },
+      });
+      if (!found.ok) return;
+      expect(await send(deps, found.place, { text: "hi" }, found.as)).toMatchObject({ ok: false });
+      expect(sent).toEqual([]);
+    });
+  }
 
   it("reads as not connected while Rome holds no account on the platform", async () => {
     const deps = {
