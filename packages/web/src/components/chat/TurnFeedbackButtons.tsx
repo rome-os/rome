@@ -20,7 +20,17 @@ import { autoPlaceApp } from "@/pages/free/use-free-cells";
 // small popover with an optional comment before submitting. Each turn gets
 // exactly one feedback record (the server answers 409 once a record exists),
 // so after submit the buttons lock with the recorded rating shown.
-export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; turnId: string }) {
+// `data-state` on the row is `open` while the comment popover is, so a toolbar
+// that hides the row can stay up meanwhile.
+export function TurnFeedbackButtons({
+  sessionId,
+  turnId,
+  size = "sm",
+}: {
+  sessionId: string;
+  turnId: string;
+  size?: "xs" | "sm";
+}) {
   const { t } = useTranslation("chat");
   // The recorded rating (submitted now, or hydrated from an existing record).
   const [rating, setRating] = useState<TurnFeedbackRating | null>(null);
@@ -126,9 +136,13 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
       }}
     >
       <PopoverAnchor asChild>
-        <div ref={containerRef} className="flex items-center">
+        <div
+          ref={containerRef}
+          data-state={draftRating !== null ? "open" : "closed"}
+          className="flex items-center"
+        >
           <IconButton
-            size="sm"
+            size={size}
             label={locked ? t("message.feedback.recorded") : t("message.feedback.thumbsUp")}
             icon={<ThumbsUp className={cn(upActive && "fill-current")} />}
             aria-pressed={upActive}
@@ -140,7 +154,7 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
             )}
           />
           <IconButton
-            size="sm"
+            size={size}
             label={locked ? t("message.feedback.recorded") : t("message.feedback.thumbsDown")}
             icon={<ThumbsDown className={cn(downActive && "fill-current")} />}
             aria-pressed={downActive}

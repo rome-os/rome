@@ -55,8 +55,7 @@ export function ConciergeTranscript({
   );
   return (
     // Padding outside, width cap inside: the composer floor's geometry, so the
-    // messages and the composer share both edges at every width. The inner
-    // element is the container that bubble controls measure their width against.
+    // messages and the composer share both edges at every width.
     <div className="flex-1 px-3 pt-4 md:px-6">
       <div
         ref={contentRef}
