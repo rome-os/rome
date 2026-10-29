@@ -25,7 +25,7 @@ import {
   type SpecSource,
   writeLockfile,
 } from "./lockfile.js";
-import type { ActionRegistryImpl } from "../actions/registry.js";
+import { resolveArtifactId, type LegacyArtifactBindings } from "./artifact-id.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { RoutineEngine } from "../routines/engine.js";
 import type { AppCatalog } from "./catalog.js";
@@ -104,7 +104,7 @@ export interface AppManagerOptions {
   lockfilePath: string;
   installer: AppInstaller;
   routines?: {
-    actionRegistry: Pick<ActionRegistryImpl, "list" | "getCanonicalName">;
+    legacyBindings: Readonly<LegacyArtifactBindings>;
     repository: Pick<RoutinesRepository, "findEnabled" | "update">;
     engine: Pick<RoutineEngine, "deactivate">;
   };
@@ -584,19 +584,20 @@ export class AppManager {
   private async pauseRoutines(appId: AppId): Promise<void> {
     const deps = this.opts.routines;
     if (!deps) return;
-    // Boot removal precedes action registration, so qualified names must also match
-    // without the registry. Legacy names need the registry before catalog refresh.
-    const actionNames = new Set(
-      deps.actionRegistry.list().filter((name) => name.startsWith(`${appId}:`)),
-    );
+    const prefix = `${appId}:`;
     for (const routine of await deps.repository.findEnabled()) {
-      const canonicalName = deps.actionRegistry.getCanonicalName(routine.actionName);
-      if (
-        !routine.actionName.startsWith(`${appId}:`) &&
-        !actionNames.has(routine.actionName) &&
-        !(canonicalName && actionNames.has(canonicalName))
-      ) {
-        continue;
+      let actionName = routine.actionName;
+      if (!actionName.startsWith(prefix)) {
+        try {
+          actionName = resolveArtifactId({
+            kind: "action",
+            value: actionName,
+            legacyBindings: deps.legacyBindings,
+          });
+        } catch {
+          continue;
+        }
+        if (!actionName.startsWith(prefix)) continue;
       }
       await deps.repository.update(routine.id, { enabled: false });
       await deps.engine.deactivate(routine.id);

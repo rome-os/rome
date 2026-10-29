@@ -558,8 +558,13 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
-  // Boot removal precedes app action registration and engine construction.
-  // Prefix matching pauses rows; routineEngine.start() later skips them.
+  const artifactIdentity = {
+    legacyBindings: parseLegacyArtifactBindings(
+      await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
+    ),
+  };
+  // Boot removal matches qualified names and legacy bindings before actions register.
+  // Only the DB flag changes until the engine exists; routineEngine.start() skips paused rows.
   let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
     lockfilePath: getProfileAppsLockfilePath(),
@@ -568,10 +573,7 @@ async function main() {
     romeCloudListings,
     routines: {
       repository: routinesRepo,
-      actionRegistry: {
-        list: () => actionRegistry.list(),
-        getCanonicalName: (name) => actionRegistry.getCanonicalName(name),
-      },
+      legacyBindings: artifactIdentity.legacyBindings,
       engine: {
         deactivate: async (id) => {
           await deactivateRoutine?.(id);
@@ -583,11 +585,6 @@ async function main() {
 
   // Subscribers ordered agentLoader → actionLoader → skillCatalog →
   // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
-  const artifactIdentity = {
-    legacyBindings: parseLegacyArtifactBindings(
-      await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
-    ),
-  };
   const agentLoader = new AgentLoader(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
