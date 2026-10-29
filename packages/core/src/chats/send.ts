@@ -21,6 +21,7 @@ import {
   type Channels,
   type PlatformOfChannel,
 } from "../channels/channel.js";
+import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
@@ -115,7 +116,10 @@ export async function send(
   }
   const channel = sender && deps.channels.find((candidate) => candidate.name === sender);
   if (!channel) return { ok: false, send: "not-connected" };
-  if (!channel.send) return { ok: false, send: "unsupported" };
+  // The dashboard's channel writes its own transcript of what it is handed,
+  // so a second, pending record would show one message twice. Its chats take
+  // sends once they move onto this service.
+  if (!channel.send || channel.name === WEBCHAT_CHANNEL) return { ok: false, send: "unsupported" };
 
   const address = addressOf(place);
   const chat = await deps.webchatRepo.ensureChannelChat({

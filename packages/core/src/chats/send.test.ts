@@ -22,7 +22,7 @@ describe("send", () => {
   beforeEach(async () => {
     testDb = createTestDb();
     await seedBaseline(testDb.db);
-    deps = await buildTestDeps(testDb.db, { channels: ["telegram"] });
+    deps = await buildTestDeps(testDb.db, { channels: ["telegram", "webchat"] });
   });
 
   const rows = () =>
@@ -86,6 +86,16 @@ describe("send", () => {
 
     expect(result).toMatchObject({ ok: false, invalid: expect.any(String) });
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
+  });
+
+  it("refuses a dashboard chat, whose channel records its own copy of a send", async () => {
+    const result = await send(deps, placeIn(chatKey("webchat", "chat-1" as ChatId)), {
+      text: "hi",
+    });
+
+    expect(result).toEqual({ ok: false, send: "unsupported" });
+    expect(deps.transports.get("webchat")?.sentMessages).toEqual([]);
+    expect(testDb.db.select().from(romeAgentMessages).all()).toEqual([]);
   });
 
   it("refuses a place on a platform Rome holds no account on", async () => {
