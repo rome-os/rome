@@ -237,14 +237,50 @@ describe("inboundRecording", () => {
     expect(await catchUp()).toEqual([b!.messageId]);
   });
 
-  it("decides the wake of a message nobody hears, so it is not left out for good", async () => {
+  it("stops recording when the last subscriber leaves, so a hook that stores for itself stores alone", async () => {
     const telegram = fakeChannel("telegram");
     const recorder = recording([telegram.channel]);
     const leave = recorder.recordedMessages.subscribe(async () => undefined);
+    expect(telegram.handlers).toHaveLength(1);
+
     leave();
+
+    expect(telegram.handlers).toHaveLength(0);
+    await telegram.deliver(message());
+    expect(messagesIn(GROUP)).toEqual([]);
+
+    recorder.recordedMessages.subscribe(async () => undefined);
+    expect(telegram.handlers).toHaveLength(1);
+  });
+
+  it("decides the wake of a message handed to nobody, even if someone subscribes while it records", async () => {
+    const telegram = fakeChannel("telegram");
+    let recorder: ReturnType<typeof recording> | undefined;
+    let leave: () => void = () => undefined;
+    const heard = rs.fn(async () => undefined);
+    recorder = inboundRecording(
+      {
+        chats: rows,
+        messages: {
+          record: async (incoming, via) => {
+            leave();
+            const recorded = await messages.record(incoming, via);
+            recorder?.recordedMessages.subscribe(heard);
+            return recorded;
+          },
+          wakeDecided: (id) => messages.wakeDecided(id),
+          isWakeUndecided: (id) => messages.isWakeUndecided(id),
+        },
+        events,
+        platformOfChannel: () => "telegram",
+      },
+      [telegram.channel],
+    );
+    leave = recorder.recordedMessages.subscribe(async () => undefined);
 
     await telegram.deliver(message());
 
+    expect(heard).not.toHaveBeenCalled();
     const chat = channelChatId("telegram", GROUP);
     expect((await rows.loadConversationContext(chat)).pendingNotificationIds).toHaveLength(1);
   });
