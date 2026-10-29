@@ -7,6 +7,7 @@ import {
   type RomeAppContext,
   type RomeAppRuntimeServices,
 } from "./context.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { AppApiDispatcher } from "./api.js";
 import type { AppCatalog } from "./catalog.js";
@@ -250,7 +251,11 @@ export function createAction(config, deps) {
       deleteSession: rs.fn(),
     } as unknown as WebChatRepository;
 
-    const repositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+    const repositories = createAppRuntimeRepositories({
+      settingsRepo,
+      webchatRepo,
+      chatRepo: {} as ChatRepository,
+    });
 
     expect("delete" in repositories.settings).toBe(false);
     expect("getAll" in repositories.settings).toBe(false);

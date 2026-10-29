@@ -217,6 +217,8 @@ export interface ChatSettingsServiceDeps {
 export class ChatSettingsService implements ChatSettingsControl {
   private readonly mutex = new KeyedMutex();
   private readonly descriptors = new Map<string, ChatDescriptor>();
+  /** The kind each conversation's platform described it as, by ref. */
+  private readonly describedKinds = new Map<string, ChatDescriptor["kind"]>();
   /** The channel each remembered conversation was last seen on, so it still
    *  reads its row once its Connection is removed. */
   private readonly rememberedChannels = new Map<string, string>();
@@ -226,6 +228,7 @@ export class ChatSettingsService implements ChatSettingsControl {
   /** Remember provider-native discovery metadata without changing settings. */
   observe(descriptor: ChatDescriptor): void {
     this.remember(descriptor);
+    this.describedKinds.set(this.key(descriptor.ref), descriptor.kind);
     if (descriptor.parent) {
       const existing = this.descriptors.get(this.key(descriptor.parent));
       if (!existing) {
@@ -271,6 +274,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       // enter this page only after Rome has persisted the conversation.
       if (descriptor.kind === "dm") continue;
       this.remember(descriptor);
+      this.describedKinds.set(this.key(descriptor.ref), descriptor.kind);
       byRef.set(this.key(descriptor.ref), { descriptor, source: "live" });
     }
     for (const row of known) {
@@ -375,7 +379,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       });
       return snapshot;
     }
-    const stored = row?.channelSettings ?? null;
+    const stored = this.storedRule(ref, descriptor, row);
     const direct = this.directOverrides(row, stored);
     const effective = overlay(defaultConversationSettings(), direct);
     const supportedFields = this.supportedFields(descriptor, row);
@@ -450,13 +454,15 @@ export class ChatSettingsService implements ChatSettingsControl {
           updatedAt: new Date().toISOString(),
           updatedBy: input.actor,
         };
-        this.deps.repository.mutate(descriptor, this.storedChannel(input.ref), {
+        const [target, channel, kindKnown] = this.target(input.ref, descriptor, row);
+        this.deps.repository.mutate(target, channel, {
           settings: stored,
           agentName: supported.has("routing.agentName")
             ? typeof routing === "string"
               ? routing
               : null
             : undefined,
+          kindKnown,
         });
         await this.deps.onChanged({
           ref: input.ref,
@@ -490,9 +496,11 @@ export class ChatSettingsService implements ChatSettingsControl {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
         const fields = [...this.supportedFields(descriptor, row)];
-        this.deps.repository.mutate(descriptor, this.storedChannel(input.ref), {
+        const [target, channel, kindKnown] = this.target(input.ref, descriptor, row);
+        this.deps.repository.mutate(target, channel, {
           settings: null,
           agentName: fields.includes("routing.agentName") ? null : undefined,
+          kindKnown,
         });
         await this.deps.onChanged({ ref: input.ref, actor: input.actor, fields, reset: true });
         log.info("conversation_settings.reset", {
@@ -517,6 +525,49 @@ export class ChatSettingsService implements ChatSettingsControl {
       (overrides.routing ??= {}).agentName = row.agentName;
     }
     return overrides;
+  }
+
+  /** The rule stored for the chat `ref` names, read through the chat so a
+   *  group's rule set through another of Rome's accounts reads here too. */
+  private storedRule(
+    ref: ChatRef,
+    descriptor: ChatDescriptor,
+    row: StoredChatRow | null,
+  ): StoredChatSettings | null {
+    let channel = row?.sourceChannel ?? null;
+    if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
+      channel = this.channelName(ref);
+    }
+    return channel === null
+      ? null
+      : this.deps.repository.ruleOf(channel, ref.chatId, this.knownKind(ref, descriptor, row));
+  }
+
+  /** What `mutate` writes for `ref`: the conversation as its kind is known,
+   *  the channel its row is stored under, and whether that kind is known. */
+  private target(
+    ref: ChatRef,
+    descriptor: ChatDescriptor,
+    row: StoredChatRow | null,
+  ): [ChatDescriptor, string, boolean] {
+    const kind = this.knownKind(ref, descriptor, row);
+    return [
+      kind === null ? descriptor : { ...descriptor, kind },
+      this.storedChannel(ref),
+      kind !== null,
+    ];
+  }
+
+  /** The kind of the conversation as its row or its platform states it, or
+   *  null when `descriptor.kind` is only the guess made for an address with
+   *  no row or a row with no type, which must not join a group on that guess. */
+  private knownKind(
+    ref: ChatRef,
+    descriptor: ChatDescriptor,
+    row: StoredChatRow | null,
+  ): ChatDescriptor["kind"] | null {
+    if (row !== null && row.sourceThreadType !== null) return descriptor.kind;
+    return this.describedKinds.get(this.key(ref)) ?? null;
   }
 
   private async discover(
@@ -682,11 +733,15 @@ export class ChatSettingsService implements ChatSettingsControl {
     return `${ref.connectionId}\0${ref.chatId}`;
   }
 
-  /** A conversation on no channel stores nothing, so it locks on its own
-   *  key, which no channel's conversation shares. */
+  /** The lock a conversation's read-modify-write holds: its chat's platform
+   *  and id, since a write to a group reaches the row of every one of Rome's
+   *  accounts in it. A conversation on no channel stores nothing, so it locks
+   *  on its own key, which no channel's conversation shares. */
   private storageKey(ref: ChatRef): string {
     const channel = this.channelName(ref);
-    return channel === null ? this.key(ref) : `${channel}\0${ref.chatId}`;
+    return channel === null
+      ? this.key(ref)
+      : `${this.deps.repository.platformOf(channel)}\0${ref.chatId}`;
   }
 
   /** The channel the conversation `ref` addresses belongs to, or null when
