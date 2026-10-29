@@ -1,8 +1,22 @@
 // @rstest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { TraceSubagentSummary } from "@rome/api-types/trace-segments";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { TraceSegment, TraceSubagentSummary } from "@rome/api-types/trace-segments";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { FakeTurnStream, runSegment, stepsSummary } from "@/test/fake-turn-stream";
 import { DelegatedSubagentGroup } from "./DelegatedSubagentGroup";
+
+let streams = new Map<string, FakeTurnStream>();
+rs.mock("@/lib/chat-api", () => ({
+  openTurnStream: async (turnId: string) => {
+    const stream = new FakeTurnStream();
+    streams.set(turnId, stream);
+    return stream.response;
+  },
+}));
+
+beforeEach(() => {
+  streams = new Map();
+});
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -158,5 +172,176 @@ describe("DelegatedSubagentGroup", () => {
     render(<DelegatedSubagentGroup subagents={children} onOpenSubagentTrace={() => {}} />);
 
     expect(screen.getAllByText("Thinking…")).toHaveLength(4);
+  });
+
+  describe("while a child runs", () => {
+    // A released stream lingers one tick, so every test runs its own turn.
+    let turnId = "";
+    let seq = 0;
+    beforeEach(() => {
+      seq += 1;
+      turnId = `live-child-turn-${seq}`;
+    });
+
+    function runningChild(overrides: Partial<TraceSubagentSummary> = {}) {
+      return completedSubagent({
+        status: "running",
+        traceSummary: undefined,
+        turnId,
+        ...overrides,
+      });
+    }
+
+    it("keeps Thinking… until the first step arrives", async () => {
+      render(
+        <DelegatedSubagentGroup subagents={[runningChild()]} onOpenSubagentTrace={() => {}} />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      expect(screen.getByText("Thinking…")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Open trace for planning" }).title).toBe("");
+    });
+
+    it("shows the live step count and elapsed time, with the current step as the tooltip", async () => {
+      render(
+        <DelegatedSubagentGroup subagents={[runningChild()]} onOpenSubagentTrace={() => {}} />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      const stream = streams.get(turnId)!;
+      const startedAt = new Date(Date.now() - 80_000).toISOString();
+      await act(async () => {
+        stream.send(
+          "segment_upsert",
+          runSegment("run-1", [
+            { tool: "Read", input: { path: "a.ts" }, startedAt },
+            { tool: "Edit", input: { path: "TraceDrawer.tsx" } },
+          ]),
+        );
+        stream.send("summary_update", stepsSummary(7));
+      });
+
+      expect(await screen.findByText("7 steps · 1m 20s")).toBeTruthy();
+      expect(screen.queryByText("Thinking…")).toBeNull();
+      expect(screen.getByRole("button", { name: "Open trace for planning" }).title).toBe(
+        "Edit TraceDrawer.tsx",
+      );
+    });
+
+    it("counts from the subagent_start in the parent trace, not from the first step", async () => {
+      const parent: TraceSegment[] = [
+        {
+          kind: "run",
+          id: "parent-run",
+          ordinal: 0,
+          count: 1,
+          app: { id: "coding", name: "Coding", iconUrl: "/icon" },
+          blocks: [
+            {
+              type: "subagent_start",
+              toolUseId: "subagent-1",
+              agentName: "coding:planning",
+              input: {},
+              sessionId: "child-session",
+              turnId,
+              startedAt: new Date(Date.now() - 80_000).toISOString(),
+            },
+          ],
+        },
+      ];
+      render(
+        <DelegatedSubagentGroup
+          subagents={[runningChild()]}
+          parentSegments={parent}
+          onOpenSubagentTrace={() => {}}
+        />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      const firstStep = new Date(Date.now() - 20_000).toISOString();
+      await act(async () => {
+        streams
+          .get(turnId)!
+          .send(
+            "segment_upsert",
+            runSegment("run-1", [{ tool: "Read", input: {}, startedAt: firstStep }]),
+          );
+        streams.get(turnId)!.send("summary_update", stepsSummary(1));
+      });
+      expect(await screen.findByText("1 step · 1m 20s")).toBeTruthy();
+    });
+
+    it("reads 1 step in the singular", async () => {
+      render(
+        <DelegatedSubagentGroup subagents={[runningChild()]} onOpenSubagentTrace={() => {}} />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      await act(async () => {
+        streams.get(turnId)!.send("summary_update", stepsSummary(1));
+      });
+      expect(await screen.findByText("1 step")).toBeTruthy();
+    });
+
+    it("falls back to the stored summary once the run ends", async () => {
+      const props = { onOpenSubagentTrace: () => {} };
+      const { rerender } = render(
+        <DelegatedSubagentGroup subagents={[runningChild()]} {...props} />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      await act(async () => {
+        streams.get(turnId)!.send("summary_update", stepsSummary(7));
+      });
+      await screen.findByText("7 steps");
+
+      rerender(
+        <DelegatedSubagentGroup
+          subagents={[
+            runningChild({
+              status: "completed",
+              traceSummary: {
+                distinctApps: [],
+                totalSteps: 8,
+                totalDurationMs: 3200,
+                invocationCounts: {},
+              },
+            }),
+          ]}
+          {...props}
+        />,
+      );
+      expect(screen.getByText("8 steps · 3.2s")).toBeTruthy();
+      expect(screen.queryByText("7 steps")).toBeNull();
+    });
+
+    it("keeps the status text for a child that failed", async () => {
+      const props = { onOpenSubagentTrace: () => {} };
+      const { rerender } = render(
+        <DelegatedSubagentGroup subagents={[runningChild()]} {...props} />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      await act(async () => {
+        streams.get(turnId)!.send("summary_update", stepsSummary(2));
+      });
+      await screen.findByText("2 steps");
+      rerender(
+        <DelegatedSubagentGroup subagents={[runningChild({ status: "failed" })]} {...props} />,
+      );
+      expect(screen.getByText("failed")).toBeTruthy();
+    });
+
+    it("opens no stream for a completed child it never saw running", () => {
+      render(
+        <DelegatedSubagentGroup
+          subagents={[runningChild({ status: "completed" })]}
+          onOpenSubagentTrace={() => {}}
+        />,
+      );
+      expect(streams.size).toBe(0);
+      expect(screen.getByText("completed")).toBeTruthy();
+    });
+
+    it("opens no stream for a child that is not running", () => {
+      render(
+        <DelegatedSubagentGroup subagents={[completedSubagent()]} onOpenSubagentTrace={() => {}} />,
+      );
+      expect(streams.size).toBe(0);
+    });
   });
 });

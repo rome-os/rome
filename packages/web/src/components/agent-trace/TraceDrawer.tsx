@@ -9,6 +9,7 @@ import type {
   TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
+import { useTurnStream } from "@/hooks/use-turn-stream";
 import { CollapsedTraceSummary } from "./CollapsedTraceSummary";
 import { TraceBody } from "./AgentTrace";
 import { turnApiPath } from "./turn-api";
@@ -36,6 +37,8 @@ export type TraceDrawerTarget =
       turnId: string;
       summary: TraceSummary;
       dumpHref?: string;
+      /** Still running when opened: followed over its stream, then loaded from storage. */
+      running?: boolean;
     };
 
 function traceDrawerOpenPlacementClass(hasApps: boolean): string {
@@ -157,6 +160,9 @@ export function TraceDrawer({
   const includeSubagentUsage =
     usageOption.targetKey === remoteTargetKey ? usageOption.include : true;
   const liveTargetKey = target?.kind === "live" ? `${target.sessionId}:${target.turnId}` : null;
+  // A running turn is followed over its stream; its stored trace loads once it ends.
+  const turnStream = useTurnStream(turnTarget?.turnId, { enabled: !!turnTarget?.running });
+  const followingTurn = !!turnTarget?.running && !turnStream.done;
 
   useEffect(() => {
     if (!remoteTargetKey) {
@@ -165,6 +171,16 @@ export function TraceDrawer({
       setError(null);
       setLoading(false);
       setUsageOption({ targetKey: null, include: true });
+      loadedKeyRef.current = null;
+      loadedTargetKeyRef.current = null;
+      return;
+    }
+    if (followingTurn) {
+      // Drop what the previous target left behind (stored trace, archived/error state).
+      setRemoteTrace(null);
+      setArchived(false);
+      setError(null);
+      setLoading(false);
       loadedKeyRef.current = null;
       loadedTargetKeyRef.current = null;
       return;
@@ -210,32 +226,48 @@ export function TraceDrawer({
     return () => {
       cancelled = true;
     };
-  }, [remoteTargetKey, storedId, turnTarget, includeSubagentUsage, retryNonce, t, loadStoredTrace]);
+  }, [
+    remoteTargetKey,
+    storedId,
+    turnTarget,
+    followingTurn,
+    includeSubagentUsage,
+    retryNonce,
+    t,
+    loadStoredTrace,
+  ]);
 
   const onRetry = remoteTargetKey ? () => setRetryNonce((n) => n + 1) : undefined;
 
   const open = target !== null;
-  const segments = target?.kind === "live" ? target.segments : (remoteTrace?.segments ?? null);
-  const displaySummary = remoteTrace?.summary ?? target?.summary;
-  const streaming = target?.kind === "live" && target.streaming;
+  // Until the stored trace lands, show what the stream delivered, so the panel never blanks.
+  const streamedSegments = turnTarget?.running && turnStream.segments.length > 0;
+  const segments =
+    target?.kind === "live"
+      ? target.segments
+      : (remoteTrace?.segments ?? (streamedSegments ? turnStream.segments : null));
+  const displaySummary =
+    remoteTrace?.summary ?? (streamedSegments ? turnStream.summary : null) ?? target?.summary;
+  const streaming = (target?.kind === "live" && target.streaming) || followingTurn;
+  const followsLive = target?.kind === "live" || !!turnTarget?.running;
+  const followKey = liveTargetKey ?? (followsLive ? remoteTargetKey : null);
   useLayoutEffect(() => {
     shouldFollowLiveTraceRef.current = true;
-    if (target?.kind !== "live" || !scrollEl) return;
+    if (!followKey || !scrollEl) return;
     scrollEl.scrollTop = scrollEl.scrollHeight;
-  }, [liveTargetKey, target?.kind, scrollEl]);
+  }, [followKey, scrollEl]);
 
   const updateLiveTraceFollowState = useCallback(() => {
-    if (target?.kind !== "live" || !scrollEl) return;
+    if (!followsLive || !scrollEl) return;
     shouldFollowLiveTraceRef.current =
       scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight <=
       TRACE_SCROLL_BOTTOM_THRESHOLD_PX;
-  }, [target?.kind, scrollEl]);
+  }, [followsLive, scrollEl]);
 
   useLayoutEffect(() => {
-    if (target?.kind !== "live" || !streaming || !shouldFollowLiveTraceRef.current || !scrollEl)
-      return;
+    if (!followsLive || !streaming || !shouldFollowLiveTraceRef.current || !scrollEl) return;
     scrollEl.scrollTop = scrollEl.scrollHeight;
-  }, [target, streaming, scrollEl]);
+  }, [target, segments, followsLive, streaming, scrollEl]);
 
   const dumpHref =
     !readOnly && !archived
@@ -302,7 +334,7 @@ export function TraceDrawer({
       ) : target ? (
         <TraceBody
           segments={segments}
-          loading={loading}
+          loading={loading && !streamedSegments}
           error={error}
           onRetry={onRetry}
           renderInlineBlock={renderInlineBlock}
