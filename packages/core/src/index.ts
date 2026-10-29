@@ -563,6 +563,15 @@ async function main() {
     installedRoot: getProfileInstalledAppsDir(),
     bundleFetcher: appBundleFetcher,
     romeCloudListings,
+    routines: {
+      repository: routinesRepo,
+      // These collaborators are constructed after the app domain, before any user operation.
+      actionRegistry: {
+        list: () => actionRegistry.list(),
+        getCanonicalName: (name) => actionRegistry.getCanonicalName(name),
+      },
+      engine: { deactivate: (id) => routineEngine.deactivate(id) },
+    },
   });
   const appStore = createAppStoreService({ appCatalog });
 
