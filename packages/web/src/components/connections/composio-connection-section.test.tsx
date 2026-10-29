@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { ComposioConnectionSection } from "@/components/connections/composio-connection-section";
 import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-cards";
@@ -48,15 +49,18 @@ function renderSection(
     onFlash?: (message: string) => void;
   } = {},
 ) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <ComposioConnectionSection
-      card={card}
-      slot={card.slots[0]}
-      role="primary"
-      composio={cliStatus}
-      onRefresh={onRefresh}
-      onFlash={onFlash}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <ComposioConnectionSection
+        card={card}
+        slot={card.slots[0]}
+        role="primary"
+        composio={cliStatus}
+        onRefresh={onRefresh}
+        onFlash={onFlash}
+      />
+    </QueryClientProvider>,
   );
 }
 
@@ -83,6 +87,25 @@ describe("ComposioConnectionSection", () => {
     renderSection(status({ installed: false }));
     expect(screen.getByText("Composio is not available on this host.")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows event delivery while signed in and sets it up again on request", async () => {
+    let registered = false;
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/apps/connector/webhook/register" && init?.method === "POST") {
+        registered = true;
+        return Response.json({ ok: true });
+      }
+      return Response.json({ webhookRegistered: registered, relayConfigured: true });
+    });
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+    expect(await screen.findByText("Needs setup")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Set up again" }));
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/apps/connector/webhook/register",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("Disconnect posts to the composio logout endpoint and refreshes", async () => {

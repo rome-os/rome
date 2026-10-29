@@ -4,6 +4,7 @@ import type { ComposioClient } from "./api/composio-client.js";
 import {
   buildProxyEndpoint,
   isSupportedToolkit,
+  ROME_MANAGED_TOOLKITS,
   SUPPORTED_TOOLKITS,
   subscribeTriggerFeed,
   TOOLKIT_API_HOSTS,
@@ -26,6 +27,14 @@ describe("SUPPORTED_TOOLKITS mirrors the web catalog", () => {
   it("recognizes a catalog toolkit case-insensitively and rejects one outside it", () => {
     expect(isSupportedToolkit("Slack")).toBe(true);
     expect(isSupportedToolkit("twitter")).toBe(false);
+  });
+
+  it("marks exactly the Rome-managed toolkits as romeManaged in the catalog", () => {
+    expect(
+      CATALOG.filter((e) => e.romeManaged)
+        .map((e) => e.slug)
+        .sort(),
+    ).toEqual([...ROME_MANAGED_TOOLKITS].sort());
   });
 });
 

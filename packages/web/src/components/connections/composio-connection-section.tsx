@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@rome-os/ui/spinner";
+import { ComposioWebhookRow } from "@/components/connections/composio-services";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
@@ -111,7 +112,9 @@ export function ComposioConnectionSection({
       icon={<ConnectionBrandBadge connection={card.service} />}
       action={disconnectAction}
     >
-      {loggedIn ? null : (
+      {loggedIn ? (
+        <ComposioWebhookRow onFlash={onFlash} />
+      ) : (
         <div>
           <Button
             disabled={pending !== null || Boolean(composio?.loginPending)}

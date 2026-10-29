@@ -79,6 +79,28 @@
       "accounts": "账号和工具",
       "other": "其他"
     },
+    "composioServices": {
+      "group": "通过 Composio 连接",
+      "via": "via Composio",
+      "viaLong": "Rome 通过你的 Composio 账号连接这个服务。",
+      "signInBanner": "登录 Composio 后才能连接这些服务。",
+      "signIn": "登录",
+      "authorize": "请在新标签页中授权 {{name}}，完成后回到这里。",
+      "alreadyConnected": "{{name}} 已经连接。",
+      "connectFailed": "无法开始连接，请重试。",
+      "reconnect": "重新连接",
+      "disconnectConfirm": "断开 {{name}}？断开后，Rome 无法访问它，直到你重新连接。",
+      "disconnected": "已断开 {{name}}。",
+      "loadFailed": "无法加载 Composio 服务。",
+      "webhook": {
+        "title": "事件推送",
+        "ready": "正常",
+        "notReady": "需要设置",
+        "unavailable": "此实例不可用",
+        "setUp": "重新设置",
+        "done": "事件推送已设置。"
+      }
+    },
     "loadFailedFallback": "加载连接失败。",
     "accounts": {
       "add": "添加另一个账号",
