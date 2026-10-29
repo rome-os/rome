@@ -1,6 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
+import { eq } from "drizzle-orm";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatEvents } from "./events.js";
 import { StoredMessages } from "./message-repository.js";
@@ -347,16 +349,8 @@ describe("StoredMessages reads", () => {
     expect(read).toMatchObject([{ direction: "fromRome", body: { text: "on it" } }]);
   });
 
-  it("reads a group Rome wrote to first as one chat once a message says it is a group", async () => {
-    // A send opens the chat on each account without knowing its kind, or
-    // guesses it is private.
-    await rows.ensureChannelChat({ channel: "telegram", threadId: "group-1", agentName: "main" });
-    await rows.ensureChannelChat({
-      channel: "telegram-sales",
-      threadId: "group-1",
-      threadType: "private",
-      agentName: "main",
-    });
+  it("reads a shared channel two of Rome's accounts are in as one chat", async () => {
+    // Discord calls a shared room a channel.
     for (const [channel, n] of [
       ["telegram", 1],
       ["telegram-sales", 2],
@@ -364,20 +358,13 @@ describe("StoredMessages reads", () => {
       const chat = await rows.ensureChannelChat({
         channel,
         threadId: "group-1",
-        threadType: "group",
         agentName: "main",
       });
+      await testDb.db
+        .update(romeSessions)
+        .set({ sourceThreadType: "channel" })
+        .where(eq(romeSessions.id, chat.id));
       await said(chat.id, `line ${n}`, minute(n), `m-${n}`);
-    }
-
-    // A later send that guesses private leaves the group a group.
-    for (const channel of ["telegram", "telegram-sales"]) {
-      await rows.ensureChannelChat({
-        channel,
-        threadId: "group-1",
-        threadType: "private",
-        agentName: "main",
-      });
     }
 
     const { messages: read } = await messages.recent(group, 10);

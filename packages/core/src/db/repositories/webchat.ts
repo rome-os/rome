@@ -1064,15 +1064,6 @@ export class WebChatRepository {
     if (found && input.threadName) {
       await this.backfillChannelConversationName(found, input, input.threadName);
     }
-    // A send can open a chat before a message arrives in it, and it does not
-    // know the chat's kind: some callers guess private. A group's own message
-    // says it is one, and nothing makes a known group private again.
-    if (found && input.threadType === "group" && found.sourceThreadType !== "group") {
-      await this.db
-        .update(romeSessions)
-        .set({ sourceThreadType: "group" })
-        .where(eq(romeSessions.id, found.id));
-    }
     const existing = found && { id: found.id, agentName: found.agentName };
     if (existing) {
       if (!parent) return existing;
@@ -1535,13 +1526,15 @@ export class WebChatRepository {
       inArray(romeSessions.sourceChannel, [...input.channels]),
       eq(romeSessions.sourceThreadId, input.address),
     );
-    // A native thread opens only inside a group, and its row may not name its
-    // type, so a row under a parent chat is a group's too.
-    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') = 'group' or ${romeSessions.parentSessionId} is not null)`;
+    // A group or a channel is shared. A native thread opens only inside one,
+    // and its row may not name its type, so a row under a parent chat is
+    // shared too.
+    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') in ('group', 'channel') or ${romeSessions.parentSessionId} is not null)`;
     // Read through one channel, the chat is that channel's record alone.
     // Otherwise only a group's address names one chat across Rome's accounts,
     // and one account knowing it for a group is enough: a send opens its row
-    // without knowing the kind. Any other chat is one account's own: Telegram
+    // without knowing the kind. A chat no account knows for a group reads as
+    // a direct message. Any other chat is one account's own: Telegram
     // keys a direct message by the other person alone, so the same address on
     // two channels is two chats, and it is read only while one channel holds
     // it.
@@ -1697,7 +1690,6 @@ export class WebChatRepository {
     agentName: string | null;
     name: string;
     sourceThreadName: string | null;
-    sourceThreadType: string | null;
   } | null> {
     const rows = await this.db
       .select({
@@ -1705,7 +1697,6 @@ export class WebChatRepository {
         agentName: romeSessions.agentName,
         name: romeSessions.name,
         sourceThreadName: romeSessions.sourceThreadName,
-        sourceThreadType: romeSessions.sourceThreadType,
       })
       .from(romeSessions)
       .where(
