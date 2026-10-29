@@ -574,22 +574,29 @@ describe("ConnectionsSection — Composio services", () => {
     { slug: "gmail", name: "Gmail", scope: "Reads and sends your email.", glyph: "gmail" },
     { slug: "notion", name: "Notion", scope: "Reads and writes your pages.", glyph: "notion" },
     { slug: "linear", name: "Linear", scope: "Tracks issues and projects.", glyph: "linear" },
+    { slug: "github", name: "GitHub", scope: "", glyph: "github", romeManaged: true },
   ];
   const accounts = [
     { id: "a", toolkitSlug: "gmail", status: "ACTIVE" },
     { id: "b", toolkitSlug: "notion", status: "EXPIRED" },
+    // The account core bridges from Rome's own GitHub connection.
+    { id: "c", toolkitSlug: "github", status: "ACTIVE" },
   ];
+  let failAccounts = false;
   let calls: { url: string; method: string }[] = [];
 
   beforeEach(() => {
     calls = [];
+    failAccounts = false;
     rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       calls.push({ url, method });
       if (url === "/api/apps/connector/catalog") return Response.json({ items: catalog });
       if (url === "/api/apps/connector/connectors" && method === "GET")
-        return Response.json({ items: accounts });
+        return failAccounts
+          ? Response.json({ error: "composio_unavailable" }, { status: 502 })
+          : Response.json({ items: accounts });
       if (url === "/api/apps/connector/connectors" && method === "POST")
         return Response.json({ authorizationUrl: "https://composio.example/auth/linear" });
       if (url.startsWith("/api/apps/connector/connectors/") && method === "DELETE")
@@ -601,14 +608,16 @@ describe("ConnectionsSection — Composio services", () => {
   const signedIn = () => composioStatus({ installed: true, loggedIn: true });
   const signedOut = () => composioStatus({ installed: true, loggedIn: false });
 
-  it("lists connected services under Accounts, marked via Composio, broken first", async () => {
+  it("lists connected services under Accounts, marked via Composio, broken ones leading", async () => {
     renderSection([oauth("github", "authorized")], signedIn());
     const accountsGroup = screen.getByRole("region", { name: "Accounts and tools" });
     await within(accountsGroup).findByRole("button", { name: "Open Gmail" });
     const names = within(accountsGroup)
       .getAllByRole("button")
       .map((row) => row.getAttribute("aria-label"));
-    expect(names).toEqual(["Open GitHub", "Open Composio", "Open Notion", "Open Gmail"]);
+    // A broken Composio service leads the group like a broken Rome one, and the
+    // bridged GitHub account never shows as a Composio row.
+    expect(names).toEqual(["Open Notion", "Open GitHub", "Open Composio", "Open Gmail"]);
     const notion = within(accountsGroup).getByRole("button", { name: "Open Notion" });
     expect(within(notion).getByText("via Composio")).toBeTruthy();
     expect(within(notion).getByText("Broken")).toBeTruthy();
@@ -670,5 +679,14 @@ describe("ConnectionsSection — Composio services", () => {
     });
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open Google" })).toBeNull();
+  });
+
+  it("shows a Composio load failure on Connected, with a retry", async () => {
+    failAccounts = true;
+    renderSection([oauth("github", "authorized")], signedIn());
+    expect(await screen.findByText("Couldn't load the Composio services.")).toBeTruthy();
+    failAccounts = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Open Gmail" })).toBeTruthy();
   });
 });

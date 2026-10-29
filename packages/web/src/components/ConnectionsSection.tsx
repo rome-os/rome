@@ -131,9 +131,7 @@ export function ConnectionsSection({
   const matchesService = (row: ComposioServiceRow, withScope: boolean) =>
     !needle || `${row.name} ${withScope ? row.scope : ""}`.toLocaleLowerCase().includes(needle);
   const shownServices: Record<ConnectionTab, ComposioServiceRow[]> = {
-    connected: composioServices.rows.connected
-      .filter((row) => matchesService(row, false))
-      .sort((a, b) => Number(b.needsAttention) - Number(a.needsAttention)),
+    connected: composioServices.rows.connected.filter((row) => matchesService(row, false)),
     available: composioServices.rows.available.filter((row) => matchesService(row, true)),
   };
   const count = (value: ConnectionTab) => shown[value].length + shownServices[value].length;
@@ -143,6 +141,51 @@ export function ConnectionsSection({
   const showAppKeys =
     tab === "connected" && (!needle || t("appKeys.title").toLocaleLowerCase().includes(needle));
   const needsAttention = (card: ConnectionCard) => connectionStatus(card).tone === "attention";
+
+  const renderCard = (card: ConnectionCard) => (
+    <Button
+      key={card.route}
+      type="button"
+      variant="outline"
+      size="default"
+      align="between"
+      onClick={() => select(card.route)}
+      className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
+      aria-label={`Open ${card.label}`}
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <ConnectionBrandBadge connection={card.service} />
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-ui text-foreground">{card.label}</span>
+          {tab === "available" && describe(card) ? (
+            <span className="truncate text-aux text-muted-foreground">{describe(card)}</span>
+          ) : null}
+        </span>
+      </span>
+      {/* A service the host cannot offer keeps its Unavailable
+          status and reason instead of a Connect cue. */}
+      {tab === "connected" || card.connect?.available === false ? (
+        <StatusIndicator card={card} />
+      ) : (
+        <span className="shrink-0 text-ui text-primary">{t("connections.connect")}</span>
+      )}
+    </Button>
+  );
+  // On Connected, Composio services join the Accounts group, and whatever
+  // needs attention leads it, Rome's own or Composio's.
+  const ordered = (
+    group: string,
+    rows: ConnectionCard[],
+  ): (ConnectionCard | ComposioServiceRow)[] => {
+    if (tab !== "connected" || group !== "accounts") return rows;
+    const services = shownServices.connected;
+    return [
+      ...rows.filter(needsAttention),
+      ...services.filter((row) => row.needsAttention),
+      ...rows.filter((card) => !needsAttention(card)),
+      ...services.filter((row) => !row.needsAttention),
+    ];
+  };
 
   // A freshly added account has no card until the list refetches, so refetch
   // first and point the dialog at it only once its card exists. Otherwise the
@@ -250,6 +293,16 @@ export function ConnectionsSection({
                 ),
               }))}
             />
+            {/* On both tabs: a failed load hides connected services as well as
+                available ones. */}
+            {composioInstalled && composioServices.error ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3 text-ui text-muted-foreground">
+                <span>{t("connections.composioServices.loadFailed")}</span>
+                <Button type="button" variant="outline" size="sm" onClick={composioServices.retry}>
+                  {t("page.retry")}
+                </Button>
+              </div>
+            ) : null}
             {/* A search that matches only App keys shows that row, not a
                 no-match message above it. */}
             {count(tab) === 0 && !(needle && showAppKeys) ? (
@@ -283,51 +336,20 @@ export function ConnectionsSection({
                   {t(`connections.groups.${group}`)}
                 </h3>
                 <ListCollection className="flex flex-col gap-2">
-                  {rows.map((card) => (
-                    <Button
-                      key={card.route}
-                      type="button"
-                      variant="outline"
-                      size="default"
-                      align="between"
-                      onClick={() => select(card.route)}
-                      className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
-                      aria-label={`Open ${card.label}`}
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <ConnectionBrandBadge connection={card.service} />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="truncate text-ui text-foreground">{card.label}</span>
-                          {tab === "available" && describe(card) ? (
-                            <span className="truncate text-aux text-muted-foreground">
-                              {describe(card)}
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-                      {/* A service the host cannot offer keeps its Unavailable
-                          status and reason instead of a Connect cue. */}
-                      {tab === "connected" || card.connect?.available === false ? (
-                        <StatusIndicator card={card} />
-                      ) : (
-                        <span className="shrink-0 text-ui text-primary">
-                          {t("connections.connect")}
-                        </span>
-                      )}
-                    </Button>
-                  ))}
-                  {tab === "connected" && group === "accounts"
-                    ? shownServices.connected.map((row) => (
-                        <ComposioServiceRowButton
-                          key={`composio:${row.slug}`}
-                          row={row}
-                          connected
-                          disabled={false}
-                          busy={false}
-                          onClick={() => setOpenService(row.slug)}
-                        />
-                      ))
-                    : null}
+                  {ordered(group, rows).map((row) =>
+                    "route" in row ? (
+                      renderCard(row)
+                    ) : (
+                      <ComposioServiceRowButton
+                        key={`composio:${row.slug}`}
+                        row={row}
+                        connected
+                        disabled={false}
+                        busy={false}
+                        onClick={() => setOpenService(row.slug)}
+                      />
+                    ),
+                  )}
                 </ListCollection>
               </section>
             ))}
@@ -335,24 +357,11 @@ export function ConnectionsSection({
                 the guardian signs in to Composio. */}
             {tab === "available" &&
             composioInstalled &&
-            (!composioSignedIn || shownServices.available.length > 0 || composioServices.error) ? (
+            (!composioSignedIn || shownServices.available.length > 0) ? (
               <section className="flex flex-col gap-2" aria-labelledby="composio-heading">
                 <h3 id="composio-heading" className="text-aux text-muted-foreground">
                   {t("connections.composioServices.group")}
                 </h3>
-                {composioServices.error ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3 text-ui text-muted-foreground">
-                    <span>{t("connections.composioServices.loadFailed")}</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={composioServices.retry}
-                    >
-                      {t("page.retry")}
-                    </Button>
-                  </div>
-                ) : null}
                 {!composioSignedIn ? (
                   <ComposioSignInBanner onSignIn={() => select("composio")} />
                 ) : null}

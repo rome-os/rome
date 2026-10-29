@@ -44,6 +44,9 @@ export function useComposioServices({
     queryKey: COMPOSIO_ACCOUNTS_QUERY_KEY,
     queryFn: fetchComposioAccounts,
     enabled: installed && signedIn,
+    // A connection finished in another tab must show when the guardian comes
+    // back, however soon, so focus always refetches.
+    staleTime: 0,
   });
   const rows = composioServiceRows(catalog.data ?? [], signedIn ? (accounts.data ?? []) : []);
   return {

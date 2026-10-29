@@ -6,13 +6,16 @@ import { fetchJson } from "@/lib/fetch-json";
 // them and calls these routes.
 const CONNECTOR_API = "/api/apps/connector";
 
-/** One service the guardian can connect through Composio. */
+/** One service in the Connector's catalog. */
 export interface ComposioCatalogEntry {
   slug: string;
   name: string;
   /** What the service lets Rome do, in one line. */
   scope: string;
   glyph: string;
+  /** Rome connects this service itself (GitHub, Slack, Shopify). Settings
+   *  lists it as Rome's own connection, never as a Composio one. */
+  romeManaged?: boolean;
 }
 
 /** One connected Composio account. Several can share a toolkit. */
@@ -89,14 +92,23 @@ export async function registerComposioWebhook(): Promise<void> {
  * service needs attention only when none of its accounts is ACTIVE: one live
  * account means Rome can reach it. A connected service missing from the
  * catalog still shows, under its slug, so it can be disconnected.
+ *
+ * Rome-managed services are left out on both sides. Core bridges Rome's own
+ * GitHub (and Slack, Shopify) connection into Composio, and that bridged
+ * account is not the guardian's to manage here.
  */
 export function composioServiceRows(
-  catalog: ComposioCatalogEntry[],
+  fullCatalog: ComposioCatalogEntry[],
   accounts: ComposioAccount[],
 ): { connected: ComposioServiceRow[]; available: ComposioServiceRow[] } {
+  const romeManaged = new Set(
+    fullCatalog.filter((entry) => entry.romeManaged).map((entry) => entry.slug),
+  );
+  const catalog = fullCatalog.filter((entry) => !entry.romeManaged);
   const active = new Map<string, boolean>();
   for (const account of accounts) {
     const slug = account.toolkitSlug.toLowerCase();
+    if (romeManaged.has(slug)) continue;
     active.set(slug, (active.get(slug) ?? false) || account.status.toUpperCase() === "ACTIVE");
   }
   const known = new Set(catalog.map((entry) => entry.slug));

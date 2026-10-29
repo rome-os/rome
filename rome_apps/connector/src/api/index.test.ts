@@ -179,10 +179,10 @@ describe("connector authentication recovery", () => {
 });
 
 describe("connector API catalog", () => {
-  it("lists the Composio services without the ones Rome connects itself", async () => {
+  it("lists the whole catalog and marks the toolkits Rome connects itself", async () => {
     const response = await createApiHandler(context()).handle(request("catalog"));
     const { items } = (await response.json()) as {
-      items: { slug: string; name: string; scope: string; glyph: string }[];
+      items: { slug: string; name: string; scope: string; glyph: string; romeManaged: boolean }[];
     };
 
     expect(items.find((item) => item.slug === "gmail")).toEqual({
@@ -190,11 +190,28 @@ describe("connector API catalog", () => {
       name: "Gmail",
       scope: "Reads and sends your email.",
       glyph: "gmail",
+      romeManaged: false,
     });
-    expect(items.map((item) => item.slug)).not.toContain("github");
-    expect(items.map((item) => item.slug)).not.toContain("slack");
-    expect(items.map((item) => item.slug)).not.toContain("shopify");
-    expect(items).toHaveLength(19);
+    expect(
+      items
+        .filter((item) => item.romeManaged)
+        .map((item) => item.slug)
+        .sort(),
+    ).toEqual(["github", "shopify", "slack"]);
+    expect(items.filter((item) => !item.romeManaged)).toHaveLength(19);
+  });
+
+  it.each([
+    "github",
+    "slack",
+    "shopify",
+  ])("refuses to disconnect %s, which Rome manages", async (slug) => {
+    const response = await createApiHandler(context()).handle(
+      request(`connectors/${slug}`, "DELETE"),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "rome_managed_toolkit" });
   });
 });
 

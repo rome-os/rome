@@ -193,20 +193,25 @@ class ComposioApiHandler implements RomeAppApiHandler {
     return new ComposioClient({ apiKey });
   }
 
+  /** The Composio catalog, for Settings › Connections. `romeManaged` marks
+   *  the toolkits Rome connects itself: Settings lists those as Rome's own
+   *  connections, so it leaves out their catalog entries and the accounts
+   *  core bridges into Composio for them. */
+  private handleCatalog(): Response {
+    const items = CATALOG.map(({ slug, name, scope, glyph, romeManaged }) => ({
+      slug,
+      name,
+      scope,
+      glyph,
+      romeManaged: romeManaged === true,
+    }));
+    return Response.json({ items });
+  }
+
   // Local reads only — the dashboard blocks its first paint on this response,
   // so it must never make a Composio round trip. Key health is asserted where
   // the key is exercised (finalizeLogin pings; connect/list surface auth
   // failures per request).
-  /** The services the guardian can connect through Composio, for Settings ›
-   *  Connections. Rome-managed toolkits are left out: Settings lists them as
-   *  Rome's own connections, and the connect route refuses them. */
-  private handleCatalog(): Response {
-    const items = CATALOG.filter((entry) => !entry.romeManaged).map(
-      ({ slug, name, scope, glyph }) => ({ slug, name, scope, glyph }),
-    );
-    return Response.json({ items });
-  }
-
   private async handleStatus(): Promise<Response> {
     const [apiKey, webhookSecret, webhookEndpointId, relayDepositUrl] = await Promise.all([
       readSessionApiKey(),
@@ -553,6 +558,17 @@ class ComposioApiHandler implements RomeAppApiHandler {
   private async handleDisconnectConnector(toolkit: string): Promise<Response> {
     const provider = toolkit.trim();
     if (!provider) return jsonError(400, "missing_provider", "toolkit is required");
+
+    // A Rome-managed toolkit's Composio account is the one core bridges from
+    // Rome's own connection. Refuse it like the connect route does, so a stale
+    // client or direct request can't delete what that bridge relies on.
+    if (isRomeManagedToolkit(provider)) {
+      return jsonError(
+        409,
+        "rome_managed_toolkit",
+        `${provider} is managed by Rome. Disconnect it in Settings → Connections.`,
+      );
+    }
 
     const client = await this.loadClient();
     if (!client) return jsonError(409, "no_api_key", "Log in to Composio first");

@@ -35,4 +35,22 @@ describe("composioServiceRows", () => {
       { slug: "asana", name: "asana", scope: "", glyph: "", needsAttention: false },
     ]);
   });
+
+  it("leaves out the services Rome connects itself, and their bridged accounts", () => {
+    const rows = composioServiceRows(
+      [
+        ...catalog,
+        { slug: "github", name: "GitHub", scope: "", glyph: "github", romeManaged: true },
+        { slug: "slack", name: "Slack", scope: "", glyph: "slack", romeManaged: true },
+        { slug: "shopify", name: "Shopify", scope: "", glyph: "shopify", romeManaged: true },
+      ],
+      [
+        { id: "a", toolkitSlug: "github", status: "ACTIVE" },
+        { id: "b", toolkitSlug: "slack", status: "EXPIRED" },
+        { id: "c", toolkitSlug: "Shopify", status: "ACTIVE" },
+      ],
+    );
+    expect(rows.connected).toEqual([]);
+    expect(rows.available.map((row) => row.slug)).toEqual(["gmail", "notion", "linear"]);
+  });
 });
