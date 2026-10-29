@@ -65,6 +65,26 @@ function renderSection(
 }
 
 describe("ComposioConnectionSection", () => {
+  it("offers to open the sign-in tab again while the sign-in runs, in case it was blocked", async () => {
+    // A strict popup blocker refuses the first tab.
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/api/integrations/composio/login")
+        return Response.json({ loginUrl: "https://composio.example/login" });
+      return Response.json({ composio: status({ loginPending: true }) });
+    });
+    renderSection(status({ loggedIn: false }), { card: composioCard(status({ loggedIn: false })) });
+    expect(screen.queryByRole("button", { name: "Open tab" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open tab" }));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenLastCalledWith(
+      "https://composio.example/login",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
   it("renders + bullets and a Connect control when installed but not logged in", () => {
     renderSection(status({ loggedIn: false }), { card: composioCard(status({ loggedIn: false })) });
     expect(screen.getByText("This connection will let your agent")).toBeTruthy();

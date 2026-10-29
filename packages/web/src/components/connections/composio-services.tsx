@@ -116,7 +116,7 @@ function rowStatus(row: ComposioServiceRow): ConnectionStatus {
     : { label: "Working", tone: "success" };
 }
 
-/** Starts a Composio OAuth in a new tab, the way the Connector page does. */
+/** Starts a Composio OAuth in a new tab. */
 export function useComposioConnect(onFlash: (message: string) => void) {
   const { t } = useTranslation("settings");
   const client = useQueryClient();
@@ -134,7 +134,10 @@ export function useComposioConnect(onFlash: (message: string) => void) {
         // The tab opens after the request returns, which a strict popup blocker
         // (iOS Safari) can refuse, and `noopener` hides whether it did. The
         // action opens it again from a click of its own.
+        // It stays until closed: a blocked tab may be noticed only later.
         toast(t("connections.composioServices.authorize", { name: row.name }), {
+          duration: Number.POSITIVE_INFINITY,
+          closeButton: true,
           action: {
             label: t("connections.composioServices.openTab"),
             onClick: () => window.open(url, "_blank", "noopener,noreferrer"),
@@ -321,7 +324,7 @@ export function ComposioServiceDialog({
 /**
  * Whether connected services can deliver events (new email, new issue) to
  * Rome's routines. Signing in and connecting a service register the webhook
- * on their own; Set up again is the manual repair the Connector page offered.
+ * on their own; Set up again is the manual repair.
  */
 export function ComposioWebhookRow({ onFlash }: { onFlash: (message: string) => void }) {
   const { t } = useTranslation("settings");

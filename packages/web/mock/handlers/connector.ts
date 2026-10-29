@@ -2,8 +2,8 @@ import { http, HttpResponse } from "msw";
 import type { ComposioAccount, ComposioCatalogEntry } from "@/lib/composio-services";
 
 // The Connector app's API, as Settings › Connections reads it. The catalog
-// mirrors the Connector's own (`rome_apps/connector/src/web/lib/connections.ts`),
-// without the services Rome connects itself.
+// mirrors the Connector's own (`rome_apps/connector/src/catalog.ts`), without
+// the services Rome connects itself.
 const catalog: ComposioCatalogEntry[] = [
   { slug: "gmail", name: "Gmail", scope: "Reads and sends your email.", glyph: "gmail" },
   { slug: "outlook", name: "Outlook", scope: "Reads and sends your email.", glyph: "outlook" },

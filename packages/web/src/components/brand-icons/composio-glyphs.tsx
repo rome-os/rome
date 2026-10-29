@@ -4,10 +4,9 @@ import { Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* Monochrome glyphs for the services Rome reaches through Composio, keyed by
-   the catalog's `glyph` id. The Connector app draws the same marks in its
-   in-chat connect card (`rome_apps/connector/src/web/components/AppGlyph.tsx`);
-   keep the two in step when a service is added. GitHub, Slack and Shopify are
-   left out: Rome connects those itself, never through Composio. */
+   the catalog's `glyph` id (`rome_apps/connector/src/catalog.ts`); add one
+   when a service joins the catalog. GitHub, Slack and Shopify are left out:
+   Rome connects those itself, never through Composio. */
 const COMPOSIO_GLYPHS: Record<string, ReactNode> = {
   calendar: (
     <svg

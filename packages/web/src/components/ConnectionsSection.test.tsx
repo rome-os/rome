@@ -724,9 +724,12 @@ describe("ConnectionsSection — Composio services", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Connect Linear" }));
     await waitFor(() => expect(toast).toHaveBeenCalled());
     const options = rs.mocked(toast).mock.calls[0]?.[1] as {
+      duration: number;
       action: { label: string; onClick: () => void };
     };
     expect(options.action.label).toBe("Open tab");
+    // It stays until closed, so a blocked tab noticed late can still open.
+    expect(options.duration).toBe(Number.POSITIVE_INFINITY);
     open.mockClear();
     options.action.onClick();
     expect(open).toHaveBeenCalledWith(
