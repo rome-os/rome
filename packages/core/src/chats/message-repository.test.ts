@@ -504,6 +504,47 @@ describe("StoredMessages reads", () => {
     }
   });
 
+  // Two accounts each record message 1 at one Telegram address.
+  const bothSayOne = async (address: string) => {
+    for (const [n, channel] of ["telegram", "telegram-ops"].entries()) {
+      const chat = await rows.ensureChannelChat({
+        channel,
+        threadId: address,
+        threadType: "group",
+        agentName: "main",
+      });
+      await said(chat.id, `${channel} heard`, minute(n + 1), "1");
+    }
+    return placeIn(chatKey("telegram", address as ChatId));
+  };
+
+  // A basic group gives each member account its own message ids. Telegram
+  // keeps basic groups below -10^12 and supergroups from there on.
+  for (const address of ["-555", "-100555", "-999999999999"]) {
+    it(`keeps each account's record apart in the Telegram basic group ${address}`, async () => {
+      const basic = await bothSayOne(address);
+
+      const { messages: read } = await messages.recent(basic, 10);
+      expect(read.map((message) => message.body.text)).toEqual([
+        "telegram heard",
+        "telegram-ops heard",
+      ]);
+      for (const message of read) {
+        const found = await messages.find(basic, [message.id]);
+        expect(found.map((each) => each.body.text)).toEqual([message.body.text]);
+      }
+    });
+  }
+
+  for (const address of ["-1000000000001", "-1010000000001"]) {
+    it(`reads a Telegram supergroup's message once across accounts at ${address}`, async () => {
+      const supergroup = await bothSayOne(address);
+
+      const { messages: read } = await messages.recent(supergroup, 10);
+      expect(read.map((message) => message.body.text)).toEqual(["telegram heard"]);
+    });
+  }
+
   it("reads a group as one account heard it when the read names that account", async () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
