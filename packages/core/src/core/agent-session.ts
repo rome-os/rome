@@ -203,43 +203,34 @@ function conversationContextLine(line: ConversationContextLine): string {
 function channelMessages(
   rows: WebChatRepository,
   channel: string,
-): Pick<MessageRepository, "recent" | "before"> {
+): Pick<MessageRepository, "find"> {
   return new StoredMessages(rows, new ChatEvents(), { channelsOn: () => [channel] });
 }
 
 /** How many of the messages the agent has not seen a turn's prompt carries.
  *  The rest are counted, not shown. */
 const CATCH_UP_LIMIT = 20;
-const CATCH_UP_PAGE = 50;
 
 /**
  * The newest of `unseen` as the place's record holds them, oldest first, at
  * most {@link CATCH_UP_LIMIT}, and how many more there were
  * (docs/domains/participation.md#projection), read as the account the agent
- * was woken on heard it, which is the record the unseen ids name. The place
- * is read back page by page from its newest message until that many are
- * found.
+ * was woken on heard it, which is the record the unseen ids name. `unseen`
+ * comes oldest first.
  */
 async function catchUp(
-  messages: Pick<MessageRepository, "recent" | "before">,
+  messages: Pick<MessageRepository, "find">,
   place: Place,
   via: Pick<Via, "channel">,
   unseen: readonly { id: string }[],
 ): Promise<{ lines: SaidMessage[]; omitted: number }> {
-  const want = Math.min(unseen.length, CATCH_UP_LIMIT);
-  if (want === 0) return { lines: [], omitted: 0 };
-  const ids = new Set(unseen.map((message) => message.id));
-  const found: SaidMessage[] = [];
-  let page = await messages.recent(place, CATCH_UP_PAGE, via);
-  for (;;) {
-    for (const message of [...page.messages].reverse()) {
-      if (ids.has(message.id)) found.push(message);
-      if (found.length === want) break;
-    }
-    if (found.length === want || !page.older) break;
-    page = await messages.before(place, page.older, CATCH_UP_PAGE, via);
-  }
-  return { lines: found.reverse(), omitted: unseen.length - found.length };
+  const shown = unseen.slice(-CATCH_UP_LIMIT);
+  const lines = await messages.find(
+    place,
+    shown.map((message) => message.id),
+    via,
+  );
+  return { lines, omitted: unseen.length - shown.length };
 }
 
 function prependConversationContext(
@@ -475,7 +466,7 @@ interface ManagerDeps {
   webchatRepo?: WebChatRepository;
   /** What was said in each place, read for the agent's catch-up at a wake.
    *  Absent, the catch-up reads the woken channel's own record only. */
-  chatMessages?: Pick<MessageRepository, "recent" | "before">;
+  chatMessages?: Pick<MessageRepository, "find">;
   /** The platform a channel's accounts live on. Absent, a channel's name
    *  is its platform. */
   platformOfChannel?: PlatformOfChannel;

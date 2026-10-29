@@ -74,6 +74,13 @@ export interface MessageRepository {
   ): Promise<MessagePage>;
 
   /**
+   * The messages of `ids` said in `place`, oldest first, read by the same
+   * rule as {@link recent}. An id the place does not hold, or holds as a copy
+   * of an earlier message, is left out.
+   */
+  find(place: Place, ids: readonly string[], via?: Pick<Via, "channel">): Promise<SaidMessage[]>;
+
+  /**
    * Note that Participation has decided whether the recorded message `id`
    * wakes an agent. Until then a turn does not catch up on it, since it may
    * yet become a turn's prompt of its own.
@@ -126,6 +133,22 @@ export class StoredMessages implements MessageRepository {
     via?: Pick<Via, "channel">,
   ): Promise<MessagePage> {
     return this.page(place, limit, via, cursor);
+  }
+
+  async find(
+    place: Place,
+    ids: readonly string[],
+    via?: Pick<Via, "channel">,
+  ): Promise<SaidMessage[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.rows.saidMessagesAt({
+      channels: this.history.channelsOn(place.chat.platform),
+      address: addressOf(place),
+      ...(via ? { ownChannel: via.channel } : {}),
+      ids,
+      limit: ids.length,
+    });
+    return rows.reverse().map((row) => this.said(place, row));
   }
 
   private async page(
