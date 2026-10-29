@@ -558,21 +558,33 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
-  const { catalog: appCatalog, manager: appManager } = createAppDomain({
-    lockfilePath: getProfileAppsLockfilePath(),
-    installedRoot: getProfileInstalledAppsDir(),
-    bundleFetcher: appBundleFetcher,
-    romeCloudListings,
-  });
-  const appStore = createAppStoreService({ appCatalog });
-
-  // Subscribers ordered agentLoader → actionLoader → skillCatalog →
-  // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
   const artifactIdentity = {
     legacyBindings: parseLegacyArtifactBindings(
       await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
     ),
   };
+  // Boot removal matches qualified names and legacy bindings before actions register.
+  // Only the DB flag changes until the engine exists; routineEngine.start() skips paused rows.
+  let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
+  const { catalog: appCatalog, manager: appManager } = createAppDomain({
+    lockfilePath: getProfileAppsLockfilePath(),
+    installedRoot: getProfileInstalledAppsDir(),
+    bundleFetcher: appBundleFetcher,
+    romeCloudListings,
+    routines: {
+      repository: routinesRepo,
+      legacyBindings: artifactIdentity.legacyBindings,
+      engine: {
+        deactivate: async (id) => {
+          await deactivateRoutine?.(id);
+        },
+      },
+    },
+  });
+  const appStore = createAppStoreService({ appCatalog });
+
+  // Subscribers ordered agentLoader → actionLoader → skillCatalog →
+  // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
   const agentLoader = new AgentLoader(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
@@ -879,6 +891,7 @@ async function main() {
     30_000,
     systemClock,
   );
+  deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
     resolveGuardianTimezone(settingsRepo),
   );
