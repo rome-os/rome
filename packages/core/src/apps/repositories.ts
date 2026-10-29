@@ -5,6 +5,8 @@ import type {
   GuardianProfileRepository,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
+import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
+import { openChannelChat } from "../chats/open-chat.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -13,6 +15,8 @@ import { applyGuardianProfile } from "../lib/guardian-profile.js";
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
   webchatRepo: WebChatRepository;
+  /** The chats a channel thread's first message starts. */
+  chatRepo: ChatsByKey;
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -21,7 +25,7 @@ export interface CreateAppRuntimeRepositoriesDeps {
 export function createAppRuntimeRepositories(
   deps: CreateAppRuntimeRepositoriesDeps,
 ): AppRuntimeRepositories {
-  const chats = createChatRepository(deps.webchatRepo);
+  const chats = createChatRepository(deps.webchatRepo, deps.chatRepo);
   return {
     settings: createAppSettingsRepository(deps.settingsRepo),
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
@@ -55,10 +59,12 @@ function createGuardianProfileRepository(deps: {
   };
 }
 
-function createChatRepository(repo: WebChatRepository): ChatRepository {
+function createChatRepository(repo: WebChatRepository, chats: ChatsByKey): ChatRepository {
+  const open: ChatRepository["ensureChannelChat"] = (input) =>
+    openChannelChat({ chats, webchatRepo: repo }, input);
   return {
-    ensureChannelChat: (input) => repo.ensureChannelChat(input),
-    ensureChannelConversation: (input) => repo.ensureChannelChat(input),
+    ensureChannelChat: open,
+    ensureChannelConversation: open,
     addMessage: (input) => repo.addConversationMessage(input),
     promoteMessageToUser: (sessionId, platformMessageId) =>
       repo.promoteConversationMessageToUser(sessionId, platformMessageId),

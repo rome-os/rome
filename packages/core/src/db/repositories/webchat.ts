@@ -1064,14 +1064,6 @@ export class WebChatRepository {
     if (found && input.threadName) {
       await this.backfillChannelConversationName(found, input, input.threadName);
     }
-    // A send can open a chat before a message arrives in it, and it does not
-    // know the chat's kind. The first message that does says it.
-    if (found && input.threadType && found.sourceThreadType !== input.threadType) {
-      await this.db
-        .update(romeSessions)
-        .set({ sourceThreadType: input.threadType })
-        .where(eq(romeSessions.id, found.id));
-    }
     const existing = found && { id: found.id, agentName: found.agentName };
     if (existing) {
       if (!parent) return existing;
@@ -1534,19 +1526,23 @@ export class WebChatRepository {
       inArray(romeSessions.sourceChannel, [...input.channels]),
       eq(romeSessions.sourceThreadId, input.address),
     );
-    // A native thread opens only inside a group, and its row may not name its
-    // type, so a row under a parent chat is a group's too.
-    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') = 'group' or ${romeSessions.parentSessionId} is not null)`;
+    // A group or a channel is shared. A native thread opens only inside one,
+    // and its row may not name its type, so a row under a parent chat is
+    // shared too.
+    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') in ('group', 'channel') or ${romeSessions.parentSessionId} is not null)`;
     // Read through one channel, the chat is that channel's record alone.
-    // Otherwise only a group's address names one chat across Rome's accounts.
-    // Any other chat is one account's own: Telegram keys a direct message by
-    // the other person alone, so the same address on two channels is two
-    // chats, and it is read only while one channel holds it.
+    // Otherwise only a group's address names one chat across Rome's accounts,
+    // and one account knowing it for a group is enough: a send opens its row
+    // without knowing the kind. A chat no account knows for a group reads as
+    // a direct message. Any other chat is one account's own: Telegram
+    // keys a direct message by the other person alone, so the same address on
+    // two channels is two chats, and it is read only while one channel holds
+    // it.
     const which = input.ownChannel
       ? eq(romeSessions.sourceChannel, input.ownChannel)
       : or(
-          isGroup,
-          sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`,
+          sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+          sql`(select count(*) from ${romeSessions} where ${at}) = 1`,
         );
     const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);
     const roles = sql.join(
@@ -1554,6 +1550,28 @@ export class WebChatRepository {
       sql`, `,
     );
     const { before } = input;
+    // Reading named messages, only their copies are grouped: the rows that
+    // share a platform id with them, through the reply that holds them.
+    const asked = input.ids
+      ? sql`
+        "asked" as materialized (
+          select "id", "platform_message_id" as "pid" from ${romeAgentMessages}
+          where "id" in (${sql.join(
+            input.ids.map((id) => sql`${id}`),
+            sql`, `,
+          )}) and "session_id" in (select "id" from "chats")
+        ),
+        "asked_wholes" as materialized (
+          select "message_id" from "held" where "pid" in (select "pid" from "asked")
+          union select "id" from "asked" where "id" in (select "message_id" from "held")
+        ),
+        "asked_pids" as materialized (
+          select "pid" from "asked" where "pid" is not null
+          union select "pid" from "held" where "message_id" in (select "message_id" from "asked_wholes")
+          union select "platform_message_id" from ${romeAgentMessages}
+          where "id" in (select "message_id" from "asked_wholes") and "platform_message_id" is not null
+        ),`
+      : sql``;
     const rows = await this.db.all<{
       id: string;
       channel: string;
@@ -1573,10 +1591,21 @@ export class WebChatRepository {
           from ${romeAgentMessagePlatformIds}
           where "session_id" in (select "id" from "chats")
         ),
+        ${asked}
         "said" as materialized (
           select "m".rowid as "rid", "m"."id", "m"."platform_message_id" as "pid",
             "m"."role", "m"."sender_id"
-          from ${romeAgentMessages} as "m"
+          from ${
+            input.ids
+              ? sql`(
+                  select rowid as "picked" from ${romeAgentMessages} where "id" in (select "id" from "asked")
+                  union select rowid from ${romeAgentMessages} where "id" in (select "message_id" from "asked_wholes")
+                  union select rowid from ${romeAgentMessages}
+                  where "session_id" in (select "id" from "chats")
+                    and "platform_message_id" in (select "pid" from "asked_pids")
+                ) as "pick" cross join ${romeAgentMessages} as "m" on "m".rowid = "pick"."picked"`
+              : sql`${romeAgentMessages} as "m"`
+          }
           where "m"."session_id" in (select "id" from "chats") and "m"."role" in (${roles})
         ),
         -- The reply shown as several messages that holds a row's platform id:
@@ -1661,7 +1690,6 @@ export class WebChatRepository {
     agentName: string | null;
     name: string;
     sourceThreadName: string | null;
-    sourceThreadType: string | null;
   } | null> {
     const rows = await this.db
       .select({
@@ -1669,7 +1697,6 @@ export class WebChatRepository {
         agentName: romeSessions.agentName,
         name: romeSessions.name,
         sourceThreadName: romeSessions.sourceThreadName,
-        sourceThreadType: romeSessions.sourceThreadType,
       })
       .from(romeSessions)
       .where(

@@ -1,6 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
+import { eq } from "drizzle-orm";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatEvents } from "./events.js";
 import { StoredMessages } from "./message-repository.js";
@@ -347,11 +349,8 @@ describe("StoredMessages reads", () => {
     expect(read).toMatchObject([{ direction: "fromRome", body: { text: "on it" } }]);
   });
 
-  it("reads a group Rome wrote to first as one chat once a message says it is a group", async () => {
-    // A send opens the chat on each account without knowing its kind.
-    for (const channel of ["telegram", "telegram-sales"]) {
-      await rows.ensureChannelChat({ channel, threadId: "group-1", agentName: "main" });
-    }
+  it("reads a shared channel two of Rome's accounts are in as one chat", async () => {
+    // Discord calls a shared room a channel.
     for (const [channel, n] of [
       ["telegram", 1],
       ["telegram-sales", 2],
@@ -359,14 +358,42 @@ describe("StoredMessages reads", () => {
       const chat = await rows.ensureChannelChat({
         channel,
         threadId: "group-1",
-        threadType: "group",
         agentName: "main",
       });
+      await testDb.db
+        .update(romeSessions)
+        .set({ sourceThreadType: "channel" })
+        .where(eq(romeSessions.id, chat.id));
       await said(chat.id, `line ${n}`, minute(n), `m-${n}`);
     }
 
     const { messages: read } = await messages.recent(group, 10);
     expect(read.map((message) => message.body.text)).toEqual(["line 1", "line 2"]);
+  });
+
+  it("reads every account's record of a group one account knows for a group", async () => {
+    // Two accounts only sent there, so their rows do not know the kind.
+    const sentOnly = await Promise.all(
+      ["telegram", "telegram-ops"].map((channel) =>
+        rows.ensureChannelChat({ channel, threadId: "group-1", agentName: "main" }),
+      ),
+    );
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(sentOnly[0]!.id, "support heard", minute(1), "m-1");
+    await said(sentOnly[1]!.id, "ops heard", minute(2), "m-2");
+    await said(sales.id, "sales heard", minute(3), "m-3");
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual([
+      "support heard",
+      "ops heard",
+      "sales heard",
+    ]);
   });
 
   it("keeps a message where its echo was written when Rome's record of it arrives between pages", async () => {

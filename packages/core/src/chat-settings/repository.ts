@@ -1,9 +1,10 @@
-import { and, asc, eq, like } from "drizzle-orm";
+import { and, asc, eq, isNull, like } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { channelChatId } from "../db/repositories/webchat.js";
+import { withoutRouting, withRoutingOf, type ChatRepository } from "../chats/chat-repository.js";
+import { chatKey } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
-import { isChannelConversation } from "../db/session-kind.js";
+import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredChatRow = typeof romeSessions.$inferSelect;
@@ -24,7 +25,10 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: Chat
 }
 
 export class ChatSettingsRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(
+    private readonly db: DrizzleDb,
+    private readonly chats: ChatRepository,
+  ) {}
 
   find(channel: string, chatId: ChatId): StoredChatRow | null {
     return rowByAddress(this.db, channel, chatId) ?? null;
@@ -46,6 +50,52 @@ export class ChatSettingsRepository {
       .all();
   }
 
+  /** The reply rule of the chat at `chatId` as the account `channel` speaks
+   *  as sees it: the group's, whichever of Rome's accounts set it, or the
+   *  account's own direct message's. A row stored with no type reads as the
+   *  `kind` its platform described, as `mutate` will store it, and alone when
+   *  `kind` is null. An address the account has no row at reads a group's
+   *  rule only when `kind` names a group or channel. The routing marker is
+   *  the account's own row's. Null when none is set. */
+  ruleOf(
+    channel: string,
+    chatId: ChatId,
+    kind: ChatDescriptor["kind"] | null,
+  ): StoredChatSettings | null {
+    const own = rowByAddress(this.db, channel, chatId);
+    if (own === undefined && !isShared(kind)) return null;
+    const via = this.chats.accountOn(channel);
+    return withRoutingOf(
+      own?.channelSettings ?? null,
+      this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null,
+    );
+  }
+
+  /**
+   * Mark the row of the group or channel `descriptor` names on `channel` with
+   * that kind when its row was stored with none, so it reads as one chat with
+   * the rows of Rome's other accounts in it. Changes no other row.
+   */
+  private classify(exec: DrizzleTx, descriptor: ChatDescriptor, channel: string): void {
+    if (!isShared(descriptor.kind)) return;
+    exec
+      .update(romeSessions)
+      .set({ sourceThreadType: descriptor.kind })
+      .where(
+        and(
+          eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)),
+          isNull(romeSessions.parentSessionId),
+          isNull(romeSessions.sourceThreadType),
+        ),
+      )
+      .run();
+  }
+
+  /** The platform channel `channel`'s accounts live on. */
+  platformOf(channel: string): string {
+    return this.chats.accountOn(channel).platform;
+  }
+
   hasMessageHistory(sessionId: string): boolean {
     return (
       this.db
@@ -57,11 +107,81 @@ export class ChatSettingsRepository {
     );
   }
 
-  /** Create if missing, then mutate one aggregate in one SQLite transaction. Callers
-   * serialize by address before entering this method. `channel` is the name of
-   * the channel the conversation belongs to, which a connection kind's later channels
-   * do not share with it. */
+  /**
+   * Set the reply rule of the conversation `descriptor` names, through the
+   * account `channel` speaks as, starting the chat when Rome holds none there
+   * yet, and bind its row to `agentName` unless that is undefined. One SQLite
+   * transaction. Callers serialize by address before entering this method.
+   * `channel` is the name of the channel the conversation belongs to, which a
+   * connection kind's later channels do not share with it.
+   */
   mutate(
+    descriptor: ChatDescriptor,
+    channel: string,
+    input: {
+      settings: StoredChatSettings | null;
+      agentName: string | null | undefined;
+      /** False when `descriptor.kind` is only a guess, made for a row stored
+       *  with no type that its platform has never described. The row then
+       *  keeps no type, and joins no group. */
+      kindKnown?: boolean;
+    },
+  ): void {
+    // A webchat address is a guardian chat, which has no conversation settings.
+    if (descriptor.connectionKind === "webchat") {
+      throw new Error("Webchat chats have no conversation settings");
+    }
+    if (descriptor.parent) {
+      this.mutateThread(descriptor, channel, input);
+      return;
+    }
+    // Immediate, as the chat repository's writes are: it reads before it
+    // writes, and another connection may commit in between.
+    this.db.transaction(
+      (tx) => {
+        // A row stored before its type was known joins its group's other rows
+        // first, so the rule below is written to the whole group.
+        const kindKnown = input.kindKnown ?? true;
+        if (kindKnown) this.classify(tx, descriptor, channel);
+        const via = this.chats.accountOn(channel);
+        const key = chatKey(via.platform, descriptor.ref.chatId);
+        const sourceThreadType = !kindKnown
+          ? null
+          : descriptor.kind === "dm"
+            ? "private"
+            : descriptor.kind;
+        this.chats.startIfMissing(
+          key,
+          descriptor.kind === "dm" ? "dm" : "group",
+          via,
+          descriptor.displayName,
+          { threadType: sourceThreadType },
+        );
+        this.chats.update(
+          key,
+          (chat) => {
+            chat.rename(descriptor.displayName);
+            chat.setReplyRule(via, input.settings && withoutRouting(input.settings));
+          },
+          via,
+        );
+        tx.update(romeSessions)
+          .set({
+            ...(sourceThreadType === null ? {} : { sourceThreadType }),
+            // The routing marker is this account's alone, so only its row holds it.
+            channelSettings: input.settings,
+            ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
+          })
+          .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
+  }
+
+  /** A native thread's row. A thread is no chat of its own, so its row is
+   *  written as it stands until threads have a home in the chat. */
+  private mutateThread(
     descriptor: ChatDescriptor,
     channel: string,
     input: {
@@ -69,10 +189,6 @@ export class ChatSettingsRepository {
       agentName: string | null | undefined;
     },
   ): void {
-    // A webchat address is a guardian chat, which has no conversation settings.
-    if (descriptor.connectionKind === "webchat") {
-      throw new Error("Webchat chats have no conversation settings");
-    }
     this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent
@@ -121,4 +237,8 @@ export class ChatSettingsRepository {
         .run();
     });
   }
+}
+
+function isShared(kind: ChatDescriptor["kind"] | null): boolean {
+  return kind === "group" || kind === "channel";
 }
