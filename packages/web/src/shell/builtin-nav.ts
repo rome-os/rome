@@ -7,7 +7,7 @@ import {
   PersonIcon,
   Pencil2Icon,
 } from "@radix-ui/react-icons";
-import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone, MessagesSquare } from "lucide-react";
+import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone } from "lucide-react";
 import type { ComponentType } from "react";
 
 /** Rome's own dashboard destinations. The sidebar, the Apps launcher, page
@@ -32,7 +32,6 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     sidebarIconMotion: "apps",
   },
   { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: FolderKanban },
-  { id: "sessions", href: "/sessions", labelKey: "nav.sessions", Icon: MessagesSquare },
   { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
   { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
   // Off the sidebar until the guardian pins it: main answers assistants, so
@@ -40,7 +39,15 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
   { id: "assistants", href: "/assistants", labelKey: "nav.assistants", Icon: Bot },
   { id: "envoys", href: "/envoys", labelKey: "nav.envoys", Icon: Megaphone },
   { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: CalendarIcon },
-  { id: "activity", href: "/activity", labelKey: "nav.activity", Icon: ActivityLogIcon },
+  {
+    // One page for sessions and the event log. It keeps the Sessions address,
+    // which the app SDK and show_app open sessions at.
+    id: "activity",
+    href: "/sessions",
+    labelKey: "nav.activity",
+    Icon: ActivityLogIcon,
+    aliases: ["sessions", "events"],
+  },
   {
     id: "desktop",
     href: "/desktop",

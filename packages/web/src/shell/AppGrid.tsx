@@ -79,9 +79,26 @@ function parsePins(raw: unknown): PinnedEntry[] | null {
   return valid;
 }
 
+// Builtin pages folded into another one. A pin saved under the old id opens
+// the page that replaced it.
+const MERGED_BUILTIN_PINS: Readonly<Record<string, string>> = { sessions: "activity" };
+
 export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
   const requiredIds = new Set(REQUIRED_BUILTIN_PINS.map((pin) => pin.id));
-  const rest = pins.filter((pin) => !(pin.type === "builtin" && requiredIds.has(pin.id)));
+  const seen = new Set<string>();
+  const rest: PinnedEntry[] = [];
+  for (const pin of pins) {
+    const entry =
+      pin.type === "builtin" && MERGED_BUILTIN_PINS[pin.id]
+        ? { type: pin.type, id: MERGED_BUILTIN_PINS[pin.id] }
+        : pin;
+    if (entry.type === "builtin" && requiredIds.has(entry.id)) continue;
+    // Both old pages pinned leave one pin, not two.
+    const key = `${entry.type}:${entry.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rest.push(entry);
+  }
   return [...REQUIRED_BUILTIN_PINS, ...rest];
 }
 

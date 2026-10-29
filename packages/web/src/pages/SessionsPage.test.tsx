@@ -16,6 +16,7 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
 import {
@@ -200,17 +201,26 @@ function OpenMissingTileSession() {
 
 function renderDetail(initialEntry = "/sessions/feedback-fork-session", container?: HTMLElement) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      {container ? <OpenMissingTileSession /> : null}
-      <Routes>
-        <Route path="/sessions/*" element={<SessionsPage />} />
-        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
-        <Route path="/chat" element={<ChatHomeProbe />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        {container ? <OpenMissingTileSession /> : null}
+        <Routes>
+          <Route path="/sessions/*" element={<SessionsPage />} />
+          <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+          <Route path="/chat" element={<ChatHomeProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
     { container },
   );
 }
+
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+/** Approvals the Activity page's pending banner and Events tab read. */
+let approvals: Record<string, unknown>[] = [];
 
 function setRouterHistoryIndex(idx: number) {
   window.history.replaceState({ ...window.history.state, idx }, "");
@@ -218,27 +228,40 @@ function setRouterHistoryIndex(idx: number) {
 
 function renderIndex(initialEntry = "/sessions") {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/sessions/*" element={<SessionsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 /** The shell-less mount: /full/apps/sessions/* routes outside RomeShellLayout. */
 function renderFullMode(initialEntry: string) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
   setRouterHistoryIndex(0);
+  approvals = [];
+  const realFetch = globalThis.fetch;
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url === "/api/approvals") return Response.json(approvals);
+    if (url.startsWith("/api/action-executions") || url.startsWith("/api/webhook-invocations"))
+      return Response.json([]);
+    return realFetch(input, init);
+  });
   rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
   rs.mocked(listRomeSessions).mockResolvedValue({
     sessions: [],
@@ -415,14 +438,16 @@ describe("SessionsPage live fork details", () => {
     setRouterHistoryIndex(1);
 
     render(
-      <MemoryRouter
-        initialEntries={["/sessions/all", "/sessions/feedback-fork-session"]}
-        initialIndex={1}
-      >
-        <Routes>
-          <Route path="/sessions/*" element={<SessionsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter
+          initialEntries={["/sessions/all", "/sessions/feedback-fork-session"]}
+          initialIndex={1}
+        >
+          <Routes>
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
@@ -436,12 +461,14 @@ describe("SessionsPage live fork details", () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     render(
-      <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
-        <Routes>
-          <Route path="/sessions" element={<div>Sessions index</div>} />
-          <Route path="/sessions/*" element={<SessionsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
+          <Routes>
+            <Route path="/sessions" element={<div>Sessions index</div>} />
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
 
@@ -830,5 +857,95 @@ describe("SessionsPage explorer", () => {
       ),
     );
     expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+  });
+});
+
+describe("Activity page tabs", () => {
+  function PathProbe() {
+    const location = useLocation();
+    return (
+      <output data-testid="path">
+        {location.pathname}
+        {location.search}
+      </output>
+    );
+  }
+
+  function renderWithProbe(initialEntry: string) {
+    return render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+          <PathProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("switches to Events, which holds the event log", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe("/sessions/all");
+    const events = await screen.findByRole("radio", { name: "Events" });
+    expect(screen.getByRole("radio", { name: "Overview" })).toBeTruthy();
+    fireEvent.click(events);
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/sessions/events"));
+    expect(await screen.findByRole("radiogroup", { name: "Activity status" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Events" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("says a pending approval waits on the other tabs, and Review opens it on Events", async () => {
+    await i18n.changeLanguage("en");
+    approvals = [
+      {
+        id: "a1",
+        type: "action_execution",
+        status: "pending",
+        requestedBy: "main",
+        description: "Approval needing a decision",
+        createdAt: new Date().toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        payload: null,
+      },
+    ];
+    renderWithProbe("/sessions/all");
+    const review = await screen.findByRole("button", { name: /1 pending approval/ });
+    fireEvent.click(review);
+    await waitFor(() =>
+      expect(screen.getByTestId("path").textContent).toBe("/sessions/events?status=pending"),
+    );
+    const filters = await screen.findByRole("radiogroup", { name: "Activity status" });
+    expect(filters.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe(
+      "Pending",
+    );
+  });
+
+  it("shows no pending banner while nothing waits", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe("/sessions/all");
+    await screen.findByRole("radio", { name: "Events" });
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/approvals", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: /pending approval/ })).toBeNull();
+  });
+
+  it("gives the full-mode Events tab one main with the safe-area frame", async () => {
+    await i18n.changeLanguage("en");
+    const view = render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/full/apps/sessions/events"]}>
+          <Routes>
+            <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("radiogroup", { name: "Activity status" });
+    const mains = view.container.querySelectorAll("main");
+    expect(mains.length).toBe(1);
+    expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
   });
 });
