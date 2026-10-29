@@ -261,4 +261,126 @@ describe("AppManager routine lifecycle", () => {
     expect(active.has(unrelated)).toBe(false);
     expect(active.has(shared)).toBe(false);
   });
+
+  it.each([
+    "installed",
+    "failed",
+  ] as const)("%s reinstall disables the app and pauses its routines", async (state) => {
+    const seed = (actionName: string, enabled = true) =>
+      repository.create({
+        name: actionName,
+        actionName,
+        enabled,
+        trigger: { type: "manual" },
+        args: {},
+      });
+    const qualified = await seed("app-a:run");
+    const legacy = await seed("legacy");
+    const paused = await seed("app-a:run", false);
+    const unrelated = await seed("app-b:run");
+    const lookalike = await seed("app-a-x:run");
+    const pausedBefore = await repository.findById(paused);
+    const historyId = await runs.create({
+      routineId: qualified,
+      executionId: "test-reinstall-run",
+      status: "success",
+    });
+    const history = await runs.findById(historyId);
+    await engine.start();
+    const update = rs.spyOn(repository, "update");
+    const deactivate = rs.spyOn(engine, "deactivate");
+    if (state === "failed") {
+      rs.spyOn(domain.installer, "materialize").mockRejectedValueOnce(
+        new Error("test materialization failure"),
+      );
+    }
+
+    const result = await domain.manager.install({
+      source: { mode: "bundle", path: join(root, "app-a.packed") },
+      enabled: false,
+    });
+
+    expect(result.appId).toBe("app-a");
+    expect(result.state).toBe(state);
+    expect((await domain.manager.readLockfileEntry("app-a"))?.enabled).toBe(false);
+    expect(registry.has("app-a:run")).toBe(false);
+    expect(update.mock.calls).toEqual([
+      [qualified, { enabled: false }],
+      [legacy, { enabled: false }],
+    ]);
+    expect(deactivate.mock.calls).toEqual([[qualified], [legacy]]);
+    for (const id of [qualified, legacy]) {
+      expect((await repository.findById(id))?.enabled).toBe(false);
+      expect(active.has(id)).toBe(false);
+    }
+    for (const id of [unrelated, lookalike]) {
+      expect((await repository.findById(id))?.enabled).toBe(true);
+      expect(active.has(id)).toBe(true);
+    }
+    expect(await repository.findById(paused)).toEqual(pausedBefore);
+    expect(active.has(paused)).toBe(false);
+    expect(await runs.findById(historyId)).toEqual(history);
+    expect(await repository.findAll()).toHaveLength(5);
+  });
+
+  it.each([undefined, true])("reinstall with enabled=%s pauses no routines", async (enabled) => {
+    const ids = [];
+    for (const actionName of ["app-a:run", "legacy"]) {
+      ids.push(
+        await repository.create({
+          name: actionName,
+          actionName,
+          trigger: { type: "manual" },
+          args: {},
+        }),
+      );
+    }
+    await engine.start();
+    const update = rs.spyOn(repository, "update");
+    const deactivate = rs.spyOn(engine, "deactivate");
+
+    const result = await domain.manager.install({
+      source: { mode: "bundle", path: join(root, "app-a.packed") },
+      ...(enabled === undefined ? {} : { enabled }),
+    });
+
+    expect(result.state).toBe("installed");
+    expect((await domain.manager.readLockfileEntry("app-a"))?.enabled).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    expect(deactivate).not.toHaveBeenCalled();
+    for (const id of ids) {
+      expect((await repository.findById(id))?.enabled).toBe(true);
+      expect(active.has(id)).toBe(true);
+    }
+  });
+
+  it.each([
+    "fresh",
+    "already-disabled",
+  ] as const)("%s disabled install pauses no routines", async (prior) => {
+    if (prior === "fresh") await domain.manager.uninstall("app-a");
+    else await domain.manager.setEnabled("app-a", false);
+    const id = await repository.create({
+      name: "app-a:run",
+      actionName: "app-a:run",
+      trigger: { type: "manual" },
+      args: {},
+    });
+    const before = await repository.findById(id);
+    await engine.start();
+    const update = rs.spyOn(repository, "update");
+    const deactivate = rs.spyOn(engine, "deactivate");
+
+    const result = await domain.manager.install({
+      source: { mode: "bundle", path: join(root, "app-a.packed") },
+      enabled: false,
+    });
+
+    expect(result.state).toBe("installed");
+    expect((await domain.manager.readLockfileEntry("app-a"))?.enabled).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(deactivate).not.toHaveBeenCalled();
+    expect(await repository.findById(id)).toEqual(before);
+    expect(active.has(id)).toBe(true);
+  });
 });

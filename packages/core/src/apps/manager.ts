@@ -227,6 +227,9 @@ export class AppManager {
         await this.lockfileMutex.runExclusive(async () => {
           const lockfile = await this.readLockfileForMutation();
           const prior = lockfile.apps[appId];
+          if (prior && prior.enabled !== false && opts.enabled === false) {
+            await this.pauseRoutines(appId);
+          }
           lockfile.apps[appId] = {
             source: persistedSource,
             enabled: opts.enabled ?? prior?.enabled ?? true,
@@ -284,6 +287,9 @@ export class AppManager {
           const prior = lockfile.apps[appId];
           priorHash = prior?.installedHash ?? null;
           priorVersion = prior?.installedVersion ?? null;
+          if (prior && prior.enabled !== false && opts.enabled === false) {
+            await this.pauseRoutines(appId);
+          }
           lockfile.apps[appId] = {
             source,
             enabled: opts.enabled ?? prior?.enabled ?? true,
