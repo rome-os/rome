@@ -65,7 +65,26 @@ export function inboundRecording(
   /** The ids of recorded messages a subscriber was handed. */
   const delivered = new Set<string>();
 
-  const record = (channel: Channel) => async (event: InboundEvent) => {
+  /** The last recording queued in each chat, by channel and chat. A channel
+   *  delivers a chat's messages one at a time, but a recording still running
+   *  when recording stops outlives its subscription, so the chat's next one,
+   *  delivered to a later subscription, waits for it here. */
+  const tails = new Map<string, Promise<void>>();
+
+  const record = (channel: Channel) => (event: InboundEvent) => {
+    const key = `${channel.name}\0${event.message.chatId}`;
+    const recorded = (tails.get(key) ?? Promise.resolve()).then(() => recordOne(channel, event));
+    // A failed recording is the channel's to report, and does not hold up the
+    // chat's next message.
+    const tail = recorded.catch(() => undefined);
+    tails.set(key, tail);
+    void tail.then(() => {
+      if (tails.get(key) === tail) tails.delete(key);
+    });
+    return recorded;
+  };
+
+  const recordOne = async (channel: Channel, event: InboundEvent) => {
     if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(event.ref.connectionId) === false) return;

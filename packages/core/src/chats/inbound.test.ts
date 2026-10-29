@@ -312,6 +312,35 @@ describe("inboundRecording", () => {
     expect((await rows.loadConversationContext(chat)).pendingNotificationIds).toHaveLength(1);
   });
 
+  it("keeps a chat's order when recording restarts while a message is still being recorded", async () => {
+    let attachmentsSaved: () => void = () => undefined;
+    const saving = new Promise<void>((resolve) => {
+      attachmentsSaved = resolve;
+    });
+    const materialize = rs.fn(async (incoming: ChannelMessage) => {
+      await saving;
+      return incoming.attachments;
+    });
+    const telegram = fakeChannel("telegram", { materialize });
+    const recorder = recording([telegram.channel]);
+    const leave = recorder.recordedMessages.subscribe(async () => undefined);
+
+    const first = telegram.deliver(
+      message({ messageId: "tg-1", attachments: [{ type: "image", url: "file-1" }] }),
+    );
+    // A reload swaps the hook while the first message's attachments save.
+    leave();
+    const heard: string[] = [];
+    recorder.recordedMessages.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+    const second = telegram.deliver(message({ messageId: "tg-2" }));
+    attachmentsSaved();
+    await Promise.all([first, second]);
+
+    expect(heard).toEqual(["tg-1", "tg-2"]);
+  });
+
   it("refuses to record into a chat that does not exist", async () => {
     await expect(
       messages.record(
