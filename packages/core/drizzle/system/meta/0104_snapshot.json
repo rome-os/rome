@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bb6b693f-44f6-48bb-92de-f83498c8889a",
+  "id": "f3f40086-bea1-4008-80c1-377652cbe381",
   "prevId": "d879d891-e38d-4b59-bb49-403f2f5485be",
   "tables": {
     "account_profiles": {
@@ -2455,6 +2455,14 @@
         "idx_rome_sessions_parent_session": {
           "name": "idx_rome_sessions_parent_session",
           "columns": [
+            "parent_session_id"
+          ],
+          "isUnique": false
+        },
+        "idx_rome_sessions_chat_id": {
+          "name": "idx_rome_sessions_chat_id",
+          "columns": [
+            "source_thread_id",
             "parent_session_id"
           ],
           "isUnique": false

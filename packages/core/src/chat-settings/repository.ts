@@ -1,4 +1,4 @@
-import { and, asc, eq, like } from "drizzle-orm";
+import { and, asc, eq, isNull, like } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
@@ -56,6 +56,26 @@ export class ChatSettingsRepository {
   ruleOf(channel: string, chatId: ChatId): StoredChatSettings | null {
     const via = this.chats.accountOn(channel);
     return this.chats.byKey(chatKey(via.platform, chatId), via)?.replyRule ?? null;
+  }
+
+  /**
+   * Mark the row of the group or channel `descriptor` names on `channel` with
+   * that kind when its row was stored with none, so it reads as one chat with
+   * the rows of Rome's other accounts in it. Changes no other row.
+   */
+  classify(descriptor: ChatDescriptor, channel: string): void {
+    if (descriptor.parent || (descriptor.kind !== "group" && descriptor.kind !== "channel")) return;
+    this.db
+      .update(romeSessions)
+      .set({ sourceThreadType: descriptor.kind })
+      .where(
+        and(
+          eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)),
+          isNull(romeSessions.parentSessionId),
+          isNull(romeSessions.sourceThreadType),
+        ),
+      )
+      .run();
   }
 
   /** The platform channel `channel`'s accounts live on. */

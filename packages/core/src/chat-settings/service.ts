@@ -405,6 +405,9 @@ export class ChatSettingsService implements ChatSettingsControl {
       .runExclusive(this.storageKey(input.ref), async () => {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
+        // A row stored before its type was known joins its group's other rows
+        // now, so the write below starts from the group's rule, not the row's.
+        this.deps.repository.classify(descriptor, this.storedChannel(input.ref));
         const supportedFields = this.supportedFields(descriptor, row);
         const supported = new Set(supportedFields);
         // `get` returns a fresh, already-normalized overrides object.
@@ -489,6 +492,9 @@ export class ChatSettingsService implements ChatSettingsControl {
       .runExclusive(this.storageKey(input.ref), async () => {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
+        // A row stored before its type was known joins its group's other rows
+        // now, so the write below starts from the group's rule, not the row's.
+        this.deps.repository.classify(descriptor, this.storedChannel(input.ref));
         const fields = [...this.supportedFields(descriptor, row)];
         this.deps.repository.mutate(descriptor, this.storedChannel(input.ref), {
           settings: null,

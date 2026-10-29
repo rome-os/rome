@@ -562,6 +562,9 @@ export const romeSessions = sqliteTable(
         sql`${table.type} = 'channel' AND ${table.sourceChannel} IS NOT NULL AND ${table.sourceThreadId} IS NOT NULL`,
       ),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
+    // A chat is found by its platform id alone, across the channels of every
+    // one of Rome's accounts on the platform.
+    index("idx_rome_sessions_chat_id").on(table.sourceThreadId, table.parentSessionId),
   ],
 );
 

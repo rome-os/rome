@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Account, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
-import { eq } from "drizzle-orm";
+import type Database from "better-sqlite3";
+import { and, eq, isNull } from "drizzle-orm";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
-import { channelChatId } from "../db/session-kind.js";
+import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatRefusal } from "./chat.js";
 import { ChatRepository, type ChatChannels } from "./chat-repository.js";
@@ -212,6 +213,24 @@ describe("ChatRepository", () => {
 
   it("refuses to start through an account Rome does not hold", () => {
     expect(() => chats.startIfMissing(GROUP, "group", ALICE, null)).toThrow(ChatRefusal);
+  });
+
+  it("finds a chat's rows through the chat id index", () => {
+    const query = testDb.db
+      .select()
+      .from(romeSessions)
+      .where(
+        and(
+          isChannelConversation,
+          eq(romeSessions.sourceThreadId, "oc_group"),
+          isNull(romeSessions.parentSessionId),
+        ),
+      )
+      .toSQL();
+    const client = (testDb.db as unknown as { $client: Database.Database }).$client;
+    const plan = client.prepare(`explain query plan ${query.sql}`).all(...query.params);
+
+    expect(JSON.stringify(plan)).toContain("idx_rome_sessions_chat_id");
   });
 
   it("reads no thread row as a chat", () => {

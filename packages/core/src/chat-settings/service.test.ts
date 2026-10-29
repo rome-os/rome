@@ -10,6 +10,7 @@ import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ChatRepository } from "../chats/chat-repository.js";
+import { chatKey } from "../chats/place.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 
@@ -632,13 +633,14 @@ describe("ChatSettingsService", () => {
     expect((await service.get(parent)).updatedBy).toEqual({ kind: "guardian", id: "second" });
   });
 
-  it("serializes writers through two of Rome's accounts in one group", async () => {
+  /** A service over one group two of Rome's accounts on Feishu are in. A
+   *  second account of one kind is stood in for by another kind, whose channel
+   *  the fake records put on Feishu. */
+  async function twoAccountsInOneGroup() {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(testDb.db),
     });
-    // Two of Rome's accounts on one platform. A second account of one kind is
-    // stood in for by another kind whose channel the fake records put there.
     registry.register(directoryDescriptor("feishu", () => []));
     registry.register(directoryDescriptor("wechat", () => []));
     const sales = await connectLive(registry, "feishu");
@@ -675,6 +677,12 @@ describe("ChatSettingsService", () => {
       });
     }
 
+    return { service, chats, throughSales, throughSupport };
+  }
+
+  it("serializes writers through two of Rome's accounts in one group", async () => {
+    const { service, throughSales, throughSupport } = await twoAccountsInOneGroup();
+
     // Both start before either writes, so each would read the rule before
     // the other's change without one lock for the chat.
     await Promise.all([
@@ -691,6 +699,37 @@ describe("ChatSettingsService", () => {
         actor: { kind: "guardian" },
       }),
     ]);
+
+    for (const ref of [throughSales, throughSupport]) {
+      expect((await service.get(ref)).effective).toMatchObject({
+        enabled: false,
+        activation: { mode: "all" },
+      });
+    }
+  });
+
+  it("keeps a group's rule when rows stored with no type join it", async () => {
+    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
+    const key = chatKey("feishu", "oc_group" as ChatId);
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null, {
+      threadType: null,
+    });
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_support" }, null, {
+      threadType: null,
+    });
+
+    await service.update({
+      ref: throughSales,
+      set: { activation: { mode: "all" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    await service.update({
+      ref: throughSupport,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
 
     for (const ref of [throughSales, throughSupport]) {
       expect((await service.get(ref)).effective).toMatchObject({
