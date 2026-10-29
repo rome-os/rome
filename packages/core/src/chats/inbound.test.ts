@@ -5,7 +5,7 @@ import type {
   ChannelMessage,
   ChatId,
   InboundEvent,
-  RecordedInboundEvent,
+  SaidInboundEvent,
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { type AccountAgents, AccountListening } from "../channels/account-agents.js";
@@ -113,10 +113,10 @@ describe("inboundRecording", () => {
 
   it("records a message in its chat before a subscriber hears it", async () => {
     const telegram = fakeChannel("telegram");
-    const { recordedMessages } = recording([telegram.channel]);
+    const { messagesSaid } = recording([telegram.channel]);
     let rowsWhenHeard: unknown;
-    const heard: RecordedInboundEvent[] = [];
-    recordedMessages.subscribe(async (event) => {
+    const heard: SaidInboundEvent[] = [];
+    messagesSaid.subscribe(async (event) => {
       rowsWhenHeard = messagesIn(GROUP).map((row) => row.platformMessageId);
       heard.push(event);
     });
@@ -153,9 +153,9 @@ describe("inboundRecording", () => {
 
   it("records a redelivery once, and it is heard once", async () => {
     const telegram = fakeChannel("telegram");
-    const { recordedMessages } = recording([telegram.channel]);
+    const { messagesSaid } = recording([telegram.channel]);
     const heard = rs.fn(async () => undefined);
-    recordedMessages.subscribe(heard);
+    messagesSaid.subscribe(heard);
 
     await telegram.deliver(message());
     await telegram.deliver(message());
@@ -166,7 +166,7 @@ describe("inboundRecording", () => {
 
   it("records a message said in a thread in the thread, under its chat", async () => {
     const telegram = fakeChannel("telegram");
-    recording([telegram.channel]).recordedMessages.subscribe(async () => undefined);
+    recording([telegram.channel]).messagesSaid.subscribe(async () => undefined);
 
     await telegram.deliver(message({ chatId: TOPIC, parentChatId: GROUP }));
 
@@ -182,7 +182,7 @@ describe("inboundRecording", () => {
   it("records nothing that reaches an account with no agent", async () => {
     const telegram = fakeChannel("telegram");
     const heard = rs.fn(async () => undefined);
-    recording([telegram.channel], listeningWith(null)).recordedMessages.subscribe(heard);
+    recording([telegram.channel], listeningWith(null)).messagesSaid.subscribe(heard);
 
     await telegram.deliver(message());
 
@@ -195,9 +195,7 @@ describe("inboundRecording", () => {
     // a /stop still reaches Participation while the agent's app is down.
     const telegram = fakeChannel("telegram");
     const heard = rs.fn(async () => undefined);
-    recording([telegram.channel], listeningWith("unloaded-agent")).recordedMessages.subscribe(
-      heard,
-    );
+    recording([telegram.channel], listeningWith("unloaded-agent")).messagesSaid.subscribe(heard);
 
     await telegram.deliver(message({ text: "/stop" }));
 
@@ -209,8 +207,8 @@ describe("inboundRecording", () => {
     const saved = [{ type: "image" as const, fileName: "a.jpg", localPath: "/tmp/a.jpg" }];
     const materialize = rs.fn(async () => saved);
     const telegram = fakeChannel("telegram", { materialize });
-    const heard: RecordedInboundEvent[] = [];
-    recording([telegram.channel]).recordedMessages.subscribe(async (event) => {
+    const heard: SaidInboundEvent[] = [];
+    recording([telegram.channel]).messagesSaid.subscribe(async (event) => {
       heard.push(event);
     });
 
@@ -229,7 +227,7 @@ describe("inboundRecording", () => {
     recorder.addChannels([second.channel]);
     expect(second.handlers).toHaveLength(0);
 
-    recorder.recordedMessages.subscribe(async () => undefined);
+    recorder.messagesSaid.subscribe(async () => undefined);
     const third = fakeChannel("telegram-3");
     recorder.addChannels([third.channel]);
 
@@ -241,8 +239,8 @@ describe("inboundRecording", () => {
   it("keeps a message out of other turns' catch-up until its wake is decided", async () => {
     const telegram = fakeChannel("telegram");
     const recorder = recording([telegram.channel]);
-    const heard: RecordedInboundEvent[] = [];
-    recorder.recordedMessages.subscribe(async (event) => {
+    const heard: SaidInboundEvent[] = [];
+    recorder.messagesSaid.subscribe(async (event) => {
       heard.push(event);
     });
     const chat = channelChatId("telegram", GROUP);
@@ -257,18 +255,18 @@ describe("inboundRecording", () => {
 
     // A woke an agent: it is that turn's prompt, never catch-up.
     await rows.promoteConversationMessageToUser(chat, "tg-a");
-    await recorder.recordedMessages.decided(a!);
+    await recorder.messagesSaid.decided(a!);
     expect(await catchUp()).toEqual([]);
 
     // B woke none: once decided, the next turn catches up on it.
-    await recorder.recordedMessages.decided(b!);
+    await recorder.messagesSaid.decided(b!);
     expect(await catchUp()).toEqual([b!.messageId]);
   });
 
   it("stops recording when the last subscriber leaves, so a hook that stores for itself stores alone", async () => {
     const telegram = fakeChannel("telegram");
     const recorder = recording([telegram.channel]);
-    const leave = recorder.recordedMessages.subscribe(async () => undefined);
+    const leave = recorder.messagesSaid.subscribe(async () => undefined);
     expect(telegram.handlers).toHaveLength(1);
 
     leave();
@@ -277,7 +275,7 @@ describe("inboundRecording", () => {
     await telegram.deliver(message());
     expect(messagesIn(GROUP)).toEqual([]);
 
-    recorder.recordedMessages.subscribe(async () => undefined);
+    recorder.messagesSaid.subscribe(async () => undefined);
     expect(telegram.handlers).toHaveLength(1);
   });
 
@@ -293,7 +291,7 @@ describe("inboundRecording", () => {
           record: async (incoming, via) => {
             leave();
             const recorded = await messages.record(incoming, via);
-            recorder?.recordedMessages.subscribe(heard);
+            recorder?.messagesSaid.subscribe(heard);
             return recorded;
           },
           wakeDecided: (id) => messages.wakeDecided(id),
@@ -304,13 +302,42 @@ describe("inboundRecording", () => {
       },
       [telegram.channel],
     );
-    leave = recorder.recordedMessages.subscribe(async () => undefined);
+    leave = recorder.messagesSaid.subscribe(async () => undefined);
 
     await telegram.deliver(message());
 
     expect(heard).not.toHaveBeenCalled();
     const chat = channelChatId("telegram", GROUP);
     expect((await rows.loadConversationContext(chat)).unseen).toHaveLength(1);
+  });
+
+  it("keeps a chat's order when recording restarts while a message is still being recorded", async () => {
+    let attachmentsSaved: () => void = () => undefined;
+    const saving = new Promise<void>((resolve) => {
+      attachmentsSaved = resolve;
+    });
+    const materialize = rs.fn(async (incoming: ChannelMessage) => {
+      await saving;
+      return incoming.attachments;
+    });
+    const telegram = fakeChannel("telegram", { materialize });
+    const recorder = recording([telegram.channel]);
+    const leave = recorder.messagesSaid.subscribe(async () => undefined);
+
+    const first = telegram.deliver(
+      message({ messageId: "tg-1", attachments: [{ type: "image", url: "file-1" }] }),
+    );
+    // A reload swaps the hook while the first message's attachments save.
+    leave();
+    const heard: string[] = [];
+    recorder.messagesSaid.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+    const second = telegram.deliver(message({ messageId: "tg-2" }));
+    attachmentsSaved();
+    await Promise.all([first, second]);
+
+    expect(heard).toEqual(["tg-1", "tg-2"]);
   });
 
   it("refuses to record into a chat that does not exist", async () => {
