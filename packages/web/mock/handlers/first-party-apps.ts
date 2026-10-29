@@ -79,6 +79,7 @@ const definitions = [
       "Periodic self-review agent that summarizes recent conversations and updates memory",
     hasFrontend: true,
     iconUrl: dreamIcon,
+    hideInLauncher: true,
   },
   {
     id: "inbox",

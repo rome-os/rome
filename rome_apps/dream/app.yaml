@@ -5,6 +5,7 @@ icon: assets/icon.svg
 version: 0.3.0
 description: Periodic self-review agent that updates memory from recent chats, fixes the guardian's apps that broke, and turns repeated work into skills and tools
 tagline: "Your Rome reflects on recent conversations and remembers what matters."
+hideInLauncher: true
 appRoot: dist
 
 web:
