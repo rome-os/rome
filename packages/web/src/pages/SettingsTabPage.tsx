@@ -9,6 +9,7 @@ import {
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
+import { SpokenRecapsSection } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -1025,6 +1026,7 @@ function AdvancedSection({
             />
           </FormRows>
         </Section>
+        <SpokenRecapsSection />
         <ComputerUseSection />
         <PresentationModeSection />
         <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
