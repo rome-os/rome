@@ -294,8 +294,8 @@ describe("RecentChats", () => {
   });
 
   it.each([
-    ["My chats", 200],
-    ["My chats", 500],
+    ["All chats", 200],
+    ["All chats", 500],
     ["Archived", 200],
     ["Archived", 500],
   ])("ignores a stale %s list response with status %s", async (selection, status) => {
