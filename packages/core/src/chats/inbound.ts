@@ -125,6 +125,7 @@ export function inboundRecording(
       }
       return unsubscribe;
     },
+    decided: (recorded) => deps.messages.wakeDecided(recorded.messageId),
   };
 
   return {

@@ -208,6 +208,33 @@ describe("inboundRecording", () => {
     expect(telegram.handlers).toHaveLength(1);
   });
 
+  it("keeps a message out of other turns' catch-up until its wake is decided", async () => {
+    const telegram = fakeChannel("telegram");
+    const recorder = recording([telegram.channel]);
+    const heard: RecordedInboundEvent[] = [];
+    recorder.recordedMessages.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const chat = channelChatId("telegram", GROUP);
+    const catchUp = async () =>
+      (await rows.loadConversationContext(chat)).unseen.map((message) => message.id);
+
+    await telegram.deliver(message({ messageId: "tg-a" }));
+    await telegram.deliver(message({ messageId: "tg-b" }));
+    const [a, b] = heard.map((event) => event.recorded);
+    // A turn starting now, such as the one message A woke, sees neither.
+    expect(await catchUp()).toEqual([]);
+
+    // A woke an agent: it is that turn's prompt, never catch-up.
+    await rows.promoteConversationMessageToUser(chat, "tg-a");
+    await recorder.recordedMessages.decided(a!);
+    expect(await catchUp()).toEqual([]);
+
+    // B woke none: once decided, the next turn catches up on it.
+    await recorder.recordedMessages.decided(b!);
+    expect(await catchUp()).toEqual([b!.messageId]);
+  });
+
   it("refuses to record into a chat that does not exist", async () => {
     const messages = new StoredMessages(rows, events, { channelsOn: () => ["telegram"] });
 

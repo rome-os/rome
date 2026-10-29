@@ -577,7 +577,8 @@ describe("ChannelMessageHook hearing recorded messages", () => {
         listeners.delete(handler);
       };
     });
-    const recordedMessages: RecordedMessages = { subscribe };
+    const decided = rs.fn(async (_recorded: RecordedInboundEvent["recorded"]) => undefined);
+    const recordedMessages: RecordedMessages = { subscribe, decided };
     const harness = createHarness({ recordedMessages });
     const hear = async (connectionId: string, incoming: ChannelMessage) => {
       for (const listener of listeners) {
@@ -589,8 +590,41 @@ describe("ChannelMessageHook hearing recorded messages", () => {
         });
       }
     };
-    return { ...harness, subscribe, listeners, hear };
+    return { ...harness, subscribe, decided, listeners, hear };
   }
+
+  it("says the wake is decided once the turn it started ends, and not before", async () => {
+    const harness = recordedHarness();
+    let finish: () => void = () => undefined;
+    harness.run.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ status: "ok" as const });
+        }),
+    );
+    await harness.hook.register();
+
+    await harness.hear(TELEGRAM_ID, message());
+    expect(harness.run).toHaveBeenCalledTimes(1);
+    expect(harness.decided).not.toHaveBeenCalled();
+
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.decided).toHaveBeenCalledWith(RECORDED);
+  });
+
+  it("says the wake is decided at once when no turn comes of the message", async () => {
+    const harness = recordedHarness();
+    harness.get.mockImplementation(async ({ connectionId, chatId }) =>
+      snapshot(connectionId, chatId, { enabled: false }),
+    );
+    await harness.hook.register();
+
+    await harness.hear(TELEGRAM_ID, message());
+
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.decided).toHaveBeenCalledWith(RECORDED);
+  });
 
   it("hears every channel through one subscription and subscribes to none of them", async () => {
     const harness = recordedHarness();
@@ -660,6 +694,7 @@ describe("ChannelMessageHook hearing recorded messages", () => {
 
   it("drops a recorded message on a channel it does not know, and says so", async () => {
     const warn = rs.fn();
+    const decided = rs.fn(async () => undefined);
     const listeners = new Set<(event: RecordedInboundEvent) => Promise<void>>();
     const harness = createHarness({
       log: { warn },
@@ -668,6 +703,7 @@ describe("ChannelMessageHook hearing recorded messages", () => {
           listeners.add(handler);
           return () => listeners.delete(handler);
         },
+        decided,
       },
     });
     await harness.hook.register();
@@ -686,5 +722,6 @@ describe("ChannelMessageHook hearing recorded messages", () => {
       "recorded message names no channel the hook knows",
       expect.objectContaining({ service: "slack" }),
     );
+    expect(decided).toHaveBeenCalledWith(RECORDED);
   });
 });

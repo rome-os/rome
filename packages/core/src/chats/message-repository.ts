@@ -61,6 +61,13 @@ export interface MessageRepository {
   /** The `limit` messages said in `place` just before `cursor`, oldest
    *  first, by the same rule as {@link recent}. */
   before(place: Place, cursor: MessageCursor, limit: number): Promise<MessagePage>;
+
+  /**
+   * Note that Participation has decided whether the recorded message `id`
+   * wakes an agent. Until then a turn does not catch up on it, since it may
+   * yet become a turn's prompt of its own.
+   */
+  wakeDecided(id: string): Promise<void>;
 }
 
 /**
@@ -77,7 +84,7 @@ export interface MessageHistory {
 
 type MessageRows = Pick<
   WebChatRepository,
-  "findChannelChat" | "addConversationMessage" | "saidMessagesAt"
+  "findChannelChat" | "addConversationMessage" | "markWakeDecided" | "saidMessagesAt"
 >;
 
 export class StoredMessages implements MessageRepository {
@@ -142,6 +149,7 @@ export class StoredMessages implements MessageRepository {
       // Recorded before any agent is woken by it, so it reads as something
       // said while the agent was away. A wake makes it the turn's prompt.
       role: "notification",
+      wakePending: true,
       content: JSON.stringify([{ type: "text", content: plainText(message.body) }]),
       platformMessageId: message.platformMessageId,
       // The account's platform is the place's, so the row keeps only its id.
@@ -163,6 +171,10 @@ export class StoredMessages implements MessageRepository {
       via,
     });
     return recorded;
+  }
+
+  async wakeDecided(id: string): Promise<void> {
+    await this.rows.markWakeDecided(id);
   }
 }
 

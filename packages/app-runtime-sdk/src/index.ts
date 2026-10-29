@@ -2024,6 +2024,14 @@ export interface RecordedInboundEvent extends InboundEvent {
  */
 export interface RecordedMessages {
   subscribe(handler: (event: RecordedInboundEvent) => Promise<void>): () => void;
+  /**
+   * Say the wake for a recorded message is decided: it woke no agent, or the
+   * turn it woke has ended. A message is recorded as undecided, and no turn
+   * catches up on it until this is called or it is made a turn's prompt, so a
+   * subscriber calls it once for every message it hears, whatever the outcome.
+   * The host marks every message decided when it restarts.
+   */
+  decided(recorded: RecordedInboundEvent["recorded"]): Promise<void>;
 }
 
 /**

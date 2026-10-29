@@ -1354,6 +1354,41 @@ describe("WebChatRepository", () => {
       expect(context.unseen.map((row) => row.id)).toEqual([sent]);
     });
 
+    it("leaves an idle chat's traces archived while a send to it is pending or failed", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "discord",
+        threadId: "delivery-traces",
+        agentName: "main",
+      });
+      await repo.addMessage("old-trace", conversation.id, "trace", "[]", "old-turn");
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date("2026-09-01T12:00:00Z") })
+        .where(eq(romeAgentMessages.id, "old-trace"));
+      const now = new Date("2026-10-24T12:00:00Z");
+      const cutoff = sessionTraceCutoff(now);
+      const record = async () =>
+        (
+          await repo.recordPendingOutbound({
+            sessionId: conversation.id,
+            content: textContent("hi"),
+            senderId: "rome",
+            senderName: "Rome",
+            at: now,
+          })
+        ).id;
+      const failed = await record();
+      await repo.setDelivery(failed, { state: "failed", error: "no such chat", at: now });
+      const sent = await record();
+
+      expect(await repo.getTraceArchivedSessionIds([conversation.id], cutoff)).toEqual([
+        conversation.id,
+      ]);
+
+      await repo.setDelivery(sent, { state: "sent", at: now });
+      expect(await repo.getTraceArchivedSessionIds([conversation.id], cutoff)).toEqual([]);
+    });
+
     it("keeps the platform's id and moves the chat's activity when sent", async () => {
       const conversation = await repo.ensureChannelChat({
         channel: "discord",
