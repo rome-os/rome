@@ -75,9 +75,10 @@ export interface MessageRepository {
   ): Promise<MessagePage>;
 
   /**
-   * The messages of `ids` said in `place`, oldest first, read by the same
-   * rule as {@link recent}. An id the place does not hold, or holds as a copy
-   * of an earlier message, is left out.
+   * The messages `ids` name in `place`, oldest first, read by the same rule
+   * as {@link recent}. An id may name any copy of a message, and the message
+   * is read once under its first copy's id. An id the place does not hold is
+   * left out.
    */
   find(place: Place, ids: readonly string[], via?: Pick<Via, "channel">): Promise<SaidMessage[]>;
 

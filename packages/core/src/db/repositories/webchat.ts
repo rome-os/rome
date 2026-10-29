@@ -1508,8 +1508,9 @@ export class WebChatRepository {
    * order are its first copy's, so a copy that arrives later never moves it.
    * What it says and who said it come from the multipart reply that holds it,
    * else from Rome's own record of it, else from that first copy. With
-   * `ownChannel`, only that channel's record is read. With `ids`, only those
-   * messages are. Without `ownChannel`, only a group is read across channels.
+   * `ownChannel`, only that channel's record is read. With `ids`, only the
+   * messages one of their copies is named for are. Without `ownChannel`, only
+   * a group is read across channels.
    * Trace rows belong to no chat and are left out.
    */
   async saidMessagesAt(input: {
@@ -1530,18 +1531,23 @@ export class WebChatRepository {
     // and its row may not name its type, so a row under a parent chat is
     // shared too.
     const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') in ('group', 'channel') or ${romeSessions.parentSessionId} is not null)`;
+    // A row that names a kind other than a group's is a direct message.
+    const isDirect = sql`(${romeSessions.sourceThreadType} is not null and not ${isGroup})`;
     // Read through one channel, the chat is that channel's record alone.
-    // Otherwise only a group's address names one chat across Rome's accounts,
-    // and one account knowing it for a group is enough: a send opens its row
-    // without knowing the kind. A chat no account knows for a group reads as
-    // a direct message. Any other chat is one account's own: Telegram
-    // keys a direct message by the other person alone, so the same address on
-    // two channels is two chats, and it is read only while one channel holds
-    // it.
+    // Otherwise only a group's address names one chat across Rome's accounts.
+    // One account knowing it for a group is enough, since a send opens its row
+    // without knowing the kind, unless another account knows it for a direct
+    // message: Telegram keys a direct message by the other person alone, and
+    // a user account may label one a group, so the address then names two
+    // chats and neither is read. A chat no account knows for a group is one
+    // account's own, read only while one channel holds it.
     const which = input.ownChannel
       ? eq(romeSessions.sourceChannel, input.ownChannel)
       : or(
-          sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+          and(
+            sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+            sql`not exists (select 1 from ${romeSessions} where ${and(at, isDirect)})`,
+          ),
           sql`(select count(*) from ${romeSessions} where ${at}) = 1`,
         );
     const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);
@@ -1564,6 +1570,11 @@ export class WebChatRepository {
         "asked_wholes" as materialized (
           select "message_id" from "held" where "pid" in (select "pid" from "asked")
           union select "id" from "asked" where "id" in (select "message_id" from "held")
+          -- A whole named by the platform id an asked row holds.
+          union select "m"."id" from "chats" as "c"
+          cross join "asked" as "a"
+          cross join ${romeAgentMessages} as "m"
+            on "m"."session_id" = "c"."id" and "m"."platform_message_id" = "a"."pid"
         ),
         "asked_pids" as materialized (
           select "pid" from "asked" where "pid" is not null
@@ -1622,8 +1633,9 @@ export class WebChatRepository {
           join "said" as "w" on "w"."id" = "h"."message_id"
         ),
         -- Each row's message: the reply that holds it, else its platform id.
-        "copies" as (
+        "copies" as materialized (
           select "r"."rid", ${outbound} as "outbound",
+            ${input.ids ? sql`"r"."id" in (select "id" from "asked")` : sql`0`} as "named",
             case
               when min("x"."wrid") is not null then 'w' || min("x"."wrid")
               when "r"."pid" is not null then 'p' || "r"."pid"
@@ -1638,7 +1650,7 @@ export class WebChatRepository {
         -- arrives later never moves it across a page. It reads as the reply
         -- that holds it, else as Rome's own record of it, else as that copy.
         "messages" as (
-          select min("rid") as "at_rid",
+          select "message", min("rid") as "at_rid", max("named") as "named",
             coalesce(min("wrid"), min(case when "outbound" = 1 then "rid" end), min("rid")) as "as_rid"
           from "copies"
           group by "message"
@@ -1654,19 +1666,17 @@ export class WebChatRepository {
       join ${romeAgentMessages} as "shown" on "shown".rowid = "k"."as_rid"
       join ${romeSessions} as "s" on "s"."id" = "shown"."session_id"
       where 1 = 1
-        ${
-          input.ids
-            ? sql`and "first"."id" in (${sql.join(
-                input.ids.map((id) => sql`${id}`),
-                sql`, `,
-              )})`
-            : sql``
-        }
+        ${input.ids ? sql`and "k"."named" = 1` : sql``}
         ${
           before
             ? sql`and ("first"."created_at" < ${Math.floor(before.at.getTime() / 1000)}
                 or ("first"."created_at" = ${Math.floor(before.at.getTime() / 1000)}
-                  and "first".rowid < (select rowid from ${romeAgentMessages} where "id" = ${before.id})))`
+                  and "first".rowid < (select rowid from ${romeAgentMessages} where "id" = ${before.id})))
+              -- The cursor's message was read, even when a copy written
+              -- earlier has since become its first.
+              and "k"."message" is not (
+                select "message" from "copies"
+                where "rid" = (select rowid from ${romeAgentMessages} where "id" = ${before.id}))`
             : sql``
         }
       order by "first"."created_at" desc, "first".rowid desc
