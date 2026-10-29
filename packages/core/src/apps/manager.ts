@@ -584,13 +584,15 @@ export class AppManager {
   private async pauseRoutines(appId: AppId): Promise<void> {
     const deps = this.opts.routines;
     if (!deps) return;
-    // Resolve legacy names before catalog refresh deregisters the app's actions.
+    // Boot removal precedes action registration, so qualified names must also match
+    // without the registry. Legacy names need the registry before catalog refresh.
     const actionNames = new Set(
       deps.actionRegistry.list().filter((name) => name.startsWith(`${appId}:`)),
     );
     for (const routine of await deps.repository.findEnabled()) {
       const canonicalName = deps.actionRegistry.getCanonicalName(routine.actionName);
       if (
+        !routine.actionName.startsWith(`${appId}:`) &&
         !actionNames.has(routine.actionName) &&
         !(canonicalName && actionNames.has(canonicalName))
       ) {

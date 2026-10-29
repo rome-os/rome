@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createAppDomain, type AppDomain } from "./index.js";
 import { createEmptyLegacyArtifactBindings, formatArtifactId } from "./artifact-id.js";
 import { packArtifact } from "./packaging/index.js";
+import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
 import { isResolvedApp } from "./state.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -160,5 +161,90 @@ describe("AppManager routine lifecycle", () => {
       expect(active.has(qualified)).toBe(false);
       expect(update).toHaveBeenCalledTimes(2);
     }
+  });
+
+  it.each([
+    "uninstall",
+    "boot removal pass",
+  ] as const)("%s pauses qualified routines before actions register or the engine is available", async (operation) => {
+    registry.unregisterOwnedBy("app");
+    let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
+    const bootDomain = createAppDomain({
+      lockfilePath: join(root, "apps.lock.json"),
+      installedRoot: join(root, "installed"),
+      routines: {
+        actionRegistry: registry,
+        repository,
+        engine: {
+          deactivate: async (id) => {
+            await deactivateRoutine?.(id);
+          },
+        },
+      },
+    });
+    await bootDomain.manager.boot();
+    await bootDomain.manager.install({
+      source: { mode: "bundle", path: join(root, "app-a.packed") },
+      firstParty: true,
+    });
+    const seed = (actionName: string, enabled = true) =>
+      repository.create({
+        name: actionName,
+        actionName,
+        enabled,
+        trigger: { type: "manual" },
+        args: {},
+      });
+    const qualified = await seed("app-a:run");
+    const unrelated = await seed("app-b:run");
+    const lookalike = await seed("app-a-x:run");
+    const paused = await seed("app-a:run", false);
+    const legacy = await seed("legacy");
+    const pausedBefore = await repository.findById(paused);
+    const historyId = await runs.create({
+      routineId: qualified,
+      executionId: "test-boot-run",
+      status: "success",
+    });
+    const history = await runs.findById(historyId);
+    const update = rs.spyOn(repository, "update");
+    const deactivate = rs.spyOn(engine, "deactivate");
+    const uninstall = rs.spyOn(bootDomain.manager, "uninstall");
+    expect(registry.list()).toEqual([]);
+
+    if (operation === "uninstall") {
+      await bootDomain.manager.uninstall("app-a", { firstParty: true });
+    } else {
+      await packArtifact(join(root, "app-b"), join(root, "dist", "first-party-artifacts", "app-b"));
+      const result = await installFirstPartyAppsAtBoot({
+        appManager: bootDomain.manager,
+        appCatalog: bootDomain.catalog,
+        projectRoot: root,
+      });
+      expect(result.removed).toEqual(["app-a"]);
+    }
+
+    expect(uninstall).toHaveBeenCalledWith("app-a", { firstParty: true });
+    expect(await bootDomain.manager.readLockfileEntry("app-a")).toBeNull();
+    expect((await repository.findById(qualified))?.enabled).toBe(false);
+    expect(update.mock.calls).toEqual([[qualified, { enabled: false }]]);
+    expect(deactivate).not.toHaveBeenCalled();
+    expect(await repository.findById(paused)).toEqual(pausedBefore);
+    expect(await runs.findById(historyId)).toEqual(history);
+    expect(await repository.findAll()).toHaveLength(5);
+    for (const id of [unrelated, lookalike, legacy]) {
+      expect((await repository.findById(id))?.enabled).toBe(true);
+    }
+
+    deactivateRoutine = (id) => engine.deactivate(id);
+    await engine.start();
+    expect(active.has(qualified)).toBe(false);
+    expect(active.has(paused)).toBe(false);
+    for (const id of [unrelated, lookalike, legacy]) {
+      expect(active.has(id)).toBe(true);
+    }
+    await bootDomain.manager.setEnabled("app-b", false);
+    expect(deactivate.mock.calls).toEqual([[unrelated]]);
+    expect(active.has(unrelated)).toBe(false);
   });
 });

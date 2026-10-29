@@ -558,6 +558,9 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
+  // Boot removal precedes app action registration and engine construction.
+  // Prefix matching pauses rows; routineEngine.start() later skips them.
+  let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
     lockfilePath: getProfileAppsLockfilePath(),
     installedRoot: getProfileInstalledAppsDir(),
@@ -565,12 +568,15 @@ async function main() {
     romeCloudListings,
     routines: {
       repository: routinesRepo,
-      // These collaborators are constructed after the app domain, before any user operation.
       actionRegistry: {
         list: () => actionRegistry.list(),
         getCanonicalName: (name) => actionRegistry.getCanonicalName(name),
       },
-      engine: { deactivate: (id) => routineEngine.deactivate(id) },
+      engine: {
+        deactivate: async (id) => {
+          await deactivateRoutine?.(id);
+        },
+      },
     },
   });
   const appStore = createAppStoreService({ appCatalog });
@@ -888,6 +894,7 @@ async function main() {
     30_000,
     systemClock,
   );
+  deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
     resolveGuardianTimezone(settingsRepo),
   );
