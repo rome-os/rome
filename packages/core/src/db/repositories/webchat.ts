@@ -1114,6 +1114,8 @@ export class WebChatRepository {
     senderId?: string;
     senderName?: string;
     replyToPlatformMessageId?: string;
+    /** The agent a delegate's message is said by, on the account's behalf. */
+    onBehalfOf?: string;
     createdAt?: Date;
   }): Promise<{ inserted: boolean }> {
     const createdAt = input.createdAt ?? new Date();
@@ -1133,6 +1135,7 @@ export class WebChatRepository {
           senderId: input.senderId ?? null,
           senderName: input.senderName ?? null,
           replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
+          onBehalfOf: input.onBehalfOf ?? null,
           contextInjectedTurnId: null,
           createdAt,
         })
@@ -1549,6 +1552,13 @@ export class WebChatRepository {
     if (nameMissing && updated[0]?.name === threadName) {
       this.emitSessionNameChanged(row.id, threadName);
     }
+  }
+
+  /** The id of a channel's chat row for the platform's chat id, or null when
+   *  no message has reached Rome there yet. Never creates one. */
+  async findChannelChat(channel: string, threadId: string): Promise<{ id: string } | null> {
+    const found = await this.findChannelConversation(channel, threadId);
+    return found && { id: found.id };
   }
 
   private async findChannelConversation(

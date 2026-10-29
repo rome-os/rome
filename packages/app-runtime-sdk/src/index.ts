@@ -1997,12 +1997,47 @@ export interface Channel {
 }
 
 /**
+ * An inbound message once the host has put it on record in its chat
+ * (docs/domains/chats.md#message). Its attachments are already materialized
+ * where the channel could, and `message.channel` names the channel it arrived
+ * on.
+ */
+export interface RecordedInboundEvent extends InboundEvent {
+  readonly recorded: {
+    /** The chat the message is recorded in, as {@link ChatRecord.id} names it. */
+    readonly chatRecordId: string;
+    /** The message's own id in that chat. */
+    readonly messageId: string;
+  };
+}
+
+/**
+ * Every message that reaches Rome, heard after the host records it. The host
+ * records every answerable message its channels deliver, whether or not an
+ * agent answers it, and only then is it heard here. A message recorded again,
+ * such as a platform redelivery, is not heard again. Each subscriber hears a
+ * chat's messages one at a time, in the order they were recorded, and the
+ * chat's next message is recorded only once every subscriber has handled this
+ * one: a handler that does not settle stops its chat. Different chats never
+ * wait on each other. The host starts recording when the first subscriber
+ * subscribes.
+ */
+export interface RecordedMessages {
+  subscribe(handler: (event: RecordedInboundEvent) => Promise<void>): () => void;
+}
+
+/**
  * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
  * hears inbound messages through `channels`, one subscription per channel that
  * can receive.
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
+  /** Hearing messages once they are on record. A hook that subscribes here
+   *  hears every channel through it, the ones added later included, and does
+   *  not store the message itself. A host that predates it passes none, and a
+   *  hook hears `channels` instead. */
+  recordedMessages?: RecordedMessages;
   /** Each chat's settings. A host that predates the name passes only
    *  `conversationSettings`, so read `chatSettings ?? conversationSettings`. */
   chatSettings?: ChatSettingsControl;

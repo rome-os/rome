@@ -9,6 +9,8 @@ import type {
   InboundEvent,
   ChannelActivity,
   ChannelInboundMedia,
+  RecordedInboundEvent,
+  RecordedMessages,
 } from "@rome-os/app-runtime";
 import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
 
@@ -561,5 +563,128 @@ describe("ChannelMessageHook", () => {
         chatStop: async () => ({ status: "idle" }),
       } as unknown as Parameters<typeof createHook>[0]),
     ).toThrow(MissingChannelsError);
+  });
+});
+
+describe("ChannelMessageHook hearing recorded messages", () => {
+  const RECORDED = { chatRecordId: "chat-row-1", messageId: "row-1" };
+
+  function recordedHarness() {
+    const listeners = new Set<(event: RecordedInboundEvent) => Promise<void>>();
+    const subscribe = rs.fn((handler: (event: RecordedInboundEvent) => Promise<void>) => {
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
+    });
+    const recordedMessages: RecordedMessages = { subscribe };
+    const harness = createHarness({ recordedMessages });
+    const hear = async (connectionId: string, incoming: ChannelMessage) => {
+      for (const listener of listeners) {
+        await listener({
+          kind: "message",
+          message: incoming,
+          ref: { connectionId, chatId: incoming.chatId },
+          recorded: RECORDED,
+        });
+      }
+    };
+    return { ...harness, subscribe, listeners, hear };
+  }
+
+  it("hears every channel through one subscription and subscribes to none of them", async () => {
+    const harness = recordedHarness();
+    await harness.hook.register();
+    await harness.hook.register();
+
+    expect(harness.subscribe).toHaveBeenCalledTimes(1);
+    expect(harness.subscribes).not.toHaveBeenCalled();
+    await harness.hear(WHATSAPP_ID, message({ channel: "whatsapp", messageId: "wa-1" }));
+    expect(harness.run).toHaveBeenCalledWith(
+      "message_handler",
+      expect.objectContaining({
+        connectionId: WHATSAPP_ID,
+        channel: "whatsapp",
+        messageId: "wa-1",
+        recordedMessageId: "row-1",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("does not save a recorded message's attachments again", async () => {
+    const harness = recordedHarness();
+    const materialize = rs.fn(async () => []);
+    harness.features.set(TELEGRAM_ID, { inboundMedia: { materialize } });
+    await harness.hook.register();
+    const saved = [{ type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" }];
+
+    await harness.hear(TELEGRAM_ID, message({ attachments: saved }));
+
+    expect(materialize).not.toHaveBeenCalled();
+    expect(harness.run).toHaveBeenCalledWith(
+      "message_handler",
+      expect.objectContaining({ attachments: saved }),
+      expect.anything(),
+    );
+  });
+
+  it("answers on a channel the host adds later, without subscribing to it", async () => {
+    const harness = recordedHarness();
+    await harness.hook.register();
+    const added = harness.channel("feishu-2", FEISHU_2_ID);
+    harness.channels.push(added);
+    await harness.hook.addChannels([added]);
+
+    await harness.hear(
+      FEISHU_2_ID,
+      message({ channel: "feishu-2", text: "/stop", thread: { kind: "dm" } }),
+    );
+
+    expect(harness.subscribes).not.toHaveBeenCalled();
+    expect(harness.stop).toHaveBeenCalledTimes(1);
+    expect(harness.send).toHaveBeenCalledWith(FEISHU_2_ID, "chat-1", expect.anything());
+  });
+
+  it("stops hearing on unregister, and hears once again after register", async () => {
+    const harness = recordedHarness();
+    await harness.hook.register();
+    harness.hook.unregister();
+    expect(harness.listeners.size).toBe(0);
+
+    await harness.hook.register();
+    await harness.hear(TELEGRAM_ID, message());
+    expect(harness.listeners.size).toBe(1);
+    expect(harness.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a recorded message on a channel it does not know, and says so", async () => {
+    const warn = rs.fn();
+    const listeners = new Set<(event: RecordedInboundEvent) => Promise<void>>();
+    const harness = createHarness({
+      log: { warn },
+      recordedMessages: {
+        subscribe: (handler) => {
+          listeners.add(handler);
+          return () => listeners.delete(handler);
+        },
+      },
+    });
+    await harness.hook.register();
+
+    for (const listener of listeners) {
+      await listener({
+        kind: "message",
+        message: message({ channel: "slack" }),
+        ref: { connectionId: "connection:slack", chatId: "chat-1" as ChatId },
+        recorded: RECORDED,
+      });
+    }
+
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "recorded message names no channel the hook knows",
+      expect.objectContaining({ service: "slack" }),
+    );
   });
 });

@@ -273,6 +273,9 @@ import {
 } from "./relay/settings.js";
 import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
+import { ChatEvents } from "./chats/events.js";
+import { inboundRecording } from "./chats/inbound.js";
+import { StoredMessages } from "./chats/message-repository.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -1483,6 +1486,20 @@ async function main() {
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
   const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  // Every message the channels deliver is put on record in its chat before the
+  // hook hears it (docs/domains/participation.md#wake). It records through the
+  // hook's channels, so the hook's trace covers recording as well.
+  const chatEvents = new ChatEvents();
+  const inboundRecorder = inboundRecording(
+    {
+      chats: webchatRepo,
+      messages: new StoredMessages(webchatRepo, chatEvents),
+      events: chatEvents,
+      platformOfChannel,
+      accountAgentOf: hookAgentOf,
+    },
+    hookChannels,
+  );
   const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
@@ -1496,6 +1513,7 @@ async function main() {
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
         channels: hookChannels,
+        recordedMessages: inboundRecorder.recordedMessages,
         accountAgentOf: hookAgentOf,
         linkedAgentOf: hookAgentOf,
       });
@@ -1538,6 +1556,7 @@ async function main() {
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
           channels: hookChannels,
+          recordedMessages: inboundRecorder.recordedMessages,
           accountAgentOf: hookAgentOf,
           linkedAgentOf: hookAgentOf,
         },
@@ -1569,6 +1588,7 @@ async function main() {
     if (!channel) return;
     const added = legacyChatIdChannels(withInboundSpans([channel], "channel-message"));
     hookChannels.push(...added);
+    inboundRecorder.addChannels(added);
     const hook = messageHook;
     // A hook without `addChannels` re-registers, as the app-keys reloader
     // does, and its register() reads the grown channel list. Events waiting

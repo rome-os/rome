@@ -1262,3 +1262,68 @@ describe("streamed guardian replies", () => {
     expect(sentMessages).toHaveLength(1);
   });
 });
+
+describe("a message the host recorded", () => {
+  const guardian: PersonRecord = {
+    id: "alice",
+    displayName: "Alice",
+    bondLevel: "guardian",
+    channelMappings: [{ channel: "telegram", channelUserId: "alice-tg" }],
+    profilePath: null,
+  };
+  const inner: PersonRecord = { ...guardian, bondLevel: "inner-circle" };
+  const recordedArgs = {
+    channel: "telegram",
+    channelUserId: "alice-tg",
+    threadId: "thread-1",
+    threadType: "private",
+    displayName: "Alice",
+    text: "Can you answer?",
+    messageId: "msg-1",
+    recordedMessageId: "row-1",
+  };
+
+  beforeEach(() => {
+    rs.clearAllMocks();
+  });
+
+  it("makes the recorded message the turn's prompt before the agent runs, storing nothing", async () => {
+    let turnsWhenPromoted: number | undefined;
+    const { deps, agentRunner, sentMessages, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardian) },
+      agentResponses: [[{ type: "result", content: "Sure." }]],
+      conversations: {
+        promoteMessageToUser: rs.fn(async () => {
+          turnsWhenPromoted = agentRunner.calls.length;
+        }),
+      },
+    });
+
+    const result = await createAction(actionConfig, deps).execute(recordedArgs);
+
+    expect(result).toEqual({ status: "ok", data: { action: "sent", response: "Sure." } });
+    expect(conversations.addMessage).not.toHaveBeenCalled();
+    expect(conversations.promoteMessageToUser).toHaveBeenCalledWith(
+      "channel:telegram:thread-1",
+      "msg-1",
+    );
+    expect(turnsWhenPromoted).toBe(0);
+    expect(sentMessages).toHaveLength(1);
+  });
+
+  it("leaves a message no agent answers as recorded", async () => {
+    const { deps, agentRunner, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => inner) },
+    });
+
+    const result = await createAction(actionConfig, deps).execute(recordedArgs);
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "inner-circle" },
+    });
+    expect(agentRunner.calls).toEqual([]);
+    expect(conversations.addMessage).not.toHaveBeenCalled();
+    expect(conversations.promoteMessageToUser).not.toHaveBeenCalled();
+  });
+});
