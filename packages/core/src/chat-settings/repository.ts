@@ -54,16 +54,19 @@ export class ChatSettingsRepository {
    *  as sees it: the group's, whichever of Rome's accounts set it, or the
    *  account's own direct message's. A row stored with no type reads as the
    *  `kind` its platform described, as `mutate` will store it, and alone when
-   *  `kind` is null. The routing marker is
+   *  `kind` is null. An address the account has no row at reads a group's
+   *  rule only when `kind` names a group or channel. The routing marker is
    *  the account's own row's. Null when none is set. */
   ruleOf(
     channel: string,
     chatId: ChatId,
     kind: ChatDescriptor["kind"] | null,
   ): StoredChatSettings | null {
+    const own = rowByAddress(this.db, channel, chatId);
+    if (own === undefined && !isShared(kind)) return null;
     const via = this.chats.accountOn(channel);
     return withRoutingOf(
-      rowByAddress(this.db, channel, chatId)?.channelSettings ?? null,
+      own?.channelSettings ?? null,
       this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null,
     );
   }

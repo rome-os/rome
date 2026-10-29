@@ -848,6 +848,30 @@ describe("ChatSettingsService", () => {
     expect((await service.get(throughSupport)).effective.session.reset).toEqual({ mode: "none" });
   });
 
+  it("reads no group's rule at an address an account has no row at and no kind for", async () => {
+    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
+    const key = chatKey("feishu", "oc_group" as ChatId);
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
+    await service.update({
+      ref: throughSupport,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect((await service.get(throughSupport)).overrides).toEqual({
+      session: { reset: { mode: "none" } },
+    });
+    expect((await service.get(throughSales)).effective.enabled).toBe(false);
+  });
+
   it("leaves a row stored with no type apart when its edit is refused", async () => {
     const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
     const key = chatKey("feishu", "oc_group" as ChatId);
