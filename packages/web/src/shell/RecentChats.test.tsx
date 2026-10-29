@@ -267,7 +267,7 @@ describe("RecentChats", () => {
     });
   });
 
-  it("defaults to All chats and persists a scope toggle across remounts", async () => {
+  it("defaults to My chats and persists a scope toggle across remounts", async () => {
     const fetchSpy = mockSessions([]);
     const user = userEvent.setup();
     const view = renderRecentChats();
@@ -275,27 +275,27 @@ describe("RecentChats", () => {
       new URL(String(fetchSpy.mock.calls.at(-1)?.[0]), "http://localhost").searchParams.get(
         "scope",
       );
-    await waitFor(() => expect(requestedScope()).toBe("all"));
-    await user.click(screen.getByRole("button", { name: "List settings" }));
-    const all = screen.getByRole("menuitem", { name: "All chats" });
-    expect(all.querySelector("svg")).not.toBeNull();
-    await user.click(screen.getByRole("menuitem", { name: "My chats" }));
-    await waitFor(() => expect(requestedScope()).toBe("mine"));
-    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("mine");
-    view.unmount();
-    const remounted = renderRecentChats();
     await waitFor(() => expect(requestedScope()).toBe("mine"));
     await user.click(screen.getByRole("button", { name: "List settings" }));
-    expect(screen.getByRole("menuitem", { name: "My chats" }).querySelector("svg")).not.toBeNull();
+    const mine = screen.getByRole("menuitem", { name: "My chats" });
+    expect(mine.querySelector("svg")).not.toBeNull();
     await user.click(screen.getByRole("menuitem", { name: "All chats" }));
     await waitFor(() => expect(requestedScope()).toBe("all"));
     expect(localStorage.getItem("rome-recent-chats-scope")).toBe("all");
+    view.unmount();
+    const remounted = renderRecentChats();
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    expect(screen.getByRole("menuitem", { name: "All chats" }).querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "My chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("mine");
     remounted.unmount();
   });
 
   it.each([
-    ["My chats", 200],
-    ["My chats", 500],
+    ["All chats", 200],
+    ["All chats", 500],
     ["Archived", 200],
     ["Archived", 500],
   ])("ignores a stale %s list response with status %s", async (selection, status) => {
@@ -1158,7 +1158,7 @@ describe("RecentChats", () => {
     expect(screen.queryByText("Active chat")).toBeNull();
     expect(
       spy.mock.calls.some(
-        ([url]) => String(url) === "/api/chat/sessions?status=archived&scope=all",
+        ([url]) => String(url) === "/api/chat/sessions?status=archived&scope=mine",
       ),
     ).toBe(true);
   });
