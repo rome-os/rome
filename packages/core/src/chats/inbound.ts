@@ -6,12 +6,7 @@
 // anything acts on it, whether or not an agent answers it. Participation hears
 // it from MessageSaid and decides the wake there.
 
-import type {
-  Channel,
-  InboundEvent,
-  RecordedInboundEvent,
-  RecordedMessages,
-} from "@rome-os/app-runtime";
+import type { Channel, InboundEvent, SaidInboundEvent, MessagesSaid } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 import type { ChatEvents } from "./events.js";
@@ -40,7 +35,7 @@ export interface InboundRecording {
   /** Hearing each message once recorded. Recording runs only while someone
    *  subscribes here, so nothing is stored twice while a hook stores messages
    *  itself. */
-  readonly recordedMessages: RecordedMessages;
+  readonly messagesSaid: MessagesSaid;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
 }
@@ -49,7 +44,7 @@ export interface InboundRecording {
  * Records what arrives on `channels` and on any channel added later. Each
  * channel is subscribed once, so a chat's messages are recorded one at a time
  * in arrival order (R4 of `ChannelInbound`), and each is heard by every
- * {@link RecordedMessages} subscriber before the chat's next one is recorded.
+ * {@link MessagesSaid} subscriber before the chat's next one is recorded.
  * A subscriber that is slow therefore holds up its chat's later messages, both
  * their recording and every subscriber's hearing them.
  */
@@ -65,7 +60,26 @@ export function inboundRecording(
   /** The ids of recorded messages a subscriber was handed. */
   const delivered = new Set<string>();
 
-  const record = (channel: Channel) => async (event: InboundEvent) => {
+  /** The last recording queued in each chat, by channel and chat. A channel
+   *  delivers a chat's messages one at a time, but a recording still running
+   *  when recording stops outlives its subscription, so the chat's next one,
+   *  delivered to a later subscription, waits for it here. */
+  const tails = new Map<string, Promise<void>>();
+
+  const record = (channel: Channel) => (event: InboundEvent) => {
+    const key = `${channel.name}\0${event.message.chatId}`;
+    const recorded = (tails.get(key) ?? Promise.resolve()).then(() => recordOne(channel, event));
+    // A failed recording is the channel's to report, and does not hold up the
+    // chat's next message.
+    const tail = recorded.catch(() => undefined);
+    tails.set(key, tail);
+    void tail.then(() => {
+      if (tails.get(key) === tail) tails.delete(key);
+    });
+    return recorded;
+  };
+
+  const recordOne = async (channel: Channel, event: InboundEvent) => {
     if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(event.ref.connectionId) === false) return;
@@ -115,11 +129,11 @@ export function inboundRecording(
     recording.set(channel.name, channel.inbound.subscribe(record(channel)));
   };
 
-  const recordedMessages: RecordedMessages = {
+  const messagesSaid: MessagesSaid = {
     subscribe(handler) {
       const unsubscribe = deps.events.subscribe(async (event) => {
         if (event.type !== "MessageSaid" || !event.via.heard) return;
-        const recorded: RecordedInboundEvent = {
+        const recorded: SaidInboundEvent = {
           ...event.via.heard,
           recorded: { chatRecordId: event.chatRecordId, messageId: event.message.id },
         };
@@ -147,7 +161,7 @@ export function inboundRecording(
   };
 
   return {
-    recordedMessages,
+    messagesSaid,
     addChannels(added) {
       known.push(...added);
       if (hearers > 0) for (const channel of added) subscribe(channel);
