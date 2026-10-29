@@ -128,8 +128,7 @@ describe("a link on a platform Rome holds accounts on", () => {
       accountOf: (name: string) => ({ platform: "telegram", id: `${name}-account` }),
       webchatRepo: {
         ensureChannelChat: unused,
-        recordPendingOutbound: unused,
-        setDelivery: unused,
+        recordOutboundConversationMessage: unused,
       },
     };
 

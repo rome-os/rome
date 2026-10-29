@@ -7,8 +7,8 @@ import { StoredMessages } from "./message-repository.js";
 import { chatKey, placeIn } from "./place.js";
 
 // Reading a place's messages. What these pin: pages run newest to oldest and
-// each answers oldest first, only what was said is read, and a group two of
-// Rome's accounts are in reads as one chat.
+// each answers oldest first, and a group two of Rome's accounts are in reads as
+// one chat.
 
 const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 const minute = (n: number) => new Date(Date.UTC(2026, 9, 29, 1, n));
@@ -101,31 +101,6 @@ describe("StoredMessages reads", () => {
         replyTo: "m-1",
       },
     ]);
-  });
-
-  it("reads only what was said: no pending or refused send", async () => {
-    const chat = await rows.ensureChannelChat({
-      channel: "telegram",
-      threadId: "group-1",
-      threadType: "group",
-      agentName: "main",
-    });
-    const pending = (text: string) =>
-      rows.recordPendingOutbound({
-        sessionId: chat.id,
-        content: textContent(text),
-        senderId: "rome",
-        senderName: "Rome",
-        at: minute(1),
-      });
-    const sent = await pending("went out");
-    const failed = await pending("refused");
-    await pending("still going");
-    await rows.setDelivery(sent.id, { state: "sent", at: minute(2) }, "m-sent");
-    await rows.setDelivery(failed.id, { state: "failed", error: "no such chat", at: minute(2) });
-
-    const { messages: read } = await messages.recent(group, 10);
-    expect(read.map((message) => message.body.text)).toEqual(["went out"]);
   });
 
   it("reads a group two of Rome's accounts are in as one chat", async () => {

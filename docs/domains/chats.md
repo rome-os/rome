@@ -85,7 +85,6 @@ One thing a participant said or did in a chat.
 
 How a message Rome sends stands with its platform: pending, sent or failed. Only a message from Rome has one.
 
-- A message Rome sends is recorded before the platform is asked, with its delivery pending, so nothing is said that Rome holds no record of.
 - The platform's answer settles it: sent once the platform took the message, failed with the platform's own words when it refused.
 - Once the platform has taken a message, it is sent, even when Rome fails to write that down. Reporting it failed would invite a second real message.
 - A failed message reads as never said, to the guardian and to the agent. Sending the text again is a new message.

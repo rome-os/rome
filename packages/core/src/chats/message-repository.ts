@@ -79,6 +79,9 @@ export interface MessageRepository {
    * yet become a turn's prompt of its own.
    */
   wakeDecided(id: string): Promise<void>;
+
+  /** Whether the wake for the recorded message `id` is still undecided. */
+  isWakeUndecided(id: string): boolean;
 }
 
 /**
@@ -95,10 +98,17 @@ export interface MessageHistory {
 
 type MessageRows = Pick<
   WebChatRepository,
-  "findChannelChat" | "addConversationMessage" | "markWakeDecided" | "saidMessagesAt"
+  "findChannelChat" | "addConversationMessage" | "saidMessagesAt"
 >;
 
 export class StoredMessages implements MessageRepository {
+  /**
+   * The messages whose wake is undecided. Kept in memory, not on the row, so
+   * today's schema carries it unchanged. A restart forgets it, which decides
+   * every wake in flight: the decision died with the process.
+   */
+  private readonly undecided = new Set<string>();
+
   constructor(
     private readonly rows: MessageRows,
     private readonly events: ChatEvents,
@@ -166,26 +176,37 @@ export class StoredMessages implements MessageRepository {
       throw new Error(`No chat at ${via.channel}:${address} to record a message in`);
     }
     const { saidBy } = message;
-    const { inserted } = await this.rows.addConversationMessage({
-      sessionId: chat.id,
-      // Recorded before any agent is woken by it, so it reads as something
-      // said while the agent was away. A wake makes it the turn's prompt.
-      role: "notification",
-      wakePending: true,
-      content: JSON.stringify([{ type: "text", content: plainText(message.body) }]),
-      platformMessageId: message.platformMessageId,
-      // The account's platform is the place's, so the row keeps only its id.
-      senderId: saidBy.account.id,
-      ...(saidBy.name === undefined ? {} : { senderName: saidBy.name }),
-      ...(saidBy.onBehalfOf === undefined ? {} : { onBehalfOf: saidBy.onBehalfOf }),
-      ...(message.replyTo === undefined ? {} : { replyToPlatformMessageId: message.replyTo }),
-      createdAt: message.at,
-    });
-    if (!inserted) return null;
-    const recorded: RecordedMessage = {
-      ...message,
-      id: conversationPlatformMessageId(chat.id, message.platformMessageId),
-    };
+    if (saidBy.onBehalfOf !== undefined) {
+      throw new Error("A message said on another's behalf cannot be recorded yet");
+    }
+    const id = conversationPlatformMessageId(chat.id, message.platformMessageId);
+    // Undecided before the row is written, so no catch-up read sees it in
+    // between. A redelivery of a message still undecided leaves it so.
+    const alreadyUndecided = this.undecided.has(id);
+    this.undecided.add(id);
+    const { inserted } = await this.rows
+      .addConversationMessage({
+        sessionId: chat.id,
+        // Recorded before any agent is woken by it, so it reads as something
+        // said while the agent was away. A wake makes it the turn's prompt.
+        role: "notification",
+        content: JSON.stringify([{ type: "text", content: plainText(message.body) }]),
+        platformMessageId: message.platformMessageId,
+        // The account's platform is the place's, so the row keeps only its id.
+        senderId: saidBy.account.id,
+        ...(saidBy.name === undefined ? {} : { senderName: saidBy.name }),
+        ...(message.replyTo === undefined ? {} : { replyToPlatformMessageId: message.replyTo }),
+        createdAt: message.at,
+      })
+      .catch((error: unknown) => {
+        if (!alreadyUndecided) this.undecided.delete(id);
+        throw error;
+      });
+    if (!inserted) {
+      if (!alreadyUndecided) this.undecided.delete(id);
+      return null;
+    }
+    const recorded: RecordedMessage = { ...message, id };
     await this.events.publish({
       type: "MessageRecorded",
       message: recorded,
@@ -196,18 +217,20 @@ export class StoredMessages implements MessageRepository {
   }
 
   async wakeDecided(id: string): Promise<void> {
-    await this.rows.markWakeDecided(id);
+    this.undecided.delete(id);
+  }
+
+  isWakeUndecided(id: string): boolean {
+    return this.undecided.has(id);
   }
 }
 
-/** Rome's line, said as the channel's own account. A delegate's reply says
- *  which agent it was on behalf of. */
+/** Rome's line, said as the channel's own account. */
 function romeSaidBy(account: Account | null, row: StoredSaidMessage): SaidBy | undefined {
   if (!account) return undefined;
   return {
     account,
     ...(row.senderName === null ? {} : { name: row.senderName }),
-    ...(row.onBehalfOf === null ? {} : { onBehalfOf: row.onBehalfOf }),
   };
 }
 

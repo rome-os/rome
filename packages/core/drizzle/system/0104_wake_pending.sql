@@ -1,1 +1,0 @@
-ALTER TABLE `rome_agent_messages` ADD `wake_pending` integer;
