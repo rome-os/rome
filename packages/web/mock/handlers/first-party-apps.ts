@@ -134,6 +134,7 @@ const definitions = [
       "Describe an automation in plain language; approve the short spec, and it's built into a runnable workflow in one conversation.",
     hasFrontend: true,
     iconUrl: workflowStudioIcon,
+    hideInLauncher: true,
   },
 ];
 
