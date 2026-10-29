@@ -97,6 +97,7 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
         return;
       }
       codexStartedRef.current = true;
+      loginStartedAtRef.current = Date.now();
       setStep("authorize");
     } catch {
       setError(t("chatgptLogin.errors.codexStartFailed"));
@@ -105,7 +106,10 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
     }
   }, [t]);
 
-  const { data: aiStatus } = useAiToolStatus({
+  // The shared status cache can still hold an earlier attempt's error, so
+  // only status read after this attempt started may report one.
+  const loginStartedAtRef = useRef(0);
+  const { data: aiStatus, dataUpdatedAt } = useAiToolStatus({
     enabled: open && step === "authorize",
     loginPolling: open && step === "authorize",
   });
@@ -117,11 +121,11 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
       onConnectedRef.current();
       return;
     }
-    if (aiStatus.codexLogin?.lastError) {
+    if (aiStatus.codexLogin?.lastError && dataUpdatedAt > loginStartedAtRef.current) {
       codexStartedRef.current = false;
       setError(aiStatus.codexLogin.lastError);
     }
-  }, [open, step, aiStatus]);
+  }, [open, step, aiStatus, dataUpdatedAt]);
 
   const cancelCodexLogin = useCallback(() => {
     if (!codexStartedRef.current) return;

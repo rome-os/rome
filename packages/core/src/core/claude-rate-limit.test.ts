@@ -30,17 +30,28 @@ describe("Claude rate limit usage", () => {
     "garbage",
     { five_hour: null },
     { five_hour: { utilization: "0.29", resetsAt: 1793260800 } },
-    { five_hour: { utilization: 1.1, resetsAt: 1793260800 } },
+    { five_hour: { utilization: 0.29, resetsAt: 1793260800 } },
+    { seven_day: { utilization: 1, resetsAt: 1793757600 } },
+    {
+      five_hour: { utilization: -0.1, resetsAt: 1793260800 },
+      seven_day: { utilization: 0.1, resetsAt: 1793757600 },
+    },
     { seven_day: { utilization: 0.2, resetsAt: Infinity } },
     { five_hour: { utilization: NaN, resetsAt: 1793260800 } },
-  ])("ignores missing or malformed windows: %j", (windows) => {
+  ])("ignores missing, partial or malformed windows: %j", (windows) => {
     expect(claudeRateLimitUsage(event(windows))).toBeNull();
   });
-  it("ignores other events and accepts a weekly-only window", () => {
+  it("ignores other events", () => {
     expect(claudeRateLimitUsage({ type: "result" })).toBeNull();
-    expect(
-      claudeRateLimitUsage(event({ seven_day: { utilization: 1, resetsAt: 1793757600 } }))?.sevenDay
-        ?.remainingPercent,
-    ).toBe(0);
+  });
+  it("reads utilization past a limit as a full window", () => {
+    const usage = claudeRateLimitUsage(
+      event({
+        five_hour: { utilization: 1.04, resetsAt: 1793260800 },
+        seven_day: { utilization: 0.5, resetsAt: 1793757600 },
+      }),
+    );
+    expect(usage?.fiveHour).toMatchObject({ usedPercent: 100, remainingPercent: 0 });
+    expect(usage?.sevenDay).toMatchObject({ usedPercent: 50 });
   });
 });

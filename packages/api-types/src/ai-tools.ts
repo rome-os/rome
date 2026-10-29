@@ -11,30 +11,37 @@ const anthropicCompatibleCredentialsSummarySchema = z.object({
   needsReauth: z.boolean().optional(),
 });
 
+/**
+ * The Claude and Codex CLIs report an unknown field as null, as in
+ * `email: null`. A null reads as absent instead of failing the whole status.
+ */
+const optional = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === null ? undefined : value), schema.optional());
+
 export const usageWindowStatusSchema = z.object({
-  usedPercent: z.number().finite().min(0).max(100).optional(),
-  remainingPercent: z.number().finite().min(0).max(100).optional(),
-  resetsAt: z.string().optional(),
+  usedPercent: optional(z.number().finite().min(0).max(100)),
+  remainingPercent: optional(z.number().finite().min(0).max(100)),
+  resetsAt: optional(z.string()),
 });
 export const aiToolUsageStatusSchema = z.object({
   checkedAt: z.string(),
   source: z.string(),
-  fiveHour: usageWindowStatusSchema.optional(),
-  sevenDay: usageWindowStatusSchema.optional(),
-  error: z.string().optional(),
+  fiveHour: optional(usageWindowStatusSchema),
+  sevenDay: optional(usageWindowStatusSchema),
+  error: optional(z.string()),
 });
 export const aiToolStatusSchema = z.object({
-  solAccess: z.boolean().optional(),
-  lunaAccess: z.boolean().optional(),
+  solAccess: optional(z.boolean()),
+  lunaAccess: optional(z.boolean()),
   anthropicCompatible: anthropicCompatibleCredentialsSummarySchema.nullable().optional(),
-  loggedIn: z.boolean().optional(),
-  quotaExhausted: z.boolean().optional(),
-  quotaExhaustedUntil: z.string().optional(),
-  email: z.string().optional(),
-  authMethod: z.string().optional(),
-  accountType: z.string().optional(),
-  needsReauth: z.boolean().optional(),
-  usage: aiToolUsageStatusSchema.optional(),
+  loggedIn: optional(z.boolean()),
+  quotaExhausted: optional(z.boolean()),
+  quotaExhaustedUntil: optional(z.string()),
+  email: optional(z.string()),
+  authMethod: optional(z.string()),
+  accountType: optional(z.string()),
+  needsReauth: optional(z.boolean()),
+  usage: optional(aiToolUsageStatusSchema),
 });
 export const aiToolsStatusSchema = z.object({
   claude: aiToolStatusSchema.optional(),

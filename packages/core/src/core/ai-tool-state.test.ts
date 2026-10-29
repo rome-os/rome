@@ -1064,6 +1064,38 @@ describe("AI tool state change subscription", () => {
     expect(state.get().claude.usage).toEqual(usage);
     state.close();
   });
+
+  it("lets a live recovery after a failed run outlast that failure's replay", async () => {
+    let resolve!: (usage: AIToolUsageStatus) => void;
+    const state = createAIToolState({
+      probes: probes({
+        claudeUsage: () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const refresh = state.refresh("anthropic");
+    state.markQuotaExhausted("anthropic");
+    expect(state.get().claude.quotaExhausted).toBe(true);
+    const resetsAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    state.applyLiveUsage("anthropic", {
+      checkedAt: new Date().toISOString(),
+      source: "event",
+      fiveHour: { usedPercent: 20, resetsAt },
+      sevenDay: { usedPercent: 10, resetsAt },
+    });
+    resolve({ checkedAt: new Date().toISOString(), source: "old probe" });
+    await refresh;
+    await Promise.resolve();
+    expect(state.get().claude).toMatchObject({
+      quotaExhausted: false,
+      usage: { source: "event", fiveHour: { usedPercent: 20 } },
+    });
+    state.close();
+  });
 });
 
 it("applies live exhaustion and recovery without another usage probe", async () => {

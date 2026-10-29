@@ -1400,7 +1400,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             )}
             {/* Last, so a narrow toolbar scrolls it off before the controls a send uses. */}
             <UsageMenu
-              enabled={settings !== undefined && settings.showAiToolUsage !== false}
+              enabled={!textOnly && settings !== undefined && settings.showAiToolUsage !== false}
               selection={
                 usageModel?.selection ??
                 chatModelSelection?.value ??

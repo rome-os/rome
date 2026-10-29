@@ -139,7 +139,10 @@ describe("AnthropicProvider", () => {
         type: "rate_limit_event",
         rate_limit_info: {
           status: "allowed",
-          unifiedWindows: { five_hour: { utilization: 0.29, resetsAt: 1793260800 } },
+          unifiedWindows: {
+            five_hour: { utilization: 0.29, resetsAt: 1793260800 },
+            seven_day: { utilization: 0.12, resetsAt: 1793757600 },
+          },
         },
       },
       { type: "result", subtype: "success", result: "done", num_turns: 1 },

@@ -106,4 +106,36 @@ describe("useAiToolStatus", () => {
     await new Promise((resolve) => setTimeout(resolve, 2100));
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+  it("resolves a status read with a push that lands while the first GET is in flight", async () => {
+    let resolve!: (response: Response) => void;
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const { wrapper } = setup();
+    const reader = renderHook(() => useAiToolStatus(), { wrapper });
+    let socket!: FakeWebSocket;
+    act(() => {
+      socket = acceptLatestSocket();
+    });
+    let read!: Promise<unknown>;
+    act(() => {
+      read = reader.result.current.readStatus();
+    });
+    await act(async () => push(socket, { claude: { loggedIn: true } }));
+    await act(async () => resolve(Response.json({ claude: { loggedIn: false } })));
+    await expect(read).resolves.toEqual({ claude: { loggedIn: true } });
+  });
+
+  it("reads null CLI fields as absent instead of rejecting the status", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ claude: { loggedIn: true, email: null, usage: null } }),
+    );
+    const { wrapper } = setup();
+    const reader = renderHook(() => useAiToolStatus(), { wrapper });
+    await waitFor(() => expect(reader.result.current.data?.claude?.loggedIn).toBe(true));
+    expect(reader.result.current.data?.claude?.email).toBeUndefined();
+  });
 });

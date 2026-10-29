@@ -369,12 +369,15 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       logQuotaChange(provider, "failed run");
       notify();
 
-      // Keep this newer runtime signal after any older probe settles.
+      // Keep this newer runtime signal after any older probe settles, unless a
+      // live usage update arrived after the failure and already superseded it.
       const olderRefresh = refreshesInFlight.get(provider);
       if (!olderRefresh) return;
+      const revisionAtFailure = usageRevision[provider];
       pendingReplays[provider] += 1;
       const replay = (): void => {
         pendingReplays[provider] -= 1;
+        if (usageRevision[provider] !== revisionAtFailure) return;
         const applied = applyRuntimeSignal();
         logQuotaChange(provider, applied ? "failed run" : "usage check");
         notify();

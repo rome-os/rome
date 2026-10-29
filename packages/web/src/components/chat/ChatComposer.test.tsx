@@ -1395,4 +1395,25 @@ describe("composer usage", () => {
     expect(screen.queryByRole("button", { name: "Model" })).toBeNull();
     expect(screen.getByText("71%")).toBeTruthy();
   });
+  it("hides local usage in a text-only assistant chat", async () => {
+    renderComposer(
+      { textOnly: true },
+      {
+        settings: { showAiToolUsage: true },
+        aiToolsStatus: {
+          claude: {
+            loggedIn: true,
+            usage: {
+              checkedAt: new Date().toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 29 },
+            },
+          },
+        },
+      },
+    );
+    await screen.findByRole("textbox");
+    await new Promise((done) => setTimeout(done, 100));
+    expect(screen.queryByRole("button", { name: "Usage remaining" })).toBeNull();
+  });
 });
