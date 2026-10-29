@@ -1568,22 +1568,29 @@ export class WebChatRepository {
                 sql`${romeAgentMessages}.rowid < (select rowid from ${romeAgentMessages} as "cursor" where "cursor"."id" = ${before.id})`,
               ),
             ),
-          // A reply shown as several messages keeps its other parts' ids beside
-          // its row, so a row is every platform id it holds. A row another
-          // earlier row shares an id with is a copy of it, unless that earlier
-          // row is itself a copy: then it is not read, and this row stands.
-          sql`not exists (
-            select 1 from ${romeAgentMessages} as "copy"
-            where "copy"."session_id" in ${chats}
-              and "copy".rowid < ${romeAgentMessages}.rowid
-              and ${sharesAnId(sql`"copy"`, romeAgentMessages)}
-              and not exists (
-                select 1 from ${romeAgentMessages} as "earlier"
-                where "earlier"."session_id" in ${chats}
-                  and "earlier".rowid < "copy".rowid
-                  and ${sharesAnId(sql`"earlier"`, sql`"copy"`)}
-              )
-          )`,
+          // A reply shown as several messages is one row that keeps its other
+          // parts' ids beside it, and it stands for every part another account
+          // heard, whichever came first. Any other message is read as its first
+          // copy. Each check is an index lookup by platform id, so a page costs
+          // a few lookups per message the place holds.
+          or(
+            isNull(romeAgentMessages.platformMessageId),
+            sql`exists (${heldAsParts(sql`${romeAgentMessages}`)})`,
+            and(
+              sql`not exists (
+                select 1 from ${romeAgentMessagePlatformIds} as "part"
+                where "part"."session_id" in ${chats}
+                  and "part"."platform_message_id" = ${romeAgentMessages.platformMessageId}
+              )`,
+              sql`not exists (
+                select 1 from ${romeAgentMessages} as "copy"
+                where "copy"."session_id" in ${chats}
+                  and "copy"."platform_message_id" = ${romeAgentMessages.platformMessageId}
+                  and "copy"."id" != ${romeAgentMessages.id}
+                  and ("copy".rowid < ${romeAgentMessages}.rowid or exists (${heldAsParts(sql`"copy"`)}))
+              )`,
+            ),
+          ),
         ),
       )
       .orderBy(desc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid desc`)
@@ -3329,10 +3336,9 @@ export class WebChatRepository {
   }
 }
 
-/** Whether the message rows `a` and `b` hold a platform id in common: their
- *  own, or one of a multipart reply's other parts. */
-function sharesAnId(a: SQL | typeof romeAgentMessages, b: SQL | typeof romeAgentMessages): SQL {
-  const idsOf = (row: SQL | typeof romeAgentMessages) =>
-    sql`select ${row}."platform_message_id" union all select "alias"."platform_message_id" from ${romeAgentMessagePlatformIds} as "alias" where "alias"."message_id" = ${row}."id"`;
-  return sql`exists (select 1 from (${idsOf(a)}) as "theirs" where "theirs"."platform_message_id" in (${idsOf(b)}))`;
+/** The other parts' ids `row` keeps, when it is a reply shown as several
+ *  messages. */
+function heldAsParts(row: SQL): SQL {
+  return sql`select 1 from ${romeAgentMessagePlatformIds} as "held"
+    where "held"."session_id" = ${row}."session_id" and "held"."message_id" = ${row}."id"`;
 }

@@ -53,8 +53,10 @@ export type Message = InboundMessage;
 export type RecordedMessage = Message & { readonly id: string };
 
 /**
- * A message as a read of its place finds it, either way it went. A message
- * from Rome is on record only once the platform took it.
+ * A message as a read of its place finds it, either way it went. Over today's
+ * storage an agent's reply is on record from the end of its turn, before its
+ * send settles, so one the platform refused can still be read
+ * (docs/domains/chats.md#delivery).
  *
  * `saidBy` is absent when the record kept no account for the message: an
  * older row, or one of Rome's lines on a channel that has no account of its
