@@ -734,6 +734,9 @@ export class WebChatRepository {
 
   constructor(private db: DrizzleDb) {}
 
+  /** Set by {@link leaveOutOfCatchUp}. */
+  private wakeUndecided: (messageId: string) => boolean = () => false;
+
   onMessageInserted(listener: WebchatMessageInsertedListener): () => void {
     this.messageInsertedListeners.add(listener);
     return () => {
@@ -1322,7 +1325,11 @@ export class WebChatRepository {
         ),
       )
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const pendingNotificationIds = pendingNotificationRows.map((row) => row.id);
+    const pendingNotificationIds = pendingNotificationRows
+      .map((row) => row.id)
+      // Its wake is still being decided, so it may become a turn's prompt of
+      // its own.
+      .filter((id) => !this.wakeUndecided(id));
     const projectedNotificationIds = pendingNotificationIds.slice(
       -CONVERSATION_CONTEXT_NOTIFICATION_LIMIT,
     );
@@ -1475,6 +1482,22 @@ export class WebChatRepository {
     if (nameMissing && updated[0]?.name === threadName) {
       this.emitSessionNameChanged(row.id, threadName);
     }
+  }
+
+  /**
+   * Leave every message `undecided` answers true for out of what a turn
+   * catches up on ({@link loadConversationContext}). It is asked once per
+   * pending message at each catch-up read, so it answers from memory.
+   */
+  leaveOutOfCatchUp(undecided: (messageId: string) => boolean): void {
+    this.wakeUndecided = undecided;
+  }
+
+  /** The id of a channel's chat row for the platform's chat id, or null when
+   *  no message has reached Rome there yet. Never creates one. */
+  async findChannelChat(channel: string, threadId: string): Promise<{ id: string } | null> {
+    const found = await this.findChannelConversation(channel, threadId);
+    return found && { id: found.id };
   }
 
   private async findChannelConversation(

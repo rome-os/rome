@@ -8,12 +8,18 @@ import type {
   ChatSettingsControl,
   InboundEvent,
   ChannelActivitySession,
+  SaidInboundEvent,
+  MessagesSaid,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
 
 /** Core's `AGENTS_KIND`, which an app cannot import. */
 const AGENTS_CHANNEL = "agents";
+
+/** The key of the one subscription a hook hearing recorded messages holds. No
+ *  channel name starts with a NUL. */
+const RECORDED = "\0recorded";
 
 /**
  * How long a turn may run before the hook reports it as still running: the
@@ -24,8 +30,11 @@ const AGENTS_CHANNEL = "agents";
 export const SLOW_TURN_MS = 10 * 60_000;
 
 export class ChannelMessageHook implements ChannelMessageHookInterface {
-  /** Unsubscribe functions by channel name, one per channel this hook holds. */
+  /** Unsubscribe functions by channel name, one per channel this hook holds.
+   *  Hearing recorded messages, the one subscription is under `RECORDED`. */
   private readonly subscriptions = new Map<string, () => void>();
+  /** The channels a recorded message may name, by name. */
+  private readonly known = new Map<string, Channel>();
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
@@ -36,20 +45,36 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
+      messagesSaid?: MessagesSaid;
     } = {},
   ) {}
 
-  /** Subscribe to every channel that can receive. A channel's subscription
+  /** Hear every message the host records, or, on a host that records none,
+   *  subscribe to every channel that can receive. A channel's subscription
    *  follows whatever backs it, so a Connection that appears or reconnects
    *  later needs nothing more from the hook. */
   async register(): Promise<void> {
-    this.subscribe(this.channels);
+    const messagesSaid = this.options.messagesSaid;
+    if (!messagesSaid) {
+      this.subscribe(this.channels);
+      return;
+    }
+    for (const channel of this.channels) this.known.set(channel.name, channel);
+    if (this.subscriptions.has(RECORDED)) return;
+    this.subscriptions.set(
+      RECORDED,
+      messagesSaid.subscribe((event) => this.handleRecorded(event)),
+    );
   }
 
-  /** Subscribe to channels the host added after `register`, such as a second
-   *  bot whose Talk first unlocked. */
+  /** Take in channels the host added after `register`, such as a second bot
+   *  whose Talk first unlocked. */
   async addChannels(channels: readonly Channel[]): Promise<void> {
-    this.subscribe(channels);
+    if (!this.options.messagesSaid) {
+      this.subscribe(channels);
+      return;
+    }
+    for (const channel of channels) this.known.set(channel.name, channel);
   }
 
   /** Subscribe to each channel that can receive and that this hook does not
@@ -60,7 +85,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       if (!inbound || this.subscriptions.has(channel.name)) continue;
       this.subscriptions.set(
         channel.name,
-        inbound.subscribe((event) => this.handleMessage(channel, event)),
+        inbound.subscribe(async (event) => {
+          await this.handleMessage(channel, event);
+        }),
       );
     }
   }
@@ -74,6 +101,36 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     for (const unsubscribe of unsubscribes) unsubscribe();
   }
 
+  /** Handle a recorded message, and say its wake is decided once no turn
+   *  will come of it, or once the turn it started has ended. */
+  private async handleRecorded(event: SaidInboundEvent): Promise<void> {
+    const decided = () =>
+      this.options.messagesSaid?.decided(event.recorded).catch((err) =>
+        (this.options.log ?? log).warn("could not mark a message's wake decided", {
+          messageId: event.message.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    const channel = this.known.get(event.message.channel);
+    if (!channel) {
+      (this.options.log ?? log).warn("recorded message names no channel the hook knows", {
+        service: event.message.channel,
+        messageId: event.message.messageId,
+      });
+      await decided();
+      return;
+    }
+    let dispatched: { turn: Promise<void> } | undefined;
+    try {
+      dispatched = await this.handleMessage(channel, event);
+    } finally {
+      // The turn settles without throwing, and the chat's next message must
+      // not wait on it.
+      if (dispatched) void dispatched.turn.then(decided);
+      else await decided();
+    }
+  }
+
   /**
    * Take one message through the checks that decide whether it becomes a turn,
    * then dispatch the turn and settle. The channel holds this conversation
@@ -83,9 +140,15 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    * awaits a person lookup, a policy check and a store before its turn reaches
    * the agent session's queue, so two quick messages can reach the session in
    * either order, as they could before the channel ordered its handlers.
+   * Answers the dispatched turn, which never rejects, or nothing when no turn
+   * comes of the message.
    */
-  private async handleMessage(channel: Channel, event: InboundEvent): Promise<void> {
+  private async handleMessage(
+    channel: Channel,
+    event: InboundEvent | SaidInboundEvent,
+  ): Promise<{ turn: Promise<void> } | undefined> {
     const { message, ref } = event;
+    const recorded = "recorded" in event ? event.recorded : undefined;
     const { connectionId } = ref;
     const service = channel.name;
     if (!message.text?.trim() && message.attachments.length === 0) {
@@ -149,8 +212,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     let attachments = message.attachments;
-    // Through the channel's Connection, which is `ref`'s.
-    const inboundMedia = channel.inbound?.media ?? null;
+    // Through the channel's Connection, which is `ref`'s. A recorded message's
+    // attachments were saved before it was recorded.
+    const inboundMedia = recorded ? null : (channel.inbound?.media ?? null);
     if (inboundMedia && attachments.length > 0) {
       try {
         attachments = await inboundMedia.materialize(message);
@@ -184,10 +248,12 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         });
         return null;
       });
-    void this.runTurn(message, service, connectionId, attachments, activity, {
+    const turn = this.runTurn(message, service, connectionId, attachments, activity, {
       routedAgentName,
       accountAgentName: accountAgent,
+      ...(recorded ? { recordedMessageId: recorded.messageId } : {}),
     });
+    return { turn };
   }
 
   private async runTurn(
@@ -196,7 +262,11 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
     activity: Promise<ChannelActivitySession | null>,
-    agents: { routedAgentName: string | undefined; accountAgentName: string | undefined },
+    agents: {
+      routedAgentName: string | undefined;
+      accountAgentName: string | undefined;
+      recordedMessageId?: string;
+    },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {
@@ -309,6 +379,9 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.chatSettings ?? deps.conversationSettings,
     deps.chatStop,
     deps.channels,
-    { accountAgentOf: deps.accountAgentOf ?? byChannelName(deps.linkedAgentOf) },
+    {
+      accountAgentOf: deps.accountAgentOf ?? byChannelName(deps.linkedAgentOf),
+      ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
+    },
   );
 }

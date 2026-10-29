@@ -75,6 +75,7 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 One thing a participant said or did in a chat.
 
 - Every message goes one way: to Rome or from Rome.
+- A message that reaches Rome is recorded in its chat before anything acts on it, whether or not an agent is woken by it. A platform delivering the same message again records nothing new.
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.

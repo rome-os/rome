@@ -1997,12 +1997,55 @@ export interface Channel {
 }
 
 /**
+ * A message said to Rome in a chat, once the host has put it on record there
+ * (docs/domains/chats.md#message). Its attachments are already materialized
+ * where the channel could, and `message.channel` names the channel it arrived
+ * on.
+ */
+export interface SaidInboundEvent extends InboundEvent {
+  readonly recorded: {
+    /** The chat the message is recorded in, as {@link ChatRecord.id} names it. */
+    readonly chatRecordId: string;
+    /** The message's own id in that chat. */
+    readonly messageId: string;
+  };
+}
+
+/**
+ * Every message said to Rome, heard after the host records it. The host
+ * records every answerable message its channels deliver, whether or not an
+ * agent answers it, and only then is it heard here. A message recorded again,
+ * such as a platform redelivery, is not heard again. Each subscriber hears a
+ * chat's messages one at a time, in the order they were recorded, and the
+ * chat's next message is recorded only once every subscriber has handled this
+ * one: a handler that does not settle stops its chat. Different chats never
+ * wait on each other. The host records only while at least one subscriber
+ * is subscribed.
+ */
+export interface MessagesSaid {
+  subscribe(handler: (event: SaidInboundEvent) => Promise<void>): () => void;
+  /**
+   * Say the wake for a recorded message is decided: it woke no agent, or the
+   * turn it woke has ended. A message is recorded as undecided, and no turn
+   * catches up on it until this is called or it is made a turn's prompt, so a
+   * subscriber calls it once for every message it hears, whatever the outcome.
+   * The host marks every message decided when it restarts.
+   */
+  decided(recorded: SaidInboundEvent["recorded"]): Promise<void>;
+}
+
+/**
  * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
  * hears inbound messages through `channels`, one subscription per channel that
  * can receive.
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
+  /** Hearing messages said to Rome once they are on record. A hook that subscribes here
+   *  hears every channel through it, the ones added later included, and does
+   *  not store the message itself. A host that predates it passes none, and a
+   *  hook hears `channels` instead. */
+  messagesSaid?: MessagesSaid;
   /** Each chat's settings. A host that predates the name passes only
    *  `conversationSettings`, so read `chatSettings ?? conversationSettings`. */
   chatSettings?: ChatSettingsControl;
