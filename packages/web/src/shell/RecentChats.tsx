@@ -179,8 +179,8 @@ const DATE_BUCKETS = [
 type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
 
 function readScope(): SessionScope {
-  if (typeof window === "undefined") return "all";
-  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "mine" ? "mine" : "all";
+  if (typeof window === "undefined") return "mine";
+  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
 }
 
 function readGroupMode(): GroupMode {
