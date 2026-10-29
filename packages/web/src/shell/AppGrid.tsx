@@ -447,7 +447,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   const fixedCount = REQUIRED_BUILTIN_PINS.length;
   return (
-    <TooltipProvider delayDuration={150}>
+    // A labelled tile renders no tooltip content, and Radix closes a hoverable
+    // tooltip from that content, not the trigger. Hovering labelled tiles would
+    // leave each one open, and they would all show when the rail collapses.
+    // Without hoverable content, leaving the trigger closes the tooltip.
+    <TooltipProvider delayDuration={150} disableHoverableContent={labelled}>
       <nav
         className={`flex shrink-0 flex-col gap-1 px-3 pb-2 ${labelled ? "items-stretch" : "items-center"}`}
       >

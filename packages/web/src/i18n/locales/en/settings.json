@@ -871,6 +871,37 @@
         "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
         "toggleLabel": "Allow agent reports"
       }
+    },
+    "spokenRecaps": {
+      "title": "Spoken recaps",
+      "description": "A short summary after substantial chat turns, with optional audio to listen hands-free. Recaps appear in the chat.",
+      "enabled": {
+        "title": "Create recaps",
+        "description": "Each recap uses an extra model call. Off by default. Turning recaps off stops new summaries and audio, but keeps existing recaps."
+      },
+      "threshold": {
+        "title": "Length threshold",
+        "description": "Based on response length and tool activity, not recap length.",
+        "short": "Shorter turns",
+        "medium": "Substantial turns",
+        "long": "Longer turns only"
+      },
+      "createAudio": {
+        "title": "Create audio",
+        "description": "Send recap text to Microsoft Edge Text to Speech to create a playable recording."
+      },
+      "audioSpeed": {
+        "title": "Audio speed",
+        "description": "Applies to newly created recordings.",
+        "slower": "Slower (−15%)",
+        "normal": "Normal",
+        "faster": "Faster (+15%)",
+        "fastest": "Fastest (+30%)"
+      },
+      "loadFailed": "Recap settings could not be saved or loaded. Try again.",
+      "loading": "Loading recap settings…",
+      "saving": "Saving…",
+      "retry": "Try again"
     }
   },
   "system": {

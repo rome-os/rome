@@ -9,8 +9,7 @@ import { chatKey, placeIn } from "./place.js";
 import { send } from "./send.js";
 
 // Sending into a place. What these pin: a send names a place and goes out at
-// that place's address, the message is on record before the platform is
-// asked, and the platform's answer settles its delivery.
+// that place's address, and the platform's answer is the message's delivery.
 
 const GROUP = "tg-group-1" as ChatId;
 const TOPIC = "tg-group-1:topic-9" as ChatId;
@@ -35,7 +34,7 @@ describe("send", () => {
   it("sends into a thread at the thread's address, and records it in the thread", async () => {
     const result = await send(deps, placeIn(chatKey("telegram", GROUP), TOPIC), { text: "hi" });
 
-    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ ok: true, delivery: { state: "sent" } });
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: TOPIC, message: { text: "hi" } },
     ]);
@@ -45,32 +44,24 @@ describe("send", () => {
       .where(eq(romeSessions.id, channelChatId("telegram", TOPIC)))
       .get();
     expect(thread?.parentSessionId).toBe(channelChatId("telegram", GROUP));
-    expect(rows()).toMatchObject([{ delivery: "sent", senderId: "rome" }]);
+    expect(rows()).toMatchObject([
+      { senderId: "rome", content: JSON.stringify([{ type: "text", content: "hi" }]) },
+    ]);
   });
 
-  it("records the message as pending before the platform is asked", async () => {
-    const transport = deps.transports.get("telegram")!;
-    const sendOnTransport = transport.send.bind(transport);
-    let seen: unknown;
-    rs.spyOn(transport, "send").mockImplementation(async (...args) => {
-      seen = rows().map((row) => row.delivery);
-      return sendOnTransport(...args);
-    });
-
-    await send(deps, placeIn(chatKey("telegram", GROUP), TOPIC), { text: "hi" });
-
-    expect(seen).toEqual(["pending"]);
-  });
-
-  it("keeps a refused message as failed, in the platform's words", async () => {
+  it("answers a refused message as failed, in the platform's words, and records nothing", async () => {
     rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(
       new Error("chat not found"),
     );
 
     const result = await send(deps, placeIn(chatKey("telegram", GROUP), TOPIC), { text: "hi" });
 
-    expect(result).toEqual({ ok: false, error: "chat not found" });
-    expect(rows()).toMatchObject([{ delivery: "failed", deliveryError: "chat not found" }]);
+    expect(result).toMatchObject({
+      ok: false,
+      error: "chat not found",
+      delivery: { state: "failed", error: "chat not found" },
+    });
+    expect(rows()).toEqual([]);
   });
 
   it("refuses a sender Rome does not hold, before asking the platform", async () => {

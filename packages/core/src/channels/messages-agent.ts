@@ -90,10 +90,7 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
           -- untied to one. Either way it is conversation, and the direction
           -- above is what tells the two apart. 'trace' is the turn's own
           -- machinery and belongs to no conversation.
-          AND m.role IN ('user', 'assistant', 'notification')
-          -- A send still pending, or one the platform refused, was not said.
-          -- The same rule as the repository's saidMessage.
-          AND coalesce(m.delivery, 'sent') = 'sent'`;
+          AND m.role IN ('user', 'assistant', 'notification')`;
     },
     body: messageContentText,
     detail: {
