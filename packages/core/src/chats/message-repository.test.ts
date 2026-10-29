@@ -22,7 +22,8 @@ describe("StoredMessages reads", () => {
     testDb = createTestDb();
     rows = new WebChatRepository(testDb.db);
     messages = new StoredMessages(rows, new ChatEvents(), {
-      channelsOn: (platform) => (platform === "telegram" ? ["telegram", "telegram-sales"] : []),
+      channelsOn: (platform) =>
+        platform === "telegram" ? ["telegram", "telegram-sales", "telegram-ops"] : [],
       accountOf: (channel) =>
         channel === "telegram" ? { platform: "telegram", id: "rome-bot" } : null,
     });
@@ -280,6 +281,34 @@ describe("StoredMessages reads", () => {
 
     const { messages: read } = await messages.recent(group, 10);
     expect(read.map((message) => message.body.text)).toEqual(["Looking. Found it. Answer"]);
+  });
+
+  it("reads a reply once however many accounts heard its parts, in any order", async () => {
+    const chatOf = (channel: string) =>
+      rows.ensureChannelChat({
+        channel,
+        threadId: "group-1",
+        threadType: "group",
+        agentName: "main",
+      });
+    const support = await chatOf("telegram");
+    const sales = await chatOf("telegram-sales");
+    const ops = await chatOf("telegram-ops");
+    await said(sales.id, "r-1", minute(1), "r-1");
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("r-1 r-2"),
+      platformMessageId: "r-1",
+      otherPlatformMessageIds: ["r-2"],
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+    await said(sales.id, "r-2", minute(1), "r-2");
+    await said(ops.id, "r-2", minute(1), "r-2");
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual(["r-1 r-2"]);
   });
 
   it("reads a group as one account heard it when the read names that account", async () => {
