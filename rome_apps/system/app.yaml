@@ -8,6 +8,11 @@ tagline: "The control room: scheduling, messaging, approvals, and the app store.
 hideInLauncher: true
 appRoot: dist
 
+web:
+  manifest: web/manifest.json
+  displayName: System
+  navLabel: System
+
 api:
   entry: api/index
 
