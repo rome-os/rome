@@ -6,8 +6,9 @@ Who said what, where, and as whom. Chats follows the definitions in [Connections
 
 A place where people and agents talk: a group, a direct message, the chat built into the dashboard. The code and the dashboard call it a conversation, a deprecated alias for the same thing.
 
+- A chat is known by its platform and the platform's own id for it. Whether it is a group or a direct message is something about the chat, not part of what it is known by.
 - A group is named by the platform's own id for it, so one group is one chat however many of Rome's accounts are in it.
-- A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two.
+- A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two. Where the platform gives a direct message no id of its own across Rome's accounts, Rome derives one from the two ends.
 - A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
 - A chat's history belongs to the chat. It goes when the last of Rome's accounts leaves the chat, not before.
 - A chat may have threads inside it.
@@ -23,6 +24,14 @@ A chat inside a chat, usually started from one of its messages. A thread is not 
 - Everyone in the chat whom the platform lets see a thread sees it: who is in it and what is said. An agent in the chat sees its threads the same way, and can write in them. A thread the platform hides from some members, such as a private thread, is hidden from them in Rome too.
 - The chat's reply rule applies in its threads. A thread has no reply rule of its own.
 - A thread goes with its chat.
+
+## Place
+
+Where a message is said, and where a send goes: a chat, or a thread in a chat.
+
+- Two places are the same when they name the same chat and the same thread, or both name no thread.
+- Rome sends to a place, never to an account. Messaging a person on one of their accounts is sending into the direct message that reaches that account.
+- A send into a place goes out from one of Rome's accounts in it: the one the send names, or the only one Rome holds on the platform. With several and none named, the send is refused rather than sent from an account nobody chose.
 
 ## Participant
 
@@ -70,6 +79,14 @@ One thing a participant said or did in a chat.
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
+
+## Delivery
+
+How a message Rome sends stands with its platform: pending, sent or failed. Only a message from Rome has one.
+
+- The platform's answer settles it: sent once the platform took the message, failed with the platform's own words when it refused.
+- Once the platform has taken a message, it is sent, even when Rome fails to write that down. Reporting it failed would invite a second real message.
+- A failed message reads as never said, to the guardian and to the agent. Sending the text again is a new message.
 
 ## Widget
 
@@ -157,5 +174,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.
+- **Sending to an account.** A person's account is reached in a chat, and a group or a thread has no account to address. One destination, the place, serves a direct message, a group and a thread alike.
+- **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
 - **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.
