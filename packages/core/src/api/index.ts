@@ -33,6 +33,7 @@ import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
+import { send } from "../chats/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
 import { settingsRoutes } from "./routes/settings.js";
@@ -236,6 +237,12 @@ export function buildApp(
   // buildApp runs, so the runtime is bound after the fact, like the rest of the
   // post-setup wiring.
   deps.backendTurnRunner.setWebchatRuntime(webchatRuntime);
+  // Concierge is built before the API layer too. Its sends are Chats' own,
+  // with the dashboard taking those into its chats.
+  deps.concierge?.attachDashboard({
+    chats: webchatRuntime,
+    send: (place, body, as) => send({ ...deps, dashboard: webchatRuntime }, place, body, as),
+  });
 
   app.route("/api", api);
 

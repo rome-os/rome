@@ -6,7 +6,12 @@ import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, shouldNudge } from "./nudge.js";
-import { type ConciergeService, isConciergeAgent, TASK_CHAT_TRIGGER_KIND } from "./service.js";
+import {
+  CONCIERGE_ACCOUNT,
+  type ConciergeService,
+  isConciergeAgent,
+  TASK_CHAT_TRIGGER_KIND,
+} from "./service.js";
 import { openQuestion } from "./transcript.js";
 
 const log = createLogger("concierge-events");
@@ -58,8 +63,7 @@ async function waitForTurnStream(
 ): Promise<void> {
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const running = await service.deps.chatApi.activeTurns(chatId).catch((): string[] => []);
-    if (!running.includes(turnId)) return;
+    if (!service.dashboard.chats.activeTurns(chatId).includes(turnId)) return;
     await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS));
   }
 }
@@ -100,7 +104,10 @@ export function startConciergeEvents(
     await waitForTurnStream(service, chatId, event.turn.turnId);
     const rows = await webchatRepo.getTurnChatMessages(chatId, event.turn.turnId);
     const userRows = rows.filter((row) => row.role === "user");
-    const started = service.takePosted(userRows.map((row) => row.id));
+    // A follow-up the task chat queued or deferred sits under the turn that
+    // answered it, so the turn is Concierge's when any of its inputs was said
+    // as Concierge's account.
+    const started = userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id);
     const question = event.status === "completed" ? openQuestion(rows) : null;
     const reply = event.output.text.trim();
     const taskEvent: TaskEvent = question

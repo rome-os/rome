@@ -144,8 +144,10 @@ function transcriptDetail(raw: Record<string, unknown>, entry: Message): Message
 }
 
 /** The line a stored agent message renders as: its text parts, joined.
- *  Non-text parts (cards, recaps, errors) carry no conversation, and content
- *  that does not parse is a row with nothing to show rather than a failed read. */
+ *  Non-text parts (cards, recaps, errors) carry no conversation, nor does a
+ *  dashboard turn's narration on its way to the answer (a commentary part).
+ *  Content that does not parse is a row with nothing to show rather than a
+ *  failed read. */
 export function messageContentText(raw: string | null): string | null {
   if (raw === null) return null;
   let parsed: unknown;
@@ -158,8 +160,12 @@ export function messageContentText(raw: string | null): string | null {
   const text = parsed
     .filter((part): part is Extract<MessagePart, { type: "text" }> => {
       if (typeof part !== "object" || part === null) return false;
-      const candidate = part as { type?: unknown; content?: unknown };
-      return candidate.type === "text" && typeof candidate.content === "string";
+      const candidate = part as { type?: unknown; content?: unknown; turnPhase?: unknown };
+      return (
+        candidate.type === "text" &&
+        typeof candidate.content === "string" &&
+        candidate.turnPhase !== "commentary"
+      );
     })
     .map((part) => part.content)
     .join("\n");

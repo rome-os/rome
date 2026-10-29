@@ -154,7 +154,6 @@ import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
-import { createLoopbackChatApi } from "./concierge/chat-api.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -995,16 +994,6 @@ async function main() {
       return access ? credentialFingerprint(access.token) : null;
     },
   });
-  // Concierge (rome-os/rome#1344). Its backend turns run through the runner
-  // created below, by the time any turn finishes.
-  const concierge = new ConciergeService({
-    settingsRepo,
-    webchatRepo,
-    sessionManager,
-    aiToolState,
-    chatApi: createLoopbackChatApi(),
-    runBackendTurn: (params) => backendTurnRunner.runAndDeliver(params),
-  });
   // What was said in each place (docs/domains/chats.md#message). Reads find a
   // platform's chats under every channel it is kept under, built or released.
   // `channels` is built further down, before anything reads.
@@ -1013,6 +1002,17 @@ async function main() {
     channelsOn: (platform) =>
       storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
     accountOf: (channel) => channelRecords.accountOf(channel),
+  });
+  // Concierge (rome-os/rome#1344). Its backend turns run through the runner
+  // created below, by the time any turn finishes. The API layer attaches the
+  // dashboard it runs task chats on.
+  const concierge = new ConciergeService({
+    settingsRepo,
+    webchatRepo,
+    sessionManager,
+    aiToolState,
+    messages: chatMessages,
+    runBackendTurn: (params) => backendTurnRunner.runAndDeliver(params),
   });
   const agentSessionManager = createAgentSessionManager(
     {

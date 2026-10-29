@@ -88,14 +88,65 @@ describe("send", () => {
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
-  it("refuses a dashboard chat, whose channel records its own copy of a send", async () => {
-    const result = await send(deps, placeIn(chatKey("webchat", "chat-1" as ChatId)), {
-      text: "hi",
+  describe("into a dashboard chat", () => {
+    const DASHBOARD_CHAT = placeIn(chatKey("webchat", "chat-1" as ChatId));
+    const CONCIERGE = { platform: "webchat", id: "core:concierge" };
+    const inbox = () => ({
+      post: rs.fn(async () => ({ ok: true as const, messageId: "input-1", at: new Date(0) })),
     });
 
-    expect(result).toEqual({ ok: false, send: "unsupported" });
-    expect(deps.transports.get("webchat")?.sentMessages).toEqual([]);
-    expect(testDb.db.select().from(romeAgentMessages).all()).toEqual([]);
+    it("posts it to the dashboard as the agent account it names, and never to the channel", async () => {
+      const dashboard = inbox();
+      const result = await send({ ...deps, dashboard }, DASHBOARD_CHAT, { text: "hi" }, CONCIERGE);
+
+      expect(result).toEqual({ ok: true, sent: { ref: "chat-1:input-1", timestamp: 0 } });
+      expect(dashboard.post).toHaveBeenCalledWith("chat-1", { text: "hi" }, CONCIERGE);
+      expect(deps.transports.get("webchat")?.sentMessages).toEqual([]);
+      expect(testDb.db.select().from(romeAgentMessages).all()).toEqual([]);
+    });
+
+    it("answers the dashboard's refusal in its words", async () => {
+      const dashboard = {
+        post: async () => ({ ok: false as const, error: "This chat is archived and read-only" }),
+      };
+      const result = await send({ ...deps, dashboard }, DASHBOARD_CHAT, { text: "hi" }, CONCIERGE);
+
+      expect(result).toEqual({ ok: false, error: "This chat is archived and read-only" });
+    });
+
+    it("refuses a send that names no dashboard account, or a thread", async () => {
+      const dashboard = inbox();
+      const unnamed = await send({ ...deps, dashboard }, DASHBOARD_CHAT, { text: "hi" });
+      const elsewhere = await send(
+        { ...deps, dashboard },
+        DASHBOARD_CHAT,
+        { text: "hi" },
+        {
+          platform: "telegram",
+          id: "rome-bot",
+        },
+      );
+      const threaded = await send(
+        { ...deps, dashboard },
+        placeIn(chatKey("webchat", "chat-1" as ChatId), "t-1" as ChatId),
+        { text: "hi" },
+        CONCIERGE,
+      );
+
+      expect([unnamed, elsewhere, threaded].map((result) => "invalid" in result)).toEqual([
+        true,
+        true,
+        true,
+      ]);
+      expect(dashboard.post).not.toHaveBeenCalled();
+    });
+
+    it("refuses it where no dashboard takes sends", async () => {
+      const result = await send(deps, DASHBOARD_CHAT, { text: "hi" }, CONCIERGE);
+
+      expect(result).toEqual({ ok: false, send: "unsupported" });
+      expect(deps.transports.get("webchat")?.sentMessages).toEqual([]);
+    });
   });
 
   it("refuses a place on a platform Rome holds no account on", async () => {

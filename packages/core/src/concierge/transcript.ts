@@ -1,16 +1,14 @@
-// Read-only views of a stored chat transcript, in the shapes Concierge's tools
-// and task events hand the model.
+// Read-only views of a stored chat transcript, in the shapes Concierge's task
+// events hand the model. Cards are not on a message's body until widgets land,
+// so a task chat's open question is read off its rows.
 
 interface StoredRow {
   role: string;
   content: string;
-  createdAt?: Date;
 }
 
 interface StoredPart {
   type?: unknown;
-  content?: unknown;
-  turnPhase?: unknown;
   render?: { builtin?: unknown; componentId?: unknown; props?: unknown };
 }
 
@@ -21,53 +19,6 @@ function parts(content: string): StoredPart[] {
   } catch {
     return [];
   }
-}
-
-/** The row's text parts, joined. `answerOnly` skips in-turn narration. */
-function rowText(content: string, options: { answerOnly?: boolean } = {}): string {
-  return parts(content)
-    .filter(
-      (part) =>
-        part.type === "text" &&
-        typeof part.content === "string" &&
-        !(options.answerOnly && part.turnPhase === "commentary"),
-    )
-    .map((part) => part.content as string)
-    .join("\n\n")
-    .trim();
-}
-
-export interface TranscriptLine {
-  role: "user" | "assistant";
-  text: string;
-  at?: string;
-}
-
-/** The last `limit` user and agent messages that carry text. */
-export function transcriptLines(rows: StoredRow[], limit: number): TranscriptLine[] {
-  const lines: TranscriptLine[] = [];
-  for (const row of rows) {
-    if (row.role !== "user" && row.role !== "assistant") continue;
-    const text = rowText(row.content);
-    if (!text) continue;
-    lines.push({
-      role: row.role,
-      text,
-      ...(row.createdAt ? { at: row.createdAt.toISOString() } : {}),
-    });
-  }
-  return lines.slice(-limit);
-}
-
-/** The chat's latest agent answer, or null when it has none. */
-export function latestAnswer(rows: StoredRow[]): string | null {
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const row = rows[index];
-    if (row.role !== "assistant") continue;
-    const text = rowText(row.content, { answerOnly: true });
-    if (text) return text;
-  }
-  return null;
 }
 
 export interface OpenQuestion {

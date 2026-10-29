@@ -8,7 +8,7 @@ import {
   WHOLE_HISTORY,
   type MessagesContractSubject,
 } from "./messages-contract.js";
-import { agentMessages } from "./messages-agent.js";
+import { agentMessages, messageContentText } from "./messages-agent.js";
 
 // `rome_agent_messages` read as an `AccountMessages` store, holding exactly what
 // `agentMessagesSource` holds today: the roles that carry conversation, on
@@ -346,4 +346,16 @@ testAccountMessagesContract("agentMessages", () => {
     };
   })();
   return enrolled;
+});
+
+describe("messageContentText", () => {
+  it("reads a dashboard answer without the narration that led to it", () => {
+    const content = JSON.stringify([
+      { type: "text", content: "Checking the fares.", turnPhase: "commentary" },
+      { type: "task_chat", chatId: "task-1", title: "Flights" },
+      { type: "text", content: "3 options", turnPhase: "final" },
+    ]);
+
+    expect(messageContentText(content)).toBe("3 options");
+  });
 });
