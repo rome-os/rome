@@ -354,3 +354,43 @@ function labelAccounts(cards: ConnectionCard[]): void {
     if (identity) card.label = `${serviceLabel(card.service)} · ${identity}`;
   }
 }
+
+/** The two views of the Connections page. */
+export type ConnectionTab = "connected" | "available";
+
+/** The groups the Connections page sorts cards into. Channels the guardian
+ *  talks to Rome through are Messaging; accounts Rome acts in (Rome OAuth and
+ *  the Composio broker) are Accounts. */
+export type ConnectionGroup = "messaging" | "accounts";
+
+/** A card is connected while any of its accounts gives Rome access, working or
+ *  broken. A broken one stays connected so it is fixed where it is listed,
+ *  instead of reading as something new to add. */
+export function isConnectedCard(card: ConnectionCard): boolean {
+  return card.slots.some((slot) => slot.state !== null);
+}
+
+export function connectionGroup(card: ConnectionCard): ConnectionGroup {
+  return card.kind === "channel" ? "messaging" : "accounts";
+}
+
+/** Splits the cards into the groups of one tab, in group order. A card that
+ *  needs attention leads its group; the rest keep the list order. */
+export function groupConnectionCards(
+  cards: ConnectionCard[],
+  needsAttention: (card: ConnectionCard) => boolean,
+): { group: ConnectionGroup; cards: ConnectionCard[] }[] {
+  const order: ConnectionGroup[] = ["messaging", "accounts"];
+  return order
+    .map((group) => {
+      const inGroup = cards.filter((card) => connectionGroup(card) === group);
+      return {
+        group,
+        cards: [
+          ...inGroup.filter(needsAttention),
+          ...inGroup.filter((card) => !needsAttention(card)),
+        ],
+      };
+    })
+    .filter((entry) => entry.cards.length > 0);
+}

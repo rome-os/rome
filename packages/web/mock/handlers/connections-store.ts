@@ -157,6 +157,37 @@ export const connections: { connections: ApiConnection[] } = {
       link: null,
       severalAccounts: false,
     },
+    // The OAuth services this host offers but nobody has connected. Core lists
+    // them as placeholders (`id: null`), so the page has something to offer.
+    ...[
+      { service: "google", grant: "user" },
+      { service: "slack", grant: "workspace" },
+      { service: "shopify", grant: "store" },
+    ].map(
+      ({ service, grant }): ApiConnection => ({
+        id: null,
+        connectionKind: service,
+        label: service,
+        state: null,
+        grants: { [grant]: "unauthorized" },
+        display: { [grant]: null },
+        capabilities: {
+          chat: { state: "unsupported" },
+          act: { state: "needs-auth", missingGrants: [grant] },
+          watch: { state: "unsupported" },
+        },
+        connect: {
+          url: `https://example.com/oauth/${service}`,
+          available: true,
+          unavailableReason: null,
+        },
+        setups: {},
+        channel: null,
+        agent: null,
+        link: null,
+        severalAccounts: false,
+      }),
+    ),
   ],
 };
 
