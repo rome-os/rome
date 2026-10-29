@@ -1530,18 +1530,23 @@ export class WebChatRepository {
     // and its row may not name its type, so a row under a parent chat is
     // shared too.
     const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') in ('group', 'channel') or ${romeSessions.parentSessionId} is not null)`;
+    // A row that names a kind other than a group's is a direct message.
+    const isDirect = sql`(${romeSessions.sourceThreadType} is not null and not ${isGroup})`;
     // Read through one channel, the chat is that channel's record alone.
-    // Otherwise only a group's address names one chat across Rome's accounts,
-    // and one account knowing it for a group is enough: a send opens its row
-    // without knowing the kind. A chat no account knows for a group reads as
-    // a direct message. Any other chat is one account's own: Telegram
-    // keys a direct message by the other person alone, so the same address on
-    // two channels is two chats, and it is read only while one channel holds
-    // it.
+    // Otherwise only a group's address names one chat across Rome's accounts.
+    // One account knowing it for a group is enough, since a send opens its row
+    // without knowing the kind, unless another account knows it for a direct
+    // message: Telegram keys a direct message by the other person alone, and
+    // a user account may label one a group, so the address then names two
+    // chats and neither is read. A chat no account knows for a group is one
+    // account's own, read only while one channel holds it.
     const which = input.ownChannel
       ? eq(romeSessions.sourceChannel, input.ownChannel)
       : or(
-          sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+          and(
+            sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
+            sql`not exists (select 1 from ${romeSessions} where ${and(at, isDirect)})`,
+          ),
           sql`(select count(*) from ${romeSessions} where ${at}) = 1`,
         );
     const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);

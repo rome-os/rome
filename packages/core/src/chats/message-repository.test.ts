@@ -485,6 +485,35 @@ describe("StoredMessages reads", () => {
     expect(await read()).toEqual([]);
   });
 
+  it("keeps a direct message apart when another account labels it a group", async () => {
+    // A Telegram user account labels its direct messages as groups, so the bot's
+    // direct message and the user account's share an address and disagree on
+    // the kind.
+    const bot = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "alice-tg",
+      threadType: "private",
+      agentName: "main",
+    });
+    const user = await rows.ensureChannelChat({
+      channel: "telegram-ops",
+      threadId: "alice-tg",
+      threadType: "group",
+      agentName: "main",
+    });
+    await said(bot.id, "to the bot", minute(1), "1");
+    await said(user.id, "to the user account", minute(2), "1");
+    const dm = placeIn(chatKey("telegram", "alice-tg" as ChatId));
+
+    const read = async (channel?: string) =>
+      (await messages.recent(dm, 10, channel ? { channel } : undefined)).messages.map(
+        (message) => message.body.text,
+      );
+    expect(await read("telegram")).toEqual(["to the bot"]);
+    expect(await read("telegram-ops")).toEqual(["to the user account"]);
+    expect(await read()).toEqual([]);
+  });
+
   it("keeps a thread's messages to the thread", async () => {
     const chat = await rows.ensureChannelChat({
       channel: "telegram",
