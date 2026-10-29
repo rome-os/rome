@@ -375,10 +375,13 @@ export function connectionGroup(card: ConnectionCard): ConnectionGroup {
 }
 
 /** Splits the cards into the groups of one tab, in group order. A card that
- *  needs attention leads its group; the rest keep the list order. */
+ *  needs attention leads its group; the rest keep the list order. An empty
+ *  group is left out unless `keep` names it, for a caller that adds rows of
+ *  its own to that group. */
 export function groupConnectionCards(
   cards: ConnectionCard[],
   needsAttention: (card: ConnectionCard) => boolean,
+  keep: Partial<Record<ConnectionGroup, boolean>> = {},
 ): { group: ConnectionGroup; cards: ConnectionCard[] }[] {
   const order: ConnectionGroup[] = ["messaging", "accounts"];
   return order
@@ -392,5 +395,5 @@ export function groupConnectionCards(
         ],
       };
     })
-    .filter((entry) => entry.cards.length > 0);
+    .filter((entry) => entry.cards.length > 0 || keep[entry.group] === true);
 }

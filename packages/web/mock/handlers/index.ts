@@ -42,6 +42,7 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { connectorHandlers } from "./connector";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -1449,6 +1450,7 @@ export const handlers = [
   // and message counts read off that chat's transcript.
   ...sessionQueryHandlers(chatSessions, transcripts),
   ...settingsHandlers,
+  ...connectorHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
   ...liveEventsHandlers,

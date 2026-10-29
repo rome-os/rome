@@ -12,6 +12,13 @@ import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Search, Unplug, X } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { AppKeysRow } from "@/components/connections/app-keys-row";
+import {
+  ComposioServiceDialog,
+  ComposioServiceRowButton,
+  ComposioSignInBanner,
+  useComposioConnect,
+  useComposioServices,
+} from "@/components/connections/composio-services";
 import { ConnectionDetailDialog } from "@/components/ConnectionDetail";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -30,6 +37,7 @@ import {
 } from "@/lib/connection-cards";
 import { connectionStatus, StatusIndicator } from "@/lib/connection-status";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
+import type { ComposioServiceRow } from "@/lib/composio-services";
 import type { ApiConnection } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 
@@ -103,11 +111,32 @@ export function ConnectionsSection({
     !needle ||
     `${card.label} ${withDescription ? describe(card) : ""}`.toLocaleLowerCase().includes(needle);
   const connected = cards.filter(isConnectedCard);
-  const available = cards.filter((card) => !isConnectedCard(card));
+  // Signed out, the Composio group's sign-in banner stands in for the
+  // Composio account row.
+  const available = cards.filter((card) => !isConnectedCard(card) && card.kind !== "composio");
   const shown: Record<ConnectionTab, ConnectionCard[]> = {
     connected: connected.filter((card) => matches(card, false)),
     available: available.filter((card) => matches(card, true)),
   };
+
+  // The services Rome reaches through Composio, from the Connector app.
+  const composioInstalled = composio?.installed === true;
+  const composioSignedIn = composioInstalled && composio?.loggedIn === true;
+  const composioServices = useComposioServices({
+    installed: composioInstalled,
+    signedIn: composioSignedIn,
+  });
+  const { connect: connectComposio, busySlug } = useComposioConnect(onFlash);
+  const [openService, setOpenService] = useState<string | null>(null);
+  const matchesService = (row: ComposioServiceRow, withScope: boolean) =>
+    !needle || `${row.name} ${withScope ? row.scope : ""}`.toLocaleLowerCase().includes(needle);
+  const shownServices: Record<ConnectionTab, ComposioServiceRow[]> = {
+    connected: composioServices.rows.connected
+      .filter((row) => matchesService(row, false))
+      .sort((a, b) => Number(b.needsAttention) - Number(a.needsAttention)),
+    available: composioServices.rows.available.filter((row) => matchesService(row, true)),
+  };
+  const count = (value: ConnectionTab) => shown[value].length + shownServices[value].length;
   const tab: ConnectionTab = chosenTab ?? (connected.length > 0 ? "connected" : "available");
   if (chosenTab === null && !loading && !error && cards.length > 0) setChosenTab(tab);
   const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
@@ -216,35 +245,35 @@ export function ConnectionsSection({
                 label: (
                   <span className="inline-flex items-center gap-2">
                     {t(`connections.tabs.${value}`)}
-                    <span className="tabular-nums text-muted-foreground">
-                      {shown[value].length}
-                    </span>
+                    <span className="tabular-nums text-muted-foreground">{count(value)}</span>
                   </span>
                 ),
               }))}
             />
             {/* A search that matches only App keys shows that row, not a
                 no-match message above it. */}
-            {shown[tab].length === 0 && !(needle && showAppKeys) ? (
+            {count(tab) === 0 && !(needle && showAppKeys) ? (
               <div className="flex flex-col items-center gap-3 rounded-8 border border-dashed border-border px-4 py-6 text-center text-ui text-muted-foreground">
                 <p>
                   {needle
                     ? t(`connections.search.noMatch.${tab}`, { query: query.trim() })
                     : t(`connections.tabs.empty.${tab}`)}
                 </p>
-                {shown[otherTab].length > 0 ? (
+                {count(otherTab) > 0 ? (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => setChosenTab(otherTab)}
                   >
-                    {t(`connections.tabs.show.${otherTab}`, { count: shown[otherTab].length })}
+                    {t(`connections.tabs.show.${otherTab}`, { count: count(otherTab) })}
                   </Button>
                 ) : null}
               </div>
             ) : null}
-            {groupConnectionCards(shown[tab], needsAttention).map(({ group, cards: rows }) => (
+            {groupConnectionCards(shown[tab], needsAttention, {
+              accounts: tab === "connected" && shownServices.connected.length > 0,
+            }).map(({ group, cards: rows }) => (
               <section
                 key={group}
                 className="flex flex-col gap-2"
@@ -287,9 +316,60 @@ export function ConnectionsSection({
                       )}
                     </Button>
                   ))}
+                  {tab === "connected" && group === "accounts"
+                    ? shownServices.connected.map((row) => (
+                        <ComposioServiceRowButton
+                          key={`composio:${row.slug}`}
+                          row={row}
+                          connected
+                          disabled={false}
+                          busy={false}
+                          onClick={() => setOpenService(row.slug)}
+                        />
+                      ))
+                    : null}
                 </ListCollection>
               </section>
             ))}
+            {/* Signed out, the group always shows, since its banner is where
+                the guardian signs in to Composio. */}
+            {tab === "available" &&
+            composioInstalled &&
+            (!composioSignedIn || shownServices.available.length > 0 || composioServices.error) ? (
+              <section className="flex flex-col gap-2" aria-labelledby="composio-heading">
+                <h3 id="composio-heading" className="text-aux text-muted-foreground">
+                  {t("connections.composioServices.group")}
+                </h3>
+                {composioServices.error ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3 text-ui text-muted-foreground">
+                    <span>{t("connections.composioServices.loadFailed")}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={composioServices.retry}
+                    >
+                      {t("page.retry")}
+                    </Button>
+                  </div>
+                ) : null}
+                {!composioSignedIn ? (
+                  <ComposioSignInBanner onSignIn={() => select("composio")} />
+                ) : null}
+                <ListCollection className="flex flex-col gap-2">
+                  {shownServices.available.map((row) => (
+                    <ComposioServiceRowButton
+                      key={`composio:${row.slug}`}
+                      row={row}
+                      connected={false}
+                      disabled={!composioSignedIn}
+                      busy={busySlug === row.slug}
+                      onClick={() => void connectComposio(row)}
+                    />
+                  ))}
+                </ListCollection>
+              </section>
+            ) : null}
             {showAppKeys ? (
               <section className="flex flex-col gap-2" aria-labelledby="other-heading">
                 <h3 id="other-heading" className="text-aux text-muted-foreground">
@@ -308,6 +388,13 @@ export function ConnectionsSection({
           </ListCollection>
         ) : null}
 
+        <ComposioServiceDialog
+          row={composioServices.rows.connected.find((row) => row.slug === openService) ?? null}
+          busy={busySlug !== null}
+          onReconnect={(row) => void connectComposio(row)}
+          onClose={() => setOpenService(null)}
+          onFlash={onFlash}
+        />
         <ConnectionDetailDialog
           card={selected}
           composio={composio}

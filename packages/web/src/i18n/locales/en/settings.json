@@ -79,6 +79,28 @@
       "accounts": "Accounts and tools",
       "other": "Other"
     },
+    "composioServices": {
+      "group": "Via Composio",
+      "via": "via Composio",
+      "viaLong": "Rome reaches this service through your Composio account.",
+      "signInBanner": "Sign in to Composio to connect these services.",
+      "signIn": "Sign in",
+      "authorize": "Authorize {{name}} in the new tab, then come back.",
+      "alreadyConnected": "{{name}} is already connected.",
+      "connectFailed": "Couldn't start the connection. Try again.",
+      "reconnect": "Reconnect",
+      "disconnectConfirm": "Disconnect {{name}}? Rome can't reach it until you connect it again.",
+      "disconnected": "{{name}} disconnected.",
+      "loadFailed": "Couldn't load the Composio services.",
+      "webhook": {
+        "title": "Event delivery",
+        "ready": "Ready",
+        "notReady": "Needs setup",
+        "unavailable": "Unavailable on this instance",
+        "setUp": "Set up again",
+        "done": "Event delivery is set up."
+      }
+    },
     "loadFailedFallback": "Failed to load connections.",
     "accounts": {
       "add": "Add another account",

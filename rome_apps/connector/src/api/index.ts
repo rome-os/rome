@@ -41,6 +41,7 @@ import {
   ROME_USER_ID,
   subscribeTriggerFeed,
 } from "../shared.js";
+import { CATALOG } from "../catalog.js";
 
 const APP_ID = "connector";
 const EVENTS_DEFAULT_LIMIT = 100;
@@ -135,6 +136,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
       if (method === "GET" && (path === "" || path === "status")) {
         return await this.handleStatus();
       }
+      if (method === "GET" && path === "catalog") return this.handleCatalog();
       if (method === "POST" && path === "login/start") return await this.handleLoginStart();
       if (method === "POST" && path === "login/complete") {
         return await this.handleLoginComplete(request);
@@ -195,6 +197,16 @@ class ComposioApiHandler implements RomeAppApiHandler {
   // so it must never make a Composio round trip. Key health is asserted where
   // the key is exercised (finalizeLogin pings; connect/list surface auth
   // failures per request).
+  /** The services the guardian can connect through Composio, for Settings ›
+   *  Connections. Rome-managed toolkits are left out: Settings lists them as
+   *  Rome's own connections, and the connect route refuses them. */
+  private handleCatalog(): Response {
+    const items = CATALOG.filter((entry) => !entry.romeManaged).map(
+      ({ slug, name, scope, glyph }) => ({ slug, name, scope, glyph }),
+    );
+    return Response.json({ items });
+  }
+
   private async handleStatus(): Promise<Response> {
     const [apiKey, webhookSecret, webhookEndpointId, relayDepositUrl] = await Promise.all([
       readSessionApiKey(),

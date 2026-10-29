@@ -178,6 +178,26 @@ describe("connector authentication recovery", () => {
   });
 });
 
+describe("connector API catalog", () => {
+  it("lists the Composio services without the ones Rome connects itself", async () => {
+    const response = await createApiHandler(context()).handle(request("catalog"));
+    const { items } = (await response.json()) as {
+      items: { slug: string; name: string; scope: string; glyph: string }[];
+    };
+
+    expect(items.find((item) => item.slug === "gmail")).toEqual({
+      slug: "gmail",
+      name: "Gmail",
+      scope: "Reads and sends your email.",
+      glyph: "gmail",
+    });
+    expect(items.map((item) => item.slug)).not.toContain("github");
+    expect(items.map((item) => item.slug)).not.toContain("slack");
+    expect(items.map((item) => item.slug)).not.toContain("shopify");
+    expect(items).toHaveLength(19);
+  });
+});
+
 describe("connector API webhook self-healing", () => {
   beforeEach(() => {
     rs.resetAllMocks();

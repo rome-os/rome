@@ -425,11 +425,13 @@ describe("ConnectionsSection — Composio row", () => {
     expect(screen.queryByText("Composio")).toBeNull();
   });
 
-  it("lists a signed-out Composio row under Available", () => {
+  it("offers a Composio sign-in under Available while signed out", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
-    // Installed-but-signed-out is something to add, offered with a Connect cue.
-    const row = screen.getByRole("button", { name: "Open Composio" });
-    expect(within(row).getByText("Connect")).toBeTruthy();
+    // The Via Composio group's banner stands in for the signed-out account row,
+    // even before any Composio service is listed.
+    expect(screen.queryByRole("button", { name: "Open Composio" })).toBeNull();
+    const group = screen.getByRole("region", { name: "Via Composio" });
+    expect(within(group).getByRole("button", { name: "Sign in" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Available/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
@@ -445,9 +447,9 @@ describe("ConnectionsSection — Composio row", () => {
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
   });
 
-  it("clicking a signed-out Composio row opens the connect ceremony", () => {
+  it("the Composio sign-in opens the connect ceremony", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
   });
 });
@@ -564,5 +566,109 @@ describe("ConnectionsSection — several accounts", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("ConnectionsSection — Composio services", () => {
+  const catalog = [
+    { slug: "gmail", name: "Gmail", scope: "Reads and sends your email.", glyph: "gmail" },
+    { slug: "notion", name: "Notion", scope: "Reads and writes your pages.", glyph: "notion" },
+    { slug: "linear", name: "Linear", scope: "Tracks issues and projects.", glyph: "linear" },
+  ];
+  const accounts = [
+    { id: "a", toolkitSlug: "gmail", status: "ACTIVE" },
+    { id: "b", toolkitSlug: "notion", status: "EXPIRED" },
+  ];
+  let calls: { url: string; method: string }[] = [];
+
+  beforeEach(() => {
+    calls = [];
+    rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method });
+      if (url === "/api/apps/connector/catalog") return Response.json({ items: catalog });
+      if (url === "/api/apps/connector/connectors" && method === "GET")
+        return Response.json({ items: accounts });
+      if (url === "/api/apps/connector/connectors" && method === "POST")
+        return Response.json({ authorizationUrl: "https://composio.example/auth/linear" });
+      if (url.startsWith("/api/apps/connector/connectors/") && method === "DELETE")
+        return Response.json({ ok: true, deleted: 1 });
+      return new Response(url === "/api/approvals" ? "[]" : "{}", { status: 200 });
+    });
+  });
+
+  const signedIn = () => composioStatus({ installed: true, loggedIn: true });
+  const signedOut = () => composioStatus({ installed: true, loggedIn: false });
+
+  it("lists connected services under Accounts, marked via Composio, broken first", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    const accountsGroup = screen.getByRole("region", { name: "Accounts and tools" });
+    await within(accountsGroup).findByRole("button", { name: "Open Gmail" });
+    const names = within(accountsGroup)
+      .getAllByRole("button")
+      .map((row) => row.getAttribute("aria-label"));
+    expect(names).toEqual(["Open GitHub", "Open Composio", "Open Notion", "Open Gmail"]);
+    const notion = within(accountsGroup).getByRole("button", { name: "Open Notion" });
+    expect(within(notion).getByText("via Composio")).toBeTruthy();
+    expect(within(notion).getByText("Broken")).toBeTruthy();
+  });
+
+  it("offers the rest under Via Composio, and starts a connect in a new tab", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    const group = await screen.findByRole("region", { name: "Via Composio" });
+    expect(within(group).queryByText("Sign in to Composio to connect these services.")).toBeNull();
+    fireEvent.click(await within(group).findByRole("button", { name: "Connect Linear" }));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        "https://composio.example/auth/linear",
+        "_blank",
+        "noopener,noreferrer",
+      ),
+    );
+    expect(calls).toContainEqual({ url: "/api/apps/connector/connectors", method: "POST" });
+  });
+
+  it("asks for a Composio sign-in first, and lists no connected services while signed out", async () => {
+    renderSection([oauth("github", "authorized")], signedOut());
+    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    const group = await screen.findByRole("region", { name: "Via Composio" });
+    expect(within(group).getByText("Sign in to Composio to connect these services.")).toBeTruthy();
+    const gmail = await within(group).findByRole("button", { name: "Connect Gmail" });
+    expect(gmail.hasAttribute("disabled")).toBe(true);
+    // The banner stands in for the signed-out Composio account row.
+    expect(screen.queryByRole("button", { name: "Open Composio" })).toBeNull();
+    expect(calls.some((call) => call.url === "/api/apps/connector/connectors")).toBe(false);
+    fireEvent.click(within(group).getByRole("button", { name: "Sign in" }));
+    expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
+  });
+
+  it("disconnects a connected service only after confirming", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Reads and sends your email.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: "/api/apps/connector/connectors/gmail",
+        method: "DELETE",
+      }),
+    );
+  });
+
+  it("finds a Composio service by what it does on Available", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    await screen.findByRole("button", { name: "Connect Linear" });
+    fireEvent.change(screen.getByLabelText("Search connections"), {
+      target: { value: "issues" },
+    });
+    expect(screen.getByRole("button", { name: "Connect Linear" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Google" })).toBeNull();
   });
 });
