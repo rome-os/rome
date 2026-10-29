@@ -91,17 +91,6 @@ describe("People send API", () => {
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: TG, message: { text: "on my way" } },
     ]);
-    const [, messageId] = sent.ref!.split(":");
-    expect(
-      testDb.db
-        .select({
-          delivery: romeAgentMessages.delivery,
-          platformMessageId: romeAgentMessages.platformMessageId,
-        })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, channelChatId("telegram", TG)))
-        .all(),
-    ).toEqual([{ delivery: "sent", platformMessageId: messageId }]);
   });
 
   it("refuses an account the person does not hold", async () => {
@@ -139,9 +128,9 @@ describe("People send API", () => {
     expect((await send({ channel: "telegram", channelUserId: TG, text: "  " })).status).toBe(400);
   });
 
-  // A message the channel did not take is kept as failed, and reads as never
-  // said: the guardian still holds the text, and sending it again is a new send.
-  it("answers a refused send with the channel's words, and shows nothing", async () => {
+  // Nothing is kept for a message the channel did not take: the guardian still
+  // holds the text, and sending it again is a new send.
+  it("answers a refused send with the channel's words, and records nothing", async () => {
     rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(
       new Error("provider rejected"),
     );
@@ -151,12 +140,6 @@ describe("People send API", () => {
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: "provider rejected" });
     expect((await timeline()).entries.map((entry) => entry.body)).not.toContain("will fail");
-    expect(
-      testDb.db
-        .select({ delivery: romeAgentMessages.delivery, error: romeAgentMessages.deliveryError })
-        .from(romeAgentMessages)
-        .all(),
-    ).toContainEqual({ delivery: "failed", error: "provider rejected" });
   });
 
   it("says on the person read whether each account can be written to", async () => {
@@ -216,7 +199,7 @@ describe("People send API — after the channel answers", () => {
     // The provider accepted the message: it is out on a network Rome does not
     // own. A local write failing afterwards cannot take it back, and reporting
     // the send as failed invites a retry that delivers a second real message.
-    deps.webchatRepo.setDelivery = async () => {
+    deps.webchatRepo.recordOutboundConversationMessage = async () => {
       throw new Error("disk is full");
     };
 
