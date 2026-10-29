@@ -1064,6 +1064,14 @@ export class WebChatRepository {
     if (found && input.threadName) {
       await this.backfillChannelConversationName(found, input, input.threadName);
     }
+    // A send can open a chat before a message arrives in it, and it does not
+    // know the chat's kind. The first message that does says it.
+    if (found && input.threadType && found.sourceThreadType !== input.threadType) {
+      await this.db
+        .update(romeSessions)
+        .set({ sourceThreadType: input.threadType })
+        .where(eq(romeSessions.id, found.id));
+    }
     const existing = found && { id: found.id, agentName: found.agentName };
     if (existing) {
       if (!parent) return existing;
@@ -1504,12 +1512,13 @@ export class WebChatRepository {
    * The order is created_at, then the order the rows were written in, since
    * created_at keeps whole seconds. `before` names a message by its time and
    * id. A message two of the rows hold, such as a group's message that reached
-   * two of Rome's accounts, is answered once, as the copy written first, so a
-   * copy that arrives later never moves it. With `ownChannel`, only that
-   * channel's record is read. With `ids`, only those messages are. Without
-   * `ownChannel`, only a group is read across
-   * channels. Trace rows belong to no chat and are left
-   * out.
+   * two of Rome's accounts, is answered once. Its id, time and place in the
+   * order are its first copy's, so a copy that arrives later never moves it.
+   * What it says and who said it come from the multipart reply that holds it,
+   * else from Rome's own record of it, else from that first copy. With
+   * `ownChannel`, only that channel's record is read. With `ids`, only those
+   * messages are. Without `ownChannel`, only a group is read across channels.
+   * Trace rows belong to no chat and are left out.
    */
   async saidMessagesAt(input: {
     channels: readonly string[];
@@ -1539,75 +1548,102 @@ export class WebChatRepository {
           isGroup,
           sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`,
         );
-    const chats = this.db.select({ id: romeSessions.id }).from(romeSessions).where(and(at, which));
-    // The rows that are a reply shown as several messages.
-    const wholes = sql`(select "held"."message_id" from ${romeAgentMessagePlatformIds} as "held" where "held"."session_id" in ${chats})`;
-    const ownOutbound = agentMessageOutbound(
-      sql`${romeAgentMessages}."role"`,
-      sql`${romeAgentMessages}."sender_id"`,
+    const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);
+    const roles = sql.join(
+      ["user", "assistant", "notification"].map((role) => sql`${role}`),
+      sql`, `,
     );
-    const copyOutbound = agentMessageOutbound(sql`"copy"."role"`, sql`"copy"."sender_id"`);
     const { before } = input;
-    return await this.db
-      .select({
-        id: romeAgentMessages.id,
-        channel: sql<string>`${romeSessions.sourceChannel}`,
-        turnId: romeAgentMessages.turnId,
-        role: romeAgentMessages.role,
-        content: romeAgentMessages.content,
-        platformMessageId: romeAgentMessages.platformMessageId,
-        senderId: romeAgentMessages.senderId,
-        senderName: romeAgentMessages.senderName,
-        replyToPlatformMessageId: romeAgentMessages.replyToPlatformMessageId,
-        createdAt: romeAgentMessages.createdAt,
-      })
-      .from(romeAgentMessages)
-      .innerJoin(romeSessions, eq(romeSessions.id, romeAgentMessages.sessionId))
-      .where(
-        and(
-          inArray(romeAgentMessages.sessionId, chats),
-          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          input.ids && inArray(romeAgentMessages.id, [...input.ids]),
-          before &&
-            or(
-              lt(romeAgentMessages.createdAt, before.at),
-              and(
-                eq(romeAgentMessages.createdAt, before.at),
-                sql`${romeAgentMessages}.rowid < (select rowid from ${romeAgentMessages} as "cursor" where "cursor"."id" = ${before.id})`,
-              ),
-            ),
-          // A reply shown as several messages is one row that keeps its other
-          // parts' ids beside it, and it stands for every part another account
-          // heard, whichever came first. Any other message is read once: Rome's
-          // own record of a line it sent over another account's echo of it,
-          // else the first copy. Each check is an index lookup by platform id,
-          // and the set of wholes is built once per read.
-          or(
-            isNull(romeAgentMessages.platformMessageId),
-            sql`${romeAgentMessages}."id" in ${wholes}`,
-            and(
-              sql`not exists (
-                select 1 from ${romeAgentMessagePlatformIds} as "part"
-                where "part"."session_id" in ${chats}
-                  and "part"."platform_message_id" = ${romeAgentMessages.platformMessageId}
-              )`,
-              sql`not exists (
-                select 1 from ${romeAgentMessages} as "copy"
-                where "copy"."session_id" in ${chats}
-                  and "copy"."platform_message_id" = ${romeAgentMessages.platformMessageId}
-                  and "copy"."id" != ${romeAgentMessages.id}
-                  and (
-                    "copy"."id" in ${wholes}
-                    or ${copyOutbound} > ${ownOutbound}
-                    or (${copyOutbound} = ${ownOutbound} and "copy".rowid < ${romeAgentMessages}.rowid)
-                  )
-              )`,
-            ),
-          ),
+    const rows = await this.db.all<{
+      id: string;
+      channel: string;
+      turnId: string | null;
+      role: string;
+      content: string;
+      platformMessageId: string | null;
+      senderId: string | null;
+      senderName: string | null;
+      replyToPlatformMessageId: string | null;
+      createdAt: number;
+    }>(sql`
+      with
+        "chats" as materialized (select "id" from ${romeSessions} where ${and(at, which)}),
+        "held" as materialized (
+          select "message_id", "platform_message_id" as "pid"
+          from ${romeAgentMessagePlatformIds}
+          where "session_id" in (select "id" from "chats")
         ),
-      )
-      .orderBy(desc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid desc`)
-      .limit(input.limit);
+        "said" as materialized (
+          select "m".rowid as "rid", "m"."id", "m"."platform_message_id" as "pid",
+            "m"."role", "m"."sender_id"
+          from ${romeAgentMessages} as "m"
+          where "m"."session_id" in (select "id" from "chats") and "m"."role" in (${roles})
+        ),
+        -- The reply shown as several messages that holds a row's platform id:
+        -- the row itself, or the row that keeps it as another part.
+        "holder" as materialized (
+          select "r"."rid", "w"."rid" as "wrid"
+          from "said" as "r"
+          join "said" as "w" on "w"."pid" = "r"."pid"
+          where "w"."id" in (select "message_id" from "held")
+          union all
+          select "r"."rid", "w"."rid"
+          from "said" as "r"
+          join "held" as "h" on "h"."pid" = "r"."pid"
+          join "said" as "w" on "w"."id" = "h"."message_id"
+        ),
+        -- Each row's message: the reply that holds it, else its platform id.
+        "copies" as (
+          select "r"."rid", ${outbound} as "outbound",
+            case
+              when min("x"."wrid") is not null then 'w' || min("x"."wrid")
+              when "r"."pid" is not null then 'p' || "r"."pid"
+              else 'r' || "r"."rid"
+            end as "message",
+            min("x"."wrid") as "wrid"
+          from "said" as "r"
+          left join "holder" as "x" on "x"."rid" = "r"."rid"
+          group by "r"."rid"
+        ),
+        -- A message stands where its first copy was written, so a copy that
+        -- arrives later never moves it across a page. It reads as the reply
+        -- that holds it, else as Rome's own record of it, else as that copy.
+        "messages" as (
+          select min("rid") as "at_rid",
+            coalesce(min("wrid"), min(case when "outbound" = 1 then "rid" end), min("rid")) as "as_rid"
+          from "copies"
+          group by "message"
+        )
+      select "first"."id" as "id", "s"."source_channel" as "channel",
+        "shown"."turn_id" as "turnId", "shown"."role" as "role", "shown"."content" as "content",
+        "shown"."platform_message_id" as "platformMessageId", "shown"."sender_id" as "senderId",
+        "shown"."sender_name" as "senderName",
+        "shown"."reply_to_platform_message_id" as "replyToPlatformMessageId",
+        "first"."created_at" as "createdAt"
+      from "messages" as "k"
+      join ${romeAgentMessages} as "first" on "first".rowid = "k"."at_rid"
+      join ${romeAgentMessages} as "shown" on "shown".rowid = "k"."as_rid"
+      join ${romeSessions} as "s" on "s"."id" = "shown"."session_id"
+      where 1 = 1
+        ${
+          input.ids
+            ? sql`and "first"."id" in (${sql.join(
+                input.ids.map((id) => sql`${id}`),
+                sql`, `,
+              )})`
+            : sql``
+        }
+        ${
+          before
+            ? sql`and ("first"."created_at" < ${Math.floor(before.at.getTime() / 1000)}
+                or ("first"."created_at" = ${Math.floor(before.at.getTime() / 1000)}
+                  and "first".rowid < (select rowid from ${romeAgentMessages} where "id" = ${before.id})))`
+            : sql``
+        }
+      order by "first"."created_at" desc, "first".rowid desc
+      limit ${input.limit}
+    `);
+    return rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt * 1000) }));
   }
 
   /** The id of a channel's chat row for the platform's chat id, or null when
@@ -1625,6 +1661,7 @@ export class WebChatRepository {
     agentName: string | null;
     name: string;
     sourceThreadName: string | null;
+    sourceThreadType: string | null;
   } | null> {
     const rows = await this.db
       .select({
@@ -1632,6 +1669,7 @@ export class WebChatRepository {
         agentName: romeSessions.agentName,
         name: romeSessions.name,
         sourceThreadName: romeSessions.sourceThreadName,
+        sourceThreadType: romeSessions.sourceThreadType,
       })
       .from(romeSessions)
       .where(

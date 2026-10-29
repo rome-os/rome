@@ -187,11 +187,12 @@ describe("StoredMessages reads", () => {
     await said(sales.id, "p-2", minute(1), "p-2");
     expect(await read()).toEqual(["p-1 p-2"]);
 
-    // Sales hears the parts first: the reply still stands for them.
+    // Sales hears the parts first: the reply still stands for them, where
+    // the first part was heard.
     await said(sales.id, "q-1", minute(2), "q-1");
     await said(sales.id, "q-2", minute(2), "q-2");
     await reply("q-1", "q-2");
-    expect(await read()).toEqual(["p-1 p-2", "q-1 q-2"]);
+    expect(await read()).toEqual(["q-1 q-2", "p-1 p-2"]);
   });
 
   it("reads the whole reply when another account heard a part before it was recorded", async () => {
@@ -344,6 +345,65 @@ describe("StoredMessages reads", () => {
 
     const { messages: read } = await messages.recent(group, 10);
     expect(read).toMatchObject([{ direction: "fromRome", body: { text: "on it" } }]);
+  });
+
+  it("reads a group Rome wrote to first as one chat once a message says it is a group", async () => {
+    // A send opens the chat on each account without knowing its kind.
+    for (const channel of ["telegram", "telegram-sales"]) {
+      await rows.ensureChannelChat({ channel, threadId: "group-1", agentName: "main" });
+    }
+    for (const [channel, n] of [
+      ["telegram", 1],
+      ["telegram-sales", 2],
+    ] as const) {
+      const chat = await rows.ensureChannelChat({
+        channel,
+        threadId: "group-1",
+        threadType: "group",
+        agentName: "main",
+      });
+      await said(chat.id, `line ${n}`, minute(n), `m-${n}`);
+    }
+
+    const { messages: read } = await messages.recent(group, 10);
+    expect(read.map((message) => message.body.text)).toEqual(["line 1", "line 2"]);
+  });
+
+  it("keeps a message where its echo was written when Rome's record of it arrives between pages", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    await rows.addConversationMessage({
+      sessionId: sales.id,
+      role: "notification",
+      content: textContent("on it"),
+      platformMessageId: "e-1",
+      senderId: "rome-bot",
+      senderName: "Rome",
+      createdAt: minute(1),
+    });
+    await said(sales.id, "later", minute(2), "m-2");
+    const newest = await messages.recent(group, 1);
+    await rows.recordOutboundConversationMessage({
+      sessionId: support.id,
+      content: textContent("on it"),
+      platformMessageId: "e-1",
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+
+    const older = await messages.before(group, newest.older!, 10);
+    expect(older.messages).toMatchObject([{ direction: "fromRome", body: { text: "on it" } }]);
   });
 
   it("reads a group as one account heard it when the read names that account", async () => {
