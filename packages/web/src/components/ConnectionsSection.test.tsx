@@ -333,6 +333,33 @@ describe("ConnectionsSection — tabs, search and groups", () => {
     expect(rowNames()).toEqual([]);
   });
 
+  it("stays on Available after the first service connects from it", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(sectionWith(minimalConnections(), onRefresh));
+    expect(tabRadio(/Available/).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Open WhatsApp" }));
+    rerender(
+      sectionWith(
+        [
+          telegramBot("unauthorized"),
+          connection({ connectionKind: "whatsapp", grants: { session: "authorized" } }),
+        ],
+        onRefresh,
+      ),
+    );
+    // The open dialog hides the page from the accessibility tree.
+    expect(
+      screen.getByRole("radio", { name: /Available/, hidden: true }).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("shows App keys without a no-match message when only App keys matches", () => {
+    renderSection(mixed());
+    fireEvent.change(screen.getByLabelText("Search connections"), { target: { value: "app" } });
+    expect(screen.getByRole("link", { name: "Open App keys" })).toBeTruthy();
+    expect(screen.queryByText("No connected service matches “app”.")).toBeNull();
+  });
+
   it("clears the search on Escape", () => {
     renderSection(mixed());
     const input = screen.getByLabelText("Search connections") as HTMLInputElement;
