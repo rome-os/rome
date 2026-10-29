@@ -15,7 +15,7 @@ import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 
 function directoryDescriptor(
-  service: "discord" | "feishu" | "wechat",
+  service: "discord" | "feishu" | "wechat" | "agents",
   conversations: (connectionId: string) => ChatDescriptor[],
 ): ConnectionDescriptor {
   return {
@@ -410,6 +410,39 @@ describe("ChatSettingsService", () => {
     expect(changed).toHaveBeenCalledTimes(2);
   });
 
+  it("lets a Rome Cloud direct message change its session reset", async () => {
+    testDb = createTestDb();
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
+    registry.register(directoryDescriptor("agents", () => []));
+    const agents = await connectLive(registry, "agents");
+    const service = new ChatSettingsService({
+      repository: new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db)),
+      connections: registry,
+      channelOf: kindChannelOf,
+      channels: () => [],
+      listAgents: () => [],
+      onChanged: () => {},
+    });
+    await new WebChatRepository(testDb.db).ensureChannelChat({
+      channel: "agents",
+      threadId: "dm-1",
+      threadType: "private",
+      agentName: "main",
+    });
+    const ref: ChatRef = { connectionId: agents.id, chatId: "dm-1" as ChatId };
+
+    const updated = await service.update({
+      ref,
+      set: { session: { reset: { mode: "daily", atHour: 4 } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(updated.overrides).toEqual({ session: { reset: { mode: "daily", atHour: 4 } } });
+  });
+
   it("validates actors, supported fields, agents, list source, and offline edits", async () => {
     const { registry, service, discord, feishu, wechat, parent } = await setup();
 
@@ -636,7 +669,7 @@ describe("ChatSettingsService", () => {
   /** A service over one group two of Rome's accounts on Feishu are in. A
    *  second account of one kind is stood in for by another kind, whose channel
    *  the fake records put on Feishu. */
-  async function twoAccountsInOneGroup() {
+  async function twoAccountsInOneGroup(agents: string[] = []) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(testDb.db),
@@ -662,7 +695,7 @@ describe("ChatSettingsService", () => {
       connections: registry,
       channelOf,
       channels: () => [],
-      listAgents: () => [],
+      listAgents: () => agents,
       onChanged: () => {},
     });
     const throughSales = { connectionId: sales.id, chatId: "oc_group" as ChatId };
@@ -737,6 +770,34 @@ describe("ChatSettingsService", () => {
         activation: { mode: "all" },
       });
     }
+  });
+
+  it("keeps each of Rome's accounts' agent choice in a group its own", async () => {
+    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([
+      "pm-assistant",
+    ]);
+    const key = chatKey("feishu", "oc_group" as ChatId);
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
+    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_support" }, null);
+
+    await service.update({
+      ref: throughSales,
+      set: { routing: { agentName: "main" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect((await service.get(throughSupport)).overrides.routing).toBeUndefined();
+    await service.update({
+      ref: throughSupport,
+      set: { routing: { agentName: "pm-assistant" } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect((await service.get(throughSales)).overrides.routing).toEqual({ agentName: null });
+    expect((await service.get(throughSupport)).overrides.routing).toEqual({
+      agentName: "pm-assistant",
+    });
   });
 
   it("leaves a row stored with no type apart when its edit is refused", async () => {

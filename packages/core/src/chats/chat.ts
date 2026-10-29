@@ -144,11 +144,15 @@ export class Chat {
   /**
    * Set when the agent of `romeAccount` is woken, or clear the rule with null
    * so the defaults apply. Refuses an account that is not one of Rome's in the
-   * chat, and any change on a platform whose rule is fixed.
+   * chat, and a rule that sets when to wake on a platform where that is fixed.
+   * What travels with the rule, such as the session reset, may still change.
    */
   setReplyRule(romeAccount: Account, rule: ReplyRule | null): void {
     this.assertLive();
-    if (FIXED_RULE_PLATFORMS.has(this.key.platform)) {
+    if (
+      FIXED_RULE_PLATFORMS.has(this.key.platform) &&
+      (rule?.overrides.enabled !== undefined || rule?.overrides.activation !== undefined)
+    ) {
       throw new ChatRefusal(`A chat on ${this.key.platform} replies to every message`);
     }
     if (!this.isRomes(romeAccount)) {

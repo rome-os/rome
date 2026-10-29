@@ -108,6 +108,16 @@ describe("Chat", () => {
     const chat = Chat.start(chatKey(platform, "chat-1" as ChatId), "dm", via, null);
 
     expect(() => chat.setReplyRule(via, RULE)).toThrow(ChatRefusal);
+    expect(() => chat.setReplyRule(via, { ...RULE, overrides: { enabled: false } })).toThrow(
+      ChatRefusal,
+    );
+
+    const reset = {
+      ...RULE,
+      overrides: { session: { reset: { mode: "idle" as const, idleMinutes: 30 } } },
+    };
+    chat.setReplyRule(via, reset);
+    expect(chat.replyRule).toEqual(reset);
   });
 
   it("refuses to restore a live chat with none of Rome's accounts in it", () => {

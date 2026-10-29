@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, like } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import type { ChatRepository } from "../chats/chat-repository.js";
+import { withoutRouting, withRoutingOf, type ChatRepository } from "../chats/chat-repository.js";
 import { chatKey } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
@@ -53,10 +53,14 @@ export class ChatSettingsRepository {
   /** The reply rule of the chat at `chatId` as the account `channel` speaks
    *  as sees it: the group's, whichever of Rome's accounts set it, or the
    *  account's own direct message's. A row stored with no type reads as the
-   *  `kind` it is known by, as `mutate` will store it. Null when none is set. */
+   *  `kind` it is known by, as `mutate` will store it. The routing marker is
+   *  the account's own row's. Null when none is set. */
   ruleOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): StoredChatSettings | null {
     const via = this.chats.accountOn(channel);
-    return this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null;
+    return withRoutingOf(
+      rowByAddress(this.db, channel, chatId)?.channelSettings ?? null,
+      this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null,
+    );
   }
 
   /**
@@ -137,13 +141,15 @@ export class ChatSettingsRepository {
         key,
         (chat) => {
           chat.rename(descriptor.displayName);
-          chat.setReplyRule(via, input.settings);
+          chat.setReplyRule(via, input.settings && withoutRouting(input.settings));
         },
         via,
       );
       tx.update(romeSessions)
         .set({
           sourceThreadType,
+          // The routing marker is this account's alone, so only its row holds it.
+          channelSettings: input.settings,
           ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
         })
         .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))

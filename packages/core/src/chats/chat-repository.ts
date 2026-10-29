@@ -160,7 +160,7 @@ export class ChatRepository {
       tx.update(romeSessions)
         .set({
           ...(chat.name === null ? {} : { name: chat.name, sourceThreadName: chat.name }),
-          channelSettings: chat.replyRule,
+          channelSettings: withRoutingOf(row.channelSettings, chat.replyRule),
         })
         .where(eq(romeSessions.id, row.id))
         .run();
@@ -226,6 +226,7 @@ export class ChatRepository {
       .map((row) => row.channelSettings)
       .filter((settings): settings is ReplyRule => settings !== null)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    // The newest row's routing marker is that row's, never the chat's.
     return Chat.restore({
       key,
       kind: rows.some((row) => row.sourceThreadType === "private") ? "dm" : "group",
@@ -234,7 +235,7 @@ export class ChatRepository {
         account: this.accountOn(row.sourceChannel!),
         romes: true,
       })),
-      replyRule: rule ?? null,
+      replyRule: rule === undefined ? null : withoutRouting(rule),
       ended: false,
     });
   }
@@ -300,4 +301,24 @@ export class ChatRepository {
       ) ?? null
     );
   }
+}
+
+/**
+ * `rule` without its routing marker. A row's routing (`overrides.routing`)
+ * pins the agent of the one of Rome's accounts the row is stored under, as the
+ * row's `agent_name` does, so it is no part of the chat's rule.
+ */
+export function withoutRouting(rule: ReplyRule): ReplyRule {
+  if (rule.overrides.routing === undefined) return rule;
+  const { routing: _routing, ...overrides } = rule.overrides;
+  return { ...rule, overrides };
+}
+
+/** `rule` with the routing marker of `stored`, the settings one row already
+ *  holds, since that marker is its account's alone. */
+export function withRoutingOf(stored: ReplyRule | null, rule: ReplyRule | null): ReplyRule | null {
+  const routing = stored?.overrides.routing;
+  if (routing === undefined) return rule;
+  const base = rule ?? { ...stored!, overrides: {} };
+  return { ...base, overrides: { ...base.overrides, routing } };
 }
