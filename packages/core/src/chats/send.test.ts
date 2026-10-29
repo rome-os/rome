@@ -49,6 +49,22 @@ describe("send", () => {
     ]);
   });
 
+  it("sends a turn's answer with its turn, and records it as the turn's", async () => {
+    const result = await send(
+      deps,
+      placeIn(chatKey("telegram", GROUP), TOPIC),
+      { text: "done" },
+      undefined,
+      { turnId: "turn-7" },
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([
+      { chatId: TOPIC, message: { text: "done", turnId: "turn-7" } },
+    ]);
+    expect(rows()).toMatchObject([{ role: "assistant", turnId: "turn-7", senderId: "rome" }]);
+  });
+
   it("answers a refused message as failed, in the platform's words, and records nothing", async () => {
     rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(
       new Error("chat not found"),

@@ -277,6 +277,7 @@ import { FavorDispatchRunner } from "./favors/dispatcher.js";
 import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
 import { StoredMessages } from "./chats/message-repository.js";
+import { send } from "./chats/send.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -1116,8 +1117,22 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
-    messages: chatMessages,
     places: chatRepo,
+    sendInto: (place, body, as, answer) =>
+      send(
+        {
+          channels,
+          platformOfChannel,
+          sendersOn: (platform) => channelRecords.sendersOn(platform),
+          accountOf: (channel) => channelRecords.accountOf(channel),
+          webchatRepo,
+          chatMessages,
+        },
+        place,
+        body,
+        as,
+        answer,
+      ),
     isTextPrivate: (agentName) =>
       agentLoader.has(agentName) &&
       resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",

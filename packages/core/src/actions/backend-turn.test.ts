@@ -3,6 +3,7 @@ import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import { chatKey, placeIn } from "../chats/place.js";
 import { createMockAgentRunner } from "../test/helpers.js";
+import { send as sendIntoPlace } from "../chats/send.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 describe("backend turn delivery", () => {
@@ -41,11 +42,22 @@ describe("backend turn delivery", () => {
       agentRunner,
       channel: (name) => (name === "wechat" ? wechat : null),
       chats,
-      messages: { recordSent },
       places: {
         placeOfRecord: (id) =>
           id === "channel:wechat:wechat-thread-1" ? { place, channel: "wechat" } : null,
       },
+      sendInto: (into, body, as, answer) =>
+        sendIntoPlace(
+          {
+            channels: [wechat],
+            webchatRepo: { ensureChannelChat },
+            chatMessages: { recordSent },
+          },
+          into,
+          body,
+          as,
+          answer,
+        ),
     });
 
     await runner.runAndDeliver({
@@ -78,6 +90,61 @@ describe("backend turn delivery", () => {
       { channel: "wechat" },
     );
   });
+  it("fails the continuation and records nothing when the platform refuses the reply", async () => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "agent-session-1", userPrompt: "Wake" },
+        { type: "result", content: "The deferred check is complete." },
+      ],
+    ]);
+    const wechat: Channel = {
+      name: "wechat",
+      send: {
+        send: async () => {
+          throw new Error("blocked by the platform");
+        },
+        direct: null,
+        activity: null,
+      },
+      inbound: null,
+      accounts: null,
+      messages: null,
+      directory: null,
+    };
+    const ensureChannelChat = async () => ({
+      id: "channel:wechat:wechat-thread-1",
+      agentName: null,
+    });
+    const recordSent = rs.fn(async () => {});
+    const place = placeIn(chatKey("wechat", "wechat-thread-1" as ChatId));
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "wechat" ? wechat : null),
+      chats: { ensureChannelChat } as unknown as ChatRepository,
+      places: { placeOfRecord: () => ({ place, channel: "wechat" }) },
+      sendInto: (into, body, as, answer) =>
+        sendIntoPlace(
+          { channels: [wechat], webchatRepo: { ensureChannelChat }, chatMessages: { recordSent } },
+          into,
+          body,
+          as,
+          answer,
+        ),
+    });
+
+    await expect(
+      runner.runAndDeliver({
+        agentName: "main",
+        sessionId: "agent-session-1",
+        channel: "wechat",
+        threadId: "wechat-thread-1",
+        channelUserId: "wechat-user-1",
+        prompt: "Wake",
+      }),
+    ).rejects.toThrow('Channel "wechat" did not take the reply: blocked by the platform');
+    expect(recordSent).not.toHaveBeenCalled();
+  });
+
   it("delivers a webchat continuation on the send port after showing it on the session stream", async () => {
     const agentRunner = createMockAgentRunner([
       [

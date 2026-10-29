@@ -118,10 +118,22 @@ export type SendResult =
 export type Sender = Account | { readonly channel: string };
 
 /**
+ * A send that is an agent turn's own answer, said by the turn `turnId` names
+ * when it is known. The agent holds the message as what it said, where a send
+ * with none it learns of later, like a message it was away for. `turnId` is an
+ * id in Agents, which Chats keeps and never reads.
+ */
+export interface TurnAnswer {
+  readonly turnId?: string;
+}
+
+/**
  * Say `body` in `place` as `as`, one of Rome's accounts on the place's
  * platform, and answer whether the platform took it. Absent `as`, Rome has to
  * hold one account there, and the send is refused as not connected while it
  * holds several or none.
+ *
+ * `answer` marks the send as an agent turn's own answer.
  *
  * One platform call inside the call. Nothing is recorded for a message the
  * platform did not take. Once the platform has taken it, a failure to record
@@ -133,6 +145,7 @@ export async function send(
   place: Place,
   body: Body,
   as?: Sender,
+  answer?: TurnAnswer,
 ): Promise<SendResult> {
   const platform = place.chat.platform;
   if (platform === DASHBOARD_PLATFORM) return await sendOnDashboard(deps, place, body, as);
@@ -156,7 +169,8 @@ export async function send(
   const address = addressOf(place);
   let messageId: string | null;
   try {
-    messageId = (await channel.send.send(address, { text: body.text })).messageId ?? null;
+    const turn = answer?.turnId === undefined ? {} : { turnId: answer.turnId };
+    messageId = (await channel.send.send(address, { text: body.text, ...turn })).messageId ?? null;
   } catch (error) {
     // The Connection went between choosing the sender and asking it: the same
     // answer a send that found none to begin with gives.
@@ -166,7 +180,7 @@ export async function send(
   }
 
   const at = new Date();
-  await record(deps, channel.name, place, body, messageId);
+  await record(deps, channel.name, place, body, messageId, answer);
   return {
     ok: true,
     sent: {
@@ -248,6 +262,7 @@ async function record(
   place: Place,
   body: Body,
   messageId: string | null,
+  answer: TurnAnswer | undefined,
 ): Promise<void> {
   try {
     await deps.webchatRepo.ensureChannelChat({
@@ -261,8 +276,8 @@ async function record(
         place,
         parts: [{ type: "text", content: body.text }],
         ...(messageId ? { platformMessageId: messageId } : {}),
-        // Not said by an agent turn.
-        turnAnswer: false,
+        ...(answer?.turnId === undefined ? {} : { turnId: answer.turnId }),
+        turnAnswer: answer !== undefined,
       },
       { channel },
     );
