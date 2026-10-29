@@ -6,12 +6,7 @@
 // anything acts on it, whether or not an agent answers it. Participation hears
 // it from MessageSaid and decides the wake there.
 
-import type {
-  Channel,
-  InboundEvent,
-  RecordedInboundEvent,
-  RecordedMessages,
-} from "@rome-os/app-runtime";
+import type { Channel, InboundEvent, SaidInboundEvent, MessagesSaid } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 import type { ChatEvents } from "./events.js";
@@ -40,7 +35,7 @@ export interface InboundRecording {
   /** Hearing each message once recorded. Recording runs only while someone
    *  subscribes here, so nothing is stored twice while a hook stores messages
    *  itself. */
-  readonly recordedMessages: RecordedMessages;
+  readonly messagesSaid: MessagesSaid;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
 }
@@ -49,7 +44,7 @@ export interface InboundRecording {
  * Records what arrives on `channels` and on any channel added later. Each
  * channel is subscribed once, so a chat's messages are recorded one at a time
  * in arrival order (R4 of `ChannelInbound`), and each is heard by every
- * {@link RecordedMessages} subscriber before the chat's next one is recorded.
+ * {@link MessagesSaid} subscriber before the chat's next one is recorded.
  * A subscriber that is slow therefore holds up its chat's later messages, both
  * their recording and every subscriber's hearing them.
  */
@@ -134,11 +129,11 @@ export function inboundRecording(
     recording.set(channel.name, channel.inbound.subscribe(record(channel)));
   };
 
-  const recordedMessages: RecordedMessages = {
+  const messagesSaid: MessagesSaid = {
     subscribe(handler) {
       const unsubscribe = deps.events.subscribe(async (event) => {
         if (event.type !== "MessageSaid" || !event.via.heard) return;
-        const recorded: RecordedInboundEvent = {
+        const recorded: SaidInboundEvent = {
           ...event.via.heard,
           recorded: { chatRecordId: event.chatRecordId, messageId: event.message.id },
         };
@@ -166,7 +161,7 @@ export function inboundRecording(
   };
 
   return {
-    recordedMessages,
+    messagesSaid,
     addChannels(added) {
       known.push(...added);
       if (hearers > 0) for (const channel of added) subscribe(channel);

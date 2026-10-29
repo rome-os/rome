@@ -9,8 +9,8 @@ import type {
   InboundEvent,
   ChannelActivity,
   ChannelInboundMedia,
-  RecordedInboundEvent,
-  RecordedMessages,
+  SaidInboundEvent,
+  MessagesSaid,
 } from "@rome-os/app-runtime";
 import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
 
@@ -570,16 +570,16 @@ describe("ChannelMessageHook hearing recorded messages", () => {
   const RECORDED = { chatRecordId: "chat-row-1", messageId: "row-1" };
 
   function recordedHarness() {
-    const listeners = new Set<(event: RecordedInboundEvent) => Promise<void>>();
-    const subscribe = rs.fn((handler: (event: RecordedInboundEvent) => Promise<void>) => {
+    const listeners = new Set<(event: SaidInboundEvent) => Promise<void>>();
+    const subscribe = rs.fn((handler: (event: SaidInboundEvent) => Promise<void>) => {
       listeners.add(handler);
       return () => {
         listeners.delete(handler);
       };
     });
-    const decided = rs.fn(async (_recorded: RecordedInboundEvent["recorded"]) => undefined);
-    const recordedMessages: RecordedMessages = { subscribe, decided };
-    const harness = createHarness({ recordedMessages });
+    const decided = rs.fn(async (_recorded: SaidInboundEvent["recorded"]) => undefined);
+    const messagesSaid: MessagesSaid = { subscribe, decided };
+    const harness = createHarness({ messagesSaid });
     const hear = async (connectionId: string, incoming: ChannelMessage) => {
       for (const listener of listeners) {
         await listener({
@@ -695,10 +695,10 @@ describe("ChannelMessageHook hearing recorded messages", () => {
   it("drops a recorded message on a channel it does not know, and says so", async () => {
     const warn = rs.fn();
     const decided = rs.fn(async () => undefined);
-    const listeners = new Set<(event: RecordedInboundEvent) => Promise<void>>();
+    const listeners = new Set<(event: SaidInboundEvent) => Promise<void>>();
     const harness = createHarness({
       log: { warn },
-      recordedMessages: {
+      messagesSaid: {
         subscribe: (handler) => {
           listeners.add(handler);
           return () => listeners.delete(handler);

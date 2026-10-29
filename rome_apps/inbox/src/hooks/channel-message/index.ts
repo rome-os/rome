@@ -8,8 +8,8 @@ import type {
   ChatSettingsControl,
   InboundEvent,
   ChannelActivitySession,
-  RecordedInboundEvent,
-  RecordedMessages,
+  SaidInboundEvent,
+  MessagesSaid,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
@@ -45,7 +45,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
-      recordedMessages?: RecordedMessages;
+      messagesSaid?: MessagesSaid;
     } = {},
   ) {}
 
@@ -54,8 +54,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    *  follows whatever backs it, so a Connection that appears or reconnects
    *  later needs nothing more from the hook. */
   async register(): Promise<void> {
-    const recordedMessages = this.options.recordedMessages;
-    if (!recordedMessages) {
+    const messagesSaid = this.options.messagesSaid;
+    if (!messagesSaid) {
       this.subscribe(this.channels);
       return;
     }
@@ -63,14 +63,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     if (this.subscriptions.has(RECORDED)) return;
     this.subscriptions.set(
       RECORDED,
-      recordedMessages.subscribe((event) => this.handleRecorded(event)),
+      messagesSaid.subscribe((event) => this.handleRecorded(event)),
     );
   }
 
   /** Take in channels the host added after `register`, such as a second bot
    *  whose Talk first unlocked. */
   async addChannels(channels: readonly Channel[]): Promise<void> {
-    if (!this.options.recordedMessages) {
+    if (!this.options.messagesSaid) {
       this.subscribe(channels);
       return;
     }
@@ -103,9 +103,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   /** Handle a recorded message, and say its wake is decided once no turn
    *  will come of it, or once the turn it started has ended. */
-  private async handleRecorded(event: RecordedInboundEvent): Promise<void> {
+  private async handleRecorded(event: SaidInboundEvent): Promise<void> {
     const decided = () =>
-      this.options.recordedMessages?.decided(event.recorded).catch((err) =>
+      this.options.messagesSaid?.decided(event.recorded).catch((err) =>
         (this.options.log ?? log).warn("could not mark a message's wake decided", {
           messageId: event.message.messageId,
           error: err instanceof Error ? err.message : String(err),
@@ -145,7 +145,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    */
   private async handleMessage(
     channel: Channel,
-    event: InboundEvent | RecordedInboundEvent,
+    event: InboundEvent | SaidInboundEvent,
   ): Promise<{ turn: Promise<void> } | undefined> {
     const { message, ref } = event;
     const recorded = "recorded" in event ? event.recorded : undefined;
@@ -381,7 +381,7 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.channels,
     {
       accountAgentOf: deps.accountAgentOf ?? byChannelName(deps.linkedAgentOf),
-      ...(deps.recordedMessages ? { recordedMessages: deps.recordedMessages } : {}),
+      ...(deps.messagesSaid ? { messagesSaid: deps.messagesSaid } : {}),
     },
   );
 }

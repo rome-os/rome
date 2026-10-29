@@ -1515,7 +1515,7 @@ async function main() {
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
         channels: hookChannels,
-        recordedMessages: inboundRecorder.recordedMessages,
+        messagesSaid: inboundRecorder.messagesSaid,
         accountAgentOf: hookAgentOf,
         linkedAgentOf: hookAgentOf,
       });
@@ -1558,7 +1558,7 @@ async function main() {
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
           channels: hookChannels,
-          recordedMessages: inboundRecorder.recordedMessages,
+          messagesSaid: inboundRecorder.messagesSaid,
           accountAgentOf: hookAgentOf,
           linkedAgentOf: hookAgentOf,
         },
