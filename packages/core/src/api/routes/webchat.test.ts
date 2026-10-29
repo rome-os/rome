@@ -386,6 +386,17 @@ describe("Webchat API", () => {
         ok: false,
         error: "Session not found",
       });
+
+      // Recorded before the agent failed to wake: said, so not answered failed.
+      deps.agentSessionManager.acquire = rs.fn(async () => {
+        throw new Error("session store unavailable");
+      });
+      expect(await runtime.post(id, { text: "Trains too" }, concierge)).toMatchObject({
+        ok: true,
+      });
+      expect(
+        (await deps.webchatRepo.getMessages(id)).filter((message) => message.role === "user"),
+      ).toHaveLength(2);
     } finally {
       for (const finish of finishers) finish();
     }

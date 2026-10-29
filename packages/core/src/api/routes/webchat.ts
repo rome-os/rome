@@ -4402,7 +4402,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       const inputId = randomUUID();
       const sent = await handleChatSend(chatId, { inputId, text: body.text }, { saidBy: as });
-      if (sent.status >= 400) return { ok: false, error: routeError(sent) };
+      if (sent.status >= 400) {
+        // Once the input is recorded it is said, even when the agent could not
+        // be woken on it: answering failed would invite a second message.
+        if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
+          return { ok: false, error: routeError(sent) };
+        }
+        log.warn("dashboard send recorded but its agent was not woken", {
+          chatId,
+          inputId,
+          error: routeError(sent),
+        });
+      }
       return { ok: true, messageId: inputId, at: new Date() };
     },
     async startChat(input) {
