@@ -352,6 +352,23 @@ describe("StoredMessages reads", () => {
     ]);
   });
 
+  it("finds the named messages said in a place, oldest first", async () => {
+    const chat = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    for (let n = 1; n <= 4; n += 1) await said(chat.id, `line ${n}`, minute(n), `m-${n}`);
+    const ids = (await messages.recent(group, 10)).messages.map((message) => message.id);
+
+    const found = await messages.find(group, [ids[3]!, ids[0]!, "elsewhere"], {
+      channel: "telegram",
+    });
+    expect(found.map((message) => message.body.text)).toEqual(["line 1", "line 4"]);
+    await expect(messages.find(group, [])).resolves.toEqual([]);
+  });
+
   it("answers an empty page for a place Rome holds nothing in", async () => {
     await expect(messages.recent(group, 10)).resolves.toEqual({ messages: [], older: null });
     const elsewhere = placeIn(chatKey("discord", "group-1" as ChatId));

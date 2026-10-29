@@ -1505,7 +1505,8 @@ export class WebChatRepository {
    * id. A message two of the rows hold, such as a group's message that reached
    * two of Rome's accounts, is answered once, as the copy written first, so a
    * copy that arrives later never moves it. With `ownChannel`, only that
-   * channel's record is read. Without it, only a group is read across
+   * channel's record is read. With `ids`, only those messages are. Without
+   * `ownChannel`, only a group is read across
    * channels. Trace rows belong to no chat and are left
    * out.
    */
@@ -1513,6 +1514,7 @@ export class WebChatRepository {
     channels: readonly string[];
     address: string;
     ownChannel?: string;
+    ids?: readonly string[];
     before?: { at: Date; id: string };
     limit: number;
   }): Promise<StoredSaidMessage[]> {
@@ -1557,6 +1559,7 @@ export class WebChatRepository {
         and(
           inArray(romeAgentMessages.sessionId, chats),
           inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
+          input.ids && inArray(romeAgentMessages.id, [...input.ids]),
           before &&
             or(
               lt(romeAgentMessages.createdAt, before.at),
