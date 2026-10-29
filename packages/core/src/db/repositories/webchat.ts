@@ -1557,6 +1557,28 @@ export class WebChatRepository {
       sql`, `,
     );
     const { before } = input;
+    // Reading named messages, only their copies are grouped: the rows that
+    // share a platform id with them, through the reply that holds them.
+    const asked = input.ids
+      ? sql`
+        "asked" as materialized (
+          select "id", "platform_message_id" as "pid" from ${romeAgentMessages}
+          where "id" in (${sql.join(
+            input.ids.map((id) => sql`${id}`),
+            sql`, `,
+          )}) and "session_id" in (select "id" from "chats")
+        ),
+        "asked_wholes" as materialized (
+          select "message_id" from "held" where "pid" in (select "pid" from "asked")
+          union select "id" from "asked" where "id" in (select "message_id" from "held")
+        ),
+        "asked_pids" as materialized (
+          select "pid" from "asked" where "pid" is not null
+          union select "pid" from "held" where "message_id" in (select "message_id" from "asked_wholes")
+          union select "platform_message_id" from ${romeAgentMessages}
+          where "id" in (select "message_id" from "asked_wholes") and "platform_message_id" is not null
+        ),`
+      : sql``;
     const rows = await this.db.all<{
       id: string;
       channel: string;
@@ -1576,10 +1598,21 @@ export class WebChatRepository {
           from ${romeAgentMessagePlatformIds}
           where "session_id" in (select "id" from "chats")
         ),
+        ${asked}
         "said" as materialized (
           select "m".rowid as "rid", "m"."id", "m"."platform_message_id" as "pid",
             "m"."role", "m"."sender_id"
-          from ${romeAgentMessages} as "m"
+          from ${
+            input.ids
+              ? sql`(
+                  select rowid as "picked" from ${romeAgentMessages} where "id" in (select "id" from "asked")
+                  union select rowid from ${romeAgentMessages} where "id" in (select "message_id" from "asked_wholes")
+                  union select rowid from ${romeAgentMessages}
+                  where "session_id" in (select "id" from "chats")
+                    and "platform_message_id" in (select "pid" from "asked_pids")
+                ) as "pick" cross join ${romeAgentMessages} as "m" on "m".rowid = "pick"."picked"`
+              : sql`${romeAgentMessages} as "m"`
+          }
           where "m"."session_id" in (select "id" from "chats") and "m"."role" in (${roles})
         ),
         -- The reply shown as several messages that holds a row's platform id:
