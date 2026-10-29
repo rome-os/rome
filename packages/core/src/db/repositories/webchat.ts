@@ -1592,7 +1592,8 @@ export class WebChatRepository {
    * The order is created_at, then the order the rows were written in, since
    * created_at keeps whole seconds. `before` names a message by its time and
    * id. A message two of the rows hold, such as a group's message that reached
-   * two of Rome's accounts, is answered once, as the copy with the smallest id. Trace rows belong to no chat and are left
+   * two of Rome's accounts, is answered once, as the copy written first, so a
+   * copy that arrives later never moves it. Trace rows belong to no chat and are left
    * out.
    */
   async saidMessagesAt(input: {
@@ -1648,7 +1649,7 @@ export class WebChatRepository {
               select 1 from ${romeAgentMessages} as "copy"
               where "copy"."session_id" in ${chats}
                 and "copy"."platform_message_id" = ${romeAgentMessages.platformMessageId}
-                and "copy"."id" < ${romeAgentMessages.id}
+                and "copy".rowid < ${romeAgentMessages}.rowid
             )`,
           ),
         ),

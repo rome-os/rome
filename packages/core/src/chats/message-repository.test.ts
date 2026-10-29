@@ -145,6 +145,33 @@ describe("StoredMessages reads", () => {
     expect(read.map((message) => message.platformMessageId)).toEqual(["m-1", "m-2"]);
   });
 
+  it("keeps a group message where its first copy put it when a later copy arrives", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      agentName: "main",
+    });
+    // Two messages in one second reach one account, then both reach the other.
+    await said(support.id, "second", minute(1), "m-2");
+    await said(support.id, "third", minute(1), "m-3");
+    const newest = await messages.recent(group, 1);
+    await said(sales.id, "second", minute(1), "m-2");
+    await said(sales.id, "third", minute(1), "m-3");
+
+    expect((await messages.recent(group, 10)).messages.map((m) => m.platformMessageId)).toEqual([
+      "m-2",
+      "m-3",
+    ]);
+    expect(newest.messages.map((m) => m.platformMessageId)).toEqual(["m-3"]);
+    const older = await messages.before(group, newest.older!, 10);
+    expect(older.messages.map((m) => m.platformMessageId)).toEqual(["m-2"]);
+  });
+
   it("keeps a thread's messages to the thread", async () => {
     const chat = await rows.ensureChannelChat({
       channel: "telegram",
