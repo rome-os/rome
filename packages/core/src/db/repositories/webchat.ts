@@ -1593,26 +1593,35 @@ export class WebChatRepository {
    * created_at keeps whole seconds. `before` names a message by its time and
    * id. A message two of the rows hold, such as a group's message that reached
    * two of Rome's accounts, is answered once, as the copy written first, so a
-   * copy that arrives later never moves it. Trace rows belong to no chat and are left
+   * copy that arrives later never moves it. Only a group is read across
+   * channels; any other chat is the one `ownChannel` keeps. Trace rows belong to no chat and are left
    * out.
    */
   async saidMessagesAt(input: {
     channels: readonly string[];
     address: string;
+    ownChannel?: string;
     before?: { at: Date; id: string };
     limit: number;
   }): Promise<StoredSaidMessage[]> {
     if (input.channels.length === 0 || input.limit < 1) return [];
+    const at = and(
+      eq(romeSessions.type, "channel"),
+      inArray(romeSessions.sourceChannel, [...input.channels]),
+      eq(romeSessions.sourceThreadId, input.address),
+    );
+    const isGroup = sql`coalesce(${romeSessions.sourceThreadType}, '') = 'group'`;
+    // Only a group's address names one chat across Rome's accounts. Any other
+    // chat is one account's own: Telegram keys a direct message by the other
+    // person alone, so the same address on two channels is two chats. It is
+    // read from `ownChannel`, or from the one channel that holds it.
+    const ownChat = input.ownChannel
+      ? eq(romeSessions.sourceChannel, input.ownChannel)
+      : sql`(select count(*) from ${romeSessions} where ${and(at, sql`not ${isGroup}`)}) = 1`;
     const chats = this.db
       .select({ id: romeSessions.id })
       .from(romeSessions)
-      .where(
-        and(
-          eq(romeSessions.type, "channel"),
-          inArray(romeSessions.sourceChannel, [...input.channels]),
-          eq(romeSessions.sourceThreadId, input.address),
-        ),
-      );
+      .where(and(at, or(isGroup, ownChat)));
     const { before } = input;
     return await this.db
       .select({

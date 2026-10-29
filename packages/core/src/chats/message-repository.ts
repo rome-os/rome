@@ -55,12 +55,23 @@ export interface MessageRepository {
    * The newest `limit` messages said in `place`, oldest first. A message
    * still pending, or one the platform refused, was not said and is not here.
    * A place Rome holds no messages in answers an empty page.
+   *
+   * `via` is the one of Rome's accounts reading, over today's storage. A
+   * group reads the same through every account in it, but a direct message
+   * is read through `via`'s, since its address alone may name a direct
+   * message with each of Rome's accounts. Absent, a direct message reads only
+   * while one account holds it.
    */
-  recent(place: Place, limit: number): Promise<MessagePage>;
+  recent(place: Place, limit: number, via?: Pick<Via, "channel">): Promise<MessagePage>;
 
   /** The `limit` messages said in `place` just before `cursor`, oldest
    *  first, by the same rule as {@link recent}. */
-  before(place: Place, cursor: MessageCursor, limit: number): Promise<MessagePage>;
+  before(
+    place: Place,
+    cursor: MessageCursor,
+    limit: number,
+    via?: Pick<Via, "channel">,
+  ): Promise<MessagePage>;
 
   /**
    * Note that Participation has decided whether the recorded message `id`
@@ -94,19 +105,30 @@ export class StoredMessages implements MessageRepository {
     private readonly history: MessageHistory,
   ) {}
 
-  recent(place: Place, limit: number): Promise<MessagePage> {
-    return this.page(place, limit);
+  recent(place: Place, limit: number, via?: Pick<Via, "channel">): Promise<MessagePage> {
+    return this.page(place, limit, via);
   }
 
-  before(place: Place, cursor: MessageCursor, limit: number): Promise<MessagePage> {
-    return this.page(place, limit, cursor);
+  before(
+    place: Place,
+    cursor: MessageCursor,
+    limit: number,
+    via?: Pick<Via, "channel">,
+  ): Promise<MessagePage> {
+    return this.page(place, limit, via, cursor);
   }
 
-  private async page(place: Place, limit: number, before?: MessageCursor): Promise<MessagePage> {
+  private async page(
+    place: Place,
+    limit: number,
+    via?: Pick<Via, "channel">,
+    before?: MessageCursor,
+  ): Promise<MessagePage> {
     // One more than asked says whether any are older.
     const rows = await this.rows.saidMessagesAt({
       channels: this.history.channelsOn(place.chat.platform),
       address: addressOf(place),
+      ...(via ? { ownChannel: via.channel } : {}),
       ...(before ? { before } : {}),
       limit: limit + 1,
     });

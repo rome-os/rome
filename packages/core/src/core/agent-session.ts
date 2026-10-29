@@ -127,7 +127,7 @@ import type {
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { PlatformOfChannel } from "../channels/channel.js";
-import { ChatEvents } from "../chats/events.js";
+import { ChatEvents, type Via } from "../chats/events.js";
 import type { SaidMessage } from "../chats/message.js";
 import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
@@ -215,7 +215,8 @@ const CATCH_UP_PAGE = 50;
 /**
  * The newest of `unseen` as the place's record holds them, oldest first, at
  * most {@link CATCH_UP_LIMIT}, and how many more there were
- * (docs/domains/participation.md#projection). The place is read back page by
+ * (docs/domains/participation.md#projection), read through the account the
+ * agent was woken on. The place is read back page by
  * page from its newest message until that many are found. A message the chat
  * keeps under another of Rome's accounts is the same message when the
  * platform's id for it is.
@@ -223,6 +224,7 @@ const CATCH_UP_PAGE = 50;
 async function catchUp(
   messages: Pick<MessageRepository, "recent" | "before">,
   place: Place,
+  via: Pick<Via, "channel">,
   unseen: readonly { id: string; platformMessageId: string | null }[],
 ): Promise<{ lines: SaidMessage[]; omitted: number }> {
   const want = Math.min(unseen.length, CATCH_UP_LIMIT);
@@ -230,7 +232,7 @@ async function catchUp(
   const ids = new Set(unseen.map((message) => message.id));
   const platformIds = new Set(unseen.flatMap((message) => message.platformMessageId ?? []));
   const found: SaidMessage[] = [];
-  let page = await messages.recent(place, CATCH_UP_PAGE);
+  let page = await messages.recent(place, CATCH_UP_PAGE, via);
   for (;;) {
     for (const message of [...page.messages].reverse()) {
       const isUnseen =
@@ -240,7 +242,7 @@ async function catchUp(
       if (found.length === want) break;
     }
     if (found.length === want || !page.older) break;
-    page = await messages.before(place, page.older, CATCH_UP_PAGE);
+    page = await messages.before(place, page.older, CATCH_UP_PAGE, via);
   }
   return { lines: found.reverse(), omitted: unseen.length - found.length };
 }
@@ -3689,6 +3691,7 @@ class AgentSessionImpl implements AgentSession {
         const caughtUp = await catchUp(
           this.deps.chatMessages ?? channelMessages(this.deps.webchatRepo, channel),
           place,
+          { channel },
           storedContext.unseen,
         );
         const repliedTo = storedContext.repliedTo
