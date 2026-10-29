@@ -49,6 +49,7 @@ describe("StoredMessages reads", () => {
     const chat = await rows.ensureChannelChat({
       channel: "telegram",
       threadId: "group-1",
+      threadType: "group",
       agentName: "main",
     });
     for (let n = 1; n <= 5; n += 1) await said(chat.id, `line ${n}`, minute(n), `m-${n}`);
@@ -69,6 +70,7 @@ describe("StoredMessages reads", () => {
     const chat = await rows.ensureChannelChat({
       channel: "telegram",
       threadId: "group-1",
+      threadType: "group",
       agentName: "main",
     });
     await said(chat.id, "hi Rome", minute(1), "m-1");
@@ -105,6 +107,7 @@ describe("StoredMessages reads", () => {
     const chat = await rows.ensureChannelChat({
       channel: "telegram",
       threadId: "group-1",
+      threadType: "group",
       agentName: "main",
     });
     const pending = (text: string) =>
@@ -129,11 +132,13 @@ describe("StoredMessages reads", () => {
     const support = await rows.ensureChannelChat({
       channel: "telegram",
       threadId: "group-1",
+      threadType: "group",
       agentName: "main",
     });
     const sales = await rows.ensureChannelChat({
       channel: "telegram-sales",
       threadId: "group-1",
+      threadType: "group",
       agentName: "main",
     });
     // Both accounts received the same message, and each heard one of its own.
@@ -145,10 +150,108 @@ describe("StoredMessages reads", () => {
     expect(read.map((message) => message.platformMessageId)).toEqual(["m-1", "m-2"]);
   });
 
+  it("keeps a group message where its first copy put it when a later copy arrives", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    // Two messages in one second reach one account, then both reach the other.
+    await said(support.id, "second", minute(1), "m-2");
+    await said(support.id, "third", minute(1), "m-3");
+    const newest = await messages.recent(group, 1);
+    await said(sales.id, "second", minute(1), "m-2");
+    await said(sales.id, "third", minute(1), "m-3");
+
+    expect((await messages.recent(group, 10)).messages.map((m) => m.platformMessageId)).toEqual([
+      "m-2",
+      "m-3",
+    ]);
+    expect(newest.messages.map((m) => m.platformMessageId)).toEqual(["m-3"]);
+    const older = await messages.before(group, newest.older!, 10);
+    expect(older.messages.map((m) => m.platformMessageId)).toEqual(["m-2"]);
+  });
+
+  it("reads a reply shown as several messages once, whichever account heard its parts", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const reply = (first: string, second: string) =>
+      rows.recordOutboundConversationMessage({
+        sessionId: support.id,
+        content: textContent(`${first} ${second}`),
+        platformMessageId: first,
+        otherPlatformMessageIds: [second],
+        senderId: "rome",
+        senderName: "Rome",
+        knownToProvider: false,
+      });
+    const read = async () =>
+      (await messages.recent(group, 10)).messages.map((message) => message.body.text);
+
+    // Sales hears the parts after Rome recorded its reply: the reply stands.
+    await reply("p-1", "p-2");
+    await said(sales.id, "p-1", minute(1), "p-1");
+    await said(sales.id, "p-2", minute(1), "p-2");
+    expect(await read()).toEqual(["p-1 p-2"]);
+
+    // Sales hears the parts first: they stand, and the reply adds nothing.
+    await said(sales.id, "q-1", minute(2), "q-1");
+    await said(sales.id, "q-2", minute(2), "q-2");
+    await reply("q-1", "q-2");
+    expect((await read()).sort()).toEqual(["p-1 p-2", "q-1", "q-2"]);
+  });
+
+  it("keeps a direct message to the one of Rome's accounts it was written to", async () => {
+    // Telegram keys a direct message by the other person, so Alice writing to
+    // two of Rome's bots leaves two chats at one address.
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "alice-tg",
+      threadType: "private",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "alice-tg",
+      threadType: "private",
+      agentName: "main",
+    });
+    await said(support.id, "for support", minute(1), "1");
+    await said(sales.id, "for sales", minute(2), "1");
+    const dm = placeIn(chatKey("telegram", "alice-tg" as ChatId));
+
+    const read = async (channel?: string) =>
+      (await messages.recent(dm, 10, channel ? { channel } : undefined)).messages.map(
+        (message) => message.body.text,
+      );
+    expect(await read("telegram")).toEqual(["for support"]);
+    expect(await read("telegram-sales")).toEqual(["for sales"]);
+    // Read through no account, the address names two chats, so neither is read.
+    expect(await read()).toEqual([]);
+  });
+
   it("keeps a thread's messages to the thread", async () => {
     const chat = await rows.ensureChannelChat({
       channel: "telegram",
       threadId: "group-1",
+      threadType: "group",
       agentName: "main",
     });
     const thread = await rows.ensureChannelChat({
