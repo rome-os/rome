@@ -1,7 +1,7 @@
 import { pairingPayload } from "@rome/api-types/approvals";
 import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
 import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -664,7 +664,54 @@ function StatTile({
   );
 }
 
-export default function ActivityPage() {
+/** The "N pending approvals requiring review" bar. Review shows them. */
+export function PendingApprovalsCallout({
+  count,
+  onReview,
+}: {
+  count: number;
+  onReview: () => void;
+}) {
+  const { t } = useTranslation("activity");
+  return (
+    <button
+      type="button"
+      onClick={onReview}
+      className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left min-h-[var(--control-min-h)] transition-colors hover:bg-warning-bg/70"
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="h-1.5 w-1.5 rounded-full bg-warning"
+          style={{
+            animation: "rome-activity-pulse 1.6s ease-in-out infinite",
+          }}
+          aria-hidden="true"
+        />
+        <span className="text-ui text-warning-fg">
+          <span>
+            {t(count === 1 ? "page.pendingCallout.single" : "page.pendingCallout.multiple", {
+              count,
+            })}
+          </span>{" "}
+          {t("page.pendingCallout.suffix")}
+        </span>
+      </div>
+      <span className="text-aux text-warning-fg">{t("page.pendingCallout.cta")}</span>
+    </button>
+  );
+}
+
+/**
+ * The event log: approvals, action executions and webhook receipts. It is the
+ * Events tab of the Activity page, which passes the switch between its tabs.
+ */
+export default function ActivityPage({
+  viewSwitch,
+  initialFilter = "all",
+}: {
+  viewSwitch?: ReactNode;
+  initialFilter?: StatusFilter;
+} = {}) {
   const { t } = useTranslation("activity");
   const approvalsQuery = useApprovals();
   const approvals = approvalsQuery.data ?? [];
@@ -672,7 +719,7 @@ export default function ActivityPage() {
   const [executionGroups, setExecutionGroups] = useState<ExecutionGroup[]>([]);
   const [webhookInvocations, setWebhookInvocations] = useState<WebhookInvocation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialFilter);
   const [offset, setOffset] = useState(0);
   const [lastFetchedAt, setLastFetchedAt] = useState<number>(Date.now());
   const [, setTick] = useState(0);
@@ -796,17 +843,20 @@ export default function ActivityPage() {
             </span>
           }
           actions={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void fetchData();
-                void approvalsQuery.refetch();
-              }}
-            >
-              {t("page.refresh")}
-            </Button>
+            <>
+              {viewSwitch}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void fetchData();
+                  void approvalsQuery.refetch();
+                }}
+              >
+                {t("page.refresh")}
+              </Button>
+            </>
           }
         />
 
@@ -830,32 +880,10 @@ export default function ActivityPage() {
 
         {/* Pending callout */}
         {stats.pendingApprovals > 0 && statusFilter === "all" && (
-          <button
-            onClick={() => setStatusFilter("pending")}
-            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left min-h-[var(--control-min-h)] transition-colors hover:bg-warning-bg/70"
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="h-1.5 w-1.5 rounded-full bg-warning"
-                style={{
-                  animation: "rome-activity-pulse 1.6s ease-in-out infinite",
-                }}
-                aria-hidden="true"
-              />
-              <span className="text-ui text-warning-fg">
-                <span>
-                  {t(
-                    stats.pendingApprovals === 1
-                      ? "page.pendingCallout.single"
-                      : "page.pendingCallout.multiple",
-                    { count: stats.pendingApprovals },
-                  )}
-                </span>{" "}
-                {t("page.pendingCallout.suffix")}
-              </span>
-            </div>
-            <span className="text-aux text-warning-fg">{t("page.pendingCallout.cta")}</span>
-          </button>
+          <PendingApprovalsCallout
+            count={stats.pendingApprovals}
+            onReview={() => setStatusFilter("pending")}
+          />
         )}
 
         <FilterChipGroup

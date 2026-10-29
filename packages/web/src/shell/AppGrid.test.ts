@@ -28,4 +28,20 @@ describe("sidebar pins", () => {
       { type: "app", id: "recipe-box" },
     ]);
   });
+
+  it("carries a Sessions pin over to Activity, which replaced it, without doubling it", () => {
+    expect(
+      normalizeSidebarPins([
+        { type: "builtin", id: "sessions" },
+        { type: "app", id: "recipe-box" },
+        { type: "builtin", id: "activity" },
+      ]),
+    ).toEqual([
+      { type: "builtin", id: "apps" },
+      { type: "builtin", id: "chat" },
+      { type: "builtin", id: "projects" },
+      { type: "builtin", id: "activity" },
+      { type: "app", id: "recipe-box" },
+    ]);
+  });
 });
