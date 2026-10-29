@@ -1,13 +1,18 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { toast } from "sonner";
 import i18n from "@/i18n";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { stateOfGrants } from "@/test/connection-state";
+
+rs.mock("sonner", () => ({
+  toast: Object.assign(rs.fn(), { success: rs.fn(), error: rs.fn() }),
+}));
 
 /** A later account's channel id, opaque as core mints it. */
 const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
@@ -709,6 +714,97 @@ describe("ConnectionsSection — Composio services", () => {
     // Without the catalog, the bridged GitHub account could pass for a service.
     expect(screen.queryByRole("button", { name: "Open github" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open Gmail" })).toBeNull();
+  });
+
+  it("offers to open the authorize tab again, in case the browser blocked it", async () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    rs.mocked(toast).mockClear();
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.click(screen.getByRole("radio", { name: /Available/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Linear" }));
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    const options = rs.mocked(toast).mock.calls[0]?.[1] as {
+      duration: number;
+      action: { label: string; onClick: () => void };
+    };
+    expect(options.action.label).toBe("Open tab");
+    // It stays until closed, so a blocked tab noticed late can still open.
+    expect(options.duration).toBe(Number.POSITIVE_INFINITY);
+    open.mockClear();
+    options.action.onClick();
+    expect(open).toHaveBeenCalledWith(
+      "https://composio.example/auth/linear",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  describe("after the authorize tab comes back", () => {
+    function renderReturn(search: string, composio: ComposioCliStatus | null = signedIn()) {
+      let location = "";
+      function Probe() {
+        location = useLocation().search;
+        return null;
+      }
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const tree = (status: ComposioCliStatus | null) => (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[`/settings/connections${search}`]}>
+            <ConnectionsSection
+              connections={[oauth("github", "authorized")]}
+              composio={status}
+              loading={false}
+              error={null}
+              onRefresh={rs.fn(async () => null)}
+              onFlash={rs.fn()}
+            />
+            <Probe />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+      const { rerender } = render(tree(composio));
+      return {
+        location: () => location,
+        update: (status: ComposioCliStatus) => rerender(tree(status)),
+      };
+    }
+
+    beforeEach(() => {
+      rs.mocked(toast.success).mockClear();
+      rs.mocked(toast.error).mockClear();
+    });
+
+    it("says the service connected, by name, and drops just those params", async () => {
+      const { location } = renderReturn("?connector=gmail&status=ACTIVE&keep=1");
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Gmail connected.", expect.anything()),
+      );
+      await waitFor(() => expect(location()).toBe("?keep=1"));
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it("waits for the catalog to name the service when the Composio status comes late", async () => {
+      const { update } = renderReturn("?connector=gmail&status=ACTIVE", null);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(toast.success).not.toHaveBeenCalled();
+      update(signedIn());
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith("Gmail connected.", expect.anything()),
+      );
+      expect(toast.success).toHaveBeenCalledTimes(1);
+    });
+
+    it("says a declined or failed connect did not finish", async () => {
+      const { location } = renderReturn("?connector=notion&status=failed");
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "Couldn't finish connecting Notion. Try again.",
+          expect.anything(),
+        ),
+      );
+      await waitFor(() => expect(location()).toBe(""));
+      expect(toast.success).not.toHaveBeenCalled();
+    });
   });
 
   it("lists no Composio service until the connected accounts load", async () => {

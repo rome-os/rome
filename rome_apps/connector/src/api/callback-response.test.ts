@@ -2,16 +2,16 @@ import { describe, expect, it } from "@rstest/core";
 import { buildCallbackResponse } from "./callback-response.js";
 
 describe("buildCallbackResponse", () => {
-  it("redirects a dashboard-initiated connect back to the connector dashboard", () => {
+  it("redirects a dashboard-initiated connect back to Settings › Connections", () => {
     const res = buildCallbackResponse("dashboard", "gmail", true);
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/apps/connector?connector=gmail&status=ACTIVE");
+    expect(res.headers.get("location")).toBe("/settings/connections?connector=gmail&status=ACTIVE");
   });
 
   it("carries a failed dashboard result through the redirect status", () => {
     const res = buildCallbackResponse("dashboard", "slack", false);
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/apps/connector?connector=slack&status=failed");
+    expect(res.headers.get("location")).toBe("/settings/connections?connector=slack&status=failed");
   });
 
   it("lands a webchat-initiated connect on a terminal page, not the dashboard", async () => {
@@ -22,7 +22,7 @@ describe("buildCallbackResponse", () => {
     const html = await res.text();
     expect(html).toContain("Connected");
     expect(html).toContain("return to your chat");
-    expect(html).not.toContain("/apps/connector");
+    expect(html).not.toContain("/settings/connections");
   });
 
   it("tells a webchat user a failed connect to retry, still off the dashboard", async () => {
@@ -30,6 +30,6 @@ describe("buildCallbackResponse", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Couldn't connect");
-    expect(html).not.toContain("/apps/connector");
+    expect(html).not.toContain("/settings/connections");
   });
 });

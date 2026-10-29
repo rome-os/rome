@@ -110,7 +110,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           // rather than guess which connection to act on.
           return {
             status: "error",
-            error: `Toolkit "${toolkit}" has ${existing.ids.length} active managed connections — resolve the duplicate in the Connector dashboard before reconnecting.`,
+            error: `Toolkit "${toolkit}" has ${existing.ids.length} active managed connections — resolve the duplicate in Settings › Connections before reconnecting.`,
           };
         }
         // Not connected: render the inline connect card. It drives the OAuth
@@ -122,7 +122,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           status: "pending_interaction",
           interaction: {
             appId: "connector",
-            promptText: `To connect ${toolkit}, open the Connector dashboard and click Connect for "${toolkit}" to authorize.`,
+            promptText: `To connect ${toolkit}, open Settings › Connections and click Connect for "${toolkit}" to authorize.`,
             render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
           },
         };

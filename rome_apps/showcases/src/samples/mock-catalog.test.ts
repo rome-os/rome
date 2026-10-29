@@ -56,12 +56,12 @@ describe("MOCK_PRESET_CATALOG", () => {
     }
   });
 
-  it("points the Connect card at the Connector app and offers an app-store card", () => {
+  it("points the Connect card at Settings › Connections and offers an app-store card", () => {
     const system = MOCK_PRESET_CATALOG.categories.find((c) => c.id === "system");
     expect(system).toBeDefined();
 
     const connect = system?.items.find((i) => i.id === "connect-apps");
-    expect(connect?.mainCta?.href).toBe("/apps/connector");
+    expect(connect?.mainCta?.navigate).toEqual({ path: "settings", tab: "connections" });
 
     const store = system?.items.find((i) => i.id === "browse-apps");
     expect(store?.mainCta?.href).toBe("https://romeos.cc/store");
