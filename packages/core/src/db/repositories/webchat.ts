@@ -1661,6 +1661,18 @@ export class WebChatRepository {
                 and "copy".rowid < ${romeAgentMessages}.rowid
             )`,
           ),
+          // A reply shown as several messages keeps its other parts' ids beside
+          // its row, so a part another account received is a copy of it too.
+          or(
+            isNull(romeAgentMessages.platformMessageId),
+            sql`not exists (
+              select 1 from ${romeAgentMessagePlatformIds} as "part"
+              join ${romeAgentMessages} as "whole" on "whole"."id" = "part"."message_id"
+              where "part"."session_id" in ${chats}
+                and "part"."platform_message_id" = ${romeAgentMessages.platformMessageId}
+                and "whole".rowid < ${romeAgentMessages}.rowid
+            )`,
+          ),
         ),
       )
       .orderBy(desc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid desc`)

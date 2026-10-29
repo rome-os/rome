@@ -179,6 +179,45 @@ describe("StoredMessages reads", () => {
     expect(older.messages.map((m) => m.platformMessageId)).toEqual(["m-2"]);
   });
 
+  it("reads a reply shown as several messages once, whichever account heard its parts", async () => {
+    const support = await rows.ensureChannelChat({
+      channel: "telegram",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const sales = await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const reply = (first: string, second: string) =>
+      rows.recordOutboundConversationMessage({
+        sessionId: support.id,
+        content: textContent(`${first} ${second}`),
+        platformMessageId: first,
+        otherPlatformMessageIds: [second],
+        senderId: "rome",
+        senderName: "Rome",
+        knownToProvider: false,
+      });
+    const read = async () =>
+      (await messages.recent(group, 10)).messages.map((message) => message.body.text);
+
+    // Sales hears the parts after Rome recorded its reply: the reply stands.
+    await reply("p-1", "p-2");
+    await said(sales.id, "p-1", minute(1), "p-1");
+    await said(sales.id, "p-2", minute(1), "p-2");
+    expect(await read()).toEqual(["p-1 p-2"]);
+
+    // Sales hears the parts first: they stand, and the reply adds nothing.
+    await said(sales.id, "q-1", minute(2), "q-1");
+    await said(sales.id, "q-2", minute(2), "q-2");
+    await reply("q-1", "q-2");
+    expect((await read()).sort()).toEqual(["p-1 p-2", "q-1", "q-2"]);
+  });
+
   it("keeps a direct message to the one of Rome's accounts it was written to", async () => {
     // Telegram keys a direct message by the other person, so Alice writing to
     // two of Rome's bots leaves two chats at one address.
