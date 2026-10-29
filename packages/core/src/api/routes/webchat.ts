@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   context as otelContext,
   trace as otelTrace,
@@ -52,7 +53,7 @@ import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
-import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
@@ -80,6 +81,7 @@ import {
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
 import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import type { DashboardInbox } from "../../chats/send.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
@@ -202,6 +204,34 @@ function buildTurnFeedbackProcessingPrompt(
 
 type StoredWebchatSession = NonNullable<Awaited<ReturnType<ApiDeps["webchatRepo"]["getSession"]>>>;
 type SessionLookupResult = { session: StoredWebchatSession } | { response: Response };
+
+/** A route's answer, made without a request, so an in-process caller takes
+ *  the same path the route does. */
+export interface RouteAnswer {
+  status: ContentfulStatusCode;
+  body: Record<string, unknown>;
+}
+
+function answer(body: Record<string, unknown>, status: ContentfulStatusCode = 200): RouteAnswer {
+  return { status, body };
+}
+
+function routeError(refused: RouteAnswer): string {
+  const { error } = refused.body;
+  return typeof error === "string" && error ? error : `HTTP ${refused.status}`;
+}
+
+/** What `POST /chat/sessions` takes. */
+export interface NewChatBody {
+  name?: string;
+  personaId?: string;
+  projectName?: string | null;
+  projectPath?: string | null;
+  largeModelSelection?: string;
+  reasoningEffort?: string;
+  agentName?: string | null;
+  deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
+}
 
 function isStoredWebchatSession(session: StoredWebchatSession): boolean {
   return session.type === "webchat" || session.type === "webchat_handoff";
@@ -745,6 +775,17 @@ export interface WebchatRuntime {
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
+  /** The dashboard's side of a send into one of its chats (chats/send.ts). */
+  post: DashboardInbox["post"];
+  /** Start a chat for the guardian, as `POST /chat/sessions` does, and answer
+   *  its id. Throws the route's error. */
+  startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  /** Whether the chat is running a turn now. */
+  isRunning(sessionId: string): boolean;
+  /** Ids of the chat's turns whose streams have not ended, running or queued. */
+  activeTurns(sessionId: string): string[];
+  /** Stop a turn. A turn that already ended is not an error. */
+  interruptTurn(turnId: string): Promise<void>;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -865,17 +906,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return !!row?.providerThreadId;
   };
 
+  const findContinuableSession = async (sessionId: string) => {
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (!session) return null;
+    return isStoredWebchatSession(session) || (await isContinuableFork(session)) ? session : null;
+  };
+
   const getContinuableSession = async (
     c: Context,
     sessionId: string,
   ): Promise<SessionLookupResult> => {
-    const session = await deps.webchatRepo.getSession(sessionId);
-    if (!session) {
-      return { response: c.json({ error: "Session not found" }, 404) as Response };
-    }
-    if (isStoredWebchatSession(session) || (await isContinuableFork(session))) {
-      return { session };
-    }
+    const session = await findContinuableSession(sessionId);
+    if (session) return { session };
     return { response: c.json({ error: "Session not found" }, 404) as Response };
   };
 
@@ -2302,36 +2344,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   });
 
-  app.post("/chat/sessions", async (c) => {
-    const body = await c.req
-      .json<{
-        name?: string;
-        personaId?: string;
-        projectName?: string | null;
-        projectPath?: string | null;
-        largeModelSelection?: string;
-        reasoningEffort?: string;
-        agentName?: string | null;
-        deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
-      }>()
-      .catch(
-        () =>
-          ({}) as {
-            name?: string;
-            personaId?: string;
-            projectName?: string | null;
-            projectPath?: string | null;
-            largeModelSelection?: string;
-            reasoningEffort?: string;
-            agentName?: string | null;
-            deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
-          },
-      );
+  /** Start a dashboard chat owned by `ownerKey`, as `POST /chat/sessions` does. */
+  const startChat = async (body: NewChatBody, ownerKey: string | null): Promise<RouteAnswer> => {
     let deviceFolder: DeviceFolder | null = null;
     if (body.deviceFolder) {
       const { deviceId, path } = body.deviceFolder;
       if (typeof deviceId !== "string" || !deviceId || typeof path !== "string" || !path) {
-        return c.json({ error: "deviceFolder requires deviceId and path" }, 400);
+        return answer({ error: "deviceFolder requires deviceId and path" }, 400);
       }
       // A chat works in a project or a device folder, never both.
       let requestedProject: string;
@@ -2343,7 +2362,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         requestedProject = "";
       }
       if (requestedProject !== DEFAULT_WEBCHAT_PROJECT_NAME) {
-        return c.json({ error: "A chat cannot have both a project and a device folder" }, 400);
+        return answer({ error: "A chat cannot have both a project and a device folder" }, 400);
       }
       // Store the real path the device reports, plus a name and platform snapshot,
       // so the prompt names the folder even while the device is offline.
@@ -2353,7 +2372,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         deps.nodeDevices.listFiles(deviceId, path),
         deps.nodeDevices.listDevices(),
       ]);
-      if (!listing.ok) return c.json({ error: listing.code }, 409);
+      if (!listing.ok) return answer({ error: listing.code }, 409);
       const device = list?.devices.find((item) => item.id === deviceId);
       deviceFolder = {
         deviceId,
@@ -2371,7 +2390,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Internal error";
-      return c.json({ error: message }, getWebchatProjectErrorStatus(message));
+      return answer({ error: message }, getWebchatProjectErrorStatus(message));
     }
     const modelSelection = await resolveRequestedInitialModelSelection(body.largeModelSelection);
     const personaId = await resolveRequestedPersonaId(body.personaId);
@@ -2382,7 +2401,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const requestedAgentName = body.agentName?.trim() || null;
     if (requestedAgentName && !isCoreMainAgentId(requestedAgentName)) {
       if (!deps.agentLoader.has(requestedAgentName)) {
-        return c.json({ error: `Agent "${requestedAgentName}" not found` }, 400);
+        return answer({ error: `Agent "${requestedAgentName}" not found` }, 400);
       }
     }
     const storedAgentName =
@@ -2400,12 +2419,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       storedAgentName,
       "webchat",
       null,
-      { ownerKey: sessionOwnerKey(await currentSessionActor()) },
+      { ownerKey },
       deviceFolder,
     );
     const createdSession = await deps.webchatRepo.getSession(id);
     if (!createdSession) {
-      return c.json({ error: "Failed to create session" }, 500);
+      return answer({ error: "Failed to create session" }, 500);
     }
     // Audit counterpart of webchat_session_deleted: the durable signal for
     // guardian-initiated chat creation. Keep the payload free of the
@@ -2419,7 +2438,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       deviceFolder: deviceFolder !== null,
       ...(await sessionActorLogAttributes()),
     });
-    return c.json(toWebchatSessionResponse(createdSession, 0));
+    return answer(toWebchatSessionResponse(createdSession, 0));
+  };
+
+  app.post("/chat/sessions", async (c) => {
+    const body = await c.req.json<NewChatBody>().catch(() => ({}) as NewChatBody);
+    const started = await startChat(body, sessionOwnerKey(await currentSessionActor()));
+    return c.json(started.body, started.status);
   });
 
   app.patch("/chat/sessions/:id/project", async (c) => {
@@ -2992,25 +3017,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // Precise per-turn interrupt. Targeting by turnId (instead
   // of "the running stream on this session") avoids race conditions when a
   // turn finishes between the user clicking Stop and the request landing.
-  app.post("/chat/turns/:turnId/interrupt", async (c) => {
-    const turnId = c.req.param("turnId");
+  /** Stop the turn `turnId`, as `POST /chat/turns/:turnId/interrupt` does. */
+  const interruptTurn = async (turnId: string): Promise<RouteAnswer> => {
     const stream = streamsByTurnId.get(turnId);
     const agentTurnStream = deps.agentTurnStreamRegistry.get(turnId);
     if ((!stream || stream.finished) && (!agentTurnStream || agentTurnStream.finished)) {
-      return c.json({ stopped: false, reason: "no_running_turn" }, 404);
+      return answer({ stopped: false, reason: "no_running_turn" }, 404);
     }
     if (!stream && agentTurnStream) {
       if (!agentTurnStream.interrupt) {
-        return c.json({ stopped: false, reason: "turn_not_interruptible" }, 409);
+        return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
       }
       await agentTurnStream.interrupt("user-stop");
-      return c.json({ stopped: agentTurnStream.finished }, agentTurnStream.finished ? 200 : 202);
+      return answer({ stopped: agentTurnStream.finished }, agentTurnStream.finished ? 200 : 202);
     }
-    if (!stream) return c.json({ stopped: false, reason: "no_running_turn" }, 404);
+    if (!stream) return answer({ stopped: false, reason: "no_running_turn" }, 404);
     log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
     if (stream.interrupt) {
       await stream.interrupt("user-stop");
-      return c.json({ stopped: stream.finished }, stream.finished ? 200 : 202);
+      return answer({ stopped: stream.finished }, stream.finished ? 200 : 202);
     }
     // A stream without a turn-bound interrupt can only be cancelled through
     // its live session owner. Require the exact active turn so a queued turn
@@ -3020,14 +3045,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
     });
     if (!agentSess || agentSess.currentTurnId !== turnId) {
-      return c.json({ stopped: false, reason: "turn_not_interruptible" }, 409);
+      return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
     await agentSess.interrupt("user-stop", turnId);
-    return c.json({ stopped: true });
+    return answer({ stopped: true });
+  };
+
+  app.post("/chat/turns/:turnId/interrupt", async (c) => {
+    const stopped = await interruptTurn(c.req.param("turnId"));
+    return c.json(stopped.body, stopped.status);
   });
 
-  app.get("/chat/sessions/:id/turns", (c) => {
-    const sessionId = c.req.param("id");
+  /** A chat's turns whose streams have not ended, running or queued. */
+  const sessionTurns = (sessionId: string) => {
     const list = activeStreams.get(sessionId) ?? [];
     const registeredTurns = deps.agentTurnStreamRegistry.listBySession(sessionId).map((stream) => ({
       turnId: stream.turnId,
@@ -3035,7 +3065,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       startedAt: stream.startedAt,
       status: "running" as const,
     }));
-    return c.json([
+    return [
       ...list
         .filter((s) => !s.finished)
         .map((s) => ({
@@ -3054,8 +3084,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               : "queued",
         })),
       ...registeredTurns,
-    ]);
-  });
+    ];
+  };
+
+  app.get("/chat/sessions/:id/turns", (c) => c.json(sessionTurns(c.req.param("id"))));
 
   app.get("/chat/turns/:turnId/stream", (c) => {
     const turnId = c.req.param("turnId");
@@ -3248,21 +3280,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   const handleChatSend = async (
-    c: Context,
     sessionId: string | undefined,
     body: SendBody,
-  ): Promise<Response> => {
+    said: { saidBy?: Account } = {},
+  ): Promise<RouteAnswer> => {
     if (
       body.inputId &&
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.inputId)
     ) {
-      return c.json({ error: "inputId must be a UUID" }, 400);
+      return answer({ error: "inputId must be a UUID" }, 400);
     }
     const inputId = body.inputId ?? randomUUID();
     const uploadedFiles = Array.isArray(body.files) ? body.files : [];
     const priority = inputPrioritySchema.safeParse(body.priority);
     if (!priority.success) {
-      return c.json({ error: 'priority must be "now" or "next"' }, 400);
+      return answer({ error: 'priority must be "now" or "next"' }, 400);
     }
 
     // A resolution from an app interaction surface is a valid turn trigger even
@@ -3284,19 +3316,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       !sessionId ||
       (!body.text?.trim() && uploadedFiles.length === 0 && !resolution && !skillName)
     ) {
-      return c.json({ error: "session id and text or files are required" }, 400);
+      return answer({ error: "session id and text or files are required" }, 400);
     }
 
-    const lookup = await getContinuableSession(c, sessionId);
-    if ("response" in lookup) return lookup.response;
-    const { session } = lookup;
+    const session = await findContinuableSession(sessionId);
+    if (!session) return answer({ error: "Session not found" }, 404);
 
     // Defense in depth: an archived top-level chat is read-only. The composer is
     // hidden client-side, but the server must also refuse turns so a stale tab or
     // direct API call can't write into an archived thread. Scoped to top-level
     // webchat — handoff children never carry the flag.
     if (session.type === "webchat" && session.archivedAt) {
-      return c.json({ error: "This chat is archived and read-only" }, 409);
+      return answer({ error: "This chat is archived and read-only" }, 409);
     }
 
     // A branch is visible in the sidebar from its 201, but its provider thread
@@ -3309,7 +3340,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         session.agentName ?? "main",
       );
       if (!branchThread?.providerThreadId) {
-        return c.json(
+        return answer(
           {
             error:
               "This side chat's thread isn't ready — its first answer is still running or did not complete.",
@@ -3328,7 +3359,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const openSuspensions = await findOpenSuspensions(deps.webchatRepo, sessionId);
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
-      return c.json({ error: "No open interaction matches this toolUseId" }, 400);
+      return answer({ error: "No open interaction matches this toolUseId" }, 400);
     }
     // A handback (not a dismissal) carries the card's hint into the resuming
     // prompt, so the caller learns its exact next step instead of a bare
@@ -3346,10 +3377,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let reply: Extract<ReplyResolution, { ok: true }> | undefined;
     if (!resolution && body.replyToMessageId !== undefined && body.replyToMessageId !== "") {
       if (typeof body.replyToMessageId !== "string") {
-        return c.json({ error: "replyToMessageId must be a string" }, 400);
+        return answer({ error: "replyToMessageId must be a string" }, 400);
       }
       if (body.replyQuote !== undefined && typeof body.replyQuote !== "string") {
-        return c.json({ error: "replyQuote must be a string" }, 400);
+        return answer({ error: "replyQuote must be a string" }, 400);
       }
       const resolved = await resolveReply(deps, {
         sessionId,
@@ -3361,7 +3392,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
             .finalText === "private",
       });
-      if (!resolved.ok) return c.json({ error: resolved.error }, 400);
+      if (!resolved.ok) return answer({ error: resolved.error }, 400);
       reply = resolved;
     }
 
@@ -3374,7 +3405,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       storedProject = await ensureStoredProjectSelection(sessionProjectPath);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Internal error";
-      return c.json({ error: message }, getWebchatProjectErrorStatus(message));
+      return answer({ error: message }, getWebchatProjectErrorStatus(message));
     }
     const sessionProjectName = storedProject.name;
     const workingDir = resolveWebchatProjectPath(storedProject.path, projectsRoot);
@@ -3399,7 +3430,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     } catch (err) {
       const message = err instanceof Error ? err.message : "Internal error";
       const status = /unavailable|required|missing|empty/.test(message) ? 400 : 500;
-      return c.json({ error: message }, status);
+      return answer({ error: message }, status);
     }
 
     // A resolution feeds the model the server-built outcome prompt; the raw
@@ -3508,7 +3539,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const agentName = session.agentName ?? "main";
     if (!isCoreMainAgentId(agentName)) {
       if (!deps.agentLoader.has(agentName)) {
-        return c.json(
+        return answer(
           {
             error: `Agent "${agentName}" is unavailable. The owning app may have been uninstalled.`,
           },
@@ -3555,11 +3586,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         sessionId,
         userContent,
         await currentSessionActor(),
+        said.saidBy,
       ))
     ) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
-      if (!existing) return c.json({ error: "inputId is already in use" }, 409);
-      return c.json({
+      if (!existing) return answer({ error: "inputId is already in use" }, 409);
+      return answer({
         inputId,
         turnId: existing.turnId,
         sessionId,
@@ -3641,10 +3673,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           return { success: false, ...modelError };
         });
 
-        return c.json({ turnId, sessionId, startedAt: stream.startedAt });
+        return answer({ turnId, sessionId, startedAt: stream.startedAt });
       }
       const message = err instanceof Error ? err.message : "Failed to open agent session";
-      return c.json({ error: message }, 500);
+      return answer({ error: message }, 500);
     }
 
     // POST span goes on as a Link, not a parent: the response returns
@@ -4181,7 +4213,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const input = { inputId, prompt: promptText, reasoningEffort };
     const receipt = agentSess.submitInput(input, options);
     const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
-    return c.json({
+    return answer({
       ...receipt,
       sessionId,
       startedAt: stream?.startedAt ?? new Date().toISOString(),
@@ -4190,8 +4222,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
-    const id = c.req.param("id");
-    return handleChatSend(c, id, body);
+    const sent = await handleChatSend(c.req.param("id"), body);
+    return c.json(sent.body, sent.status);
   });
 
   const runEnqueuedTask = async (sessionId: string, task: BackendSessionTask): Promise<void> => {
@@ -4363,6 +4395,43 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     async hasStoredSession(sessionId) {
       const session = await deps.webchatRepo.getSession(sessionId);
       return Boolean(session && isStoredWebchatSession(session));
+    },
+    async post(chatId, body, as) {
+      if (!deps.agentLoader.has(as.id)) {
+        return { ok: false, error: `No agent ${as.id} to say it as` };
+      }
+      const inputId = randomUUID();
+      const sent = await handleChatSend(chatId, { inputId, text: body.text }, { saidBy: as });
+      if (sent.status >= 400) {
+        // Once the input is recorded it is said, even when the agent could not
+        // be woken on it: answering failed would invite a second message.
+        if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
+          return { ok: false, error: routeError(sent) };
+        }
+        log.warn("dashboard send recorded but its agent was not woken", {
+          chatId,
+          inputId,
+          error: routeError(sent),
+        });
+      }
+      return { ok: true, messageId: inputId, at: new Date() };
+    },
+    async startChat(input) {
+      // A chat an agent starts on the guardian's dashboard is the guardian's.
+      const started = await startChat(input, "guardian");
+      const id = started.body.id;
+      if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
+      return id;
+    },
+    isRunning: isSessionRunning,
+    activeTurns: (sessionId) =>
+      sessionTurns(sessionId).map(
+        (turn) => ("agentTurnId" in turn ? turn.agentTurnId : undefined) ?? turn.turnId,
+      ),
+    async interruptTurn(turnId) {
+      const stopped = await interruptTurn(turnId);
+      // 404: the turn ended before the stop landed.
+      if (stopped.status >= 400 && stopped.status !== 404) throw new Error(routeError(stopped));
     },
   };
 

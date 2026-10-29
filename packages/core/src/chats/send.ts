@@ -10,6 +10,10 @@
 // send goes out on the channel of the one of Rome's accounts that says it.
 // Delivery is answered, not stored: the message is recorded once the platform
 // took it, and a refused one is not recorded, until storage holds a delivery.
+//
+// A dashboard chat is the exception. Rome is its platform, so a send there is
+// said as an agent's dashboard account and wakes the chat's agent, the way the
+// guardian's composer does.
 
 import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, SentMessage } from "@rome/api-types/people";
@@ -73,6 +77,26 @@ export interface SendIntoPlaceDeps extends SendDeps {
   /** Rome's own account on a channel, which a send names as `as`. Absent, no
    *  channel answers to one. */
   accountOf?: ChannelRecordsRepository["accountOf"];
+  /** Where a send into a dashboard chat goes. Absent, the dashboard takes no
+   *  sends. */
+  dashboard?: DashboardInbox;
+}
+
+/** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
+export const DASHBOARD_PLATFORM = platformOf(WEBCHAT_CHANNEL);
+
+/**
+ * The dashboard's side of a send. Rome is the dashboard's platform, so there
+ * is nobody else to ask: the message is said once it is recorded, and the
+ * chat's agent wakes on it as it does on the guardian's. Each agent has its
+ * own account there, named by the agent's id.
+ */
+export interface DashboardInbox {
+  post(
+    chatId: string,
+    body: Body,
+    as: Account,
+  ): Promise<{ ok: true; messageId: string; at: Date } | { ok: false; error: string }>;
 }
 
 /** What a message says. Text only, for now. */
@@ -120,6 +144,7 @@ export async function send(
   as?: Sender,
 ): Promise<SendResult> {
   const platform = place.chat.platform;
+  if (platform === DASHBOARD_PLATFORM) return await sendOnDashboard(deps, place, body, as);
   // Absent `as`, Rome has to hold one account on the platform. With none or
   // several, no Connection answers for the place as such, and connecting or
   // removing an account is what settles it, so it reads as not connected. A
@@ -135,10 +160,7 @@ export async function send(
   }
   const channel = sender && deps.channels.find((candidate) => candidate.name === sender);
   if (!channel) return { ok: false, send: "not-connected" };
-  // The dashboard's channel writes its own transcript of what it is handed,
-  // so recording it here too would show one message twice. Its chats take
-  // sends once they move onto this service.
-  if (!channel.send || channel.name === WEBCHAT_CHANNEL) return { ok: false, send: "unsupported" };
+  if (!channel.send) return { ok: false, send: "unsupported" };
 
   const address = addressOf(place);
   let messageId: string | null;
@@ -161,6 +183,45 @@ export async function send(
       timestamp: Math.floor(at.getTime() / 1000),
     },
     delivery: { state: "sent", at },
+  };
+}
+
+/**
+ * A send into a dashboard chat. It names the agent account that says it,
+ * since every agent holds one there and none is the dashboard's only one. A
+ * dashboard chat has no threads.
+ */
+async function sendOnDashboard(
+  deps: SendIntoPlaceDeps,
+  place: Place,
+  body: Body,
+  as: Sender | undefined,
+): Promise<SendResult> {
+  if (as === undefined || "channel" in as || as.platform !== DASHBOARD_PLATFORM) {
+    return {
+      ok: false,
+      invalid: "A send into a dashboard chat names the agent account it is from",
+    };
+  }
+  if (place.threadId !== undefined) {
+    return { ok: false, invalid: "A dashboard chat has no threads" };
+  }
+  if (!deps.dashboard) return { ok: false, send: "unsupported" };
+  const posted = await deps.dashboard.post(place.chat.id, body, as);
+  if (!posted.ok) {
+    return {
+      ok: false,
+      error: posted.error,
+      delivery: { state: "failed", error: posted.error, at: new Date() },
+    };
+  }
+  return {
+    ok: true,
+    sent: {
+      ref: `${place.chat.id}:${posted.messageId}`,
+      timestamp: Math.floor(posted.at.getTime() / 1000),
+    },
+    delivery: { state: "sent", at: posted.at },
   };
 }
 

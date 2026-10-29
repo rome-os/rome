@@ -48,7 +48,7 @@ import type {
   TraceSubagentStartEvent,
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { RomeSessionType } from "@rome-os/app-runtime";
+import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
@@ -2142,11 +2142,17 @@ export class WebChatRepository {
     return rows[0]?.count ?? 0;
   }
 
+  /**
+   * Record a dashboard input. `saidBy` is the agent account that said it when
+   * an agent, not the guardian, sends into the chat; its id is kept as the
+   * sender, since the account's platform is the chat's.
+   */
   async recordUserInput(
     id: string,
     sessionId: string,
     content: string,
     actor?: SessionActor,
+    saidBy?: Account,
   ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2159,6 +2165,7 @@ export class WebChatRepository {
           role: "user",
           inputState: "queued",
           actor: actor ?? null,
+          senderId: saidBy?.id ?? null,
           createdAt,
         })
         .onConflictDoNothing()
@@ -3199,6 +3206,7 @@ export class WebChatRepository {
         id: romeAgentMessages.id,
         role: romeAgentMessages.role,
         content: romeAgentMessages.content,
+        senderId: romeAgentMessages.senderId,
       })
       .from(romeAgentMessages)
       .where(

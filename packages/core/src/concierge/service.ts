@@ -1,7 +1,10 @@
 // Concierge: one fixed texting-style conversation that hands work to task
 // chats. Design: rome-os/rome#1344.
 
-import type { BackendTurnParams } from "@rome-os/app-runtime";
+import type { Account, BackendTurnParams } from "@rome-os/app-runtime";
+import type { MessageRepository } from "../chats/message-repository.js";
+import type { Place } from "../chats/place.js";
+import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../chats/send.js";
 import type { AIToolStateValue } from "../core/ai-tool-state.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -9,7 +12,6 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { SessionManager } from "../core/session-manager.js";
 import type { ModelSelectionId } from "../core/model-selector.js";
 import { createLogger } from "../logger.js";
-import type { ChatApi } from "./chat-api.js";
 
 const log = createLogger("concierge");
 
@@ -21,9 +23,34 @@ export const CONCIERGE_CHAT_ID = "concierge";
 const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** `rome_sessions.trigger_kind` of a task chat Concierge started. */
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
+/** Concierge's own account on the dashboard, which says what it sends into a
+ *  task chat. */
+export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
 
 export function isConciergeAgent(agentName: string | null | undefined): boolean {
   return agentName === CONCIERGE_AGENT_ID || agentName === "concierge";
+}
+
+/**
+ * The dashboard's chat operations a task chat needs beyond saying something
+ * in it: starting the chat, and its turns' state. They belong to the
+ * dashboard and to Agents, not to Chats.
+ */
+export interface TaskChats {
+  /** Start a chat for the guardian and answer its id. */
+  startChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
+  isRunning(chatId: string): boolean;
+  /** Ids of the chat's turns whose streams have not ended, running or queued. */
+  activeTurns(chatId: string): string[];
+  interruptTurn(turnId: string): Promise<void>;
+}
+
+/** The dashboard as Concierge reaches it. The API layer builds it after
+ *  Concierge, so it is attached once that layer is up. */
+export interface ConciergeDashboard {
+  chats: TaskChats;
+  /** Chats' ordinary send (chats/send.ts), with the dashboard able to take it. */
+  send(place: Place, body: Body, as: Account): Promise<SendResult>;
 }
 
 export interface ConciergeDeps {
@@ -32,29 +59,36 @@ export interface ConciergeDeps {
     WebChatRepository,
     | "createSession"
     | "getSession"
-    | "getMessages"
+    | "listSessions"
+    | "updateSessionName"
     | "getTurnChatMessages"
     | "addBackendMessage"
     | "setSessionTrigger"
     | "listProjects"
   >;
+  messages: Pick<MessageRepository, "recent" | "before">;
   sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
-  chatApi: ChatApi;
   /** Runs a system turn in a chat and waits for it to end. */
   runBackendTurn: (params: BackendTurnParams) => Promise<void>;
 }
 
-/**
- * Holds the in-process state Concierge needs between a turn and its
- * lifecycle event: which task-chat inputs it posted.
- * The state is advisory and lost on restart.
- */
 export class ConciergeService {
-  private readonly postedInputs = new Set<string>();
   private creating: Promise<string> | null = null;
+  private attached: ConciergeDashboard | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
+
+  attachDashboard(dashboard: ConciergeDashboard): void {
+    this.attached = dashboard;
+  }
+
+  /** The dashboard. Throws before the API layer has attached it, which no
+   *  turn can outrun, since turns start from that layer. */
+  get dashboard(): ConciergeDashboard {
+    if (!this.attached) throw new Error("The dashboard is not up yet");
+    return this.attached;
+  }
 
   async isEnabled(): Promise<boolean> {
     try {
@@ -135,21 +169,5 @@ export class ConciergeService {
       threadId: chatId,
       prompt,
     });
-  }
-
-  /** Records an input Concierge posts to a task chat. Its id is the user message's id. */
-  markPosted(inputId: string): void {
-    this.postedInputs.add(inputId);
-  }
-
-  /**
-   * Whether any of a finished task-chat turn's user messages is an input
-   * Concierge posted. Forgets those inputs. A follow-up the task chat queued
-   * or deferred sits under the turn that answered it, not the receipt's turn.
-   */
-  takePosted(messageIds: string[]): boolean {
-    let posted = false;
-    for (const id of messageIds) if (this.postedInputs.delete(id)) posted = true;
-    return posted;
   }
 }

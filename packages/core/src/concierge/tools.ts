@@ -1,14 +1,26 @@
 // Concierge's facade tools: `say` is its only way to speak, and the `chat_*`
 // tools run its task chats.
 
-import { randomUUID } from "node:crypto";
+import type { ChatId } from "@rome-os/app-runtime";
+import type { SaidMessage } from "../chats/message.js";
+import { chatKey, placeIn, type Place } from "../chats/place.js";
+import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
+import { DASHBOARD_PLATFORM, type SendResult } from "../chats/send.js";
+import {
+  CONVERSATION_TITLE_MAX_LENGTH,
+  conversationTitleLength,
+} from "../core/conversation-title.js";
 import type { FacadeToolDef } from "../core/mcp-facade.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
-import { type ConciergeService, isConciergeAgent, TASK_CHAT_TRIGGER_KIND } from "./service.js";
-import { latestAnswer, transcriptLines } from "./transcript.js";
+import {
+  CONCIERGE_ACCOUNT,
+  type ConciergeService,
+  isConciergeAgent,
+  TASK_CHAT_TRIGGER_KIND,
+} from "./service.js";
 
 const log = createLogger("concierge-tools");
 
@@ -28,9 +40,42 @@ function optionalString(args: Record<string, unknown>, field: string): string | 
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function statusOf(chat: { running: boolean; awaitingGuardian: boolean }): TaskStatus {
-  if (chat.running) return "running";
-  return chat.awaitingGuardian ? "waiting_input" : "idle";
+function statusOf(running: boolean, chat: { awaitingGuardian: boolean } | undefined): TaskStatus {
+  if (running) return "running";
+  return chat?.awaitingGuardian ? "waiting_input" : "idle";
+}
+
+/** A task chat is a direct message on the dashboard, read through its channel. */
+const DASHBOARD = { channel: WEBCHAT_CHANNEL };
+
+function taskChatPlace(chatId: string): Place {
+  return placeIn(chatKey(DASHBOARD_PLATFORM, chatId as ChatId));
+}
+
+function refusal(result: Exclude<SendResult, { ok: true }>): string {
+  if ("error" in result) return result.error;
+  if ("invalid" in result) return result.invalid;
+  return `The task chat cannot take a message (${result.send})`;
+}
+
+const hasText = (message: SaidMessage) => message.body.text.trim() !== "";
+
+/** The newest `limit` messages of a place that `keep` keeps, oldest first,
+ *  paging back past the rest, such as messages that carry only cards. */
+async function latestSaid(
+  messages: ConciergeService["deps"]["messages"],
+  place: Place,
+  limit: number,
+  keep: (message: SaidMessage) => boolean,
+): Promise<SaidMessage[]> {
+  const pageSize = Math.max(limit, MAX_READ_LIMIT);
+  const found: SaidMessage[] = [];
+  let page = await messages.recent(place, pageSize, DASHBOARD);
+  for (;;) {
+    found.unshift(...page.messages.filter(keep));
+    if (found.length >= limit || !page.older) return found.slice(-limit);
+    page = await messages.before(place, page.older, pageSize, DASHBOARD);
+  }
 }
 
 /**
@@ -44,7 +89,7 @@ export async function buildConciergeTools(
 ): Promise<FacadeToolDef[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
   if (!(await service.isEnabled())) return [];
-  const { webchatRepo, chatApi } = service.deps;
+  const { webchatRepo, messages } = service.deps;
 
   const currentTurn = (): { chatId: string; turnId: string } => {
     const turnId = context.getTurnId();
@@ -71,15 +116,15 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // Marked before posting, so the turn that answers it already finds the mark.
-  const postInput = async (chatId: string, text: string) => {
-    const inputId = randomUUID();
-    service.markPosted(inputId);
-    return await chatApi.postTurn(chatId, text, inputId);
+  // Said as Concierge's account, so the task event reads who asked off the
+  // message.
+  const sendInput = async (chatId: string, text: string) => {
+    const sent = await service.dashboard.send(taskChatPlace(chatId), { text }, CONCIERGE_ACCOUNT);
+    if (!sent.ok) throw new Error(refusal(sent));
   };
 
   const findListEntry = async (chatId: string) =>
-    (await chatApi.listChats()).find((chat) => chat.id === chatId);
+    (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
   const say = async (text: string, format: "bubble" | "long") => {
     const { chatId, turnId } = currentTurn();
@@ -155,7 +200,7 @@ export async function buildConciergeTools(
           currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
-          const chatId = await chatApi.createChat({
+          const chatId = await service.dashboard.chats.startChat({
             agentName: optionalString(args, "agent"),
             projectPath: await taskProjectPath(optionalString(args, "project")),
           });
@@ -164,16 +209,22 @@ export async function buildConciergeTools(
             triggerKind: TASK_CHAT_TRIGGER_KIND,
             triggerName: title,
           });
-          const turn = await postInput(chatId, brief);
+          await sendInput(chatId, brief);
           // Named after the first turn: the first message would rename it.
-          await chatApi.renameChat(chatId, title).catch((error: unknown) =>
-            log.warn("failed to name a task chat", {
-              chatId,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+          if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
+            // The task already runs, so a failure here must not read as a
+            // failed start that the agent retries.
+            await webchatRepo.updateSessionName(chatId, title).catch((error: unknown) =>
+              log.warn("failed to name a task chat", {
+                chatId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          } else {
+            log.warn("task chat title too long to name the chat", { chatId });
+          }
           if (args.card === true) await showCard(chatId, title);
-          return { chatId, turnId: turn.turnId };
+          return { chatId };
         }),
     },
     {
@@ -194,7 +245,8 @@ export async function buildConciergeTools(
           currentTurn();
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
-          return await postInput(chatId, requireString(args, "text"));
+          await sendInput(chatId, requireString(args, "text"));
+          return "Sent; the task chat takes it as input.";
         }),
     },
     {
@@ -222,12 +274,19 @@ export async function buildConciergeTools(
             typeof args.last === "number"
               ? Math.min(MAX_READ_LIMIT, Math.max(1, Math.floor(args.last)))
               : DEFAULT_READ_LIMIT;
-          const entry = await findListEntry(chatId);
+          const said = await latestSaid(messages, taskChatPlace(chatId), limit, hasText);
           return {
             chatId,
             title: chat.name,
-            status: entry ? statusOf(entry) : "idle",
-            messages: transcriptLines(await webchatRepo.getMessages(chatId), limit),
+            status: statusOf(
+              service.dashboard.chats.isRunning(chatId),
+              await findListEntry(chatId),
+            ),
+            messages: said.map((message) => ({
+              role: message.direction === "fromRome" ? "assistant" : "user",
+              text: message.body.text,
+              at: message.at.toISOString(),
+            })),
           };
         }),
     },
@@ -244,8 +303,9 @@ export async function buildConciergeTools(
         runFacadeTool("chat_stop", input, async (args) => {
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
-          const turns = await chatApi.activeTurns(chatId);
-          for (const turnId of turns) await chatApi.interruptTurn(turnId);
+          const { chats } = service.dashboard;
+          const turns = chats.activeTurns(chatId);
+          for (const turnId of turns) await chats.interruptTurn(turnId);
           return { stopped: turns.length };
         }),
     },
@@ -259,9 +319,14 @@ export async function buildConciergeTools(
       handler: (input) =>
         runFacadeTool("chat_list", input, async (args) => {
           const wanted = TASK_STATUSES.find((status) => status === args.status);
-          return (await chatApi.listChats())
+          const { chats } = service.dashboard;
+          return (await webchatRepo.listSessions("all"))
             .filter((chat) => chat.triggerKind === TASK_CHAT_TRIGGER_KIND && !chat.archivedAt)
-            .map((chat) => ({ chatId: chat.id, title: chat.name, status: statusOf(chat) }))
+            .map((chat) => ({
+              chatId: chat.id,
+              title: chat.name,
+              status: statusOf(chats.isRunning(chat.id), chat),
+            }))
             .filter((chat) => !wanted || chat.status === wanted);
         }),
     },
@@ -282,7 +347,13 @@ export async function buildConciergeTools(
         runFacadeTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
-          const answer = latestAnswer(await webchatRepo.getMessages(chatId));
+          const [latest] = await latestSaid(
+            messages,
+            taskChatPlace(chatId),
+            1,
+            (message) => message.direction === "fromRome" && hasText(message),
+          );
+          const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
           const intro = optionalString(args, "intro");
           if (intro) await say(intro, "bubble");

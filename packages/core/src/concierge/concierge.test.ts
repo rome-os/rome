@@ -1,17 +1,22 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
+import type { Account, AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MessagePage } from "../chats/message-repository.js";
+import type { SaidMessage } from "../chats/message.js";
+import type { Place } from "../chats/place.js";
+import type { Body, SendResult } from "../chats/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
-import type { ChatApi } from "./chat-api.js";
 import { startConciergeEvents } from "./events.js";
 import { NUDGE_PROMPT } from "./nudge.js";
 import {
+  CONCIERGE_ACCOUNT,
   CONCIERGE_AGENT_ID,
   CONCIERGE_CHAT_ID,
   ConciergeService,
   type ConciergeDeps,
+  type TaskChats,
 } from "./service.js";
 import { buildConciergeTools } from "./tools.js";
 
@@ -21,8 +26,33 @@ interface Row {
   id?: string;
   role: string;
   content: string;
+  senderId?: string;
   /** Unset rows belong to every turn. */
   turnId?: string;
+}
+
+const textOf = (content: string): string => {
+  const parts = JSON.parse(content) as Array<{ type: string; content?: string }>;
+  return parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.content)
+    .join("\n");
+};
+
+/** The rows of a chat as a read of its place pages them, newest back. */
+function pageOf(rows: Row[], place: Place, end: number, limit: number): MessagePage {
+  const start = Math.max(0, end - limit);
+  const messages: SaidMessage[] = rows.slice(start, end).map((row, index) => ({
+    id: row.id ?? `row-${start + index}`,
+    direction: row.role === "assistant" ? "fromRome" : "toRome",
+    place,
+    body: { text: textOf(row.content) },
+    at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
+  }));
+  return {
+    messages,
+    older: start > 0 ? { at: messages[0].at, id: String(start) } : null,
+  };
 }
 
 function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
@@ -32,34 +62,39 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
   const posted: string[] = [];
-  /** The receipt `postTurn` answers with next. */
-  let receipt: { turnId: string; disposition: "started" | "queued" | "steering" } = {
-    turnId: "task-turn-1",
-    disposition: "started",
-  };
+  /** What the next send answers when it is refused. */
+  let refuseWith: Exclude<SendResult, { ok: true }> | null = null;
   const backendTurns: BackendTurnParams[] = [];
   const order: string[] = [];
-  const chatApi: ChatApi = {
-    createChat: rs.fn(async () => {
+  const chats: TaskChats = {
+    startChat: rs.fn(async () => {
       sessions.set("task-1", { id: "task-1", name: "New Chat", triggerKind: null });
       return "task-1";
     }),
-    renameChat: rs.fn(async (chatId: string, name: string) => {
-      order.push("rename");
-      sessions.set(chatId, { ...sessions.get(chatId), name });
-    }),
-    postTurn: rs.fn(async (chatId: string, text: string, inputId?: string) => {
-      order.push("post");
-      const list = messages.get(chatId) ?? [];
-      list.push({ id: inputId, role: "user", content: text, turnId: receipt.turnId });
-      messages.set(chatId, list);
-      if (inputId) posted.push(inputId);
-      return receipt;
-    }),
-    listChats: rs.fn(async () => []),
-    activeTurns: rs.fn(async () => []),
+    isRunning: rs.fn(() => false),
+    activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
   };
+  const send = rs.fn(async (place: Place, body: Body, as: Account): Promise<SendResult> => {
+    if (refuseWith) return refuseWith;
+    order.push("post");
+    const id = `input-${posted.length + 1}`;
+    const list = messages.get(place.chat.id) ?? [];
+    list.push({
+      id,
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: body.text }]),
+      senderId: as.id,
+      turnId: "task-turn-1",
+    });
+    messages.set(place.chat.id, list);
+    posted.push(id);
+    return {
+      ok: true,
+      sent: { ref: `${place.chat.id}:${id}`, timestamp: 0 },
+      delivery: { state: "sent", at: new Date(0) },
+    };
+  });
   const deps = {
     settingsRepo: {
       get: async () => {
@@ -70,7 +105,11 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
     },
     webchatRepo: {
       getSession: async (id: string) => sessions.get(id) ?? null,
-      getMessages: async (id: string) => messages.get(id) ?? [],
+      listSessions: async () => [...sessions.values()],
+      updateSessionName: rs.fn(async (id: string, name: string) => {
+        order.push("rename");
+        sessions.set(id, { ...sessions.get(id), name });
+      }),
       getTurnChatMessages: async (id: string, turnId: string) =>
         (messages.get(id) ?? []).filter((row) => !row.turnId || row.turnId === turnId),
       addBackendMessage: rs.fn(async (chatId: string, _turnId: string, parts: unknown[]) => {
@@ -87,6 +126,14 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
     },
+    messages: {
+      recent: async (place: Place, limit: number) => {
+        const rows = messages.get(place.chat.id) ?? [];
+        return pageOf(rows, place, rows.length, limit);
+      },
+      before: async (place: Place, cursor: { id: string }, limit: number) =>
+        pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
+    },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
     aiToolState: {
       get: () => ({
@@ -94,7 +141,6 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
       }),
     },
-    chatApi,
     runBackendTurn: async (params: BackendTurnParams) => {
       backendTurns.push(params);
       await onBackendTurn(params);
@@ -102,6 +148,7 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
   } as unknown as ConciergeDeps;
   let onBackendTurn: (params: BackendTurnParams) => Promise<void> | void = () => {};
   const service = new ConciergeService(deps);
+  service.attachDashboard({ chats, send });
   const context = (agentName = CONCIERGE_AGENT_ID): SessionToolContext => ({
     agentName,
     channelThreadKey: `webchat:${CONCIERGE_CHAT}`,
@@ -160,7 +207,8 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
   return {
     service,
     deps,
-    chatApi,
+    chats,
+    send,
     messages,
     backendTurns,
     order,
@@ -169,8 +217,8 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
     tool,
     posted,
     assignInput,
-    setReceipt: (next: typeof receipt) => {
-      receipt = next;
+    refuseSends: (result: Exclude<SendResult, { ok: true }>) => {
+      refuseWith = result;
     },
     onBackendTurn: (handler: typeof onBackendTurn) => {
       onBackendTurn = handler;
@@ -213,8 +261,28 @@ describe("Concierge tools", () => {
       brief: "Find flights",
       card: true,
     });
-    expect(JSON.parse(result.content[0].text)).toEqual({ chatId: "task-1", turnId: "task-turn-1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({ chatId: "task-1" });
     expect(s.order).toEqual(["trigger", "post", "rename"]);
+    expect(s.send).toHaveBeenCalledWith(
+      { chat: { platform: "webchat", id: "task-1" } },
+      { text: "Find flights" },
+      CONCIERGE_ACCOUNT,
+    );
+    expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
+      { type: "task_chat", chatId: "task-1", title: "Flights" },
+    ]);
+  });
+
+  it("chat_start answers the started chat when naming it fails", async () => {
+    const s = setup();
+    rs.mocked(s.deps.webchatRepo.updateSessionName).mockRejectedValueOnce(new Error("disk full"));
+    const result = await s.tool("chat_start", {
+      title: "Flights",
+      brief: "Find flights",
+      card: true,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(result.content[0].text)).toEqual({ chatId: "task-1" });
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
       { type: "task_chat", chatId: "task-1", title: "Flights" },
     ]);
@@ -230,7 +298,7 @@ describe("Concierge tools", () => {
         brief: "Fix it",
         project: join(root, "rome-oss"),
       });
-      expect(s.chatApi.createChat).toHaveBeenCalledWith({
+      expect(s.chats.startChat).toHaveBeenCalledWith({
         agentName: undefined,
         projectPath: "rome-oss",
       });
@@ -248,7 +316,7 @@ describe("Concierge tools", () => {
       const result = await s.tool("chat_start", { title: "Fix", brief: "Fix it", project: "rome" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("one of: default, rome-oss");
-      expect(s.chatApi.createChat).not.toHaveBeenCalled();
+      expect(s.chats.startChat).not.toHaveBeenCalled();
     } finally {
       rs.unstubAllEnvs();
       rmSync(root, { recursive: true, force: true });
@@ -259,6 +327,81 @@ describe("Concierge tools", () => {
     const s = setup();
     const result = await s.tool("chat_send", { chatId: CONCIERGE_CHAT, text: "hi" });
     expect(result.isError).toBe(true);
+  });
+
+  it("chat_send says the follow-up as Concierge's account", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const result = await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
+    expect(result.isError).toBeFalsy();
+    expect(s.send).toHaveBeenLastCalledWith(
+      { chat: { platform: "webchat", id: "task-1" } },
+      { text: "Trains too" },
+      CONCIERGE_ACCOUNT,
+    );
+  });
+
+  it("chat_send fails with the send's own words when the chat refuses it", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const error = "This chat is archived and read-only";
+    s.refuseSends({ ok: false, error, delivery: { state: "failed", error, at: new Date(0) } });
+    const result = await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("This chat is archived and read-only");
+  });
+
+  it("chat_read reads the latest messages that carry text, past card-only ones", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const said = (role: string, parts: unknown[]) =>
+      s.messages.get("task-1")?.push({ role, content: JSON.stringify(parts) });
+    said("assistant", [{ type: "text", content: "3 options" }]);
+    for (let index = 0; index < 40; index += 1) said("assistant", [{ type: "recap" }]);
+    s.chats.isRunning = () => true;
+    const result = await s.tool("chat_read", { chatId: "task-1", last: 2 });
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      chatId: "task-1",
+      status: "running",
+      messages: [
+        { role: "user", text: "Find flights" },
+        { role: "assistant", text: "3 options" },
+      ],
+    });
+  });
+
+  it("chat_forward says the latest answer, not a later follow-up", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.messages.get("task-1")?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "# Report" }]),
+    });
+    await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
+    const result = await s.tool("chat_forward", { chatId: "task-1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({ forwardedChars: 8 });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "text", content: "# Report", format: "long" }],
+    ]);
+  });
+
+  it("chat_stop stops each of the task chat's turns", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.chats.activeTurns = () => ["t1", "t2"];
+    const result = await s.tool("chat_stop", { chatId: "task-1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({ stopped: 2 });
+    expect(s.chats.interruptTurn).toHaveBeenCalledWith("t1");
+    expect(s.chats.interruptTurn).toHaveBeenCalledWith("t2");
+  });
+
+  it("chat_list lists only the task chats it started", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const result = await s.tool("chat_list", {});
+    expect(JSON.parse(result.content[0].text)).toEqual([
+      { chatId: "task-1", title: "Flights", status: "idle" },
+    ]);
   });
 
   it("chat_card shows the card for a task chat started without one", async () => {
@@ -305,7 +448,6 @@ describe("Concierge events", () => {
   it("reports the turn that answers a queued chat_send follow-up as Concierge's", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    s.setReceipt({ turnId: "task-turn-1", disposition: "queued" });
     await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     s.assignInput("task-1", s.posted[1], "task-turn-2");
     await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId: "task-1", text: "f" });

@@ -322,6 +322,86 @@ describe("Webchat API", () => {
     }
   });
 
+  it("takes an agent's send into a chat it starts for the guardian, as that agent's account", async () => {
+    const finishers: (() => void)[] = [];
+    const interrupt = rs.fn(async () => {});
+    const agent = withSubmitInput({
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "running",
+      currentTurnId: "task-1",
+      sendTurn: () => {
+        const terminal = new Promise<void>((resolve) => {
+          finishers.push(resolve);
+        });
+        return {
+          turnId: "task-1",
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            await terminal;
+            yield { type: "result" as const, content: "" };
+          })(),
+        };
+      },
+      subscribe: () => () => {},
+      onStatusChange: () => () => {},
+      interrupt,
+      close: async () => {},
+    });
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => agent),
+      acquireBySessionId: rs.fn(async () => agent),
+      peek: () => agent,
+      findWorkingDirBySessionId: () => undefined,
+      recordConversation: async () => {},
+      shutdown: async () => {},
+    };
+    rs.spyOn(deps.agentLoader, "has").mockImplementation((name) => name === "core:concierge");
+    const { runtime } = createWebchatRuntime(deps);
+    const concierge = { platform: "webchat", id: "core:concierge" };
+    const id = await runtime.startChat({});
+    try {
+      const posted = await runtime.post(id, { text: "Find flights" }, concierge);
+
+      expect(posted).toMatchObject({ ok: true });
+      expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
+      const stored = await testDb.db
+        .select({ role: romeAgentMessages.role, senderId: romeAgentMessages.senderId })
+        .from(romeAgentMessages)
+        .where(eq(romeAgentMessages.sessionId, id));
+      expect(stored).toEqual([{ role: "user", senderId: "core:concierge" }]);
+      expect(runtime.isRunning(id)).toBe(true);
+      expect(runtime.activeTurns(id)).toEqual(["task-1"]);
+      await runtime.interruptTurn("task-1");
+      expect(interrupt).toHaveBeenCalledWith("user-stop", "task-1");
+      await runtime.interruptTurn("no-such-turn");
+
+      expect(await runtime.post(id, { text: "hi" }, { platform: "webchat", id: "nobody" })).toEqual(
+        {
+          ok: false,
+          error: "No agent nobody to say it as",
+        },
+      );
+      expect(await runtime.post("no-such-chat", { text: "hi" }, concierge)).toEqual({
+        ok: false,
+        error: "Session not found",
+      });
+
+      // Recorded before the agent failed to wake: said, so not answered failed.
+      deps.agentSessionManager.acquire = rs.fn(async () => {
+        throw new Error("session store unavailable");
+      });
+      expect(await runtime.post(id, { text: "Trains too" }, concierge)).toMatchObject({
+        ok: true,
+      });
+      expect(
+        (await deps.webchatRepo.getMessages(id)).filter((message) => message.role === "user"),
+      ).toHaveLength(2);
+    } finally {
+      for (const finish of finishers) finish();
+    }
+  });
+
   it("encodes scoped owner ids in agent picker icon URLs", async () => {
     const ownerId = "@foo/bar";
     deps.agentLoader = {

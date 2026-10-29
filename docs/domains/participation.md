@@ -27,7 +27,7 @@ The agent's working memory of a chat: a view built from the chat's messages, not
 What the agent says back after a wake, through the account it was woken on.
 
 - The agent decides where in the chat a reply goes: the thread the message was said in, the chat itself, or another of its threads.
-- A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it.
+- A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it. A message from one of the guardian's dashboard chats into another needs no card: the guardian is the only other participant in both, so nothing leaves their sight. Concierge hands work to its task chats this way.
 - A reply is a message like any other, said by the agent as its own account or on the guardian's behalf under theirs, as the kind of link says.
 
 ## Decided against

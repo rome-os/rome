@@ -32,6 +32,7 @@ Where a message is said, and where a send goes: a chat, or a thread in a chat.
 - Two places are the same when they name the same chat and the same thread, or both name no thread.
 - Rome sends to a place, never to an account. Messaging a person on one of their accounts is sending into the direct message that reaches that account.
 - A send into a place goes out from one of Rome's accounts in it: the one the send names, or the only one Rome holds on the platform. With several and none named, the send is refused rather than sent from an account nobody chose.
+- On the dashboard each of Rome's agents has its own account, so a send into a dashboard chat names the agent it is from. Rome is the dashboard's platform, so the message is said once it is recorded, and the chat's agent is woken by it as by the guardian's.
 
 ## Participant
 
