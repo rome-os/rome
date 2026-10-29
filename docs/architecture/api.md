@@ -16,6 +16,16 @@ A single server hosts every HTTP route behind the [edge](access-control.md#reque
 - One listener serves the whole HTTP surface. The edge and the direct backend origin expose the same route set — a second listener does not exist, and a route hidden from the edge does not exist.
 - Worker-to-main traffic never rides HTTP. A service a worker needs joins the [Worker RPC](#worker-rpc) surface, never a route.
 
+### AI tool status
+
+AI tool status has one in-memory source. HTTP reads and live subscriptions read the cache without probing a provider.
+
+The guardian-only `ai-tools.status` topic replays the HTTP status body on subscribe and pushes changes. `/api/ai-tools/events` serves the same events over SSE.
+
+Claude subscription rate-limit events update usage without network requests. Unknown event shapes leave the OAuth probe as the fallback.
+
+The composer shows usage for the chat's explicit model pick or [session model pin](../concepts/sessions.md#model-pin). An unpinned Auto chat follows the model resolver's provider order.
+
 ## Worker RPC
 
 The main process creates every worker that runs a cancellable [action](../concepts/actions.md) out of process, and it holds a direct fork IPC channel to each one. A worker never forks a worker. A worker that needs a nested subprocess action delegates it to main. A worker that starts intentionally independent work asks main to dispatch a new root. Either way main spawns the target worker on a channel of its own. The operating-system process tree stays flat while execution ids carry the logical action tree ([decision](../adrs/workers-never-fork-workers.md)). What a caller observes — the nested cancellation lifetime, the detached acceptance receipt, the root-cancel cascade — is an [action contract](../concepts/actions.md).

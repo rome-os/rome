@@ -5,6 +5,7 @@ import {
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
 import { http, HttpResponse } from "msw";
+import type { AIToolsStatus } from "@rome/api-types/ai-tools";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import {
   DEFAULT_RECAP_SETTINGS,
@@ -68,6 +69,21 @@ const aiToolStatus: Record<string, AIToolStatus> = {
     loggedIn: false,
   },
 };
+
+const aiToolListeners = new Set<() => void>();
+export const mockAiToolsStatus = (): AIToolsStatus => ({
+  ...aiToolStatus,
+  anthropicCompatible: configuredAnthropic,
+});
+export function subscribeMockAiToolsStatus(listener: () => void): () => void {
+  aiToolListeners.add(listener);
+  return () => {
+    aiToolListeners.delete(listener);
+  };
+}
+function notifyAiToolsStatus() {
+  for (const listener of aiToolListeners) listener();
+}
 
 // The real catalog, not a copy of it. Building the summaries through the same
 // function the route calls means a provider added, renamed or repointed in core
@@ -394,9 +410,27 @@ export const settingsHandlers = [
       ],
     } satisfies ComputerUseStatus),
   ),
-  http.get("/api/ai-tools/status", () =>
-    HttpResponse.json({ ...aiToolStatus, anthropicCompatible: configuredAnthropic }),
-  ),
+  http.get("/api/ai-tools/status", () => HttpResponse.json(mockAiToolsStatus())),
+  http.get("/api/ai-tools/events", () => {
+    let unsubscribe = () => {};
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = () =>
+          controller.enqueue(
+            new TextEncoder().encode(
+              `event: status\ndata: ${JSON.stringify(mockAiToolsStatus())}\n\n`,
+            ),
+          );
+        send();
+        unsubscribe = subscribeMockAiToolsStatus(send);
+      },
+      cancel() {
+        unsubscribe();
+      },
+    });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
+  http.post("/api/ai-tools/refresh", () => HttpResponse.json(mockAiToolsStatus())),
   http.get("/api/ai-tools/rome-credits", () =>
     HttpResponse.json({ credits: romeCredits } satisfies RomeCreditsResponse),
   ),
@@ -433,10 +467,12 @@ export const settingsHandlers = [
       updatedAt: new Date().toISOString(),
       ...(customEnv ? { env: customEnv } : {}),
     };
+    notifyAiToolsStatus();
     return HttpResponse.json({ configured: configuredAnthropic });
   }),
   http.delete("/api/ai-tools/anthropic-compatible-credentials", () => {
     configuredAnthropic = null;
+    notifyAiToolsStatus();
     return HttpResponse.json({ configured: null });
   }),
   // Logout is the one AI-tool write that is non-interactive; the login flows are
@@ -447,6 +483,7 @@ export const settingsHandlers = [
     const status = aiToolStatus[provider];
     if (!status) return HttpResponse.json({ error: "Unknown provider" }, { status: 404 });
     aiToolStatus[provider] = { loggedIn: false };
+    notifyAiToolsStatus();
     return HttpResponse.json({ ok: true });
   }),
   http.get("/api/public-access", () => HttpResponse.json(publicAccess.config)),

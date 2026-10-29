@@ -823,6 +823,7 @@ async function main() {
   });
   const anthropicProvider = new AnthropicProvider({
     settingsRepo,
+    onUsage: (usage) => aiToolState.applyLiveUsage("anthropic", usage),
     onAuthRevoked: () => aiToolState.markAuthRevoked("anthropic"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("anthropic"),
   });

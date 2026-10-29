@@ -1,3 +1,4 @@
+import { buildAiToolsStatus, subscribeAiToolsStatus } from "./api/ai-tools-status.js";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -142,6 +143,7 @@ describe("live events WebSocket", () => {
       hasChatSession: (sessionId) => runtime.hasStoredSession(sessionId),
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
+      subscribeAiToolsStatus: (emit) => track(subscribeAiToolsStatus(deps, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
     };
     server = createServer();
@@ -164,6 +166,38 @@ describe("live events WebSocket", () => {
     rmSync(projectsRoot, { recursive: true, force: true });
     if (originalProjectsRoot === undefined) delete process.env.ROME_PROJECTS_ROOT;
     else process.env.ROME_PROJECTS_ROOT = originalProjectsRoot;
+  });
+
+  it("replays the HTTP status body then pushes cache changes without probes", async () => {
+    const client = await connect();
+    await client.subscribe("ai-tools.status");
+    expect(await client.next((m) => m.type === "event" && m.topic === "ai-tools.status")).toEqual({
+      type: "event",
+      topic: "ai-tools.status",
+      event: "status",
+      data: buildAiToolsStatus(deps),
+    });
+    const usage = {
+      checkedAt: new Date().toISOString(),
+      source: "event",
+      fiveHour: { usedPercent: 29, remainingPercent: 71 },
+    };
+    deps.aiToolState.applyLiveUsage("anthropic", usage);
+    expect(
+      await client.next(
+        (m) =>
+          m.type === "event" &&
+          m.topic === "ai-tools.status" &&
+          JSON.stringify(m.data).includes("71"),
+      ),
+    ).toEqual({
+      type: "event",
+      topic: "ai-tools.status",
+      event: "status",
+      data: buildAiToolsStatus(deps),
+    });
+    client.send({ type: "unsubscribe", topic: "ai-tools.status" });
+    await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
   });
 
   it("admits a guardian and refuses anonymous and cross-origin upgrades", async () => {
@@ -232,8 +266,14 @@ describe("live events WebSocket", () => {
     });
     await client.subscribe("chat.status");
     await client.subscribe("chat.session:sess-a");
+    client.send({ type: "subscribe", topic: "ai-tools.status" });
+    expect(await client.next((m) => m.type === "error" && m.topic === "ai-tools.status")).toEqual({
+      type: "error",
+      topic: "ai-tools.status",
+      message: "Forbidden",
+    });
     client.send({ type: "subscribe", topic: "apps.catalog" });
-    expect(await client.next((m) => m.type === "error")).toEqual({
+    expect(await client.next((m) => m.type === "error" && m.topic === "apps.catalog")).toEqual({
       type: "error",
       topic: "apps.catalog",
       message: "Forbidden",

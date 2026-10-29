@@ -7,6 +7,7 @@
 // each maintaining its own narrower parser that could miss a genuinely-exhausted
 // window.
 
+import type { AIToolUsageStatus, UsageWindowStatus } from "@rome/api-types/ai-tools";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -16,19 +17,7 @@ const log = createLogger("provider-usage");
 
 const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
 
-export interface UsageWindowStatus {
-  usedPercent?: number;
-  remainingPercent?: number;
-  resetsAt?: string;
-}
-
-export interface AIToolUsageStatus {
-  checkedAt: string;
-  source: string;
-  fiveHour?: UsageWindowStatus;
-  sevenDay?: UsageWindowStatus;
-  error?: string;
-}
+export type { AIToolUsageStatus, UsageWindowStatus } from "@rome/api-types/ai-tools";
 
 interface UsageNormalizationOptions {
   utilizationUnit?: "percent" | "fraction";

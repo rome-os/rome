@@ -130,6 +130,38 @@ function buildForkOpenParams(
 }
 
 describe("AnthropicProvider", () => {
+  it.each([
+    false,
+    true,
+  ])("forwards live usage only for subscription auth (API key: %s)", async (apiKey) => {
+    mockQuery([
+      {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed",
+          unifiedWindows: {
+            five_hour: { utilization: 0.29, resetsAt: 1793260800 },
+            seven_day: { utilization: 0.12, resetsAt: 1793757600 },
+          },
+        },
+      },
+      { type: "result", subtype: "success", result: "done", num_turns: 1 },
+    ]);
+    const onUsage = rs.fn();
+    const session = await new AnthropicProvider({
+      env: apiKey ? { ANTHROPIC_API_KEY: "test-key" } : {},
+      onUsage,
+    }).openSession(buildParams());
+    await session.sendUserInput({ text: "hello", inputId: SENT });
+    await collectEvents(session);
+    await session.close();
+    expect(onUsage).toHaveBeenCalledTimes(apiKey ? 0 : 1);
+    if (!apiKey)
+      expect(onUsage).toHaveBeenCalledWith(
+        expect.objectContaining({ fiveHour: expect.objectContaining({ usedPercent: 29 }) }),
+      );
+  });
+
   it("adopts a late SDK-queued input exactly once and holds its turn until Rome opens one", async () => {
     const a = "00000000-0000-4000-8000-000000000001";
     const b = "00000000-0000-4000-8000-000000000002";

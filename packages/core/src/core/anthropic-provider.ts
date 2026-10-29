@@ -1,3 +1,5 @@
+import { claudeRateLimitUsage } from "./claude-rate-limit.js";
+import type { AIToolUsageStatus } from "../lib/provider-usage.js";
 import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
@@ -131,6 +133,7 @@ function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLeve
 }
 
 interface AnthropicProviderOptions {
+  onUsage?: (usage: AIToolUsageStatus) => void;
   settingsRepo?: Pick<SettingsRepository, "get">;
   env?: NodeJS.ProcessEnv;
   /** Update runtime auth state before an auth-revoked terminal is exposed. */
@@ -594,6 +597,8 @@ export class AnthropicProvider implements ModelProvider {
     // `this`): update runtime state before classified terminals become observable.
     const onAuthRevoked = this.options.onAuthRevoked;
     const onQuotaExhausted = this.options.onQuotaExhausted;
+    // Only a subscription turn reports subscription usage.
+    const onUsage = queryContext.funding === "subscription" ? this.options.onUsage : undefined;
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const queryProcess = createClaudeQueryProcess();
@@ -737,6 +742,8 @@ export class AnthropicProvider implements ModelProvider {
           : { type: "text", content, turnPhase };
       try {
         for await (const message of q) {
+          const usage = claudeRateLimitUsage(message);
+          if (usage) onUsage?.(usage);
           const replayedId = replayedSendId(message);
           const romeReplay = replayedId !== undefined && romeSendIds.has(replayedId);
           const owner = sdkTurnOwnerAfter(message, sdkTurnOwner, romeSendIds);

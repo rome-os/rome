@@ -1,3 +1,7 @@
+import type { AIToolStatus, UsageWindowStatus } from "@rome/api-types/ai-tools";
+export type { AIToolStatus } from "@rome/api-types/ai-tools";
+import { useAiToolStatus } from "@/hooks/use-ai-tool-status";
+import { UsageUpdatedAt } from "@/components/usage-updated-at";
 import {
   Measure,
   Section,
@@ -65,36 +69,6 @@ const CodexDeviceLoginModal = lazy(() =>
 );
 
 // ── Section: AI Tools ──────────────────────────────────
-
-export interface AIToolStatus {
-  loggedIn: boolean;
-  email?: string;
-  authMethod?: string;
-  accountType?: string;
-  usage?: AIToolUsageStatus;
-  /**
-   * Credentials are present but proven revoked server-side (Codex's refresh
-   * token was revoked): `loggedIn` is false and the badge reads "needs
-   * re-login" rather than a plain "not connected".
-   */
-  needsReauth?: boolean;
-}
-
-interface UsageWindowStatus {
-  usedPercent?: number;
-  remainingPercent?: number;
-  resetsAt?: string;
-}
-
-interface AIToolUsageStatus {
-  checkedAt: string;
-  source: string;
-  fiveHour?: UsageWindowStatus;
-  sevenDay?: UsageWindowStatus;
-  error?: string;
-}
-
-type AIToolStatusMap = Record<string, AIToolStatus>;
 
 export type { AnthropicCompatibleProviderSummary };
 
@@ -217,7 +191,7 @@ export type AiToolProviderId = (typeof AI_TOOL_PROVIDERS)[number]["statusKey"];
  *  chat probes `/api/ai-tools/status` and reads the answer through this, so it
  *  and the panel cannot disagree on what counts as connected. */
 export function hasConnectedAiProvider(
-  status: Partial<Record<string, { loggedIn?: boolean } | null>>,
+  status: Partial<Record<AiToolProviderId, { loggedIn?: boolean } | null>>,
   hiddenProviders: readonly AiToolProviderId[] = [],
 ): boolean {
   return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
@@ -253,8 +227,6 @@ interface AiToolsPanelProps {
   showHeader?: boolean;
   onConnectedChange?: (connected: boolean) => void;
 }
-
-const AI_TOOLS_STATUS_REFRESH_MS = 30 * 60 * 1000;
 
 function getSignInMethods(
   providerId: string,
@@ -480,7 +452,14 @@ export function AiToolsPanel({
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [removeAnthropicProviderOpen, setRemoveAnthropicProviderOpen] = useState(false);
-  const [toolStatus, setToolStatus] = useState<AIToolStatusMap>({});
+  const statusQuery = useAiToolStatus();
+  const toolStatus: Partial<Record<string, AIToolStatus>> = {
+    claude: statusQuery.data?.claude,
+    codex: statusQuery.data?.codex,
+  };
+  const fetchStatus = statusQuery.readStatus;
+  const loadingStatus = statusQuery.isPending;
+  const statusLoaded = statusQuery.data !== undefined;
   const [anthropicProviders, setAnthropicProviders] = useState<
     AnthropicCompatibleProviderSummary[]
   >([]);
@@ -495,10 +474,6 @@ export function AiToolsPanel({
   const [anthropicEnvError, setAnthropicEnvError] = useState<string | null>(null);
   const [savingAnthropicProvider, setSavingAnthropicProvider] = useState(false);
   const [anthropicProviderMessage, setAnthropicProviderMessage] = useState("");
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  // The credits row waits for the first successful status only, since its
-  // state depends on the ChatGPT login; a later re-read keeps it in place.
-  const [statusLoaded, setStatusLoaded] = useState(false);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [fetchedRomeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
@@ -526,44 +501,20 @@ export function AiToolsPanel({
     );
   }, []);
 
-  const fetchStatus = useCallback(async () => {
-    setLoadingStatus(true);
-    try {
-      const res = await fetch("/api/ai-tools/status");
-      const data = (await res.json()) as {
-        claude?: AIToolStatus;
-        codex?: AIToolStatus;
-        anthropicCompatible?: AnthropicCompatibleConfiguredSummary | null;
-      };
-      setToolStatus({
-        ...(data.claude ? { claude: data.claude } : {}),
-        ...(data.codex ? { codex: data.codex } : {}),
-      });
-      setStatusLoaded(true);
-      setConfiguredAnthropicProvider((current) => {
-        const next = data.anthropicCompatible ?? null;
-        if (
-          next?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID &&
-          current?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID
-        ) {
-          return {
-            ...next,
-            env: current.env,
-          };
-        }
-        return next;
-      });
-    } catch {
-      /* ignore */
-    } finally {
-      setLoadingStatus(false);
-    }
-  }, []);
+  useEffect(() => {
+    if (!statusQuery.data) return;
+    setConfiguredAnthropicProvider((current) => {
+      const next = statusQuery.data.anthropicCompatible ?? null;
+      if (
+        next?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID &&
+        current?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID
+      )
+        return { ...next, env: current.env };
+      return next;
+    });
+  }, [statusQuery.data]);
 
   useEffect(() => {
-    fetchStatus().catch(() => {
-      /* ignore */
-    });
     fetchAnthropicProviders().catch(() => {
       /* ignore */
     });
@@ -575,12 +526,15 @@ export function AiToolsPanel({
   }, [fetchStatus, fetchAnthropicProviders, fetchRomeCredits, fetchesRomeCredits]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      void fetchStatus();
-      if (fetchesRomeCredits) void fetchRomeCredits().catch(() => {});
-    }, AI_TOOLS_STATUS_REFRESH_MS);
+    if (!fetchesRomeCredits) return;
+    const interval = window.setInterval(
+      () => {
+        void fetchRomeCredits().catch(() => {});
+      },
+      30 * 60 * 1000,
+    );
     return () => window.clearInterval(interval);
-  }, [fetchStatus, fetchRomeCredits, fetchesRomeCredits]);
+  }, [fetchRomeCredits, fetchesRomeCredits]);
 
   function handleTerminalClose() {
     setTerminalPreset(null);
@@ -685,7 +639,7 @@ export function AiToolsPanel({
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
-      setToolStatus({ claude: data.claude, codex: data.codex });
+      await fetchStatus();
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
     } finally {
@@ -1085,7 +1039,8 @@ export function AiToolsPanel({
                 {shouldShowUsage && (
                   <>
                     <div className="my-3 border-t border-border" />
-                    {status.usage?.error && (
+                    <UsageUpdatedAt checkedAt={status?.usage?.checkedAt} className="mb-3" />
+                    {status?.usage?.error && (
                       <p role="alert" className="mb-3 text-ui text-destructive">
                         {t("aiTools.usage.unavailable")}
                       </p>
@@ -1093,14 +1048,14 @@ export function AiToolsPanel({
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1px_1fr] sm:gap-4">
                       <UsageBar
                         label={t("aiTools.usage.fiveHour")}
-                        window={status.usage?.error ? undefined : status.usage?.fiveHour}
+                        window={status?.usage?.error ? undefined : status?.usage?.fiveHour}
                         windowKey="fiveHour"
                         resetsInLabel="settings:aiTools.usage.resetsIn"
                       />
                       <div className="hidden bg-border sm:block" aria-hidden />
                       <UsageBar
                         label={t("aiTools.usage.sevenDay")}
-                        window={status.usage?.error ? undefined : status.usage?.sevenDay}
+                        window={status?.usage?.error ? undefined : status?.usage?.sevenDay}
                         windowKey="sevenDay"
                         resetsInLabel="settings:aiTools.usage.resetsIn"
                       />

@@ -1,7 +1,8 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { render } from "@/test/query-render";
 import i18n from "@/i18n";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { AiToolsCard } from "./AiToolsCard";

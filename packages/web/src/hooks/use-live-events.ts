@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from "react";
 import type { z } from "zod";
 import {
+  AI_TOOLS_STATUS_TOPIC,
   APP_CATALOG_TOPIC,
   CHAT_STATUS_TOPIC,
   chatSessionTopicName,
@@ -25,6 +26,11 @@ export interface LiveTopic {
 export const chatStatusTopic: LiveTopic = {
   topic: CHAT_STATUS_TOPIC,
   sseUrl: "/api/chat/status/events",
+};
+
+export const aiToolsStatusTopic: LiveTopic = {
+  topic: AI_TOOLS_STATUS_TOPIC,
+  sseUrl: "/api/ai-tools/events",
 };
 
 export const appCatalogTopic: LiveTopic = {

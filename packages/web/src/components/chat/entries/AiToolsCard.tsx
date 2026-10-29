@@ -1,3 +1,4 @@
+import { useAiToolStatus } from "@/hooks/use-ai-tool-status";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
@@ -63,6 +64,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   const [probe, setProbe] = useState<Probe>("checking");
   const [credits, setCredits] = useState<RomeCreditsView | null>(null);
   const resolved = result !== undefined || sent;
+  const { readStatus } = useAiToolStatus({ enabled: result === undefined && !sent });
 
   const submit = useCallback(
     (output: Record<string, unknown>, summary: string) => {
@@ -82,9 +84,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   useEffect(() => {
     if (result !== undefined) return;
     let cancelled = false;
-    type Status = Record<string, { loggedIn?: boolean } | null>;
-    const readStatus = (): Promise<Status> =>
-      fetch("/api/ai-tools/status", { credentials: "include" }).then((res) => res.json());
+
     void readStatus()
       .then(async (first) => {
         let status = first;
@@ -127,7 +127,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [result]);
+  }, [result, readStatus]);
 
   useEffect(() => {
     if (probe === "connected" && !resolved && !failed) {
