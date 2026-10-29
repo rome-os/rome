@@ -16,12 +16,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { fetchJson } from "@/lib/fetch-json";
+import { ProfileUsage } from "./ProfileUsage";
 
 // The signed-in identity anchor at the sidebar bottom: the Rome Cloud avatar
 // when available, with initials as the local/password fallback. It opens the
-// account menu (Settings, Feedback, Log out). Password and cloud guardians
-// still resolve to the same guardian identity; only the bound Cloud profile
-// supplies a picture.
+// account menu (AI tool usage, Settings, Feedback, Log out). Password and
+// cloud guardians still resolve to the same guardian identity; only the bound
+// Cloud profile supplies a picture.
 export function ProfileMenu() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
@@ -86,7 +87,7 @@ export function ProfileMenu() {
             </Avatar>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" className="w-56">
+        <DropdownMenuContent side="top" align="start" className="w-64">
           {title ? (
             <>
               <DropdownMenuLabel className="flex flex-col gap-1">
@@ -96,6 +97,8 @@ export function ProfileMenu() {
               <DropdownMenuSeparator />
             </>
           ) : null}
+          {/* Usage is the guardian's own; a visitor never sees it. */}
+          {identity?.kind === "guardian" ? <ProfileUsage /> : null}
           <DropdownMenuItem onSelect={() => navigate("/settings")}>
             <Settings aria-hidden />
             {t("nav.settings")}

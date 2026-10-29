@@ -550,9 +550,6 @@ export function Chat({
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
     view;
-  const floorUsageIdentity = useSessionIdentity(
-    floorSessionId !== mainSessionId ? floorSessionId : null,
-  );
   const chatModelPickable =
     !!mainSessionId && canPickChatModel({ mainSessionId, floorSessionId, isSideChat });
 
@@ -2361,18 +2358,6 @@ export function Chat({
                     />
                   ) : (
                     <ChatComposer
-                      usageModel={
-                        mainSessionId
-                          ? {
-                              selection:
-                                floorSessionId !== mainSessionId
-                                  ? (floorUsageIdentity.largeModelSelection ?? "auto")
-                                  : chatModelValue,
-                              pinnedModel:
-                                floorSessionId !== mainSessionId ? floorUsageIdentity.model : model,
-                            }
-                          : undefined
-                      }
                       persistNewChatDraft={!mainSessionId}
                       ref={composerRef}
                       // The box look lives on the composer now so the chip row can sit

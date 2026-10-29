@@ -82,14 +82,3 @@ export type AIToolProviderId = "openai" | "anthropic";
 export function claudeUsesApiKey(state: Pick<AIToolStatus, "authMethod">): boolean {
   return state.authMethod === "stored-compatible" || state.authMethod === "environment";
 }
-
-/** Unknown login is optimistic, as during the initial probes. */
-export function autoModelProvider(
-  codex: Pick<AIToolStatus, "loggedIn" | "quotaExhausted"> | null,
-  claude: Pick<AIToolStatus, "loggedIn" | "quotaExhausted" | "authMethod"> | null,
-): AIToolProviderId | null {
-  if (codex && codex.loggedIn !== false && !codex.quotaExhausted) return "openai";
-  if (claude && claude.loggedIn !== false && (!claude.quotaExhausted || claudeUsesApiKey(claude)))
-    return "anthropic";
-  return null;
-}

@@ -66,7 +66,6 @@ interface RenderComposerOptions {
   settingsPromise?: Promise<Record<string, unknown>>;
   /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
   people?: PersonResource[];
-  aiToolsStatus?: unknown;
 }
 
 function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
@@ -80,7 +79,6 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
       const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
       return Response.json({ guardianName: "Ada", ...settings });
     }
-    if (url === "/api/ai-tools/status") return Response.json(options.aiToolsStatus ?? {});
     if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
     if (url === "/api/chat/locations") {
       return Response.json({
@@ -1365,55 +1363,5 @@ describe("composer reply", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
 
     expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
-  });
-});
-
-describe("composer usage", () => {
-  it("shows usage independently of the model selector and ignores a disabled draft model pick", async () => {
-    renderComposer(
-      {},
-      {
-        settings: {
-          showAiToolUsage: true,
-          enableModelSelector: false,
-          webchatLargeModel: "gpt-6-astra",
-        },
-        aiToolsStatus: {
-          codex: { loggedIn: false },
-          claude: {
-            loggedIn: true,
-            usage: {
-              checkedAt: new Date().toISOString(),
-              source: "test",
-              fiveHour: { usedPercent: 29 },
-            },
-          },
-        },
-      },
-    );
-    await userEvent.click(await screen.findByRole("button", { name: "Usage remaining" }));
-    expect(screen.queryByRole("button", { name: "Model" })).toBeNull();
-    expect(screen.getByText("71%")).toBeTruthy();
-  });
-  it("hides local usage in a text-only assistant chat", async () => {
-    renderComposer(
-      { textOnly: true },
-      {
-        settings: { showAiToolUsage: true },
-        aiToolsStatus: {
-          claude: {
-            loggedIn: true,
-            usage: {
-              checkedAt: new Date().toISOString(),
-              source: "test",
-              fiveHour: { usedPercent: 29 },
-            },
-          },
-        },
-      },
-    );
-    await screen.findByRole("textbox");
-    await new Promise((done) => setTimeout(done, 100));
-    expect(screen.queryByRole("button", { name: "Usage remaining" })).toBeNull();
   });
 });

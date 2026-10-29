@@ -79,6 +79,9 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
   const [connected, setConnected] = useState(false);
   const startedRef = useRef(false);
   const completedRef = useRef(false);
+  // The shared status cache can still hold an earlier attempt's code or
+  // error, so only status read after this opening may report either.
+  const openedAtRef = useRef(0);
   const startInFlightRef = useRef(false);
 
   // Keep callback refs stable so the polling effect doesn't tear down on every
@@ -136,10 +139,14 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
     setConnected(false);
     startedRef.current = false;
     completedRef.current = false;
+    openedAtRef.current = Date.now();
     void start();
   }, [open, start]);
 
-  const { data: aiStatus } = useAiToolStatus({ enabled: open, loginPolling: open });
+  const { data: aiStatus, dataUpdatedAt } = useAiToolStatus({
+    enabled: open,
+    loginPolling: open,
+  });
   useEffect(() => {
     if (!open || completedRef.current || !aiStatus) return;
     if (aiStatus.codex?.loggedIn) {
@@ -148,13 +155,14 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
       setTimeout(() => onConnectedRef.current(), CONNECTED_DISPLAY_MS);
       return;
     }
+    if (dataUpdatedAt <= openedAtRef.current) return;
     const deviceLogin = aiStatus.codexDeviceLogin;
     setStatusError(deviceLogin?.lastError ?? null);
     if (deviceLogin?.userCode && deviceLogin.verificationUrl) {
       setUserCode((prev) => prev ?? deviceLogin.userCode ?? null);
       setVerificationUrl((prev) => prev ?? deviceLogin.verificationUrl ?? null);
     }
-  }, [open, aiStatus]);
+  }, [open, aiStatus, dataUpdatedAt]);
 
   const cancel = useCallback(() => {
     // Fire even while the initial `/start` is still in flight: the backend
