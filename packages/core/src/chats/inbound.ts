@@ -4,7 +4,7 @@
 //
 // Every answerable message a channel delivers is recorded in its chat before
 // anything acts on it, whether or not an agent answers it. Participation hears
-// it from MessageRecorded and decides the wake there.
+// it from MessageSaid and decides the wake there.
 
 import type {
   Channel,
@@ -118,7 +118,7 @@ export function inboundRecording(
   const recordedMessages: RecordedMessages = {
     subscribe(handler) {
       const unsubscribe = deps.events.subscribe(async (event) => {
-        if (event.type !== "MessageRecorded" || !event.via.heard) return;
+        if (event.type !== "MessageSaid" || !event.via.heard) return;
         const recorded: RecordedInboundEvent = {
           ...event.via.heard,
           recorded: { chatRecordId: event.chatRecordId, messageId: event.message.id },
