@@ -202,7 +202,7 @@ export function SpokenRecapsSection() {
       <div aria-live="polite" className="mt-2 text-ui text-muted-foreground">
         {error ? (
           <div role="alert" className="flex flex-wrap items-center gap-3">
-            <p>{error.message}</p>
+            <p>{fallback}</p>
             <Button
               variant="outline"
               size="xs"

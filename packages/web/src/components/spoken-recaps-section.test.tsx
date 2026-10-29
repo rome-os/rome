@@ -95,9 +95,11 @@ describe("Spoken recaps settings", () => {
     const fetchSpy = setup(true, true);
     const master = screen.getByRole("switch", { name: "Create recaps" });
     await waitFor(() => expect(master.hasAttribute("disabled")).toBe(false));
-    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    fetchSpy.mockResolvedValueOnce(Response.json({ error: "forbidden" }, { status: 403 }));
     fireEvent.click(master);
-    expect(await screen.findByRole("alert")).toBeTruthy();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Recap settings could not be saved or loaded.");
+    expect(alert.textContent).not.toContain("forbidden");
     expect(master.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
