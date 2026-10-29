@@ -1000,9 +1000,6 @@ importers:
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
-      '@rome-os/app-web-sdk':
-        specifier: workspace:*
-        version: link:../app-web-sdk
       '@rsbuild/core':
         specifier: 2.2.3
         version: 2.2.3(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)
@@ -1425,9 +1422,6 @@ importers:
       '@rome-os/ui':
         specifier: ^0.3.0
         version: link:../../packages/ui
-      '@tanstack/react-query':
-        specifier: ^5.62.0
-        version: 5.101.0(react@19.2.6)
       node-edge-tts:
         specifier: ^1.2.10
         version: 1.2.10(bufferutil@4.1.0)(utf-8-validate@5.0.10)

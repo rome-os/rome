@@ -61,7 +61,6 @@
   "devDependencies": {
     "@mdx-js/loader": "^3.1.1",
     "@playwright/test": "1.62.1",
-    "@rome-os/app-web-sdk": "workspace:*",
     "@rsbuild/core": "2.2.3",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rsbuild/plugin-svgr": "^2.0.2",
