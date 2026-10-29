@@ -348,10 +348,15 @@ describe("StoredMessages reads", () => {
   });
 
   it("reads a group Rome wrote to first as one chat once a message says it is a group", async () => {
-    // A send opens the chat on each account without knowing its kind.
-    for (const channel of ["telegram", "telegram-sales"]) {
-      await rows.ensureChannelChat({ channel, threadId: "group-1", agentName: "main" });
-    }
+    // A send opens the chat on each account without knowing its kind, or
+    // guesses it is private.
+    await rows.ensureChannelChat({ channel: "telegram", threadId: "group-1", agentName: "main" });
+    await rows.ensureChannelChat({
+      channel: "telegram-sales",
+      threadId: "group-1",
+      threadType: "private",
+      agentName: "main",
+    });
     for (const [channel, n] of [
       ["telegram", 1],
       ["telegram-sales", 2],
@@ -363,6 +368,16 @@ describe("StoredMessages reads", () => {
         agentName: "main",
       });
       await said(chat.id, `line ${n}`, minute(n), `m-${n}`);
+    }
+
+    // A later send that guesses private leaves the group a group.
+    for (const channel of ["telegram", "telegram-sales"]) {
+      await rows.ensureChannelChat({
+        channel,
+        threadId: "group-1",
+        threadType: "private",
+        agentName: "main",
+      });
     }
 
     const { messages: read } = await messages.recent(group, 10);

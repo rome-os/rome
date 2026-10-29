@@ -1065,11 +1065,12 @@ export class WebChatRepository {
       await this.backfillChannelConversationName(found, input, input.threadName);
     }
     // A send can open a chat before a message arrives in it, and it does not
-    // know the chat's kind. The first message that does says it.
-    if (found && input.threadType && found.sourceThreadType !== input.threadType) {
+    // know the chat's kind: some callers guess private. A group's own message
+    // says it is one, and nothing makes a known group private again.
+    if (found && input.threadType === "group" && found.sourceThreadType !== "group") {
       await this.db
         .update(romeSessions)
-        .set({ sourceThreadType: input.threadType })
+        .set({ sourceThreadType: "group" })
         .where(eq(romeSessions.id, found.id));
     }
     const existing = found && { id: found.id, agentName: found.agentName };
