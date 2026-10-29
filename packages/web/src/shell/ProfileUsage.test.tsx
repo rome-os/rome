@@ -65,10 +65,10 @@ describe("ProfileUsage", () => {
     expect(screen.getByText("Updated 5 min ago")).toBeTruthy();
   });
 
-  it("names no tool when only one shows usage", async () => {
+  it("names the tool with its mark even when only one shows usage", async () => {
     mount({ claude: { loggedIn: true, usage }, codex: { loggedIn: false } });
-    await screen.findByText("71%");
-    expect(screen.queryByText("Claude")).toBeNull();
+    const claude = await screen.findByRole("group", { name: "Claude" });
+    expect(within(claude).getByText("Claude").querySelector("svg")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "ChatGPT" })).toBeNull();
   });
 

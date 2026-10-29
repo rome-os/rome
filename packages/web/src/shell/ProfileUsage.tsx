@@ -7,6 +7,7 @@ import {
   type AIToolStatus,
   type UsageWindowStatus,
 } from "@rome/api-types/ai-tools";
+import { ModelProviderIcon } from "@/components/brand-icons/ai-tool-icons";
 import { useAiToolStatus } from "@/hooks/use-ai-tool-status";
 import { useSettings } from "@/hooks/use-settings";
 import { UsageUpdatedAt } from "@/components/usage-updated-at";
@@ -60,10 +61,11 @@ export function ProfileUsage() {
   const enabled = settings !== undefined && settings.showAiToolUsage !== false;
   const { data } = useAiToolStatus({ enabled });
   const tools = [
-    { name: "ChatGPT", status: data?.codex },
-    { name: "Claude", status: data?.claude },
+    { name: "ChatGPT", provider: "openai", status: data?.codex },
+    { name: "Claude", provider: "anthropic", status: data?.claude },
   ].filter((tool) => showsUsage(tool.status)) as {
     name: string;
+    provider: string;
     status: AIToolStatus & { usage: NonNullable<AIToolStatus["usage"]> };
   }[];
   if (!enabled || tools.length === 0) return null;
@@ -117,7 +119,11 @@ export function ProfileUsage() {
         <>
           {tools.map((tool) => (
             <div key={tool.name} role="group" aria-label={tool.name}>
-              {tools.length > 1 ? <DropdownMenuLabel inset>{tool.name}</DropdownMenuLabel> : null}
+              {/* The tool's mark sits in the menu's icon column, its name with the item text. */}
+              <DropdownMenuLabel className="flex items-center gap-2 pt-2">
+                <ModelProviderIcon provider={tool.provider} />
+                {tool.name}
+              </DropdownMenuLabel>
               {tool.status.usage.error ? (
                 <p className="py-1 pr-2 pl-8 text-ui text-muted-foreground">
                   {t("aiTools.usage.unavailable")}
