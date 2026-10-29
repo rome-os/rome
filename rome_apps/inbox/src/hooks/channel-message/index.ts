@@ -85,7 +85,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       if (!inbound || this.subscriptions.has(channel.name)) continue;
       this.subscriptions.set(
         channel.name,
-        inbound.subscribe((event) => this.handleMessage(channel, event)),
+        inbound.subscribe(async (event) => {
+          await this.handleMessage(channel, event);
+        }),
       );
     }
   }
@@ -99,16 +101,34 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     for (const unsubscribe of unsubscribes) unsubscribe();
   }
 
+  /** Handle a recorded message, and say its wake is decided once no turn
+   *  will come of it, or once the turn it started has ended. */
   private async handleRecorded(event: RecordedInboundEvent): Promise<void> {
+    const decided = () =>
+      this.options.recordedMessages?.decided(event.recorded).catch((err) =>
+        (this.options.log ?? log).warn("could not mark a message's wake decided", {
+          messageId: event.message.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     const channel = this.known.get(event.message.channel);
     if (!channel) {
       (this.options.log ?? log).warn("recorded message names no channel the hook knows", {
         service: event.message.channel,
         messageId: event.message.messageId,
       });
+      await decided();
       return;
     }
-    await this.handleMessage(channel, event);
+    let dispatched: { turn: Promise<void> } | undefined;
+    try {
+      dispatched = await this.handleMessage(channel, event);
+    } finally {
+      // The turn settles without throwing, and the chat's next message must
+      // not wait on it.
+      if (dispatched) void dispatched.turn.then(decided);
+      else await decided();
+    }
   }
 
   /**
@@ -120,11 +140,13 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    * awaits a person lookup, a policy check and a store before its turn reaches
    * the agent session's queue, so two quick messages can reach the session in
    * either order, as they could before the channel ordered its handlers.
+   * Answers the dispatched turn, which never rejects, or nothing when no turn
+   * comes of the message.
    */
   private async handleMessage(
     channel: Channel,
     event: InboundEvent | RecordedInboundEvent,
-  ): Promise<void> {
+  ): Promise<{ turn: Promise<void> } | undefined> {
     const { message, ref } = event;
     const recorded = "recorded" in event ? event.recorded : undefined;
     const { connectionId } = ref;
@@ -226,11 +248,12 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         });
         return null;
       });
-    void this.runTurn(message, service, connectionId, attachments, activity, {
+    const turn = this.runTurn(message, service, connectionId, attachments, activity, {
       routedAgentName,
       accountAgentName: accountAgent,
       ...(recorded ? { recordedMessageId: recorded.messageId } : {}),
     });
+    return { turn };
   }
 
   private async runTurn(

@@ -1490,6 +1490,8 @@ async function main() {
   // hook hears it (docs/domains/participation.md#wake). It records through the
   // hook's channels, so the hook's trace covers recording as well.
   const chatEvents = new ChatEvents();
+  // A wake being decided when Rome stopped was decided by the stop.
+  await webchatRepo.markEveryWakeDecided();
   const inboundRecorder = inboundRecording(
     {
       chats: webchatRepo,

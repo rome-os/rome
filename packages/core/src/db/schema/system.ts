@@ -725,6 +725,11 @@ export const romeAgentMessages = sqliteTable(
     // The agent a delegate's reply is said by, on the guardian's behalf under
     // the guardian's account. Nothing writes it yet.
     onBehalfOf: text("on_behalf_of"),
+    // Set while Participation has not yet decided whether the message wakes
+    // an agent (docs/domains/participation.md#wake). Such a message is in the
+    // transcript but not yet something a turn catches up on. Null on every
+    // decided row.
+    wakePending: integer("wake_pending", { mode: "boolean" }),
   },
   (table) => [
     index("idx_rome_agent_messages_session_id").on(table.sessionId),

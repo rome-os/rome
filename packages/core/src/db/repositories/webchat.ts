@@ -1116,6 +1116,9 @@ export class WebChatRepository {
     replyToPlatformMessageId?: string;
     /** The agent a delegate's message is said by, on the account's behalf. */
     onBehalfOf?: string;
+    /** Whether the wake for it is still to be decided. A turn does not catch
+     *  up on such a message until {@link markWakeDecided} or a promotion. */
+    wakePending?: boolean;
     createdAt?: Date;
   }): Promise<{ inserted: boolean }> {
     const createdAt = input.createdAt ?? new Date();
@@ -1136,6 +1139,7 @@ export class WebChatRepository {
           senderName: input.senderName ?? null,
           replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
           onBehalfOf: input.onBehalfOf ?? null,
+          wakePending: input.wakePending ? true : null,
           contextInjectedTurnId: null,
           createdAt,
         })
@@ -1159,7 +1163,7 @@ export class WebChatRepository {
   ): Promise<void> {
     await this.db
       .update(romeAgentMessages)
-      .set({ role: "user" })
+      .set({ role: "user", wakePending: null })
       .where(
         and(
           eq(romeAgentMessages.sessionId, sessionId),
@@ -1167,6 +1171,24 @@ export class WebChatRepository {
           eq(romeAgentMessages.role, "notification"),
         ),
       );
+  }
+
+  /** Mark the wake for a message decided, so a turn catches up on it if it
+   *  was not made a prompt. An id that names no row changes nothing. */
+  async markWakeDecided(id: string): Promise<void> {
+    await this.db
+      .update(romeAgentMessages)
+      .set({ wakePending: null })
+      .where(eq(romeAgentMessages.id, id));
+  }
+
+  /** Mark every pending wake decided. A decision in flight does not survive a
+   *  restart, so at boot nothing is still being decided. */
+  async markEveryWakeDecided(): Promise<void> {
+    await this.db
+      .update(romeAgentMessages)
+      .set({ wakePending: null })
+      .where(eq(romeAgentMessages.wakePending, true));
   }
 
   async assignConversationMessageTurn(
@@ -1396,6 +1418,9 @@ export class WebChatRepository {
           // A send still pending reaches the agent once it is sent, and one the
           // platform refused never does.
           saidMessage,
+          // A message whose wake is still being decided may become its own
+          // turn's prompt, so no other turn catches up on it yet.
+          isNull(romeAgentMessages.wakePending),
         ),
       )
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
