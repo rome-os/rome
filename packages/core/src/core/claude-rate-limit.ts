@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { AIToolUsageStatus } from "../lib/provider-usage.js";
 
+/** Marks usage read from a Claude turn, as opposed to the OAuth probe. */
+export const CLAUDE_RATE_LIMIT_SOURCE = "claude rate limit event";
+
 const windowSchema = z.object({
   // Past a limit the CLI can report more than 1, which is still a full window.
   utilization: z
@@ -40,7 +43,7 @@ export function claudeRateLimitUsage(event: unknown): AIToolUsageStatus | null {
   });
   return {
     checkedAt: new Date().toISOString(),
-    source: "claude rate limit event",
+    source: CLAUDE_RATE_LIMIT_SOURCE,
     fiveHour: convert(windows.five_hour),
     sevenDay: convert(windows.seven_day),
   };

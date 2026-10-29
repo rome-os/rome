@@ -1,6 +1,7 @@
 import { claudeUsesApiKey, type AIToolProviderId } from "@rome/api-types/ai-tools";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
+import { CLAUDE_RATE_LIMIT_SOURCE } from "./claude-rate-limit.js";
 import {
   getClaudeStatus,
   readClaudeUsage,
@@ -121,8 +122,9 @@ function applyUsage(
   if (!usage) {
     // Null means no usable usage source, such as a Claude token held in the
     // macOS Keychain, or a CLI token past its expiresAt that only the next
-    // Claude turn renews. There is nothing to show and no failure to report.
-    delete target.usage;
+    // Claude turn renews. There is nothing to report, and a reading from a
+    // Claude turn stays: it is real, and its age shows next to it.
+    if (target.usage?.source !== CLAUDE_RATE_LIMIT_SOURCE) delete target.usage;
     return;
   }
   if (usage.error) {

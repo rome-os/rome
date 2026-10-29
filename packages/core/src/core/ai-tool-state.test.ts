@@ -1065,6 +1065,25 @@ describe("AI tool state change subscription", () => {
     state.close();
   });
 
+  it("keeps a Claude turn's reading when a later probe finds no usable token", async () => {
+    const state = createAIToolState({
+      probes: probes({ claudeUsage: async () => null }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const resetsAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    const live = {
+      checkedAt: new Date().toISOString(),
+      source: "claude rate limit event",
+      fiveHour: { usedPercent: 43, resetsAt },
+      sevenDay: { usedPercent: 20, resetsAt },
+    };
+    state.applyLiveUsage("anthropic", live);
+    await state.refresh("anthropic");
+    expect(state.get().claude.usage).toEqual(live);
+    state.close();
+  });
+
   it("lets a live recovery after a failed run outlast that failure's replay", async () => {
     let resolve!: (usage: AIToolUsageStatus) => void;
     const state = createAIToolState({
