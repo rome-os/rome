@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.9.5](https://github.com/rome-os/rome/compare/app-runtime-v0.9.4...app-runtime-v0.9.5) (2026-10-29)
+
+
+### Features
+
+* **chats:** record every inbound message before the wake decides ([#1502](https://github.com/rome-os/rome/issues/1502)) ([4a91a0c](https://github.com/rome-os/rome/commit/4a91a0c865955af009c1831d4c338f2eefeb3c51))
+
 ## [0.9.4](https://github.com/rome-os/rome/compare/app-runtime-v0.9.3...app-runtime-v0.9.4) (2026-10-28)
 
 
