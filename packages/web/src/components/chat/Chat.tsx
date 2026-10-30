@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import {
   Archive,
@@ -67,7 +68,7 @@ import type {
   TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { useStableMap } from "@/hooks/use-stable-map";
-import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
   CHAT_PAGE_TURNS,
@@ -102,6 +103,7 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -154,6 +156,8 @@ import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 const TIMELINE_JUMP_OFFSET_PX = 24;
 // How long the landed-on question stays tinted.
 const TIMELINE_LANDING_MS = 900;
+/** How many older pages a jump to a Concierge message loads before it gives up. */
+const MAX_JUMP_PAGES = 20;
 
 // Chat Component
 
@@ -539,6 +543,7 @@ export function Chat({
     setCursor: setOlderCursor,
     hasOlder,
     sentinelRef: olderSentinelRef,
+    loadOlder,
   } = useOlderMessages(mainSessionId || null, {
     pageTurns,
     scroller: scrollerEl,
@@ -606,6 +611,9 @@ export function Chat({
         anchor.getBoundingClientRect().top -
         scroller.getBoundingClientRect().top +
         scroller.scrollTop;
+      // A jump that follows loading older pages comes long after the click, so
+      // the pin would read it as drift and snap back to the bottom.
+      anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
       // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
       // scroll outside its 300ms user-gesture window as accidental drift and
       // snaps back to the bottom while pinned; an instant scroll emits its one
@@ -628,6 +636,56 @@ export function Chat({
     },
     [scrollerEl],
   );
+
+  // A row of the task panel points to a Concierge message that may sit pages
+  // above the loaded ones, so the jump pages older history in until it renders.
+  const olderRef = useRef({ hasOlder, loadOlder });
+  olderRef.current = { hasOlder, loadOlder };
+  const shownCountRef = useRef(0);
+  useEffect(() => {
+    shownCountRef.current = displayMessages.length;
+  }, [displayMessages]);
+  const findingMessageRef = useRef(false);
+  const showSourceMessage = useCallback(
+    async (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller || !mainSessionId || findingMessageRef.current) return;
+      if (findMessageAnchor(scroller, messageId)) {
+        jumpToMessage(messageId);
+        return;
+      }
+      findingMessageRef.current = true;
+      const loading = toast.loading(t("concierge.tasks.findingMessage"));
+      try {
+        let stalled = 0;
+        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+          if (!olderRef.current.hasOlder(mainSessionId)) break;
+          const before = shownCountRef.current;
+          await olderRef.current.loadOlder(mainSessionId);
+          // The page lands in state first and renders a moment later.
+          for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          if (findMessageAnchor(scroller, messageId)) {
+            jumpToMessage(messageId);
+            return;
+          }
+          // A page that fails to load changes nothing; two in a row end the search.
+          stalled = shownCountRef.current === before ? stalled + 1 : 0;
+          if (stalled >= 2) break;
+        }
+        toast.error(t("concierge.tasks.sourceMissing"));
+      } finally {
+        toast.dismiss(loading);
+        findingMessageRef.current = false;
+      }
+    },
+    [scrollerEl, mainSessionId, jumpToMessage, t],
+  );
+  useEffect(() => {
+    if (!concierge) return;
+    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+  }, [concierge, showSourceMessage]);
 
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),

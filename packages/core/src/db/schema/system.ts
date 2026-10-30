@@ -582,6 +582,11 @@ export const conciergeTasks = sqliteTable(
     /** Order inside Up next, decided by the Concierge. */
     rank: integer("rank"),
     sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    /**
+     * The Concierge chat message the row points back to. Not a foreign key: the
+     * message may be gone, and the panel then offers no jump. The text is never copied.
+     */
+    sourceMessageId: text("source_message_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */

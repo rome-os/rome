@@ -32,20 +32,41 @@ export function pressText(
  * Presses a panel button: it sends the Concierge the same message the guardian
  * could type, and the Concierge does the work and writes the row. The priority
  * is `next`: the message joins a running turn or waits for it, and never cuts it
- * off.
+ * off. With `replyToMessageId` the message is a reply to that message.
  */
 export async function sendTaskAction(
   task: Pick<ConciergeTaskDto, "id" | "updatedAt">,
   action: ConciergeTaskAction,
   text: string,
+  replyToMessageId?: string,
 ): Promise<void> {
   // The message keeps this id, so the press can be matched with the turn that takes it in.
   const inputId = randomUUID();
   beginPending(task.id, action, task.updatedAt, inputId);
   try {
-    const sent = await postSessionTurnJson(CONCIERGE_CHAT_ID, { inputId, text, priority: "next" });
+    const sent = await postSessionTurnJson(CONCIERGE_CHAT_ID, {
+      inputId,
+      text,
+      priority: "next",
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+    });
     if (!sent.ok) failPending(task.id);
   } catch {
     failPending(task.id);
   }
+}
+
+/**
+ * What a row's Done button sends. A row with a source message replies to it with
+ * a short sentence, so the Concierge reads which ask is answered; a row without
+ * one names its title like the other buttons.
+ */
+export function doneMessage(
+  t: (key: string, options: Record<string, string>) => string,
+  task: Pick<ConciergeTaskDto, "id" | "title" | "sourceMessageId">,
+  rows: ReadonlyArray<Pick<ConciergeTaskDto, "id" | "title" | "archivedAt">>,
+): { text: string; replyToMessageId?: string } {
+  return task.sourceMessageId
+    ? { text: t("concierge.tasks.replyText.done", {}), replyToMessageId: task.sourceMessageId }
+    : { text: pressText(t, "done", task, rows) };
 }

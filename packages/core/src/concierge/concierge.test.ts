@@ -65,8 +65,22 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
   };
 }
 
+/** What the Concierge has already said in its running turn, unless a test says it has not. */
+const ACKNOWLEDGEMENT: Row = {
+  id: "ack-1",
+  role: "assistant",
+  content: JSON.stringify([{ type: "text", content: "On it" }]),
+  turnId: "concierge-turn-1",
+};
+
 function setup(
-  options: { enabled?: boolean; settingsDelayMs?: number; startEvents?: boolean } = {},
+  options: {
+    enabled?: boolean;
+    settingsDelayMs?: number;
+    startEvents?: boolean;
+    /** False: the turn has said nothing yet, so a new task row has no message to point to. */
+    said?: boolean;
+  } = {},
 ) {
   const testDb = createTestDb();
   opened.push(testDb);
@@ -88,6 +102,7 @@ function setup(
   const backendTurns: BackendTurnParams[] = [];
   const order: string[] = [];
   let startedChats = 0;
+  let saidCount = 0;
   const chats: TaskChats = {
     startChat: rs.fn(async () => {
       const id = `task-${++startedChats}`;
@@ -135,12 +150,24 @@ function setup(
         sessions.set(id, { ...sessions.get(id), name });
       }),
       getTurnChatMessages: async (id: string, turnId: string) =>
-        (messages.get(id) ?? []).filter((row) => !row.turnId || row.turnId === turnId),
-      addBackendMessage: rs.fn(async (chatId: string, _turnId: string, parts: unknown[]) => {
+        [
+          ...(id === CONCIERGE_CHAT && options.said !== false ? [ACKNOWLEDGEMENT] : []),
+          ...(messages.get(id) ?? []),
+        ].filter((row) => !row.turnId || row.turnId === turnId),
+      addBackendMessage: rs.fn(async (chatId: string, turnId: string, parts: unknown[]) => {
         const list = messages.get(chatId) ?? [];
-        list.push({ role: "assistant", content: JSON.stringify(parts) });
+        const id = `said-${++saidCount}`;
+        list.push({ id, role: "assistant", content: JSON.stringify(parts), turnId });
         messages.set(chatId, list);
+        return { id };
       }),
+      getReplyTarget: async (chatId: string, messageId: string) =>
+        [
+          ...(chatId === CONCIERGE_CHAT && options.said !== false ? [ACKNOWLEDGEMENT] : []),
+          ...(messages.get(chatId) ?? []),
+        ].find(
+          (row) => row.id === messageId && (row.role === "user" || row.role === "assistant"),
+        ) ?? null,
       setSessionTrigger: rs.fn(
         async (id: string, trigger: { triggerKind: string; triggerName: string | null }) => {
           order.push("trigger");
@@ -440,7 +467,7 @@ describe("Concierge tools", () => {
     });
     await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     const result = await s.tool("chat_forward", { chatId: "task-1" });
-    expect(JSON.parse(result.content[0].text)).toEqual({ forwardedChars: 8 });
+    expect(JSON.parse(result.content[0].text)).toEqual({ forwardedChars: 8, messageId: "said-1" });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
       [
         {
@@ -598,6 +625,7 @@ describe("Concierge task list tools", () => {
     expect(await s.taskRepo.findBySession("legacy")).toMatchObject({
       title: "Old task",
       state: "doing",
+      sourceMessageId: null,
     });
     // A second send does not add a second row.
     await s.tool("chat_send", { chatId: "legacy", text: "Again" });
@@ -704,6 +732,256 @@ describe("Concierge task list tools", () => {
       },
     ]);
     expect(text(await s.tool("task_list", { includeDone: true })).tasks).toHaveLength(2);
+  });
+});
+
+describe("Concierge task anchors", () => {
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
+  const anchorOf = async (s: ReturnType<typeof setup>, taskId: string) =>
+    (await s.taskRepo.get(taskId))?.sourceMessageId;
+  const created = async (s: ReturnType<typeof setup>, entry: Record<string, unknown>) =>
+    text(await s.tool("task_upsert", { tasks: [{ title: "Pay rent", ...entry }] })).tasks[0].id;
+
+  it("say, chat_card and chat_forward answer the id of the message they stored", async () => {
+    const s = setup();
+    const said = text(await s.tool("say", { text: "On it" }));
+    expect(said).toEqual({ sent: expect.any(String), messageId: "said-1" });
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.messages.get("task-1")?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+    });
+    expect(text(await s.tool("chat_card", { chatId: "task-1" }))).toEqual({
+      sent: expect.any(String),
+      messageId: "said-2",
+    });
+    expect(text(await s.tool("chat_forward", { chatId: "task-1" })).messageId).toBe("said-3");
+  });
+
+  it("points a new row at the latest thing the Concierge said this turn", async () => {
+    const s = setup({ said: false });
+    await s.tool("say", { text: "First" });
+    await s.tool("say", { text: "Second" });
+    expect(await anchorOf(s, await created(s, {}))).toBe("said-2");
+  });
+
+  it("points a new row at the message passed, which says, cards and forwards returned", async () => {
+    const s = setup({ said: false });
+    const first = text(await s.tool("say", { text: "First" })).messageId;
+    await s.tool("say", { text: "Second" });
+    expect(await anchorOf(s, await created(s, { messageId: first }))).toBe(first);
+  });
+
+  it("refuses a message that is not in the Concierge chat, and writes nothing", async () => {
+    const s = setup({ said: false });
+    s.messages.set("task-1", [
+      { id: "foreign-1", role: "assistant", content: "[]", turnId: "concierge-turn-1" },
+    ]);
+    await s.tool("say", { text: "First" });
+    for (const messageId of ["foreign-1", "no-such-message"]) {
+      const result = await s.tool("task_upsert", { tasks: [{ title: "Pay rent", messageId }] });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(`No message ${messageId} in this chat`);
+    }
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("refuses a new row when nothing was said this turn, and never falls back to the guardian's words", async () => {
+    const s = setup({ said: false });
+    s.messages.set(CONCIERGE_CHAT, [
+      { id: "user-1", role: "user", content: "[]", turnId: "concierge-turn-1" },
+      { id: "older-said", role: "assistant", content: "[]", turnId: "concierge-turn-0" },
+    ]);
+    const result = await s.tool("task_upsert", { tasks: [{ title: "Pay rent" }] });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Call say first");
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("keeps a row's message on an update, and a new messageId replaces it", async () => {
+    const s = setup({ said: false });
+    const first = text(await s.tool("say", { text: "Pay the rent?" })).messageId;
+    const id = await created(s, { state: "next" });
+    const asked = text(await s.tool("say", { text: "Which account?" })).messageId;
+
+    await s.tool("task_upsert", { tasks: [{ id, summary: "Waiting" }] });
+    expect(await anchorOf(s, id)).toBe(first);
+
+    await s.tool("task_upsert", { tasks: [{ id, state: "needs_user", messageId: asked }] });
+    expect(await anchorOf(s, id)).toBe(asked);
+
+    const bad = await s.tool("task_upsert", { tasks: [{ id, messageId: "no-such-message" }] });
+    expect(bad.isError).toBe(true);
+    expect(await anchorOf(s, id)).toBe(asked);
+  });
+
+  it("refuses needs_user without a messageId, on a create and on an update, and writes nothing", async () => {
+    const s = setup({ said: false });
+    await s.tool("say", { text: "Which account?" });
+    const id = await created(s, { state: "next" });
+    const before = await s.taskRepo.get(id);
+
+    // The turn has said something, so a create of another state would have an anchor; needs_user still needs the id.
+    const create = await s.tool("task_upsert", {
+      tasks: [
+        { title: "Fine", state: "next" },
+        { title: "Pick one", state: "needs_user" },
+      ],
+    });
+    expect(create.isError).toBe(true);
+    expect(create.content[0].text).toContain(
+      "tasks[1]: needs_user requires messageId: say or chat_forward the ask first",
+    );
+    const update = await s.tool("task_upsert", { tasks: [{ id, state: "needs_user" }] });
+    expect(update.isError).toBe(true);
+    expect(update.content[0].text).toContain("tasks[0]: needs_user requires messageId");
+    // The batch is atomic: not even the valid first entry was written.
+    expect((await s.taskRepo.listForAgent(true)).map(({ row }) => row.title)).toEqual(["Pay rent"]);
+    expect(await s.taskRepo.get(id)).toEqual(before);
+  });
+
+  it("takes needs_user with a valid messageId, which replaces the anchor", async () => {
+    const s = setup({ said: false });
+    await s.tool("say", { text: "Planning" });
+    const id = await created(s, { state: "doing" });
+    const asked = text(await s.tool("say", { text: "Which one?" })).messageId;
+    const result = text(
+      await s.tool("task_upsert", {
+        tasks: [{ id, state: "needs_user", waitingOn: "a choice", messageId: asked }],
+      }),
+    );
+    expect(await anchorOf(s, id)).toBe(asked);
+    expect(result.tasks[0]).toMatchObject({ state: "needs_user", anchor: asked });
+    expect(result.tasks[0]).not.toHaveProperty("anchorKept");
+
+    // A new needs_user row takes the id too, whatever the turn said last.
+    await s.tool("say", { text: "Something else" });
+    const made = await created(s, { title: "Choose", state: "needs_user", messageId: asked });
+    expect(await anchorOf(s, made)).toBe(asked);
+  });
+
+  it("refuses a needs_user messageId that is not a message of the Concierge chat", async () => {
+    const s = setup({ said: false });
+    await s.tool("say", { text: "Planning" });
+    const id = await created(s, { state: "doing" });
+    s.messages.set("task-1", [
+      { id: "foreign-1", role: "assistant", content: "[]", turnId: "concierge-turn-1" },
+    ]);
+    for (const messageId of ["foreign-1", "no-such-message"]) {
+      const result = await s.tool("task_upsert", {
+        tasks: [{ id, state: "needs_user", messageId }],
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(`No message ${messageId} in this chat`);
+    }
+    expect((await s.taskRepo.get(id))?.state).toBe("doing");
+  });
+
+  it("leaves an update that sets no needs_user alone: the anchor stays and the result says so", async () => {
+    const s = setup({ said: false });
+    const first = text(await s.tool("say", { text: "Planning" })).messageId;
+    const id = await created(s, { state: "doing" });
+    await s.tool("say", { text: "Later" });
+    const result = text(
+      await s.tool("task_upsert", { tasks: [{ id, state: "watching", summary: "Waiting" }] }),
+    );
+    expect(await anchorOf(s, id)).toBe(first);
+    expect(result.tasks[0]).toMatchObject({ state: "watching", anchor: first, anchorKept: true });
+    // A write with no state field touches a needs_user row without the requirement.
+    const asked = text(await s.tool("say", { text: "Which?" })).messageId;
+    await s.tool("task_upsert", { tasks: [{ id, state: "needs_user", messageId: asked }] });
+    const touched = text(
+      await s.tool("task_upsert", { tasks: [{ id, summary: "Still waiting" }] }),
+    );
+    expect(touched.tasks[0]).toMatchObject({
+      state: "needs_user",
+      anchor: asked,
+      anchorKept: true,
+    });
+  });
+
+  it("answers a created row's anchor without the kept flag, and leaves out an anchor a legacy row never had", async () => {
+    const s = setup({ said: false });
+    await s.tool("say", { text: "Planning" });
+    const made = text(await s.tool("task_upsert", { tasks: [{ title: "New" }] }));
+    expect(made.tasks[0]).toEqual({
+      id: expect.any(String),
+      title: "New",
+      state: "next",
+      anchor: "said-1",
+    });
+    const [legacy] = await s.taskRepo.upsertMany([{ title: "Old", state: "next" }]);
+    const kept = text(await s.tool("task_upsert", { tasks: [{ id: legacy.id, summary: "x" }] }));
+    expect(kept.tasks[0]).toEqual({
+      id: legacy.id,
+      title: "Old",
+      state: "next",
+      anchorKept: true,
+    });
+  });
+
+  it("chat_start linking a taskId sets doing and needs no messageId", async () => {
+    const s = setup({ said: false });
+    const first = text(await s.tool("say", { text: "Planning" })).messageId;
+    const planned = await created(s, { state: "next" });
+    const result = await s.tool("chat_start", { title: "Go", brief: "Do it", taskId: planned });
+    expect(result.isError).toBeFalsy();
+    expect(await anchorOf(s, planned)).toBe(first);
+    expect((await s.taskRepo.get(planned))?.state).toBe("doing");
+  });
+
+  it("chat_start points the row it creates at the latest message of the turn", async () => {
+    const s = setup({ said: false });
+    await s.tool("say", { text: "Looking into flights" });
+    const started = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
+    expect(await anchorOf(s, started.taskId)).toBe("said-1");
+  });
+
+  it("chat_start starts no chat when the row has no message to point to", async () => {
+    const s = setup({ said: false });
+    const none = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(none.isError).toBe(true);
+    expect(none.content[0].text).toContain("Call say first");
+    const bogus = await s.tool("chat_start", {
+      title: "Flights",
+      brief: "Find flights",
+      messageId: "no-such-message",
+    });
+    expect(bogus.isError).toBe(true);
+    expect(s.chats.startChat).not.toHaveBeenCalled();
+    expect(s.posted).toEqual([]);
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("chat_start keeps a linked row's message unless a messageId replaces it", async () => {
+    const s = setup({ said: false });
+    const first = text(await s.tool("say", { text: "Planning" })).messageId;
+    const planned = await created(s, { state: "next" });
+    await s.tool("say", { text: "Starting now" });
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights", taskId: planned });
+    expect(await anchorOf(s, planned)).toBe(first);
+
+    const other = await created(s, { title: "Other", state: "next" });
+    const chosen = text(await s.tool("say", { text: "Choose" })).messageId;
+    await s.tool("chat_start", {
+      title: "Hotels",
+      brief: "Find hotels",
+      taskId: other,
+      messageId: chosen,
+    });
+    expect(await anchorOf(s, other)).toBe(chosen);
+  });
+
+  it("chat_start with a taskId needs no message of the turn when the row has none", async () => {
+    const s = setup({ said: false });
+    const [legacy] = await s.taskRepo.upsertMany([{ title: "Old", state: "next" }]);
+    const result = await s.tool("chat_start", {
+      title: "Old",
+      brief: "Do it",
+      taskId: legacy.id,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(await anchorOf(s, legacy.id)).toBeNull();
   });
 });
 

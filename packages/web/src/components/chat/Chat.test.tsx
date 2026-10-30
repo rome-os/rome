@@ -8,6 +8,8 @@ import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
   rstest: "importActual",
 };
+import { requestConciergeJump } from "@/components/concierge/concierge-jump";
+import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { Chat } from "./Chat";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
@@ -36,6 +38,12 @@ const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }))
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+const toast = rs.hoisted(() => ({
+  loading: rs.fn(() => "finding"),
+  error: rs.fn(),
+  dismiss: rs.fn(),
+}));
+rs.mock("sonner", () => ({ toast }));
 // How often the chat and its composer render: the chat calls this hook once
 // per render, and the composer stand-in counts its own.
 const renders = rs.hoisted(() => ({ chat: 0, composer: 0 }));
@@ -99,6 +107,7 @@ rs.mock("@/pages/free/use-free-cells", () => ({
 const stickToBottom = rs.hoisted(() => ({ isAtBottom: true, scrollToBottom: rs.fn() }));
 
 rs.mock("@/hooks/use-stick-to-bottom", () => ({
+  HOLD_STICK_EVENT: "rome:hold-stick",
   // Callback refs, matching the real hook. Chat composes these with its own
   // refs and CALLS them, so a ref object here would throw on mount — and a
   // rs.mock factory is not checked against the module's real shape, so nothing
@@ -166,6 +175,7 @@ rs.mock("@/components/chat/MessageList", () => ({
       kind: string;
       key: string;
       message?: {
+        id?: string;
         content: string;
         traceArchived?: boolean;
         sender?: { name: string | null; avatarUrl: string | null };
@@ -197,6 +207,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             key={row.key}
             data-testid="user-row"
             data-row-key={row.key}
+            data-timeline-anchor={row.message?.id}
             data-sender={row.message?.sender?.name}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
@@ -2136,5 +2147,137 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
     expect(screen.getByTestId("message-list")).toBeTruthy();
     expect(guidance()).toBeNull();
+  });
+});
+
+describe("Chat Concierge jump to a message", () => {
+  const message = (n: number) => ({
+    id: `m-${n}`,
+    sessionId: "concierge",
+    turnId: `turn-${n}`,
+    role: "user" as const,
+    content: `question ${n}`,
+    createdAt: new Date(Date.UTC(2026, 9, 27, 12, 0, n)).toISOString(),
+  });
+  const anchor = (id: string) => document.querySelector(`[data-timeline-anchor="${id}"]`);
+  const rows = () => screen.queryAllByTestId("user-row").length;
+  const originalScrollTo = Element.prototype.scrollTo;
+  const scrollTo = rs.fn();
+
+  beforeEach(() => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    Element.prototype.scrollTo = scrollTo as typeof Element.prototype.scrollTo;
+    scrollTo.mockClear();
+    toast.loading.mockClear();
+    toast.error.mockClear();
+    toast.dismiss.mockClear();
+  });
+  afterEach(() => {
+    Element.prototype.scrollTo = originalScrollTo;
+  });
+
+  it("scrolls to a message that is on screen and tints it, with no waiting", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+
+    act(() => requestConciergeJump("m-2"));
+
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
+    expect(toast.loading).not.toHaveBeenCalled();
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(5), message(6)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c2" })
+      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+
+    act(() => requestConciergeJump("m-1"));
+
+    await waitFor(() => expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true));
+    expect(toast.loading).toHaveBeenCalledWith("concierge.tasks.findingMessage");
+    expect(toast.dismiss).toHaveBeenCalledWith("finding");
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[1])).toEqual([
+      { limit: expect.any(Number) },
+      { limit: expect.any(Number), before: "c1" },
+      { limit: expect.any(Number), before: "c2" },
+    ]);
+    expect(scrollTo).toHaveBeenCalledOnce();
+  });
+
+  it("holds a pinned view still while it scrolls, so the jump is not read as drift", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+    const order: string[] = [];
+    anchor("m-1")!.addEventListener(HOLD_STICK_EVENT, () => order.push("hold"));
+    scrollTo.mockImplementation(() => order.push("scroll"));
+
+    act(() => requestConciergeJump("m-1"));
+
+    expect(order).toEqual(["hold", "scroll"]);
+  });
+
+  it("gives up after 20 older pages and says it can't find the message", async () => {
+    // The newest page and 20 older ones, each with a page behind it.
+    for (let page = 1; page <= 21; page++) {
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1000 - page)],
+        nextCursor: `c${page}`,
+      });
+    }
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(1));
+
+    act(() => requestConciergeJump("m-missing"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"), {
+      timeout: 10_000,
+    });
+    // The newest page, then 20 older ones.
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(21);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(toast.dismiss).toHaveBeenCalledWith("finding");
+  }, 15_000);
+
+  it("says it can't find a message when all the history is loaded and it is not there", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+
+    act(() => requestConciergeJump("m-gone"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("is for the Concierge chat only", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [{ ...message(2), sessionId: "session-1" }],
+      nextCursor: "c1",
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(rows()).toBe(1));
+
+    act(() => requestConciergeJump("m-2"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
   });
 });

@@ -29,6 +29,7 @@ const row = (
   dueAt: null,
   rank: null,
   chat: null,
+  sourceMessageId: null,
   createdAt: 1,
   updatedAt: 1,
   completedAt: null,

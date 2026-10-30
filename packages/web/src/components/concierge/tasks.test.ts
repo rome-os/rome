@@ -24,6 +24,7 @@ function task(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}):
     dueAt: null,
     rank: null,
     chat: null,
+    sourceMessageId: null,
     createdAt: NOW - 10 * DAY + seq,
     updatedAt: NOW - 1000 * seq,
     completedAt: null,

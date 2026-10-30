@@ -1,6 +1,7 @@
 // Concierge: one fixed texting-style conversation that hands work to task
 // chats. Design: rome-os/rome#1344.
 
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type { Account, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
@@ -20,8 +21,7 @@ const log = createLogger("concierge");
 
 /** The canonical id of the core agent behind the Concierge conversation. */
 export const CONCIERGE_AGENT_ID = "core:concierge";
-/** The Concierge chat's fixed id, so the dashboard opens it at `/chat/concierge`. */
-export const CONCIERGE_CHAT_ID = "concierge";
+export { CONCIERGE_CHAT_ID };
 /** The guardian setting that turns Concierge on. Any value but `true` is off. */
 const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** `rome_sessions.trigger_kind` of a task chat Concierge started. */
@@ -65,6 +65,7 @@ export interface ConciergeDeps {
     | "listSessions"
     | "updateSessionName"
     | "getTurnChatMessages"
+    | "getReplyTarget"
     | "addBackendMessage"
     | "setSessionTrigger"
     | "listProjects"

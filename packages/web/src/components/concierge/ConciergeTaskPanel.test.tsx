@@ -12,8 +12,12 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
+import { onConciergeJump } from "./concierge-jump";
 import { ConciergeTaskPanel } from "./ConciergeTaskPanel";
 import { PENDING_TIMEOUT_MS, resetPending } from "./task-pending";
+
+const toast = rs.hoisted(() => ({ error: rs.fn() }));
+rs.mock("sonner", () => ({ toast }));
 
 const DAY = 86_400_000;
 
@@ -29,6 +33,7 @@ function row(state: ConciergeTaskState, extra: Partial<ConciergeTaskDto> = {}): 
     dueAt: null,
     rank: null,
     chat: null,
+    sourceMessageId: null,
     createdAt: Date.now() - 20 * DAY + seq,
     updatedAt: Date.now() - 60_000,
     completedAt: null,
@@ -80,13 +85,13 @@ function mockServer() {
   }) as typeof fetch);
 }
 
-function renderPanel() {
+function renderPanel(props: { onNavigate?: () => void } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <ConciergeTaskPanel />
+          <ConciergeTaskPanel {...props} />
         </MemoryRouter>
       </QueryClientProvider>
     </LiveEventsClientContext.Provider>,
@@ -120,6 +125,7 @@ beforeEach(() => {
   server.turns = [];
   posts.length = 0;
   postStatus = 200;
+  toast.error.mockClear();
   FakeWebSocket.instances = [];
   resetPending();
 });
@@ -131,11 +137,11 @@ afterEach(() => {
 
 const groupButtons = () =>
   screen
-    .getAllByRole("button", { name: /^(Needs you|Doing|Up next|Watching|Done)\b/ })
+    .getAllByRole("button", { name: /^(Needs you|Doing|Up next|Watching|Done) \d/ })
     .map((button) => button.textContent);
 /** Opens the Done group, which starts folded. */
 const openDone = async (user: ReturnType<typeof userEvent.setup>) =>
-  user.click(screen.getByRole("button", { name: /^Done\b/ }));
+  user.click(screen.getByRole("button", { name: /^Done \d/ }));
 const item = (title: string) => screen.getByText(title).closest("li")!;
 
 describe("ConciergeTaskPanel", () => {
@@ -175,7 +181,7 @@ describe("ConciergeTaskPanel", () => {
     const user = userEvent.setup();
     renderPanel();
     await screen.findByText("Working");
-    const done = screen.getByRole("button", { name: /^Done\b/ });
+    const done = screen.getByRole("button", { name: /^Done \d/ });
     expect(done.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Shipped")).toBeNull();
     await user.click(done);
@@ -271,7 +277,7 @@ describe("ConciergeTaskPanel", () => {
     }
   });
 
-  it("opens a row's chat when it has one, and offers nothing to open otherwise", async () => {
+  it("keeps a small open-chat link at the end of a row with a chat, and none on a row without one", async () => {
     server.recent = [
       row("doing", { title: "With chat", chat: { id: "chat-9", name: "Chat nine" } }),
       row("next", { title: "No chat" }),
@@ -281,9 +287,115 @@ describe("ConciergeTaskPanel", () => {
     const link = await screen.findByRole("link", { name: "Open the chat for With chat" });
     expect(link.getAttribute("href")).toBe("/chat/chat-9");
     expect(screen.getAllByRole("link")).toHaveLength(1);
+    // At the end of the row, after the title.
+    expect(item("With chat").contains(link)).toBe(true);
+    expect(
+      screen.getByText("With chat").compareDocumentPosition(link) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("offers Stop on a Doing row with a chat, Archive on Done rows, and nothing on the rest, as icon buttons", async () => {
+  it("does not navigate to the chat when the row body is clicked", async () => {
+    server.recent = [
+      row("doing", {
+        title: "With chat",
+        chat: { id: "chat-9", name: "Chat nine" },
+        sourceMessageId: "m1",
+      }),
+    ];
+    mockServer();
+    renderPanel();
+    // The title is no link: the only link on the row is the open-chat icon.
+    expect((await screen.findByText("With chat")).closest("a")).toBeNull();
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
+
+  it("jumps to a row's message when the row is clicked, whatever its state", async () => {
+    server.recent = [
+      row("doing", { title: "Running", chat: { id: "c1", name: "c" }, sourceMessageId: "m-run" }),
+      row("next", { title: "Planned", sourceMessageId: "m-next" }),
+      row("needs_user", { title: "Blocked", sourceMessageId: "m-ask" }),
+      row("done", { title: "Shipped", completedAt: Date.now() - DAY, sourceMessageId: "m-done" }),
+    ];
+    mockServer();
+    const jumps: string[] = [];
+    const off = onConciergeJump((messageId) => jumps.push(messageId));
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findByText("Running");
+    await openDone(user);
+    for (const title of ["Running", "Planned", "Blocked", "Shipped"]) {
+      await user.click(screen.getByText(title));
+    }
+    off();
+    expect(jumps).toEqual(["m-run", "m-next", "m-ask", "m-done"]);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("closes the mobile sheet before it asks for the jump", async () => {
+    server.recent = [row("next", { title: "Planned", sourceMessageId: "m-next" })];
+    mockServer();
+    const order: string[] = [];
+    const off = onConciergeJump(() => order.push("jump"));
+    const user = userEvent.setup();
+    renderPanel({ onNavigate: () => order.push("close") });
+    await user.click(await screen.findByText("Planned"));
+    off();
+    expect(order).toEqual(["close", "jump"]);
+  });
+
+  it("says it can't find the original message for a row without one, and jumps nowhere", async () => {
+    server.recent = [row("next", { title: "Old row", sourceMessageId: null })];
+    mockServer();
+    const jumps: string[] = [];
+    const off = onConciergeJump((messageId) => jumps.push(messageId));
+    const closed = rs.fn();
+    const user = userEvent.setup();
+    renderPanel({ onNavigate: closed });
+    await user.click(await screen.findByText("Old row"));
+    off();
+    expect(jumps).toEqual([]);
+    expect(closed).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith("Can't find the original message");
+  });
+
+  it("says it in Chinese too", async () => {
+    await i18n.changeLanguage("zh-CN");
+    try {
+      server.recent = [row("next", { title: "旧任务", sourceMessageId: null })];
+      mockServer();
+      const user = userEvent.setup();
+      renderPanel();
+      await user.click(await screen.findByText("旧任务"));
+      expect(toast.error).toHaveBeenCalledWith("找不到原消息");
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("has the new strings in English and Chinese", () => {
+    const keys = [
+      "concierge.tasks.done",
+      "concierge.tasks.pending.done",
+      "concierge.tasks.actionText.done",
+      "concierge.tasks.replyText.done",
+      "concierge.tasks.sourceMissing",
+      "concierge.tasks.findingMessage",
+    ];
+    for (const lng of ["en", "zh-CN"]) {
+      for (const key of keys) {
+        expect(i18n.exists(key, { ns: "chat", lng }), `${lng} ${key}`).toBe(true);
+      }
+    }
+    expect(i18n.t("concierge.tasks.replyText.done", { ns: "chat", lng: "en" })).toBe(
+      "I've done this",
+    );
+    expect(i18n.t("concierge.tasks.replyText.done", { ns: "chat", lng: "zh-CN" })).toBe(
+      "我已经完成了",
+    );
+  });
+
+  it("offers Stop on a Doing row with a chat, Done on a Needs you row, Archive on Done rows, and nothing on the rest, as icon buttons", async () => {
     server.recent = [
       row("doing", { title: "Running", chat: { id: "c1", name: "c" } }),
       row("doing", { title: "Chatless doing" }),
@@ -298,13 +410,15 @@ describe("ConciergeTaskPanel", () => {
     renderPanel();
     await screen.findByText("Running");
     await openDone(user);
+    // The title is a button too; the icon buttons are the ones with a label.
     const buttonsOf = (title: string) =>
       within(item(title))
         .queryAllByRole("button")
+        .filter((button) => button.getAttribute("aria-label"))
         .map((button) => [button.getAttribute("aria-label"), button.textContent]);
     expect(buttonsOf("Running")).toEqual([["Stop", ""]]);
     expect(buttonsOf("Chatless doing")).toEqual([]);
-    expect(buttonsOf("Blocked")).toEqual([]);
+    expect(buttonsOf("Blocked")).toEqual([["Done", ""]]);
     expect(buttonsOf("Planned")).toEqual([]);
     expect(buttonsOf("Watched")).toEqual([]);
     expect(buttonsOf("Finished")).toEqual([["Archive", ""]]);
@@ -343,7 +457,9 @@ describe("ConciergeTaskPanel", () => {
     // The row says so quietly under its title, with no action to press again.
     const status = await screen.findByText("Stopping…");
     expect(item("Fix flaky test").contains(status)).toBe(true);
-    expect(within(item("Fix flaky test")).queryByRole("button")).toBeNull();
+    expect(
+      within(item("Fix flaky test")).queryByRole("button", { name: /Stop|Try again/ }),
+    ).toBeNull();
 
     // The Concierge stops it and writes the row: the pending state is gone.
     upsert(socket, {
@@ -353,7 +469,7 @@ describe("ConciergeTaskPanel", () => {
       updatedAt: task.updatedAt + 5_000,
     });
     await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
-    expect(screen.getByRole("button", { name: /^Done\b/ }).textContent).toBe("Done 1");
+    expect(screen.getByRole("button", { name: /^Done \d/ }).textContent).toBe("Done 1");
   });
 
   it("sends Archive the same way, and the row leaves the list when the Concierge archives it", async () => {
@@ -362,7 +478,7 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const user = userEvent.setup();
     const { socket } = renderPanel();
-    await user.click(await screen.findByRole("button", { name: /^Done\b/ }));
+    await user.click(await screen.findByRole("button", { name: /^Done \d/ }));
     await user.click(await screen.findByRole("button", { name: "Archive" }));
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toMatchObject({ text: 'Archive "Shipped"', priority: "next" });
@@ -370,6 +486,89 @@ describe("ConciergeTaskPanel", () => {
     expect(await screen.findByText("Archiving…")).toBeTruthy();
     upsert(socket, { ...task, archivedAt: Date.now(), updatedAt: task.updatedAt + 5_000 });
     await waitFor(() => expect(screen.queryByText("Shipped")).toBeNull());
+  });
+
+  it("sends Done on a Needs you row as a reply to its message, in the guardian's language", async () => {
+    const task = row("needs_user", { title: "Pay rent", sourceMessageId: "m-ask" });
+    server.recent = [task];
+    mockServer();
+    const user = userEvent.setup();
+    const { socket } = renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({
+      text: "I've done this",
+      replyToMessageId: "m-ask",
+      priority: "next",
+    });
+    expect(posts[0]).not.toHaveProperty("parts");
+    const status = await screen.findByText("Sending…");
+    expect(item("Pay rent").contains(status)).toBe(true);
+    expect(within(item("Pay rent")).queryByRole("button", { name: "Done" })).toBeNull();
+
+    upsert(socket, {
+      ...task,
+      state: "done",
+      completedAt: Date.now(),
+      updatedAt: task.updatedAt + 5_000,
+    });
+    await waitFor(() => expect(screen.queryByText("Sending…")).toBeNull());
+  });
+
+  it("sends Done in Chinese when the interface is", async () => {
+    await i18n.changeLanguage("zh-CN");
+    try {
+      server.recent = [row("needs_user", { title: "交房租", sourceMessageId: "m-ask" })];
+      mockServer();
+      const user = userEvent.setup();
+      renderPanel();
+      await user.click(await screen.findByRole("button", { name: "完成" }));
+      await waitFor(() => expect(posts).toHaveLength(1));
+      expect(posts[0]).toMatchObject({ text: "我已经完成了", replyToMessageId: "m-ask" });
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("sends Done as plain text naming the row when it has no message to reply to", async () => {
+    server.recent = [row("needs_user", { title: "Pay rent", sourceMessageId: null })];
+    mockServer();
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Done" }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ text: 'Done "Pay rent"', priority: "next" });
+    expect(posts[0]).not.toHaveProperty("replyToMessageId");
+  });
+
+  it("adds the short id to the plain Done text only when another open row has the same title", async () => {
+    const first = row("needs_user", { title: "Pay rent" });
+    const twin = row("needs_user", { title: "Pay rent" });
+    server.recent = [first, twin];
+    mockServer();
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findAllByText("Pay rent");
+    for (const done of screen.getAllByRole("button", { name: "Done" })) await user.click(done);
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts.map((post) => post.text).sort()).toEqual(
+      [first, twin].map((task) => `Done "Pay rent" (task ${task.id.slice(0, 6)})`).sort(),
+    );
+  });
+
+  it("repeats Done as a reply when the first press fails", async () => {
+    server.recent = [row("needs_user", { title: "Pay rent", sourceMessageId: "m-ask" })];
+    postStatus = 500;
+    mockServer();
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Done" }));
+    await screen.findByText("Could not send");
+    postStatus = 200;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]).toMatchObject({ text: "I've done this", replyToMessageId: "m-ask" });
   });
 
   it("names the short id only when another open row has the same title", async () => {
@@ -485,8 +684,8 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await screen.findByRole("button", { name: /^Done\b/ });
-    expect(screen.getByRole("button", { name: /^Done\b/ }).textContent).toBe("Done 3");
+    await screen.findByRole("button", { name: /^Done \d/ });
+    expect(screen.getByRole("button", { name: /^Done \d/ }).textContent).toBe("Done 3");
     await openDone(user);
     expect(screen.getByText("Fresh")).toBeTruthy();
     expect(screen.queryByText("Stale")).toBeNull();
@@ -504,7 +703,7 @@ describe("ConciergeTaskPanel", () => {
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: /^Done\b/ }));
+    await user.click(await screen.findByRole("button", { name: /^Done \d/ }));
     expect(await screen.findByRole("button", { name: "Show 1 older" })).toBeTruthy();
     expect(screen.queryByText("Long ago")).toBeNull();
   });

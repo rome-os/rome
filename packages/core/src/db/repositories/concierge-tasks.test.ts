@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { romeAgentMessages } from "../schema.js";
 import { WebChatRepository } from "./webchat.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 
@@ -103,6 +105,59 @@ describe("ConciergeTasksRepository", () => {
     const [row] = await repo.upsertMany([{ title: "A", sessionId: "chat-1" }]);
     await chats.updateSessionName("chat-1", "Renamed");
     expect((await repo.getWithChat(row.id))?.chat).toEqual({ id: "chat-1", name: "Renamed" });
+  });
+
+  describe("source message", () => {
+    const say = async (chatId: string, text = "Hello") =>
+      (await chats.addBackendMessage(chatId, "turn-1", [{ type: "text", content: text }])).id;
+    const sourceOf = async (id: string) => (await repo.getWithChat(id))?.sourceMessageId;
+
+    it("answers the id while the message is in the Concierge chat, and null once it is gone", async () => {
+      await chats.createSession("concierge", "Concierge");
+      const messageId = await say("concierge");
+      const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: messageId }]);
+      expect(row.sourceMessageId).toBe(messageId);
+      expect(await sourceOf(row.id)).toBe(messageId);
+      expect((await repo.listForPanel(new Date(0)))[0].sourceMessageId).toBe(messageId);
+
+      testDb.db.delete(romeAgentMessages).where(eq(romeAgentMessages.id, messageId)).run();
+      expect(await sourceOf(row.id)).toBeNull();
+      // The row keeps the id it was given: nothing is copied or cleared.
+      expect((await repo.get(row.id))?.sourceMessageId).toBe(messageId);
+    });
+
+    it("counts only a user or assistant message of the Concierge chat", async () => {
+      await chats.createSession("concierge", "Concierge");
+      await chats.createSession("other", "Other");
+      const foreign = await say("other");
+      const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: foreign }]);
+      expect(await sourceOf(row.id)).toBeNull();
+
+      const trace = await say("concierge");
+      testDb.db
+        .update(romeAgentMessages)
+        .set({ role: "trace" })
+        .where(eq(romeAgentMessages.id, trace))
+        .run();
+      await repo.upsertMany([{ id: row.id, sourceMessageId: trace }]);
+      expect(await sourceOf(row.id)).toBeNull();
+    });
+
+    it("keeps the message on a later write unless one is given", async () => {
+      await chats.createSession("concierge", "Concierge");
+      const first = await say("concierge");
+      const second = await say("concierge");
+      const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: first }]);
+      await repo.upsertMany([{ id: row.id, summary: "Later" }]);
+      expect(await sourceOf(row.id)).toBe(first);
+      await repo.upsertMany([{ id: row.id, sourceMessageId: second }]);
+      expect(await sourceOf(row.id)).toBe(second);
+    });
+
+    it("is null for a row that never had one", async () => {
+      const [row] = await repo.upsertMany([{ title: "A" }]);
+      expect(await sourceOf(row.id)).toBeNull();
+    });
   });
 
   it("finds rows whose chat was active after the row was written", async () => {

@@ -13,7 +13,10 @@ export const CONCIERGE_TASK_STATES = [
 export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 
 /** The panel actions. Each one sends the Concierge a message, and never writes the row. */
-export type ConciergeTaskAction = "stop" | "archive";
+export type ConciergeTaskAction = "stop" | "archive" | "done";
+
+/** The Concierge's chat has a fixed id, so the dashboard opens it at `/chat/concierge`. */
+export const CONCIERGE_CHAT_ID = "concierge";
 
 /** How many days of finished rows `GET /concierge/tasks` returns by default. */
 export const CONCIERGE_DONE_DAYS = 7;
@@ -32,6 +35,11 @@ export interface ConciergeTaskDto {
   rank: number | null;
   /** The linked task chat, with its current name, or null when the row has none. */
   chat: { id: string; name: string } | null;
+  /**
+   * The Concierge chat message this row points back to, or null when the row has
+   * none or the message is gone. An id only: the text lives in the chat.
+   */
+  sourceMessageId: string | null;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
