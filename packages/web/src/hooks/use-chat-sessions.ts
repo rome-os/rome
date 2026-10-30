@@ -65,8 +65,8 @@ function retainSessionsChangedInvalidation(queryClient: QueryClient): () => void
   };
 }
 
-function chatSessionsQueryKey(status: SessionStatusFilter, scope: SessionScope) {
-  return [...CHAT_SESSIONS_QUERY_KEY, status, scope] as const;
+function chatSessionsQueryKey(status: SessionStatusFilter, scope: SessionScope | undefined) {
+  return [...CHAT_SESSIONS_QUERY_KEY, status, scope ?? "default"] as const;
 }
 
 /**
@@ -76,12 +76,20 @@ function chatSessionsQueryKey(status: SessionStatusFilter, scope: SessionScope) 
  * the previous rows until the new list lands. Lists stay cached for the tab's
  * lifetime (`gcTime: Infinity`), since there are at most one per filter and
  * scope, so a long time away from Chat still comes back to rows.
+ *
+ * Without a `scope` the server's default applies. `enabled: false` holds the
+ * fetch back, for a consumer that only needs the list while something is open.
  */
-export function useChatSessions(status: SessionStatusFilter, scope: SessionScope) {
+export function useChatSessions(
+  status: SessionStatusFilter,
+  scope: SessionScope | undefined,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: chatSessionsQueryKey(status, scope),
     queryFn: ({ signal }) => listSessions(status, scope, signal),
+    enabled,
     staleTime: 0,
     gcTime: Number.POSITIVE_INFINITY,
     placeholderData: keepPreviousData,

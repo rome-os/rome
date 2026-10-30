@@ -25,6 +25,10 @@ function TypingBubble() {
   );
 }
 
+// One element for every render: a typing bubble has no props, and a fresh one
+// each time would defeat the memoized group that draws it.
+const TYPING_BUBBLE = <TypingBubble />;
+
 /**
  * The Concierge chat's transcript: the guardian's bubbles, the agent's
  * messages, and a typing indicator while a turn runs. It shows no trace, turn
@@ -50,9 +54,12 @@ export function ConciergeTranscript({
   // it says something.
   const typing = live.isStreaming && (!live.quiet || turnHasSpoken(rows, live.runningTurnId));
   const items = useMemo(() => buildConciergeItems(rows, { typing }), [rows, typing]);
-  const arrival = useBubbleArrivals(
-    items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
+  const messageIds = useMemo(
+    () =>
+      items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
+    [items],
   );
+  const arrival = useBubbleArrivals(messageIds);
   return (
     // Padding outside, width cap inside: the composer floor's geometry, so the
     // messages and the composer share both edges at every width.
@@ -79,7 +86,7 @@ export function ConciergeTranscript({
               runningTurnId={runningTurnId}
               feedback={feedback}
               arrival={arrival}
-              typing={<TypingBubble />}
+              typing={TYPING_BUBBLE}
             />
           );
         })}

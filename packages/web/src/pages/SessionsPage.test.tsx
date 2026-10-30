@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import type { ComponentProps } from "react";
 import type { ChatRow } from "@/components/chat/chat-view";
+import type { LiveTextStore } from "@/hooks/live-text";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import * as traceDrawerModule from "@/components/agent-trace/TraceDrawer" with {
   rstest: "importActual",
@@ -69,7 +70,7 @@ rs.mock("@/components/chat/MessageList", () => ({
     rows,
     onOpenStoredTrace,
   }: {
-    live: { isStreaming: boolean; text: string };
+    live: { isStreaming: boolean; textStore: LiveTextStore };
     rows: ChatRow[];
     onOpenStoredTrace: (target: TraceDrawerTarget) => void;
   }) => (
@@ -81,7 +82,7 @@ rs.mock("@/components/chat/MessageList", () => ({
         .map((row) => row.key)
         .join(",")}
     >
-      {live.text}
+      {live.textStore.get().text}
       {realTraceDrawer.enabled
         ? rows.map((row) =>
             row.kind === "trace" && row.message.traceSummary ? (

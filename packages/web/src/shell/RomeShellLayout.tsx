@@ -23,7 +23,7 @@ import { SlotOutlet } from "../components/slot";
 import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid } from "./AppGrid";
 import { APP_NAV } from "./builtin-nav";
-import { ChatSearchDialog } from "./ChatSearchDialog";
+import { ChatSearchHost } from "./ChatSearchHost";
 import { DesktopTitlebar } from "./DesktopTitlebar";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
@@ -31,6 +31,7 @@ import { RailLabelsContext } from "./sidebar-shared";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
+import { openChatSearch } from "@/lib/chat-search-events";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -90,7 +91,6 @@ export function RomeShellLayout() {
   const [chatListOpen, setChatListOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const [railNames, setRailNames] = useState(readRailNames);
-  const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
   // The fallback title for whatever the shell is showing. A routed page that
@@ -166,7 +166,6 @@ export function RomeShellLayout() {
 
   useEffect(() => {
     setSidebarOpen(false);
-    setChatSearchOpen(false);
   }, [location.pathname]);
 
   // Any navigation closes the phone chat list: picking a chat, New chat, or
@@ -331,10 +330,7 @@ export function RomeShellLayout() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
         <RailLabelsContext.Provider value={railNames}>
-          <AppGrid
-            onSearch={() => setChatSearchOpen(true)}
-            chatPeek={canPeek ? chatPeek.tile : undefined}
-          />
+          <AppGrid onSearch={openChatSearch} chatPeek={canPeek ? chatPeek.tile : undefined} />
         </RailLabelsContext.Provider>
       </div>
       <div
@@ -404,7 +400,7 @@ export function RomeShellLayout() {
       }
     />
   );
-  const searchDialog = <ChatSearchDialog open={chatSearchOpen} onOpenChange={setChatSearchOpen} />;
+  const searchDialog = <ChatSearchHost />;
   // Height floor, not just flow: routed pages are lazy() behind a null
   // Suspense fallback, so without it the page collapses to zero for the frame
   // between navigating and the chunk arriving.

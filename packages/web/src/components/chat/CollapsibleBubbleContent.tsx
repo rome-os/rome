@@ -7,6 +7,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,51 @@ const MIN_HIDDEN_REM = 3;
 // The end bar can sit behind the composer that floats over the bottom of the
 // transcript; this much of the scroller's bottom is not counted as visible.
 const COMPOSER_ALLOWANCE = "0px 0px -96px 0px";
+
+interface Watcher {
+  set: (collapsible: boolean) => void;
+  collapsible: boolean;
+}
+
+// One observer for every bubble in the page. A transcript holds hundreds of
+// bubbles, and an observer per bubble measured each of them on its own, each
+// time reading the root's font size. This one reports after the frame's layout
+// is done, so its reads force nothing, and it reads the font size once for all
+// the bubbles that changed.
+const watchers = new WeakMap<Element, Watcher>();
+let shared: { ObserverClass: typeof ResizeObserver; observer: ResizeObserver } | null = null;
+
+function isTallEnough(content: Element, rem: number): boolean {
+  return content.scrollHeight > (COLLAPSED_MAX_HEIGHT_REM + MIN_HIDDEN_REM) * rem;
+}
+
+function sharedObserver(): ResizeObserver {
+  if (shared?.ObserverClass !== ResizeObserver) {
+    shared = {
+      ObserverClass: ResizeObserver,
+      observer: new ResizeObserver((entries) => {
+        const rem = remInPixels();
+        const changed: Array<[Watcher, boolean]> = [];
+        for (const { target } of entries) {
+          const watcher = watchers.get(target);
+          if (!watcher) continue;
+          const collapsible = isTallEnough(target, rem);
+          if (collapsible !== watcher.collapsible) changed.push([watcher, collapsible]);
+        }
+        if (changed.length === 0) return;
+        // Rendered now, not after the frame is painted: a long message that
+        // shows whole for a frame and then folds would jump under the reader.
+        flushSync(() => {
+          for (const [watcher, collapsible] of changed) {
+            watcher.collapsible = collapsible;
+            watcher.set(collapsible);
+          }
+        });
+      }),
+    };
+  }
+  return shared.observer;
+}
 
 /**
  * A message's content, cut to {@link COLLAPSED_MAX_HEIGHT_REM} with a fade and a
@@ -92,15 +138,19 @@ export function CollapsibleBubbleContent({ children }: { children: ReactNode }) 
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
-    const measure = () =>
-      setCollapsible(
-        content.scrollHeight > (COLLAPSED_MAX_HEIGHT_REM + MIN_HIDDEN_REM) * remInPixels(),
-      );
-    measure();
+    // The first measurement is now, before the first paint: the transcript pins
+    // itself to the bottom in this same commit, and it must pin to the folded
+    // heights. The observer takes over for what changes after.
+    const collapsible = isTallEnough(content, remInPixels());
+    setCollapsible(collapsible);
     if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
+    watchers.set(content, { set: setCollapsible, collapsible });
+    const observer = sharedObserver();
     observer.observe(content);
-    return () => observer.disconnect();
+    return () => {
+      observer.unobserve(content);
+      watchers.delete(content);
+    };
   }, []);
 
   useLayoutEffect(() => {

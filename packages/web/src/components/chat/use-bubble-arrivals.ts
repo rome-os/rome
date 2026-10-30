@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 
 // A batch steps in this many times at most; later bubbles share the last step.
 const MAX_STEP = 2;
@@ -34,9 +34,11 @@ export function useBubbleArrivals(ids: readonly string[]): ArrivalProps {
       if (!replaced && index > lastKnown) arrived.current.set(id, Math.min(step++, MAX_STEP));
     });
   }
-  const map = arrived.current;
-  return (id) => {
-    const step = map.get(id);
+  // One function for the life of the chat, so the bubbles it is passed to can
+  // be memoized. It reads the steps when called, and a bubble already drawn
+  // keeps its step, so the rows that skip a render lose nothing.
+  return useCallback((id) => {
+    const step = arrived.current.get(id);
     return step === undefined ? {} : { "data-arrival": step };
-  };
+  }, []);
 }

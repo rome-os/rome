@@ -17,12 +17,13 @@ import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import { TurnActions, turnCopyText } from "@/components/chat/TurnActions";
 import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
-import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
+import { LiveTail } from "@/components/chat/LiveTail";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
 import { lastTextMessage, turnAnswerText } from "@/components/chat/reply/reply-source";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
+import { EMPTY_LIVE_TEXT, type LiveTextStore } from "@/hooks/live-text";
 import type { ChatMessage } from "@/lib/chat-types";
 
 // The block-level callbacks + resolved-interaction map threaded into
@@ -48,10 +49,12 @@ export interface LivePreview {
   /** The running turn is housekeeping for the agent, so the Concierge chat holds back its typing indicator. */
   quiet?: boolean;
   snapshot: TraceSnapshot | null;
-  text: string;
+  /**
+   * The text block being typed. A store rather than a string, so each delivery
+   * renders the live row alone and not the chat (see {@link LiveTail}).
+   */
+  textStore: LiveTextStore;
   blockIx?: number;
-  /** The full SSE text, which may be ahead of the typewriter preview. */
-  sourceText?: string;
   textThroughOrdinal?: number;
   identity: AgentIdentity;
 }
@@ -356,35 +359,11 @@ const RowView = memo(function RowView({
           </div>
         );
       })}
-      {live?.text ? (
-        // rome-live-caret appends the pulsing live dot after the last rendered
-        // character (see globals.css).
-        <div className="rome-live-caret">
-          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
-            ...actions,
-            turnId: live.runningTurnId ?? undefined,
-            transcript: { live: true },
-          })}
-        </div>
-      ) : null}
-      {live ? (
-        <LiveTurnActivity
-          snapshot={live.snapshot}
-          textThroughOrdinal={live.textThroughOrdinal}
-          hasText={!!live.text}
-          entranceKey={typingEntranceKey(live)}
-        />
-      ) : null}
+      {live ? <LiveTail live={live} actions={actions} /> : null}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
     </MessageRow>
   );
 });
-
-// The typing bubble pops in again each time the agent goes back to work after
-// a text block, so its key moves with the text it follows.
-function typingEntranceKey(live: LivePreview): string {
-  return `${live.runningTurnId ?? "no-turn"}:typing:${live.textThroughOrdinal ?? -1}`;
-}
 
 // A block without an agent row at its transcript position carries its own header.
 // Persisted cards stay in RowView so their local state survives the handoff.
@@ -418,21 +397,7 @@ function StandaloneLiveTail({
         live.snapshot?.segments,
       )}
     >
-      {live.text ? (
-        <div className="rome-live-caret">
-          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
-            ...actions,
-            turnId: live.runningTurnId ?? undefined,
-            transcript: { live: true },
-          })}
-        </div>
-      ) : null}
-      <LiveTurnActivity
-        snapshot={live.snapshot}
-        textThroughOrdinal={live.textThroughOrdinal}
-        hasText={!!live.text}
-        entranceKey={typingEntranceKey(live)}
-      />
+      <LiveTail live={live} actions={actions} />
       <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
     </MessageRow>
   );
@@ -549,7 +514,6 @@ function TranscriptMessageList({
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
-  const sourceText = live.sourceText ?? live.text;
   const persistedTextRows = useMemo(() => indexPersistedTextRows(rows), [rows]);
   const persistedRow = blockKey ? persistedTextRows.get(blockKey) : undefined;
   const nextAnchor = { blockKey, afterRowKey: persistedRow?.key ?? rows.at(-1)?.key ?? null };
@@ -570,9 +534,8 @@ function TranscriptMessageList({
     anchorRow.messages.some((m) => m.turnId === runningTurnId)
       ? anchorRow
       : undefined;
-  // useSmoothText resets after render. Do not place the old block's last frame
-  // at the new block's position while that effect catches up.
-  const preview = !persistedRow && sourceText.startsWith(live.text) ? live : { ...live, text: "" };
+  // A persisted copy of the block takes over from the live text.
+  const preview = persistedRow ? { ...live, textStore: EMPTY_LIVE_TEXT } : live;
   const standalone =
     live.isStreaming && !runningRow ? (
       <StandaloneLiveTail

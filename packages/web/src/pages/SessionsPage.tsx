@@ -22,6 +22,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import ActivityPage, { PendingApprovalsCallout } from "@/pages/ActivityPage";
+import { staticLiveText } from "@/hooks/live-text";
 import { useApprovals } from "@/hooks/use-approvals";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -1143,6 +1144,8 @@ function ReadOnlySessionChat({
       }),
     [identity, liveTurn, view],
   );
+  const liveText = liveTurn?.text ?? "";
+  const liveTextStore = useMemo(() => staticLiveText(liveText), [liveText]);
   const actions = useMemo<BlockActions>(
     () => ({
       onApprovalResolved: NO_OP,
@@ -1199,7 +1202,7 @@ function ReadOnlySessionChat({
                 isStreaming: liveTurn !== null,
                 runningTurnId: liveTurn?.turnId ?? null,
                 snapshot: liveTurn?.snapshot ?? null,
-                text: liveTurn?.text ?? "",
+                textStore: liveTextStore,
                 identity,
               }}
               contentRef={NO_OP}

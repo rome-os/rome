@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { memo, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Ellipsis } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ConciergeMessageMeta } from "@/components/chat/ConciergeMessageMeta";
@@ -46,7 +46,7 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  * the bubble the target of a jump from a quote of it. `arrival` marks a bubble
  * that enters while the chat is open.
  */
-export function ConciergeBubble({
+export const ConciergeBubble = memo(function ConciergeBubble({
   side,
   copyText,
   createdAt,
@@ -70,7 +70,10 @@ export function ConciergeBubble({
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   // A selection is quoted from this bubble, though a message of several bubbles anchors its first.
-  const scopedReply: ReplySource | null = reply ? { ...reply, scope: () => boxRef.current } : null;
+  const scopedReply = useMemo<ReplySource | null>(
+    () => (reply ? { ...reply, scope: () => boxRef.current } : null),
+    [reply],
+  );
 
   const onTap = (event: MouseEvent<HTMLElement>) => {
     if (!touch) return;
@@ -149,4 +152,4 @@ export function ConciergeBubble({
       ) : null}
     </div>
   );
-}
+});

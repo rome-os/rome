@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import type { ChatRow } from "./chat-view";
@@ -107,7 +108,7 @@ const idle = {
   isStreaming: false,
   runningTurnId: null,
   snapshot: null,
-  text: "",
+  textStore: EMPTY_LIVE_TEXT,
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
@@ -380,27 +381,84 @@ describe("Concierge long message collapse", () => {
     ]);
   });
 
-  it("measures again when the content or its width changes", () => {
-    const observers: Array<() => void> = [];
-    rs.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(callback: () => void) {
-          observers.push(callback);
-        }
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
-    );
-    render(transcript([agentRow(agent("a1", [text(SHORT)]))]));
-    expect(toggles()).toHaveLength(0);
+  describe("with a ResizeObserver", () => {
+    // jsdom has no layout engine, so no observer ever reports. This one reports
+    // the size of everything it watches when a test says a frame has passed.
+    const observed = new Set<Element>();
+    const created: Array<(entries: Array<{ target: Element }>) => void> = [];
+    const frame = () =>
+      act(() => {
+        for (const report of created) report([...observed].map((target) => ({ target })));
+      });
+    beforeEach(() => {
+      observed.clear();
+      created.length = 0;
+      rs.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(report: (entries: Array<{ target: Element }>) => void) {
+            created.push(report);
+          }
+          observe(target: Element) {
+            observed.add(target);
+          }
+          unobserve(target: Element) {
+            observed.delete(target);
+          }
+          disconnect() {}
+        },
+      );
+    });
 
-    // The text grows after the first paint, as an image or a wide table does.
-    screen.getByText(SHORT).textContent = LONG;
-    act(() => observers.forEach((callback) => callback()));
+    it("measures again when the content or its width changes", () => {
+      render(transcript([agentRow(agent("a1", [text(SHORT)]))]));
+      expect(toggles()).toHaveLength(0);
 
-    expect(toggles()).toHaveLength(1);
+      // The text grows after the first paint, as an image or a wide table does.
+      screen.getByText(SHORT).textContent = LONG;
+      frame();
+
+      expect(toggles()).toHaveLength(1);
+    });
+
+    it("cuts a long message in the commit that mounts it, not on a later frame", () => {
+      render(transcript([agentRow(agent("a1", [text(LONG)]))]));
+
+      // No frame has passed: the transcript pins itself to the bottom in this
+      // commit, so a cut that waited for the observer would pin to the wrong heights.
+      expect(toggles()).toHaveLength(1);
+    });
+
+    it("watches every bubble with one observer, and stops when they go", () => {
+      const { unmount } = render(
+        transcript([
+          agentRow(
+            agent("a1", [text(SHORT)]),
+            agent("a2", [text(LONG)]),
+            agent("a3", [text(SHORT)]),
+          ),
+        ]),
+      );
+
+      expect(created).toHaveLength(1);
+      expect(observed.size).toBe(3);
+
+      // Settled bubbles report again without a change, and nothing is redrawn.
+      const reads = rs.fn();
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get(this: HTMLElement) {
+          reads();
+          return heightOf(this);
+        },
+      });
+      frame();
+      expect(toggles()).toHaveLength(1);
+      expect(reads).toHaveBeenCalledTimes(3);
+
+      unmount();
+      expect(observed.size).toBe(0);
+    });
   });
 
   it("opens when the browser's find scrolls the cut text into view", () => {

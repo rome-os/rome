@@ -66,7 +66,7 @@ import type {
   TraceSubagentSummary,
   TraceSummary,
 } from "@rome/api-types/trace-segments";
-import { useSmoothText } from "@/hooks/use-smooth-text";
+import { useStableMap } from "@/hooks/use-stable-map";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
@@ -394,6 +394,7 @@ export function Chat({
   const {
     streams: streamingSessions,
     streamsRef: streamingSessionsRef,
+    liveText: liveTextOf,
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
@@ -707,16 +708,9 @@ export function Chat({
     [view, runningTurnId],
   );
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
-  // Typewriter-paced reveal of the latest assistant text block — the SSE
-  // stream updates in provider-sized deltas; this smooths them into typing.
-  // Keyed by turn + block: a new block retypes from zero (delayed fold — it
-  // replaces the previous block the moment its first delta arrives).
-  const liveAssistantText = useSmoothText(
-    floorSessionStream?.assistantText ?? "",
-    floorSessionStream
-      ? `${floorSessionStream.turnId}:${floorSessionStream.assistantBlockIx}`
-      : "idle",
-  );
+  // The latest assistant text block. The live row follows it (and smooths it
+  // into typing, see LiveTail); the chat does not render for it.
+  const liveTextStore = liveTextOf(floorSessionId);
 
   // Pull host callbacks through refs so the many internal `useCallback`s
   // depending on them don't need to re-create whenever the host swaps in a
@@ -1832,14 +1826,18 @@ export function Chat({
 
   // The composer's pinned chip = the floor agent (the specialist during a
   // handoff, the main agent otherwise).
-  const floorAgentMention: AgentMention | null = floorHandoff
-    ? {
-        appId: floorHandoff.appId,
-        appLabel: floorHandoff.agentLabel,
-        agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
-        iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
-      }
-    : pinnedAgentMention;
+  const floorAgentMention = useMemo<AgentMention | null>(
+    () =>
+      floorHandoff
+        ? {
+            appId: floorHandoff.appId,
+            appLabel: floorHandoff.agentLabel,
+            agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
+            iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
+          }
+        : pinnedAgentMention,
+    [floorHandoff, pinnedAgentMention],
+  );
   // The floor's own (raw, chronological) messages drive the approve /
   // verbal-approval gates — reordering doesn't affect submission detection.
   const floorMessages = messages.get(floorSessionId) ?? EMPTY_MESSAGES;
@@ -1856,6 +1854,31 @@ export function Chat({
     () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
     [floorHandoff, floorMessages],
   );
+
+  // The composer is memoized so a streaming turn does not render it, which only
+  // holds while what it is handed keeps its identity.
+  const composerModelSelection = useMemo(
+    () => (chatModelPickable ? { value: chatModelValue, onChange: pickChatModel } : undefined),
+    [chatModelPickable, chatModelValue, pickChatModel],
+  );
+  const composerDesigning = useMemo(
+    () =>
+      floorHandoff
+        ? {
+            agentLabel: floorHandoff.agentLabel,
+            // A pending submission turns the banner into an Approve
+            // that resolves the handoff with that payload.
+            onApprove: activeSubmission
+              ? () => void handleResolveHandoff(floorHandoff, activeSubmission.payload, "Approved")
+              : undefined,
+            // Cancel lives here now (off the @mention seam): dismiss
+            // the handoff and hand the floor back to the caller.
+            onCancel: () => handleCancelHandoff(floorHandoff),
+          }
+        : null,
+    [floorHandoff, activeSubmission, handleResolveHandoff, handleCancelHandoff],
+  );
+  const stopComposerTurn = useCallback(() => void stopMessage(), [stopMessage]);
   // A submission waiting on Approve is the specialist asking the guardian, the
   // same as an open card.
   useChatTabStatus(
@@ -1946,14 +1969,22 @@ export function Chat({
 
   // The block-level callbacks + resolved-interaction map, bundled once so the
   // memoized StaticTranscript stays stable across a streaming turn.
+  // `interactionResults` is rebuilt whenever a message changes; kept by value, a
+  // new message does not hand every transcript row new actions.
+  const stableInteractionResults = useStableMap(interactionResults);
   const blockActions = useMemo<BlockActions>(
     () => ({
       onApprovalResolved: refreshActiveSession,
       onSubmitAppComponent: handleSubmitAppComponent,
       onDismissAppComponent: handleDismissAppComponent,
-      interactionResults,
+      interactionResults: stableInteractionResults,
     }),
-    [refreshActiveSession, handleSubmitAppComponent, handleDismissAppComponent, interactionResults],
+    [
+      refreshActiveSession,
+      handleSubmitAppComponent,
+      handleDismissAppComponent,
+      stableInteractionResults,
+    ],
   );
 
   // Keyed by (session, turn) so dismissal naturally clears when the turn
@@ -2232,9 +2263,8 @@ export function Chat({
                       runningTurnId,
                       quiet: floorSessionStream?.quiet,
                       snapshot: currentSnapshot,
-                      text: liveAssistantText,
+                      textStore: liveTextStore,
                       blockIx: floorSessionStream?.assistantBlockIx,
-                      sourceText: floorSessionStream?.assistantText,
                       textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
                       identity: floorIdentity,
                     }}
@@ -2383,16 +2413,12 @@ export function Chat({
                       // can change from the next turn.
                       showProjectSelector={!mainSessionId}
                       showModelSelector={!mainSessionId || chatModelPickable}
-                      chatModelSelection={
-                        chatModelPickable
-                          ? { value: chatModelValue, onChange: pickChatModel }
-                          : undefined
-                      }
+                      chatModelSelection={composerModelSelection}
                       initialProjectName={initialProjectName}
                       initialDeviceFolder={initialDeviceFolder}
                       initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
-                      onStop={() => void stopMessage()}
+                      onStop={stopComposerTurn}
                       streamError={streamError}
                       // The chip names the floor agent — the specialist during a
                       // handoff, the main agent otherwise.
@@ -2403,26 +2429,7 @@ export function Chat({
                       lockedReason={
                         lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
                       }
-                      designingInteraction={
-                        floorHandoff
-                          ? {
-                              agentLabel: floorHandoff.agentLabel,
-                              // A pending submission turns the banner into an Approve
-                              // that resolves the handoff with that payload.
-                              onApprove: activeSubmission
-                                ? () =>
-                                    void handleResolveHandoff(
-                                      floorHandoff,
-                                      activeSubmission.payload,
-                                      "Approved",
-                                    )
-                                : undefined,
-                              // Cancel lives here now (off the @mention seam): dismiss
-                              // the handoff and hand the floor back to the caller.
-                              onCancel: () => handleCancelHandoff(floorHandoff),
-                            }
-                          : null
-                      }
+                      designingInteraction={composerDesigning}
                     />
                   )}
                 </div>

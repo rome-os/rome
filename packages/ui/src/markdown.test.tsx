@@ -322,6 +322,24 @@ describe("Markdown Mermaid theme", () => {
     expect(spy.mock.calls.length).toBe(single);
   });
 
+  it("keeps the resolved theme when only the root's inline style changes", async () => {
+    render(
+      <>
+        {Array.from({ length: 5 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    await act(async () => {
+      document.documentElement.style.setProperty("--rome-viewport-height", "512px");
+    });
+    document.documentElement.style.removeProperty("--rome-viewport-height");
+
+    expect(spy.mock.calls.length).toBe(0);
+  });
+
   it("re-validates a theme resolved by a render that never committed", async () => {
     const single = readsPerResolve();
     // The sibling suspends, so React discards the Markdown render after it

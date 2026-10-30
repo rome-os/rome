@@ -382,6 +382,44 @@ export type ChatRow =
   // session's turn before it on another one.
   | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string });
 
+// The rows the last build made, by the message each starts from. A build hands
+// back the row object it made before when nothing the row shows has changed, so
+// the memoized row views skip a render when a message arrives. Weak, so a
+// message that leaves the transcript takes its row along.
+const builtRows = new WeakMap<ChatMessage, ChatRow>();
+// A model-switch notice is keyed by the row it stands before.
+const builtSwitches = new WeakMap<ChatRow, ChatRow>();
+
+function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
+  return a === b || (a.name === b.name && a.iconUrl === b.iconUrl);
+}
+
+function sameRow(a: ChatRow, b: ChatRow): boolean {
+  if (a.kind !== b.kind || a.key !== b.key) return false;
+  if (a.kind === "user") return true;
+  if (a.kind === "model_switch") {
+    return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
+  }
+  if (a.kind === "trace") {
+    return b.kind === "trace" && a.message === b.message && sameIdentity(a.identity, b.identity);
+  }
+  return (
+    b.kind === "agent" &&
+    sameIdentity(a.identity, b.identity) &&
+    a.trace === b.trace &&
+    a.messages.length === b.messages.length &&
+    a.messages.every((message, index) => message === b.messages[index])
+  );
+}
+
+/** `next`, or the row the last build made for `anchor` when it shows the same. */
+function reuseRow(anchor: ChatMessage, next: ChatRow): ChatRow {
+  const built = builtRows.get(anchor);
+  if (built && sameRow(built, next)) return built;
+  builtRows.set(anchor, next);
+  return next;
+}
+
 export function buildRows(
   messages: ChatMessage[],
   identityBySession: Map<string, AgentIdentity>,
@@ -405,7 +443,7 @@ export function buildRows(
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role === "user") {
-      rows.push({ kind: "user", key: msg.id, message: msg });
+      rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: msg }));
       continue;
     }
     if (msg.role === "trace") {
@@ -415,7 +453,14 @@ export function buildRows(
       // turn (the live trace button carries it).
       if (msg.turnId && turnsWithAssistant.has(msg.turnId)) continue;
       if (isRunningTurn(msg.turnId)) continue;
-      rows.push({ kind: "trace", key: msg.id, message: msg, identity: identityOf(msg.sessionId) });
+      rows.push(
+        reuseRow(msg, {
+          kind: "trace",
+          key: msg.id,
+          message: msg,
+          identity: identityOf(msg.sessionId),
+        }),
+      );
       continue;
     }
     // Group a whole turn under one header: gather this turn's assistant
@@ -440,13 +485,15 @@ export function buildRows(
     const showTrace =
       !!turnTrace && !renderedTraceTurns.has(msg.turnId!) && !isRunningTurn(msg.turnId);
     if (showTrace) renderedTraceTurns.add(msg.turnId!);
-    rows.push({
-      kind: "agent",
-      key: msg.id,
-      identity: identityOf(msg.sessionId),
-      trace: showTrace ? turnTrace! : null,
-      messages: group,
-    });
+    rows.push(
+      reuseRow(msg, {
+        kind: "agent",
+        key: msg.id,
+        identity: identityOf(msg.sessionId),
+        trace: showTrace ? turnTrace! : null,
+        messages: group,
+      }),
+    );
   }
   return withModelSwitches(rows, tracesByTurn);
 }
@@ -476,13 +523,19 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
       if (model) {
         const previous = lastModelBySession.get(turn.sessionId);
         if (previous && previous !== model) {
-          out.push({
+          const notice: ChatRow = {
             kind: "model_switch",
             key: `model-switch:${turn.turnId}`,
             model,
             turnId: turn.turnId,
             sessionId: turn.sessionId,
-          });
+          };
+          const built = builtSwitches.get(row);
+          if (built && sameRow(built, notice)) out.push(built);
+          else {
+            builtSwitches.set(row, notice);
+            out.push(notice);
+          }
         }
         lastModelBySession.set(turn.sessionId, model);
       }
