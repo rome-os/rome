@@ -152,6 +152,8 @@ import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
+import { ConciergeTasks } from "./concierge/tasks.js";
+import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
@@ -1030,7 +1032,9 @@ async function main() {
     sessionManager,
     aiToolState,
     messages: chatMessages,
-    runBackendTurn: (params) => backendTurnRunner.runAndDeliver(params),
+    tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
+    approvals: approvalsRepo,
+    runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
   });
   const agentSessionManager = createAgentSessionManager(
     {

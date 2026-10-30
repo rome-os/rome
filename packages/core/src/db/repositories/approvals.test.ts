@@ -32,6 +32,31 @@ describe("ApprovalsRepository", () => {
     expect(approval!.requestedBy).toBe("sentinel");
   });
 
+  it("create() tells the created listeners about the stored approval, until they unsubscribe", async () => {
+    const seen: Array<{ id: string; status: string; description: string; payload: unknown }> = [];
+    const unsubscribe = repo.onCreated((approval) => seen.push(approval));
+    const id = await repo.create({
+      type: "person_mapping",
+      requestedBy: "sentinel",
+      description: "Add new person: Alice",
+      payload: { channelContext: { threadId: "chat-1" } },
+    });
+    expect(seen).toEqual([
+      {
+        id,
+        type: "person_mapping",
+        status: "pending",
+        description: "Add new person: Alice",
+        payload: { channelContext: { threadId: "chat-1" } },
+      },
+    ]);
+    // The row is stored by the time the listener runs.
+    expect(await repo.findById(id)).not.toBeNull();
+    unsubscribe();
+    await repo.create({ type: "person_mapping", requestedBy: "x", description: "y" });
+    expect(seen).toHaveLength(1);
+  });
+
   // An app compiled against an older SDK reaches create() with an unchecked
   // string, so the type union alone does not close this.
   it("create() rejects a lifecycle no resolver recognises", async () => {

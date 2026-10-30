@@ -2,6 +2,7 @@ import {
   ChevronDown,
   ExternalLink,
   LayoutGrid,
+  ListChecks,
   ListTree,
   PanelRightClose,
   Plus,
@@ -37,6 +38,8 @@ import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
+import { ConciergeTaskPanel } from "@/components/concierge/ConciergeTaskPanel";
+import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
 
@@ -47,6 +50,8 @@ const SEPARATOR_WIDTH = 1;
 export const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
 // Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
 const TRACE_TAB_ID = "__trace__";
+// Tab value of the Tasks tab, likewise.
+const TASKS_TAB_ID = "__tasks__";
 
 function readRatio() {
   try {
@@ -168,7 +173,7 @@ export function ToolWorkspace({
   // session and written through the module-global active session, so a trace
   // must never write it: a write could land on another session after a switch,
   // and a reload would bring back a pane that nothing fills. Instead, a trace
-  // opened over a collapsed pane sets `traceHoldsOpen`, and the pane renders
+  // opened over a collapsed pane sets `holdsOpen`, and the pane renders
   // open while the tab exists. Ending the trace clears the flag, and the pane
   // falls back to the session's stored state: a collapsed pane is collapsed
   // again, an open pane stays open on its previous app tab.
@@ -177,17 +182,24 @@ export function ToolWorkspace({
   // - Choosing an app tab or adding an app expands the pane for real, through
   //   the store, because the user has moved on to the pane. The flag is then
   //   redundant and clears, so the app stays visible after the trace closes.
+  //
+  // The Tasks tab is the same kind of tab: view state, never saved, at most one.
+  // Selecting one built-in tab deselects the other. A built-in tab opened over
+  // a collapsed pane holds it open with the same flag.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
   const [traceSelected, setTraceSelected] = useState(false);
-  const [traceHoldsOpen, setTraceHoldsOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [tasksSelected, setTasksSelected] = useState(false);
+  const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
   const latest = useRef({ view, setCollapsed });
   latest.current = { view, setCollapsed };
 
   const reveal = useCallback(() => {
-    if (latest.current.view.collapsed) setTraceHoldsOpen(true);
+    if (latest.current.view.collapsed) setHoldsOpen(true);
     setTraceSelected(true);
+    setTasksSelected(false);
   }, []);
 
   const setTraceTab = useCallback(
@@ -197,7 +209,7 @@ export function ToolWorkspace({
         traceOwnerRef.current = null;
         traceCloseRef.current = null;
         setTraceSelected(false);
-        setTraceHoldsOpen(false);
+        setHoldsOpen(false);
         setTrace(null);
         return;
       }
@@ -222,34 +234,55 @@ export function ToolWorkspace({
   // app under a new id or a background app closing, move `view.activeId`
   // without the user asking to leave the trace, so they never touch it.
   useEffect(() => {
-    if (activations !== undefined) setTraceSelected(false);
+    if (activations !== undefined) {
+      setTraceSelected(false);
+      setTasksSelected(false);
+    }
   }, [activations]);
 
   function addAndShow(type: WidgetType, targetId?: string) {
     setTraceSelected(false);
+    setTasksSelected(false);
     addWidget(type, targetId);
   }
 
   // A real expansion supersedes the hold.
   useEffect(() => {
-    if (!view.collapsed) setTraceHoldsOpen(false);
+    if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const open = !view.collapsed || (trace !== null && traceHoldsOpen);
+  const open = !view.collapsed || ((trace !== null || tasksOpen) && holdsOpen);
   const setPaneCollapsed = useCallback((collapsed: boolean) => {
-    setTraceHoldsOpen(false);
+    setHoldsOpen(false);
     latest.current.setCollapsed(collapsed);
   }, []);
 
   const traceActive = trace !== null && traceSelected;
+  const tasksActive = tasksOpen && tasksSelected;
+  const builtinActive = traceActive || tasksActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const hasTabs = sorted.length > 0 || trace !== null;
+  const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
   const compact = width < COMPACT_WIDTH;
-  const activeWidget = traceActive
+  const showTasks = useCallback(() => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    setTasksOpen(true);
+    setTasksSelected(true);
+    setTraceSelected(false);
+  }, []);
+  const hideTasks = useCallback(() => {
+    setTasksOpen(false);
+    setTasksSelected(false);
+    if (traceOwnerRef.current === null) setHoldsOpen(false);
+  }, []);
+  const tasksHost = useMemo<ToolTasksHost>(
+    () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
+    [tasksActive, open, compact, showTasks, hideTasks],
+  );
+  const activeWidget = builtinActive
     ? undefined
     : sorted.find((widget) => widget.id === view.activeId);
   const activeHref = activeWidget ? fullHref(activeWidget) : null;
@@ -286,8 +319,16 @@ export function ToolWorkspace({
   // height too, or it would clip the tabs. The strip never scrolls: tabs that
   // do not fit at their minimum width leave it, and the all-tools menu lists
   // them. The same `header` renders in the title bar, so both share this.
-  const tabIds = [...(trace ? [TRACE_TAB_ID] : []), ...sorted.map((widget) => widget.id)];
-  const activeTabId = traceActive ? TRACE_TAB_ID : (view.activeId ?? null);
+  const tabIds = [
+    ...(trace ? [TRACE_TAB_ID] : []),
+    ...(tasksOpen ? [TASKS_TAB_ID] : []),
+    ...sorted.map((widget) => widget.id),
+  ];
+  const activeTabId = traceActive
+    ? TRACE_TAB_ID
+    : tasksActive
+      ? TASKS_TAB_ID
+      : (view.activeId ?? null);
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
   const allToolsLabel =
@@ -310,6 +351,15 @@ export function ToolWorkspace({
               onClose={() => traceCloseRef.current?.()}
             />
           )}
+          {tasksOpen && shownIds.has(TASKS_TAB_ID) && (
+            <ToolTab
+              id={TASKS_TAB_ID}
+              label={t("chat.tasksTab")}
+              icon={<ListChecks className="size-3.5" />}
+              active={tasksActive}
+              onClose={hideTasks}
+            />
+          )}
           {sorted
             .filter((widget) => shownIds.has(widget.id))
             .map((widget) => (
@@ -318,7 +368,7 @@ export function ToolWorkspace({
                 id={widget.id}
                 label={label(widget)}
                 icon={icon(widget)}
-                active={!traceActive && widget.id === view.activeId}
+                active={!builtinActive && widget.id === view.activeId}
                 unread={view.unreadIds.includes(widget.id)}
                 onClose={() => closeTab(widget.id)}
               />
@@ -371,6 +421,12 @@ export function ToolWorkspace({
                 {tActivity("trace.drawer.title")}
               </DropdownMenuItem>
             )}
+            {tasksOpen && (
+              <DropdownMenuItem onSelect={() => pickTab(TASKS_TAB_ID)}>
+                <ListChecks className="size-3.5" />
+                {t("chat.tasksTab")}
+              </DropdownMenuItem>
+            )}
             {sorted.map((widget) => (
               <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
@@ -404,9 +460,16 @@ export function ToolWorkspace({
   function pickTab(id: string) {
     if (id === TRACE_TAB_ID) {
       setTraceSelected(true);
+      setTasksSelected(false);
+      return;
+    }
+    if (id === TASKS_TAB_ID) {
+      setTasksSelected(true);
+      setTraceSelected(false);
       return;
     }
     setTraceSelected(false);
+    setTasksSelected(false);
     selectTool(id);
   }
 
@@ -451,7 +514,7 @@ export function ToolWorkspace({
             flexShrink: 0,
           }}
         >
-          {children}
+          <ToolTasksContext.Provider value={tasksHost}>{children}</ToolTasksContext.Provider>
         </div>
         {open && !compact && (
           <div
@@ -499,7 +562,7 @@ export function ToolWorkspace({
           />
         )}
         <Tabs
-          value={traceActive ? TRACE_TAB_ID : (view.activeId ?? "")}
+          value={traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : (view.activeId ?? "")}
           onValueChange={pickTab}
           activationMode="automatic"
           className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
@@ -522,7 +585,7 @@ export function ToolWorkspace({
             </div>
           )}
           <div className="relative min-h-0 flex-1">
-            {placements.length === 0 && !traceActive && (
+            {placements.length === 0 && !builtinActive && (
               <EmptyState className="h-full" role="region">
                 <EmptyStateIcon>
                   <LayoutGrid />
@@ -540,7 +603,7 @@ export function ToolWorkspace({
               </EmptyState>
             )}
             {/* Moving an iframe's DOM node reloads it. Keep content in a stable
-                order when loading a saved layout. */}
+              order when loading a saved layout. */}
             {[...placements]
               .sort((a, b) => a.id.localeCompare(b.id))
               .map((widget) => (
@@ -548,10 +611,10 @@ export function ToolWorkspace({
                   key={widget.id}
                   value={widget.id}
                   forceMount
-                  inert={traceActive || widget.id !== view.activeId}
-                  aria-hidden={traceActive || widget.id !== view.activeId}
+                  inert={builtinActive || widget.id !== view.activeId}
+                  aria-hidden={builtinActive || widget.id !== view.activeId}
                   style={{
-                    display: !traceActive && widget.id === view.activeId ? undefined : "none",
+                    display: !builtinActive && widget.id === view.activeId ? undefined : "none",
                   }}
                   className="absolute inset-0 overflow-auto overscroll-y-contain pb-safe md:pb-0"
                 >
@@ -559,11 +622,11 @@ export function ToolWorkspace({
                 </TabsContent>
               ))}
             {/* Kept mounted while the trace exists, and hidden with `visibility`
-              rather than `display`, so its scroll position and live following
-              survive switching to an app tab. `display: none` would reset the
-              scroller. The panel is absolutely positioned, so hiding it takes
-              no layout space, and a hidden element takes no pointer events. The
-              trace's owner portals its body into the outlet. */}
+            rather than `display`, so its scroll position and live following
+            survive switching to an app tab. `display: none` would reset the
+            scroller. The panel is absolutely positioned, so hiding it takes
+            no layout space, and a hidden element takes no pointer events. The
+            trace's owner portals its body into the outlet. */}
             {trace && (
               <TabsContent
                 value={TRACE_TAB_ID}
@@ -574,6 +637,18 @@ export function ToolWorkspace({
                 className="absolute inset-0 overflow-hidden"
               >
                 <div ref={setOutlet} className="flex h-full min-h-0 flex-col" />
+              </TabsContent>
+            )}
+            {tasksOpen && (
+              <TabsContent
+                value={TASKS_TAB_ID}
+                forceMount
+                inert={!tasksActive}
+                aria-hidden={!tasksActive}
+                style={{ display: tasksActive ? undefined : "none" }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <ConciergeTaskPanel />
               </TabsContent>
             )}
           </div>

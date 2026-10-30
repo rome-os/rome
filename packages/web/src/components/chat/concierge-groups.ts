@@ -53,6 +53,16 @@ function sameLocalDay(a: Date, b: Date): boolean {
   );
 }
 
+/** Whether the agent has said something in the turn, as a message the chat draws. */
+export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
+  if (!turnId) return false;
+  return rows.some(
+    (row) =>
+      row.kind === "agent" &&
+      row.messages.some((message) => message.turnId === turnId && isRenderable(message)),
+  );
+}
+
 /**
  * Turns the transcript's rows into what the Concierge draws: groups of
  * same-sender messages, time separators, and model-switch notices. Two

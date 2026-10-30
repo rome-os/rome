@@ -134,6 +134,42 @@ describe("backend turn delivery", () => {
     });
   });
 
+  it("passes a quiet turn's option to the webchat runtime, and nothing for an ordinary one", async () => {
+    const run = async (options?: { quiet?: boolean }) => {
+      const agentRunner = createMockAgentRunner([
+        [
+          { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+          { type: "result", content: "" },
+        ],
+      ]);
+      const webchat = {
+        name: "webchat",
+        send: {
+          send: async () => ({ messageId: "m", chatId: "chat-1" }),
+          direct: null,
+          activity: null,
+        },
+      } as unknown as Channel;
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: (name) => (name === "webchat" ? webchat : null),
+      });
+      const seen: unknown[] = [];
+      runner.setWebchatRuntime({
+        enqueueSessionTask: async (_sessionId, _task, taskOptions) => {
+          seen.push(taskOptions);
+        },
+      });
+      await runner.runAndDeliver(
+        { agentName: "main", sessionId: "s", channel: "webchat", threadId: "chat-1", prompt: "p" },
+        options,
+      );
+      return seen;
+    };
+    expect(await run({ quiet: true })).toEqual([{ quiet: true }]);
+    expect(await run()).toEqual([undefined]);
+  });
+
   it("delivers no reply for an agent whose text is private", async () => {
     const agentRunner = createMockAgentRunner([
       [

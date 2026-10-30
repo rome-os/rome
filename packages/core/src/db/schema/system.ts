@@ -558,6 +558,44 @@ export const romeSessions = sqliteTable(
   ],
 );
 
+/**
+ * The Concierge's own todo list (rome-os/rome#1508). Only the Concierge's
+ * tools write it, and every state is its own judgement. A row links at most
+ * one task chat; deleting the chat leaves the row, unlinked. Times are
+ * milliseconds, so "updated after the click" and "dirty before the build" are
+ * decided finer than a second.
+ */
+export const conciergeTasks = sqliteTable(
+  "concierge_tasks",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    state: text("state", {
+      enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
+    }).notNull(),
+    /** One line, the result or the current status. */
+    summary: text("summary"),
+    /** What a `watching` or `needs_user` row waits for. */
+    waitingOn: text("waiting_on"),
+    /** The next check of a `watching` row, or the planned time of a `next` one. */
+    dueAt: integer("due_at", { mode: "timestamp_ms" }),
+    /** Order inside Up next, decided by the Concierge. */
+    rank: integer("rank"),
+    sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    /** Set while the state is `done` or `dropped`. */
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    // A chat belongs to at most one row, so a chat event maps to exactly one row.
+    uniqueIndex("idx_concierge_tasks_session")
+      .on(table.sessionId)
+      .where(sql`${table.sessionId} is not null`),
+  ],
+);
+
 export const webchatWorkspaceLayouts = sqliteTable("webchat_workspace_layouts", {
   sessionId: text("session_id")
     .primaryKey()

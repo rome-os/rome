@@ -2,11 +2,17 @@
 // tools run its task chats.
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
-import type { ChatId } from "@rome-os/app-runtime";
+import {
+  CONCIERGE_TASK_STATES,
+  CONCIERGE_TASK_SUMMARY_MAX_LENGTH,
+  type ConciergeTaskState,
+} from "@rome/api-types/concierge";
 import type { SaidMessage } from "../chats/message.js";
-import { chatKey, placeIn, type Place } from "../chats/place.js";
-import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
-import { DASHBOARD_PLATFORM, type SendResult } from "../chats/send.js";
+import type { SendResult } from "../chats/send.js";
+import type {
+  ConciergeTaskWithChat,
+  ConciergeTaskWrite,
+} from "../db/repositories/concierge-tasks.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
@@ -22,13 +28,13 @@ import {
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
+import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 
 const log = createLogger("concierge-tools");
 
 const TASK_STATUSES = ["running", "idle", "waiting_input"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
-const MAX_READ_LIMIT = 30;
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -46,37 +52,31 @@ function statusOf(running: boolean, chat: { awaitingGuardian: boolean } | undefi
   return chat?.awaitingGuardian ? "waiting_input" : "idle";
 }
 
-/** A task chat is a direct message on the dashboard, read through its channel. */
-const DASHBOARD = { channel: WEBCHAT_CHANNEL };
+const isTaskState = (value: unknown): value is ConciergeTaskState =>
+  (CONCIERGE_TASK_STATES as readonly unknown[]).includes(value);
 
-function taskChatPlace(chatId: string): Place {
-  return placeIn(chatKey(DASHBOARD_PLATFORM, chatId as ChatId));
+/** The ISO time of a nullable instant, for the Concierge to read. */
+const isoOf = (date: Date | null) => date?.toISOString();
+
+/** A row as the Concierge reads it: compact, with no empty fields. */
+function compactTask({ row }: ConciergeTaskWithChat) {
+  return {
+    id: row.id,
+    title: row.title,
+    state: row.state,
+    ...(row.summary ? { summary: row.summary } : {}),
+    ...(row.waitingOn ? { waitingOn: row.waitingOn } : {}),
+    ...(row.dueAt ? { dueAt: isoOf(row.dueAt) } : {}),
+    ...(row.rank !== null ? { rank: row.rank } : {}),
+    ...(row.sessionId ? { chatId: row.sessionId } : {}),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 function refusal(result: Exclude<SendResult, { ok: true }>): string {
   if ("error" in result) return result.error;
   if ("invalid" in result) return result.invalid;
   return `The task chat cannot take a message (${result.send})`;
-}
-
-const hasText = (message: SaidMessage) => message.body.text.trim() !== "";
-
-/** The newest `limit` messages of a place that `keep` keeps, oldest first,
- *  paging back past the rest, such as messages that carry only cards. */
-async function latestSaid(
-  messages: ConciergeService["deps"]["messages"],
-  place: Place,
-  limit: number,
-  keep: (message: SaidMessage) => boolean,
-): Promise<SaidMessage[]> {
-  const pageSize = Math.max(limit, MAX_READ_LIMIT);
-  const found: SaidMessage[] = [];
-  let page = await messages.recent(place, pageSize, DASHBOARD);
-  for (;;) {
-    found.unshift(...page.messages.filter(keep));
-    if (found.length >= limit || !page.older) return found.slice(-limit);
-    page = await messages.before(place, page.older, pageSize, DASHBOARD);
-  }
 }
 
 /**
@@ -90,7 +90,7 @@ export async function buildConciergeTools(
 ): Promise<FacadeToolDef[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
   if (!(await service.isEnabled())) return [];
-  const { webchatRepo, messages } = service.deps;
+  const { webchatRepo, messages, tasks } = service.deps;
 
   const currentTurn = (): { chatId: string; turnId: string } => {
     const turnId = context.getTurnId();
@@ -122,6 +122,72 @@ export async function buildConciergeTools(
   const sendInput = async (chatId: string, text: string) => {
     const sent = await service.dashboard.send(taskChatPlace(chatId), { text }, CONCIERGE_ACCOUNT);
     if (!sent.ok) throw new Error(refusal(sent));
+  };
+
+  // A task chat always has a row. One from before the todo list gets its row
+  // when the Concierge next works with it.
+  const ensureTaskRow = async (chat: { id: string; name: string; triggerName?: string | null }) => {
+    if (await tasks.repo.findBySession(chat.id)) return;
+    await tasks.repo.upsertMany([
+      { title: chat.triggerName ?? chat.name, state: "doing", sessionId: chat.id },
+    ]);
+  };
+
+  const parseTaskWrite = async (
+    raw: Record<string, unknown>,
+    where: string,
+  ): Promise<ConciergeTaskWrite> => {
+    const write: ConciergeTaskWrite = {};
+    const text = (field: string) => {
+      const value = raw[field];
+      if (value === null) return null;
+      if (typeof value !== "string") throw new Error(`${where}.${field} must be a string or null`);
+      return value.trim() || null;
+    };
+    if (raw.id !== undefined) write.id = requireString(raw, "id");
+    if (raw.title !== undefined) write.title = requireString(raw, "title");
+    if (raw.state !== undefined) {
+      if (!isTaskState(raw.state)) {
+        throw new Error(`${where}.state must be one of: ${CONCIERGE_TASK_STATES.join(", ")}`);
+      }
+      write.state = raw.state;
+    }
+    if (raw.summary !== undefined) {
+      const summary = text("summary");
+      write.summary =
+        summary && summary.length > CONCIERGE_TASK_SUMMARY_MAX_LENGTH
+          ? `${summary.slice(0, CONCIERGE_TASK_SUMMARY_MAX_LENGTH - 1)}…`
+          : summary;
+    }
+    if (raw.waitingOn !== undefined) write.waitingOn = text("waitingOn");
+    if (raw.dueAt !== undefined) {
+      const due = text("dueAt");
+      const dueAt = due === null ? null : new Date(due);
+      if (dueAt !== null && Number.isNaN(dueAt.getTime())) {
+        throw new Error(`${where}.dueAt must be an ISO 8601 time`);
+      }
+      write.dueAt = dueAt;
+    }
+    if (raw.rank !== undefined) {
+      if (raw.rank !== null && !Number.isInteger(raw.rank)) {
+        throw new Error(`${where}.rank must be an integer or null`);
+      }
+      write.rank = raw.rank as number | null;
+    }
+    if (raw.chatId !== undefined) {
+      const chatId = text("chatId");
+      if (chatId) await requireTaskChat(chatId);
+      write.sessionId = chatId;
+    }
+    if (raw.archived !== undefined) {
+      if (typeof raw.archived !== "boolean") throw new Error(`${where}.archived must be a boolean`);
+      write.archived = raw.archived;
+    }
+    if (!write.id) {
+      if (!write.title) throw new Error(`${where}.title is required to create a row`);
+      write.state ??= write.sessionId ? "doing" : "next";
+    }
+    return write;
   };
 
   const findListEntry = async (chatId: string) =>
@@ -177,10 +243,94 @@ export async function buildConciergeTools(
         }),
     },
     {
+      name: "task_upsert",
+      description:
+        "Write your task list, the guardian's panel of what you are busy with. Batch only: one call writes every row that changed. " +
+        "An entry without id creates a row (title required); an entry with id updates it, and fields you leave out stay. " +
+        "Returns each row's id.",
+      inputSchema: {
+        type: "object",
+        required: ["tasks"],
+        properties: {
+          tasks: {
+            type: "array",
+            minItems: 1,
+            maxItems: 20,
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "The row to update. Leave out to create one." },
+                title: { type: "string", description: "A few words naming the task." },
+                state: {
+                  type: "string",
+                  enum: [...CONCIERGE_TASK_STATES],
+                  description:
+                    "next: planned. doing: in progress. watching: waiting on something external. needs_user: blocked on the guardian. done: finished. dropped: given up or called off, with the reason in summary.",
+                },
+                summary: {
+                  type: ["string", "null"],
+                  description: `One line, at most ${CONCIERGE_TASK_SUMMARY_MAX_LENGTH} characters: the result or the current status.`,
+                },
+                waitingOn: {
+                  type: ["string", "null"],
+                  description:
+                    'What a watching or needs_user row waits for, such as "CI" or "your budget call".',
+                },
+                dueAt: {
+                  type: ["string", "null"],
+                  description:
+                    "ISO 8601 time: the next check of a watching row, or when a next row is planned.",
+                },
+                rank: {
+                  type: ["integer", "null"],
+                  description: "Order inside next. Lower comes first.",
+                },
+                chatId: {
+                  type: ["string", "null"],
+                  description: "The task chat this row follows. Each chat belongs to one row.",
+                },
+                archived: { type: "boolean", description: "Archive the row, or bring it back." },
+              },
+            },
+          },
+        },
+      },
+      handler: (input) =>
+        runFacadeTool("task_upsert", input, async (args) => {
+          currentTurn();
+          if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
+            throw new Error("tasks is required: an array with one entry per row to write");
+          }
+          const writes: ConciergeTaskWrite[] = [];
+          for (const [index, raw] of args.tasks.entries()) {
+            if (!raw || typeof raw !== "object")
+              throw new Error(`tasks[${index}] must be an object`);
+            writes.push(await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`));
+          }
+          const rows = await tasks.repo.upsertMany(writes);
+          return { tasks: rows.map((row) => ({ id: row.id, title: row.title, state: row.state })) };
+        }),
+    },
+    {
+      name: "task_list",
+      description:
+        "List your task list: the open rows, or with includeDone the finished ones too. Check it before you create a row, so you do not create a duplicate.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          includeDone: { type: "boolean", description: "Also list done and dropped rows." },
+        },
+      },
+      handler: (input) =>
+        runFacadeTool("task_list", input, async (args) => ({
+          tasks: (await tasks.repo.listForAgent(args.includeDone === true)).map(compactTask),
+        })),
+    },
+    {
       name: "chat_start",
       description:
         "Start a task chat: a normal chat with another agent (main by default) that does the work while you keep talking. " +
-        "Its result comes back to you as a <task_event>. Returns the chat's id.",
+        "Its result comes back to you in a <task_events> batch. Every task chat has a row on your task list: this call creates one (or links taskId). Returns the chat's id and the row's id.",
       inputSchema: {
         type: "object",
         required: ["title", "brief"],
@@ -199,6 +349,11 @@ export async function buildConciergeTools(
             type: "string",
             description: `Project the chat works in, as a path relative to the projects root ${getWebchatProjectsRoot()}, such as "website" or "apps/notes". Defaults to "default".`,
           },
+          taskId: {
+            type: "string",
+            description:
+              "Link the chat to this existing task row, such as one planned under next, and set it to doing. Without it a doing row is created for the chat.",
+          },
           card: {
             type: "boolean",
             description:
@@ -211,6 +366,16 @@ export async function buildConciergeTools(
           currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
+          const taskId = optionalString(args, "taskId");
+          if (taskId) {
+            const planned = await tasks.repo.get(taskId);
+            if (!planned) throw new Error(`No task ${taskId}. Use task_list to find it.`);
+            if (planned.sessionId) {
+              throw new Error(
+                `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,
+              );
+            }
+          }
           const chatId = await service.dashboard.chats.startChat({
             agentName: optionalString(args, "agent"),
             projectPath: await taskProjectPath(optionalString(args, "project")),
@@ -220,6 +385,12 @@ export async function buildConciergeTools(
             triggerKind: TASK_CHAT_TRIGGER_KIND,
             triggerName: title,
           });
+          // Linked before the first turn, so that turn's events find the row.
+          const [task] = await tasks.repo.upsertMany([
+            taskId
+              ? { id: taskId, sessionId: chatId, state: "doing", waitingOn: null }
+              : { title, state: "doing", sessionId: chatId },
+          ]);
           await sendInput(chatId, brief);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
@@ -235,7 +406,7 @@ export async function buildConciergeTools(
             log.warn("task chat title too long to name the chat", { chatId });
           }
           if (args.card === true) await showCard(chatId, title);
-          return { chatId };
+          return { chatId, taskId: task.id };
         }),
     },
     {
@@ -255,7 +426,8 @@ export async function buildConciergeTools(
         runFacadeTool("chat_send", input, async (args) => {
           currentTurn();
           const chatId = requireString(args, "chatId");
-          await requireTaskChat(chatId);
+          const chat = await requireTaskChat(chatId);
+          await ensureTaskRow(chat);
           await sendInput(chatId, requireString(args, "text"));
           return "Sent; the task chat takes it as input.";
         }),

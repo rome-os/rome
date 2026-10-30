@@ -57,6 +57,11 @@ rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
 }));
 
+// The pill is tested on its own; here only whether the navbar offers it.
+rs.mock("@/components/concierge/ConciergeTasksPill", () => ({
+  ConciergeTasksPill: () => <span data-testid="tasks-pill" />,
+}));
+
 rs.mock("@/pages/free/workspace-context", () => ({
   snapshotWorkspaceForSend: () => null,
   useWorkspaceContextRegistry: () => null,
@@ -1938,6 +1943,26 @@ describe("Chat Concierge empty state", () => {
 
     expect(await screen.findByTestId("user-row")).toBeTruthy();
     expect(guidance()).toBeNull();
+  });
+
+  it("puts the tasks pill in the navbar beside the Concierge's name, and in no other chat's", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    const pill = await screen.findByTestId("tasks-pill");
+    const name = screen.getByText("Concierge");
+    expect(name.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(name.parentElement).toBe(pill.parentElement);
+    // The name keeps its width beside the pill; the label after it gives way.
+    expect(name.className).toContain("shrink-0");
+    view.unmount();
+
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    expect(screen.queryByTestId("tasks-pill")).toBeNull();
   });
 
   it("is only for Concierge: an empty normal chat keeps its message list", async () => {
