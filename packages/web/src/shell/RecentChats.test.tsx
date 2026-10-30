@@ -1772,10 +1772,8 @@ describe("RecentChats chat name tooltip", () => {
 describe("running mark style", () => {
   const css = readFileSync(new URL("../globals.css", import.meta.url), "utf8");
 
-  it("turns in steps, so the compositor has no frame to draw between them", () => {
-    expect(css).toMatch(
-      /\.rome-status-spin \{\s*animation: rome-status-spin 1s steps\(12\) infinite;/,
-    );
+  it("turns at an even speed, not in visible ticks", () => {
+    expect(css).toMatch(/\.rome-status-spin \{\s*animation: rome-status-spin 1s linear infinite;/);
   });
 
   it("stands still under reduced motion", () => {
