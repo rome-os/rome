@@ -570,7 +570,7 @@ export function ToolWorkspace({
         >
           {inTitlebar ? (
             open ? (
-              <SlotContent name={TITLEBAR_END_SLOT}>
+              <SlotContent name={TITLEBAR_END_SLOT} hideWithPage>
                 <div
                   className="flex h-full shrink-0 items-center gap-1 px-2"
                   style={{ width: toolsWidth }}

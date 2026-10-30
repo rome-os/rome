@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useState } from "react";
+import { Activity, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
@@ -248,12 +248,40 @@ describe("ToolWorkspace in the Mac app's title bar", () => {
 
     const end = screen.getByTestId("titlebar-end");
     expect(end.querySelector('[role="tablist"]')).not.toBeNull();
-    const header = end.firstElementChild?.firstElementChild as HTMLElement;
+    const header = end.querySelector<HTMLElement>("div[style*='width']") as HTMLElement;
     const chat = screen.getByTestId("workspace-chat");
     // The separator is the one pixel between the chat and the panel.
     expect(Number.parseFloat(header.style.width) + Number.parseFloat(chat.style.width) + 1).toBe(
       viewportWidth,
     );
+  });
+
+  it("takes the tabs out of the title bar while an Activity hides the page, and puts them back", () => {
+    const page = (mode: "visible" | "hidden") => (
+      <SlotProvider>
+        <div data-testid="titlebar-end">
+          <SlotOutlet name={TITLEBAR_END_SLOT} />
+        </div>
+        <Activity mode={mode}>
+          {workspace({ activeId: "a", collapsed: false, unreadIds: [] })}
+        </Activity>
+      </SlotProvider>
+    );
+    const shown = () => {
+      const tablist = screen.getByTestId("titlebar-end").querySelector('[role="tablist"]');
+      for (let node = tablist as HTMLElement | null; node; node = node.parentElement) {
+        if (node.style.display === "none") return false;
+      }
+      return tablist !== null;
+    };
+    const view = render(page("visible"));
+    expect(shown()).toBe(true);
+
+    view.rerender(page("hidden"));
+    expect(shown()).toBe(false);
+
+    view.rerender(page("visible"));
+    expect(shown()).toBe(true);
   });
 
   it("fits the tabs to the strip in the title bar too", () => {

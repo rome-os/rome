@@ -75,7 +75,14 @@ export function useReplyDraftState({
   const focusRef = useRef(focusComposer);
   focusRef.current = focusComposer;
 
-  useEffect(() => setTarget(null), [chatId]);
+  // Only a different chat drops the reply. The effect also runs again when an
+  // `<Activity>` shows a kept chat, and the reply must survive that.
+  const draftChatId = useRef(chatId);
+  useEffect(() => {
+    if (draftChatId.current === chatId) return;
+    draftChatId.current = chatId;
+    setTarget(null);
+  }, [chatId]);
 
   const set = useCallback((next: ReplyTarget) => {
     setTarget(next);

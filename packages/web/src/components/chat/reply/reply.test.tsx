@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { Activity, type ReactNode } from "react";
 import i18n from "@/i18n";
 import { QuotedReply } from "./QuotedReply";
 import { ReplyButton } from "./ReplyButton";
@@ -289,5 +289,56 @@ describe("a quote whose original is outside the loaded history", () => {
 
     expect(findMessageAnchor(root, "older")).toBeNull();
     expect(findMessageAnchor(root, "a2")).toBe(root.firstElementChild);
+  });
+});
+
+describe("the reply draft of a chat kept alive behind an Activity", () => {
+  const picked: ReplyTarget = {
+    messageId: "a2",
+    author: "agent",
+    quote: "Lisbon",
+    preview: "Lisbon",
+  };
+  function Chat({ chatId }: { chatId: string }) {
+    const draft = useReplyDraftState({
+      chatId,
+      sessionId: "s1",
+      messageIds: new Set(),
+      jump: () => {},
+      focusComposer: () => {},
+    });
+    return (
+      <>
+        <button type="button" onClick={() => draft.set(picked)}>
+          pick
+        </button>
+        <output>{draft.target?.preview ?? "no reply"}</output>
+      </>
+    );
+  }
+  const page = (mode: "visible" | "hidden", chatId = "concierge") => (
+    <Activity mode={mode}>
+      <Chat chatId={chatId} />
+    </Activity>
+  );
+
+  it("keeps the picked reply through a hide and a show", () => {
+    const view = render(page("visible"));
+    fireEvent.click(screen.getByText("pick"));
+    expect(screen.getByRole("status").textContent).toBe("Lisbon");
+
+    view.rerender(page("hidden"));
+    view.rerender(page("visible"));
+
+    expect(screen.getByRole("status").textContent).toBe("Lisbon");
+  });
+
+  it("still drops the reply when the chat changes", () => {
+    const view = render(page("visible"));
+    fireEvent.click(screen.getByText("pick"));
+
+    view.rerender(page("visible", "another-chat"));
+
+    expect(screen.getByRole("status").textContent).toBe("no reply");
   });
 });
