@@ -17,6 +17,10 @@ const HOVER_CHIP =
 // A tap on any of these belongs to the thing tapped, not to the bubble.
 const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],[role=link]";
 
+// Every bubble shrinks to its content up to this share of the column, so even
+// the widest leaves a gap on the other side that tells whose it is.
+const BUBBLE_MAX_WIDTH = "max-w-[90%]";
+
 /**
  * One Concierge bubble and its details: when it was sent, Reply, a copy button
  * for its text, and for the last bubble of an agent turn, the turn's feedback
@@ -39,7 +43,8 @@ const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],
  *
  * `side` is the edge the bubble aligns to: `start` for the agent, `end` for the
  * guardian. `reply` is what the Reply button quotes. `anchorId` makes
- * the bubble the target of a jump from a quote of it.
+ * the bubble the target of a jump from a quote of it. `arrival` marks a bubble
+ * that enters while the chat is open.
  */
 export function ConciergeBubble({
   side,
@@ -48,6 +53,7 @@ export function ConciergeBubble({
   feedbackTurn,
   reply = null,
   anchorId,
+  arrival,
   children,
 }: {
   side: "start" | "end";
@@ -56,6 +62,7 @@ export function ConciergeBubble({
   feedbackTurn: { sessionId: string; turnId: string } | null;
   reply?: ReplySource | null;
   anchorId?: string;
+  arrival?: number;
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -75,8 +82,10 @@ export function ConciergeBubble({
   return (
     <div
       data-timeline-anchor={anchorId}
+      data-arrival={arrival}
       className={cn(
-        "flex min-w-0 max-w-full flex-col",
+        "flex min-w-0 flex-col",
+        BUBBLE_MAX_WIDTH,
         side === "end" ? "items-end" : "items-start",
       )}
     >

@@ -22,32 +22,30 @@ import { cn } from "@/lib/utils";
 const GuardianBubble = memo(
   function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
+    // The bubble is a direct child of the group, so its width cap is a share
+    // of the column, as the agent's is.
     return (
-      <div
-        data-timeline-anchor={msg.id}
-        className="flex min-w-0 max-w-full flex-col items-end"
-        data-arrival={arrival}
+      <ConciergeBubble
+        side="end"
+        copyText={text}
+        createdAt={msg.createdAt}
+        feedbackTurn={null}
+        reply={
+          isSettledUserMessage(msg)
+            ? {
+                messageId: msg.id,
+                sessionId: msg.sessionId,
+                author: "guardian",
+                name: msg.sender?.name ?? undefined,
+                text,
+              }
+            : null
+        }
+        anchorId={msg.id}
+        arrival={arrival}
       >
-        <ConciergeBubble
-          side="end"
-          copyText={text}
-          createdAt={msg.createdAt}
-          feedbackTurn={null}
-          reply={
-            isSettledUserMessage(msg)
-              ? {
-                  messageId: msg.id,
-                  sessionId: msg.sessionId,
-                  author: "guardian",
-                  name: msg.sender?.name ?? undefined,
-                  text,
-                }
-              : null
-          }
-        >
-          <UserMessageBubble msg={msg} text={text} own />
-        </ConciergeBubble>
-      </div>
+        <UserMessageBubble msg={msg} text={text} own />
+      </ConciergeBubble>
     );
   },
   (prev, next) =>
