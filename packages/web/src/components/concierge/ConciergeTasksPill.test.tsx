@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { Activity } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -215,6 +216,76 @@ describe("ConciergeTasksPill", () => {
     const view = renderPill(pane);
     await screen.findByRole("button", { name: "Tasks" });
     view.unmount();
+    expect(pane.hide).toHaveBeenCalled();
+  });
+});
+
+describe("ConciergeTasksPill in a chat kept alive behind an Activity", () => {
+  const topic = { type: "subscribe", topic: "concierge.tasks" };
+  const kept = (
+    mode: "visible" | "hidden",
+    live: ReturnType<typeof fakeSocketLiveEventsClient>,
+  ) => (
+    <LiveEventsClientContext.Provider value={live}>
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <Activity mode={mode}>
+            <ConciergeTasksPill />
+          </Activity>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </LiveEventsClientContext.Provider>
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const taskReads = () =>
+    rs.mocked(fetch).mock.calls.filter(([url]) => String(url).startsWith("/api/concierge/tasks"));
+
+  it("stops listening while hidden, and reads the list again and listens again when shown", async () => {
+    FakeWebSocket.instances = [];
+    client.clear();
+    server.tasks = [row("doing")];
+    const live = fakeSocketLiveEventsClient();
+    const view = render(kept("visible", live));
+    const socket = (() => FakeWebSocket.latest())();
+    await screen.findByRole("button", { name: "Tasks, 1 in progress" });
+    acceptLatestSocket();
+    expect(
+      socket.sent.filter((frame) => JSON.stringify(frame) === JSON.stringify(topic)),
+    ).toHaveLength(1);
+
+    view.rerender(kept("hidden", live));
+    await waitFor(() =>
+      expect(socket.sent).toContainEqual({ type: "unsubscribe", topic: "concierge.tasks" }),
+    );
+    const readsWhileHidden = taskReads().length;
+
+    // The list changes while nobody listens; no event reaches the pill.
+    server.tasks = [row("needs_user"), row("doing")];
+    view.rerender(kept("visible", live));
+
+    await waitFor(() => expect(taskReads().length).toBeGreaterThan(readsWhileHidden));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { hidden: true, name: "Tasks, 1 needs you" })).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(
+        socket.sent.filter((frame) => JSON.stringify(frame) === JSON.stringify(topic)),
+      ).toHaveLength(2),
+    );
+  });
+
+  it("closes the tasks tab of the pane as the chat is hidden", async () => {
+    server.tasks = [row("doing")];
+    const pane = host();
+    const live = fakeSocketLiveEventsClient();
+    const page = (mode: "visible" | "hidden") => (
+      <ToolTasksContext.Provider value={pane}>{kept(mode, live)}</ToolTasksContext.Provider>
+    );
+    const view = render(page("visible"));
+    await screen.findByRole("button", { name: "Tasks, 1 in progress" });
+    expect(pane.hide).not.toHaveBeenCalled();
+
+    view.rerender(page("hidden"));
     expect(pane.hide).toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
 
 // A reusable "keep the viewport pinned to the bottom" hook, written for chat /
@@ -107,11 +107,16 @@ export function useStickToBottom({
   // True while a control holds the position (see HOLD_STICK_EVENT).
   const holdRef = useRef(false);
 
+  // The state keeps the last node when a ref goes null. That is the node
+  // leaving for good, or an `<Activity>` hiding it and bringing the same one
+  // back; the second must not render the chat again on the way in.
   const scrollRef = useCallback((node: HTMLElement | null) => {
     explicitScrollRef.current = node;
-    setExplicitScrollEl(node);
+    if (node) setExplicitScrollEl(node);
   }, []);
-  const contentRef = useCallback((node: HTMLElement | null) => setContentEl(node), []);
+  const contentRef = useCallback((node: HTMLElement | null) => {
+    if (node) setContentEl(node);
+  }, []);
 
   // The element (or window) that actually scrolls `contentEl`, resolved lazily:
   // a container only becomes the scroller once its content overflows, so this is
@@ -148,6 +153,34 @@ export function useStickToBottom({
     [jumpToBottom, setStuck],
   );
 
+  // An `<Activity>` hides its content with `display: none`, and a scroller
+  // that loses its box forgets its offset. The layout cleanup runs as the
+  // content is hidden, and the layout effect again after it is shown; between
+  // them the hook parks the reader and puts them back: at the bottom when they
+  // were pinned there (the content may have grown meanwhile), else at the
+  // offset they left.
+  //
+  // The offset is the last one a scroll event reported, not one read at the hide:
+  // the commit that hides the chat can change the page around it (the chat list
+  // leaves with the chat), and reading then lays the page out in its new shape,
+  // where the browser has already moved the scroller to keep its place there.
+  const parkedRef = useRef<{ el: HTMLElement; top: number; stuck: boolean } | null>(null);
+  const lastTopRef = useRef<{ el: HTMLElement; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = explicitScrollEl;
+    if (!el) return;
+    const parked = parkedRef.current;
+    parkedRef.current = null;
+    if (parked?.el === el) {
+      setStuck(parked.stuck);
+      el.scrollTop = parked.stuck ? el.scrollHeight : parked.top;
+    }
+    return () => {
+      const known = lastTopRef.current?.el === el ? lastTopRef.current.top : el.scrollTop;
+      parkedRef.current = { el, top: known, stuck: stuckRef.current };
+    };
+  }, [explicitScrollEl, setStuck]);
+
   // Record real user gestures so the scroll handler can distinguish a deliberate
   // scroll from a programmatic one. Capture + passive so we see them before any
   // app component can stop propagation. performance.now() is fine in app code.
@@ -176,7 +209,11 @@ export function useStickToBottom({
   // it). We only react to the scroller that owns our content, so an unrelated
   // list scrolling elsewhere doesn't toggle our pin.
   useEffect(() => {
-    let lastScrollTop: number | null = null;
+    // Where the scroller stands as the listener starts, so the first scroll it
+    // sees can already be told to move up. Listening again after an
+    // `<Activity>` shows the chat is such a start, with no scroll in between
+    // when the offset came back unchanged.
+    let lastScrollTop: number | null = readMetrics(resolveScroller()).scrollTop;
     const handleScroll = (event: Event) => {
       const scroller = resolveScroller();
       const isOurs =
@@ -187,6 +224,8 @@ export function useStickToBottom({
           : event.target === scroller;
       if (!isOurs) return;
       const metrics = readMetrics(scroller);
+      if (scroller !== window)
+        lastTopRef.current = { el: scroller as HTMLElement, top: metrics.scrollTop };
       const atBottom = distanceToBottom(metrics) <= STUCK_THRESHOLD_PX;
       const movedUp = lastScrollTop !== null && metrics.scrollTop < lastScrollTop - 0.5;
       lastScrollTop = metrics.scrollTop;
@@ -237,7 +276,11 @@ export function useStickToBottom({
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
           holdRef.current = false;
-          setStuck(distanceToBottom(readMetrics(resolveScroller())) <= STUCK_THRESHOLD_PX);
+          const metrics = readMetrics(resolveScroller());
+          // Hidden in the meantime (see the park above): a scroller without a
+          // box measures 0 from the bottom, which says nothing about the reader.
+          if (metrics.clientHeight === 0) return;
+          setStuck(distanceToBottom(metrics) <= STUCK_THRESHOLD_PX);
         }),
       );
     };

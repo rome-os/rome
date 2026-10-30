@@ -3,7 +3,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -93,13 +95,49 @@ export function useSlotOutlet(name: string): boolean {
   return (registry?.hosts[name] ?? null) !== null;
 }
 
-/** The page-side filler — portals `children` into the matching outlet. */
-export function SlotContent({ name, children }: { name: string; children: ReactNode }) {
+/**
+ * The page-side filler — portals `children` into the matching outlet.
+ *
+ * `hideWithPage` is for a page an `<Activity>` can hide. The outlet is outside
+ * the page, and in the browser the page's hidden state does not reach what it
+ * portals out (the kept Concierge's header would sit beside the visible chat's),
+ * so the filler hides its own content: the layout cleanup runs as the page is
+ * hidden, and the layout effect as it is shown again. The content sits in a
+ * wrapper that keeps out of the outlet's layout (`display: contents`).
+ */
+export function SlotContent({
+  name,
+  children,
+  hideWithPage = false,
+}: {
+  name: string;
+  children: ReactNode;
+  hideWithPage?: boolean;
+}) {
   const { hosts, addFill, removeFill } = useSlotRegistry();
   const host = hosts[name] ?? null;
   useEffect(() => {
     addFill(name);
     return () => removeFill(name);
   }, [name, addFill, removeFill]);
-  return host ? createPortal(children, host) : null;
+  const wrapper = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = wrapper.current;
+    if (!hideWithPage || !node) return;
+    node.style.display = "contents";
+    return () => {
+      node.style.display = "none";
+    };
+  }, [hideWithPage, host]);
+  if (!host) return null;
+  return createPortal(
+    hideWithPage ? (
+      <div ref={wrapper} style={{ display: "contents" }}>
+        {children}
+      </div>
+    ) : (
+      children
+    ),
+    host,
+  );
 }

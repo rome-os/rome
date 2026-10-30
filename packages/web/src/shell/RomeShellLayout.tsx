@@ -24,6 +24,7 @@ import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid } from "./AppGrid";
 import { APP_NAV } from "./builtin-nav";
 import { ChatSearchHost } from "./ChatSearchHost";
+import { ConciergeKeepAlive } from "./ConciergeKeepAlive";
 import { DesktopTitlebar } from "./DesktopTitlebar";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
@@ -406,6 +407,7 @@ export function RomeShellLayout() {
   // between navigating and the chunk arriving.
   const routed = (
     <div className="flex min-h-0 flex-1 flex-col">
+      <ConciergeKeepAlive />
       <Outlet />
     </div>
   );

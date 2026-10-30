@@ -6,6 +6,12 @@ import { useSettings } from "@/hooks/use-settings";
 export const CONCIERGE_AGENT_ID = "core:concierge";
 /** The Concierge chat's fixed id: the dashboard opens it at `/chat/concierge`. */
 export const CONCIERGE_CHAT_ID = "concierge";
+/** Whether `pathname` is the Concierge chat's page: `/chat/concierge`, or a path under it. */
+export function isConciergePath(pathname: string): boolean {
+  return (
+    pathname === `/chat/${CONCIERGE_CHAT_ID}` || pathname.startsWith(`/chat/${CONCIERGE_CHAT_ID}/`)
+  );
+}
 /** `triggerKind` of a task chat Concierge started. */
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
 /** The setting that turns Concierge on, under Settings → Experimental. */

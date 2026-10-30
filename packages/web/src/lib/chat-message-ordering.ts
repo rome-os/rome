@@ -85,3 +85,17 @@ export function mergeLatestMessagePage(
     dropMessageIds: new Set([...history, ...(options.dropMessageIds ?? [])]),
   });
 }
+
+/**
+ * Whether a refetch brought nothing new: the same messages, field for field.
+ * The state then keeps its list, and the transcript, which rebuilds on every
+ * new list, stays as it is.
+ */
+export function sameMessages(a: readonly ChatMessage[], b: readonly ChatMessage[]): boolean {
+  if (a === b) return true;
+  return a.length === b.length && a.every((message, index) => sameMessage(message, b[index]));
+}
+
+function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}

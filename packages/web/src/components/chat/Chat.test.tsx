@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
+import { Activity, forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
@@ -592,6 +592,151 @@ describe("Chat read marking", () => {
     } finally {
       delete (document as { visibilityState?: unknown }).visibilityState;
     }
+  });
+});
+
+describe("Chat kept alive behind an Activity", () => {
+  const userMessage = (id: string, createdAt: string) => ({
+    id,
+    sessionId: "session-1",
+    turnId: `turn-${id}`,
+    role: "user" as const,
+    content: id,
+    createdAt,
+  });
+  const first = userMessage("first", "2026-10-30T10:00:00.000Z");
+  const second = userMessage("second", "2026-10-30T10:01:00.000Z");
+  const host = (mode: "visible" | "hidden", live?: LiveEventsClient) => {
+    const chat = (
+      <MemoryRouter>
+        {pane(
+          <Activity mode={mode}>
+            <Chat sessionId="session-1" />
+          </Activity>,
+        )}
+      </MemoryRouter>
+    );
+    return live ? (
+      <LiveEventsClientContext.Provider value={live}>{chat}</LiveEventsClientContext.Provider>
+    ) : (
+      chat
+    );
+  };
+  const userRows = () => screen.queryAllByTestId("user-row").map((row) => row.textContent);
+  afterEach(() => {
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  });
+
+  it("keeps what it loaded while hidden, and reads the newest page again when shown", async () => {
+    rs.mocked(listSessionMessages).mockResolvedValue([first]);
+    const view = render(host("visible"));
+    await waitFor(() => expect(userRows()).toEqual(["first"]));
+    const row = screen.getByTestId("user-row");
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+
+    view.rerender(host("hidden"));
+    expect(screen.getByTestId("user-row")).toBe(row);
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+
+    rs.mocked(listSessionMessages).mockResolvedValue([first, second]);
+    view.rerender(host("visible"));
+    await waitFor(() => expect(userRows()).toEqual(["first", "second"]));
+    // The same node: shown again, not mounted again, and one request for the news.
+    expect(screen.getAllByTestId("user-row")[0]).toBe(row);
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    expect(rs.mocked(listSessionMessagePage).mock.calls.map(([id]) => id)).toEqual([
+      "session-1",
+      "session-1",
+    ]);
+  });
+
+  it("does not mark the chat read while hidden, and marks it when shown", async () => {
+    const { markSessionRead } = await import("@/lib/chat-api");
+    let finishLoad: (messages: (typeof first)[]) => void = () => {};
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () => new Promise((resolve) => (finishLoad = resolve)),
+    );
+    const view = render(host("visible"));
+    view.rerender(host("hidden"));
+
+    // The first load lands while the chat is hidden.
+    await act(async () => finishLoad([first]));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(markSessionRead).not.toHaveBeenCalled();
+
+    rs.mocked(listSessionMessages).mockResolvedValue([first]);
+    view.rerender(host("visible"));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+  });
+
+  it("leaves the reader where they were when shown again, not at the bottom", async () => {
+    rs.mocked(listSessionMessages).mockResolvedValue([first]);
+    const view = render(host("visible"));
+    await waitFor(() => expect(userRows()).toEqual(["first"]));
+    // Opening a chat goes to its bottom.
+    expect(stickToBottom.scrollToBottom).toHaveBeenCalled();
+
+    stickToBottom.scrollToBottom.mockClear();
+    view.rerender(host("hidden"));
+    view.rerender(host("visible"));
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+
+    expect(stickToBottom.scrollToBottom).not.toHaveBeenCalled();
+  });
+
+  describe("with a turn running when it is hidden", () => {
+    const streaming = () => screen.getByTestId("chat-composer").getAttribute("data-streaming");
+
+    it("follows the turn again when shown", async () => {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      const view = render(host("visible"));
+      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(streaming()).toBe("true"));
+
+      // Hiding cuts the follower; the chat must not stay "typing" without one.
+      view.rerender(host("hidden"));
+      expect(rs.mocked(openTurnStream).mock.calls[0]?.[1]?.aborted).toBe(true);
+
+      view.rerender(host("visible"));
+      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(2));
+      expect(streaming()).toBe("true");
+    });
+
+    it("settles when the turn ended while it was hidden", async () => {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      const view = render(host("visible"));
+      await waitFor(() => expect(streaming()).toBe("true"));
+
+      view.rerender(host("hidden"));
+      rs.mocked(listSessionTurns).mockResolvedValue([]);
+      view.rerender(host("visible"));
+
+      await waitFor(() => expect(streaming()).toBe("false"));
+    });
+  });
+
+  it("stops listening while hidden and listens again when shown", async () => {
+    FakeWebSocket.instances = [];
+    const live = fakeSocketLiveEventsClient();
+    const view = render(host("visible", live));
+    let socket!: FakeWebSocket;
+    act(() => {
+      socket = acceptLatestSocket();
+    });
+    expect(socket.sent).toEqual([{ type: "subscribe", topic: "chat.session:session-1" }]);
+
+    view.rerender(host("hidden", live));
+    await waitFor(() =>
+      expect(socket.sent).toContainEqual({ type: "unsubscribe", topic: "chat.session:session-1" }),
+    );
+
+    view.rerender(host("visible", live));
+    await waitFor(() =>
+      expect(socket.sent.filter((frame) => frame.type === "subscribe")).toHaveLength(2),
+    );
   });
 });
 

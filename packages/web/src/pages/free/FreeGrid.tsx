@@ -25,7 +25,8 @@ import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { SlotContent } from "@/components/slot";
+import { SlotContent, useSlotOutlet } from "@/components/slot";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -163,13 +164,31 @@ function ToolsToggle({ unread }: { unread: boolean }) {
   );
 }
 
-export function FreeGrid() {
+const NO_PLACEMENTS: WidgetPlacement[] = [];
+
+export interface FreeGridProps {
+  /** The chat to show, instead of the one the URL names. */
+  sessionId?: string;
+  /**
+   * False while the page is kept alive behind another one (see
+   * ConciergeKeepAlive). The tool layout belongs to one chat at a time, so a
+   * grid that is not on screen draws none of it: the chat on screen has it.
+   */
+  active?: boolean;
+}
+
+export function FreeGrid({ sessionId: pinnedSessionId, active = true }: FreeGridProps = {}) {
   const { t } = useTranslation("common");
+  // The Mac app's title bar takes the chat's bar, so the window has one row on
+  // top. Elsewhere the chat draws its own. Read here, not in the chat: the slot
+  // registry changes whenever any page fills a slot, and the chat should not
+  // render again for that.
+  const inTitlebar = useSlotOutlet(TITLEBAR_SLOT);
   const params = useParams<{ "*"?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const {
-    placements,
+    placements: layoutPlacements,
     addWidget,
     removeWidget,
     toolView,
@@ -177,6 +196,7 @@ export function FreeGrid() {
     selectTool,
     setToolsCollapsed,
   } = useFreeCells();
+  const placements = active ? layoutPlacements : NO_PLACEMENTS;
   const { apps } = useApps();
   const sessionNames = useSessionNames(
     placements.flatMap((widget) =>
@@ -202,7 +222,7 @@ export function FreeGrid() {
   const [workspaceStore] = useState(() => createWorkspaceStore());
   const [eventBus] = useState(() => createWorkspaceEventBus());
   const [workspaceContextRegistry] = useState(() => createWorkspaceContextRegistry());
-  const urlSessionId = params["*"]?.split("/")[0] || undefined;
+  const urlSessionId = pinnedSessionId ?? (params["*"]?.split("/")[0] || undefined);
   const locState = location.state as {
     projectPath?: string;
     deviceFolder?: DraftDeviceFolder;
@@ -410,10 +430,11 @@ export function FreeGrid() {
               initialAgentMention={initialAgentMention}
               initialDraftText={initialDraftText}
               initialSkillName={initialSkillName}
+              navbarSlot={inTitlebar ? TITLEBAR_SLOT : undefined}
             />
             {/* A portal: it renders in the mobile header, and sits here so it
                 reads the pane's open state. */}
-            <SlotContent name="mobileHeader">
+            <SlotContent name="mobileHeader" hideWithPage>
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <SessionAvatar
                   iconUrl={pinnedAgentMention?.iconUrl}

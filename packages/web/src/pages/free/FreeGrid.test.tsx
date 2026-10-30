@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { useEffect } from "react";
+import { useEffect, type ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -24,7 +24,13 @@ rs.mock("@/hooks/use-concierge", () => ({
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: () => ({ sessionName: null }),
 }));
-rs.mock("@/components/chat/Chat", () => ({ Chat: () => null }));
+const chatProps = rs.hoisted(() => ({ sessionId: undefined as string | null | undefined }));
+rs.mock("@/components/chat/Chat", () => ({
+  Chat: (props: { sessionId?: string | null }) => {
+    chatProps.sessionId = props.sessionId;
+    return null;
+  },
+}));
 rs.mock("./AppWidget", () => ({
   AppWidget: ({ placementId }: { placementId: string }) => {
     useEffect(() => {
@@ -58,13 +64,19 @@ function NavigationProbe({ withProject }: { withProject: boolean }) {
   );
 }
 
-function Grid({ withProject = true }: { withProject?: boolean }) {
+function Grid({
+  withProject = true,
+  grid = <FreeGrid />,
+}: {
+  withProject?: boolean;
+  grid?: ReactElement;
+}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <MemoryRouter initialEntries={["/chat"]}>
       <QueryClientProvider client={queryClient}>
         <SlotProvider>
-          <FreeGrid />
+          {grid}
           <NavigationProbe withProject={withProject} />
         </SlotProvider>
       </QueryClientProvider>
@@ -241,5 +253,24 @@ describe("FreeGrid mobile header", () => {
     const { container } = renderAt("/chat/concierge");
     await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
+  });
+});
+
+describe("FreeGrid kept alive for one chat", () => {
+  it("shows the chat it is pinned to, whatever the address", async () => {
+    render(<Grid grid={<FreeGrid sessionId="concierge" />} />);
+    await waitFor(() => expect(chatProps.sessionId).toBe("concierge"));
+  });
+
+  it("draws no tool layout while it is not the grid on screen, and gets it back", async () => {
+    const view = render(<Grid grid={<FreeGrid sessionId="concierge" />} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open notes" }));
+    expect(await screen.findByTitle("Seeded app")).toBeTruthy();
+
+    view.rerender(<Grid grid={<FreeGrid sessionId="concierge" active={false} />} />);
+    expect(screen.queryByTitle("Seeded app")).toBeNull();
+
+    view.rerender(<Grid grid={<FreeGrid sessionId="concierge" />} />);
+    expect(screen.getByTitle("Seeded app")).toBeTruthy();
   });
 });

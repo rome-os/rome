@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
@@ -34,8 +34,11 @@ const TYPING_BUBBLE = <TypingBubble />;
  * messages, and a typing indicator while a turn runs. It shows no trace, turn
  * summary, live activity, or live text: the agent's text is private, and what
  * it says arrives as messages.
+ *
+ * Memoized: the chat around it renders for many reasons, and a transcript of
+ * hundreds of bubbles should only render for its own.
  */
-export function ConciergeTranscript({
+export const ConciergeTranscript = memo(function ConciergeTranscript({
   rows,
   live,
   actions,
@@ -54,18 +57,26 @@ export function ConciergeTranscript({
   // it says something.
   const typing = live.isStreaming && (!live.quiet || turnHasSpoken(rows, live.runningTurnId));
   const items = useMemo(() => buildConciergeItems(rows, { typing }), [rows, typing]);
+  const log = useRef<HTMLElement | null>(null);
+  const attachLog = useCallback(
+    (node: HTMLElement | null) => {
+      log.current = node;
+      contentRef(node);
+    },
+    [contentRef],
+  );
   const messageIds = useMemo(
     () =>
       items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
     [items],
   );
-  const arrival = useBubbleArrivals(messageIds);
+  const arrival = useBubbleArrivals(messageIds, log);
   return (
     // Padding outside, width cap inside: the composer floor's geometry, so the
     // messages and the composer share both edges at every width.
     <div className="flex-1 px-3 pt-4 md:px-6">
       <div
-        ref={contentRef}
+        ref={attachLog}
         data-chat-transcript
         data-concierge-transcript
         className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
@@ -93,4 +104,4 @@ export function ConciergeTranscript({
       </div>
     </div>
   );
-}
+});

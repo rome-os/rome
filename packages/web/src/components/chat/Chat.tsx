@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -90,6 +91,7 @@ import {
   MessageList,
   type BlockActions,
   type ChatVariant,
+  type LivePreview,
   findActiveSubmission,
   findLastSubmission,
   hasPendingApprovalConfirmation,
@@ -104,6 +106,7 @@ import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer"
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
+import { HoldArrivalsContext } from "@/components/chat/use-bubble-arrivals";
 import type {
   AgentMention,
   ChatErrorNotice,
@@ -122,6 +125,7 @@ import {
   mergeChatMessage,
   mergeLatestMessagePage,
   orderChatMessages,
+  sameMessages,
   startsNewHistory,
 } from "@/lib/chat-message-ordering";
 import {
@@ -518,20 +522,26 @@ export function Chat({
   // never re-invokes them; the cost is one extra render on mount.
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null);
+  // A ref that goes null leaves the state as it was (see `useStickToBottom`):
+  // an `<Activity>` detaches and attaches every ref as it hides and shows the
+  // chat, and a state that went null and came back would render it again.
   const attachScroller = useCallback(
     (node: HTMLDivElement | null) => {
-      setScrollerEl(node);
+      if (node) setScrollerEl(node);
       stickScrollRef(node);
     },
     [stickScrollRef],
   );
   const attachContent = useCallback(
     (node: HTMLElement | null) => {
-      setContentEl(node);
+      if (node) setContentEl(node);
       stickContentRef(node);
     },
     [stickContentRef],
   );
+  const attachFloor = useCallback((node: HTMLDivElement | null) => {
+    if (node) setFloorEl(node);
+  }, []);
 
   // The main session loads its newest turns first and pages older ones in as
   // the transcript scrolls toward the top.
@@ -773,12 +783,21 @@ export function Chat({
     };
   }, []);
 
-  // A chat that changes while its tab is hidden stays unread, so the sidebar
-  // and other devices show it as new until the guardian comes back.
+  // False while an `<Activity>` hides this chat: its effects are gone, but a
+  // request still in flight can land. The layout effect below keeps it.
+  const shownRef = useRef(true);
+  // Set as the chat is shown again, until the effects that follow have seen it.
+  const shownAgainRef = useRef(false);
+  // A chat that changes while its tab or the chat itself is hidden stays
+  // unread, so the sidebar and other devices show it as new until the guardian
+  // comes back.
   const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      if (
+        !shownRef.current ||
+        (typeof document !== "undefined" && document.visibilityState === "hidden")
+      ) {
         hiddenReadsRef.current.add(id);
         return;
       }
@@ -791,16 +810,16 @@ export function Chat({
     },
     [notifySessionsChanged],
   );
-  useEffect(() => {
-    const flush = () => {
-      if (document.visibilityState === "hidden") return;
-      const ids = [...hiddenReadsRef.current];
-      hiddenReadsRef.current.clear();
-      for (const id of ids) void markSessionRead(id);
-    };
-    document.addEventListener("visibilitychange", flush);
-    return () => document.removeEventListener("visibilitychange", flush);
+  const flushHiddenReads = useCallback(() => {
+    if (document.visibilityState === "hidden") return;
+    const ids = [...hiddenReadsRef.current];
+    hiddenReadsRef.current.clear();
+    for (const id of ids) void markSessionRead(id);
   }, [markSessionRead]);
+  useEffect(() => {
+    document.addEventListener("visibilitychange", flushHiddenReads);
+    return () => document.removeEventListener("visibilitychange", flushHiddenReads);
+  }, [flushHiddenReads]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat.
@@ -892,14 +911,16 @@ export function Chat({
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
         setMessages((prev) => {
+          const current = prev.get(id) ?? [];
+          const merged = mergeLatestMessagePage(current, fetchedMessages, {
+            restart,
+            dropMessageIds,
+          });
+          // A refetch that found nothing new keeps the list, so the transcript
+          // does not rebuild for it.
+          if (prev.has(id) && sameMessages(current, merged)) return prev;
           const next = new Map(prev);
-          next.set(
-            id,
-            mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
-              restart,
-              dropMessageIds,
-            }),
-          );
+          next.set(id, merged);
           return next;
         });
         // A refetch of the newest page leaves older loaded pages, and the
@@ -983,10 +1004,59 @@ export function Chat({
     [loadMessages],
   );
 
+  // An `<Activity>` keeps a hidden chat's state and drops its effects: live
+  // events and the turn poll stop, so whatever happened meanwhile is unseen.
+  // On show, read the newest page again (the load marks the chat read, and
+  // sends the reads held while hidden) and keep the bubbles it brings from
+  // entering, since they are not arriving now.
+  const holdArrivalsRef = useRef(false);
+  const wasHiddenRef = useRef(false);
+  const catchUpRef = useRef(() => {});
+  catchUpRef.current = () => {
+    flushHiddenReads();
+    // Hiding cut the followers of the turns that were running (the unmount
+    // cleanup is the same one). An entry nobody follows would keep the typing
+    // indicator up for good and keep the poll from attaching again: drop it,
+    // and let the poll ask the server which turn still runs.
+    let orphaned = false;
+    for (const [sessionId, entry] of streamingSessionsRef.current) {
+      if (turnStreamControllersRef.current.has(entry.turnId)) continue;
+      endSessionStream(sessionId, entry.turnId);
+      orphaned = true;
+    }
+    if (orphaned) setStreamReconnectRevision((revision) => revision + 1);
+    const loaded = sessionEventIds.filter((id) => loadedSessionsRef.current.has(id));
+    if (loaded.length === 0) return;
+    holdArrivalsRef.current = true;
+    void Promise.all(loaded.map((id) => loadMessages(id, { force: true }))).finally(() => {
+      // After the render the new messages land in.
+      window.setTimeout(() => {
+        holdArrivalsRef.current = false;
+      }, 50);
+    });
+  };
+  useLayoutEffect(() => {
+    shownRef.current = true;
+    if (wasHiddenRef.current) {
+      wasHiddenRef.current = false;
+      shownAgainRef.current = loadedSessionsRef.current.size > 0;
+      catchUpRef.current();
+    }
+    return () => {
+      shownRef.current = false;
+      wasHiddenRef.current = true;
+    };
+  }, []);
+
   // On session switch, snap to the bottom and re-engage stickiness. Ongoing
   // growth (streaming text, late media) is followed by the hook's ResizeObserver
   // — no per-render scroll effect needed.
+  // Not when the chat is shown again: the hook put the reader back where they were.
   useEffect(() => {
+    if (shownAgainRef.current) {
+      shownAgainRef.current = false;
+      return;
+    }
     if (mainSessionId) scrollToBottom("auto");
   }, [mainSessionId, scrollToBottom]);
 
@@ -1812,6 +1882,31 @@ export function Chat({
     [displayMessages, identityBySession, mainIdentity, runningTurnId, isActiveSessionStreaming],
   );
 
+  // Held by identity, so a render that changes none of it (the tool layout
+  // moved, the chat was shown again) leaves the transcript alone.
+  const livePreview = useMemo<LivePreview>(
+    () => ({
+      isStreaming: displayedStreaming,
+      runningTurnId,
+      quiet: floorSessionStream?.quiet,
+      snapshot: currentSnapshot,
+      textStore: liveTextStore,
+      blockIx: floorSessionStream?.assistantBlockIx,
+      textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
+      identity: floorIdentity,
+    }),
+    [
+      displayedStreaming,
+      runningTurnId,
+      floorSessionStream?.quiet,
+      currentSnapshot,
+      liveTextStore,
+      floorSessionStream?.assistantBlockIx,
+      floorSessionStream?.textThroughOrdinal,
+      floorIdentity,
+    ],
+  );
+
   // Concierge before its first message. It waits for the history fetch, so a
   // chat with messages never flashes the guidance while they load.
   const conciergeEmpty =
@@ -2216,7 +2311,9 @@ export function Chat({
               and the page does not move when the first message starts the
               session. */}
           {navbarSlot ? (
-            <SlotContent name={navbarSlot}>{navbar}</SlotContent>
+            <SlotContent name={navbarSlot} hideWithPage>
+              {navbar}
+            </SlotContent>
           ) : (
             <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
               {navbar}
@@ -2250,22 +2347,13 @@ export function Chat({
               {conciergeEmpty ? (
                 <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
               ) : mainSessionId ? (
-                <>
+                <HoldArrivalsContext.Provider value={holdArrivalsRef}>
                   {hasOlder(mainSessionId) ? (
                     <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                   ) : null}
                   <MessageList
                     rows={rows}
-                    live={{
-                      isStreaming: displayedStreaming,
-                      runningTurnId,
-                      quiet: floorSessionStream?.quiet,
-                      snapshot: currentSnapshot,
-                      textStore: liveTextStore,
-                      blockIx: floorSessionStream?.assistantBlockIx,
-                      textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
-                      identity: floorIdentity,
-                    }}
+                    live={livePreview}
                     selection={
                       shareMode
                         ? {
@@ -2285,7 +2373,7 @@ export function Chat({
                     feedback
                     variant={variant}
                   />
-                </>
+                </HoldArrivalsContext.Provider>
               ) : (
                 emptyState
               )}
@@ -2305,7 +2393,7 @@ export function Chat({
                 land on a link it hides. It stays inside the scroller, so the
                 scroll and keyboard geometry match the desktop layout. */}
               <div
-                ref={setFloorEl}
+                ref={attachFloor}
                 data-chat-floor
                 className={cn(
                   "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",

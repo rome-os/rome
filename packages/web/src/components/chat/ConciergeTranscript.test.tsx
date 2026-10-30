@@ -1,5 +1,6 @@
 // @rstest-environment jsdom
 import { readFileSync } from "node:fs";
+import { Activity } from "react";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
@@ -10,6 +11,7 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 }));
 import { type AgentIdentity, buildRows } from "./chat-view";
 import { ConciergeTranscript } from "./ConciergeTranscript";
+import { HoldArrivalsContext } from "./use-bubble-arrivals";
 import type { BlockActions, LivePreview } from "./MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
@@ -130,6 +132,41 @@ describe("ConciergeTranscript bubble arrival", () => {
     expect(entering(container)).toEqual([]);
     rerender(transcript([...history, ...recent].map((m) => ({ ...m }))));
     expect(entering(container)).toEqual([]);
+  });
+});
+
+describe("ConciergeTranscript hidden by an Activity", () => {
+  const kept = (messages: ChatMessage[], mode: "visible" | "hidden", hold = false) => (
+    <Activity mode={mode}>
+      <HoldArrivalsContext.Provider value={{ current: hold }}>
+        {transcript(messages)}
+      </HoldArrivalsContext.Provider>
+    </Activity>
+  );
+
+  it("shows a bubble that entered before the hide in place when it comes back", () => {
+    const { container, rerender } = render(kept(history, "visible"));
+    rerender(kept([...history, user("u2", "t2")], "visible"));
+    expect(entering(container)).toEqual(["u2@0"]);
+
+    // A hidden element's animation restarts when it is shown, so the mark goes.
+    rerender(kept([...history, user("u2", "t2")], "hidden"));
+    rerender(kept([...history, user("u2", "t2")], "visible"));
+    expect(entering(container)).toEqual([]);
+  });
+
+  it("does not bring in what the chat missed while it was hidden", () => {
+    const { container, rerender } = render(kept(history, "visible"));
+    rerender(kept(history, "hidden"));
+    rerender(kept(history, "visible", true));
+
+    // The catch-up after the show lands: history, not arrivals.
+    rerender(kept([...history, user("u2", "t2"), agent("a3", "t2")], "visible", true));
+    expect(entering(container)).toEqual([]);
+
+    // Once it has settled, later bubbles enter again.
+    rerender(kept([...history, user("u2", "t2"), agent("a3", "t2"), agent("a4", "t2")], "visible"));
+    expect(entering(container)).toEqual(["said a4@0"]);
   });
 });
 

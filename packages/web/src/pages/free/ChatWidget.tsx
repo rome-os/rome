@@ -1,8 +1,6 @@
 import type { DraftDeviceFolder } from "@/lib/device-folder";
-import { useCallback, useRef } from "react";
+import { memo, useCallback, useRef } from "react";
 import { ChatComponent, type SessionMessage } from "@/components/chat/ChatComponent";
-import { useSlotOutlet } from "@/components/slot";
-import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import { detectAppInstalls } from "@/lib/chat-helpers";
 import { extractFilePathsFromText } from "@/lib/extract-file-paths";
 import type { AgentMention } from "@/lib/chat-types";
@@ -34,9 +32,13 @@ interface ChatWidgetProps {
   initialAgentMention?: AgentMention | null;
   initialDraftText?: string;
   initialSkillName?: string;
+  /** Passed to `Chat`: the slot to draw the chat's bar into. */
+  navbarSlot?: string;
 }
 
-export function ChatWidget({
+// Memoized so a grid that renders again (its tool layout changed, or it was
+// shown or hidden) does not render the whole chat with it.
+export const ChatWidget = memo(function ChatWidget({
   sessionId,
   onSessionChosen,
   initialProjectName,
@@ -44,10 +46,8 @@ export function ChatWidget({
   initialAgentMention,
   initialDraftText,
   initialSkillName,
+  navbarSlot,
 }: ChatWidgetProps) {
-  // The Mac app's title bar takes the chat's bar, so the window has one row on
-  // top. Elsewhere the chat draws its own.
-  const inTitlebar = useSlotOutlet(TITLEBAR_SLOT);
   const store = useWorkspaceStore();
   const eventBus = useWorkspaceEventBus();
   const emittedAppInstallsRef = useRef(new Set<string>());
@@ -120,7 +120,7 @@ export function ChatWidget({
       initialAgentMention={initialAgentMention}
       initialDraftText={initialDraftText}
       initialSkillName={initialSkillName}
-      navbarSlot={inTitlebar ? TITLEBAR_SLOT : undefined}
+      navbarSlot={navbarSlot}
     />
   );
-}
+});

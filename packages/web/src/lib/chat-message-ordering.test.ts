@@ -4,6 +4,7 @@ import {
   mergeFetchedChatMessages,
   mergeLatestMessagePage,
   orderChatMessages,
+  sameMessages,
   startsNewHistory,
 } from "./chat-message-ordering";
 
@@ -116,5 +117,25 @@ describe("refetching the newest page of a paged chat", () => {
     const merged = mergeLatestMessagePage([...older, optimistic], newest, { restart: true });
 
     expect(merged.map((item) => item.id)).toEqual(["n-user", "n-assistant", "local-user"]);
+  });
+});
+
+describe("sameMessages", () => {
+  const page = () => [
+    message("a", "t1", "2026-07-10T10:00:00.000Z", "user"),
+    message("b", "t1", "2026-07-10T10:00:01.000Z"),
+  ];
+
+  it("holds for a refetch that brought the same messages, as fresh objects", () => {
+    expect(sameMessages(page(), page())).toBe(true);
+  });
+
+  it("fails for a new message, a missing one, or one that changed", () => {
+    const current = page();
+    expect(sameMessages(current, [...page(), message("c", "t2", "2026-07-10T10:01:00.000Z")])).toBe(
+      false,
+    );
+    expect(sameMessages(current, current.slice(1))).toBe(false);
+    expect(sameMessages(current, [current[0], { ...current[1], content: "edited" }])).toBe(false);
   });
 });

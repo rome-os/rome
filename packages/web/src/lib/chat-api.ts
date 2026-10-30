@@ -33,6 +33,7 @@ import type {
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "./random-uuid";
+import { emitSessionDeleted } from "./session-deleted";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 const SSE_HEADERS = { Accept: "text/event-stream" } as const;
@@ -411,10 +412,13 @@ export async function updateSessionProject(
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, {
+  const res = await fetch(`/api/chat/sessions/${sessionId}`, {
     method: "DELETE",
     credentials: "include",
   });
+  // The one place every delete goes through, so whatever kept the session's
+  // chat alive (the Concierge, whose id is fixed and comes back empty) hears it.
+  if (res.ok) emitSessionDeleted(sessionId);
 }
 
 export async function markSessionRead(
