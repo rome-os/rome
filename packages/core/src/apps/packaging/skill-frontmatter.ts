@@ -1,3 +1,5 @@
+import { parse as parseYaml } from "yaml";
+
 export interface SkillFrontmatter {
   name: string;
   description: string;
@@ -64,23 +66,26 @@ export function parseSkillFrontmatterResult(content: string): SkillFrontmatterRe
 }
 
 /**
- * Removes the quotes of a YAML scalar written as `"value"` or `'value'`, so
- * `name: "sample-skill"` reads the same as `name: sample-skill`. Values without
- * surrounding quotes are returned unchanged. The frontmatter is not parsed as
- * full YAML because plain descriptions such as `description: Use it: when …`
- * are not valid YAML.
+ * Decodes a YAML scalar written as `"value"` or `'value'` with the `yaml`
+ * parser, so `name: "sample-skill"` reads the same as `name: sample-skill`.
+ * Only this quoted value is parsed, not the whole frontmatter, because plain
+ * descriptions such as `description: Use it: when …` are not valid YAML.
+ * Values without matching surrounding quotes are returned unchanged. A quoted
+ * value that does not decode to a string falls back to its inner text, with
+ * `''` collapsed to `'` for single quotes, as before.
  */
 function unquoteScalar(value: string | undefined): string | undefined {
   if (value === undefined || value.length < 2) return value;
   const quote = value[0];
   if ((quote !== '"' && quote !== "'") || value[value.length - 1] !== quote) return value;
-  const inner = value.slice(1, -1);
-  if (quote === "'") return inner.replaceAll("''", "'");
   try {
-    return JSON.parse(value) as string;
+    const decoded: unknown = parseYaml(value);
+    if (typeof decoded === "string") return decoded;
   } catch {
-    return inner;
+    // Malformed quoted scalar: fall back to the previous behavior below.
   }
+  const inner = value.slice(1, -1);
+  return quote === "'" ? inner.replaceAll("''", "'") : inner;
 }
 
 export function parseSkillFrontmatter(content: string): SkillFrontmatter | null {

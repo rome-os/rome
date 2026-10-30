@@ -73,6 +73,13 @@ body`;
     expect(double?.description).toBe('Say "hi".');
   });
 
+  it("decodes YAML-only escapes in a quoted name", () => {
+    const content = `---\nname: "sample\\x2dskill"\ndescription: x\n---`;
+    const result = parseSkillFrontmatterResult(content);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.name).toBe("sample-skill");
+  });
+
   it("still rejects a quoted name with internal whitespace", () => {
     const result = parseSkillFrontmatterResult(`---\nname: "deep research"\ndescription: x\n---`);
     expect(result.ok).toBe(false);
