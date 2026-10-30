@@ -134,10 +134,7 @@ export class ChatReadModel {
   private lines(sessionId: string, seat: Seat, page: TranscriptPage | null) {
     const before = page?.before;
     return this.db.all<TranscriptRow>(sql`
-      WITH seats AS (
-        SELECT id FROM rome_sessions WHERE chat_id = ${seat.chatId} AND thread_id IS ${seat.threadId}
-      ),
-      lines AS (
+      WITH lines AS (
         -- What was said: one row per message, with the turn it prompted or
         -- answered. A line two of Rome's agents both took a turn on is drawn
         -- under the first link, so it is never drawn twice.
@@ -148,7 +145,6 @@ export class ChatReadModel {
         LEFT JOIN agent_turn_messages l ON l.rowid = (
           SELECT x.rowid FROM agent_turn_messages x
           WHERE x.message_id = m.id AND x.role IN ('prompt', 'answer')
-            AND x.session_id IN (SELECT id FROM seats)
           ORDER BY x.rowid LIMIT 1)
         WHERE m.chat_id = ${seat.chatId} AND m.thread_id IS ${seat.threadId}
       ),
