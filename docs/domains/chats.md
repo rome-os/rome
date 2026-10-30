@@ -84,7 +84,7 @@ One thing a participant said or did in a chat.
 
 ## Delivery
 
-How a message Rome sends stands with its platform: pending, sent or failed. Only a message from Rome has one.
+How a message Rome sends stands with its platform: pending, sent or failed. Only a message from Rome has one. It is the send's answer to whoever sent, and never part of the chat: a chat records a message Rome sends once the platform took it, and nothing for one it refused.
 
 - The platform's answer settles it: sent once the platform took the message, failed with the platform's own words when it refused.
 - Once the platform has taken a message, it is sent, even when Rome fails to write that down. Reporting it failed would invite a second real message.
@@ -177,6 +177,6 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.
 - **Sending to an account.** A person's account is reached in a chat, and a group or a thread has no account to address. One destination, the place, serves a direct message, a group and a thread alike.
-- **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
+- **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A chat records a message once the platform took it, so there is no pending send to keep.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
 - **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.
