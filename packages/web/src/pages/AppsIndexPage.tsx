@@ -373,14 +373,7 @@ export default function AppsIndexPage() {
             {pinned ? t("installed.unpin") : t("installed.pin")}
           </DropdownMenuItem>
         }
-        icon={
-          <TileIcon
-            size="lg"
-            kind="builtin"
-            displayName={label}
-            BuiltinIcon={entry.TileGlyph ?? entry.Icon}
-          />
-        }
+        icon={<TileIcon size="lg" kind="builtin" displayName={label} BuiltinIcon={entry.Icon} />}
         name={label}
       />
     );

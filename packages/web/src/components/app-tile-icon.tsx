@@ -19,8 +19,7 @@ export function getStatusDot(status: InstalledAppCard["status"]): string {
 }
 
 // Tile-shaped icon shared by every card.
-// - "builtin": render a lucide glyph on a muted surface tile, about two thirds
-//   of the "lg" tile so it matches the first-party app icons beside it.
+// - "builtin": render a lucide glyph on a muted surface tile.
 // - "image": render the app's self-painted iconUrl (apps own their tile, see
 //   rome_apps/coding/src/skills/app_creation/SKILL.md), with a letter avatar
 //   fallback.
@@ -66,10 +65,7 @@ export function TileIcon({
           muted && mutedClass,
         )}
       >
-        <BuiltinIcon
-          className={size === "lg" ? "h-9 w-9 sm:h-10 sm:w-10" : "h-5 w-5"}
-          aria-hidden
-        />
+        <BuiltinIcon className={size === "lg" ? "h-6 w-6 sm:h-7 sm:w-7" : "h-5 w-5"} aria-hidden />
       </div>
     );
   }
