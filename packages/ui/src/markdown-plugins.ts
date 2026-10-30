@@ -1,3 +1,4 @@
+import { cjk } from "@streamdown/cjk";
 import type { CodeHighlighterPlugin, DiagramPlugin, MathPlugin, PluginConfig } from "streamdown";
 
 // Pele, KaTeX and Shiki are most of the Markdown renderer's weight, and
@@ -51,7 +52,12 @@ const lazyMermaid: DiagramPlugin = {
 // Code and math plugins change how Markdown parses and renders, so Streamdown
 // needs the real ones up front. Until one arrives, its blocks render as plain
 // text, and every mounted Markdown re-renders once it does.
-let loaded: PluginConfig = { mermaid: lazyMermaid };
+//
+// CJK is small and shapes every message, so it loads with the module. It ends
+// a bare URL at full-width punctuation, which GFM would link into
+// (`https://x.com/a，后面`), and lets emphasis close beside it
+// (`这是**「引用」**文字`).
+let loaded: PluginConfig = { cjk, mermaid: lazyMermaid };
 const requested = new Set<LazyPluginName>();
 const listeners = new Set<() => void>();
 
