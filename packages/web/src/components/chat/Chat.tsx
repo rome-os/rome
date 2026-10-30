@@ -2109,14 +2109,10 @@ export function Chat({
               {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
             </span>
             {concierge ? <ConciergeTasksPill /> : null}
-            {sessionName?.trim() && pinnedAgentMention && (
-              <span
-                className={cn(
-                  "truncate text-aux text-muted-foreground",
-                  // Beside the Concierge's name this label gives way first.
-                  concierge ? "min-w-0" : "shrink-0",
-                )}
-              >
+            {/* The agent's app beside a titled chat. The Concierge's is always
+                Rome, so it shows none. */}
+            {!concierge && sessionName?.trim() && pinnedAgentMention && (
+              <span className="shrink-0 truncate text-aux text-muted-foreground">
                 {pinnedAgentMention.appLabel}
               </span>
             )}
