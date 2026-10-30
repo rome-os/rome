@@ -635,6 +635,9 @@ export const chatMessages = sqliteTable(
   },
   (table) => [
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+    // A place's lines in insertion order: SQLite appends the rowid, so "lines
+    // after the guardian's last" is a range here, not a filter.
+    index("idx_chat_messages_place").on(table.chatId, table.threadId),
     uniqueIndex("uq_chat_messages_platform")
       .on(table.chatId, table.platformMessageId)
       .where(sql`${table.platformMessageId} IS NOT NULL`),

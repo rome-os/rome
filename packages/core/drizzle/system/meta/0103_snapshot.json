@@ -1045,6 +1045,14 @@
           ],
           "isUnique": false
         },
+        "idx_chat_messages_place": {
+          "name": "idx_chat_messages_place",
+          "columns": [
+            "chat_id",
+            "thread_id"
+          ],
+          "isUnique": false
+        },
         "uq_chat_messages_platform": {
           "name": "uq_chat_messages_platform",
           "columns": [

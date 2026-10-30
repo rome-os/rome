@@ -11,7 +11,7 @@
 // seats there, and the transcript shows the whole place: every line said in
 // it, every turn any of Rome's agents took there, once.
 
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 
@@ -88,26 +88,56 @@ export class ChatReadModel {
   constructor(private readonly db: DrizzleDb) {}
 
   /**
-   * The chat as the dashboard draws it, newest turns first when paged: every
-   * line said in the place the session sits in, grouped by the turn it
-   * prompted or answered, so a turn's lines stay together and never split
-   * across pages. A line outside any turn is a group of its own. Without
-   * `page`, the whole chat. Null when the session is not a seat in a chat (a
+   * The whole chat as the dashboard draws it, oldest first: every line said in
+   * the place the session sits in, grouped by the turn it prompted or
+   * answered, so a turn's lines stay together. A line outside any turn is a
+   * group of its own. Null when the session is not a seat in a chat (a
    * handoff, a subagent or an unpromoted fork), which has no chat to read.
-   * What each turn did is not here: {@link turnTraces} reads it for the turns
-   * a page shows.
+   * What each turn did is not here: {@link turnTraces} reads it.
    */
-  async transcript(
+  async transcript(sessionId: string): Promise<TranscriptLine[] | null> {
+    const seat = await this.seatOf(sessionId);
+    if (!seat) return null;
+    const rows = await this.lines(sessionId, seat, null);
+    return rows.map(toLine);
+  }
+
+  /**
+   * One page of {@link transcript}: the newest `page.limit` turns older than
+   * `page.before`, whole, and the cursor for the turns before them (null when
+   * none remain). Turns order by their first line, so pages stay disjoint
+   * while lines arrive.
+   */
+  async transcriptPage(
     sessionId: string,
-    page?: TranscriptPage,
+    page: TranscriptPage,
   ): Promise<{ lines: TranscriptLine[]; nextCursor: TurnCursor | null } | null> {
+    const seat = await this.seatOf(sessionId);
+    if (!seat) return null;
+    const rows = await this.lines(sessionId, seat, page);
+    const oldest = rows[0];
+    return {
+      lines: rows.map(toLine),
+      nextCursor: oldest?.more ? { startedAt: oldest.started_at, key: oldest.key } : null,
+    };
+  }
+
+  private async seatOf(sessionId: string): Promise<Seat | null> {
     const [seat] = await this.db.all<{ chat_id: string | null; thread_id: string | null }>(
       sql`SELECT chat_id, thread_id FROM rome_sessions WHERE id = ${sessionId}`,
     );
-    if (!seat?.chat_id) return null;
+    return seat?.chat_id ? { chatId: seat.chat_id, threadId: seat.thread_id } : null;
+  }
+
+  /** The lines of `seat`'s place, keyed by turn, oldest first: every turn, or
+   *  with `page` that page's turns and whether older ones remain. */
+  private lines(sessionId: string, seat: Seat, page: TranscriptPage | null) {
     const before = page?.before;
-    const rows = await this.db.all<TranscriptRow>(sql`
-      WITH lines AS (
+    return this.db.all<TranscriptRow>(sql`
+      WITH seats AS (
+        SELECT id FROM rome_sessions WHERE chat_id = ${seat.chatId} AND thread_id IS ${seat.threadId}
+      ),
+      lines AS (
         -- What was said: one row per message, with the turn it prompted or
         -- answered. A line two of Rome's agents both took a turn on is drawn
         -- under the first link, so it is never drawn twice.
@@ -119,11 +149,9 @@ export class ChatReadModel {
         LEFT JOIN agent_turn_messages l ON l.rowid = (
           SELECT x.rowid FROM agent_turn_messages x
           WHERE x.message_id = m.id AND x.role IN ('prompt', 'answer')
-            AND x.session_id IN (
-              SELECT id FROM rome_sessions
-              WHERE chat_id = ${seat.chat_id} AND thread_id IS ${seat.thread_id})
+            AND x.session_id IN (SELECT id FROM seats)
           ORDER BY x.rowid LIMIT 1)
-        WHERE m.chat_id = ${seat.chat_id} AND m.thread_id IS ${seat.thread_id}
+        WHERE m.chat_id = ${seat.chatId} AND m.thread_id IS ${seat.threadId}
       ),
       keyed AS (
         SELECT *, coalesce(turn_id, id) AS key,
@@ -135,25 +163,14 @@ export class ChatReadModel {
         ${before ? sql`WHERE (started_at, key) < (${before.startedAt}, ${before.key})` : sql``}
         ORDER BY started_at DESC, key DESC
         ${page ? sql`LIMIT ${page.limit + 1}` : sql``}
+      ),
+      shown AS (
+        SELECT key FROM turns ${page ? sql`LIMIT ${page.limit}` : sql``}
       )
-      SELECT keyed.* FROM keyed JOIN turns USING (key)
+      SELECT keyed.*, (SELECT count(*) FROM turns) > ${page?.limit ?? -1} AS more
+      FROM keyed JOIN shown USING (key)
       ORDER BY keyed.started_at, keyed.key, keyed.at, keyed.seq
     `);
-    const turnStarts = new Map<string, number>();
-    for (const row of rows) turnStarts.set(row.key, row.started_at);
-    const newestFirst = [...turnStarts].sort(([ak, as], [bk, bs]) =>
-      bs !== as ? bs - as : bk < ak ? -1 : bk > ak ? 1 : 0,
-    );
-    const shown = page ? newestFirst.slice(0, page.limit) : newestFirst;
-    const shownKeys = new Set(shown.map(([key]) => key));
-    const oldest = shown[shown.length - 1];
-    return {
-      lines: rows.filter((row) => shownKeys.has(row.key)).map(toLine),
-      nextCursor:
-        page && newestFirst.length > page.limit && oldest
-          ? { startedAt: oldest[1], key: oldest[0] }
-          : null,
-    };
   }
 
   /**
@@ -254,37 +271,10 @@ export class ChatReadModel {
   }
 }
 
-/** For the sidebar's list of chats, per `rome_sessions` row in the outer
- *  query: how many lines the transcript holds (messages and traces). */
-export const chatLineCount: SQL<number> = sql<number>`(
-  (SELECT count(*) FROM chat_messages m
-   WHERE m.chat_id = "rome_sessions"."chat_id" AND m.thread_id IS "rome_sessions"."thread_id")
-  + (SELECT count(*) FROM rome_agent_messages t
-     WHERE t.session_id = "rome_sessions"."id" AND t.role = 'trace')
-)`.mapWith(Number);
-
-/** For the sidebar, per `rome_sessions` row in the outer query: whether the
- *  chat waits on the guardian, because a line from Rome after the guardian's
- *  last line holds a card (question, connect-AI, app component), or an
- *  approval in the chat is pending. Any answer to a card is saved as the
- *  guardian's line, so a card after the last one is still open. */
-export const chatAwaitingGuardian: SQL<boolean> = sql<boolean>`(exists (
-  SELECT 1 FROM chat_messages m
-  JOIN chat_message_deliveries d ON d.message_id = m.id, json_each(m.parts) part
-  WHERE m.chat_id = "rome_sessions"."chat_id" AND m.thread_id IS "rome_sessions"."thread_id"
-    AND json_valid(m.parts)
-    AND m.rowid > coalesce((
-      SELECT max(u.rowid) FROM chat_messages u
-      WHERE u.chat_id = "rome_sessions"."chat_id" AND u.thread_id IS "rome_sessions"."thread_id"
-        AND NOT EXISTS (SELECT 1 FROM chat_message_deliveries ud WHERE ud.message_id = u.id)
-        AND EXISTS (SELECT 1 FROM agent_turn_messages ul
-                    WHERE ul.message_id = u.id AND ul.role = 'prompt')
-    ), 0)
-    AND CASE WHEN part.type = 'object' THEN json_extract(part.value, '$.type') END = 'pending_interaction'
-) OR "rome_sessions"."id" IN (
-  SELECT json_extract(a.payload, '$.channelContext.threadId') FROM approvals a
-  WHERE a.status = 'pending' AND json_extract(a.payload, '$.channelContext.threadId') IS NOT NULL
-))`.mapWith(Boolean);
+interface Seat {
+  chatId: string;
+  threadId: string | null;
+}
 
 interface TranscriptRow {
   id: string;
@@ -298,6 +288,7 @@ interface TranscriptRow {
   at: number;
   key: string;
   started_at: number;
+  more: number;
 }
 
 function toLine(row: TranscriptRow): TranscriptLine {

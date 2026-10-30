@@ -42,6 +42,7 @@ CREATE TABLE `chat_messages` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_chat_messages_page` ON `chat_messages` (`chat_id`,`thread_id`,`said_at`,`id`);--> statement-breakpoint
+CREATE INDEX `idx_chat_messages_place` ON `chat_messages` (`chat_id`,`thread_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `uq_chat_messages_platform` ON `chat_messages` (`chat_id`,`platform_message_id`) WHERE "chat_messages"."platform_message_id" IS NOT NULL;--> statement-breakpoint
 CREATE TABLE `chat_participants` (
 	`chat_id` text NOT NULL,

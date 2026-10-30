@@ -53,14 +53,13 @@ describe("ChatReadModel", () => {
       const transcript = await reads.transcript("chat-1");
 
       expect(
-        transcript?.lines.map((line) => [line.id, line.role, line.turnId, line.senderAccountId]),
+        transcript?.map((line) => [line.id, line.role, line.turnId, line.senderAccountId]),
       ).toEqual([
         ["u-0", "user", "turn-0", "guardian"],
         ["a-0", "assistant", "turn-0", "agent:main"],
         ["u-1", "user", "turn-1", "guardian"],
         ["a-1", "assistant", "turn-1", "agent:main"],
       ]);
-      expect(transcript?.nextCursor).toBeNull();
     });
 
     it("pages newest turns first and walks back to the start once", async () => {
@@ -72,7 +71,7 @@ describe("ChatReadModel", () => {
       const seen: string[] = [];
       let before: { startedAt: number; key: string } | null = null;
       for (;;) {
-        const page = await reads.transcript("chat-1", { limit: 2, before });
+        const page = await reads.transcriptPage("chat-1", { limit: 2, before });
         seen.unshift(...(page?.lines.map((line) => line.id) ?? []));
         if (!page?.nextCursor) break;
         before = page.nextCursor;
@@ -152,7 +151,7 @@ describe("ChatReadModel", () => {
       const fromSales = await reads.transcript(sales.id);
       const fromSupport = await reads.transcript(support.id);
 
-      const drawn = fromSales?.lines.map((line) => [
+      const drawn = fromSales?.map((line) => [
         line.role,
         line.sessionId,
         line.turnId,
@@ -163,9 +162,7 @@ describe("ChatReadModel", () => {
         ["assistant", sales.id, "sales-turn-7", "bot-sales"],
       ]);
       // Either seat opens the same place.
-      expect(fromSupport?.lines.map((line) => line.id)).toEqual(
-        fromSales?.lines.map((line) => line.id),
-      );
+      expect(fromSupport?.map((line) => line.id)).toEqual(fromSales?.map((line) => line.id));
     });
   });
 

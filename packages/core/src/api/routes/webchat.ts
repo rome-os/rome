@@ -1326,7 +1326,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     return resolveChatSenders(deps, actors);
   };
-  /** A transcript read from Chats' tables, with trace summaries and senders. */
   /** A transcript read from Chats' tables, as the wire carries it: each
    *  turn's trace placed after the turn's prompt, with its summary, and each
    *  guardian-side line with its sender. The trace's blocks stay unread until
@@ -1381,8 +1380,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
     if (limitParam === undefined && beforeParam === undefined) {
-      const transcript = await chatReads.transcript(sessionId);
-      if (transcript) return c.json(await enrichTranscript(sessionId, transcript.lines));
+      const lines = await chatReads.transcript(sessionId);
+      if (lines) return c.json(await enrichTranscript(sessionId, lines));
       // A session that is no chat (a handoff, a subagent) keeps its own rows.
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
@@ -1395,7 +1394,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
-    const transcript = await chatReads.transcript(sessionId, { limit, before });
+    const transcript = await chatReads.transcriptPage(sessionId, { limit, before });
     if (transcript) {
       return c.json({
         messages: await enrichTranscript(sessionId, transcript.lines),

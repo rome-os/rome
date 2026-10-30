@@ -38,7 +38,6 @@ import {
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import { chatAwaitingGuardian, chatLineCount } from "../../webchat/chat-read-model.js";
 import {
   isSessionTraceArchived,
   sessionTraceCutoff,
@@ -363,6 +362,14 @@ const webchatMessageSelectFields = {
   createdAt: romeAgentMessages.createdAt,
 };
 
+// How many lines the session's transcript holds: its chat's messages plus its
+// own traces.
+const sessionLineCount = sql<number>`(
+  (select count(*) from "chat_messages" m
+   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id")
+  + (select count(*) from "rome_agent_messages" t
+     where t."session_id" = "rome_sessions"."id" and t."role" = 'trace')
+)`.mapWith(Number);
 const sessionSelectFields = {
   id: romeSessions.id,
   name: romeSessions.name,
@@ -383,7 +390,7 @@ const sessionSelectFields = {
     sql<boolean>`case when ${romeSessions.lastSeenActivityAt} is not null and ${romeSessions.activityAt} > ${romeSessions.lastSeenActivityAt} then 1 else 0 end`.mapWith(
       Boolean,
     ),
-  messageCount: chatLineCount,
+  messageCount: sessionLineCount,
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
@@ -406,21 +413,25 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
   order by b."seq" desc
   limit 1
 ), 0)`.mapWith(Boolean);
-// Whether the session waits on the guardian: a card (question, connect-AI,
-// app component) posted since their last message, or an approval still
-// pending in this chat. Any answer to a card is saved as a user message, so a
-// card after the last one is still open. rowid is insertion order. Every reply
-// adds an auto-approved row to `approvals`, so the pending thread ids are
-// collected once per list rather than scanned per chat. json_valid and the
-// object check skip rows that aren't block arrays (non-JSON, or legacy plain
-// text), which would otherwise fail the whole list.
+// Whether the session's chat waits on the guardian: a card (question,
+// connect-AI, app component) in a line from Rome after the guardian's last
+// line, or an approval still pending in this chat. Any answer to a card is
+// saved as the guardian's line, so a card after the last one is still open.
+// rowid is insertion order, and `idx_chat_messages_place` makes "after the
+// last" a range. Every reply adds an auto-approved row to `approvals`, so the
+// pending thread ids are collected once per list rather than scanned per chat.
+// json_valid and the object check skip rows that aren't block arrays
+// (non-JSON, or legacy plain text), which would otherwise fail the whole list.
 export const sessionAwaitingGuardian = sql<boolean>`(exists (
-  select 1 from "rome_agent_messages" m, json_each(m."content") part
-  where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
-  and json_valid(m."content")
+  select 1 from "chat_messages" m
+  join "chat_message_deliveries" d on d."message_id" = m."id", json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and json_valid(m."parts")
   and m."rowid" > coalesce((
-    select max(u."rowid") from "rome_agent_messages" u
-    where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
+    select max(u."rowid") from "chat_messages" u
+    where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
+    and not exists (select 1 from "chat_message_deliveries" ud where ud."message_id" = u."id")
+    and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
   ), 0)
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
 ) or "rome_sessions"."id" in (
@@ -430,12 +441,6 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
 ))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const SQL_LIKE_ESCAPE = "\\";
-
-// Transcript search: how many LIKE-prefiltered message rows the JS confirm
-// pass scans at most, and the shape of the snippet cut around the first hit.
-const SEARCH_MESSAGE_SCAN_LIMIT = 400;
-const SEARCH_SNIPPET_CONTEXT = 40;
-const SEARCH_SNIPPET_LENGTH = 160;
 
 export { channelChatId };
 
@@ -456,58 +461,6 @@ export function conversationPlatformMessageId(
 
 function escapeSqlLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `${SQL_LIKE_ESCAPE}${character}`);
-}
-
-/**
- * Flattens a stored message's JSON block array into the transcript text a
- * guardian actually sees: `text` block contents joined, whitespace collapsed.
- * Non-text blocks (tool calls, attachments, …) never contribute, so JSON keys
- * and tool payloads can't produce phantom search hits.
- */
-function extractTranscriptText(content: string): string {
-  let blocks: unknown;
-  try {
-    blocks = JSON.parse(content);
-  } catch {
-    return "";
-  }
-  if (!Array.isArray(blocks)) return "";
-  const texts: string[] = [];
-  for (const block of blocks) {
-    if (!block || typeof block !== "object") continue;
-    const type = (block as { type?: unknown }).type;
-    const text = (block as { content?: unknown }).content;
-    if (type === "text" && typeof text === "string" && text.trim()) texts.push(text);
-  }
-  return texts.join("\n").replace(/\s+/g, " ").trim();
-}
-
-/**
- * Confirms every lowercased `term` occurs in `text` (case-insensitive) and
- * returns a single-line snippet cut around the earliest hit, ellipsized on
- * clipped ends. Returns null when any term is missing — the SQL LIKE prefilter
- * matches raw JSON, so this is the authoritative check.
- */
-function buildTranscriptSnippet(text: string, terms: string[]): string | null {
-  const lowered = text.toLocaleLowerCase();
-  let firstHit = Number.POSITIVE_INFINITY;
-  for (const term of terms) {
-    const at = lowered.indexOf(term);
-    if (at === -1) return null;
-    if (at < firstHit) firstHit = at;
-  }
-  if (!Number.isFinite(firstHit)) return null;
-
-  let start = Math.max(0, firstHit - SEARCH_SNIPPET_CONTEXT);
-  if (start > 0) {
-    // Snap the left edge forward to a word boundary when one sits before the hit.
-    const boundary = text.indexOf(" ", start);
-    if (boundary !== -1 && boundary < firstHit) start = boundary + 1;
-  }
-  const end = Math.min(text.length, start + SEARCH_SNIPPET_LENGTH);
-  const prefix = start > 0 ? "…" : "";
-  const suffix = end < text.length ? "…" : "";
-  return `${prefix}${text.slice(start, end).trim()}${suffix}`;
 }
 
 function projectPathChildCondition(
@@ -1818,7 +1771,7 @@ export class WebChatRepository {
       .select({
         ...sessionSelectFields,
         lastTurnFailed: sessionLastTurnFailed,
-        awaitingGuardian: chatAwaitingGuardian,
+        awaitingGuardian: sessionAwaitingGuardian,
       })
       .from(romeSessions)
       .where(
@@ -1835,69 +1788,6 @@ export class WebChatRepository {
         ),
       )
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
-  }
-
-  /**
-   * Searches the guardian-visible transcript (user + assistant messages) of
-   * top-level webchat sessions. Matching is case-insensitive and every
-   * whitespace-separated term of `query` must occur in the same message's
-   * text. Returns at most one match per session — its most recent matching
-   * message — ordered by message recency, capped at `sessionLimit` sessions.
-   */
-  async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
-    const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
-    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    if (terms.length === 0) return [];
-
-    // Cheap SQL prefilter over the raw JSON content; buildTranscriptSnippet
-    // re-checks against extracted text so JSON structure can't match.
-    const likePredicates = terms.map(
-      (term) =>
-        sql`lower(${romeAgentMessages.content}) LIKE ${`%${escapeSqlLikePattern(term)}%`} ESCAPE ${SQL_LIKE_ESCAPE}`,
-    );
-    const rows = await this.db
-      .select({ message: webchatMessageSelectFields, session: sessionSelectFields })
-      .from(romeAgentMessages)
-      .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
-      .where(
-        and(
-          isWebchatChat,
-          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          ...likePredicates,
-        ),
-      )
-      .orderBy(desc(romeAgentMessages.createdAt), desc(romeAgentMessages.id))
-      .limit(SEARCH_MESSAGE_SCAN_LIMIT);
-
-    const matches: {
-      session: (typeof rows)[number]["session"];
-      message: {
-        id: string;
-        role: "user" | "assistant" | "notification";
-        createdAt: Date;
-        snippet: string;
-      };
-    }[] = [];
-    const seenSessions = new Set<string>();
-    for (const row of rows) {
-      if (seenSessions.has(row.session.id)) continue;
-      const text = extractTranscriptText(row.message.content);
-      if (!text) continue;
-      const snippet = buildTranscriptSnippet(text, terms);
-      if (!snippet) continue;
-      seenSessions.add(row.session.id);
-      matches.push({
-        session: row.session,
-        message: {
-          id: row.message.id,
-          role: row.message.role as "user" | "assistant" | "notification",
-          createdAt: row.message.createdAt,
-          snippet,
-        },
-      });
-      if (matches.length >= sessionLimit) break;
-    }
-    return matches;
   }
 
   async archiveSession(id: string, options: { now?: Date } = {}) {
@@ -2036,7 +1926,7 @@ export class WebChatRepository {
       .select({
         ...sessionSelectFields,
         lastTurnFailed: sessionLastTurnFailed,
-        awaitingGuardian: chatAwaitingGuardian,
+        awaitingGuardian: sessionAwaitingGuardian,
       })
       .from(romeSessions)
       .where(and(isWebchatChat, inArray(romeSessions.id, ids)));
@@ -2055,25 +1945,6 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id))
       .returning();
     return rows[0] ?? null;
-  }
-
-  /**
-   * How many agent messages the chat got since it was last read, counting at
-   * most `cap`. A chat with no read mark has none. `created_at` has one-second
-   * precision, so a message in the same second as the read mark counts as read.
-   */
-  async countUnreadAgentMessages(id: string, cap: number): Promise<number> {
-    const rows = await this.db.all<{ count: number }>(sql`
-      select count(*) as "count" from (
-        select 1 from ${romeAgentMessages}
-        join ${romeSessions} on ${romeSessions.id} = ${romeAgentMessages.sessionId}
-        where ${romeAgentMessages.sessionId} = ${id}
-          and ${romeAgentMessages.role} = 'assistant'
-          and ${romeSessions.lastSeenActivityAt} is not null
-          and ${romeAgentMessages.createdAt} > ${romeSessions.lastSeenActivityAt}
-        limit ${cap}
-      )`);
-    return Number(rows[0]?.count ?? 0);
   }
 
   /**

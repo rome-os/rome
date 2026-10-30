@@ -555,9 +555,6 @@ describe("WebChatRepository", () => {
     expect(ids(await repo.listSessions())).toEqual(["chat-1"]);
     expect(ids((await repo.listSessionsPage()).sessions)).toEqual(["chat-1"]);
     expect(ids((await repo.listSessionsByProjectPath("/work/rome")).sessions)).toEqual(["chat-1"]);
-    expect((await repo.searchSessionMessages("needle")).map((hit) => hit.session.id)).toEqual([
-      "chat-1",
-    ]);
     expect(
       (await repo.getHistoryMessages(null, new Date(0))).map((message) => message.sessionId),
     ).toEqual(["chat-1"]);
@@ -1387,78 +1384,6 @@ describe("WebChatRepository", () => {
     });
   });
 
-  describe("searchSessionMessages", () => {
-    const textMessage = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-
-    it("matches user and assistant transcript text, one hit per session", async () => {
-      await repo.createSession("sess-a", "Alpha");
-      await repo.createSession("sess-b", "Beta");
-      await repo.addMessage("m1", "sess-a", "user", textMessage("Deploy the staging server"));
-      await repo.addMessage("m2", "sess-a", "assistant", textMessage("Staging deploy scheduled"));
-      await repo.addMessage("m3", "sess-b", "user", textMessage("Unrelated grocery list"));
-
-      const results = await repo.searchSessionMessages("staging deploy");
-
-      expect(results).toHaveLength(1);
-      expect(results[0].session.id).toBe("sess-a");
-      // Most recent matching message in the session wins.
-      expect(results[0].message).toMatchObject({ id: "m2", role: "assistant" });
-      expect(results[0].message.snippet).toContain("Staging deploy scheduled");
-    });
-
-    it("never matches trace rows, non-text blocks, or JSON structure", async () => {
-      await repo.createSession("sess-a", "Alpha");
-      await repo.addMessage("m1", "sess-a", "trace", textMessage("staging secrets in trace"));
-      await repo.addMessage(
-        "m2",
-        "sess-a",
-        "assistant",
-        JSON.stringify([{ type: "tool_use", content: "staging", input: { cmd: "staging" } }]),
-      );
-
-      // "content" appears as a JSON key in every stored message; text-only
-      // extraction must keep it from matching.
-      expect(await repo.searchSessionMessages("staging")).toEqual([]);
-      expect(await repo.searchSessionMessages("content")).toEqual([]);
-    });
-
-    it("ellipsizes long matches into a snippet around the hit", async () => {
-      await repo.createSession("sess-a", "Alpha");
-      const padding = "lorem ipsum ".repeat(40);
-      await repo.addMessage(
-        "m1",
-        "sess-a",
-        "user",
-        textMessage(`${padding} the needle sits here ${padding}`),
-      );
-
-      const results = await repo.searchSessionMessages("needle");
-
-      expect(results).toHaveLength(1);
-      const snippet = results[0].message.snippet;
-      expect(snippet).toContain("needle");
-      expect(snippet.startsWith("…")).toBe(true);
-      expect(snippet.endsWith("…")).toBe(true);
-      expect(snippet.length).toBeLessThan(200);
-    });
-
-    it("requires all terms in the same message and honors the session limit", async () => {
-      await repo.createSession("sess-a", "Alpha");
-      await repo.createSession("sess-b", "Beta");
-      // Terms split across two messages of sess-a: no match.
-      await repo.addMessage("m1", "sess-a", "user", textMessage("alpha only here"));
-      await repo.addMessage("m2", "sess-a", "assistant", textMessage("omega only here"));
-      await repo.addMessage("m3", "sess-b", "user", textMessage("alpha and omega together"));
-
-      expect(await repo.searchSessionMessages("alpha omega")).toMatchObject([
-        { session: { id: "sess-b" } },
-      ]);
-
-      const limited = await repo.searchSessionMessages("only", { sessionLimit: 1 });
-      expect(limited).toHaveLength(1);
-    });
-  });
-
   it("lists sessions filtered by project path in the database", async () => {
     await repo.createSession("sess-alpha", "Chat Alpha", undefined, "alpha", null, "alpha");
     await repo.createSession(
@@ -1894,61 +1819,6 @@ describe("WebChatRepository", () => {
     });
   });
 
-  describe("countUnreadAgentMessages", () => {
-    beforeEach(async () => {
-      rs.useFakeTimers();
-      rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
-      await repo.createSession("chat", "Chat");
-      rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
-    });
-
-    it("counts each agent message since the last read, and nothing else", async () => {
-      await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: "On it." }]);
-      await repo.addBackendMessage("chat", "turn-1", [
-        { type: "task_chat", chatId: "task", title: "Task" },
-      ]);
-      await repo.addMessage("user-1", "chat", "user", "[]", "turn-1");
-      await repo.appendTraceBlocks({
-        messageId: "trace-1",
-        sessionId: "chat",
-        turnId: "turn-1",
-        startSeq: 0,
-        blocks: [{ type: "thinking", content: "private" }],
-      });
-      await repo.addMessage("note-1", "chat", "notification", "[]");
-      await repo.addBackendMessage("other-chat", "turn-1", [{ type: "text", content: "Hi." }]);
-
-      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(2);
-    });
-
-    it("resets on read and counts only what came after", async () => {
-      await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: "One." }]);
-      await repo.markSessionRead("chat");
-      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(0);
-
-      rs.setSystemTime(new Date("2029-01-01T00:00:02.000Z"));
-      await repo.addBackendMessage("chat", "turn-2", [{ type: "text", content: "Two." }]);
-      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(1);
-    });
-
-    it("stops counting at the cap", async () => {
-      for (let index = 0; index < 5; index += 1) {
-        await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: `${index}` }]);
-      }
-      await expect(repo.countUnreadAgentMessages("chat", 3)).resolves.toBe(3);
-    });
-
-    it("counts none for a chat without a read mark or an unknown chat", async () => {
-      await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: "Hi." }]);
-      await testDb.db
-        .update(romeSessions)
-        .set({ lastSeenActivityAt: null })
-        .where(eq(romeSessions.id, "chat"));
-      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(0);
-      await expect(repo.countUnreadAgentMessages("missing", 100)).resolves.toBe(0);
-    });
-  });
-
   describe("archive", () => {
     it("archives and unarchives a webchat session", async () => {
       const archivedAt = new Date("2026-07-14T12:00:00.000Z");
@@ -2088,6 +1958,31 @@ describe("WebChatRepository", () => {
 
       // An uncorrelated list subquery runs once; a correlated one per chat.
       expect(details).toMatch(/^LIST SUBQUERY \d+\nSCAN a$/m);
+    });
+
+    it("reads only the lines after the guardian's last through the place index", () => {
+      const sqlite = (
+        testDb.db as unknown as {
+          $client: {
+            prepare(sql: string): { all(...values: unknown[]): Array<{ detail: string }> };
+          };
+        }
+      ).$client;
+      const query = testDb.db
+        .select({ awaitingGuardian: sessionAwaitingGuardian })
+        .from(romeSessions)
+        .toSQL();
+      const details = sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+        .all(...query.params)
+        .map((row) => row.detail)
+        .join("\n");
+
+      // Without the index, "rowid > ?" filters every line of the chat, which
+      // took seconds per chat on a long one.
+      expect(details).toMatch(
+        /SEARCH m USING INDEX idx_chat_messages_place \(chat_id=\? AND thread_id=\? AND rowid>\?\)/,
+      );
     });
 
     it("finds each listed session's newest trace through its session index", () => {
