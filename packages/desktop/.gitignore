@@ -2,6 +2,5 @@ dist/
 native/
 release/
 node_modules/
-apple-container/
 .tmp/
 src/renderer/

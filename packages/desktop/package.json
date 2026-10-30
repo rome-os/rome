@@ -2,15 +2,13 @@
   "name": "rome-desktop",
   "version": "0.1.8",
   "private": true,
-  "description": "Rome — local node for the Rome AI agent platform",
+  "description": "Rome — the Mac app for Rome Cloud",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "pnpm --filter rome-desktop-base-web build && node scripts/dev.mjs",
     "build": "pnpm --filter rome-desktop-base-web build && node scripts/build.mjs",
     "test": "../../scripts/test-env.sh rstest",
     "rebuild:native": "node scripts/rebuild-native.mjs",
-    "image:local": "bash scripts/build-local-image.sh",
-    "smoke:guest-image": "node scripts/smoke-guest-image.mjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "typecheck": "tsc --noEmit"
@@ -24,7 +22,6 @@
     "drizzle-orm": "^0.45.1",
     "electron-updater": "^6.3.0",
     "winston": "^3.19.0",
-    "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -4,13 +4,14 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { ensureBetterSqlite3Binding } from "./rebuild-native.mjs";
-import { getDesktopBuildDefine, loadWorkspaceEnv } from "./shared-env.mjs";
+import { loadWorkspaceEnv } from "./shared-env.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
+// The spawned Electron inherits these, so a dev stack URL or a staging Rome
+// Cloud origin in the repo .env reaches the app.
 loadWorkspaceEnv(root);
-const mainBuildDefine = getDesktopBuildDefine();
 
 const sharedConfig = {
   bundle: true,
@@ -29,7 +30,6 @@ const mainCtx = await context({
   entryPoints: [resolve(root, "src/main/index.ts")],
   outfile: resolve(root, "dist/main/index.js"),
   format: "cjs",
-  define: mainBuildDefine,
 });
 
 // Watch preload

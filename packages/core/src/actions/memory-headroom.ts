@@ -34,10 +34,9 @@ const CGROUP_V1_UNLIMITED = 2 ** 60;
  * Reads the instance's memory headroom. A cgroup limit (v2, then v1) wins when
  * one applies and fits in the host's memory. Otherwise the Linux kernel's own
  * `MemAvailable` estimate stands in, because a hosted instance often sits at
- * the root of its cgroup namespace with the limit set a level above it, and
- * the Mac app runs core inside a Lima VM that has the same file. Returns null
- * where neither exists, such as a bare process on macOS, whose free-page count
- * would understate what is really available.
+ * the root of its cgroup namespace with the limit set a level above it.
+ * Returns null where neither exists, such as a bare process on macOS, whose
+ * free-page count would understate what is really available.
  */
 export function readMemoryHeadroom(
   cgroupRoot = "/sys/fs/cgroup",

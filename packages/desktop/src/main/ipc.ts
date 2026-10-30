@@ -9,7 +9,7 @@ import { settings } from "./db/schema";
 import { handleFromAppOrInstance, handleTrusted } from "./ipc-trust";
 import type { RuntimeController } from "./runtime/controller";
 import { pickFolder } from "./pick-folder";
-import { localVmSupport } from "./runtime/manager";
+import { legacyRuntimeDir } from "./runtime/legacy";
 import {
   parseRuntimeTarget,
   RUNTIME_TARGET_KEY,
@@ -19,9 +19,7 @@ import {
 
 interface IpcHandlerOptions {
   openSettingsWindow: () => void;
-  /** Null when this build's Rome Cloud origin cannot back a sign-in. */
-  cloudAccount: CloudAccount | null;
-  hasLocalRuntime: () => boolean;
+  cloudAccount: CloudAccount;
   /** This computer as a device of the signed-in account. */
   device: {
     status(): DeviceStatus;
@@ -32,12 +30,15 @@ interface IpcHandlerOptions {
 }
 
 interface CloudState {
-  available: boolean;
   signedIn: boolean;
-  cloudOrigin: string | null;
+  cloudOrigin: string;
   activeTarget: RuntimeTarget;
   savedTarget: RuntimeTarget;
-  localVm: { supported: boolean; reason: string | null };
+  /**
+   * The folder a build that ran a private VM left on this computer, or null.
+   * The app no longer opens it; the welcome page says where it is.
+   */
+  legacyRuntimeDir: string | null;
   device: DeviceStatus;
 }
 
@@ -61,8 +62,8 @@ function writeSetting(key: string, value: string): void {
     .run();
 }
 
-export function readRuntimeTarget(hasLocalRuntime: boolean): RuntimeTarget {
-  return parseRuntimeTarget(readSetting(RUNTIME_TARGET_KEY), hasLocalRuntime);
+export function readRuntimeTarget(): RuntimeTarget {
+  return parseRuntimeTarget(readSetting(RUNTIME_TARGET_KEY));
 }
 
 /** The settings key for the user's choice to let Rome use this computer. */
@@ -106,18 +107,12 @@ export function registerIpcHandlers(
 
   // ── Rome Cloud and which Rome to open ──
 
-  const requireAccount = (): CloudAccount => {
-    if (!cloudAccount) throw new Error("This build cannot sign in to Rome Cloud.");
-    return cloudAccount;
-  };
-
   const cloudState = async (): Promise<CloudState> => ({
-    available: cloudAccount !== null,
-    signedIn: cloudAccount ? await cloudAccount.isSignedIn() : false,
-    cloudOrigin: cloudAccount?.cloudOrigin ?? null,
+    signedIn: await cloudAccount.isSignedIn(),
+    cloudOrigin: cloudAccount.cloudOrigin,
     activeTarget: controller.activeTarget(),
-    savedTarget: readRuntimeTarget(options.hasLocalRuntime()),
-    localVm: localVmSupport(),
+    savedTarget: readRuntimeTarget(),
+    legacyRuntimeDir: legacyRuntimeDir(),
     device: options.device.status(),
   });
 
@@ -127,10 +122,7 @@ export function registerIpcHandlers(
   // The open Rome's dashboard reads and changes this too: the dashboard is
   // where the user sees the account's devices.
 
-  const instanceOrigin = (): string | null => {
-    const target = controller.activeTarget();
-    return target.kind === "remote" ? (target.instance?.origin ?? null) : null;
-  };
+  const instanceOrigin = (): string | null => controller.activeTarget().instance?.origin ?? null;
 
   handleFromAppOrInstance("device:get", instanceOrigin, () => options.device.status());
 
@@ -153,34 +145,28 @@ export function registerIpcHandlers(
   );
 
   handleTrusted("cloud:signIn", async () => {
-    await requireAccount().signIn();
+    await cloudAccount.signIn();
     void options.device.start();
     return cloudState();
   });
 
   handleTrusted("cloud:cancelSignIn", () => {
-    cloudAccount?.cancelSignIn();
+    cloudAccount.cancelSignIn();
   });
 
   handleTrusted("cloud:signOut", async () => {
-    requireAccount();
     await options.device.stop();
     await controller.signOut();
     return cloudState();
   });
 
   handleTrusted("cloud:listInstances", (): Promise<CloudInstance[]> => {
-    return requireAccount().listInstances();
+    return cloudAccount.listInstances();
   });
 
   // Returns whether the change applied in place or the app is relaunching.
   handleTrusted("runtime:setTarget", (_event, value) => {
-    const target = requireRuntimeTarget(value);
-    if (target.kind === "local") {
-      const support = localVmSupport();
-      if (!support.supported) throw new Error(support.reason ?? "This computer cannot run the VM.");
-    }
-    return controller.setTarget(target);
+    return controller.setTarget(requireRuntimeTarget(value));
   });
 
   handleTrusted("runtime:chooseInstance", async (_event, value) => {
@@ -200,21 +186,8 @@ export function registerIpcHandlers(
     return runtime.getStatus();
   });
 
-  handleTrusted("runtime:upgrade", async () => {
-    await runtime.upgradeRuntime();
-    return runtime.getStatus();
-  });
-
-  handleTrusted("runtime:openInstallPage", async () => {
-    await runtime.openInstallPage();
-  });
-
-  handleTrusted("runtime:startRuntimeApp", async () => {
-    await runtime.startRuntimeApp();
-  });
-
-  handleTrusted("runtime:openRuntimeFolder", async () => {
-    await runtime.openRuntimeFolder();
+  handleTrusted("runtime:openCloud", async () => {
+    await runtime.openCloud();
   });
 
   handleTrusted("runtime:openLogs", async () => {

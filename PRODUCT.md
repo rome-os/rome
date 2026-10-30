@@ -6,7 +6,7 @@
 
 web
 
-The guardian dashboard (`packages/web`) and the app shells are web surfaces. `packages/desktop` is an Electron shell around a local Rome runtime, and `packages/mobile` is an Expo WebView shell that signs in at Rome Cloud and opens the guardian's own instance. Neither shell has its own design language.
+The guardian dashboard (`packages/web`) and the app shells are web surfaces. `packages/desktop` is an Electron shell that signs in at Rome Cloud and opens the guardian's own instance, and `packages/mobile` is an Expo WebView shell that signs in at Rome Cloud and opens the guardian's own instance. Neither shell has its own design language.
 
 ## Users
 
