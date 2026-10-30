@@ -116,10 +116,10 @@ Run the mock suite from `tests/midscene`. Project setup starts the strict E2E
 mock build on port 3200, or uses one already running there:
 
 ```bash
+pnpm install --frozen-lockfile   # from the repository root
 cd tests/midscene
-npm ci --strict-allow-scripts
-npx playwright install chromium
-MIDSCENE_RETRY=0 HEADLESS=true npm test
+pnpm exec playwright install chromium
+MIDSCENE_RETRY=0 HEADLESS=true pnpm test
 ```
 
 Use `MIDSCENE_INCLUDE_TAGS=files` to run one topic. Model settings belong in
