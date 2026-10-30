@@ -31,6 +31,7 @@ import type {
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
 import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
@@ -5391,6 +5392,64 @@ describe("Webchat API", () => {
           m.content.includes("Already changed the file."),
         ),
       ).toBe(true);
+      await runtime.flushAll();
+    });
+
+    it("keeps a deleted task chat's row on the Concierge's list and tells the Concierge", async () => {
+      const repo = new ConciergeTasksRepository(testDb.db);
+      const deleted: string[] = [];
+      deps.concierge = {
+        deps: { tasks: { repo } },
+        taskOfChat: async (chatId: string) => (await repo.findBySession(chatId))?.id ?? null,
+        chatDeleted: (taskId: string) => deleted.push(taskId),
+      } as never;
+      await deps.webchatRepo.createSession("task-chat", "Fix flaky test");
+      const [row] = await repo.upsertMany([
+        { title: "Fix flaky test", state: "doing", sessionId: "task-chat" },
+      ]);
+      await deps.webchatRepo.createSession("plain-chat", "Plain");
+      const app = createWebchatRuntime(deps).routes;
+
+      expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
+        200,
+      );
+      expect(deleted).toEqual([]);
+      expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
+        200,
+      );
+
+      expect(deleted).toEqual([row.id]);
+      expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
+    });
+
+    it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {
+      const sessionId = "sess-quiet-turns";
+      await deps.webchatRepo.createSession(sessionId, "Quiet turns");
+      const { routes, runtime } = createWebchatRuntime(deps);
+      const turnsOf = async () =>
+        (await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json()) as Array<{
+          quiet?: boolean;
+        }>;
+      const hold = (options?: { quiet?: boolean }) => {
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { release, task: runtime.enqueueSessionTask(sessionId, () => gate, options) };
+      };
+
+      const quiet = hold({ quiet: true });
+      await rs.waitFor(async () => expect(await turnsOf()).toHaveLength(1));
+      expect((await turnsOf())[0].quiet).toBe(true);
+      quiet.release();
+      await quiet.task;
+      await rs.waitFor(async () => expect(await turnsOf()).toHaveLength(0));
+
+      const ordinary = hold();
+      await rs.waitFor(async () => expect(await turnsOf()).toHaveLength(1));
+      expect("quiet" in (await turnsOf())[0]).toBe(false);
+      ordinary.release();
+      await ordinary.task;
       await runtime.flushAll();
     });
 

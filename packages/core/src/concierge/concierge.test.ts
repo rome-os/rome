@@ -1,4 +1,4 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { Account, AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +8,9 @@ import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
+import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
 import { startConciergeEvents } from "./events.js";
 import { NUDGE_PROMPT } from "./nudge.js";
 import {
@@ -18,9 +21,16 @@ import {
   type ConciergeDeps,
   type TaskChats,
 } from "./service.js";
+import { ConciergeTasks } from "./tasks.js";
 import { buildConciergeTools } from "./tools.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
+
+const opened: TestDb[] = [];
+afterEach(() => {
+  rs.useRealTimers();
+  for (const testDb of opened.splice(0)) testDb.close();
+});
 
 interface Row {
   id?: string;
@@ -55,7 +65,18 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
   };
 }
 
-function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
+function setup(
+  options: { enabled?: boolean; settingsDelayMs?: number; startEvents?: boolean } = {},
+) {
+  const testDb = createTestDb();
+  opened.push(testDb);
+  const taskRepo = new ConciergeTasksRepository(testDb.db);
+  const tasks = new ConciergeTasks(taskRepo);
+  /** The real chat rows the task rows link to. */
+  const storedChats = new WebChatRepository(testDb.db);
+  const approvalListeners = new Set<(approval: unknown) => void>();
+  const quietFlags: boolean[] = [];
+  let fake = false;
   const sessions = new Map<string, Record<string, unknown>>([
     [CONCIERGE_CHAT, { id: CONCIERGE_CHAT, name: "Concierge", triggerKind: null }],
   ]);
@@ -66,10 +87,13 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
   let refuseWith: Exclude<SendResult, { ok: true }> | null = null;
   const backendTurns: BackendTurnParams[] = [];
   const order: string[] = [];
+  let startedChats = 0;
   const chats: TaskChats = {
     startChat: rs.fn(async () => {
-      sessions.set("task-1", { id: "task-1", name: "New Chat", triggerKind: null });
-      return "task-1";
+      const id = `task-${++startedChats}`;
+      sessions.set(id, { id, name: "New Chat", triggerKind: null });
+      await storedChats.createSession(id, "New Chat");
+      return id;
     }),
     isRunning: rs.fn(() => false),
     activeTurns: rs.fn(() => []),
@@ -126,6 +150,13 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
     },
+    tasks,
+    approvals: {
+      onCreated: (listener: (approval: unknown) => void) => {
+        approvalListeners.add(listener);
+        return () => approvalListeners.delete(listener);
+      },
+    },
     messages: {
       recent: async (place: Place, limit: number) => {
         const rows = messages.get(place.chat.id) ?? [];
@@ -141,8 +172,9 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
       }),
     },
-    runBackendTurn: async (params: BackendTurnParams) => {
+    runBackendTurn: async (params: BackendTurnParams, turn?: { quiet?: boolean }) => {
       backendTurns.push(params);
+      quietFlags.push(turn?.quiet === true);
       await onBackendTurn(params);
     },
   } as unknown as ConciergeDeps;
@@ -162,12 +194,19 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
     }),
   });
   const listeners: Array<(event: AgentTurnFinishedEvent) => void> = [];
-  startConciergeEvents(service, {
-    onFinished: (listener) => {
-      listeners.push(listener);
-      return () => {};
-    },
-  });
+  const startEvents = () =>
+    startConciergeEvents(service, {
+      onFinished: (listener) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    });
+  if (options.startEvents !== false) startEvents();
+  /** Lets the event handlers run: real time, or fake time moved a little. */
+  const settle = async () => {
+    if (fake) await rs.advanceTimersByTimeAsync(20);
+    else await new Promise((resolve) => setTimeout(resolve, 20));
+  };
   const finish = async (event: {
     turnId: string;
     agentName: string;
@@ -191,7 +230,7 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
         metrics: { toolCallCount: 0, skillWritten: false },
       });
     }
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
   };
   const tool = async (name: string, input: Record<string, unknown>) => {
     const tools = await buildConciergeTools(service, context());
@@ -207,6 +246,20 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
   return {
     service,
     deps,
+    tasks,
+    taskRepo,
+    storedChats,
+    quietFlags,
+    startEvents,
+    settle,
+    /** Moves the clock by hand from here on, so event delivery can be timed. */
+    fakeTimers: () => {
+      fake = true;
+      rs.useFakeTimers();
+    },
+    createApproval: (approval: Record<string, unknown>) => {
+      for (const listener of approvalListeners) listener(approval);
+    },
     chats,
     send,
     messages,
@@ -231,6 +284,8 @@ describe("Concierge tools", () => {
     const on = setup();
     expect((await buildConciergeTools(on.service, on.context())).map((t) => t.name)).toEqual([
       "say",
+      "task_upsert",
+      "task_list",
       "chat_start",
       "chat_send",
       "chat_read",
@@ -261,7 +316,10 @@ describe("Concierge tools", () => {
       brief: "Find flights",
       card: true,
     });
-    expect(JSON.parse(result.content[0].text)).toEqual({ chatId: "task-1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      chatId: "task-1",
+      taskId: expect.any(String),
+    });
     expect(s.order).toEqual(["trigger", "post", "rename"]);
     expect(s.send).toHaveBeenCalledWith(
       { chat: { platform: "webchat", id: "task-1" } },
@@ -282,7 +340,10 @@ describe("Concierge tools", () => {
       card: true,
     });
     expect(result.isError).toBeFalsy();
-    expect(JSON.parse(result.content[0].text)).toEqual({ chatId: "task-1" });
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      chatId: "task-1",
+      taskId: expect.any(String),
+    });
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
       { type: "task_chat", chatId: "task-1", title: "Flights" },
     ]);
@@ -480,50 +541,466 @@ describe("Concierge tools", () => {
   });
 });
 
-describe("Concierge events", () => {
-  it("reports a task-chat turn it started as a task event", async () => {
+describe("Concierge task list tools", () => {
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
+
+  it("chat_start without a taskId puts a doing row on the list and answers its id", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    await s.finish({
-      turnId: "task-turn-1",
-      agentName: "core:main",
-      chatId: "task-1",
-      text: "3 options",
+    const result = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
+    expect(await s.taskRepo.get(result.taskId)).toMatchObject({
+      title: "Flights",
+      state: "doing",
+      sessionId: "task-1",
     });
+    expect((await s.taskRepo.findBySession("task-1"))?.id).toBe(result.taskId);
+  });
+
+  it("chat_start with a taskId links the planned row and sets it doing", async () => {
+    const s = setup();
+    const [planned] = await s.taskRepo.upsertMany([
+      { title: "Book flights", state: "next", rank: 1, waitingOn: "a date" },
+    ]);
+    const result = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights", taskId: planned.id }),
+    );
+    expect(result).toEqual({ chatId: "task-1", taskId: planned.id });
+    expect(await s.taskRepo.get(planned.id)).toMatchObject({
+      title: "Book flights",
+      state: "doing",
+      rank: 1,
+      waitingOn: null,
+      sessionId: "task-1",
+    });
+    expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
+  });
+
+  it("chat_start refuses a taskId that is unknown or already has a chat, before starting anything", async () => {
+    const s = setup();
+    const missing = await s.tool("chat_start", { title: "A", brief: "b", taskId: "nope" });
+    expect(missing.isError).toBe(true);
+    expect(s.chats.startChat).not.toHaveBeenCalled();
+
+    const first = text(await s.tool("chat_start", { title: "A", brief: "b" }));
+    const taken = await s.tool("chat_start", { title: "B", brief: "b", taskId: first.taskId });
+    expect(taken.isError).toBe(true);
+    expect(taken.content[0].text).toContain("already has chat task-1");
+    expect(s.chats.startChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("chat_send gives a task chat from before the list its row", async () => {
+    const s = setup();
+    s.deps.webchatRepo.getSession = (async (id: string) =>
+      id === "legacy"
+        ? { id, name: "Old chat", triggerKind: "concierge", triggerName: "Old task" }
+        : null) as never;
+    await s.storedChats.createSession("legacy", "Old chat");
+    expect((await s.tool("chat_send", { chatId: "legacy", text: "More" })).isError).toBeFalsy();
+    expect(await s.taskRepo.findBySession("legacy")).toMatchObject({
+      title: "Old task",
+      state: "doing",
+    });
+    // A second send does not add a second row.
+    await s.tool("chat_send", { chatId: "legacy", text: "Again" });
+    expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
+  });
+
+  it("task_upsert creates and updates rows in one batch and answers each row's id", async () => {
+    const s = setup();
+    const created = text(
+      await s.tool("task_upsert", {
+        tasks: [
+          { title: "Renew passport", state: "next", rank: 2, dueAt: "2026-11-01T09:00:00Z" },
+          { title: "Watch CI", state: "watching", waitingOn: "CI" },
+        ],
+      }),
+    );
+    expect(created.tasks.map((task: { title: string }) => task.title)).toEqual([
+      "Renew passport",
+      "Watch CI",
+    ]);
+    const [passport, ci] = created.tasks;
+    const updated = text(
+      await s.tool("task_upsert", {
+        tasks: [
+          { id: passport.id, state: "doing" },
+          { id: ci.id, state: "done", summary: "Green", waitingOn: null },
+          { title: "Pay rent" },
+        ],
+      }),
+    );
+    expect(updated.tasks.map((task: { state: string }) => task.state)).toEqual([
+      "doing",
+      "done",
+      "next",
+    ]);
+    expect(await s.taskRepo.get(ci.id)).toMatchObject({
+      state: "done",
+      summary: "Green",
+      waitingOn: null,
+    });
+    expect((await s.taskRepo.get(passport.id))?.dueAt?.toISOString()).toBe(
+      "2026-11-01T09:00:00.000Z",
+    );
+  });
+
+  it("task_upsert validates states, times, ranks, chats and titles, and writes nothing on a bad batch", async () => {
+    const s = setup();
+    const bad = async (entry: Record<string, unknown>, message: string) => {
+      const result = await s.tool("task_upsert", { tasks: [{ title: "Fine" }, entry] });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(message);
+    };
+    await bad({ title: "x", state: "failed" }, "state must be one of");
+    await bad({ title: "x", dueAt: "tomorrow-ish" }, "dueAt must be an ISO 8601 time");
+    await bad({ title: "x", rank: 1.5 }, "rank must be an integer");
+    await bad({ title: "x", chatId: CONCIERGE_CHAT }, "No task chat");
+    await bad({ state: "doing" }, "title is required to create a row");
+    await bad({ id: "nope", state: "done" }, "No task nope");
+    expect((await s.tool("task_upsert", { tasks: [] })).isError).toBe(true);
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("task_upsert links a task chat once, and says which row holds it", async () => {
+    const s = setup();
+    const started = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
+    const result = await s.tool("task_upsert", { tasks: [{ title: "Dupe", chatId: "task-1" }] });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain(`already linked to task ${started.taskId}`);
+  });
+
+  it("task_upsert caps a summary at 120 characters", async () => {
+    const s = setup();
+    const made = text(
+      await s.tool("task_upsert", { tasks: [{ title: "Long", summary: "x".repeat(300) }] }),
+    );
+    expect((await s.taskRepo.get(made.tasks[0].id))?.summary).toHaveLength(120);
+  });
+
+  it("task_upsert tells the list's listeners about every row it writes", async () => {
+    const s = setup();
+    const seen: string[] = [];
+    s.taskRepo.onChange(({ row }) => seen.push(row.title));
+    await s.tool("task_upsert", { tasks: [{ title: "A" }, { title: "B" }] });
+    expect(seen).toEqual(["A", "B"]);
+  });
+
+  it("task_list answers compact open rows, and the finished ones on request", async () => {
+    const s = setup();
+    await s.tool("task_upsert", {
+      tasks: [
+        { title: "Open", state: "watching", waitingOn: "CI", dueAt: "2026-11-01T09:00:00Z" },
+        { title: "Finished", state: "done" },
+      ],
+    });
+    const open = text(await s.tool("task_list", {}));
+    expect(open.tasks).toEqual([
+      {
+        id: expect.any(String),
+        title: "Open",
+        state: "watching",
+        waitingOn: "CI",
+        dueAt: "2026-11-01T09:00:00.000Z",
+        updatedAt: expect.any(String),
+      },
+    ]);
+    expect(text(await s.tool("task_list", { includeDone: true })).tasks).toHaveLength(2);
+  });
+});
+
+describe("Concierge events", () => {
+  /** A task chat the Concierge started, with a reply it wrote. */
+  const startTask = async (s: ReturnType<typeof setup>, reply = "3 options") => {
+    const started = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
+    s.messages.get(started.chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: reply }]),
+    });
+    return started as { chatId: string; taskId: string };
+  };
+  const finishTask = (
+    s: ReturnType<typeof setup>,
+    chatId: string,
+    extra: { turnId?: string; status?: AgentTurnFinishedEvent["status"] } = {},
+  ) =>
+    s.finish({
+      turnId: extra.turnId ?? "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: extra.status,
+      text: "x",
+    });
+
+  it("tells the Concierge of a result it asked for two seconds after the turn ends, as one batch", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(1_900);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(200);
     expect(s.backendTurns).toHaveLength(1);
     expect(s.backendTurns[0]).toMatchObject({
       agentName: CONCIERGE_AGENT_ID,
       threadId: CONCIERGE_CHAT,
     });
-    expect(s.backendTurns[0].prompt).toContain('type="task_finished"');
-    expect(s.backendTurns[0].prompt).toContain('initiator="concierge"');
-    expect(s.backendTurns[0].prompt).toContain("3 options");
+    expect(s.backendTurns[0].prompt).toBe(
+      `<task_events>\n<task id="${taskId}" chat_id="task-1" title="Flights" state="doing" changes="turn_end:completed by=concierge">\nreply: 3 options\n</task>\n</task_events>`,
+    );
+    expect(s.quietFlags).toEqual([false]);
   });
 
-  // The receipt of a queued or deferred follow-up names the running turn; a
-  // later turn answers it.
-  it("reports the turn that answers a queued chat_send follow-up as Concierge's", async () => {
+  it("reads the reply from the chat when it builds, so a reply written after the turn ended is in", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
-    s.assignInput("task-1", s.posted[1], "task-turn-2");
-    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId: "task-1", text: "f" });
-    await s.finish({ turnId: "task-turn-2", agentName: "core:main", chatId: "task-1", text: "t" });
-    expect(s.backendTurns.map((turn) => turn.prompt.match(/initiator="(\w+)"/)?.[1])).toEqual([
-      "concierge",
-      "concierge",
+    const { chatId } = await startTask(s, "first answer");
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "final answer" }]),
+    });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns[0].prompt).toContain("reply: final answer");
+    expect(s.backendTurns[0].prompt).not.toContain("first answer");
+  });
+
+  it("cuts a long reply to 600 characters", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s, "y".repeat(2_000));
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns[0].prompt).toContain(`reply: ${"y".repeat(600)}…`);
+  });
+
+  it("puts tasks that finish together in one turn", async () => {
+    const s = setup();
+    const first = await startTask(s);
+    const second = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    s.fakeTimers();
+    await finishTask(s, first.chatId);
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId: second.chatId });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt.match(/<task /g)).toHaveLength(2);
+  });
+
+  it("holds the guardian's own turn in a task chat for a minute and runs it quietly", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.messages.get(chatId)?.push({
+      id: "g1",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: "hi" }]),
+      turnId: "task-turn-2",
+    });
+    await finishTask(s, chatId, { turnId: "task-turn-2" });
+    await rs.advanceTimersByTimeAsync(59_000);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(1_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
+    expect(s.backendTurns[0].prompt).toContain('quiet="true"');
+    expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("tells the Concierge of a failed turn at once, and holds a stopped one", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, chatId, { status: "error" });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:error by=concierge"');
+
+    const stopped = setup();
+    const task = await startTask(stopped);
+    stopped.fakeTimers();
+    await finishTask(stopped, task.chatId, { status: "interrupted" });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(stopped.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(58_000);
+    expect(stopped.quietFlags).toEqual([true]);
+  });
+
+  it("tells the Concierge of a question card at once, with the question", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([
+        {
+          type: "pending_interaction",
+          render: {
+            builtin: true,
+            props: { questions: [{ question: "Which airport?", options: ["LIS", "OPO"] }] },
+          },
+        },
+      ]),
+    });
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    const prompt = s.backendTurns[0].prompt;
+    expect(prompt).toContain('changes="turn_end:completed question by=concierge"');
+    expect(prompt).toContain("question: Which airport? (options: LIS | OPO)");
+  });
+
+  it("tells the Concierge what the guardian said in a task chat, read from the turn's own rows", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    // The real repository, as the dashboard stores it: the guardian's input is
+    // recorded through the user-input path, which announces nothing, and the
+    // turn that takes it in is assigned afterwards.
+    s.deps.webchatRepo.getTurnChatMessages = (id: string, turnId: string) =>
+      s.storedChats.getTurnChatMessages(id, turnId);
+    await s.storedChats.recordUserInput(
+      "input-g1",
+      chatId,
+      JSON.stringify([{ type: "text", content: "Make it a window seat" }]),
+    );
+    await s.storedChats.updateUserInput(chatId, {
+      type: "input_status",
+      inputId: "input-g1",
+      state: "accepted",
+      turnId: "guardian-turn",
+    });
+    s.fakeTimers();
+    await s.finish({ turnId: "guardian-turn", agentName: "core:main", chatId });
+    await rs.advanceTimersByTimeAsync(59_000);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(`<task id="${taskId}"`);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
+    expect(s.backendTurns[0].prompt).toContain("guardian: Make it a window seat");
+    expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("tells the Concierge of a pending approval in a task chat at once", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.createApproval({
+      status: "approved",
+      description: "auto",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    s.createApproval({
+      status: "pending",
+      description: "elsewhere",
+      payload: { channelContext: { threadId: "other-chat" } },
+    });
+    await s.settle();
+    await rs.advanceTimersByTimeAsync(5_000);
+    expect(s.backendTurns).toEqual([]);
+    s.createApproval({
+      status: "pending",
+      description: "Send the booking email",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await s.settle();
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns[0].prompt).toContain('changes="approval"');
+    expect(s.backendTurns[0].prompt).toContain("approval: Send the booking email");
+    expect(s.quietFlags).toEqual([false]);
+  });
+
+  it("tells the Concierge quietly that a task chat was deleted, and the row stays", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    const linked = await s.service.taskOfChat(chatId);
+    expect(linked).toBe(taskId);
+    await s.storedChats.deleteSession(chatId);
+    s.service.chatDeleted(taskId);
+    await rs.advanceTimersByTimeAsync(59_000);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(1_000);
+    expect(s.backendTurns[0].prompt).toBe(
+      `<task_events>\n<task id="${taskId}" title="Flights" state="doing" changes="chat_deleted" quiet="true">\nThe task chat was deleted.\n</task>\n</task_events>`,
+    );
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ sessionId: null, title: "Flights" });
+  });
+
+  it("after a restart, hands over rows whose chat was active since the row was written", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession("behind", "Behind");
+    await s.storedChats.createSession("current", "Current");
+    s.messages.set("behind", [
+      { role: "assistant", content: JSON.stringify([{ type: "text", content: "all done" }]) },
     ]);
+    const longAgo = new Date(Date.now() - 3_600_000);
+    const [behind] = await s.taskRepo.upsertMany(
+      [{ title: "Behind", state: "doing", sessionId: "behind" }],
+      longAgo,
+    );
+    await s.taskRepo.upsertMany([{ title: "Current", state: "doing", sessionId: "current" }]);
+    s.fakeTimers();
+    s.startEvents();
+    await s.settle();
+    await rs.advanceTimersByTimeAsync(59_000);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(1_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(`<task id="${behind.id}"`);
+    expect(s.backendTurns[0].prompt).toContain('changes="catch_up"');
+    // The block says what the chat holds now, so the Concierge can judge the row.
+    expect(s.backendTurns[0].prompt).toContain("chat: idle\nreply: all done");
+    expect(s.backendTurns[0].prompt.match(/<task /g)).toHaveLength(1);
+    expect(s.quietFlags).toEqual([true]);
   });
 
-  it("reports a task-chat turn the guardian started there as the guardian's", async () => {
+  it("stops asking once the Concierge writes the row, and marks the row not synced when it never does", async () => {
+    const answered = setup();
+    const task = await startTask(answered);
+    answered.fakeTimers();
+    await finishTask(answered, task.chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await answered.taskRepo.upsertMany([{ id: task.taskId, state: "done", summary: "3 options" }]);
+    await rs.advanceTimersByTimeAsync(120_000);
+    expect(answered.backendTurns).toHaveLength(1);
+
+    const ignored = setup();
+    const quiet = await startTask(ignored);
+    ignored.fakeTimers();
+    await finishTask(ignored, quiet.chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(ignored.backendTurns).toHaveLength(1);
+    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
+    await rs.advanceTimersByTimeAsync(10_000);
+    expect(ignored.backendTurns).toHaveLength(2);
+    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(true);
+    await rs.advanceTimersByTimeAsync(120_000);
+    expect(ignored.backendTurns).toHaveLength(2);
+    // A later write by the Concierge clears the mark.
+    await ignored.taskRepo.upsertMany([{ id: quiet.taskId, summary: "ok" }]);
+    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
+  });
+
+  it("says nothing while the setting is off", async () => {
+    const s = setup({ enabled: false });
+    await s.taskRepo.upsertMany([{ title: "Row" }]);
+    s.fakeTimers();
+    await s.finish({ turnId: "t", agentName: "core:main", chatId: "task-1", text: "x" });
+    await rs.advanceTimersByTimeAsync(120_000);
+    expect(s.backendTurns).toEqual([]);
+  });
+
+  it("does not report a task chat the list does not know", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId: "task-1", text: "f" });
-    s.messages
-      .get("task-1")
-      ?.push({ id: "g1", role: "user", content: "hi", turnId: "task-turn-2" });
-    await s.finish({ turnId: "task-turn-2", agentName: "core:main", chatId: "task-1", text: "x" });
-    expect(s.backendTurns.at(-1)?.prompt).toContain('initiator="guardian"');
+    s.deps.webchatRepo.getSession = (async (id: string) => ({
+      id,
+      name: "Old",
+      triggerKind: "concierge",
+    })) as never;
+    s.fakeTimers();
+    await s.finish({ turnId: "t", agentName: "core:main", chatId: "legacy", text: "x" });
+    await rs.advanceTimersByTimeAsync(120_000);
+    expect(s.backendTurns).toEqual([]);
   });
 
   it("ignores turns of chats Concierge did not start", async () => {

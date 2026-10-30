@@ -10,6 +10,8 @@ import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.js";
+import { ConciergeTasks } from "./concierge/tasks.js";
+import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./lib/auth.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
@@ -90,6 +92,7 @@ describe("live events WebSocket", () => {
   let deps: Awaited<ReturnType<typeof buildTestDeps>>;
   let live: { close(): void };
   let activeSubscriptions: number;
+  let conciergeTasks: ConciergeTasks;
   let dashboardAccess: DashboardAccessState;
   const catalogHandlers = new Set<SubscriberHandler>();
   const clients: TestClient[] = [];
@@ -121,6 +124,7 @@ describe("live events WebSocket", () => {
       createdAt: new Date(),
     });
     deps = await buildTestDeps(testDb.db);
+    conciergeTasks = new ConciergeTasks(new ConciergeTasksRepository(testDb.db));
     runtime = createWebchatRuntime(deps).runtime;
     catalogHandlers.clear();
     const catalog = {
@@ -143,6 +147,7 @@ describe("live events WebSocket", () => {
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
+      subscribeConciergeTasks: (emit) => track(conciergeTasks.subscribe(emit)),
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
@@ -240,6 +245,25 @@ describe("live events WebSocket", () => {
     });
     expect(activeSubscriptions).toBe(2);
     expect(catalogHandlers.size).toBe(0);
+
+    client.send({ type: "subscribe", topic: "concierge.tasks" });
+    expect(
+      await client.next((m) => m.type === "error" && m.topic === "concierge.tasks"),
+    ).toMatchObject({ message: "Forbidden" });
+  });
+
+  it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {
+    const client = await connect();
+    await client.subscribe("concierge.tasks");
+    const [row] = await conciergeTasks.repo.upsertMany([
+      { title: "Fix flaky test", state: "doing" },
+    ]);
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
+    ).toMatchObject({
+      event: "task_upsert",
+      data: { task: { id: row.id, title: "Fix flaky test", state: "doing", chat: null } },
+    });
   });
 
   it("stops serving a visitor dropped from the allow-list: no new topics, then no socket", async () => {

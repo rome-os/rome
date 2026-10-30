@@ -102,6 +102,7 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import type {
   AgentMention,
   ChatErrorNotice,
@@ -1346,7 +1347,7 @@ export function Chat({
         if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
-        startSessionStream(reattachSessionId, target.turnId);
+        startSessionStream(reattachSessionId, target.turnId, target.quiet);
         // A backend turn already listed under its agent turn id hides its saved
         // trace from the first render, before the replayed `turn_id` arrives.
         if (target.agentTurnId) {
@@ -2076,11 +2077,18 @@ export function Chat({
               model={model}
               reasoningEffort={reasoningEffort}
             />
-            <span className="truncate text-ui text-foreground">
+            <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
               {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
             </span>
+            {concierge ? <ConciergeTasksPill /> : null}
             {sessionName?.trim() && pinnedAgentMention && (
-              <span className="shrink-0 truncate text-aux text-muted-foreground">
+              <span
+                className={cn(
+                  "truncate text-aux text-muted-foreground",
+                  // Beside the Concierge's name this label gives way first.
+                  concierge ? "min-w-0" : "shrink-0",
+                )}
+              >
                 {pinnedAgentMention.appLabel}
               </span>
             )}
@@ -2222,6 +2230,7 @@ export function Chat({
                     live={{
                       isStreaming: displayedStreaming,
                       runningTurnId,
+                      quiet: floorSessionStream?.quiet,
                       snapshot: currentSnapshot,
                       text: liveAssistantText,
                       blockIx: floorSessionStream?.assistantBlockIx,

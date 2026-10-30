@@ -142,6 +142,8 @@ export interface TurnInfo {
   streamId: string;
   startedAt: string;
   status: "running" | "queued";
+  /** A backend turn that is housekeeping for the agent; see `SessionStreamState.quiet`. */
+  quiet?: boolean;
 }
 
 // Shape of POST /chat/sessions/:id/turns response.

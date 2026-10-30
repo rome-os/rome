@@ -21,6 +21,9 @@ export type SessionStreamState = {
   assistantBlockIx: number;
   /** Trace activity at or before this ordinal was superseded by text. */
   textThroughOrdinal: number;
+  /** A backend turn that is housekeeping for the agent: the Concierge chat
+   *  shows no typing indicator for it until the agent speaks. */
+  quiet?: boolean;
 };
 
 export type StreamingSessionMap = ReadonlyMap<string, SessionStreamState>;
@@ -29,6 +32,7 @@ export function startStream(
   prev: StreamingSessionMap,
   sessionId: string,
   turnId: string,
+  quiet = false,
 ): StreamingSessionMap {
   if (prev.get(sessionId)?.turnId === turnId) return prev;
   const next = new Map(prev);
@@ -38,6 +42,7 @@ export function startStream(
     assistantText: "",
     assistantBlockIx: 0,
     textThroughOrdinal: -1,
+    ...(quiet ? { quiet } : {}),
   });
   return next;
 }
@@ -131,8 +136,8 @@ export function useStreamingSessions() {
   const streamsRef = useRef(streams);
   streamsRef.current = streams;
 
-  const start = useCallback((sessionId: string, turnId: string) => {
-    setStreams((prev) => startStream(prev, sessionId, turnId));
+  const start = useCallback((sessionId: string, turnId: string, quiet?: boolean) => {
+    setStreams((prev) => startStream(prev, sessionId, turnId, quiet));
   }, []);
   const update = useCallback((sessionId: string, turnId: string, snapshot: TraceSnapshot) => {
     setStreams((prev) => updateSnapshot(prev, sessionId, turnId, snapshot));

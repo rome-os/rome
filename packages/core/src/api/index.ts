@@ -347,6 +347,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+          subscribeConciergeTasks: (emit) =>
+            deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
         },
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);

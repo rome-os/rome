@@ -1,11 +1,12 @@
 // @rstest-environment jsdom
 import { useEffect } from "react";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import { SlotProvider } from "@/components/slot";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
+import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 import { FreeGrid } from "./FreeGrid";
 import { setActiveSession } from "./use-free-cells";
 
@@ -14,6 +15,12 @@ const catalog = rs.hoisted(() => ({
   apps: [] as { id: string; displayName: string }[] | null,
 }));
 rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: catalog.apps }) }));
+// Concierge's chat id comes from its own query, which these tests do not serve.
+const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
+rs.mock("@/hooks/use-concierge", () => ({
+  ...conciergeModule,
+  useConciergeChatId: () => concierge.chatId,
+}));
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: () => ({ sessionName: null }),
 }));
@@ -106,6 +113,7 @@ afterEach(() => {
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
+  concierge.chatId = null;
 });
 
 describe("FreeGrid navigation seeds", () => {
@@ -157,5 +165,81 @@ describe("FreeGrid navigation seeds", () => {
     expect(JSON.parse(screen.getByTestId("location-state").textContent!)).toEqual({
       futureKey: { keep: true },
     });
+  });
+});
+
+describe("FreeGrid mobile header", () => {
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rs.stubGlobal(
+      "fetch",
+      rs.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        return Promise.resolve(
+          Response.json(
+            url === "/api/settings"
+              ? {}
+              : url.startsWith("/api/concierge/tasks")
+                ? {
+                    tasks: [
+                      {
+                        id: "t1",
+                        title: "Blocked",
+                        state: "needs_user",
+                        summary: null,
+                        waitingOn: "an answer",
+                        dueAt: null,
+                        rank: null,
+                        chat: null,
+                        createdAt: 1,
+                        updatedAt: 1,
+                        completedAt: null,
+                        archivedAt: null,
+                        notSynced: false,
+                      },
+                    ],
+                  }
+                : [],
+          ),
+        );
+      }),
+    );
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <QueryClientProvider client={queryClient}>
+          <SlotProvider>
+            <SlotOutlet name="mobileHeader" className="header" />
+            <Routes>
+              <Route path="/chat/*" element={<FreeGrid />} />
+            </Routes>
+          </SlotProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+  const header = (container: HTMLElement) => container.querySelector<HTMLElement>(".header")!;
+
+  it("puts the tasks pill beside the Concierge's name", async () => {
+    concierge.chatId = "concierge";
+    const { container } = renderAt("/chat/concierge");
+    await waitFor(() =>
+      expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
+    );
+    const pill = header(container).querySelector<HTMLElement>("[data-concierge-tasks-pill]")!;
+    await waitFor(() => expect(pill.getAttribute("data-state")).toBe("needsYou"));
+    expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
+  });
+
+  it("leaves every other chat's header without it", async () => {
+    concierge.chatId = "concierge";
+    const { container } = renderAt("/chat/some-other-chat");
+    await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
+    expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
+  });
+
+  it("leaves the header without it while Concierge is off", async () => {
+    const { container } = renderAt("/chat/concierge");
+    await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
+    expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
   });
 });

@@ -381,6 +381,33 @@ export function RecentChats({
   );
   const conciergeChatId = useConciergeChatId();
 
+  // A chat that starts running before the list has it, such as a task chat
+  // Concierge just started, would show only when its first turn ends. The
+  // list is asked again once per such chat. A chat that is still not in it
+  // after that, such as one on another filter or page, is remembered, so its
+  // running state never asks again.
+  const listedIds = useRef(new Set<string>());
+  listedIds.current = new Set((cachedSessions ?? []).map((s) => s.id));
+  const refetchedFor = useRef(new Set<string>());
+  const absentAfterRefetch = useRef(new Set<string>());
+  const refetchForUnknown = (sessionId: string) => {
+    if (
+      listedIds.current.has(sessionId) ||
+      refetchedFor.current.has(sessionId) ||
+      absentAfterRefetch.current.has(sessionId)
+    ) {
+      return;
+    }
+    refetchedFor.current.add(sessionId);
+    void refetch()
+      .then((result) => {
+        if (!result.data?.some((s) => s.id === sessionId)) {
+          absentAfterRefetch.current.add(sessionId);
+        }
+      })
+      .finally(() => refetchedFor.current.delete(sessionId));
+  };
+
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
   useLiveEvents(
@@ -394,6 +421,7 @@ export function RecentChats({
             prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
           );
           if (!running) void invalidate();
+          else refetchForUnknown(sessionId);
         },
       },
     },

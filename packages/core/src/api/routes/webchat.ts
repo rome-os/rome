@@ -87,7 +87,11 @@ import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js"
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
-import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
+import type {
+  BackendEmitOptions,
+  BackendSessionTask,
+  BackendTurnOptions,
+} from "../../actions/backend-turn.js";
 import { z } from "zod";
 import { resolveSessionPolicy } from "../../core/session-policy.js";
 import { withReplyContext } from "../../core/reply-context.js";
@@ -708,6 +712,8 @@ interface ActiveWebchatStream {
    * tells clients through a `turn_id` event.
    */
   agentTurnId?: string;
+  /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
+  quiet?: boolean;
   startedAt: string;
   finished: boolean;
   // Keyed replay buffer: late subscribers receive the latest payload per key
@@ -764,7 +770,11 @@ export interface WebchatRuntime {
    * trace saved and its reply delivered by the task, so the stream only shows
    * it live and mounts its cards.
    */
-  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
+  enqueueSessionTask(
+    sessionId: string,
+    task: BackendSessionTask,
+    options?: BackendTurnOptions,
+  ): Promise<void>;
   /**
    * Emits `session_running` whenever a chat starts or stops running a turn,
    * after first emitting one for every chat running now. Returns the
@@ -2530,7 +2540,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
+    // The chat's row on the Concierge's todo list stays, unlinked, once the
+    // chat is gone; the Concierge hears of it quietly.
+    const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
     await deps.webchatRepo.deleteSession(sessionId);
+    if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
     // record can outlive the local session data it describes.
@@ -3071,6 +3085,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         .map((s) => ({
           turnId: s.turnId,
           ...(s.agentTurnId ? { agentTurnId: s.agentTurnId } : {}),
+          ...(s.quiet ? { quiet: true } : {}),
           streamId: s.streamId,
           startedAt: s.startedAt,
           status:
@@ -4226,7 +4241,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(sent.body, sent.status);
   });
 
-  const runEnqueuedTask = async (sessionId: string, task: BackendSessionTask): Promise<void> => {
+  const runEnqueuedTask = async (
+    sessionId: string,
+    task: BackendSessionTask,
+    options?: BackendTurnOptions,
+  ): Promise<void> => {
     // Wait behind any in-flight user turn before opening our own stream.
     const predecessor = getLastStream(sessionId);
     if (predecessor && !predecessor.finished) {
@@ -4270,6 +4289,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       webchatSessionKey(sessionId),
       session.agentName ?? "main",
     );
+    if (options?.quiet) stream.quiet = true;
     enqueueStream(sessionId, stream);
 
     // Capture the resumed agent's final reply so it can be persisted as a
@@ -4361,11 +4381,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  const enqueueSessionTask: WebchatRuntime["enqueueSessionTask"] = async (sessionId, task) => {
+  const enqueueSessionTask: WebchatRuntime["enqueueSessionTask"] = async (
+    sessionId,
+    task,
+    options,
+  ) => {
     const previous = sessionTaskChains.get(sessionId) ?? Promise.resolve();
     const next = previous.then(
-      () => runEnqueuedTask(sessionId, task),
-      () => runEnqueuedTask(sessionId, task),
+      () => runEnqueuedTask(sessionId, task, options),
+      () => runEnqueuedTask(sessionId, task, options),
     );
     sessionTaskChains.set(sessionId, next);
     try {

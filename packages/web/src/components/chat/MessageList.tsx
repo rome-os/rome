@@ -45,6 +45,8 @@ export interface BlockActions {
 export interface LivePreview {
   isStreaming: boolean;
   runningTurnId: string | null;
+  /** The running turn is housekeeping for the agent, so the Concierge chat holds back its typing indicator. */
+  quiet?: boolean;
   snapshot: TraceSnapshot | null;
   text: string;
   blockIx?: number;

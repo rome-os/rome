@@ -4,6 +4,8 @@ import { z } from "zod";
 // packages/web/src/lib/live-events.ts. Frames are JSON text.
 
 export const CHAT_STATUS_TOPIC = "chat.status";
+/** The Concierge task panel's rows. Its only event is `task_upsert`. */
+export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
 

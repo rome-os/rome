@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./chat": "./src/chat.ts",
+    "./concierge": "./src/concierge.ts",
     "./computer-use": "./src/computer-use.ts",
     "./chat-settings": "./src/chat-settings.ts",
     "./trace-segments": "./src/trace-segments.ts",

@@ -9,9 +9,12 @@ import type { AIToolStateValue } from "../core/ai-tool-state.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { SessionManager } from "../core/session-manager.js";
 import type { ModelSelectionId } from "../core/model-selector.js";
 import { createLogger } from "../logger.js";
+import type { TaskEventCoalescer } from "./task-events.js";
+import type { ConciergeTasks } from "./tasks.js";
 
 const log = createLogger("concierge");
 
@@ -66,16 +69,21 @@ export interface ConciergeDeps {
     | "setSessionTrigger"
     | "listProjects"
   >;
+  /** The todo list. */
+  tasks: ConciergeTasks;
+  approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
-  /** Runs a system turn in a chat and waits for it to end. */
-  runBackendTurn: (params: BackendTurnParams) => Promise<void>;
+  /** Runs a system turn in a chat and waits for it to end. A quiet turn
+   *  shows the guardian no sign that it runs, until the agent speaks. */
+  runBackendTurn: (params: BackendTurnParams, options?: { quiet?: boolean }) => Promise<void>;
 }
 
 export class ConciergeService {
   private creating: Promise<string> | null = null;
   private attached: ConciergeDashboard | null = null;
+  private taskEvents: TaskEventCoalescer | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
 
@@ -159,15 +167,37 @@ export class ConciergeService {
   }
 
   /** Runs `prompt` as a system turn in the Concierge chat. A no-op before its first turn. */
-  async runSystemTurn(chatId: string, prompt: string): Promise<void> {
+  async runSystemTurn(
+    chatId: string,
+    prompt: string,
+    options: { quiet?: boolean } = {},
+  ): Promise<void> {
     const sessionId = await this.runtimeSessionId(chatId);
     if (!sessionId) return;
-    await this.deps.runBackendTurn({
-      agentName: CONCIERGE_AGENT_ID,
-      sessionId,
-      channel: "webchat",
-      threadId: chatId,
-      prompt,
-    });
+    await this.deps.runBackendTurn(
+      {
+        agentName: CONCIERGE_AGENT_ID,
+        sessionId,
+        channel: "webchat",
+        threadId: chatId,
+        prompt,
+      },
+      options,
+    );
+  }
+
+  /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
+  attachTaskEvents(events: TaskEventCoalescer | null): void {
+    this.taskEvents = events;
+  }
+
+  /** The id of the todo row that links a chat, or null. Read before the chat is deleted. */
+  async taskOfChat(chatId: string): Promise<string | null> {
+    return (await this.deps.tasks.repo.findBySession(chatId))?.id ?? null;
+  }
+
+  /** A task chat was deleted. Its row stays, unlinked; the Concierge hears of it quietly. */
+  chatDeleted(taskId: string): void {
+    this.taskEvents?.mark({ taskId, kind: "chat_deleted", urgent: false });
   }
 }
