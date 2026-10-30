@@ -1,12 +1,12 @@
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-  <rect width="24" height="24" rx="5.5" fill="#e0e7ff"/>
-  <g fill="none" stroke="#3730a3" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="24" height="24" rx="5.5" fill="#e5e8fd"/>
+  <g fill="none" stroke="#4a5084" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M7 5.5h7.5L17 8v9.5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 7 5.5Z"/>
     <path d="M14 5.5V8h3"/>
     <path d="M8 11h6"/>
     <path d="M8 13.5h6"/>
     <path d="M8 16h3.5"/>
   </g>
-  <circle cx="16.7" cy="15.8" r="3.1" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.1"/>
-  <path d="M16.7 14.1v1.7l1.2 0.8" fill="none" stroke="#4f46e5" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="16.7" cy="15.8" r="3.1" fill="#e5e8fd" stroke="#5c62b8" stroke-width="1.2"/>
+  <path d="M16.7 14.1v1.7l1.2 0.8" fill="none" stroke="#5c62b8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

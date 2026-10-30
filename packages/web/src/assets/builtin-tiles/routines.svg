@@ -1,0 +1,19 @@
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <rect width="24" height="24" rx="5.5" fill="#fce3e0"/>
+  <g transform="translate(4.32 4.32) scale(0.64)">
+    <g fill="none" stroke="#7e413d" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2v4"/>
+      <path d="M16 2v4"/>
+      <rect width="18" height="18" x="3" y="4" rx="2"/>
+      <path d="M3 10h18"/>
+    </g>
+    <g fill="#7e413d">
+      <circle cx="8" cy="14" r=".95"/>
+      <circle cx="12" cy="14" r=".95"/>
+      <circle cx="16" cy="14" r=".95"/>
+      <circle cx="8" cy="18" r=".95"/>
+      <circle cx="12" cy="18" r=".95"/>
+      <circle cx="16" cy="18" r=".95"/>
+    </g>
+  </g>
+</svg>
