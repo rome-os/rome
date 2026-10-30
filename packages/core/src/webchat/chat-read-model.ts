@@ -1,9 +1,9 @@
 // The dashboard's read model of a chat: what the guardian sees when they open
 // a chat, search their chats, or glance at a badge. It reads Chats' tables
-// (`chat_messages` and the delivery beside each line) and joins Agents' facts
-// onto them (`agent_turn_messages` for which turn a line belongs to, and the
-// `role = 'trace'` rows of `rome_agent_messages` for what the turn did).
-// Nothing here writes. Vocabulary: docs/domains/chats.md.
+// (`chat_messages` and the delivery beside each line) and joins one fact from
+// Agents onto them: `agent_turn_messages`, which turn a line belongs to. What
+// a turn did (its trace, in `rome_agent_messages`) is read apart, only for the
+// turns on screen. Nothing here writes. Vocabulary: docs/domains/chats.md.
 //
 // The dashboard addresses a chat by the id of the agent's `rome_sessions` row
 // it opened, as every dashboard route does today. For a dashboard chat that is
@@ -18,7 +18,7 @@ import type { DrizzleDb } from "../db/index.js";
 /** How the dashboard draws a line. A line from Rome has a delivery; a line
  *  that prompted a turn is the guardian's (or a visitor's) input; anything
  *  else said in the place is a notification the agent catches up on. */
-export type TranscriptRole = "user" | "assistant" | "notification" | "trace";
+export type TranscriptRole = "user" | "assistant" | "notification";
 
 export interface TranscriptLine {
   id: string;
@@ -28,12 +28,10 @@ export interface TranscriptLine {
   turnId: string | null;
   inputState: AgentInputState | null;
   role: TranscriptRole;
-  /** The line's parts as JSON. A trace line's is `[]`: its blocks are read on
-   *  their own, per trace id. */
+  /** The line's parts as JSON. */
   content: string;
   /** Who said it, by account (`guardian`, `visitor:<id>`, a platform account),
-   *  with the name the line gave. Null on a trace and on a legacy line that
-   *  kept no sender. */
+   *  with the name the line gave. Null on a legacy line that kept no sender. */
   senderAccountId: string | null;
   senderName: string | null;
   createdAt: Date;
@@ -53,10 +51,23 @@ export interface TranscriptPage {
   before?: TurnCursor | null;
 }
 
+/** One agent turn, by the agent session it ran in. */
+export interface TurnRef {
+  sessionId: string;
+  turnId: string;
+}
+
+/** The record of what a turn did. Its blocks are read on their own, by `id`,
+ *  when the dashboard summarizes or opens it. */
+export interface TurnTrace extends TurnRef {
+  id: string;
+  createdAt: Date;
+}
+
 export interface ChatSearchHit {
   chatId: string;
   messageId: string;
-  role: Exclude<TranscriptRole, "trace">;
+  role: TranscriptRole;
   snippet: string;
   createdAt: Date;
 }
@@ -78,11 +89,13 @@ export class ChatReadModel {
 
   /**
    * The chat as the dashboard draws it, newest turns first when paged: every
-   * line said in the place the session sits in, and the trace of every turn
-   * any of Rome's agents took there, grouped so a turn's prompt, trace and
-   * answer stay together and never split across pages. Without `page`, the
-   * whole chat. Null when the session is not a seat in a chat (a handoff, a
-   * subagent or an unpromoted fork), which has no chat to read.
+   * line said in the place the session sits in, grouped by the turn it
+   * prompted or answered, so a turn's lines stay together and never split
+   * across pages. A line outside any turn is a group of its own. Without
+   * `page`, the whole chat. Null when the session is not a seat in a chat (a
+   * handoff, a subagent or an unpromoted fork), which has no chat to read.
+   * What each turn did is not here: {@link turnTraces} reads it for the turns
+   * a page shows.
    */
   async transcript(
     sessionId: string,
@@ -94,32 +107,23 @@ export class ChatReadModel {
     if (!seat?.chat_id) return null;
     const before = page?.before;
     const rows = await this.db.all<TranscriptRow>(sql`
-      WITH seats AS (
-        SELECT id FROM rome_sessions WHERE chat_id = ${seat.chat_id} AND thread_id IS ${seat.thread_id}
-      ),
-      lines AS (
+      WITH lines AS (
         -- What was said: one row per message, with the turn it prompted or
         -- answered. A line two of Rome's agents both took a turn on is drawn
         -- under the first link, so it is never drawn twice.
         SELECT m.id, coalesce(l.session_id, ${sessionId}) AS session_id, l.turn_id, l.input_state,
                ${lineRole} AS role, m.parts AS content,
-               m.sender_account_id, m.sender_name, m.said_at AS at,
-               CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS rank, m.rowid AS seq
+               m.sender_account_id, m.sender_name, m.said_at AS at, m.rowid AS seq
         FROM chat_messages m
         LEFT JOIN chat_message_deliveries d ON d.message_id = m.id
         LEFT JOIN agent_turn_messages l ON l.rowid = (
           SELECT x.rowid FROM agent_turn_messages x
           WHERE x.message_id = m.id AND x.role IN ('prompt', 'answer')
-            AND x.session_id IN (SELECT id FROM seats)
+            AND x.session_id IN (
+              SELECT id FROM rome_sessions
+              WHERE chat_id = ${seat.chat_id} AND thread_id IS ${seat.thread_id})
           ORDER BY x.rowid LIMIT 1)
         WHERE m.chat_id = ${seat.chat_id} AND m.thread_id IS ${seat.thread_id}
-        UNION ALL
-        -- What each turn did: its trace, read from Agents. The unary plus
-        -- keeps SQLite on the session index rather than walking every trace.
-        SELECT t.id, t.session_id, t.turn_id, NULL, 'trace', '[]',
-               NULL, NULL, t.created_at, 1, t.rowid
-        FROM seats s
-        JOIN rome_agent_messages t ON t.session_id = s.id AND +t.role = 'trace'
       ),
       keyed AS (
         SELECT *, coalesce(turn_id, id) AS key,
@@ -133,7 +137,7 @@ export class ChatReadModel {
         ${page ? sql`LIMIT ${page.limit + 1}` : sql``}
       )
       SELECT keyed.* FROM keyed JOIN turns USING (key)
-      ORDER BY keyed.started_at, keyed.key, keyed.at, keyed.rank, keyed.seq
+      ORDER BY keyed.started_at, keyed.key, keyed.at, keyed.seq
     `);
     const turnStarts = new Map<string, number>();
     for (const row of rows) turnStarts.set(row.key, row.started_at);
@@ -150,6 +154,38 @@ export class ChatReadModel {
           ? { startedAt: oldest[1], key: oldest[0] }
           : null,
     };
+  }
+
+  /**
+   * The trace of each of `turns` that has one, for the turns a transcript page
+   * shows. The dashboard draws a turn's summary from it and opens the whole
+   * trace only when the guardian clicks into the turn.
+   */
+  async turnTraces(turns: readonly TurnRef[]): Promise<TurnTrace[]> {
+    if (turns.length === 0) return [];
+    const wanted = sql.join(
+      turns.map((turn) => sql`(${turn.sessionId}, ${turn.turnId})`),
+      sql`, `,
+    );
+    const rows = await this.db.all<{
+      id: string;
+      session_id: string;
+      turn_id: string;
+      created_at: number;
+    }>(sql`
+      WITH wanted(session_id, turn_id) AS (VALUES ${wanted})
+      SELECT t.id, t.session_id, t.turn_id, t.created_at
+      FROM wanted w
+      JOIN rome_agent_messages t
+        ON t.session_id = w.session_id AND t.turn_id = w.turn_id AND t.role = 'trace'
+      ORDER BY t.created_at, t.rowid
+    `);
+    return rows.map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      turnId: row.turn_id,
+      createdAt: new Date(row.created_at * 1000),
+    }));
   }
 
   /**

@@ -717,6 +717,15 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    // The turn's prompt, so the turn is in the chat: the transcript lists the
+    // turns lines were said in, and reads their traces apart.
+    await deps.webchatRepo.addMessage(
+      "parent-summary-ask",
+      parentSessionId,
+      "user",
+      "Plan and research it",
+      parentTurnId,
+    );
     await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
     await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
     await testDb.db

@@ -45,7 +45,7 @@ describe("ChatReadModel", () => {
   }
 
   describe("transcript", () => {
-    it("draws a dashboard chat by turn, prompt then trace then answer, with the sender", async () => {
+    it("draws a dashboard chat by turn, prompt then answer, with the sender", async () => {
       await repo.createSession("chat-1", "Chat");
       await seedDashboardTurn("chat-1", 0, 1_000);
       await seedDashboardTurn("chat-1", 1, 2_000);
@@ -56,10 +56,8 @@ describe("ChatReadModel", () => {
         transcript?.lines.map((line) => [line.id, line.role, line.turnId, line.senderAccountId]),
       ).toEqual([
         ["u-0", "user", "turn-0", "guardian"],
-        ["t-0", "trace", "turn-0", null],
         ["a-0", "assistant", "turn-0", "agent:main"],
         ["u-1", "user", "turn-1", "guardian"],
-        ["t-1", "trace", "turn-1", null],
         ["a-1", "assistant", "turn-1", "agent:main"],
       ]);
       expect(transcript?.nextCursor).toBeNull();
@@ -80,9 +78,7 @@ describe("ChatReadModel", () => {
         before = page.nextCursor;
       }
 
-      expect(seen).toEqual(
-        [0, 1, 2, 3, 4].flatMap((index) => [`u-${index}`, `t-${index}`, `a-${index}`]),
-      );
+      expect(seen).toEqual([0, 1, 2, 3, 4].flatMap((index) => [`u-${index}`, `a-${index}`]));
     });
 
     it("is null for a session that is no chat", async () => {
@@ -164,13 +160,29 @@ describe("ChatReadModel", () => {
       ]);
       expect(drawn).toEqual([
         ["user", sales.id, "sales-turn-7", "ou_wei"],
-        ["trace", sales.id, "sales-turn-7", null],
         ["assistant", sales.id, "sales-turn-7", "bot-sales"],
       ]);
       // Either seat opens the same place.
       expect(fromSupport?.lines.map((line) => line.id)).toEqual(
         fromSales?.lines.map((line) => line.id),
       );
+    });
+  });
+
+  describe("turnTraces", () => {
+    it("reads the traces of the named turns only, each under its own session", async () => {
+      await repo.createSession("chat-1", "Chat");
+      await seedDashboardTurn("chat-1", 0, 1_000);
+      await seedDashboardTurn("chat-1", 1, 2_000);
+
+      const traces = await reads.turnTraces([
+        { sessionId: "chat-1", turnId: "turn-1" },
+        { sessionId: "other-session", turnId: "turn-0" },
+      ]);
+
+      expect(traces.map((trace) => [trace.id, trace.sessionId, trace.turnId])).toEqual([
+        ["t-1", "chat-1", "turn-1"],
+      ]);
     });
   });
 

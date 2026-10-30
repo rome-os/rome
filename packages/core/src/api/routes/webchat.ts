@@ -55,7 +55,12 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
-import { ChatReadModel, type TranscriptLine } from "../../webchat/chat-read-model.js";
+import {
+  ChatReadModel,
+  type TranscriptLine,
+  type TurnRef,
+  type TurnTrace,
+} from "../../webchat/chat-read-model.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
@@ -819,6 +824,47 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([promise.catch(() => null), late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * `lines` with each turn's trace placed where the dashboard draws it: after
+ * the turn's prompt, before what the turn said. A trace whose turn has no line
+ * on the page is left out.
+ */
+function withTurnTraces<L extends { turnId: string | null; sessionId: string; role: string }>(
+  lines: L[],
+  traces: TurnTrace[],
+) {
+  const traceOf = new Map(traces.map((trace) => [`${trace.sessionId}\0${trace.turnId}`, trace]));
+  const out: (L | ReturnType<typeof traceLine>)[] = [];
+  for (const [index, line] of lines.entries()) {
+    const key = line.turnId ? `${line.sessionId}\0${line.turnId}` : null;
+    const trace = key ? traceOf.get(key) : undefined;
+    if (trace && line.role !== "user") {
+      out.push(traceLine(trace));
+      traceOf.delete(key as string);
+    }
+    out.push(line);
+    const next = lines[index + 1];
+    const turnEnds = !next || next.turnId !== line.turnId || next.sessionId !== line.sessionId;
+    if (trace && traceOf.has(key as string) && turnEnds) {
+      out.push(traceLine(trace));
+      traceOf.delete(key as string);
+    }
+  }
+  return out;
+}
+
+function traceLine(trace: TurnTrace) {
+  return {
+    id: trace.id,
+    sessionId: trace.sessionId,
+    turnId: trace.turnId as string | null,
+    inputState: null,
+    role: "trace",
+    content: "[]",
+    createdAt: trace.createdAt,
+  };
+}
+
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
@@ -1205,11 +1251,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!hasTrace) return messages;
     const sessionActivityCutoff = sessionTraceCutoff();
     // Only the trace rows in `messages` are read, so a page of a long session
-    // never loads the blocks of the turns outside it.
-    const traceContents = await deps.webchatRepo.getTraceContents(sessionId, {
-      sessionActivityCutoff,
-      messageIds: messages.filter((m) => m.role === "trace").map((m) => m.id),
-    });
+    // never loads the blocks of the turns outside it. A chat two of Rome's
+    // agents are in holds traces of both, each read under its own session.
+    const traceIdsBySession = new Map<string, string[]>();
+    for (const m of messages) {
+      if (m.role !== "trace") continue;
+      const owner = m.sessionId || sessionId;
+      traceIdsBySession.set(owner, [...(traceIdsBySession.get(owner) ?? []), m.id]);
+    }
+    const traceContents = (
+      await Promise.all(
+        [...traceIdsBySession].map(([owner, messageIds]) =>
+          deps.webchatRepo.getTraceContents(owner, { sessionActivityCutoff, messageIds }),
+        ),
+      )
+    ).flat();
     if (traceContents.length === 0) return messages;
     const contentById = new Map(
       traceContents.filter((r) => !r.traceArchived).map((r) => [r.id, r.content]),
@@ -1271,14 +1327,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return resolveChatSenders(deps, actors);
   };
   /** A transcript read from Chats' tables, with trace summaries and senders. */
+  /** A transcript read from Chats' tables, as the wire carries it: each
+   *  turn's trace placed after the turn's prompt, with its summary, and each
+   *  guardian-side line with its sender. The trace's blocks stay unread until
+   *  the guardian opens the turn. */
   const enrichTranscript = async (sessionId: string, lines: TranscriptLine[]) => {
-    const withTraces = await attachTraceSummaries(sessionId, lines);
+    const turns = new Map<string, TurnRef>();
+    for (const line of lines) {
+      if (line.turnId) turns.set(traceTurnKey(line.sessionId, line.turnId), line as TurnRef);
+    }
+    const traces = await chatReads.turnTraces([...turns.values()]);
     const senders = await lineSenders(lines);
-    return withTraces.map((line) => {
-      const { senderAccountId: _account, senderName: _name, ...message } = line;
-      const sender = senders.get(line.id);
-      return sender ? { ...message, sender } : message;
-    });
+    const messages = withTurnTraces(
+      lines.map((line) => {
+        const { senderAccountId: _account, senderName: _name, ...message } = line;
+        const sender = senders.get(line.id);
+        return sender ? { ...message, sender } : message;
+      }),
+      traces,
+    );
+    return attachTraceSummaries(sessionId, messages);
   };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachTraceSummaries(sessionId, messages);
