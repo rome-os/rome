@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
 import { ThemeProvider } from "@/hooks/use-theme";
@@ -283,6 +284,13 @@ describe("Concierge layout", () => {
   describe("bubble width", () => {
     beforeEach(() => stubHover(true));
 
+    // The box that caps a bubble's width: the bubble's row in its group.
+    const capOf = (bubble: HTMLElement) => {
+      const cap = bubble.closest(".group\\/bubble")?.parentElement;
+      if (!cap) throw new Error("no bubble box");
+      return cap;
+    };
+
     it("draws a long message as a normal bubble", () => {
       renderTranscript([
         agentRow(
@@ -297,15 +305,63 @@ describe("Concierge layout", () => {
       for (const bubble of [short, long]) {
         const classes = bubble.className.split(/\s+/);
         expect(classes).toContain("w-fit");
-        expect(classes).toContain("max-w-full");
         expect(classes).not.toContain("w-full");
-        expect(classes).not.toContain("max-w-[80%]");
       }
     });
 
-    it("drops the percentage cap from the guardian's bubble", () => {
+    it("caps every kind of bubble at 90% of the column, from the group itself", () => {
+      render(
+        <MemoryRouter>
+          <ThemeProvider>
+            <ConciergeTranscript
+              rows={[
+                userRow(guardian("u1", 0, "Mine")),
+                agentRow(
+                  agent("a1", 1_000, [
+                    text("Short."),
+                    text("The long one.", "long"),
+                    {
+                      type: "text",
+                      content: "The report.",
+                      format: "long",
+                      forwardedFrom: { chatId: "task-1", title: "Flights" },
+                    },
+                    { type: "task_chat", chatId: "chat-7", title: "Trip" },
+                  ]),
+                ),
+              ]}
+              live={idle}
+              actions={actions}
+              contentRef={() => {}}
+              feedback
+            />
+          </ThemeProvider>
+        </MemoryRouter>,
+      );
+
+      const bubbles = [
+        bubbleOf("Mine"),
+        bubbleOf("Short."),
+        bubbleOf("The long one."),
+        bubbleOf("The report."),
+        screen.getByTestId("task-card"),
+      ];
+      for (const bubble of bubbles) {
+        const cap = capOf(bubble);
+        const classes = cap.className.split(/\s+/);
+        expect(classes).toContain("max-w-[90%]");
+        expect(classes).not.toContain("max-w-full");
+        // A percentage of a box that shrinks to the bubble would wrap short
+        // text, so the cap sits right in the group, which spans the column.
+        expect(cap.parentElement?.className).toContain("gap-1");
+      }
+    });
+
+    it("keeps the guardian's jump anchor on the capped box", () => {
       renderTranscript([userRow(guardian("u1", 0, "Hi"))]);
 
+      const cap = capOf(bubbleOf("Hi"));
+      expect(cap.getAttribute("data-timeline-anchor")).toBe("u1");
       expect(bubbleOf("Hi").className).not.toContain("max-w-[70%]");
     });
   });
