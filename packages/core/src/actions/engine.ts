@@ -228,8 +228,8 @@ interface ActionEngineOptions {
   /** Reads the instance's memory headroom when a queued root could take a
    * worker. The default reads nothing, so an engine built without it never
    * holds the queue; the production wiring passes `readMemoryHeadroom`, which
-   * reads the cgroup limit, then Linux's `/proc/meminfo` (the Mac app reads
-   * its Lima VM's). Tests inject a controllable reading. */
+   * reads the cgroup limit, then Linux's `/proc/meminfo`. Tests inject a
+   * controllable reading. */
   memoryHeadroom?: MemoryHeadroomReader;
   /**
    * Number of already-initialized action workers to keep ready in the main

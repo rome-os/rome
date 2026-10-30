@@ -7,37 +7,48 @@ const welcome = { kind: "remote", instance: null };
 
 describe("parseRuntimeTarget", () => {
   it("reads a saved target", () => {
-    expect(parseRuntimeTarget(JSON.stringify(remote), true)).toEqual(remote);
-    expect(parseRuntimeTarget(JSON.stringify(welcome), true)).toEqual(welcome);
-    expect(parseRuntimeTarget(JSON.stringify({ kind: "local" }), false)).toEqual({ kind: "local" });
+    expect(parseRuntimeTarget(JSON.stringify(remote))).toEqual(remote);
+    expect(parseRuntimeTarget(JSON.stringify(welcome))).toEqual(welcome);
   });
 
   it("starts a new install at Rome Cloud sign-in", () => {
-    expect(parseRuntimeTarget(null, false)).toEqual(welcome);
+    expect(parseRuntimeTarget(null)).toEqual(welcome);
   });
 
-  it("keeps an install that already has a VM on the VM", () => {
-    // Upgrading must not hide the Rome that lives in the VM behind a sign-in.
-    expect(parseRuntimeTarget(null, true)).toEqual({ kind: "local" });
-    expect(parseRuntimeTarget("not json", true)).toEqual({ kind: "local" });
+  // Builds with a private VM saved this. Reading it must neither throw nor
+  // reopen the VM: the app would sit on its startup page with nothing to start.
+  it("moves an install that ran the private VM to Rome Cloud sign-in", () => {
+    expect(parseRuntimeTarget(JSON.stringify({ kind: "local" }))).toEqual(welcome);
+  });
+
+  it("falls back to sign-in on anything it cannot read", () => {
+    expect(parseRuntimeTarget("not json")).toEqual(welcome);
+    expect(parseRuntimeTarget(JSON.stringify({ kind: "vm" }))).toEqual(welcome);
   });
 
   it("refuses an origin that is not an exact https origin", () => {
     for (const origin of ["http://ray.romeos.cc", "https://ray.romeos.cc/chat", "javascript:1"]) {
       const target = { kind: "remote", instance: { ...instance, origin } };
-      expect(parseRuntimeTarget(JSON.stringify(target), false)).toEqual(welcome);
+      expect(parseRuntimeTarget(JSON.stringify(target))).toEqual(welcome);
       expect(() => requireRuntimeTarget(target)).toThrow();
     }
   });
 });
 
+describe("requireRuntimeTarget", () => {
+  it("refuses the private VM over IPC", () => {
+    expect(() => requireRuntimeTarget({ kind: "local" })).toThrow();
+  });
+});
+
 describe("sameTarget", () => {
-  it("compares kind and instance", () => {
-    expect(sameTarget({ kind: "local" }, { kind: "local" })).toBe(true);
-    expect(sameTarget({ kind: "local" }, { kind: "remote", instance: null })).toBe(false);
+  it("compares the instance", () => {
     expect(sameTarget({ kind: "remote", instance }, { kind: "remote", instance: null })).toBe(
       false,
     );
     expect(sameTarget({ kind: "remote", instance }, { kind: "remote", instance })).toBe(true);
+    expect(sameTarget({ kind: "remote", instance: null }, { kind: "remote", instance: null })).toBe(
+      true,
+    );
   });
 });

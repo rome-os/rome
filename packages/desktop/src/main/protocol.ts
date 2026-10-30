@@ -9,7 +9,7 @@ const SCHEME = "rome";
 export interface ProtocolHandlerDeps {
   ensureMainWindow: () => Promise<BrowserWindow>;
   getDashboardUrl: () => string;
-  // Resolves once the local Rome runtime is up. handleRomeUrl awaits this
+  // Resolves once the Rome the app opens is reachable. handleRomeUrl awaits this
   // before navigating so cold-start deep links don't race the dashboard
   // startup (loadURL would otherwise fail and the retry path falls back to
   // the default startup surface, dropping the deep link).
@@ -85,9 +85,9 @@ async function handleRomeUrl(rawUrl: string): Promise<void> {
     return;
   }
 
-  // Wait for the local dashboard to be reachable before resolving its address.
-  // On cold start, the runtime may still be coming up — loadURL would fail
-  // and the window's did-fail-load retry falls back to the startup surface,
+  // Wait for the dashboard to be reachable before resolving its address.
+  // On cold start, the Rome may still be connecting — loadURL would fail and
+  // the window's did-fail-load handler falls back to the startup surface,
   // dropping the deep link. The dashboard runs its own connect gate, so an
   // un-enrolled instance lands there first and resumes here after enrolling.
   try {
