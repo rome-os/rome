@@ -309,29 +309,38 @@ rs.mock("@/components/chat/ChatComposer", () => ({
 // Concierge's composer: records programmatic fills and sends a fixed message.
 rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
   ConciergeComposer: forwardRef(function ConciergeComposer(
-    props: { onSend?: (snapshot: unknown, controls: unknown) => Promise<void> },
+    props: {
+      onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
+      isStreaming?: boolean;
+      onStop?: () => void;
+    },
     ref,
   ) {
     useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
     return (
-      <button
-        type="button"
-        data-testid="concierge-send-button"
-        onClick={() =>
-          void props
-            .onSend?.(
-              {
-                text: "sent at once",
-                uploads: [],
-                reasoningEffort: "medium",
-                projectPath: "",
-                inputId: "11111111-1111-4111-8111-111111111111",
-              },
-              { onUploadProgress: () => {}, signal: new AbortController().signal },
-            )
-            .catch(() => {})
-        }
-      />
+      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+        <button
+          type="button"
+          data-testid="concierge-send-button"
+          onClick={() =>
+            void props
+              .onSend?.(
+                {
+                  text: "sent at once",
+                  uploads: [],
+                  reasoningEffort: "medium",
+                  projectPath: "",
+                  inputId: "11111111-1111-4111-8111-111111111111",
+                },
+                { onUploadProgress: () => {}, signal: new AbortController().signal },
+              )
+              .catch(() => {})
+          }
+        />
+        {props.isStreaming && props.onStop ? (
+          <button type="button" data-testid="stop-button" onClick={props.onStop} />
+        ) : null}
+      </div>
     );
   }),
 }));
@@ -1773,8 +1782,12 @@ describe("Chat turn stream lifecycle", () => {
   // finished turn (interrupt → 404) that used to be swallowed with no effect
   // until the next message send resynced. Stop must release the stale entry
   // and reload the transcript on the tap itself.
-  it("releases a stale streaming entry when interrupt reports the turn is gone", async () => {
-    renderChat(<Chat sessionId="session-1" />);
+  it.each([
+    "default",
+    "concierge",
+  ] as const)("releases a stale streaming entry when interrupt reports the turn is gone (%s)", async (variant) => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    renderChat(<Chat sessionId="session-1" variant={variant} />);
 
     // The reattach poll installs the streaming entry for turn-1; the mocked
     // stream never emits, mirroring a dead connection.
@@ -1803,10 +1816,13 @@ describe("Chat turn stream lifecycle", () => {
     );
   });
 
-  it("keeps Stop available while the server still reports the turn running", async () => {
+  it.each([
+    "default",
+    "concierge",
+  ] as const)("keeps Stop available while the server still reports the turn running (%s)", async (variant) => {
     rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-    renderChat(<Chat sessionId="session-1" />);
+    renderChat(<Chat sessionId="session-1" variant={variant} />);
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
     const signal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
 
@@ -1829,7 +1845,10 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("false");
   });
 
-  it("does not let a delayed force-release abort a fresh stream for the same turn", async () => {
+  it.each([
+    "default",
+    "concierge",
+  ] as const)("does not let a delayed force-release abort a fresh stream for the same turn (%s)", async (variant) => {
     const streamControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
     rs.mocked(openTurnStream).mockImplementation((_turnId: string, signal?: AbortSignal) => {
@@ -1846,7 +1865,7 @@ describe("Chat turn stream lifecycle", () => {
       return Promise.resolve(new Response(body));
     });
     rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 200 }));
-    renderChat(<Chat sessionId="session-1" />);
+    renderChat(<Chat sessionId="session-1" variant={variant} />);
 
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
