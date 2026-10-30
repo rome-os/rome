@@ -423,14 +423,13 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
 // json_valid and the object check skip rows that aren't block arrays
 // (non-JSON, or legacy plain text), which would otherwise fail the whole list.
 export const sessionAwaitingGuardian = sql<boolean>`(exists (
-  select 1 from "chat_messages" m
-  join "chat_message_deliveries" d on d."message_id" = m."id", json_each(m."parts") part
+  select 1 from "chat_messages" m, json_each(m."parts") part
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
-  and json_valid(m."parts")
+  and m."sender_agent" is not null and json_valid(m."parts")
   and m."rowid" > coalesce((
     select max(u."rowid") from "chat_messages" u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
-    and not exists (select 1 from "chat_message_deliveries" ud where ud."message_id" = u."id")
+    and u."sender_agent" is null
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
   ), 0)
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'

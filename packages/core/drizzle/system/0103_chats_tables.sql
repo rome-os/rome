@@ -103,8 +103,7 @@ SELECT
   r.`source_thread_id` AS `source_thread_id`,
   CASE WHEN r.`source_channel` = 'webchat' THEN 'agent:' || coalesce(r.`agent_name`, 'main')
        ELSE coalesce(c.`platform_account_id`, r.`source_channel`) END AS `account_id`,
-  CASE WHEN r.`source_channel` = 'webchat' THEN coalesce(r.`agent_name`, 'main')
-       ELSE r.`agent_name` END AS `agent`
+  coalesce(r.`agent_name`, 'main') AS `agent`
 FROM `rome_sessions` r
 LEFT JOIN `channels` c ON c.`id` = r.`source_channel`
 WHERE r.`type` = 'channel' AND r.`source_channel` IS NOT NULL AND r.`source_thread_id` IS NOT NULL;

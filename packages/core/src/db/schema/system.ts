@@ -625,6 +625,8 @@ export const chatMessages = sqliteTable(
     // The platform's thread id; null in the open chat.
     threadId: text("thread_id"),
     senderAccountId: text("sender_account_id"),
+    // The agent that said the line. Set on exactly the lines from Rome, so it
+    // is what tells them apart.
     senderAgent: text("sender_agent"),
     senderName: text("sender_name"),
     text: text("text").notNull(),

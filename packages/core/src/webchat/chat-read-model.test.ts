@@ -236,6 +236,34 @@ describe("0103_chats_tables backfill", () => {
       !statement.includes("CREATE TRIGGER"),
   );
 
+  it("names the agent on every line from Rome, the default agent when the seat names none", () => {
+    const testDb = createTestDb();
+    const sqlite = (testDb.db as unknown as { $client: import("better-sqlite3").Database }).$client;
+    for (const { name } of sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_mirror_%'")
+      .all() as { name: string }[]) {
+      sqlite.exec(`DROP TRIGGER "${name}"`);
+    }
+    sqlite.exec(`
+      INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+        VALUES ('tg', 'telegram', 'telegram', 'bot-tg', 1);
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
+        agent_name, created_at, activity_at)
+        VALUES ('channel:tg:42', 'Ada', 'channel', 'tg', '42', 'private', NULL, 10, 10);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, sender_id, created_at)
+      VALUES
+        ('hi', 'channel:tg:42', 'turn-1', 'user', '[{"type":"text","content":"hi"}]', 'ada', 100),
+        ('hello', 'channel:tg:42', 'turn-1', 'assistant', '[{"type":"text","content":"hello"}]', NULL, 101);
+    `);
+
+    for (const statement of backfill) sqlite.exec(statement);
+
+    expect(sqlite.prepare("SELECT id, sender_agent FROM chat_messages ORDER BY id").all()).toEqual([
+      { id: "hello", sender_agent: "main" },
+      { id: "hi", sender_agent: null },
+    ]);
+  });
+
   it("collapses a group two of Rome's accounts are in, keeps ids, and links turns", async () => {
     const testDb = createTestDb();
     const sqlite = (testDb.db as unknown as { $client: import("better-sqlite3").Database }).$client;

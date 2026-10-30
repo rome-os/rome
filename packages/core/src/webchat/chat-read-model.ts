@@ -1,6 +1,6 @@
 // The dashboard's read model of a chat: what the guardian sees when they open
 // a chat, search their chats, or glance at a badge. It reads Chats' tables
-// (`chat_messages` and the delivery beside each line) and joins one fact from
+// (`chat_messages`) and joins one fact from
 // Agents onto them: `agent_turn_messages`, which turn a line belongs to. What
 // a turn did (its trace, in `rome_agent_messages`) is read apart, only for the
 // turns on screen. Nothing here writes. Vocabulary: docs/domains/chats.md.
@@ -15,9 +15,9 @@ import { sql } from "drizzle-orm";
 import type { AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 
-/** How the dashboard draws a line. A line from Rome has a delivery; a line
- *  that prompted a turn is the guardian's (or a visitor's) input; anything
- *  else said in the place is a notification the agent catches up on. */
+/** How the dashboard draws a line. A line from Rome names the agent that said
+ *  it; a line that prompted a turn is the guardian's (or a visitor's) input;
+ *  anything else said in the place is a notification the agent catches up on. */
 export type TranscriptRole = "user" | "assistant" | "notification";
 
 export interface TranscriptLine {
@@ -77,10 +77,10 @@ const SNIPPET_CONTEXT = 40;
 const SNIPPET_LENGTH = 160;
 const LIKE_ESCAPE = "\\";
 
-/** The role a chat message `m` draws as, given its delivery `d` and the turn
- *  link `l` the transcript picked for it. */
+/** The role a chat message `m` draws as, given the turn link `l` the
+ *  transcript picked for it. */
 const lineRole = sql.raw(`CASE
-  WHEN d.message_id IS NOT NULL THEN 'assistant'
+  WHEN m.sender_agent IS NOT NULL THEN 'assistant'
   WHEN l.role = 'prompt' THEN 'user'
   ELSE 'notification' END`);
 
@@ -145,7 +145,6 @@ export class ChatReadModel {
                ${lineRole} AS role, m.parts AS content,
                m.sender_account_id, m.sender_name, m.said_at AS at, m.rowid AS seq
         FROM chat_messages m
-        LEFT JOIN chat_message_deliveries d ON d.message_id = m.id
         LEFT JOIN agent_turn_messages l ON l.rowid = (
           SELECT x.rowid FROM agent_turn_messages x
           WHERE x.message_id = m.id AND x.role IN ('prompt', 'answer')
@@ -227,7 +226,6 @@ export class ChatReadModel {
       SELECT m.id, m.chat_id, ${lineRole} AS role, m.text, m.said_at
       FROM chat_messages m
       JOIN chats c ON c.id = m.chat_id AND c.platform = 'webchat'
-      LEFT JOIN chat_message_deliveries d ON d.message_id = m.id
       LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = m.chat_id
       WHERE ${matchesEveryTerm}
       ORDER BY m.said_at DESC, m.id DESC
@@ -262,8 +260,8 @@ export class ChatReadModel {
       SELECT count(*) AS count FROM (
         SELECT 1 FROM rome_sessions r
         JOIN chat_messages m ON m.chat_id = r.chat_id AND m.thread_id IS r.thread_id
-        JOIN chat_message_deliveries d ON d.message_id = m.id
         WHERE r.id = ${sessionId} AND r.last_seen_activity_at IS NOT NULL
+          AND m.sender_agent IS NOT NULL
           AND m.said_at > r.last_seen_activity_at
         LIMIT ${cap}
       )`);
