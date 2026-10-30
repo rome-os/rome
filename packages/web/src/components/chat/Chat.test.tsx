@@ -2100,6 +2100,37 @@ describe("Chat Concierge empty state", () => {
     expect(screen.queryByTestId("tasks-pill")).toBeNull();
   });
 
+  it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
+    // Core agents all report "Rome" as their app, so the Concierge's label never varies.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: {
+        appId: "core",
+        appLabel: "Rome",
+        agentName: "core:concierge",
+        iconUrl: null,
+      },
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await screen.findByTestId("tasks-pill");
+    expect(screen.queryByText("Rome")).toBeNull();
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the launch",
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: null,
+      },
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(await screen.findByText("Workflow Studio")).toBeTruthy();
+  });
+
   it("is only for Concierge: an empty normal chat keeps its message list", async () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());

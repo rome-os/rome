@@ -425,14 +425,9 @@ export function FreeGrid() {
                   {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
                 {isConcierge ? <ConciergeTasksPill /> : null}
-                {sessionName?.trim() && pinnedAgentMention && (
-                  <span
-                    className={cn(
-                      "truncate text-aux text-muted-foreground",
-                      // On a phone the Concierge's name and pill take the room, so this label goes.
-                      isConcierge ? "hidden" : "shrink-0",
-                    )}
-                  >
+                {/* Same label as the desktop navbar, also none for the Concierge. */}
+                {!isConcierge && sessionName?.trim() && pinnedAgentMention && (
+                  <span className="shrink-0 truncate text-aux text-muted-foreground">
                     {pinnedAgentMention.appLabel}
                   </span>
                 )}

@@ -21,8 +21,14 @@ rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
 }));
+const identity = rs.hoisted(() => ({
+  current: { sessionName: null } as {
+    sessionName: string | null;
+    pinnedAgentMention?: { appId: string; appLabel: string; agentName: string; iconUrl: null };
+  },
+}));
 rs.mock("@/components/chat/use-session-identity", () => ({
-  useSessionIdentity: () => ({ sessionName: null }),
+  useSessionIdentity: () => identity.current,
 }));
 rs.mock("@/components/chat/Chat", () => ({ Chat: () => null }));
 rs.mock("./AppWidget", () => ({
@@ -114,6 +120,7 @@ afterEach(() => {
   rs.unstubAllGlobals();
   localStorage.clear();
   concierge.chatId = null;
+  identity.current = { sessionName: null };
 });
 
 describe("FreeGrid navigation seeds", () => {
@@ -228,6 +235,33 @@ describe("FreeGrid mobile header", () => {
     const pill = header(container).querySelector<HTMLElement>("[data-concierge-tasks-pill]")!;
     await waitFor(() => expect(pill.getAttribute("data-state")).toBe("needsYou"));
     expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
+  });
+
+  it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
+    concierge.chatId = "concierge";
+    const pinned = (appLabel: string, agentName: string) => ({
+      appId: appLabel.toLowerCase(),
+      appLabel,
+      agentName,
+      iconUrl: null,
+    });
+    identity.current = {
+      sessionName: "Concierge",
+      pinnedAgentMention: pinned("Rome", "core:concierge"),
+    };
+    const first = renderAt("/chat/concierge");
+    await waitFor(() =>
+      expect(header(first.container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
+    );
+    expect(header(first.container).textContent).not.toContain("Rome");
+    first.unmount();
+
+    identity.current = {
+      sessionName: "Plan the launch",
+      pinnedAgentMention: pinned("Workflow Studio", "workflow-planner"),
+    };
+    const second = renderAt("/chat/some-other-chat");
+    await waitFor(() => expect(header(second.container).textContent).toContain("Workflow Studio"));
   });
 
   it("leaves every other chat's header without it", async () => {
