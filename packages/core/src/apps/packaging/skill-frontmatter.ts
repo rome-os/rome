@@ -26,8 +26,8 @@ export function parseSkillFrontmatterResult(content: string): SkillFrontmatterRe
   }
 
   const frontmatter = match[1];
-  const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim();
-  const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  const name = unquoteScalar(frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim());
+  const description = unquoteScalar(frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim());
   const toolsMatch = frontmatter.match(/^tools:\s*\[([^\]]*)\]$/m)?.[1];
   const tools = toolsMatch
     ? toolsMatch
@@ -61,6 +61,26 @@ export function parseSkillFrontmatterResult(content: string): SkillFrontmatterRe
     };
   }
   return { ok: true, value: { name, description, tools } };
+}
+
+/**
+ * Removes the quotes of a YAML scalar written as `"value"` or `'value'`, so
+ * `name: "sample-skill"` reads the same as `name: sample-skill`. Values without
+ * surrounding quotes are returned unchanged. The frontmatter is not parsed as
+ * full YAML because plain descriptions such as `description: Use it: when …`
+ * are not valid YAML.
+ */
+function unquoteScalar(value: string | undefined): string | undefined {
+  if (value === undefined || value.length < 2) return value;
+  const quote = value[0];
+  if ((quote !== '"' && quote !== "'") || value[value.length - 1] !== quote) return value;
+  const inner = value.slice(1, -1);
+  if (quote === "'") return inner.replaceAll("''", "'");
+  try {
+    return JSON.parse(value) as string;
+  } catch {
+    return inner;
+  }
 }
 
 export function parseSkillFrontmatter(content: string): SkillFrontmatter | null {
