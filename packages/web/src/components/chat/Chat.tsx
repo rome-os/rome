@@ -543,6 +543,9 @@ export function Chat({
     if (node) setFloorEl(node);
   }, []);
 
+  // False while an `<Activity>` hides this chat: its effects are gone, but a
+  // request still in flight can land. A layout effect below keeps it.
+  const shownRef = useRef(true);
   // The main session loads its newest turns first and pages older ones in as
   // the transcript scrolls toward the top.
   const {
@@ -554,6 +557,7 @@ export function Chat({
     scroller: scrollerEl,
     pinned: isAtBottom,
     setMessages,
+    shown: shownRef,
   });
 
   // One <Chat> owns the main session but displays & talks to the child sessions
@@ -783,9 +787,6 @@ export function Chat({
     };
   }, []);
 
-  // False while an `<Activity>` hides this chat: its effects are gone, but a
-  // request still in flight can land. The layout effect below keeps it.
-  const shownRef = useRef(true);
   // Set as the chat is shown again, until the effects that follow have seen it.
   const shownAgainRef = useRef(false);
   // A chat that changes while its tab or the chat itself is hidden stays

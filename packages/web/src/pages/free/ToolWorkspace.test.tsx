@@ -812,7 +812,9 @@ function TasksHarness({
   addWidget = rs.fn(),
   removeWidget = rs.fn(),
   withTrace = false,
+  activations,
 }: {
+  activations?: number;
   initial?: ToolView;
   selectTool?: (id: string) => void;
   setCollapsed?: (collapsed: boolean) => void;
@@ -839,6 +841,7 @@ function TasksHarness({
       icon={() => null}
       content={(widget) => <ToolContent id={widget.id} />}
       fullHref={() => null}
+      activations={activations}
     >
       <input aria-label="Chat draft" />
       <TasksOwner />
@@ -848,6 +851,38 @@ function TasksHarness({
 }
 
 describe("ToolWorkspace Tasks tab", () => {
+  describe("in a page kept alive behind an Activity", () => {
+    const kept = (mode: "visible" | "hidden", activations: number) => (
+      <Activity mode={mode}>
+        <TasksHarness activations={activations} />
+      </Activity>
+    );
+    const selected = () =>
+      screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected") === "true";
+
+    it("keeps the Tasks tab selected through a hide and a show", async () => {
+      const user = userEvent.setup();
+      const view = render(kept("visible", 0));
+      await user.click(screen.getByRole("button", { name: "Show tasks" }));
+      expect(selected()).toBe(true);
+
+      view.rerender(kept("hidden", 0));
+      view.rerender(kept("visible", 0));
+
+      expect(selected()).toBe(true);
+    });
+
+    it("still leaves the Tasks tab when an app is activated", async () => {
+      const user = userEvent.setup();
+      const view = render(kept("visible", 0));
+      await user.click(screen.getByRole("button", { name: "Show tasks" }));
+
+      view.rerender(kept("visible", 1));
+
+      expect(selected()).toBe(false);
+    });
+  });
+
   it("adds an ephemeral Tasks tab ahead of the apps and selects it, writing nothing to the layout", async () => {
     const user = userEvent.setup();
     const selectTool = rs.fn();

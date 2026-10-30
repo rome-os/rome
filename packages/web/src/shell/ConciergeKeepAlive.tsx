@@ -1,22 +1,8 @@
-import { Activity, type ComponentType, useEffect, useMemo, useState } from "react";
+import { Activity, useMemo, useState } from "react";
 import { type Location, Route, Routes, useLocation } from "react-router-dom";
 import { CONCIERGE_CHAT_ID, isConciergePath, useConciergeChat } from "@/hooks/use-concierge";
+import { ConciergePage } from "@/pages/free/FreePage";
 import { useSessionDeleted } from "@/lib/session-deleted";
-
-type ConciergePageComponent = ComponentType<{ active: boolean }>;
-
-// The page lives in the chat's own chunk. It loads while the guardian is on a
-// chat, so that opening the Concierge finds it ready: a `lazy` component would
-// suspend on its first render, and React holds a revealed fallback back for
-// about 300 ms.
-let loadedPage: ConciergePageComponent | null = null;
-let loading: Promise<void> | null = null;
-function loadConciergePage(): Promise<void> {
-  loading ??= import("@/pages/free/FreePage").then((module) => {
-    loadedPage = module.ConciergePage;
-  });
-  return loading;
-}
 
 /**
  * "kept": the Concierge page is mounted, shown or hidden.
@@ -54,18 +40,6 @@ export function ConciergeKeepAlive() {
   const { enabled } = useConciergeChat();
   const location = useLocation();
   const onConcierge = enabled && isConciergePath(location.pathname);
-  const onChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
-  const [Page, setPage] = useState<ConciergePageComponent | null>(() => loadedPage);
-  useEffect(() => {
-    if (Page || !enabled || !onChat) return;
-    let live = true;
-    void loadConciergePage().then(() => {
-      if (live) setPage(() => loadedPage);
-    });
-    return () => {
-      live = false;
-    };
-  }, [Page, enabled, onChat]);
   const [seen, setSeen] = useState(location);
   const [phase, setPhase] = useState<Phase>("idle");
   // Derived while rendering, so the page never shows a frame it should not.
@@ -79,8 +53,8 @@ export function ConciergeKeepAlive() {
     if (sessionId === CONCIERGE_CHAT_ID) setPhase("retired");
   });
 
-  const page = useMemo(() => (Page ? <Page active={onConcierge} /> : null), [Page, onConcierge]);
-  if (phase !== "kept" || !page) return null;
+  const page = useMemo(() => <ConciergePage active={onConcierge} />, [onConcierge]);
+  if (phase !== "kept") return null;
   return (
     <Activity mode={onConcierge ? "visible" : "hidden"}>
       <Routes location={seen}>

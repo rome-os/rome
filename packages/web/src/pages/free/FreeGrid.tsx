@@ -12,7 +12,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AgentMention } from "@/lib/chat-types";
@@ -58,6 +58,8 @@ import {
   updatePlacementLinks,
   type WidgetPlacement,
   type WidgetSeed,
+  getActiveSessionId,
+  type ToolView,
   useFreeCells,
 } from "./use-free-cells";
 import {
@@ -165,6 +167,7 @@ function ToolsToggle({ unread }: { unread: boolean }) {
 }
 
 const NO_PLACEMENTS: WidgetPlacement[] = [];
+const PARKED_VIEW: ToolView = { activeId: null, collapsed: true, unreadIds: [] };
 
 export interface FreeGridProps {
   /** The chat to show, instead of the one the URL names. */
@@ -191,12 +194,20 @@ export function FreeGrid({ sessionId: pinnedSessionId, active = true }: FreeGrid
     placements: layoutPlacements,
     addWidget,
     removeWidget,
-    toolView,
+    toolView: layoutView,
     toolActivations,
     selectTool,
     setToolsCollapsed,
   } = useFreeCells();
-  const placements = active ? layoutPlacements : NO_PLACEMENTS;
+  // The store holds one chat's layout and tool view at a time, and a chat
+  // switches it in an effect. A page that is kept alive and shown again renders
+  // once before its own effect runs, with the chat it replaced still in the
+  // store: that chat's tiles would mount in it and its expanded pane would
+  // narrow the chat. The page draws a layout only while the store holds its own.
+  const ownsLayout =
+    active && (pinnedSessionId === undefined || getActiveSessionId() === pinnedSessionId);
+  const placements = ownsLayout ? layoutPlacements : NO_PLACEMENTS;
+  const toolView = ownsLayout ? layoutView : PARKED_VIEW;
   const { apps } = useApps();
   const sessionNames = useSessionNames(
     placements.flatMap((widget) =>
@@ -272,6 +283,11 @@ export function FreeGrid({ sessionId: pinnedSessionId, active = true }: FreeGrid
     }
     updatePlacementLinks(links);
   }, [workspaceContextRegistry]);
+
+  // The tiles' live locations are read while their iframes still exist: as the
+  // grid goes away, or as an Activity hides it (before the render that drops the
+  // tiles, and before another chat takes the store).
+  useLayoutEffect(() => flushLayout, [flushLayout]);
 
   const suppressProjectsRef = useRef(false);
   useEffect(() => {

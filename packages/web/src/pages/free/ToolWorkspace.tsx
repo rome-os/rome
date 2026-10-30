@@ -233,11 +233,15 @@ export function ToolWorkspace({
   // store counts. Store-side changes, such as an agent re-placing the active
   // app under a new id or a background app closing, move `view.activeId`
   // without the user asking to leave the trace, so they never touch it.
+  //
+  // The effect runs again, with the same count, when an Activity shows a kept
+  // page. That is no activation, so only a changed count leaves the tabs.
+  const seenActivations = useRef(activations);
   useEffect(() => {
-    if (activations !== undefined) {
-      setTraceSelected(false);
-      setTasksSelected(false);
-    }
+    if (activations === seenActivations.current) return;
+    seenActivations.current = activations;
+    setTraceSelected(false);
+    setTasksSelected(false);
   }, [activations]);
 
   function addAndShow(type: WidgetType, targetId?: string) {

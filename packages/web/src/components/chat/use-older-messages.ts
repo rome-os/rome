@@ -50,6 +50,12 @@ interface UseOlderMessagesOptions {
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
   pinned: boolean;
   setMessages: Dispatch<SetStateAction<Map<string, ChatMessage[]>>>;
+  /**
+   * `current` is false while an `<Activity>` hides the chat. The scroller has
+   * no box then, so a page that lands is dropped instead of anchored, and the
+   * sentinel asks for it again once the chat is shown.
+   */
+  shown?: { readonly current: boolean };
 }
 
 export interface OlderMessages {
@@ -69,7 +75,7 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  { pageTurns, scroller, pinned, setMessages }: UseOlderMessagesOptions,
+  { pageTurns, scroller, pinned, setMessages, shown }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
@@ -115,6 +121,7 @@ export function useOlderMessages(
         const page = await listSessionMessagePage(id, { limit: pageTurns, before: cursor });
         // A newer response may have restarted the history while this one flew.
         if (!page || cursorsRef.current.get(id) !== cursor) return;
+        if (shown && !shown.current) return;
         const el = scrollerRef.current;
         if (el && !pinnedRef.current) {
           anchorRef.current = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
@@ -133,7 +140,7 @@ export function useOlderMessages(
         setLoading(false);
       }
     },
-    [pageTurns, setCursor, setMessages],
+    [pageTurns, setCursor, setMessages, shown],
   );
 
   useEffect(() => {

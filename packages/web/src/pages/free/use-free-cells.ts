@@ -595,6 +595,11 @@ export function updateProjectsSelection(placementId: string, selectedPath: strin
   );
 }
 
+/** The chat whose layout the store holds now, or null for a draft. */
+export function getActiveSessionId(): string | null {
+  return activeSessionId;
+}
+
 export function setActiveSession(sessionId: string | null) {
   if (activeSessionId === sessionId) return;
   const previousSessionId = activeSessionId;

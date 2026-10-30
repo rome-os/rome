@@ -64,6 +64,16 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("ConciergeKeepAlive", () => {
+  it("draws the Concierge in the first render when the app opens on its address", () => {
+    render(
+      <MemoryRouter initialEntries={["/chat/concierge"]}>
+        <ConciergeKeepAlive />
+      </MemoryRouter>,
+    );
+    // Synchronous: nothing is loaded on the way in, so there is no empty first render.
+    expect(screen.getByTestId("concierge-page").dataset.active).toBe("true");
+  });
+
   it("mounts the page on the first visit, not before", async () => {
     render(shell());
     expect(screen.queryByTestId("concierge-page")).toBeNull();

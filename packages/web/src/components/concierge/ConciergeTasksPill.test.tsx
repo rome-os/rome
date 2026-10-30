@@ -211,12 +211,13 @@ describe("ConciergeTasksPill", () => {
     expect(await screen.findByRole("dialog", { name: "Tasks" })).toBeTruthy();
   });
 
-  it("removes the pane's tab when the chat goes", async () => {
+  it("leaves the pane's tab to the page that owns the pane when the chat goes", async () => {
+    // The kept Concierge page holds the pane and its tab, and drops both together.
     const pane = host();
     const view = renderPill(pane);
     await screen.findByRole("button", { name: "Tasks" });
     view.unmount();
-    expect(pane.hide).toHaveBeenCalled();
+    expect(pane.hide).not.toHaveBeenCalled();
   });
 });
 
@@ -274,7 +275,7 @@ describe("ConciergeTasksPill in a chat kept alive behind an Activity", () => {
     );
   });
 
-  it("closes the tasks tab of the pane as the chat is hidden", async () => {
+  it("leaves the tasks tab to the kept page as the chat is hidden", async () => {
     server.tasks = [row("doing")];
     const pane = host();
     const live = fakeSocketLiveEventsClient();
@@ -283,9 +284,10 @@ describe("ConciergeTasksPill in a chat kept alive behind an Activity", () => {
     );
     const view = render(page("visible"));
     await screen.findByRole("button", { name: "Tasks, 1 in progress" });
-    expect(pane.hide).not.toHaveBeenCalled();
 
     view.rerender(page("hidden"));
-    expect(pane.hide).toHaveBeenCalled();
+    view.rerender(page("visible"));
+
+    expect(pane.hide).not.toHaveBeenCalled();
   });
 });

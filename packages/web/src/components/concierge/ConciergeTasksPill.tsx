@@ -1,5 +1,5 @@
 import { ListChecks, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetTitle } from "@/components/ui/sheet";
@@ -22,10 +22,9 @@ export function ConciergeTasksPill() {
   const state = pillState(tasks);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // The tab belongs to this chat: it goes when the chat does.
-  const hide = pane?.hide;
-  useEffect(() => () => hide?.(), [hide]);
-
+  // The tab belongs to this chat. The kept Concierge page owns its pane, so the
+  // tab goes with the page when Concierge is turned off, its chat is deleted, or
+  // the guardian signs out, and stays through a hide and a show.
   const open = () => {
     if (!pane || pane.compact) setSheetOpen(true);
     else if (pane.active) pane.hide();
