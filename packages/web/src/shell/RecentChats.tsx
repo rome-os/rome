@@ -85,27 +85,24 @@ const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolea
 function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
   if (status === "running") {
     return (
-      <svg
-        viewBox="0 0 16 16"
-        fill="none"
-        className="h-4 w-4 animate-spin text-running motion-reduce:animate-none"
-        aria-hidden
-      >
-        <circle
-          cx="8"
-          cy="8"
-          r="5.5"
-          stroke="currentColor"
-          strokeOpacity="0.2"
-          strokeWidth="1.75"
-        />
-        <path
-          d="M8 2.5A5.5 5.5 0 1 1 2.5 8"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          strokeLinecap="round"
-        />
-      </svg>
+      <span className="rome-status-spin flex h-4 w-4">
+        <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-running" aria-hidden>
+          <circle
+            cx="8"
+            cy="8"
+            r="5.5"
+            stroke="currentColor"
+            strokeOpacity="0.2"
+            strokeWidth="1.75"
+          />
+          <path
+            d="M8 2.5A5.5 5.5 0 1 1 2.5 8"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
+        </svg>
+      </span>
     );
   }
   if (status === "failed") {

@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -603,6 +604,11 @@ describe("RecentChats", () => {
     expect(mark("Waiting chat")?.querySelector("svg")?.getAttribute("class")).toContain(
       "text-warning",
     );
+    // The running ring turns on an HTML box: Chrome animates an SVG's
+    // transform on the main thread, once per display frame.
+    const spinner = mark("Running chat")?.querySelector(".rome-status-spin");
+    expect(spinner?.tagName).toBe("SPAN");
+    expect(mark("Running chat")?.querySelector("svg")?.getAttribute("class")).not.toMatch(/spin/);
     expect(mark("Read chat")).toBeNull();
     expect(mark("Open chat")).toBeNull();
     const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
@@ -1760,5 +1766,20 @@ describe("RecentChats chat name tooltip", () => {
     // Outwait the tooltip open delay before concluding nothing appeared.
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+});
+
+describe("running mark style", () => {
+  const css = readFileSync(new URL("../globals.css", import.meta.url), "utf8");
+
+  it("turns in steps, so the compositor has no frame to draw between them", () => {
+    expect(css).toMatch(
+      /\.rome-status-spin \{\s*animation: rome-status-spin 1s steps\(12\) infinite;/,
+    );
+  });
+
+  it("stands still under reduced motion", () => {
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(/\.rome-status-spin \{\s*animation: none;/);
   });
 });
