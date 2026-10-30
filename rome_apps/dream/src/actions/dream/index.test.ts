@@ -561,19 +561,19 @@ describe("dream skills", () => {
     await createAction(actionConfig, deps).execute({ windowHours: 6 });
 
     expect(runner.agents).toEqual(["dream", "dream-practice"]);
-    const journal = /Today's journal entry: \/p\/memory\/journal\/\d{4}\/\d{2}\/\d{2}\.md/;
     const [memory = "", practice = ""] = runner.prompts;
     expect(memory).toContain("windowHours: 6 to get_webchat_conversations, get_account_chats,");
     expect(memory).toContain("Memory directory: /p/memory");
-    expect(memory).toMatch(journal);
+    expect(memory).toContain(`Today's journal entry: ${join("/p/memory", "journal")}`);
+    expect(memory).toMatch(/journal[\\/]\d{4}[\\/]\d{2}[\\/]\d{2}\.md/);
     expect(memory).not.toContain("apps directory");
     expect(practice).toContain("windowHours: 6 to get_webchat_conversations and get_action_logs");
     expect(practice).not.toContain("get_account_chats");
-    expect(practice).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
+    expect(practice).toMatch(/Skills staging directory: .*\.dream-skill-review-.*[\\/]skills$/m);
     expect(practice).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
     // The memory agent wrote memory and the journal from other people's chats.
     expect(practice).not.toContain("/p/memory");
-    expect(practice).toMatch(/Practice notes file: .*\.dream-skill-review-.*\/practice\.md$/m);
+    expect(practice).toMatch(/Practice notes file: .*\.dream-skill-review-.*[\\/]practice\.md$/m);
   });
 
   it("appends the practice agent's notes to today's journal", async () => {
@@ -607,6 +607,7 @@ describe("dream skills", () => {
     writeFileSync(join(apps, "notes/src/old.ts"), "old");
     writeFileSync(join(apps, "notes/src/same.ts"), "same");
     writeFileSync(join(apps, "notes/src/gone.ts"), "removed by the agent");
+    writeFileSync(join(apps, "notes/src/elsewhere.ts"), "before unrelated edit");
     // An Edit, then a Bash write the recorder does not see, to the same file.
     const editEvents = [
       {
@@ -617,9 +618,44 @@ describe("dream skills", () => {
       },
       { type: "tool_result", toolUseId: "e1", tool: "Edit", output: "ok" },
     ];
+    const deleteEvents = [
+      {
+        type: "tool_use",
+        id: "d1",
+        tool: "Edit",
+        input: {
+          type: "fileChange",
+          changes: [
+            {
+              path: join(apps, "notes/src/gone.ts"),
+              kind: { type: "delete" },
+              diff: "-removed by the agent\n",
+            },
+          ],
+        },
+      },
+      { type: "tool_result", toolUseId: "d1", tool: "Edit", output: "ok" },
+    ];
+    const sharedPath = join(apps, "calendar/src/shared.ts");
+    const writeEvents = [
+      {
+        type: "tool_use",
+        id: "w1",
+        tool: "Write",
+        input: { file_path: sharedPath, content: "practice's final content" },
+      },
+      { type: "tool_result", toolUseId: "w1", tool: "Write", output: "ok" },
+    ];
     const runner = skillWritingRunner(
-      [...editEvents, { type: "result", content: "Fixed notes." }],
+      [...editEvents, ...writeEvents, ...deleteEvents, { type: "result", content: "Fixed notes." }],
       () => {
+        const calendar = join(apps, "calendar");
+        mkdirSync(join(calendar, "src"), { recursive: true });
+        writeFileSync(join(calendar, "src/shared.ts"), "created by app management");
+        writeFileSync(join(calendar, "src/other.ts"), "created by app management");
+        writeFileSync(sharedPath, "practice's final content");
+        // A separate guardian chat can edit an existing app without a tool event here.
+        writeFileSync(join(apps, "notes/src/elsewhere.ts"), "edited outside practice");
         writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
         rmSync(join(apps, "notes/src/gone.ts"));
         writeFileSync(join(apps, "notes/.gitignore"), "dist\n");
@@ -643,11 +679,24 @@ describe("dream skills", () => {
       op: "write",
       content: "export const fixed = true;",
     });
+    // This records that practice touched the file, not that practice was its only writer.
+    expect(byPath("calendar/src/shared.ts")).toMatchObject({
+      content: "practice's final content",
+      attribution: "practice",
+    });
+    expect(byPath("calendar/src/other.ts")).toMatchObject({ attribution: "unattributed" });
+    expect(byPath("notes/src/elsewhere.ts")).toMatchObject({
+      op: "edit",
+      previous: "before unrelated edit",
+      content: "edited outside practice",
+      attribution: "unattributed",
+    });
     // A modified file shows as a diff against its text before the run.
     expect(byPath("notes/src/old.ts")).toMatchObject({
       op: "edit",
       previous: "old",
       content: "new",
+      attribution: "practice",
     });
     // Hidden files are source; a .env is recorded without its contents; .git is skipped.
     expect(byPath("notes/.gitignore")).toMatchObject({ op: "write", content: "dist\n" });
@@ -658,9 +707,11 @@ describe("dream skills", () => {
       op: "edit",
       previous: "removed by the agent",
       content: "",
+      attribution: "practice",
     });
+    expect(byPath("notes/src/fix.ts")).toMatchObject({ attribution: "unattributed" });
     // One record per changed file: the Edit the recorder saw is not stored twice.
-    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(5);
+    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(6);
   });
 
   it("shows the practice agent its notes from earlier runs", async () => {
@@ -818,6 +869,7 @@ describe("dream skills", () => {
         op: "write",
         path: join(carrierDir, "skills/rename-invoices/SKILL.md"),
         content: SKILL,
+        attribution: "practice",
       }),
     );
   });

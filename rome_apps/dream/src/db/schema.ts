@@ -1,4 +1,5 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import type { ChangeAttribution, ChangeOp } from "../lib/changes.js";
 
 /**
  * Dream data model: one row per run of the `dream` or `skill_review` action,
@@ -40,11 +41,13 @@ export function createAppDbSchema(tablePrefix: string = "dream") {
       /** Order within the run. */
       seq: integer("seq").notNull(),
       /** "write" | "edit" */
-      op: text("op").notNull(),
+      op: text("op").$type<ChangeOp>().notNull(),
       path: text("path").notNull(),
       content: text("content").notNull(),
       previous: text("previous"),
       truncated: integer("truncated", { mode: "boolean" }).notNull().default(false),
+      /** Whether Dream observed practice touching this app path. */
+      attribution: text("attribution").$type<ChangeAttribution>(),
       createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     },
     (t) => [index(`${tablePrefix}__run_changes_run_idx`).on(t.runId, t.seq)],

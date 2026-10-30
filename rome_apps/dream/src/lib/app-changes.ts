@@ -12,7 +12,13 @@ import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { dirname, extname, join, relative } from "node:path";
-import { type FileChange, isSecretFile, MAX_CHANGE_CHARS, SECRET_PLACEHOLDER } from "./changes.js";
+import {
+  type FileChange,
+  isSecretFile,
+  MAX_CHANGE_CHARS,
+  normalizePath,
+  SECRET_PLACEHOLDER,
+} from "./changes.js";
 
 /** Build output, dependencies, and hidden folders (git, dream staging) are not source. Hidden files are. */
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
@@ -84,6 +90,17 @@ export async function snapshotApps(dir: string, copyDir: string): Promise<AppsSn
     }
   }
   return { files, copyDir };
+}
+
+export function attributeAppChanges(
+  changes: FileChange[],
+  practicePaths: ReadonlySet<string>,
+): FileChange[] {
+  const knownPaths = new Set([...practicePaths].map(normalizePath));
+  return changes.map((change) => ({
+    ...change,
+    attribution: knownPaths.has(normalizePath(change.path)) ? "practice" : "unattributed",
+  }));
 }
 
 /**

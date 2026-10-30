@@ -15,6 +15,13 @@
       "when": 1791337320801,
       "tag": "0001_amusing_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792831114786,
+      "tag": "0002_giant_shooting_star",
+      "breakpoints": true
     }
   ]
 }

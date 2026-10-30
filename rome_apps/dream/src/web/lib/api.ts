@@ -1,7 +1,7 @@
 import { fetchAppApi } from "@rome-os/app-web-sdk";
 import type { DreamSchedule, RunDetail, RunListItem } from "../../lib/run-view";
 
-export type { ChangedFile } from "../../lib/changes";
+export type { ChangeAttribution, ChangedFile } from "../../lib/changes";
 export type { DreamSchedule, RunDetail, RunListItem } from "../../lib/run-view";
 
 export type RunFilter = "all" | "dream" | "skill_review";

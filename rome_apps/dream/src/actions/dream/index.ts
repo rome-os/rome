@@ -12,7 +12,7 @@ import {
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
-import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
+import { appChangesSince, attributeAppChanges, snapshotApps } from "../../lib/app-changes.js";
 import { profileMemoryDir } from "../../lib/memory-dir.js";
 import { type FileChange, MAX_CHANGE_CHARS } from "../../lib/changes.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
@@ -54,6 +54,7 @@ async function installedSkillChanges(
       content: content.slice(0, MAX_CHANGE_CHARS),
       previous: previous?.slice(0, MAX_CHANGE_CHARS) ?? null,
       truncated: content.length > MAX_CHANGE_CHARS || (previous?.length ?? 0) > MAX_CHANGE_CHARS,
+      attribution: "practice",
     });
   }
   return changes;
@@ -282,10 +283,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           );
         } finally {
           // App changes are live once made, so record them even from a run
-          // that failed, for the guardian to review. A failure here must not
-          // hide the run's outcome or leave it running.
+          // that failed. Only paths observed in practice tool calls are attributed.
           try {
-            runs.addChanges(runId, await appChangesSince(appsDir, appsBefore));
+            const changes = await appChangesSince(appsDir, appsBefore);
+            runs.addChanges(runId, attributeAppChanges(changes, practiceRecorder.knownPaths()));
             await savePracticeNotes(notesPath, journalPath, runs, runId);
           } catch (err) {
             log.error("dream failed to record practice changes", { error: String(err), runId });
