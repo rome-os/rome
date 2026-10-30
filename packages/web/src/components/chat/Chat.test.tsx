@@ -1014,6 +1014,85 @@ describe("Chat session events over the live-events socket", () => {
   });
 });
 
+describe("Chat turn poll", () => {
+  const sessionTopic = "chat.session:session-1";
+  const flush = (ms = 0) =>
+    act(async () => {
+      await rs.advanceTimersByTimeAsync(ms);
+    });
+  const turnLookups = () => rs.mocked(listSessionTurns).mock.calls.length;
+  const renderIdle = async () => {
+    renderChat(<Chat sessionId="session-1" />, fakeSocketLiveEventsClient());
+    let socket!: FakeWebSocket;
+    act(() => {
+      socket = acceptLatestSocket();
+    });
+    await flush();
+    return socket;
+  };
+
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.useFakeTimers();
+  });
+
+  afterEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    delete (document as { visibilityState?: unknown }).visibilityState;
+  });
+
+  it("asks an idle chat for its turns twice a minute, not every 2 s", async () => {
+    await renderIdle();
+    expect(turnLookups()).toBe(1);
+    await flush(60_000);
+    expect(turnLookups()).toBe(3);
+  });
+
+  it("stops asking while the tab is hidden and asks again as it is shown", async () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    await renderIdle();
+    await flush(120_000);
+    expect(turnLookups()).toBe(1);
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(turnLookups()).toBe(2);
+  });
+
+  it("follows a turn as soon as the chat's topic says one is running", async () => {
+    const socket = await renderIdle();
+    const event = (data: unknown) =>
+      act(() =>
+        socket.receive({ type: "event", topic: sessionTopic, event: "session_running", data }),
+      );
+    event({ sessionId: "session-1", running: false });
+    await flush();
+    expect(turnLookups()).toBe(1);
+
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-9", status: "running" }]);
+    event({ sessionId: "session-1", running: true });
+    await flush();
+    expect(turnLookups()).toBe(2);
+    expect(rs.mocked(openTurnStream).mock.calls.map(([turnId]) => turnId)).toEqual(["turn-9"]);
+    expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("asks for the turns again once the socket comes back", async () => {
+    const socket = await renderIdle();
+    act(() => socket.close());
+    await flush(100);
+    act(() => {
+      acceptLatestSocket();
+    });
+    await flush();
+    expect(turnLookups()).toBe(2);
+  });
+});
+
 describe("Chat turn stream lifecycle", () => {
   it("deletes a chat only after the app confirmation dialog is confirmed", async () => {
     const user = userEvent.setup();

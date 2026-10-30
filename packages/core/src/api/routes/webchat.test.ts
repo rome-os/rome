@@ -36,6 +36,20 @@ import { VisitorProfilesRepository } from "../../db/repositories/visitor-profile
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
+/** Reads an SSE body until its text holds `needle`, and returns the text read. */
+async function readSseUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  needle: string,
+): Promise<string> {
+  let text = "";
+  while (!text.includes(needle)) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    text += new TextDecoder().decode(chunk.value);
+  }
+  return text;
+}
+
 describe("Webchat API", () => {
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
   let testDb: TestDb;
@@ -2314,13 +2328,12 @@ describe("Webchat API", () => {
     const session = await create();
     const sessionEvents = await app.request(`/chat/sessions/${session.id}/events`);
     const sessionEventsReader = sessionEvents.body!.getReader();
-    const pendingSessionEvent = sessionEventsReader.read();
+    const pendingSessionEvent = readSseUntil(sessionEventsReader, "event: session_name");
     const firstMessage =
       "Could you help me create a detailed launch plan for our fourth-quarter release?";
     await send(session.id, firstMessage);
 
-    const sessionEvent = await pendingSessionEvent;
-    expect(new TextDecoder().decode(sessionEvent.value)).toContain(
+    expect(await pendingSessionEvent).toContain(
       `event: session_name\ndata: ${JSON.stringify({
         sessionId: session.id,
         name: "Q4 Launch Plan",
@@ -5499,7 +5512,7 @@ describe("Webchat API", () => {
       expect(res.status).toBe(200);
       expect(res.body).not.toBeNull();
       const reader = res.body!.getReader();
-      const pendingRead = reader.read();
+      const pendingRead = readSseUntil(reader, "event: message_insert");
 
       // The approval continuation resumes the agent and emits its reply.
       await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
@@ -5508,9 +5521,7 @@ describe("Webchat API", () => {
 
       // Live: the open view receives a message_insert for the reply, with no
       // reload or session switch.
-      const chunk = await pendingRead;
-      expect(chunk.done).toBe(false);
-      const text = new TextDecoder().decode(chunk.value);
+      const text = await pendingRead;
       expect(text).toContain("event: message_insert");
       expect(text).toContain("Done — I sent the message.");
       await reader.cancel();
@@ -5581,6 +5592,38 @@ describe("Webchat API", () => {
       await lateReader.cancel();
       releaseRetry();
       await retry;
+    });
+
+    it("tells an open chat each time a turn is queued or ends, on its own stream", async () => {
+      const sessionId = "sess-turn-cue";
+      await deps.webchatRepo.createSession(sessionId, "Turn cue");
+      const { routes: app } = createWebchatRuntime(deps);
+      const reader = (await app.request(`/chat/sessions/${sessionId}/events`)).body!.getReader();
+      const running = `event: session_running\ndata: {"sessionId":"${sessionId}","running":true}`;
+      const stopped = `event: session_running\ndata: {"sessionId":"${sessionId}","running":false}`;
+      const register = (turnId: string, id = sessionId) =>
+        deps.agentTurnStreamRegistry.register({ sessionId: id, turnId, agentName: "main" });
+
+      const first = register("turn-1");
+      let streamed = await readSseUntil(reader, running);
+      // A second turn and the first one's end are news too, though the chat
+      // stays running through both.
+      const second = register("turn-2");
+      first.finish();
+      // A stream opened while the chat runs starts with that state.
+      const late = (await app.request(`/chat/sessions/${sessionId}/events`)).body!.getReader();
+      expect(new TextDecoder().decode((await late.read()).value)).toContain(running);
+      await late.cancel();
+      second.finish();
+      streamed += await readSseUntil(reader, stopped);
+      expect(streamed.split(running)).toHaveLength(4);
+
+      // Another chat's turns stay off this chat's stream.
+      await deps.webchatRepo.createSession("sess-other", "Other");
+      register("turn-other", "sess-other").finish();
+      await deps.webchatRepo.updateSessionName(sessionId, "Renamed");
+      expect(await readSseUntil(reader, "event: session_name")).not.toContain("sess-other");
+      await reader.cancel();
     });
 
     it("counts a turn in the shared turn registry as running", async () => {

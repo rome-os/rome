@@ -103,6 +103,7 @@ import {
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
   ChatErrorNotice,
@@ -219,10 +220,13 @@ const sessionNameSchema = z.object({
   name: z.string(),
 });
 
+const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
+  onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
 }
 
@@ -230,6 +234,7 @@ function ChatSessionEvents({
   sessionId,
   onMessageInsert,
   onSessionName,
+  onSessionRunning,
   onReconnect,
 }: ChatSessionEventsProps) {
   useLiveEvents(
@@ -242,6 +247,12 @@ function ChatSessionEvents({
       session_name: {
         schema: sessionNameSchema,
         fn: (event) => onSessionName(sessionId, event),
+      },
+      session_running: {
+        schema: sessionRunningSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onSessionRunning(event);
+        },
       },
     },
     {
@@ -1303,27 +1314,12 @@ export function Chat({
     ],
   );
 
-  useEffect(() => {
-    // Reattach to whichever session holds the floor — during a handoff that's
-    // the specialist's child session, not the main one (only the floor can have
-    // an in-flight turn, since shallower callers are suspended). On reload this
-    // re-runs as the floor resolves, so the live preview reattaches correctly.
-    const reattachSessionId = floorSessionId;
-    if (!reattachSessionId) return;
-    if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
-
-    let cancelled = false;
-    let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const schedule = (delayMs: number) => {
-      if (cancelled) return;
-      pollTimer = setTimeout(() => {
-        void runOnce();
-      }, delayMs);
-    };
-
-    const runOnce = async () => {
-      if (cancelled) return;
+  // Reattach to whichever session holds the floor — during a handoff that's
+  // the specialist's child session, not the main one (only the floor can have
+  // an in-flight turn, since shallower callers are suspended). On reload this
+  // re-runs as the floor resolves, so the live preview reattaches correctly.
+  const pollTurns = useCallback(
+    async (reattachSessionId: string, isCancelled: () => boolean): Promise<TurnPollOutcome> => {
       // Skip if the foreground send is mid-flight (locallyStreaming was added
       // before its POST, so it catches the window before its per-session
       // entry exists) or a prior reattach hasn't drained yet.
@@ -1331,55 +1327,56 @@ export function Chat({
         locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
         streamingSessionsRef.current.has(reattachSessionId)
       ) {
-        schedule(2000);
-        return;
+        return "busy";
       }
-      try {
-        // List in-flight turns by turnId. Reattach to the running
-        // one (or the first queued one) — its events stream is keyed by
-        // turnId, so reattach is unambiguous even if more turns arrive
-        // while we're polling.
-        const turns = await listSessionTurns(reattachSessionId);
-        if (!turns || turns.length === 0 || cancelled) return;
-        // A foreground send may have started while the lookup was in flight.
-        // It already follows its turn; a second follower would fight it for
-        // the stream controller.
-        if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
+      // List in-flight turns by turnId. Reattach to the running
+      // one (or the first queued one) — its events stream is keyed by
+      // turnId, so reattach is unambiguous even if more turns arrive
+      // while we're polling.
+      const turns = await listSessionTurns(reattachSessionId);
+      if (!turns || turns.length === 0 || isCancelled()) return "idle";
+      // A foreground send may have started while the lookup was in flight.
+      // It already follows its turn; a second follower would fight it for
+      // the stream controller.
+      if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return "busy";
 
-        const target = turns.find((t) => t.status === "running") ?? turns[0];
-        startSessionStream(reattachSessionId, target.turnId, target.quiet);
-        // A backend turn already listed under its agent turn id hides its saved
-        // trace from the first render, before the replayed `turn_id` arrives.
-        if (target.agentTurnId) {
-          adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
-        }
-        setStreamError(null);
-        // Not cancelled with this effect: followTurn ends with its turn (or
-        // on unmount), and the entry it holds keeps this poll from doubling up.
-        await followTurn(reattachSessionId, target.turnId);
-      } catch {
-        // Silent on poll/network blips — keep trying so backend-initiated
-        // streams (e.g. queued approvals) eventually attach.
-      } finally {
-        if (!cancelled) {
-          schedule(2000);
-        }
+      const target = turns.find((t) => t.status === "running") ?? turns[0];
+      startSessionStream(reattachSessionId, target.turnId, target.quiet);
+      // A backend turn already listed under its agent turn id hides its saved
+      // trace from the first render, before the replayed `turn_id` arrives.
+      if (target.agentTurnId) {
+        adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
       }
-    };
-
-    void runOnce();
-
-    return () => {
-      cancelled = true;
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-  }, [
+      setStreamError(null);
+      // Not cancelled with the poll: followTurn ends with its turn (or on
+      // unmount), and the entry it holds pauses the poll meanwhile.
+      await followTurn(reattachSessionId, target.turnId);
+      return "followed";
+    },
+    [followTurn, startSessionStream, adoptSessionAgentTurn, streamingSessionsRef],
+  );
+  // A `session_running` event or a reconnect kicks the poll, so its timer is
+  // only a fallback for a lost event.
+  const kickTurnPoll = useTurnPoll(
     floorSessionId,
-    followTurn,
-    streamReconnectRevision,
-    startSessionStream,
-    adoptSessionAgentTurn,
-  ]);
+    { paused: isActiveSessionStreaming, revision: streamReconnectRevision },
+    pollTurns,
+  );
+  const handleSessionRunning = useCallback(
+    (event: z.infer<typeof sessionRunningSchema>) => {
+      // A turn queued or ended with the chat still running is one to follow.
+      if (event.running && event.sessionId === floorSessionIdRef.current) kickTurnPoll();
+    },
+    [kickTurnPoll],
+  );
+  // Events missed while the stream was down may include a turn's start.
+  const handleSessionEventsReconnect = useCallback(
+    (sid: string) => {
+      resyncSessionMessages(sid);
+      if (sid === floorSessionIdRef.current) kickTurnPoll();
+    },
+    [resyncSessionMessages, kickTurnPoll],
+  );
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
@@ -2163,7 +2160,8 @@ export function Chat({
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
           onSessionName={handleSessionName}
-          onReconnect={resyncSessionMessages}
+          onSessionRunning={handleSessionRunning}
+          onReconnect={handleSessionEventsReconnect}
         />
       ))}
       <div

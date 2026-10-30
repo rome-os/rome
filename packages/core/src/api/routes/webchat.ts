@@ -781,7 +781,11 @@ export interface WebchatRuntime {
    * unsubscribe.
    */
   subscribeStatusEvents(emit: LiveEventEmit): () => void;
-  /** Emits `message_insert` and `session_name` for one session. Returns the unsubscribe. */
+  /**
+   * Emits `message_insert`, `session_name`, and `session_running` for one
+   * session, after first emitting `session_running` if it is running now.
+   * Returns the unsubscribe.
+   */
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
@@ -859,7 +863,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       runningListeners.delete(listener);
     };
   };
+  // `session_running` here is the open chat's cue to look up the turn to
+  // follow, so it needs no poll. It fires on every turn queued or ended, also
+  // while the chat stays running.
   const subscribeSessionEvents = (sessionId: string, emit: LiveEventEmit): (() => void) => {
+    const runningListener = (event: { sessionId: string; running: boolean }) => {
+      if (event.sessionId === sessionId) emit("session_running", event);
+    };
+    runningListeners.add(runningListener);
+    if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
       if (message.sessionId === sessionId) emit("message_insert", message);
     });
@@ -867,6 +879,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (event.sessionId === sessionId) emit("session_name", event);
     });
     return () => {
+      runningListeners.delete(runningListener);
       unsubscribeMessages();
       unsubscribeSessionName();
     };
