@@ -2,30 +2,8 @@ import i18n from "i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 import { initReactI18next } from "react-i18next";
 
-import enActivity from "./locales/en/activity.json";
-import enApps from "./locales/en/apps.json";
-import enAuth from "./locales/en/auth.json";
-import enChat from "./locales/en/chat.json";
-import enEnvoys from "./locales/en/envoys.json";
-import enCommon from "./locales/en/common.json";
-import enRoutines from "./locales/en/routines.json";
-import enFiles from "./locales/en/files.json";
-import enInbox from "./locales/en/inbox.json";
-import enOnboard from "./locales/en/onboard.json";
-import enPeople from "./locales/en/people.json";
-import enSettings from "./locales/en/settings.json";
-import zhActivity from "./locales/zh-CN/activity.json";
-import zhApps from "./locales/zh-CN/apps.json";
-import zhAuth from "./locales/zh-CN/auth.json";
-import zhChat from "./locales/zh-CN/chat.json";
-import zhEnvoys from "./locales/zh-CN/envoys.json";
-import zhCommon from "./locales/zh-CN/common.json";
-import zhRoutines from "./locales/zh-CN/routines.json";
-import zhFiles from "./locales/zh-CN/files.json";
-import zhInbox from "./locales/zh-CN/inbox.json";
-import zhOnboard from "./locales/zh-CN/onboard.json";
-import zhPeople from "./locales/zh-CN/people.json";
-import zhSettings from "./locales/zh-CN/settings.json";
+import { bundleLoader, createBundleBackend } from "./bundle-loader";
+import { NAMESPACES } from "./namespaces";
 
 export const SUPPORTED_LANGUAGES = ["en", "zh-CN"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -56,46 +34,15 @@ export function normalizeDetectedLanguage(code: string): string {
   return lower === "zh" || lower.startsWith("zh-") ? "zh-CN" : "en";
 }
 
-export const resources = {
-  en: {
-    common: enCommon,
-    settings: enSettings,
-    auth: enAuth,
-    activity: enActivity,
-    routines: enRoutines,
-    chat: enChat,
-    envoys: enEnvoys,
-    people: enPeople,
-    apps: enApps,
-    files: enFiles,
-    inbox: enInbox,
-    onboard: enOnboard,
-  },
-  "zh-CN": {
-    common: zhCommon,
-    settings: zhSettings,
-    auth: zhAuth,
-    activity: zhActivity,
-    routines: zhRoutines,
-    chat: zhChat,
-    envoys: zhEnvoys,
-    people: zhPeople,
-    apps: zhApps,
-    files: zhFiles,
-    inbox: zhInbox,
-    onboard: zhOnboard,
-  },
-} as const;
-
-i18n
+export const i18nReady: Promise<unknown> = i18n
   .use(LanguageDetector)
+  .use(createBundleBackend(bundleLoader))
   .use(initReactI18next)
   .init({
-    resources,
     fallbackLng: "en",
     supportedLngs: SUPPORTED_LANGUAGES,
     defaultNS: "common",
-    ns: Object.keys(resources.en),
+    ns: [...NAMESPACES],
     interpolation: { escapeValue: false },
     detection: {
       // Explicit user choice (cached under rome.lang) always wins; without one,
@@ -107,9 +54,10 @@ i18n
       convertDetectedLanguage: normalizeDetectedLanguage,
     },
     returnNull: false,
-    // Resources are bundled inline, so there is no async work to wait on —
-    // initAsync:false makes init complete synchronously instead of on the
-    // next tick, so importers can call t() right away without awaiting.
+    // Resources come from `bundleLoader`: a language already registered
+    // initialises in this tick, any other waits for its chunk. `i18nReady`
+    // settles when the detected language and the fallback are in the store.
+    // Render only after it, or `t()` returns keys.
     initAsync: false,
   });
 

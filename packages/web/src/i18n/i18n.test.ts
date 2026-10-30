@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
-import i18n, { normalizeDetectedLanguage, resources, SUPPORTED_LANGUAGES } from "./index";
+import enBundle from "./bundles/en";
+import zhBundle from "./bundles/zh-CN";
+import i18n, { normalizeDetectedLanguage, SUPPORTED_LANGUAGES } from "./index";
+
+const resources = { en: enBundle, "zh-CN": zhBundle } as const;
 
 type Resource = Record<string, unknown>;
 
@@ -94,10 +98,10 @@ describe("i18n default policy", () => {
     });
   }
 
-  it("init completes synchronously (initImmediate:false + bundled resources)", () => {
-    // If init were async, isInitialized would be false at module-import time
-    // and t() would silently return keys. Resources are bundled inline so
-    // there is no async work; assert the contract holds.
+  it("init completes synchronously once the languages are registered", () => {
+    // Tests and Storybook register both bundles before importing the module
+    // (register-all-locales.ts). If init were async, isInitialized would be
+    // false at import time and t() would silently return keys.
     expect(i18n.isInitialized).toBe(true);
   });
 });

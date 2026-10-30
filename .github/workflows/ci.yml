@@ -260,6 +260,16 @@ jobs:
         run: pnpm install --frozen-lockfile
       - if: steps.areas.outputs.web == 'true'
         run: pnpm test:unit:web
+      # No other pull-request job builds the dashboard for production, so this
+      # step is where a first screen that outgrew its budget, or pulled in
+      # shiki, mermaid, katex, monaco or noVNC, gets caught. The build keeps
+      # source maps (the compiled-mode switch is unset here) because the check
+      # reads them to name the libraries inside each chunk.
+      - if: steps.areas.outputs.web == 'true'
+        run: |
+          pnpm --filter rome-web build:kit
+          pnpm --filter rome-web exec rsbuild build
+          pnpm check:web:budget
 
   # ──────────────────────────────────────────
   # Job 2c: everything else (~1m) — libs, the Discord CLI, the Electron shell,

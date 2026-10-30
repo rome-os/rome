@@ -121,7 +121,8 @@ describe("FreeGrid navigation seeds", () => {
     catalog.apps = null;
     const view = renderGrid();
     fireEvent.click(screen.getByRole("button", { name: "Open notes" }));
-    const iframe = screen.getByTitle("Seeded app");
+    // App widgets load on demand, so the frame arrives a tick after the click.
+    const iframe = await screen.findByTitle("Seeded app");
     expect(screen.getByRole("tab", { name: "Apps" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Close Apps" })).toBeTruthy();
     catalog.apps = [{ id: "notes", displayName: "Personal Notes" }];
@@ -135,7 +136,7 @@ describe("FreeGrid navigation seeds", () => {
   it("places widgets once and consumes widget and project prefill without changing selection", async () => {
     renderGrid();
     fireEvent.click(screen.getByRole("button", { name: "Open notes" }));
-    const iframe = screen.getByTitle("Seeded app");
+    const iframe = await screen.findByTitle("Seeded app");
     await waitFor(() =>
       expect(JSON.parse(screen.getByTestId("location-state").textContent!)).toEqual({
         futureKey: { keep: true },
@@ -153,7 +154,7 @@ describe("FreeGrid navigation seeds", () => {
   ])("reopens and selects the same widget navigation (project: %s)", async (withProject) => {
     renderGrid(withProject);
     fireEvent.click(screen.getByRole("button", { name: "Open notes" }));
-    const first = screen.getByTitle("Seeded app");
+    const first = await screen.findByTitle("Seeded app");
     expect(mounted).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Close notes" }));
     expect(screen.queryByTitle("Seeded app")).toBeNull();

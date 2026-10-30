@@ -199,6 +199,12 @@
     "switchToLight": "切换到浅色主题",
     "switchToDark": "切换到深色主题"
   },
+  "routeLoading": "加载中…",
+  "chunkError": {
+    "title": "页面加载失败",
+    "description": "部分文件未能下载，通常是更新后或网络中断导致",
+    "reload": "重新加载"
+  },
   "backendUnreachable": {
     "title": "Rome 无法访问",
     "description": "仪表盘暂时无法连接 Rome 服务。页面会自动重试 — 如果问题持续，请检查 Rome 是否正在运行。",

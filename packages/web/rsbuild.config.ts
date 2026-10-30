@@ -4,6 +4,7 @@ import { pluginSvgr } from "@rsbuild/plugin-svgr";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { createMdxRspackRule } from "./mdx-rspack-rule.js";
+import { pluginRoutePreload } from "./route-preload-plugin.js";
 
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 const srcDir = fileURLToPath(new URL("./src", import.meta.url));
@@ -49,7 +50,33 @@ const romeCloudOrigin = (() => {
 })();
 
 export default defineConfig({
-  plugins: [pluginReact(), pluginSvgr()],
+  plugins: [
+    pluginReact(),
+    pluginSvgr(),
+    // The language and the chat route are the two downloads every chat visit
+    // makes before it can draw. The language is small, so it goes out with the
+    // entry chunks. The chat route is large, so it waits for them. `/` redirects
+    // to /chat, so both start the same way.
+    pluginRoutePreload({
+      // Mirrors the order of i18n/index.ts: a saved choice, then the system
+      // language, with any Chinese variant mapping to zh-CN. A visit this
+      // misjudges still works, because i18n loads its own language later.
+      prelude:
+        'var lang=function(){try{var l=localStorage.getItem("rome.lang")||(navigator.languages&&navigator.languages[0])||navigator.language||"";' +
+        'return/^zh(-|$)/i.test(l)?"zh-CN":"en"}catch(e){return"en"}}();',
+      rules: [
+        { chunks: ["locale-en"], when: 'lang==="en"', afterEntry: false },
+        { chunks: ["locale-zh-CN"], when: 'lang==="zh-CN"', afterEntry: false },
+        // Chinese visitors also load the English fallback.
+        { chunks: ["locale-en"], when: 'lang==="zh-CN"', afterEntry: true },
+        {
+          chunks: ["route-chat"],
+          when: 'p==="/"||p==="/chat"||p.indexOf("/chat/")===0',
+          afterEntry: true,
+        },
+      ],
+    }),
+  ],
   resolve: {
     alias: {
       "@": srcDir,
@@ -100,6 +127,14 @@ export default defineConfig({
       // Route /desktop-proxy through the backend so its WebSocket upgrade
       // handler can authorize the connection before reaching noVNC.
       "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true, xfwd: true },
+    },
+  },
+  performance: {
+    // The body face is on every route's first paint. The browser would only
+    // find it after the stylesheet parsed, so the HTML names it up front.
+    preload: {
+      type: "initial",
+      include: [/funnel-sans-latin-wght-normal.*\.woff2$/],
     },
   },
   output: {

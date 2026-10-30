@@ -151,3 +151,69 @@ describe("AuthGate on an embedded app route", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("/login"));
   });
 });
+
+describe("AuthGate while the auth probe is pending", () => {
+  function renderPending(phase: string) {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/health") return new Response(JSON.stringify({ status: "ok" }));
+      if (url === "/api/bootstrap") {
+        await held;
+        return new Response(JSON.stringify({ phase }));
+      }
+      return new Response("{}");
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const seen: string[] = [];
+    function Probe({ label }: { label: string }) {
+      seen.push(label);
+      return <div>{label}</div>;
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/chat/concierge"]}>
+          <Routes>
+            <Route
+              path="/chat/*"
+              element={
+                <AuthGate>
+                  <Probe label="protected shell" />
+                </AuthGate>
+              }
+            />
+            <Route path="/login" element={<Probe label="login page" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { release, seen };
+  }
+
+  it("shows a loading skeleton instead of nothing, with no protected content in it", () => {
+    renderPending("ready");
+    const skeleton = screen.getByRole("status");
+    expect(skeleton.getAttribute("aria-busy")).toBe("true");
+    expect(skeleton.textContent).toBe("Loading…");
+    expect(screen.queryByText("protected shell")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
+  it("replaces the skeleton with the page once the visitor is signed in", async () => {
+    const { release } = renderPending("ready");
+    release();
+    expect(await screen.findByText("protected shell")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("never renders the protected page for a signed-out visitor, before or after the probe", async () => {
+    const { release, seen } = renderPending("needs-signin");
+    release();
+    expect(await screen.findByText("login page")).toBeTruthy();
+    expect(seen).not.toContain("protected shell");
+  });
+});

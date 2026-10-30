@@ -11,8 +11,10 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 describe("runtime-config shell delivery", () => {
   it("index.html references /runtime-config.js unconditionally", () => {
     const html = read("../../index.html");
-    expect(html).toContain('<script src="/runtime-config.js"></script>');
-    // It must load before the app bundle, i.e. live in <head>.
+    // Deferred, not blocking: a deferred classic script runs before the module
+    // bundle that Rsbuild injects after it, and the parser does not wait on it.
+    expect(html).toContain('<script defer src="/runtime-config.js"></script>');
+    // It must precede the app bundle's injection point, i.e. live in <head>.
     expect(html.indexOf('src="/runtime-config.js"')).toBeLessThan(html.indexOf("</head>"));
   });
 

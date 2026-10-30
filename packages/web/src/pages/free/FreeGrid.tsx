@@ -12,7 +12,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AgentMention } from "@/lib/chat-types";
@@ -26,6 +26,8 @@ import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
+import { lazyWithReload } from "@/lib/lazy-with-reload";
+import { RouteLoadingSkeleton } from "@/shell/loading-skeletons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,10 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { emitSessionsChanged, usePinSession } from "@/lib/session-events";
-import { AppWidget } from "./AppWidget";
 import { ChatWidget } from "./ChatWidget";
-import { DesktopWidget } from "./DesktopWidget";
-import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { cn } from "@/lib/utils";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
@@ -65,6 +64,20 @@ import {
 } from "./workspace-context";
 import { createWorkspaceEventBus, WorkspaceEventBusContext } from "./workspace-event-bus";
 import { createWorkspaceStore, WorkspaceStoreContext } from "./workspace-store";
+
+// Widgets other than the chat only exist once the guardian adds one, and the
+// projects browser, the app host and the desktop viewer bring the file browser,
+// forms and the VNC client with them. Loading them on demand keeps all of that
+// out of the chat route's first download.
+const AppWidget = lazyWithReload(() =>
+  import("./AppWidget").then((m) => ({ default: m.AppWidget })),
+);
+const DesktopWidget = lazyWithReload(() =>
+  import("./DesktopWidget").then((m) => ({ default: m.DesktopWidget })),
+);
+const ProjectsWidget = lazyWithReload(() =>
+  import("./ProjectsWidget").then((m) => ({ default: m.ProjectsWidget })),
+);
 
 // App widgets render their real installed-app identity (icon + display name),
 // matching the sidebar pins and the composer context chips; the lucide grid is
@@ -94,7 +107,7 @@ function WidgetIcon({ widget, className }: { widget: WidgetPlacement; className?
   }
 }
 
-function WidgetContent({
+function WidgetContentSwitch({
   widget,
   dragging,
   sessionId,
@@ -135,6 +148,14 @@ function WidgetContent({
     default:
       return null;
   }
+}
+
+function WidgetContent(props: Parameters<typeof WidgetContentSwitch>[0]) {
+  return (
+    <Suspense fallback={<RouteLoadingSkeleton />}>
+      <WidgetContentSwitch {...props} />
+    </Suspense>
+  );
 }
 
 // The mobile header's pane toggle. It follows the pane's effective open state,

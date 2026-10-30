@@ -1,3 +1,7 @@
+// Both languages in memory before any test imports `@/i18n`, so `t()` answers
+// in the first render. The app itself downloads one language on demand.
+import "../i18n/register-all-locales";
+
 // jsdom implements neither ResizeObserver, scrollIntoView nor pointer capture.
 // cmdk's Command constructs the first on mount and calls the second whenever the
 // roving selection moves; Radix Select, Dialog and menus poke pointer capture.

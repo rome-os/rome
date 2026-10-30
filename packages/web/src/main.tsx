@@ -4,14 +4,18 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { ChunkErrorBoundary } from "./components/chunk-error-boundary";
 import { GuardianTimestampProvider } from "./components/guardian-timestamp-provider";
 import { ThemeProvider } from "./hooks/use-theme";
 import { initAnalytics } from "./lib/analytics";
+import { startEntryPrefetch } from "./lib/entry-prefetch";
+import { reloadForChunkFailure } from "./lib/lazy-with-reload";
 import { injectThemeCss } from "./lib/theme";
 import { queryClient } from "./lib/query-client";
 import { trackVisualViewport } from "./lib/visual-viewport";
+import { loadFreePage } from "./route-chunks";
 import "./globals.css";
-import "./i18n";
+import i18n, { i18nReady } from "./i18n";
 
 // Emit the per-theme token blocks before first render. The index.html bootstrap
 // has already replayed the active theme's cached CSS for a flash-free paint;
@@ -31,21 +35,33 @@ trackVisualViewport();
  * app renders: mock mode starts the MSW worker first, then calls this, so the
  * app stays on the main chunk and keeps Fast Refresh instead of being isolated
  * behind a dynamic import (see rome-os/rome#383).
+ *
+ * The first screen's requests start now and the render waits for the active
+ * language, which downloads as its own chunk. Nothing renders translated text
+ * before it lands, so no key flashes.
  */
 export function renderApp() {
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <DashboardScaleProvider>
-            <ThemeProvider>
-              <GuardianTimestampProvider>
-                <App />
-              </GuardianTimestampProvider>
-            </ThemeProvider>
-          </DashboardScaleProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
-    </StrictMode>,
-  );
+  startEntryPrefetch(window.location.pathname, queryClient, loadFreePage);
+  void i18nReady.then(() => {
+    // The language chunk is gone (a deploy replaced it under a stale tab):
+    // reload once for the new index.html rather than paint raw keys.
+    if (!i18n.hasResourceBundle(i18n.language, "common") && reloadForChunkFailure()) return;
+    createRoot(document.getElementById("root")!).render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <DashboardScaleProvider>
+              <ThemeProvider>
+                <GuardianTimestampProvider>
+                  <ChunkErrorBoundary>
+                    <App />
+                  </ChunkErrorBoundary>
+                </GuardianTimestampProvider>
+              </ThemeProvider>
+            </DashboardScaleProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+  });
 }

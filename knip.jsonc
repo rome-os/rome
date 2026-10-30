@@ -93,6 +93,13 @@
     },
     "packages/web": {
       "storybook": true,
+      // src/fonts.css names the font files in url() values, and the stylesheet
+      // is not an import Knip follows.
+      "ignoreDependencies": [
+        "@fontsource-variable/funnel-sans",
+        "@fontsource-variable/petrona",
+        "@fontsource/ibm-plex-mono"
+      ],
       // Knip 6.34's rstest plugin throws on the object form of
       // `testEnvironment`, which this workspace and packages/ui both use.
       // Upstream issue 2009. Declaring the test files by hand covers what the

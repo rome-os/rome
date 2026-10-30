@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./fonts.css";
 @import "@rome-os/rome-web-components/news-item/styles.css";
 /* The design-system CSS canon — semantic token vocabulary (`@theme inline`),
    the `@custom-variant` set (dark + Radix `data-*` shorthands), and base-layer

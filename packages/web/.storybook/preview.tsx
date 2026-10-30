@@ -1,6 +1,7 @@
 import type { Preview } from "storybook-react-rsbuild";
 import { useLayoutEffect, type ReactNode } from "react";
 import { I18nextProvider } from "react-i18next";
+import "../src/i18n/register-all-locales";
 import i18n, { getActiveLocale, LANGUAGE_LABELS, SUPPORTED_LANGUAGES } from "../src/i18n";
 import { storyLocale } from "./locale";
 import { ThemeProvider, useTheme } from "../src/hooks/use-theme";

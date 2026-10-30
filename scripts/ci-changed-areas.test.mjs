@@ -280,8 +280,9 @@ test("each shard job guards its steps on its own detection output", async () => 
     }
 
     // A missing guard runs setup or tests on a shard meant to stay idle.
-    // Core also installs rg for tests that invoke the real binary.
-    const expectedGuards = shard === "core" ? 5 : 4;
+    // Core also installs rg for tests that invoke the real binary. Web also
+    // builds the dashboard for the first-screen bundle budget.
+    const expectedGuards = shard === "core" || shard === "web" ? 5 : 4;
     assert.equal(
       runGuards.length,
       expectedGuards,

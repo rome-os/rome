@@ -11,6 +11,7 @@ Browse by surface:
 - [`suspensions.md`](suspensions.md) — How a parked action call, its card, and its resolution stay correlated across the chat seam, and the session split that keeps a handoff out of the parent thread.
 - [`access-control.md`](access-control.md) — The app and dashboard access policies, the fail-closed edge probe, and the visitor sign-in flow.
 - [`build.md`](build.md) — The generated runtime workspace and its closure boundary, the monorepo layout, and the first-party pre-pack step.
+- [`web-startup.md`](web-startup.md) — What the dashboard downloads and requests before its first screen, the rules that keep it small, and the entry prefetch.
 - [`channels.md`](channels.md) — The server-owned setup protocol every channel connects through, and the rules that keep the connect flow generic.
 - [`notification-delivery.md`](notification-delivery.md) — How mobile push travels from an instance through the central Rome Cloud broker to the platform push service (APNs for iOS, FCM for Android), and the account-scoping, content-enforcement, and delivery invariants that hold.
 - [`named-desktops.md`](named-desktops.md) — The fixed table of X displays kept for one owner each, the script that starts them so they outlive Rome, and the loopback and guardian-only rules for viewing them.

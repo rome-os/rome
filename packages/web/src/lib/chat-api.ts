@@ -158,7 +158,7 @@ const inFlightReads = new Map<string, Promise<unknown>>();
  * nothing is cached once it settles, so a later call fetches fresh data.
  */
 function shareInFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
-  const pending = inFlightReads.get(key) as Promise<T> | undefined;
+  const pending = (inFlightReads.get(key) ?? takePrimedRead(key)) as Promise<T> | undefined;
   if (pending) return pending;
   const run = load().finally(() => {
     if (inFlightReads.get(key) === run) inFlightReads.delete(key);
@@ -167,12 +167,70 @@ function shareInFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
   return run;
 }
 
-export function getSession(sessionId: string): Promise<ChatSession | null> {
-  return shareInFlight(`session:${sessionId}`, async () => {
-    const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
-    if (res.status === 404) return null;
-    return jsonOrThrow<ChatSession>(res);
+interface PrimedRead {
+  promise: Promise<unknown>;
+  startedAt: number;
+  /** Set by the first consumer; later consumers within the share window get the same promise. */
+  takenAt: number | null;
+  failed: boolean;
+}
+
+const primedReads = new Map<string, PrimedRead>();
+/** A primed read nobody asked for within this window is dropped, so a later mount fetches fresh data. */
+const PRIMED_READ_TTL_MS = 30_000;
+/** After the first consumer, the primed result still serves siblings that mount in the same commit. */
+const PRIMED_READ_SHARE_MS = 1_000;
+
+function takePrimedRead(key: string): Promise<unknown> | undefined {
+  const entry = primedReads.get(key);
+  if (!entry) return undefined;
+  const now = Date.now();
+  const expired =
+    entry.failed ||
+    (entry.takenAt === null
+      ? now - entry.startedAt > PRIMED_READ_TTL_MS
+      : now - entry.takenAt > PRIMED_READ_SHARE_MS);
+  if (expired) {
+    primedReads.delete(key);
+    return undefined;
+  }
+  entry.takenAt ??= now;
+  return entry.promise;
+}
+
+function primeRead(key: string, promise: Promise<unknown>): void {
+  const entry: PrimedRead = { promise, startedAt: Date.now(), takenAt: null, failed: false };
+  primedReads.set(key, entry);
+  // A failed read (signed out, offline) must not reach a consumer: the mount
+  // that follows asks again and sees the real error.
+  promise.catch(() => {
+    entry.failed = true;
   });
+}
+
+async function fetchSession(sessionId: string): Promise<ChatSession | null> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
+  if (res.status === 404) return null;
+  return jsonOrThrow<ChatSession>(res);
+}
+
+export function getSession(sessionId: string): Promise<ChatSession | null> {
+  return shareInFlight(`session:${sessionId}`, () => fetchSession(sessionId));
+}
+
+const latestPageKey = (sessionId: string, limit: number) => `messages:${sessionId}:${limit}`;
+
+/**
+ * Starts the two reads a chat makes when it mounts, ahead of the chat code
+ * itself. The matching `getSession` and first-page `listSessionMessagePage`
+ * call adopts the result once, so a chat that mounts later does not repeat the
+ * request. `limit` must equal the page size the chat will ask for, or the
+ * messages read is wasted. Failures are swallowed here and surface on the
+ * chat's own read.
+ */
+export function primeChatOpenReads(sessionId: string, limit: number): void {
+  primeRead(`session:${sessionId}`, fetchSession(sessionId));
+  primeRead(latestPageKey(sessionId, limit), fetchMessagePage(sessionId, { limit }));
 }
 
 /**
@@ -199,7 +257,18 @@ export interface ChatMessagePage {
  * The newest `limit` turns of a session, or the `limit` turns before `before`.
  * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
  */
-export async function listSessionMessagePage(
+export function listSessionMessagePage(
+  sessionId: string,
+  options: { limit: number; before?: string | null },
+): Promise<ChatMessagePage | null> {
+  if (!options.before) {
+    const primed = takePrimedRead(latestPageKey(sessionId, options.limit));
+    if (primed) return primed as Promise<ChatMessagePage | null>;
+  }
+  return fetchMessagePage(sessionId, options);
+}
+
+async function fetchMessagePage(
   sessionId: string,
   options: { limit: number; before?: string | null },
 ): Promise<ChatMessagePage | null> {

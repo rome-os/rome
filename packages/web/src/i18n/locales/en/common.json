@@ -199,6 +199,12 @@
     "switchToLight": "Switch to light theme",
     "switchToDark": "Switch to dark theme"
   },
+  "routeLoading": "Loading…",
+  "chunkError": {
+    "title": "Page failed to load",
+    "description": "A file did not download, usually after an update or a lost connection",
+    "reload": "Reload"
+  },
   "backendUnreachable": {
     "title": "Rome is unreachable",
     "description": "The dashboard can't reach the Rome service right now. The page will retry automatically — if this persists, check that Rome is running.",

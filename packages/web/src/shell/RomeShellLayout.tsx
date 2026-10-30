@@ -13,9 +13,11 @@ import {
   useEffect,
   useRef,
   useState,
+  Suspense,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { ChunkErrorBoundary } from "../components/chunk-error-boundary";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
@@ -27,6 +29,7 @@ import { ChatSearchDialog } from "./ChatSearchDialog";
 import { DesktopTitlebar } from "./DesktopTitlebar";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
+import { RouteLoadingSkeleton } from "./loading-skeletons";
 import { RailLabelsContext } from "./sidebar-shared";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
@@ -410,7 +413,11 @@ export function RomeShellLayout() {
   // between navigating and the chunk arriving.
   const routed = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Outlet />
+      <ChunkErrorBoundary>
+        <Suspense fallback={<RouteLoadingSkeleton />}>
+          <Outlet />
+        </Suspense>
+      </ChunkErrorBoundary>
     </div>
   );
 

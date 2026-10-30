@@ -5,6 +5,7 @@ import { BACKEND_RETRY_INTERVAL_MS, hasSession, useAuthState } from "../lib/auth
 import { reportDetectedTimezoneOnce } from "../lib/guardian-timezone";
 import { rememberLoginReturn } from "../lib/login-return";
 import { BackendUnreachableScreen } from "../components/backend-unreachable";
+import { AppLoadingSkeleton } from "./loading-skeletons";
 
 interface PublicAppProbe {
   pathname: string;
@@ -77,7 +78,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [location.pathname]);
 
   if (!state.ready) {
-    return null;
+    return <AppLoadingSkeleton />;
   }
 
   if (!state.backendReachable || !state.bootstrap) {

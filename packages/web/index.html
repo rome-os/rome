@@ -33,18 +33,11 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="theme-color" content="#f4f3ef" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Funnel+Sans:wght@300;400;500;600;700&family=Petrona:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-    />
     <style>
       /* Mirror globals.css's `html { font-family: var(--font-sans) }` inline so
-         the font match (and the woff2 subset download) starts as soon as the
-         Google Fonts stylesheet lands — without waiting for the rome-web CSS
-         bundle to parse or React to mount. Kept in sync with --font-sans in
-         globals.css. */
+         the first paint uses the right stack before the rome-web CSS bundle
+         parses. The @font-face rules are in src/fonts.css. Kept in sync with
+         --font-sans in globals.css. */
       html {
         font-family:
           "Funnel Sans",
@@ -102,9 +95,11 @@
          the committed public/ copy is an empty stub for dev servers and host
          runs; the container-boot script overwrites it in the web root, which is
          the only delivery that survives Caddy's file_server serving this shell
-         straight from disk. Classic sync script so config exists before the
-         bundle runs. -->
-    <script src="/runtime-config.js"></script>
+         straight from disk. A deferred classic script runs before the module
+         bundle, which defers too and comes later in the document, so config
+         exists before the bundle runs without blocking the parser on the
+         request. -->
+    <script defer src="/runtime-config.js"></script>
     <script>
       // No-flash bootstrap. Runs during head parse, before first paint. Seeds
       // the mode (.dark + color-scheme) and the theme (data-theme), then replays

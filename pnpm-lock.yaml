@@ -885,6 +885,15 @@ importers:
 
   packages/web:
     dependencies:
+      '@fontsource-variable/funnel-sans':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@fontsource-variable/petrona':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@fontsource/ibm-plex-mono':
+        specifier: 5.3.0
+        version: 5.3.0
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -3191,6 +3200,15 @@ packages:
 
   '@floating-ui/utils@0.2.11':
     resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
+
+  '@fontsource-variable/funnel-sans@5.3.0':
+    resolution: {integrity: sha512-NOgHy3KWMAJdl33XSESit33nI8vlFZh8/0E3tLD7z5jJA5gQoLeUkFcZtxehVVkyYpAZ747tF8O/kAHXXa96ZA==}
+
+  '@fontsource-variable/petrona@5.3.0':
+    resolution: {integrity: sha512-GgXjpWkw/7xnWfBDE1CqPPybuND11bn8WICzTyrRe48F91/+5ElGAaf3OxzN1+bbWWOLas771FeCNkwfHv/e6Q==}
+
+  '@fontsource/ibm-plex-mono@5.3.0':
+    resolution: {integrity: sha512-eTgnZjZEGk1QtD3ZstF+Vclo2HLAni8YMy34/DxllwZvyz1lR/1RF/xTiAquOBO7MvqBx8D2Ig2WCPMVfdZu7Q==}
 
   '@grammyjs/types@3.24.0':
     resolution: {integrity: sha512-qQIEs4lN5WqUdr4aT8MeU6UFpMbGYAvcvYSW1A4OO1PABGJQHz/KLON6qvpf+5RxaNDQBxiY2k2otIhg/AG7RQ==}
@@ -15552,6 +15570,12 @@ snapshots:
       react-dom: 19.2.6(react@19.2.6)
 
   '@floating-ui/utils@0.2.11': {}
+
+  '@fontsource-variable/funnel-sans@5.3.0': {}
+
+  '@fontsource-variable/petrona@5.3.0': {}
+
+  '@fontsource/ibm-plex-mono@5.3.0': {}
 
   '@grammyjs/types@3.24.0': {}
 

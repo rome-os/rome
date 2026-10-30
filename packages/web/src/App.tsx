@@ -1,6 +1,6 @@
 import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
 import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
-import { lazy, Suspense, useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { SlotProvider } from "./components/slot";
@@ -9,48 +9,52 @@ import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
-import FreePage from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
+import { lazyWithReload } from "./lib/lazy-with-reload";
+import { loadFreePage } from "./route-chunks";
 
-// /chat is the home route and what the first-load trace targets, so FreePage +
-// the shell stay eager. Every other route is split into its own chunk so the
-// initial bundle for /chat doesn't ship Settings, People, Memory, Apps, etc.
-const LoginPage = lazy(() => import("./pages/LoginPage"));
-const ConnectPage = lazy(() => import("./pages/ConnectPage"));
-const OnboardPage = lazy(() => import("./pages/OnboardPage"));
-const CallbackPage = lazy(() => import("./pages/CallbackPage"));
-const SharePage = lazy(() => import("./pages/share/SharePage"));
-const PeoplePage = lazy(() => import("./pages/PeoplePage"));
-const EnvoysPage = lazy(() => import("./pages/envoys/EnvoysPage"));
+// The shell (sidebar, auth gate) is the only eager UI. Every route, /chat
+// included, is its own chunk, so the first paint doesn't wait for the chat,
+// markdown and file-browser code. The /chat chunks are named so
+// `route-preload-plugin.ts` can start their download from the HTML, and
+// `entry-prefetch.ts` joins that download rather than starting a second one.
+const FreePage = lazyWithReload(loadFreePage);
+const LoginPage = lazyWithReload(() => import("./pages/LoginPage"));
+const ConnectPage = lazyWithReload(() => import("./pages/ConnectPage"));
+const OnboardPage = lazyWithReload(() => import("./pages/OnboardPage"));
+const CallbackPage = lazyWithReload(() => import("./pages/CallbackPage"));
+const SharePage = lazyWithReload(() => import("./pages/share/SharePage"));
+const PeoplePage = lazyWithReload(() => import("./pages/PeoplePage"));
+const EnvoysPage = lazyWithReload(() => import("./pages/envoys/EnvoysPage"));
 // The /people redirect lives with the views it forwards to, so the paths are
 // written once; it rides their chunk, which is the one about to render anyway.
-const PeopleIndexRedirect = lazy(() =>
+const PeopleIndexRedirect = lazyWithReload(() =>
   import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
 );
-const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
-const AssistantsPage = lazy(() => import("./pages/AssistantsPage"));
-const MemoryPage = lazy(() => import("./pages/MemoryPage"));
-const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
-const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
-const RoutineDetailPage = lazy(() => import("./pages/RoutineDetailPage"));
-const SessionsPage = lazy(() => import("./pages/SessionsPage"));
-const AppsIndexPage = lazy(() => import("./pages/AppsIndexPage"));
-const AppDetailPage = lazy(() => import("./pages/AppDetailPage"));
-const InboxPage = lazy(() => import("./pages/InboxPage"));
-const AppInstallConfirmPage = lazy(() => import("./pages/AppInstallConfirmPage"));
-const AppRemixConfirmPage = lazy(() => import("./pages/AppRemixConfirmPage"));
-const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
-const AppFullPage = lazy(() => import("./pages/AppFullPage"));
-const DesktopPage = lazy(() => import("./pages/DesktopPage"));
-const WechatDesktopPage = lazy(() => import("./pages/WechatDesktopPage"));
-const NamedDesktopPage = lazy(() =>
+const PersonDetailPage = lazyWithReload(() => import("./pages/PersonDetailPage"));
+const AssistantsPage = lazyWithReload(() => import("./pages/AssistantsPage"));
+const MemoryPage = lazyWithReload(() => import("./pages/MemoryPage"));
+const ProjectsPage = lazyWithReload(() => import("./pages/ProjectsPage"));
+const RoutinesPage = lazyWithReload(() => import("./pages/RoutinesPage"));
+const RoutineDetailPage = lazyWithReload(() => import("./pages/RoutineDetailPage"));
+const SessionsPage = lazyWithReload(() => import("./pages/SessionsPage"));
+const AppsIndexPage = lazyWithReload(() => import("./pages/AppsIndexPage"));
+const AppDetailPage = lazyWithReload(() => import("./pages/AppDetailPage"));
+const InboxPage = lazyWithReload(() => import("./pages/InboxPage"));
+const AppInstallConfirmPage = lazyWithReload(() => import("./pages/AppInstallConfirmPage"));
+const AppRemixConfirmPage = lazyWithReload(() => import("./pages/AppRemixConfirmPage"));
+const AppEmbeddedPage = lazyWithReload(() => import("./pages/AppEmbeddedPage"));
+const AppFullPage = lazyWithReload(() => import("./pages/AppFullPage"));
+const DesktopPage = lazyWithReload(() => import("./pages/DesktopPage"));
+const WechatDesktopPage = lazyWithReload(() => import("./pages/WechatDesktopPage"));
+const NamedDesktopPage = lazyWithReload(() =>
   import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
 );
-const SettingsPage = lazy(() => import("./pages/SettingsPage"));
-const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
-const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
-const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
-const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
+const SettingsPage = lazyWithReload(() => import("./pages/SettingsPage"));
+const SettingsTabPage = lazyWithReload(() => import("./pages/SettingsTabPage"));
+const ConnectionDetailPage = lazyWithReload(() => import("./pages/ConnectionDetailPage"));
+const DeviceActivityPage = lazyWithReload(() => import("./pages/DeviceActivityPage"));
+const AppKeysPage = lazyWithReload(() => import("./pages/AppKeysPage"));
 // Dev-only pages (src/pages/dev/). import.meta.env.DEV is statically false in
 // production builds, so the route entries below are dropped AND — because each
 // registry entry's lazy() dynamic import is only referenced from inside the
@@ -58,7 +62,7 @@ const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 // DEV_ROUTES is the single source of truth shared with the /dev index page:
 // add a dev page by adding one entry there, nothing here.
 const DevIndexPage = import.meta.env.DEV
-  ? lazy(() => import("./pages/dev/DevIndexPage"))
+  ? lazyWithReload(() => import("./pages/dev/DevIndexPage"))
   : () => null;
 
 export default function App() {
