@@ -1,6 +1,7 @@
 import { CONCIERGE_DONE_DAYS, type ConciergeTasksResponse } from "@rome/api-types/concierge";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -9,7 +10,7 @@ export const CONCIERGE_UNREAD_CAP = 100;
 /** The most days of finished rows a caller can ask the task list for. */
 const MAX_DONE_DAYS = 3650;
 
-export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">): Hono {
+export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webchatRepo">): Hono {
   const app = new Hono();
 
   // The single Concierge chat, created on first use, and how many agent
@@ -25,8 +26,12 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
   });
 
   // The Concierge's todo list: every open row whatever its age, and the
-  // finished ones of the last `doneDays` days. 404 while the setting is off.
+  // finished ones of the last `doneDays` days. Guardian-only, like the
+  // `concierge.tasks` socket topic; 404 while the setting is off.
   app.get("/concierge/tasks", async (c) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return c.json({ error: "Not authenticated" }, 401);
+    }
     const concierge = deps.concierge;
     if (!concierge || !(await concierge.isEnabled())) {
       return c.json({ error: "Concierge is off" }, 404);
@@ -39,8 +44,12 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "webchatRepo">
   });
 
   // The same `task_upsert` events as the `concierge.tasks` topic of the live
-  // events socket, for a tab that cannot open the socket.
+  // events socket, for a tab that cannot open the socket. Guardian-only, and
+  // the gate runs before the stream opens.
   app.get("/concierge/tasks/events", async (c) => {
+    if (!(await resolveGuardianSession(c, deps.db))) {
+      return c.json({ error: "Not authenticated" }, 401);
+    }
     const concierge = deps.concierge;
     if (!concierge || !(await concierge.isEnabled())) {
       return c.json({ error: "Concierge is off" }, 404);

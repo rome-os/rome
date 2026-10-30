@@ -68,7 +68,6 @@ export interface ConciergeDeps {
     | "addBackendMessage"
     | "setSessionTrigger"
     | "listProjects"
-    | "onMessageInserted"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;

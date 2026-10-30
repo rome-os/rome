@@ -74,7 +74,6 @@ function setup(
   const tasks = new ConciergeTasks(taskRepo);
   /** The real chat rows the task rows link to. */
   const storedChats = new WebChatRepository(testDb.db);
-  const messageListeners = new Set<(message: unknown) => void>();
   const approvalListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
   let fake = false;
@@ -150,10 +149,6 @@ function setup(
       ),
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
-      onMessageInserted: (listener: (message: unknown) => void) => {
-        messageListeners.add(listener);
-        return () => messageListeners.delete(listener);
-      },
     },
     tasks,
     approvals: {
@@ -261,10 +256,6 @@ function setup(
     fakeTimers: () => {
       fake = true;
       rs.useFakeTimers();
-    },
-    /** A message the chat stored, as the dashboard's repository announces it. */
-    insertMessage: (message: Record<string, unknown>) => {
-      for (const listener of messageListeners) listener(message);
     },
     createApproval: (approval: Record<string, unknown>) => {
       for (const listener of approvalListeners) listener(approval);
@@ -858,38 +849,33 @@ describe("Concierge events", () => {
     expect(prompt).toContain("question: Which airport? (options: LIS | OPO)");
   });
 
-  it("holds the guardian's own message in a task chat, and ignores the Concierge's own inputs", async () => {
+  it("tells the Concierge what the guardian said in a task chat, read from the turn's own rows", async () => {
     const s = setup();
-    const { chatId } = await startTask(s);
+    const { chatId, taskId } = await startTask(s);
+    // The real repository, as the dashboard stores it: the guardian's input is
+    // recorded through the user-input path, which announces nothing, and the
+    // turn that takes it in is assigned afterwards.
+    s.deps.webchatRepo.getTurnChatMessages = (id: string, turnId: string) =>
+      s.storedChats.getTurnChatMessages(id, turnId);
+    await s.storedChats.recordUserInput(
+      "input-g1",
+      chatId,
+      JSON.stringify([{ type: "text", content: "Make it a window seat" }]),
+    );
+    await s.storedChats.updateUserInput(chatId, {
+      type: "input_status",
+      inputId: "input-g1",
+      state: "accepted",
+      turnId: "guardian-turn",
+    });
     s.fakeTimers();
-    s.insertMessage({
-      sessionId: chatId,
-      role: "user",
-      senderId: CONCIERGE_ACCOUNT.id,
-      content: "[]",
-    });
-    s.insertMessage({ sessionId: chatId, role: "assistant", senderId: null, content: "[]" });
-    s.insertMessage({
-      sessionId: "other-chat",
-      role: "user",
-      senderId: null,
-      content: JSON.stringify([{ type: "text", content: "not a task chat" }]),
-    });
-    await s.settle();
-    await rs.advanceTimersByTimeAsync(61_000);
-    expect(s.backendTurns).toEqual([]);
-
-    s.insertMessage({
-      sessionId: chatId,
-      role: "user",
-      senderId: null,
-      content: JSON.stringify([{ type: "text", content: "Make it a window seat" }]),
-    });
-    await s.settle();
+    await s.finish({ turnId: "guardian-turn", agentName: "core:main", chatId });
     await rs.advanceTimersByTimeAsync(59_000);
     expect(s.backendTurns).toEqual([]);
     await rs.advanceTimersByTimeAsync(2_000);
-    expect(s.backendTurns[0].prompt).toContain('changes="guardian_message"');
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(`<task id="${taskId}"`);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
     expect(s.backendTurns[0].prompt).toContain("guardian: Make it a window seat");
     expect(s.quietFlags).toEqual([true]);
   });
@@ -999,7 +985,7 @@ describe("Concierge events", () => {
     const s = setup({ enabled: false });
     await s.taskRepo.upsertMany([{ title: "Row" }]);
     s.fakeTimers();
-    s.insertMessage({ sessionId: "task-1", role: "user", senderId: null, content: "[]" });
+    await s.finish({ turnId: "t", agentName: "core:main", chatId: "task-1", text: "x" });
     await rs.advanceTimersByTimeAsync(120_000);
     expect(s.backendTurns).toEqual([]);
   });

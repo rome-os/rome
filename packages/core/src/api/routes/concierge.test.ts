@@ -4,6 +4,7 @@ import type { ConciergeService } from "../../concierge/service.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
+import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
 
@@ -22,7 +23,7 @@ describe("GET /concierge/session", () => {
         return "concierge";
       },
     } as unknown as ConciergeService;
-    return new Hono().route("/", conciergeRoutes({ concierge, webchatRepo }));
+    return new Hono().route("/", conciergeRoutes({ concierge, db: testDb.db, webchatRepo }));
   };
 
   beforeEach(() => {
@@ -81,6 +82,7 @@ describe("GET /concierge/session", () => {
 
 describe("GET /concierge/tasks", () => {
   const DAY = 86_400_000;
+  const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
   let testDb: TestDb;
   let repo: ConciergeTasksRepository;
   let enabled: boolean;
@@ -92,12 +94,16 @@ describe("GET /concierge/tasks", () => {
     } as unknown as ConciergeService;
     return new Hono().route(
       "/",
-      conciergeRoutes({ concierge, webchatRepo: new WebChatRepository(testDb.db) }),
+      conciergeRoutes({
+        concierge,
+        db: testDb.db,
+        webchatRepo: new WebChatRepository(testDb.db),
+      }),
     );
   };
   const titles = async (query = "") =>
     (
-      (await (await app().request(`/concierge/tasks${query}`)).json()) as {
+      (await (await app().request(`/concierge/tasks${query}`, guardian)).json()) as {
         tasks: Array<{ title: string }>;
       }
     ).tasks
@@ -142,7 +148,7 @@ describe("GET /concierge/tasks", () => {
     await chats.createSession("chat-1", "Chat one");
     const [row] = await repo.upsertMany([{ title: "Linked", state: "doing", sessionId: "chat-1" }]);
     await chats.updateSessionName("chat-1", "Renamed");
-    const body = (await (await app().request("/concierge/tasks")).json()) as {
+    const body = (await (await app().request("/concierge/tasks", guardian)).json()) as {
       tasks: Array<{ id: string; chat: unknown }>;
     };
     expect(body.tasks.find((task) => task.id === row.id)?.chat).toEqual({
@@ -155,6 +161,26 @@ describe("GET /concierge/tasks", () => {
 
   it("404s while Concierge is off", async () => {
     enabled = false;
-    expect((await app().request("/concierge/tasks")).status).toBe(404);
+    expect((await app().request("/concierge/tasks", guardian)).status).toBe(404);
+    expect((await app().request("/concierge/tasks/events", guardian)).status).toBe(404);
+  });
+
+  it("answers 401 to a caller that is not the guardian, on the list and on its event stream", async () => {
+    for (const path of ["/concierge/tasks", "/concierge/tasks/events"]) {
+      const anonymous = await app().request(path);
+      expect(anonymous.status).toBe(401);
+      expect(await anonymous.json()).toEqual({ error: "Not authenticated" });
+      // A cookie that does not verify is no better than none.
+      const forged = await app().request(path, { headers: { Cookie: `${COOKIE_NAME}=forged` } });
+      expect(forged.status).toBe(401);
+    }
+  });
+
+  it("serves the list and opens the event stream for the guardian", async () => {
+    expect((await app().request("/concierge/tasks", guardian)).status).toBe(200);
+    const stream = await app().request("/concierge/tasks/events", guardian);
+    expect(stream.status).toBe(200);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    await stream.body?.cancel();
   });
 });

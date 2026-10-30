@@ -180,6 +180,10 @@ export function startConciergeEvents(
     // as Concierge's account.
     const started = userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id);
     const by = started ? "concierge" : userRows.length > 0 ? "guardian" : "system";
+    // The guardian's own words reach the chat through the user-input path, which
+    // announces nothing, so they are read from the rows of the turn they started.
+    const words = userRows.map((row) => userText(row.content)).join(" | ");
+    const said = by === "guardian" ? `guardian: ${excerpt(words, DETAIL_EXCERPT_CHARS)}` : null;
     const question = event.status === "completed" ? openQuestion(rows) : null;
     if (question) {
       const options = question.options?.length ? ` (options: ${question.options.join(" | ")})` : "";
@@ -187,7 +191,7 @@ export function startConciergeEvents(
         taskId,
         kind: `turn_end:completed question by=${by}`,
         urgent: true,
-        detail: `question: ${question.question}${options}`,
+        detail: [said, `question: ${question.question}${options}`].filter(Boolean).join("\n"),
       });
       return;
     }
@@ -197,24 +201,7 @@ export function startConciergeEvents(
       // A result the Concierge asked for, or an error, is worth telling now.
       // The guardian's own turns, scheduled ones and a stop wait.
       urgent: event.status === "error" || (event.status === "completed" && started),
-    });
-  };
-
-  const onGuardianMessage = async (message: {
-    sessionId: string;
-    role: string;
-    senderId?: string | null;
-    content: string;
-  }) => {
-    if (message.role !== "user" || message.senderId === CONCIERGE_ACCOUNT.id) return;
-    if (!(await service.isEnabled())) return;
-    const taskId = await taskOf(message.sessionId);
-    if (!taskId) return;
-    coalescer.mark({
-      taskId,
-      kind: "guardian_message",
-      urgent: false,
-      detail: `guardian: ${excerpt(userText(message.content), DETAIL_EXCERPT_CHARS)}`,
+      ...(said ? { detail: said } : {}),
     });
   };
 
@@ -260,9 +247,6 @@ export function startConciergeEvents(
     tasks.repo.onChange(({ row }, change) => {
       if (change === "write") coalescer.settle(row.id);
     }),
-    webchatRepo.onMessageInserted(
-      (message) => void guard("guardian message", onGuardianMessage(message)),
-    ),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
     dispatcher.onFinished((event) => {
       const thread = event.turn.threadContext;
