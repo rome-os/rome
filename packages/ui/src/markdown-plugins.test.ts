@@ -70,13 +70,13 @@ beforeEach(() => {
 });
 
 describe("markdown plugins", () => {
-  it("starts with only the mermaid stand-in", async () => {
+  it("starts with the CJK plugin and the mermaid stand-in", async () => {
     const store = await loadStore();
     store.requestMarkdownPlugins("Plain prose that costs $5.");
     await Promise.resolve();
 
     const plugins = store.getMarkdownPlugins();
-    expect(Object.keys(plugins)).toEqual(["mermaid"]);
+    expect(Object.keys(plugins)).toEqual(["cjk", "mermaid"]);
     expect(plugins.mermaid).not.toBe(fakes.mermaid);
   });
 
