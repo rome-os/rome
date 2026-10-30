@@ -11,6 +11,9 @@
       "categoryRelationships": "关系",
       "categoryJournal": "日志",
       "categoryProjects": "项目",
+      "dreamHeading": "Dream",
+      "dreamDescription": "Rome 每三天会回顾一次最近的聊天，更新这里的记忆，修复出问题的 app，并把重复的工作保存为技能。",
+      "dreamLink": "查看它改了什么",
       "backupHeading": "备份",
       "backupHint": "在 GitHub 上保留一份私有、带版本历史的副本。",
       "deviceNote": "渠道关联仅保留在本机，不会被备份。"

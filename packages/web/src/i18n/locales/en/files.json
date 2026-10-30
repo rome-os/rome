@@ -11,6 +11,9 @@
       "categoryRelationships": "Relationships",
       "categoryJournal": "Journal",
       "categoryProjects": "Projects",
+      "dreamHeading": "Dream",
+      "dreamDescription": "Every three days, Rome reviews your recent chats, updates this memory, fixes apps that broke, and saves repeated work as skills.",
+      "dreamLink": "See what changed",
       "backupHeading": "Backup",
       "backupHint": "Keep a private, versioned copy on GitHub.",
       "deviceNote": "Channel links stay on this device and aren't backed up."
