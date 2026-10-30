@@ -1,12 +1,12 @@
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-  <rect width="24" height="24" rx="5.5" fill="#eee5f9"/>
+  <rect width="24" height="24" rx="5.5" fill="#efe9e1"/>
   <g transform="translate(4.32 4.32) scale(0.64)">
-    <g fill="none" stroke="#60487b" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
+    <g fill="none" stroke="#1a130f" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
       <rect width="7" height="7" x="3" y="3" rx="1.5"/>
       <rect width="7" height="7" x="14" y="3" rx="1.5"/>
       <rect width="7" height="7" x="3" y="14" rx="1.5"/>
     </g>
-    <g fill="#60487b">
+    <g fill="#1a130f">
       <path d="M17.5 12.5c.45 2.7 1.3 3.55 4 4-2.7.45-3.55 1.3-4 4-.45-2.7-1.3-3.55-4-4 2.7-.45 3.55-1.3 4-4Z"/>
     </g>
   </g>

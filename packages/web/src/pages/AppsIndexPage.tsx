@@ -374,11 +374,12 @@ export default function AppsIndexPage() {
           </DropdownMenuItem>
         }
         icon={
-          entry.tileIconUrl ? (
-            <TileIcon size="lg" kind="image" displayName={label} iconUrl={entry.tileIconUrl} />
-          ) : (
-            <TileIcon size="lg" kind="builtin" displayName={label} BuiltinIcon={entry.Icon} />
-          )
+          <TileIcon
+            size="lg"
+            kind="builtin"
+            displayName={label}
+            BuiltinIcon={entry.TileGlyph ?? entry.Icon}
+          />
         }
         name={label}
       />
