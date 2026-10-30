@@ -321,10 +321,9 @@
 /* The sidebar's running mark. It rotates the HTML box that holds the icon,
    not the SVG: Chrome runs a transform animation on an SVG on the main thread,
    which paints and layerizes the whole page on every display frame. On an
-   HTML box the compositor runs it, and with twelve steps a second it draws
-   only twelve frames. */
+   HTML box the compositor runs it and the main thread stays idle. */
 .rome-status-spin {
-  animation: rome-status-spin 1s steps(12) infinite;
+  animation: rome-status-spin 1s linear infinite;
 }
 
 @keyframes rome-status-spin {
