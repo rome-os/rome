@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { ReplyButton } from "@/components/chat/reply/ReplyButton";
@@ -11,7 +12,7 @@ import { formatMessageTimestamp } from "@/lib/message-timestamp";
  * devices in the row a tap opens under it. `feedbackTurn` is null where there
  * is nothing to rate; `reply` is null where the bubble has no Reply.
  */
-export function ConciergeMessageMeta({
+export const ConciergeMessageMeta = memo(function ConciergeMessageMeta({
   copyText,
   createdAt,
   feedbackTurn,
@@ -48,4 +49,4 @@ export function ConciergeMessageMeta({
       ) : null}
     </div>
   );
-}
+});

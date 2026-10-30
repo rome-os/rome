@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { createRef, type Ref } from "react";
+import { createRef, useState, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,6 +12,7 @@ import {
   type NewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
+import * as coarsePointerModule from "@/hooks/use-coarse-pointer" with { rstest: "importActual" };
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -20,6 +21,15 @@ import {
 } from "./ChatComposer";
 import { ReplyDraftHarness } from "./reply/reply-draft-harness";
 import type { ReplyTarget } from "./reply/reply-draft";
+
+// The composer reads this once each time it renders.
+const composerRenders = rs.hoisted(() => ({ count: 0 }));
+rs.mock("@/hooks/use-coarse-pointer", () => ({
+  useCoarsePointer: () => {
+    composerRenders.count += 1;
+    return coarsePointerModule.useCoarsePointer();
+  },
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -68,12 +78,9 @@ interface RenderComposerOptions {
   people?: PersonResource[];
 }
 
-function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-  const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
-    input: RequestInfo | URL,
-  ) => {
+/** Answers the requests a mounted composer makes. */
+function mockComposerFetch(options: RenderComposerOptions = {}) {
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === "/api/settings") {
       const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
@@ -109,6 +116,12 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
     }
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
+}
+
+function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  const fetchSpy = mockComposerFetch(options);
 
   return {
     fetchSpy,
@@ -1363,5 +1376,40 @@ describe("composer reply", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
 
     expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
+  });
+});
+
+describe("ChatComposer when the chat around it renders", () => {
+  it("is not drawn again for a render that hands it the same props", async () => {
+    mockComposerFetch();
+    const props: ChatComposerProps = { onSend: rs.fn(), isStreaming: true, onStop: rs.fn() };
+    function Chat() {
+      const [renders, setRenders] = useState(0);
+      return (
+        <>
+          <button type="button" onClick={() => setRenders((count) => count + 1)}>
+            {`chat render ${renders}`}
+          </button>
+          <ChatComposer {...props} />
+        </>
+      );
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Chat />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("textbox");
+    composerRenders.count = 0;
+
+    for (let i = 0; i < 20; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /chat render/ }));
+    }
+
+    expect(screen.getByRole("button", { name: "chat render 20" })).toBeTruthy();
+    expect(composerRenders.count).toBe(0);
   });
 });

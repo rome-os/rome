@@ -318,7 +318,13 @@ export function readMarkdownMermaidTheme(theme?: MarkdownTheme): MermaidTheme {
 
 const EMPTY_MERMAID_THEME: MermaidTheme = { fontFamily: "", themeVariables: {} };
 
-const THEME_ROOT_ATTRIBUTES = ["class", "data-theme", "style"];
+// What re-themes the page: a class ("dark") or a data-theme name on <html>. Its
+// inline style is not one of them, and the page writes to it often (see
+// lib/visual-viewport.ts in the dashboard), each time invalidating every
+// resolved theme. A custom root has no such stylesheet, so there the inline
+// style may carry the tokens.
+const DOCUMENT_THEME_ATTRIBUTES = ["class", "data-theme"];
+const CUSTOM_ROOT_THEME_ATTRIBUTES = [...DOCUMENT_THEME_ATTRIBUTES, "style"];
 
 interface ResolvedMermaidTheme {
   theme: MermaidTheme;
@@ -357,7 +363,13 @@ function subscribeToThemeRoot(root: Element, listener: () => void): () => void {
       for (const entry of store.byTokens.values()) entry.stale = true;
       for (const notify of store.listeners) notify();
     });
-    observer.observe(root, { attributes: true, attributeFilter: THEME_ROOT_ATTRIBUTES });
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter:
+        root === root.ownerDocument.documentElement
+          ? DOCUMENT_THEME_ATTRIBUTES
+          : CUSTOM_ROOT_THEME_ATTRIBUTES,
+    });
     store.observer = observer;
   }
   return () => {

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ChatMessage } from "@/lib/chat-types";
 import "@/i18n";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import type { ChatRow } from "./chat-view";
@@ -70,7 +71,7 @@ const idle = {
   isStreaming: false,
   runningTurnId: null,
   snapshot: null,
-  text: "",
+  textStore: EMPTY_LIVE_TEXT,
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 

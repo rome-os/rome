@@ -74,7 +74,7 @@ function originOf(part: TranscriptPart): ForwardedFrom | undefined {
 // with a toggle when it is tall. A forwarded report is a bubble of its own with
 // a quote's gray left edge and a chip that names its task chat; the intro that
 // came with it is the bubble above. Task chat cards render as they do anywhere.
-function AgentEntry({
+const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
   rateable,
@@ -177,14 +177,14 @@ function AgentEntry({
       </ConciergeBubble>
     );
   });
-}
+});
 
 /**
  * One stretch of messages from a single sender, packed close together. The
  * guardian's bubbles align to the end, the agent's to the start. `typing` is
  * the agent's typing bubble, drawn after its messages.
  */
-export function ConciergeGroup({
+export const ConciergeGroup = memo(function ConciergeGroup({
   group,
   actions,
   runningTurnId,
@@ -227,4 +227,4 @@ export function ConciergeGroup({
       {group.typing ? typing : null}
     </div>
   );
-}
+});

@@ -11,6 +11,7 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 import { type AgentIdentity, buildRows } from "./chat-view";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import type { BlockActions, LivePreview } from "./MessageList";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
 
@@ -21,7 +22,7 @@ const live: LivePreview = {
   isStreaming: false,
   runningTurnId: null,
   snapshot: null,
-  text: "",
+  textStore: EMPTY_LIVE_TEXT,
   identity: IDENTITY,
 };
 const actions: BlockActions = {

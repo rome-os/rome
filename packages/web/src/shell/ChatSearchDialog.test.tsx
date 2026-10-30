@@ -9,9 +9,19 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { toast } from "sonner";
 import i18n from "@/i18n";
 import type { AgentCatalogGroup, ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
+import * as timestampModule from "@/lib/message-timestamp" with { rstest: "importActual" };
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { chatSearchShortcutForPlatform, isChatSearchShortcut } from "@/lib/chat-search-shortcut";
 import { agentMentionQuery, ChatSearchDialog, matchRanges } from "./ChatSearchDialog";
+
+// Counts timestamp formatting, which every drawn chat row does.
+const formatted = rs.hoisted(() => ({ count: 0 }));
+rs.mock("@/lib/message-timestamp", () => ({
+  formatMessageTimestamp: (...args: Parameters<typeof timestampModule.formatMessageTimestamp>) => {
+    formatted.count += 1;
+    return timestampModule.formatMessageTimestamp(...args);
+  },
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -228,10 +238,11 @@ describe("ChatSearchDialog", () => {
     renderSearch("/chat/current", true);
 
     const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
-    expect(fetchSpy).toHaveBeenCalledWith("/api/chat/sessions?status=all", {
-      credentials: "include",
-    });
-    expect(screen.getByText("Current")).toBeTruthy();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/chat/sessions?status=all",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(await screen.findByText("Current")).toBeTruthy();
 
     await user.type(input, "clients acme");
 
@@ -1112,5 +1123,70 @@ describe("ChatSearchDialog agent catalog errors", () => {
     const written = watch.stop();
     expect(written.filter((text) => text.includes("Agents couldn't be loaded"))).toEqual([]);
     expect(written.some((text) => text.includes("Loading agents…"))).toBe(true);
+  });
+});
+
+describe("ChatSearchDialog with many chats", () => {
+  // Newest first: "Deploy report 0" is the most recent, "Deploy report 299" the oldest.
+  const many = Array.from({ length: 300 }, (_, index) =>
+    chatSession(`chat-${index}`, `Deploy report ${index}`, "work/rome", {
+      activityAt: new Date(Date.UTC(2026, 6, 14, 10) - index * 60_000).toISOString(),
+    }),
+  );
+
+  it("draws a capped list however many chats match, and narrowing still finds an old one", async () => {
+    mockSessionSearch(many);
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+
+    await user.type(input, "deploy");
+    expect(screen.getAllByRole("option")).toHaveLength(50);
+    expect(
+      screen
+        .getAllByRole("option")
+        .some((option) => option.textContent?.includes("Deploy report 299")),
+    ).toBe(false);
+
+    await user.clear(input);
+    await user.type(input, "report 299");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toContain("Deploy report 299");
+  });
+
+  it("does not format the timestamps of rows a keystroke leaves as they were", async () => {
+    mockSessionSearch(many);
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    await user.type(input, "deploy");
+    expect(screen.getAllByRole("option")).toHaveLength(50);
+
+    // Every chat still matches and ranks as before, so the same rows stay.
+    formatted.count = 0;
+    await user.type(input, " r");
+    expect(screen.getAllByRole("option")).toHaveLength(50);
+    expect(formatted.count).toBe(0);
+  });
+
+  it("keeps the list across closing and opening, refetching behind it", async () => {
+    const fetchSpy = mockSessionSearch(many);
+    const user = userEvent.setup();
+    renderSearch("/chat", false);
+    await user.click(screen.getByRole("button", { name: "Open search" }));
+    await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(10));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Open search" }));
+    // The cached chats show at once, with no loading state in between.
+    expect(screen.getAllByRole("option")).toHaveLength(10);
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.filter(([url]) => String(url) === "/api/chat/sessions?status=all"),
+      ).toHaveLength(2),
+    );
   });
 });

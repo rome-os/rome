@@ -1,7 +1,8 @@
+import { memo } from "react";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
 /** A centered time line between two stretches of conversation. */
-export function ConciergeTimeSeparator({ at }: { at: string }) {
+export const ConciergeTimeSeparator = memo(function ConciergeTimeSeparator({ at }: { at: string }) {
   const label = formatMessageTimestamp(at);
   if (!label) return null;
   return (
@@ -10,4 +11,4 @@ export function ConciergeTimeSeparator({ at }: { at: string }) {
       <time dateTime={at}>{label}</time>
     </p>
   );
-}
+});

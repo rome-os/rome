@@ -1,10 +1,13 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, useImperativeHandle, type ReactNode } from "react";
+import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
+import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
+  rstest: "importActual",
+};
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { Chat } from "./Chat";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
@@ -33,6 +36,17 @@ const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }))
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+// How often the chat and its composer render: the chat calls this hook once
+// per render, and the composer stand-in counts its own.
+const renders = rs.hoisted(() => ({ chat: 0, composer: 0 }));
+
+rs.mock("@/hooks/use-streaming-sessions", () => ({
+  ...streamingSessionsModule,
+  useStreamingSessions: () => {
+    renders.chat += 1;
+    return streamingSessionsModule.useStreamingSessions();
+  },
+}));
 
 rs.mock("@/hooks/use-tab-status", () => ({
   useChatTabStatus: mockUseChatTabStatus,
@@ -95,10 +109,6 @@ rs.mock("@/hooks/use-stick-to-bottom", () => ({
     isAtBottom: stickToBottom.isAtBottom,
     scrollToBottom: stickToBottom.scrollToBottom,
   }),
-}));
-
-rs.mock("@/hooks/use-smooth-text", () => ({
-  useSmoothText: (text: string) => text,
 }));
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
@@ -213,83 +223,87 @@ rs.mock("@/components/chat/MessageList", () => ({
 rs.mock("@/components/chat/ChatComposer", () => ({
   // Expose the streaming state + Stop wiring so tests can drive stopMessage
   // the way the real composer's Stop button does.
-  ChatComposer: (props: {
+  // Memoized, as the real one is: it renders again only for new props.
+  ChatComposer: memo(function ChatComposer(props: {
     isStreaming?: boolean;
     onStop?: () => void;
     onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
     streamError?: string | { message: string } | null;
-  }) => (
-    <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
-      {props.streamError ? (
-        <div data-testid="stream-error">
-          {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
-        </div>
-      ) : null}
-      {props.isStreaming && props.onStop ? (
-        <button type="button" data-testid="stop-button" onClick={props.onStop} />
-      ) : null}
-      {props.onSend ? (
-        <button
-          type="button"
-          data-testid="send-button"
-          onClick={() =>
-            void props
-              .onSend?.(
-                { text: "hi", uploads: [], reasoningEffort: "medium", projectPath: "" },
-                { onUploadProgress: () => {}, signal: new AbortController().signal },
-              )
-              .catch(() => {})
-          }
-        />
-      ) : null}
-      {props.onSend ? (
-        <button
-          type="button"
-          data-testid="send-reply-button"
-          onClick={() =>
-            void props
-              .onSend?.(
-                {
-                  text: "and then?",
-                  uploads: [],
-                  reasoningEffort: "medium",
-                  projectPath: "",
-                  inputId: "11111111-1111-4111-8111-111111111111",
-                  replyTo: {
-                    messageId: "a2",
-                    author: "agent",
-                    quote: "Lisbon",
-                    preview: "Lisbon",
+  }) {
+    renders.composer += 1;
+    return (
+      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+        {props.streamError ? (
+          <div data-testid="stream-error">
+            {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
+          </div>
+        ) : null}
+        {props.isStreaming && props.onStop ? (
+          <button type="button" data-testid="stop-button" onClick={props.onStop} />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
+            data-testid="send-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  { text: "hi", uploads: [], reasoningEffort: "medium", projectPath: "" },
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
+            data-testid="send-reply-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  {
+                    text: "and then?",
+                    uploads: [],
+                    reasoningEffort: "medium",
+                    projectPath: "",
+                    inputId: "11111111-1111-4111-8111-111111111111",
+                    replyTo: {
+                      messageId: "a2",
+                      author: "agent",
+                      quote: "Lisbon",
+                      preview: "Lisbon",
+                    },
                   },
-                },
-                { onUploadProgress: () => {}, signal: new AbortController().signal },
-              )
-              .catch(() => {})
-          }
-        />
-      ) : null}
-      {props.onSend ? (
-        <button
-          type="button"
-          data-testid="send-text-button"
-          onClick={() =>
-            void props
-              .onSend?.(
-                {
-                  text: "sent at once",
-                  uploads: [],
-                  reasoningEffort: "medium",
-                  projectPath: "",
-                  inputId: "11111111-1111-4111-8111-111111111111",
-                },
-                { onUploadProgress: () => {}, signal: new AbortController().signal },
-              )
-              .catch(() => {})
-          }
-        />
-      ) : null}
-    </div>
-  ),
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
+            data-testid="send-text-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  {
+                    text: "sent at once",
+                    uploads: [],
+                    reasoningEffort: "medium",
+                    projectPath: "",
+                    inputId: "11111111-1111-4111-8111-111111111111",
+                  },
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+      </div>
+    );
+  }),
 }));
 
 // Concierge's composer: records programmatic fills and sends a fixed message.
@@ -1867,6 +1881,48 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(replacementSignal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+});
+
+describe("Chat while a turn streams text", () => {
+  it("renders neither the chat nor its composer for each delivery of text", async () => {
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              controller = c;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true"),
+    );
+    const deliver = (text: string, blockIx = 0) =>
+      act(async () => {
+        controller.enqueue(
+          encoder.encode(`event: assistant_text\ndata: ${JSON.stringify({ blockIx, text })}\n\n`),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    // The first delivery of a block is the one the chat may draw for.
+    await deliver("first");
+    renders.chat = 0;
+    renders.composer = 0;
+
+    let text = "first";
+    for (let i = 0; i < 100; i++) {
+      text += " word";
+      await deliver(text);
+    }
+
+    expect(renders.chat).toBeLessThanOrEqual(2);
+    expect(renders.composer).toBe(0);
   });
 });
 

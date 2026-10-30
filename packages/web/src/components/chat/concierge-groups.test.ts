@@ -210,3 +210,72 @@ describe("buildConciergeItems", () => {
     expect(shape(build(rows))).toEqual(["sep", "G:u1,u2"]);
   });
 });
+
+describe("buildConciergeItems reference stability", () => {
+  const history = [
+    guardian("u1", 0),
+    say("a1", 10_000, "t1"),
+    // A quarter of an hour on: a new separator and a new group.
+    guardian("u2", 20 * MIN),
+    say("a2", 20 * MIN + 10_000, "t2"),
+  ];
+  const rowsOf = (messages: ChatMessage[]): ChatRow[] =>
+    messages.map((message) => (message.role === "user" ? userRow(message) : agentRow(message)));
+
+  it("hands back the same items and entries when nothing changed, whatever the rows are", () => {
+    const first = build(rowsOf(history));
+    // New row objects around the same messages, as a rebuilt transcript has.
+    const second = build(rowsOf(history));
+
+    expect(second).toHaveLength(first.length);
+    second.forEach((item, index) => expect(item).toBe(first[index]));
+  });
+
+  it("renews only what a new message touches", () => {
+    const before = build(rowsOf(history));
+    const after = build(rowsOf([...history, say("a3", 20 * MIN + 20_000, "t3")]));
+
+    // The first stretch and the separators are the same objects.
+    expect(shape(after)).toEqual(["sep", "G:u1", "A:a1", "sep", "G:u2", "A:a2,a3"]);
+    for (const index of [0, 1, 2, 3, 4]) expect(after[index]).toBe(before[index]);
+    // The group a message joined is new, and still carries the entry it had.
+    expect(after[5]).not.toBe(before[5]);
+    expect((after[5] as { entries: unknown[] }).entries[0]).toBe(
+      (before[5] as { entries: unknown[] }).entries[0],
+    );
+  });
+
+  it("renews a group when the typing bubble comes and goes, and only that group", () => {
+    const rows = rowsOf(history);
+    const idle = build(rows);
+    const typing = build(rows, true);
+
+    expect(shape(typing).at(-1)).toBe("A:a2+typing");
+    expect(typing.slice(0, -1)).toEqual(idle.slice(0, -1));
+    typing.slice(0, -1).forEach((item, index) => expect(item).toBe(idle[index]));
+    expect(typing.at(-1)).not.toBe(idle.at(-1));
+  });
+
+  it("renews the entry that stops ending its turn when a later bubble of the turn arrives", () => {
+    const first = say("a1", 0, "t1");
+    const before = build([agentRow(first)]);
+    const after = build([agentRow(first, say("a2", 4_000, "t1"))]);
+
+    const entryOf = (items: ConciergeItem[], index: number) =>
+      (items[1] as Extract<ConciergeItem, { kind: "group" }>).entries[index];
+    expect(entryOf(before, 0).endsTurn).toBe(true);
+    expect(entryOf(after, 0)).not.toBe(entryOf(before, 0));
+    expect(entryOf(after, 0).endsTurn).toBe(false);
+    expect(entryOf(after, 1).endsTurn).toBe(true);
+  });
+
+  it("renews an item whose message was replaced by an edited copy", () => {
+    const before = build(rowsOf(history));
+    const edited = { ...history[1], content: JSON.stringify([{ type: "text", content: "new" }]) };
+    const after = build(rowsOf([history[0], edited, ...history.slice(2)]));
+
+    expect(after[1]).toBe(before[1]);
+    expect(after[2]).not.toBe(before[2]);
+    expect(after[3]).toBe(before[3]);
+  });
+});

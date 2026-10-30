@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { formatMessageTimestamp } from "./message-timestamp";
 
 // The reference "now": July 10, 2026, 20:00 local time.
@@ -48,5 +48,23 @@ describe("formatMessageTimestamp", () => {
 
   it("returns an empty string for an unparseable value", () => {
     expect(formatMessageTimestamp("not-a-date", NOW)).toBe("");
+  });
+
+  it("builds its Intl formatters once, however many timestamps it formats", () => {
+    const construct = rs.spyOn(Intl, "DateTimeFormat");
+    try {
+      const sameDay = new Date(2026, 6, 10, 18, 41).toISOString();
+      const thisYear = new Date(2026, 2, 5, 18, 41).toISOString();
+      const lastYear = new Date(2025, 11, 29, 18, 41).toISOString();
+      for (let i = 0; i < 200; i++) {
+        formatMessageTimestamp(sameDay, NOW);
+        formatMessageTimestamp(thisYear, NOW);
+        formatMessageTimestamp(lastYear, NOW);
+      }
+      // One per shape: time only, month and day, and month, day and year.
+      expect(construct.mock.calls.length).toBeLessThanOrEqual(3);
+    } finally {
+      construct.mockRestore();
+    }
   });
 });
