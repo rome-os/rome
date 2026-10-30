@@ -67,3 +67,63 @@ describe("DiscordAdapter.send", () => {
     });
   });
 });
+
+describe("DiscordAdapter.replyDelivery", () => {
+  /** A guild text channel whose user message has no thread yet, and the
+   *  adapter's client over it, noting every message the transport posts. */
+  function guild(placement?: "inline") {
+    const startThread = rs.fn().mockResolvedValue({ id: "thread-1" });
+    const channel = {
+      id: "chan-1",
+      type: ChannelType.GuildText,
+      name: "general",
+      guild: { name: "Guild" },
+      isTextBased: () => true,
+      isThread: () => false,
+      messages: { fetch: rs.fn().mockResolvedValue({ content: "hi", thread: null, startThread }) },
+    };
+    const posted: string[] = [];
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: "discord-test",
+      ...(placement
+        ? {
+            chatSettings: {
+              get: async () => ({ effective: { replies: { placement } } }),
+            } as never,
+          }
+        : {}),
+    });
+    Object.assign(adapter, {
+      client: {
+        channels: { fetch: rs.fn().mockResolvedValue(channel) },
+        rest: {
+          post: async (route: string) => {
+            posted.push(route);
+            return { id: "m-1", channel_id: route.split("/")[2] };
+          },
+        },
+      },
+    });
+    return { adapter, posted, startThread };
+  }
+
+  it("streams a reply into the thread a whole reply opens on the user's message", async () => {
+    const { adapter, posted, startThread } = guild();
+
+    await expect(adapter.replyDelivery().create("chan-1", "hello", "user-1")).resolves.toEqual({
+      messageId: "m-1",
+      chatId: "thread-1",
+    });
+    expect(startThread).toHaveBeenCalledTimes(1);
+    expect(posted).toEqual(["/channels/thread-1/messages"]);
+  });
+
+  it("streams a reply into the channel where its settings keep replies inline", async () => {
+    const { adapter, posted, startThread } = guild("inline");
+
+    await adapter.replyDelivery().create("chan-1", "hello", "user-1");
+    expect(startThread).not.toHaveBeenCalled();
+    expect(posted).toEqual(["/channels/chan-1/messages"]);
+  });
+});

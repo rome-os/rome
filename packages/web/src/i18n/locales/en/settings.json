@@ -769,7 +769,7 @@
       "description": "Features still being tried out. Each is off until switched on, and may change or be removed.",
       "replyStreaming": {
         "title": "Reply streaming",
-        "description": "Applies to the guardian's direct chats on Telegram and Feishu. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
+        "description": "Applies to the guardian's direct chats on Telegram, Feishu, and Discord. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
         "toggleLabel": "Stream replies as they are written"
       },
       "concierge": {
