@@ -152,7 +152,9 @@ describe("Webchat API", () => {
         name: "lin@example.com",
         avatarUrl: null,
       },
-      unattributed: undefined,
+      // Chats records a dashboard line with no recorded sender as the
+      // guardian's (Chats storage design, data migration).
+      unattributed: { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
     });
   });
 

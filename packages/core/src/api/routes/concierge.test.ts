@@ -20,7 +20,7 @@ describe("GET /concierge/session", () => {
         return "concierge";
       },
     } as unknown as ConciergeService;
-    return new Hono().route("/", conciergeRoutes({ concierge, webchatRepo }));
+    return new Hono().route("/", conciergeRoutes({ concierge, db: testDb.db }));
   };
 
   beforeEach(() => {

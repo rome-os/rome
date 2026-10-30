@@ -38,6 +38,7 @@ import {
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
+import { chatAwaitingGuardian, chatLineCount } from "../../webchat/chat-read-model.js";
 import {
   isSessionTraceArchived,
   sessionTraceCutoff,
@@ -382,10 +383,7 @@ const sessionSelectFields = {
     sql<boolean>`case when ${romeSessions.lastSeenActivityAt} is not null and ${romeSessions.activityAt} > ${romeSessions.lastSeenActivityAt} then 1 else 0 end`.mapWith(
       Boolean,
     ),
-  messageCount:
-    sql<number>`(select count(*) from "rome_agent_messages" where "rome_agent_messages"."session_id" = "rome_sessions"."id")`.mapWith(
-      Number,
-    ),
+  messageCount: chatLineCount,
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
@@ -1820,7 +1818,7 @@ export class WebChatRepository {
       .select({
         ...sessionSelectFields,
         lastTurnFailed: sessionLastTurnFailed,
-        awaitingGuardian: sessionAwaitingGuardian,
+        awaitingGuardian: chatAwaitingGuardian,
       })
       .from(romeSessions)
       .where(
@@ -2028,6 +2026,21 @@ export class WebChatRepository {
       sessions,
       total: countRows[0]?.count ?? 0,
     };
+  }
+
+  /** The listed dashboard chats among `ids`, as the sidebar reads them, by id. */
+  async listSessionsByIds(ids: string[]) {
+    if (ids.length === 0)
+      return new Map<string, Awaited<ReturnType<typeof this.listSessions>>[number]>();
+    const rows = await this.db
+      .select({
+        ...sessionSelectFields,
+        lastTurnFailed: sessionLastTurnFailed,
+        awaitingGuardian: chatAwaitingGuardian,
+      })
+      .from(romeSessions)
+      .where(and(isWebchatChat, inArray(romeSessions.id, ids)));
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   async getSession(id: string) {

@@ -536,8 +536,14 @@ export const romeSessions = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     activityAt: integer("activity_at", { mode: "timestamp" }).notNull(),
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
+    // The chat this row is one of Rome's seats in, and the platform's thread
+    // id when the seat is in a thread. Null on rows that are not chats
+    // (handoff, subagent, action runs). Vocabulary: docs/domains/chats.md.
+    chatId: text("chat_id"),
+    threadId: text("thread_id"),
   },
   (table) => [
+    index("idx_rome_sessions_chat").on(table.chatId, table.threadId),
     index("idx_rome_sessions_owner_key").on(table.ownerKey),
     index("idx_rome_sessions_project_path").on(table.projectPath),
     // Sidebar paging for guardian chats. See `webchatChatWhere`.
@@ -555,6 +561,129 @@ export const romeSessions = sqliteTable(
         sql`${table.type} = 'channel' AND ${table.sourceChannel} IS NOT NULL AND ${table.sourceThreadId} IS NOT NULL`,
       ),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
+  ],
+);
+
+// Chats' own record of a chat: one row per place, however many of Rome's
+// accounts are in it. A dashboard chat is a `webchat` chat whose platform id
+// is its own id. Vocabulary: docs/domains/chats.md#chat.
+export const chats = sqliteTable(
+  "chats",
+  {
+    id: text("id").primaryKey(),
+    platform: text("platform").notNull(),
+    platformChatId: text("platform_chat_id").notNull(),
+    kind: text("kind").notNull(), // 'dm' | 'group'
+    name: text("name"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_chats_platform_chat").on(table.platform, table.platformChatId),
+    index("idx_chats_platform_name").on(table.platform, table.name),
+  ],
+);
+
+export const chatThreads = sqliteTable(
+  "chat_threads",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    platformThreadId: text("platform_thread_id").notNull(),
+    name: text("name"),
+    openedFromPlatformMessageId: text("opened_from_platform_message_id"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.chatId, table.platformThreadId] })],
+);
+
+export const chatParticipants = sqliteTable(
+  "chat_participants",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    // The platform's id for the account; the platform is the chat's.
+    accountId: text("account_id").notNull(),
+    since: integer("since", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chatId, table.accountId] }),
+    index("idx_chat_participants_account").on(table.accountId),
+  ],
+);
+
+// What was said in a chat, once, whoever heard it. Who said it is the
+// account, and for Rome's lines the agent that spoke.
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    // The platform's thread id; null in the open chat.
+    threadId: text("thread_id"),
+    senderAccountId: text("sender_account_id"),
+    senderAgent: text("sender_agent"),
+    senderName: text("sender_name"),
+    text: text("text").notNull(),
+    parts: text("parts").notNull(), // JSON array of blocks, as composed
+    platformMessageId: text("platform_message_id"),
+    replyToPlatformMessageId: text("reply_to_platform_message_id"),
+    saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+    uniqueIndex("uq_chat_messages_platform")
+      .on(table.chatId, table.platformMessageId)
+      .where(sql`${table.platformMessageId} IS NOT NULL`),
+  ],
+);
+
+// How a line Rome sent stands with its platform. A line has a row exactly
+// when it is from Rome. Vocabulary: docs/domains/chats.md#delivery.
+export const chatMessageDeliveries = sqliteTable("chat_message_deliveries", {
+  messageId: text("message_id")
+    .primaryKey()
+    .references(() => chatMessages.id, { onDelete: "cascade" }),
+  state: text("state").notNull(), // 'pending' | 'sent' | 'failed'
+  error: text("error"),
+  at: integer("at", { mode: "timestamp" }).notNull(),
+});
+
+export const chatMessagePlatformIds = sqliteTable(
+  "chat_message_platform_ids",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    platformMessageId: text("platform_message_id").notNull(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.chatId, table.platformMessageId] })],
+);
+
+// Agents' link from a turn to a chat message: the message prompted the turn,
+// was its answer, or was caught up on by it. One row per message per agent
+// seat, so two of Rome's agents in one group each keep their own.
+export const agentTurnMessages = sqliteTable(
+  "agent_turn_messages",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    // Null for a prompt still queued.
+    turnId: text("turn_id"),
+    role: text("role").notNull(), // 'prompt' | 'answer' | 'seen'
+    inputState: text("input_state").$type<AgentInputState>(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.sessionId] }),
+    index("idx_agent_turn_messages_turn").on(table.sessionId, table.turnId),
   ],
 );
 

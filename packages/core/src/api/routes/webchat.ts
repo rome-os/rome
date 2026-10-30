@@ -55,6 +55,7 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
+import { ChatReadModel, type TranscriptLine } from "../../webchat/chat-read-model.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
@@ -80,7 +81,11 @@ import {
   conversationTitleLength,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
-import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import {
+  currentSessionActor,
+  sessionOwnerKey,
+  type SessionActor,
+} from "../../lib/session-actor.js";
 import type { DashboardInbox } from "../../chats/send.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
@@ -823,6 +828,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
+  const chatReads = new ChatReadModel(deps.db);
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
@@ -1191,7 +1197,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return { ...summary, subagents };
   };
   type StoredMessages = Awaited<ReturnType<ApiDeps["webchatRepo"]["getMessages"]>>;
-  const attachTraceSummaries = async (sessionId: string, messages: StoredMessages) => {
+  const attachTraceSummaries = async <M extends StoredMessages[number]>(
+    sessionId: string,
+    messages: M[],
+  ) => {
     const hasTrace = messages.some((m) => m.role === "trace");
     if (!hasTrace) return messages;
     const sessionActivityCutoff = sessionTraceCutoff();
@@ -1242,6 +1251,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
+  /** The person who sent each guardian-side line, read from the line's own
+   *  sender account: `guardian`, or `visitor:<accountId>` with the visitor's
+   *  email as the line's sender name. */
+  const lineSenders = (lines: TranscriptLine[]) => {
+    const actors = new Map<string, SessionActor>();
+    for (const line of lines) {
+      if (line.role !== "user" || !line.senderAccountId) continue;
+      if (line.senderAccountId === "guardian") {
+        actors.set(line.id, { kind: "guardian", userId: "guardian", via: "cookie" });
+      } else if (line.senderAccountId.startsWith("visitor:")) {
+        actors.set(line.id, {
+          kind: "visitor",
+          accountId: line.senderAccountId.slice("visitor:".length),
+          email: line.senderName ?? "",
+        });
+      }
+    }
+    return resolveChatSenders(deps, actors);
+  };
+  /** A transcript read from Chats' tables, with trace summaries and senders. */
+  const enrichTranscript = async (sessionId: string, lines: TranscriptLine[]) => {
+    const withTraces = await attachTraceSummaries(sessionId, lines);
+    const senders = await lineSenders(lines);
+    return withTraces.map((line) => {
+      const { senderAccountId: _account, senderName: _name, ...message } = line;
+      const sender = senders.get(line.id);
+      return sender ? { ...message, sender } : message;
+    });
+  };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachTraceSummaries(sessionId, messages);
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
@@ -1275,6 +1313,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
     if (limitParam === undefined && beforeParam === undefined) {
+      const transcript = await chatReads.transcript(sessionId);
+      if (transcript) return c.json(await enrichTranscript(sessionId, transcript.lines));
+      // A session that is no chat (a handoff, a subagent) keeps its own rows.
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
     }
@@ -1286,6 +1327,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
+    const transcript = await chatReads.transcript(sessionId, { limit, before });
+    if (transcript) {
+      return c.json({
+        messages: await enrichTranscript(sessionId, transcript.lines),
+        nextCursor: transcript.nextCursor ? encodeMessageCursor(transcript.nextCursor) : null,
+      });
+    }
     const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
     return c.json({
       messages: await enrichStoredMessages(sessionId, page.rows),
@@ -2221,17 +2269,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    const matches = await deps.webchatRepo.searchSessionMessages(query, { sessionLimit: 20 });
+    const hits = await chatReads.search(query, 20);
+    const sessions = await deps.webchatRepo.listSessionsByIds(hits.map((hit) => hit.chatId));
     return c.json(
-      matches.map((match) => ({
-        session: toWebchatSessionResponse(match.session, match.session.messageCount),
-        message: {
-          id: match.message.id,
-          role: match.message.role,
-          snippet: match.message.snippet,
-          createdAt: match.message.createdAt.toISOString(),
-        },
-      })),
+      hits.flatMap((hit) => {
+        const session = sessions.get(hit.chatId);
+        if (!session) return [];
+        return [
+          {
+            session: toWebchatSessionResponse(session, session.messageCount),
+            message: {
+              id: hit.messageId,
+              role: hit.role,
+              snippet: hit.snippet,
+              createdAt: hit.createdAt.toISOString(),
+            },
+          },
+        ];
+      }),
     );
   });
 
