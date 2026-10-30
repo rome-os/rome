@@ -9,14 +9,6 @@ CREATE TABLE `agent_turn_messages` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_agent_turn_messages_turn` ON `agent_turn_messages` (`session_id`,`turn_id`);--> statement-breakpoint
-CREATE TABLE `chat_message_deliveries` (
-	`message_id` text PRIMARY KEY NOT NULL,
-	`state` text NOT NULL,
-	`error` text,
-	`at` integer NOT NULL,
-	FOREIGN KEY (`message_id`) REFERENCES `chat_messages`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
 CREATE TABLE `chat_message_platform_ids` (
 	`chat_id` text NOT NULL,
 	`platform_message_id` text NOT NULL,
@@ -117,7 +109,6 @@ SELECT
   m.`session_id` AS `session_id`,
   r.`chat_id` AS `chat_id`,
   r.`thread_id` AS `thread_id`,
-  m.`role` = 'assistant' OR coalesce(m.`sender_id`, '') = 'rome' AS `from_rome`,
   CASE WHEN m.`role` = 'assistant' OR coalesce(m.`sender_id`, '') = 'rome' THEN s.`account_id`
        WHEN r.`source_channel` = 'webchat' THEN
          CASE WHEN json_extract(m.`actor`, '$.kind') = 'visitor'
@@ -181,10 +172,6 @@ INSERT OR IGNORE INTO `chat_messages` (`id`, `chat_id`, `thread_id`, `sender_acc
 SELECT `legacy_id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`, `sender_name`, `text`,
   `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`
 FROM `_chat_message_rows` ORDER BY `said_at`, `legacy_id`;
---> statement-breakpoint
-INSERT OR IGNORE INTO `chat_message_deliveries` (`message_id`, `state`, `at`)
-SELECT cm.`id`, 'sent', cm.`said_at` FROM `_chat_message_rows` v
-JOIN `chat_messages` cm ON cm.`id` = v.`legacy_id` WHERE v.`from_rome`;
 --> statement-breakpoint
 INSERT OR IGNORE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
 SELECT coalesce(
@@ -264,10 +251,6 @@ BEGIN
   SELECT `legacy_id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`, `sender_name`, `text`,
     `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`
   FROM `_chat_message_rows` WHERE `session_id` = NEW.`id` ORDER BY `said_at`, `legacy_id`;
-  INSERT OR IGNORE INTO `chat_message_deliveries` (`message_id`, `state`, `at`)
-  SELECT cm.`id`, 'sent', cm.`said_at` FROM `_chat_message_rows` v
-  JOIN `chat_messages` cm ON cm.`id` = v.`legacy_id`
-  WHERE v.`session_id` = NEW.`id` AND v.`from_rome`;
   INSERT OR REPLACE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
   SELECT v.`legacy_id`, v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
   FROM `_chat_message_rows` v
@@ -307,10 +290,6 @@ BEGIN
   SELECT `legacy_id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`, `sender_name`, `text`,
     `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`
   FROM `_chat_message_rows` WHERE `legacy_id` = NEW.`id`;
-  INSERT OR IGNORE INTO `chat_message_deliveries` (`message_id`, `state`, `at`)
-  SELECT cm.`id`, 'sent', cm.`said_at` FROM `_chat_message_rows` v
-  JOIN `chat_messages` cm ON cm.`id` = v.`legacy_id`
-  WHERE v.`legacy_id` = NEW.`id` AND v.`from_rome`;
   INSERT OR REPLACE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
   SELECT coalesce(
       (SELECT cm.`id` FROM `chat_messages` cm WHERE cm.`id` = v.`legacy_id`),
@@ -330,12 +309,6 @@ BEGIN
         `reply_to_platform_message_id`, `said_at`
       FROM `_chat_message_rows` WHERE `legacy_id` = NEW.`id`)
   WHERE `id` = NEW.`id`;
-  INSERT OR IGNORE INTO `chat_message_deliveries` (`message_id`, `state`, `at`)
-  SELECT cm.`id`, 'sent', cm.`said_at` FROM `_chat_message_rows` v
-  JOIN `chat_messages` cm ON cm.`id` = v.`legacy_id`
-  WHERE v.`legacy_id` = NEW.`id` AND v.`from_rome`;
-  DELETE FROM `chat_message_deliveries` WHERE `message_id` = NEW.`id`
-    AND NOT coalesce((SELECT `from_rome` FROM `_chat_message_rows` WHERE `legacy_id` = NEW.`id`), 0);
   DELETE FROM `agent_turn_messages` WHERE `session_id` = NEW.`session_id` AND `message_id` = coalesce(
     (SELECT cm.`id` FROM `chat_messages` cm WHERE cm.`id` = NEW.`id`),
     (SELECT cm.`id` FROM `chat_messages` cm JOIN `rome_sessions` r ON r.`chat_id` = cm.`chat_id`

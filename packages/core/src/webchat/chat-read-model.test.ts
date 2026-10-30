@@ -349,9 +349,6 @@ describe("0103_chats_tables backfill", () => {
         text: "When?",
       },
     ]);
-    expect(sqlite.prepare("SELECT message_id, state FROM chat_message_deliveries").all()).toEqual([
-      { message_id: "reply", state: "sent" },
-    ]);
     expect(
       sqlite
         .prepare(

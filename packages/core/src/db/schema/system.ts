@@ -614,7 +614,9 @@ export const chatParticipants = sqliteTable(
 );
 
 // What was said in a chat, once, whoever heard it. Who said it is the
-// account, and for Rome's lines the agent that spoke.
+// account, and for Rome's lines the agent that spoke. A message Rome sends is
+// recorded once the platform took it; a send the platform refused was never
+// said, so it is the sender's error and never a line here.
 export const chatMessages = sqliteTable(
   "chat_messages",
   {
@@ -645,17 +647,6 @@ export const chatMessages = sqliteTable(
       .where(sql`${table.platformMessageId} IS NOT NULL`),
   ],
 );
-
-// How a line Rome sent stands with its platform. A line has a row exactly
-// when it is from Rome. Vocabulary: docs/domains/chats.md#delivery.
-export const chatMessageDeliveries = sqliteTable("chat_message_deliveries", {
-  messageId: text("message_id")
-    .primaryKey()
-    .references(() => chatMessages.id, { onDelete: "cascade" }),
-  state: text("state").notNull(), // 'pending' | 'sent' | 'failed'
-  error: text("error"),
-  at: integer("at", { mode: "timestamp" }).notNull(),
-});
 
 export const chatMessagePlatformIds = sqliteTable(
   "chat_message_platform_ids",

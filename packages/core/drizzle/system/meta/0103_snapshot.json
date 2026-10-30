@@ -835,58 +835,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_message_deliveries": {
-      "name": "chat_message_deliveries",
-      "columns": {
-        "message_id": {
-          "name": "message_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "chat_message_deliveries_message_id_chat_messages_id_fk": {
-          "name": "chat_message_deliveries_message_id_chat_messages_id_fk",
-          "tableFrom": "chat_message_deliveries",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "chat_message_platform_ids": {
       "name": "chat_message_platform_ids",
       "columns": {
