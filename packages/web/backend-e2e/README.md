@@ -58,3 +58,29 @@ install.
   reads storage and not the page's own state.
 - Prefer roles and visible text over markup. Every test fails on a page error
   or a 5xx response, whatever it asserts.
+
+## The upgrade fixture
+
+`packages/core/src/test/browser-e2e/fixtures/main-<commit>/` is a home that an
+older Rome wrote: dashboard chats (two turns, a subagent run, a renamed, an
+archived and an unread chat), a WeChat chat, and two Telegram bots in DMs, a
+basic group and a supergroup. [`upgrade/seed.spec.ts`](upgrade/seed.spec.ts)
+made it by driving that Rome through the same fakes, and its `manifest.json`
+lists every legacy row it held.
+
+To check the Rome you are working on against it, boot on a copy of it and run
+the suite. [`upgrade/verify.spec.ts`](upgrade/verify.spec.ts) checks that every
+chat and message carried over and that the old chats still work, and the rest of
+the suite runs over the same upgraded home:
+
+```bash
+E2E_FIXTURE=$PWD/../core/src/test/browser-e2e/fixtures/main-124a1a5 \
+E2E_TELEGRAM_FIRST_ID=1000 pnpm --filter rome-web test:backend-e2e
+```
+
+To seed a new fixture, check out the older Rome, build it, and run:
+
+```bash
+E2E_FIXTURE_OUT=/tmp/fixture E2E_FIXTURE_COMMIT=$(git rev-parse --short HEAD) \
+pnpm --filter rome-web test:backend-e2e upgrade/seed
+```

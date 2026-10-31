@@ -194,12 +194,20 @@ test.describe("data", () => {
 });
 
 test.describe("dashboard", () => {
-  test("seeded chats are listed with their names, and the archived one is not", async ({
+  test("seeded chats are listed with their names and unread marks, and the archived one is not", async ({
     page,
   }) => {
     await page.goto("/chat");
+    // The list pages; the rest of the suite may have added newer chats above.
+    const more = page.getByText(/^Load \d+ more$/);
+    await expect(chatRow(page, "Topic fxplain1").or(more).first()).toBeVisible();
+    while (await more.isVisible()) await more.click();
     for (const title of ["Topic fxplain1", "Topic fxsub", "Renamed fxrename", "Topic fxunread"])
       await expect(chatRow(page, title)).toBeVisible();
+    // The reply that landed while the guardian was away is still unread.
+    await expect(
+      chatRow(page, "Topic fxunread").getByRole("img", { name: "Done · new replies" }),
+    ).toBeVisible();
     await expect(chatRow(page, "Topic fxarchive")).toHaveCount(0);
     await page.getByRole("button", { name: "List settings" }).click();
     await page.getByRole("menuitem", { name: "Archived" }).click();
@@ -207,7 +215,7 @@ test.describe("dashboard", () => {
     await expect(chatRow(page, "Topic fxarchive")).toBeVisible();
   });
 
-  test("a seeded transcript reads in order, and the chat takes a new turn", async ({ page }) => {
+  test("a seeded transcript reads in order", async ({ page }) => {
     await page.goto(`/chat/${manifest.dashboardChats.plain}`);
     const lines = [
       "Fixture plain E2E-REPLY fxplain1",
@@ -219,8 +227,14 @@ test.describe("dashboard", () => {
     const ys = await Promise.all(
       lines.map(async (line) => (await page.getByText(line).boundingBox())!.y),
     );
+    // The second turn's prompt and answer were written in the same second, so
+    // their order rests on more than the timestamp.
     expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+  });
 
+  test("a seeded chat takes a new turn after its old ones", async ({ page }) => {
+    await page.goto(`/chat/${manifest.dashboardChats.plain}`);
+    await expect(page.getByText("Reply to fxplain2")).toBeVisible();
     await send(page, "After the upgrade E2E-REPLY fxplain3");
     await expect(page.getByText("Reply to fxplain3")).toBeVisible();
     await page.reload();
@@ -242,7 +256,7 @@ test.describe("dashboard", () => {
 
   test("search finds a seeded chat by its reply", async ({ page }) => {
     await page.goto("/chat");
-    await page.keyboard.press("Control+k");
+    await page.getByRole("button", { name: "Search pages, apps, and chats" }).click();
     const search = page.getByRole("dialog");
     await search
       .getByRole("combobox")

@@ -9,7 +9,7 @@ test.describe.configure({ mode: "serial" });
 
 test("WeChat connects from Settings", async ({ page }) => {
   await page.goto("/settings/connections/wechat");
-  const connect = page.getByRole("button", { name: "Connect" });
+  const connect = page.getByRole("button", { name: "Connect", exact: true });
   const connected = page.getByText("e2e-bot@im.bot");
   await expect(connect.or(connected)).toBeVisible();
   if (await connect.isVisible()) await connect.click();
