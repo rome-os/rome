@@ -16,6 +16,12 @@ import { appendFileSync } from "node:fs";
 //   E2E-CHILD <token>     → text "Child says <token>" (the subagent's turn)
 //   E2E-SLOW <token>      → text "Slow reply to <token>", sent after 4 s, so a
 //                           test can leave the chat before the reply lands
+//   E2E-LONG <token>      → "Opening part of <token>.", a tool call, then
+//                           "Closing part of <token>.": two blocks, which a
+//                           channel sends as two messages
+//   E2E-DEFER <token>     → calls Rome's `defer` tool to wake in a minute under
+//                           the name "Wake E2E-REPLY <token>w", then answers
+//                           "Deferred <token>"
 // Rome's conversation-title request (the StructuredOutput tool) is answered
 // with the title "Topic <token>". Anything else, such as the CLI's own session
 // naming or Rome's background turns, is answered "OK" or a schema-shaped
@@ -39,8 +45,14 @@ interface MessagesRequest {
 }
 
 type Reply =
-  | { kind: "text"; text: string }
-  | { kind: "tool_use"; name: string; input: Record<string, unknown> };
+  | { kind: "text"; text: string /** Further text blocks, each its own. */; more?: string[] }
+  | {
+      kind: "tool_use";
+      name: string;
+      input: Record<string, unknown>;
+      /** Text the answer says before the call. */
+      lead?: string;
+    };
 
 export interface ModelCall {
   model: string;
@@ -48,9 +60,11 @@ export interface ModelCall {
   reply: Reply;
   /** The tools the request offered, by name. */
   tools: string[];
+  /** The newest user text, as the model read it. */
+  prompt: string;
 }
 
-const DIRECTIVE = /E2E-(REPLY|SUBAGENT|CHILD|SLOW) ([A-Za-z0-9_-]+)/g;
+const DIRECTIVE = /E2E-(REPLY|SUBAGENT|CHILD|SLOW|LONG|DEFER) ([A-Za-z0-9_-]+)/g;
 const SLOW_REPLY_MS = 4_000;
 
 function textOf(content: string | ContentBlock[] | undefined): string {
@@ -79,6 +93,17 @@ function subagentTool(request: MessagesRequest): string | undefined {
   const tools = (request.tools ?? []).filter((tool) => tool.name.startsWith("mcp__subagents__"));
   return (tools.find((tool) => tool.description?.includes("assistant:assistant")) ?? tools[0])
     ?.name;
+}
+
+/** The newest user text in a request that is not only tool results. */
+function newestUserText(request: MessagesRequest): string {
+  for (const message of [...(request.messages ?? [])].reverse()) {
+    if (message.role !== "user") continue;
+    const blocks = Array.isArray(message.content) ? message.content : [];
+    if (blocks.length > 0 && blocks.every((block) => block.type === "tool_result")) continue;
+    return textOf(message.content);
+  }
+  return "";
 }
 
 function decideReply(request: MessagesRequest): { directive: string | null; reply: Reply } {
@@ -135,6 +160,29 @@ function decideReply(request: MessagesRequest): { directive: string | null; repl
   if (verb === "REPLY") return text(`Reply to ${token}`);
   if (verb === "CHILD") return text(`Child says ${token}`);
   if (verb === "SLOW") return text(`Slow reply to ${token}`);
+  // Text, a tool call, then text again: two blocks of one answer, which a
+  // channel sends as two messages. The tool is the CLI's own file search,
+  // which reads nothing that matters here.
+  if (verb === "LONG") {
+    if (answered.has("Glob")) return text(`Closing part of ${token}.`);
+    return {
+      directive: label,
+      reply: {
+        kind: "tool_use",
+        name: "Glob",
+        input: { pattern: "no-such-file-e2e-*" },
+        lead: `Opening part of ${token}.`,
+      },
+    };
+  }
+  if (verb === "DEFER") {
+    const defer = (request.tools ?? []).find(
+      (t) => t.name === "defer" || t.name.endsWith("__defer"),
+    );
+    if (!defer) return text(`No defer tool was offered for ${token}`);
+    if (answered.has(defer.name)) return text(`Deferred ${token}`);
+    return tool(defer.name, { name: `Wake E2E-REPLY ${token}w`, afterMinutes: 1 });
+  }
 
   // SUBAGENT
   const delegate = subagentTool(request);
@@ -149,8 +197,11 @@ function messageBody(model: string, reply: Reply) {
   const id = `msg_e2e_${++messageSeq}`;
   const content =
     reply.kind === "text"
-      ? [{ type: "text", text: reply.text }]
-      : [{ type: "tool_use", id: `toolu_e2e_${messageSeq}`, name: reply.name, input: reply.input }];
+      ? [reply.text, ...(reply.more ?? [])].map((text) => ({ type: "text", text }))
+      : [
+          ...(reply.lead ? [{ type: "text", text: reply.lead }] : []),
+          { type: "tool_use", id: `toolu_e2e_${messageSeq}`, name: reply.name, input: reply.input },
+        ];
   return {
     id,
     type: "message",
@@ -181,32 +232,33 @@ function writeStream(res: ServerResponse, model: string, reply: Reply): void {
       usage: { input_tokens: 10, output_tokens: 1 },
     },
   });
-  const block = body.content[0]!;
-  if (block.type === "text") {
-    send("content_block_start", {
-      type: "content_block_start",
-      index: 0,
-      content_block: { type: "text", text: "" },
-    });
-    send("content_block_delta", {
-      type: "content_block_delta",
-      index: 0,
-      delta: { type: "text_delta", text: (block as { text: string }).text },
-    });
-  } else {
-    const tool = block as { id: string; name: string; input: unknown };
-    send("content_block_start", {
-      type: "content_block_start",
-      index: 0,
-      content_block: { type: "tool_use", id: tool.id, name: tool.name, input: {} },
-    });
-    send("content_block_delta", {
-      type: "content_block_delta",
-      index: 0,
-      delta: { type: "input_json_delta", partial_json: JSON.stringify(tool.input) },
-    });
-  }
-  send("content_block_stop", { type: "content_block_stop", index: 0 });
+  body.content.forEach((block, index) => {
+    if (block.type === "text") {
+      send("content_block_start", {
+        type: "content_block_start",
+        index,
+        content_block: { type: "text", text: "" },
+      });
+      send("content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "text_delta", text: (block as { text: string }).text },
+      });
+    } else {
+      const tool = block as { id: string; name: string; input: unknown };
+      send("content_block_start", {
+        type: "content_block_start",
+        index,
+        content_block: { type: "tool_use", id: tool.id, name: tool.name, input: {} },
+      });
+      send("content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "input_json_delta", partial_json: JSON.stringify(tool.input) },
+      });
+    }
+    send("content_block_stop", { type: "content_block_stop", index });
+  });
   send("message_delta", {
     type: "message_delta",
     delta: { stop_reason: body.stop_reason, stop_sequence: null },
@@ -260,7 +312,13 @@ export class FakeAnthropic {
         appendFileSync(process.env.E2E_MODEL_LOG, `${JSON.stringify(request)}\n`);
       const model = request.model ?? "claude-e2e";
       const { directive, reply } = decideReply(request);
-      this.calls.push({ model, directive, reply, tools: (request.tools ?? []).map((t) => t.name) });
+      this.calls.push({
+        model,
+        directive,
+        reply,
+        tools: (request.tools ?? []).map((t) => t.name),
+        prompt: newestUserText(request),
+      });
       if (directive?.startsWith("SLOW ") && reply.kind === "text" && reply.text.startsWith("Slow"))
         await new Promise((done) => setTimeout(done, SLOW_REPLY_MS));
       if (request.stream) writeStream(res, model, reply);
