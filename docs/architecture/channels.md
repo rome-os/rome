@@ -28,14 +28,25 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Inbound hears a channel only while Rome listens to its account ([An account's agent](#an-accounts-agent)). While Rome does not, the channel keeps its subscribers, but nothing it receives reaches them, and admission does not run.
 - `directory` lists the chats a channel can see, each with its `ChatRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
 
+### Chat adapters
+
+Chats reaches a channel through its adapter ([`ChatAdapter`](../../packages/core/src/chats/adapter.ts)): `start(deliver, fault)`, `stop()` and `send(chatId, threadId, out)`. Chats' inbound recording is the adapter's `deliver`, and every send into a chat (People, assistants, Concierge, an agent's backend reply) goes through `send`. Today one adapter, `channelAdapter`, serves every channel over its `inbound` and `send` ports.
+
+- Every id the adapter hands Chats is its own, unique across platforms, and Chats mints none. The adapter passes the platform's ids through behind the platform: a chat is `<platform>:<key>` and a message `<chat id>/<platform message id>`. The prefix is added and stripped in one place, `refOf`, `keyOf` and `messageIdIn` in [`chats/place.ts`](../../packages/core/src/chats/place.ts). The dashboard is its own adapter and gives its chats and lines random ids.
+- A redelivery, or a group message heard by two of Rome's accounts, carries the same id, so recording it again changes nothing.
+- A quote reaches Chats as the adapter's id for the quoted message, and leaves as the platform's.
+- `send` answers the adapter's id for the line once the platform took it, and Chats records it under that id. A platform that gives no id gets one the adapter makes. A refusal rejects with the platform's words, and nothing is recorded.
+- A streamed reply goes out through the channel's reply transport and settles to its first message's id. An app's `send_message` sends on the channel port and records through `recordOutboundMessage`.
+
 ### Direct messages
 
-Chats keys a direct message by its two ends, `dm:<Rome's account>:<other account>` ([Chat](../domains/chats.md#chat)), and a send into one goes to the other end's address (`addressOf` in [`chats/place.ts`](../../packages/core/src/chats/place.ts)).
+Chats keys a direct message by its two ends, `dm:<Rome's account>:<other account>` ([Chat](../domains/chats.md#chat)). The adapter sends into one at the address the account heard it at, where the platform gives a direct message an id of its own (Feishu's p2p chat, Discord's DM channel), and to the other end's address before it has heard it (`addressOf` in [`chats/place.ts`](../../packages/core/src/chats/place.ts)).
 
 - Where the platform addresses a direct message by the other party (Telegram, WhatsApp), the address is that party's id and the key carries it as the other end.
-- Elsewhere the other end is the account that wrote to Rome, and the channel's `send` takes that account's id as an address: Discord opens or finds its DM channel with the user, and Feishu sends to the user's `open_id`.
+- Elsewhere the other end is the account that wrote to Rome, and the channel's `send` takes that account's id as an address: Discord opens or finds its DM channel with the user, and Feishu sends to the user's id.
+- A direct message opened from its platform address reuses the chat the account already heard there, so a DM is one chat whichever way Rome first met it.
 - Email and Rome Cloud chats keep their own ids, since each thread or assistant is its own chat.
-- A Telegram basic group numbers messages per member account, so Chats keys its message ids with Rome's account in front (`ownedBy`). The channel sends and quotes the platform's own id.
+- A Telegram basic group numbers messages per member account, so the adapter puts Rome's account in front of its message ids (`ownedBy`). The channel sends and quotes the platform's own id.
 
 ### Channels for app actions
 

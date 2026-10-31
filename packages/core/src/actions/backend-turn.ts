@@ -110,7 +110,7 @@ export interface BackendTurnRunnerDeps {
   chats?: ChatRepository;
   /** Says a reply through its seat and records it. Absent, the reply is
    *  delivered and nothing records it. */
-  replies?: Pick<SeatReplies, "say">;
+  replies?: Pick<SeatReplies, "send">;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -229,15 +229,8 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         });
         return;
       }
-      const send = deps.channel(params.channel)?.send;
-      if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
-      const deliver = async () => {
-        const delivery = await send.send(params.threadId as ChatId, {
-          text: reply,
-          ...(turnId ? { turnId } : {}),
-        });
-        return delivery?.messageId ? { platformMessageId: delivery.messageId } : {};
-      };
+      const channel = deps.channel(params.channel);
+      if (!channel?.send) throw new Error(`Channel "${params.channel}" cannot send`);
       const { chats, replies } = deps;
       const seat =
         chats && replies
@@ -257,14 +250,15 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
               })
           : null;
       if (!seat || !replies) {
-        await deliver();
+        await channel.send.send(params.threadId as ChatId, {
+          text: reply,
+          ...(turnId ? { turnId } : {}),
+        });
         return;
       }
-      // Delivery that succeeded and failed to record is logged by `say`, so
-      // the continuation never retries a sent reply.
-      await replies.say(seat.id, [{ type: "text", content: reply }], deliver, {
-        ...(turnId ? { turnId } : {}),
-      });
+      // The seat's adapter sends it. A delivery that succeeded and failed to
+      // record is logged, so the continuation never retries a sent reply.
+      await replies.send(seat.id, channel, { text: reply }, { ...(turnId ? { turnId } : {}) });
     },
   };
 }

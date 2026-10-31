@@ -1543,7 +1543,11 @@ async function main() {
       messages: chatMessages,
       wakes: turnLinks,
       events: chatEvents,
-      platformOfChannel,
+      adapters: {
+        accountOf: (channel) => channelRecords.accountOf(channel),
+        platformOfChannel,
+        addressIn: (channel, chatId) => webchatRepo.addressIn(channel, chatId),
+      },
       listens: (connectionId) => accountListening.listens(connectionId),
     },
     hookChannels,

@@ -3,13 +3,15 @@
 // docs/domains/participation.md#reply.
 
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { Channel } from "@rome-os/app-runtime";
+import { channelAdapter, type Outbound } from "../chats/adapter.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { keyOf, messageIdIn, ownedBy } from "../chats/place.js";
 import type { MessagePart } from "../types.js";
 import type { TurnLinks } from "./turn-links.js";
 
 export interface SeatRepliesDeps {
-  seats: Pick<WebChatRepository, "seatOf">;
+  seats: Pick<WebChatRepository, "seatOf" | "addressIn">;
   messages: Pick<MessageRepository, "send">;
   links: Pick<TurnLinks, "answer">;
 }
@@ -65,6 +67,47 @@ export class SeatReplies {
         const { platformMessageId } = await deliver();
         return platformMessageId === undefined ? {} : { id: idOf(platformMessageId) };
       },
+    );
+    if (!sent.recorded) return { id: null, at: sent.at };
+    if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);
+    return { id: sent.id, at: sent.at };
+  }
+
+  /**
+   * Send `out` where session `sessionId` stands, through its account's
+   * adapter on `channel`, record it as the seat's, and make it turn
+   * `turnId`'s answer when one is named. Throws the platform's refusal, and
+   * records nothing then. A session that stands in no chat sends nothing and
+   * answers null.
+   */
+  async send(
+    sessionId: string,
+    channel: Channel,
+    out: Outbound,
+    options: { turnId?: string } = {},
+  ): Promise<SeatSent | null> {
+    const seat = await this.deps.seats.seatOf(sessionId);
+    if (!seat) return null;
+    const account = { platform: seat.place.chat.platform, id: seat.accountId };
+    const adapter = channelAdapter(channel, {
+      accountOf: () => account,
+      platformOfChannel: () => account.platform,
+      addressIn: (name, chatId) => this.deps.seats.addressIn(name, chatId),
+    });
+    const sent = await this.deps.messages.send(
+      {
+        direction: "fromRome",
+        place: seat.place,
+        saidBy: { account, agent: seat.agent },
+        parts: out.parts ?? [{ type: "text", content: out.text }],
+        ...(out.replyTo === undefined ? {} : { replyTo: out.replyTo }),
+      },
+      async () => ({
+        id: await adapter.send(seat.place.chat.id, seat.place.threadId ?? null, {
+          ...out,
+          ...(options.turnId ? { turnId: options.turnId } : {}),
+        }),
+      }),
     );
     if (!sent.recorded) return { id: null, at: sent.at };
     if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);

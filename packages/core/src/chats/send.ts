@@ -26,6 +26,7 @@ import {
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { channelAdapter } from "./adapter.js";
 import type { ChatRepository } from "./chat-repository.js";
 import type { MessageRepository } from "./message-repository.js";
 import {
@@ -156,14 +157,11 @@ export async function send(
   const chat =
     deps.chats.get(place.chat) ??
     deps.chats.start(place.chat, otherEndOf(keyOf(place.chat)) === null ? "group" : "dm", null);
-  // A direct message goes to the platform's own id for it where the account
-  // heard it there (Feishu's p2p chat), else to the other end.
-  const heardAt =
-    place.threadId === undefined && chat.kind === "dm"
-      ? (deps.webchatRepo?.addressIn(channel.name, chat.ref.id) ?? null)
-      : null;
-  const address = (heardAt ?? addressOf(place)) as ChatId;
-  const send = channel.send;
+  const adapter = channelAdapter(channel, {
+    accountOf: () => account,
+    platformOfChannel: () => platform,
+    addressIn: (name, chatId) => deps.webchatRepo?.addressIn(name, chatId) ?? null,
+  });
   let sent: Awaited<ReturnType<MessageRepository["send"]>>;
   try {
     sent = await deps.chatMessages.send(
@@ -174,12 +172,9 @@ export async function send(
         saidBy: { account },
         parts: [{ type: "text", content: body.text }],
       },
-      async () => {
-        const { messageId } = await send.send(address, { text: body.text });
-        return messageId
-          ? { id: messageIdIn(chat.ref, ownedBy(keyOf(chat.ref), account.id, messageId)) }
-          : {};
-      },
+      async () => ({
+        id: await adapter.send(chat.ref.id, place.threadId ?? null, { text: body.text }),
+      }),
     );
   } catch (error) {
     // The Connection went between choosing the sender and asking it: the same
@@ -191,7 +186,7 @@ export async function send(
   return {
     ok: true,
     sent: {
-      ref: `${address}:${platformIdOf(chat.ref.id, sent.id) ?? sent.id}`,
+      ref: `${addressOf(place)}:${platformIdOf(chat.ref.id, sent.id) ?? sent.id}`,
       timestamp: Math.floor(sent.at.getTime() / 1000),
     },
     at: sent.at,
