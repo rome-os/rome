@@ -25,7 +25,8 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
     locale: "en-US",
     trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    // E2E_SCREENSHOTS=on keeps a screenshot of every test, as evidence.
+    screenshot: process.env.E2E_SCREENSHOTS === "on" ? "on" : "only-on-failure",
     launchOptions: process.env.E2E_CHROMIUM_PATH
       ? { executablePath: process.env.E2E_CHROMIUM_PATH }
       : undefined,
