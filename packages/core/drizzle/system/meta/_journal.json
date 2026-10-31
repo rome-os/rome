@@ -757,6 +757,13 @@
       "when": 1793446339472,
       "tag": "0108_channel_addresses",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1793461620061,
+      "tag": "0109_seat_channel_unread",
+      "breakpoints": true
     }
   ]
 }

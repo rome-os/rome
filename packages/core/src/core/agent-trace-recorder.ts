@@ -197,7 +197,6 @@ export class AgentTraceRecorder {
       agentName: isCoreMainAgentId(this.input.agentName) ? null : this.input.agentName,
       projectName: thread?.projectName,
       projectPath: thread?.projectPath,
-      sourceChannel: thread?.channel ?? null,
       sourceThreadId: thread?.threadId ?? null,
       sourceThreadName,
       sourceThreadType: thread?.threadType ?? null,

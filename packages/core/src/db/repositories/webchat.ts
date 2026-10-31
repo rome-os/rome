@@ -1,3 +1,4 @@
+import { platformOf } from "@rome/api-types/platform";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import { createHash, randomUUID } from "node:crypto";
@@ -34,6 +35,7 @@ import {
   isWebchatChat,
   romeSessionKind,
   storedSessionType,
+  sessionRowWithKind,
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
@@ -104,8 +106,6 @@ export interface Seat {
   readonly accountId: string;
   /** The agent that speaks through the seat. */
   readonly agent: string;
-  /** The channel the seat's account speaks through. */
-  readonly channel: string;
 }
 
 export interface StoredSaidMessage {
@@ -299,7 +299,6 @@ export interface EnsureRomeSessionInput {
   projectPath?: string | null;
   /** A side chat keeps the folder of the chat it branched from. */
   deviceFolder?: DeviceFolder | null;
-  sourceChannel?: string | null;
   sourceThreadId?: string | null;
   sourceThreadName?: string | null;
   sourceThreadType?: "private" | "group" | string | null;
@@ -966,7 +965,6 @@ export class WebChatRepository {
       largeModelSelection: largeModelSelection ?? null,
       agentName,
       type: storedSessionType(type),
-      sourceChannel: "webchat",
       sourceThreadId: id,
       sourceThreadName: name,
       sourceThreadType: "private",
@@ -980,10 +978,8 @@ export class WebChatRepository {
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
-    // A chat is a channel row on the webchat channel, at its own address,
-    // whichever of the two types the caller names it by.
-    const chat =
-      input.type === "webchat" || (input.type === "channel" && input.sourceChannel === "webchat");
+    // A chat is a channel row with a dashboard chat, at its own address.
+    const chat = input.type === "webchat";
     await this.db
       .insert(romeSessions)
       .values({
@@ -997,7 +993,6 @@ export class WebChatRepository {
         largeModelSelection: null,
         agentName: input.agentName,
         type: storedSessionType(input.type),
-        sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
         sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
         sourceThreadName: input.sourceThreadName ?? null,
         sourceThreadType: input.sourceThreadType ?? null,
@@ -1098,7 +1093,6 @@ export class WebChatRepository {
             ? null
             : input.agentName,
         type: "channel",
-        sourceChannel: input.channel,
         sourceThreadId: input.threadId,
         sourceThreadName: input.threadName ?? null,
         sourceThreadType: input.threadType ?? null,
@@ -1131,7 +1125,6 @@ export class WebChatRepository {
         threadId: romeSessions.threadId,
         accountId: romeSessions.accountId,
         agentName: romeSessions.agentName,
-        sourceChannel: romeSessions.sourceChannel,
       })
       .from(romeSessions)
       .where(eq(romeSessions.id, sessionId))
@@ -1142,9 +1135,8 @@ export class WebChatRepository {
     return {
       sessionId,
       place: placeIn(chat.ref, row.threadId === null ? undefined : (row.threadId as ChatId)),
-      accountId: row.accountId ?? row.sourceChannel ?? platform,
+      accountId: row.accountId ?? platform,
       agent: row.agentName ?? "main",
-      channel: row.sourceChannel ?? platform,
     };
   }
 
@@ -1288,32 +1280,11 @@ export class WebChatRepository {
     return rows[0] ?? null;
   }
 
-  private async findChannelConversation(
-    channel: string,
-    threadId: string,
-  ): Promise<{
-    id: string;
-    agentName: string | null;
-    name: string;
-    sourceThreadName: string | null;
-  } | null> {
-    const rows = await this.db
-      .select({
-        id: romeSessions.id,
-        agentName: romeSessions.agentName,
-        name: romeSessions.name,
-        sourceThreadName: romeSessions.sourceThreadName,
-      })
-      .from(romeSessions)
-      .where(
-        and(
-          eq(romeSessions.type, "channel"),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
-        ),
-      )
-      .limit(1);
-    return rows[0] ?? null;
+  /** The conversation at channel address `threadId` on `channel`, by the id
+   *  {@link channelChatId} gives it, or null when none is there. */
+  private async findChannelConversation(channel: string, threadId: string) {
+    const found = await this.channelConversation(channelChatId(channel, threadId));
+    return found;
   }
 
   /** The id of the conversation a channel address names, or null when none
@@ -1321,19 +1292,17 @@ export class WebChatRepository {
    *  subagent runs copy their parent's address, so only conversation types
    *  match. */
   async findChatIdByAddress(channel: string, threadId: string): Promise<string | null> {
-    const rows = await this.db
+    const row = this.db
       .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(
         and(
+          eq(romeSessions.id, channelChatId(channel, threadId)),
           inArray(romeSessions.type, ["webchat_handoff", "channel"]),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
         ),
       )
-      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
-      .limit(1);
-    return rows[0]?.id ?? null;
+      .get();
+    return row?.id ?? null;
   }
 
   async deleteSession(id: string) {
@@ -1572,7 +1541,10 @@ export class WebChatRepository {
   }
 
   async getSession(id: string) {
-    const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+    const rows = await this.db
+      .select(sessionRowWithKind)
+      .from(romeSessions)
+      .where(eq(romeSessions.id, id));
     return rows[0] ? withSessionKind(rows[0]) : null;
   }
 
@@ -1603,7 +1575,6 @@ export class WebChatRepository {
       .set({
         type: storedSessionType("webchat"),
         // A fork carries its parent's address. As a chat it answers at its own.
-        sourceChannel: "webchat",
         sourceThreadId: sql`${romeSessions.id}`,
         lastSeenActivityAt: sql`${romeSessions.activityAt}`,
       })
@@ -2239,9 +2210,10 @@ export class WebChatRepository {
     const cutoff = Math.floor(since.getTime() / 1000);
     const scope =
       where === "dashboard"
-        ? sql`s.source_channel = 'webchat' AND s.type IN ('channel', 'webchat_handoff')`
-        : sql`s.type = 'channel' AND coalesce(ch.connection_kind, s.source_channel)
-            IN (SELECT value FROM json_each(${JSON.stringify(where.accountKinds)}))`;
+        ? sql`c.platform = ${WEBCHAT_PLATFORM} AND s.type IN ('channel', 'webchat_handoff')`
+        : sql`s.type = 'channel' AND c.platform IN (SELECT value FROM json_each(${JSON.stringify([
+            ...new Set(where.accountKinds.map((kind) => platformOf(kind))),
+          ])}))`;
     return this.db
       .all<{ id: string; chat_id: string; thread_id: string | null }>(
         seatsSaidInSince(scope, cutoff),

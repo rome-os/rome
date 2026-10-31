@@ -1,8 +1,8 @@
-import { and, asc, eq, isNotNull, isNull, like, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, like, sql, type SQL } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { ChatRepository } from "../chats/chat-repository.js";
-import { chatAt } from "../chats/adapter.js";
+import { ChatRepository, chatIdsOn } from "../chats/chat-repository.js";
+import type { ChatAdapters } from "../chats/adapter.js";
 import { MessageRepository } from "../chats/message-repository.js";
 import { placeIn, type ChatRef } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
@@ -11,27 +11,12 @@ import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredChatRow = typeof romeSessions.$inferSelect;
 
-function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: ChatId) {
-  return exec
-    .select()
-    .from(romeSessions)
-    .where(
-      and(
-        isChannelConversation,
-        eq(romeSessions.sourceChannel, channel),
-        eq(romeSessions.sourceThreadId, chatId),
-      ),
-    )
-    .limit(1)
-    .get();
-}
-
 export interface ChatSettingsRepositoryDeps {
   /** Where a chat is started when a rule is set before anything was said. */
   chats: Pick<ChatRepository, "start" | "rename">;
-  /** Rome's own account on a channel, or null while its record knows none. */
-  accountOf(channel: string): Account | null;
-  platformOfChannel(channel: string): string;
+  /** The chat adapters, which name the chat at an address and the channel
+   *  that is one of Rome's accounts. */
+  adapters: Pick<ChatAdapters, "chatAt" | "accountOn" | "channelOf">;
 }
 
 /**
@@ -55,30 +40,62 @@ export class ChatSettingsRepository {
 
   /** The account `channel` speaks as. */
   private accountOn(channel: string): Account {
-    return (
-      this.deps.accountOf(channel) ?? {
-        platform: this.deps.platformOfChannel(channel),
-        id: channel,
-      }
-    );
+    return this.deps.adapters.accountOn(channel);
   }
 
   /** The chat at address `chatId` as `channel`'s account sees it. */
   private chatOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatRef {
-    const via = this.accountOn(channel);
-    return kind === "dm"
-      ? chatAt(via.platform, chatId, { romeEnd: via.id })
-      : chatAt(via.platform, chatId);
+    return this.deps.adapters.chatAt(channel, chatId, kind === "dm" ? "dm" : "group");
+  }
+
+  /**
+   * The seat `channel`'s account holds at address `address`: in the group
+   * there, else the direct message there, else the thread the address names.
+   * Found by the chat and the account, never by the channel.
+   */
+  private seatAt(
+    exec: DrizzleDb | DrizzleTx,
+    channel: string,
+    address: ChatId,
+  ): StoredChatRow | undefined {
+    const account = this.accountOn(channel).id;
+    const first = (...where: SQL[]) =>
+      exec
+        .select()
+        .from(romeSessions)
+        .where(and(isChannelConversation, eq(romeSessions.accountId, account), ...where))
+        .orderBy(asc(romeSessions.createdAt))
+        .limit(1)
+        .get();
+    for (const kind of ["group", "dm"] as const) {
+      const chat = this.deps.adapters.chatAt(channel, address, kind);
+      const row = first(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId));
+      if (row) return row;
+    }
+    return first(eq(romeSessions.threadId, address));
+  }
+
+  /** The channel the seat `row` speaks through: the one that is its account
+   *  on its chat's platform, or null when none is. */
+  channelOf(row: StoredChatRow): string | null {
+    const chat = row.chatId ? this.messages.chats.find(row.chatId) : null;
+    if (!chat || !row.accountId) return null;
+    return this.deps.adapters.channelOf({ platform: chat.ref.platform, id: row.accountId });
   }
 
   find(channel: string, chatId: ChatId): StoredChatRow | null {
-    return rowByAddress(this.db, channel, chatId) ?? null;
+    return this.seatAt(this.db, channel, chatId) ?? null;
   }
 
   listKnown(input: { channel?: string; query?: string }): StoredChatRow[] {
     const predicates = [isChannelConversation];
     if (input.channel) {
-      predicates.push(eq(romeSessions.sourceChannel, input.channel));
+      // The channel's seats: its account's, in chats on its platform.
+      const account = this.accountOn(input.channel);
+      predicates.push(
+        eq(romeSessions.accountId, account.id),
+        sql`${romeSessions.chatId} in ${chatIdsOn(account.platform)}`,
+      );
     }
     if (input.query?.trim()) {
       predicates.push(like(romeSessions.sourceThreadName, `%${input.query.trim()}%`));
@@ -87,7 +104,7 @@ export class ChatSettingsRepository {
       .select()
       .from(romeSessions)
       .where(and(...predicates))
-      .orderBy(asc(romeSessions.sourceChannel), asc(romeSessions.sourceThreadName))
+      .orderBy(asc(romeSessions.accountId), asc(romeSessions.sourceThreadName))
       .all();
   }
 
@@ -103,7 +120,7 @@ export class ChatSettingsRepository {
     chatId: ChatId,
     kind: ChatDescriptor["kind"] | null,
   ): StoredChatSettings | null {
-    const own = rowByAddress(this.db, channel, chatId);
+    const own = this.seatAt(this.db, channel, chatId);
     if (own === undefined && !isShared(kind)) return null;
     if (own?.channelSettings && hasRule(own.channelSettings)) return own.channelSettings;
     if (
@@ -244,7 +261,6 @@ export class ChatSettingsRepository {
             largeModelSelection: null,
             agentName: null,
             type: "channel",
-            sourceChannel: channel,
             sourceThreadId: descriptor.ref.chatId,
             sourceThreadName: descriptor.displayName,
             sourceThreadType,
@@ -301,9 +317,10 @@ export class ChatSettingsRepository {
   ): void {
     this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
-      const parentSessionId = descriptor.parent
-        ? (rowByAddress(tx, channel, descriptor.parent.chatId)?.id ?? null)
-        : null;
+      const parent = descriptor.parent
+        ? this.seatAt(tx, channel, descriptor.parent.chatId)
+        : undefined;
+      const parentSessionId = parent?.id ?? null;
       const now = new Date();
       tx.insert(romeSessions)
         .values({
@@ -315,12 +332,15 @@ export class ChatSettingsRepository {
           largeModelSelection: null,
           agentName: null,
           type: "channel",
-          sourceChannel: channel,
           sourceThreadId: descriptor.ref.chatId,
           sourceThreadName: descriptor.displayName,
           sourceThreadType,
           channelSettings: null,
           parentSessionId,
+          // A thread's seat stands in its parent's chat, as the account.
+          chatId: parent?.chatId ?? null,
+          threadId: descriptor.ref.chatId,
+          accountId: this.accountOn(channel).id,
           createdAt: now,
           activityAt: now,
           lastSeenActivityAt: null,
@@ -328,7 +348,7 @@ export class ChatSettingsRepository {
         .onConflictDoNothing({ target: romeSessions.id })
         .run();
 
-      const current = rowByAddress(tx, channel, descriptor.ref.chatId);
+      const current = this.seatAt(tx, channel, descriptor.ref.chatId);
       if (!current) {
         throw new Error(`Failed to resolve conversation ${channel}:${descriptor.ref.chatId}`);
       }
@@ -336,7 +356,6 @@ export class ChatSettingsRepository {
       tx.update(romeSessions)
         .set({
           name: descriptor.displayName,
-          sourceChannel: channel,
           sourceThreadName: descriptor.displayName,
           sourceThreadType,
           parentSessionId,

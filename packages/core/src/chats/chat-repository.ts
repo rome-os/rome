@@ -5,13 +5,19 @@
 // `rome_sessions`. Ending a chat removes its messages with it; the sessions
 // that stood in it are Agents' to remove.
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import { chats } from "../db/schema/system.js";
 import type { Chat, ChatKind } from "./chat.js";
 import type { ChatRef } from "./place.js";
 
 type Row = typeof chats.$inferSelect;
+
+/** The ids of the chats on `platform`, as a subquery another read can test a
+ *  chat id against (`chat_id IN …`), so it names no column of Chats'. */
+export function chatIdsOn(platform: string): SQL {
+  return sql`(SELECT ${chats.id} FROM ${chats} WHERE ${chats.platform} = ${platform})`;
+}
 
 export class ChatRepository {
   constructor(private readonly db: DrizzleDb) {}

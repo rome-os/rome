@@ -7,7 +7,8 @@ import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
 import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
-import { scopePairs, sqlMessages } from "./messages-sql.js";
+import type { Account } from "@rome-os/app-runtime";
+import { sqlMessages } from "./messages-sql.js";
 import { accountTranscript, accountTranscriptDetail } from "../webchat/chat-read-model-sql.js";
 
 /**
@@ -20,20 +21,21 @@ import { accountTranscript, accountTranscriptDetail } from "../webchat/chat-read
  * no difference: a line the account wrote into a group belongs to the group's
  * thread.
  */
-export function agentMessages(db: DrizzleDb): AccountMessages {
+export function agentMessages(
+  db: DrizzleDb,
+  accountOn: (channel: string) => Account,
+): AccountMessages {
   // No `channel`: the transcript holds every channel that has no mirror of its
-  // own, side by side, so it is scoped by the pair throughout.
+  // own, side by side, so it is scoped by the pair throughout. A pair names a
+  // channel, which is Rome's account on a platform: the seats it reads are
+  // that account's, in chats on that platform.
   return sqlMessages({
     db,
     view(scope) {
-      const addressed = scopePairs(scope.keys, sql`s.source_channel`, sql`s.source_thread_id`);
-      if (addressed === null) return null;
-      // Addressing already leaves a group out, since a group's session is keyed
-      // by the group and no account answers to that. Said again on the store's
-      // own terms so the guarantee survives a caller that hands over a group id
-      // as if it were an account's address.
-      const held = sql`${addressed} AND c.kind = 'dm'`;
-      return accountTranscript(held);
+      if (scope.keys.length === 0) return null;
+      return accountTranscript(
+        scope.keys.map(({ channel, key }) => ({ channel, account: accountOn(channel), key })),
+      );
     },
     body: messageContentText,
     detail: {

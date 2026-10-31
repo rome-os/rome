@@ -50,8 +50,17 @@ import type { DrizzleDb } from "../db/index.js";
 export function personMessageStores(deps: {
   db: DrizzleDb;
   channels: Channels;
+  platformOfChannel: PlatformOfChannel;
+  /** Rome's own account on a channel, or null while its record knows none. */
+  accountOf?: (channel: string) => Account | null;
 }): AccountMessages[] {
-  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
+  const accountOn = (channel: string): Account =>
+    deps.accountOf?.(channel) ?? { platform: deps.platformOfChannel(channel), id: channel };
+  return [
+    ...messageStores(deps.channels),
+    agentMessages(deps.db, accountOn),
+    sentinelLogMessages(deps.db),
+  ];
 }
 
 /**

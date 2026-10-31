@@ -25,7 +25,7 @@ const REQUIRED_SCHEMA_PROBES: readonly SchemaProbe[] = [
   },
   {
     name: "rome_sessions",
-    query: sql`SELECT "id", "type", "source_channel", "source_thread_id", "trigger_kind", "handoff_spec", "archived_at", "pinned_at", "activity_at", "last_seen_activity_at" FROM "rome_sessions" LIMIT 0`,
+    query: sql`SELECT "id", "type", "source_thread_id", "chat_id", "account_id", "trigger_kind", "handoff_spec", "archived_at", "pinned_at", "activity_at", "last_seen_activity_at" FROM "rome_sessions" LIMIT 0`,
   },
   {
     name: "rome_agent_messages",

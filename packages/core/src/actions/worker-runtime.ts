@@ -132,6 +132,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     accountOf: (channel) => channelRecords.accountOf(channel),
     platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
     addresses: new ChatAddresses(db),
+    channelsOn: (platform) => channelRecords.namesOn(platform),
   });
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,

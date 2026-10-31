@@ -293,9 +293,10 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Removing a Connection hides its persisted conversations from settings.
       // Keep the rows intact so reconnecting the same account can recover them,
       // but do not let one orphaned row abort the cross-provider list.
-      if (row.sourceChannel && this.connectionsOf(row.sourceChannel).length === 0) {
+      const rowChannel = this.deps.repository.channelOf(row);
+      if (rowChannel && this.connectionsOf(rowChannel).length === 0) {
         log.debug("conversation_settings.removed_connection_hidden", {
-          channel: row.sourceChannel,
+          channel: rowChannel,
           chatId: row.sourceThreadId,
         });
         continue;
@@ -534,7 +535,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): StoredChatSettings | null {
-    let channel = row?.sourceChannel ?? null;
+    let channel = row ? this.deps.repository.channelOf(row) : null;
     if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
       channel = this.channelName(ref);
     }
@@ -607,13 +608,16 @@ export class ChatSettingsService implements ChatSettingsControl {
   }
 
   private descriptorFromRow(row: StoredChatRow): ChatDescriptor {
-    if (!row.sourceThreadId || !row.sourceChannel) {
+    // The seat's connection is the one behind its account on its chat's
+    // platform.
+    const channel = this.deps.repository.channelOf(row);
+    if (!row.sourceThreadId || !channel) {
       throw new Error(`Channel conversation "${row.id}" has no channel address`);
     }
-    const connections = this.connectionsOf(row.sourceChannel);
+    const connections = this.connectionsOf(channel);
     if (connections.length !== 1) {
       throw new Error(
-        `Channel conversation "${row.id}" requires exactly one ${row.sourceChannel} connection; found ${connections.length}`,
+        `Channel conversation "${row.id}" requires exactly one ${channel} connection; found ${connections.length}`,
       );
     }
     const ref = {
@@ -638,7 +642,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     };
     if (row.parentSessionId) {
       const parent = this.deps.repository
-        .listKnown({ channel: row.sourceChannel })
+        .listKnown({ channel })
         .find((candidate) => candidate.id === row.parentSessionId);
       if (parent?.sourceThreadId) {
         descriptor.parent = {

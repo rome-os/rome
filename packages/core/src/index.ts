@@ -419,6 +419,7 @@ async function main() {
     accountOf: (channel) => channelRecords.accountOf(channel),
     platformOfChannel,
     addresses: new ChatAddresses(db),
+    channelsOn: (platform) => channelRecords.namesOn(platform),
   });
   const seatReplies = new SeatReplies({
     seats: webchatRepo,
@@ -955,11 +956,7 @@ async function main() {
     run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
   });
   const chatSettings = new ChatSettingsService({
-    repository: new ChatSettingsRepository(db, {
-      chats: chatRepo,
-      accountOf: (channel) => channelRecords.accountOf(channel),
-      platformOfChannel,
-    }),
+    repository: new ChatSettingsRepository(db, { chats: chatRepo, adapters: chatAdapters }),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,

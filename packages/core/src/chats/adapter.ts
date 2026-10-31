@@ -367,7 +367,12 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
 export class ChatAdapters {
   private readonly built = new WeakMap<Channel, ChannelChatAdapter>();
 
-  constructor(private readonly deps: Required<ChannelAdapterDeps>) {}
+  constructor(
+    private readonly deps: Required<ChannelAdapterDeps> & {
+      /** The channels of Rome's accounts on `platform`. */
+      channelsOn(platform: string): readonly string[];
+    },
+  ) {}
 
   /** The adapter over `channel`. */
   of(channel: Channel): ChannelChatAdapter {
@@ -387,6 +392,16 @@ export class ChatAdapters {
         platform: this.deps.platformOfChannel(channel),
         id: channel,
       }
+    );
+  }
+
+  /** The channel Rome's account `account` speaks through, or null when no
+   *  channel is that account. The inverse of {@link accountOn}. */
+  channelOf(account: Account): string | null {
+    return (
+      this.deps
+        .channelsOn(account.platform)
+        .find((channel) => this.accountOn(channel).id === account.id) ?? null
     );
   }
 

@@ -3,6 +3,7 @@
 // is the only SQL that names Chats' tables, so a change to how Chats stores a
 // message changes Chats and this file. Vocabulary: docs/domains/chats.md.
 
+import type { Account } from "@rome-os/app-runtime";
 import { sql, type SQL } from "drizzle-orm";
 import { romeSessions } from "../db/schema/system.js";
 
@@ -47,12 +48,12 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 
-/** Every seat `scope` names where something was said since `cutoff` (unix
+/** Every seat `scope` names, over the seat `s` and its chat `c`, where something was said since `cutoff` (unix
  *  seconds) and since it took its seat, the latest said first. */
 export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
   return sql`
     SELECT s.id, s.chat_id, s.thread_id FROM rome_sessions s
-    LEFT JOIN channels ch ON ch.id = s.source_channel
+    JOIN chats c ON c.id = s.chat_id
     JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id
@@ -78,12 +79,13 @@ export function sessionLines(sessionIds: readonly string[]) {
       CASE WHEN l.role = 'answer'
              OR (l.role IS NULL AND m.sender_agent IS NOT NULL AND m.sender_account_id IS s.account_id)
              THEN 'assistant'
-           WHEN l.role = 'prompt' OR s.source_channel = 'webchat' THEN 'user'
+           WHEN l.role = 'prompt' OR c.platform = 'webchat' THEN 'user'
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
       m.sender_name, CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS line_order,
       m.rowid AS seq, m.sender_agent IS NOT NULL AS from_rome
     FROM rome_sessions s
+    JOIN chats c ON c.id = s.chat_id
     JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A seat sees the place from when it joined.
       AND m.said_at >= s.created_at
@@ -101,13 +103,27 @@ export function sessionLines(sessionIds: readonly string[]) {
   )`;
 }
 
-/** An account's direct messages with Rome in the rows `held` names: each
- *  line, whether Rome said it, and its id for {@link accountTranscriptDetail}. */
-export function accountTranscript(held: SQL): SQL {
+/**
+ * Rome's direct messages with the accounts `scope` names, each by the channel
+ * of Rome's account it is read under, that account, and the other party's
+ * address: each line, whether Rome said it, the channel as its source, and its
+ * id for {@link accountTranscriptDetail}. A group answers to no address, and
+ * a guardian chat is the guardian talking to Rome, so neither is read.
+ */
+export function accountTranscript(
+  scope: readonly { channel: string; account: Account; key: string }[],
+): SQL {
+  const rows = sql.join(
+    scope.map(
+      ({ channel, account, key }) => sql`(${channel}, ${account.platform}, ${account.id}, ${key})`,
+    ),
+    sql`, `,
+  );
   return sql`
+    WITH v(channel, platform, account, key) AS (VALUES ${rows})
     SELECT
-      s.source_channel AS source,
-      s.source_thread_id AS key,
+      v.channel AS source,
+      v.key AS key,
       m.said_at AS at,
       -- A line is from Rome when one of its agents said it, or the
       -- guardian said it through Rome's account there.
@@ -115,14 +131,12 @@ export function accountTranscript(held: SQL): SQL {
       'agent:' || m.id AS ref,
       m.parts AS body,
       m.id AS detail_key
-    FROM rome_sessions s
-    JOIN chats c ON c.id = s.chat_id
+    FROM v
+    JOIN rome_sessions s ON s.account_id = v.account AND s.source_thread_id = v.key
+    JOIN chats c ON c.id = s.chat_id AND c.platform = v.platform
     JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS NULL
     WHERE s.type = 'channel' AND s.thread_id IS NULL
-      -- A guardian chat is the guardian talking to Rome, not a conversation
-      -- with a person on an account.
-      AND c.platform <> 'webchat'
-      AND ${held}`;
+      AND c.kind = 'dm' AND c.platform <> 'webchat'`;
 }
 
 /** Who said transcript line `key` and in which seat's thread, as JSON. */

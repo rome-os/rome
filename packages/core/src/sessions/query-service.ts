@@ -28,9 +28,10 @@ import type {
   SessionQueryStorageScope,
 } from "../db/repositories/session-query.js";
 
-type SessionRow = NonNullable<
-  Awaited<ReturnType<SessionQueryRepository["getSessionDetailRows"]>>
->["session"];
+type SessionRow = Omit<
+  NonNullable<Awaited<ReturnType<SessionQueryRepository["getSessionDetailRows"]>>>["session"],
+  "onDashboard"
+>;
 
 type MetricsAccumulator = {
   sessions: Set<string>;
@@ -231,7 +232,7 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
     return (
       clean(session.sourceThreadName) ??
       clean(session.name) ??
-      humanize(session.sourceChannel) ??
+      humanize(session.seatChannel) ??
       `Channel ${shortIdentifier(session.id)}`
     );
   }
@@ -337,8 +338,8 @@ export class SessionQueryService {
    * has no shape for no agent.
    */
   private answeringAgent(session: SessionRow, accountAgentOf: AccountAgentOf): string | null {
-    if (session.type !== "channel" || !session.sourceChannel) return session.agentName;
-    const linked = accountAgentOf(session.sourceChannel);
+    if (session.type !== "channel" || !session.seatChannel) return session.agentName;
+    const linked = accountAgentOf(session.seatChannel);
     if (!linked) return session.agentName;
     if (session.sourceThreadType !== "private") {
       // A null routing override is an explicit pin to main.
@@ -460,7 +461,7 @@ export class SessionQueryService {
       projectPath: session.projectPath,
       agentName,
       type: session.type as RomeSessionType,
-      sourceChannel: session.sourceChannel,
+      sourceChannel: session.seatChannel,
       sourceThreadId: session.sourceThreadId,
       sourceThreadName: session.sourceThreadName,
       sourceThreadType: session.sourceThreadType,
@@ -584,7 +585,7 @@ export class SessionQueryService {
       };
     }
     if (by === "source") {
-      if (!run.sourceChannel) {
+      if (!run.seatChannel) {
         return {
           key: "source:internal",
           label: "Internal",
@@ -600,16 +601,16 @@ export class SessionQueryService {
         };
       }
       return {
-        key: `source:${run.sourceChannel}`,
-        label: titleCase(run.sourceChannel),
+        key: `source:${run.seatChannel}`,
+        label: titleCase(run.seatChannel),
         description: "External source",
         iconUrl: null,
         kind: "named",
         dimension: {
           dimension: "source",
           state: "channel",
-          channel: run.sourceChannel,
-          label: titleCase(run.sourceChannel),
+          channel: run.seatChannel,
+          label: titleCase(run.seatChannel),
         },
       };
     }
