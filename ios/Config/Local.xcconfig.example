@@ -1,0 +1,2 @@
+// Copy to Local.xcconfig (gitignored) to sign device builds with your team.
+DEVELOPMENT_TEAM = XXXXXXXXXX

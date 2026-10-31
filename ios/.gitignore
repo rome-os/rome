@@ -1,0 +1,7 @@
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+Config/Local.xcconfig
+.design-ref/
+Config/local-dev.env

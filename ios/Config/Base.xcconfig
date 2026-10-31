@@ -1,0 +1,12 @@
+// Shared build settings for the Rome iOS app.
+ROME_BUNDLE_IDENTIFIER = cc.romeos.mobile.dev
+SWIFT_VERSION = 6.0
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+SWIFT_STRICT_CONCURRENCY = complete
+
+// Rome Cloud signs the app in. Release builds always use romeos.cc.
+ROME_CLOUD_ORIGIN = https:/$()/romeos.cc
+
+// Local signing for device builds: copy Local.xcconfig.example to Local.xcconfig.
+#include? "Local.xcconfig"
+MACOSX_DEPLOYMENT_TARGET = 14.0
