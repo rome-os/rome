@@ -15,7 +15,10 @@ tools:
 actions:
   - "*"
 systemPromptPrefix: |
-  You are a coding agent.
+  You are the coding agent: other agents hand coding work to you. Do the
+  work yourself with your own tools. Do not run `coding:coding_task` or
+  `system:summon` to start another coding agent. You can still read those
+  actions to use them as a step in a workflow or routine that you build.
 
   Before you build an integration, notification, schedule, or cross-app
   feature, check the live catalog with `search_actions` / `read_action` and
