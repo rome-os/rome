@@ -280,6 +280,7 @@ import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
 import { MessageRepository } from "./chats/message-repository.js";
 import { SeatReplies } from "./sessions/seat-replies.js";
+import { recordedSends } from "./chats/recorded-sends.js";
 import { ChatAddresses } from "./channels/chat-addresses.js";
 import { ChatReadModel } from "./webchat/chat-read-model.js";
 import { TurnLinks } from "./sessions/turn-links.js";
@@ -1539,7 +1540,19 @@ async function main() {
 
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
-  const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  // What the hook sends on them goes through the seat's chat adapter and is
+  // recorded in Chats.
+  const recordedSendsDeps = {
+    chats: chatRepo,
+    webchatRepo,
+    addresses: chatAddresses,
+    replies: seatReplies,
+    accountOf: (channel: string) => channelRecords.accountOf(channel),
+    platformOfChannel,
+  };
+  const hookChannels = legacyChatIdChannels(
+    recordedSends(withInboundSpans(channels, "channel-message"), recordedSendsDeps),
+  );
   // Every message the channels deliver is put on record in its chat before the
   // hook hears it (docs/domains/participation.md#wake). It records through the
   // hook's channels, so the hook's trace covers recording as well.
@@ -1645,7 +1658,9 @@ async function main() {
       connection,
     );
     if (!channel) return;
-    const added = legacyChatIdChannels(withInboundSpans([channel], "channel-message"));
+    const added = legacyChatIdChannels(
+      recordedSends(withInboundSpans([channel], "channel-message"), recordedSendsDeps),
+    );
     hookChannels.push(...added);
     inboundRecorder.addChannels(added);
     const hook = messageHook;

@@ -107,10 +107,9 @@ export interface BackendTurnRunnerDeps {
     threadId: string,
   ) => Promise<ThreadContext["deviceFolder"] | undefined>;
   /** Opens the seat a delivered reply is said through. */
-  chats?: ChatRepository;
-  /** Says a reply through its seat and records it. Absent, the reply is
-   *  delivered and nothing records it. */
-  replies?: Pick<SeatReplies, "send">;
+  chats: ChatRepository;
+  /** Says a reply through its seat and records it. */
+  replies: Pick<SeatReplies, "send">;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -231,34 +230,23 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       }
       const channel = deps.channel(params.channel);
       if (!channel?.send) throw new Error(`Channel "${params.channel}" cannot send`);
-      const { chats, replies } = deps;
-      const seat =
-        chats && replies
-          ? await chats
-              .ensureChannelChat({
-                channel: params.channel,
-                threadId: params.threadId,
-                agentName: params.agentName,
-              })
-              .catch((err: unknown) => {
-                log.warn("backend reply has no seat to record it in", {
-                  channel: params.channel,
-                  threadId: params.threadId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                return null;
-              })
-          : null;
-      if (!seat || !replies) {
-        await channel.send.send(params.threadId as ChatId, {
-          text: reply,
-          ...(turnId ? { turnId } : {}),
-        });
-        return;
-      }
-      // The seat's adapter sends it. A delivery that succeeded and failed to
-      // record is logged, so the continuation never retries a sent reply.
-      await replies.send(seat.id, channel, { text: reply }, { ...(turnId ? { turnId } : {}) });
+      // The reply is said through the agent's seat there, so it goes out
+      // through the seat's adapter and is on record. A reply with no seat to
+      // say it through is not sent: it would be a line nobody can read back.
+      const seat = await deps.chats.ensureChannelChat({
+        channel: params.channel,
+        threadId: params.threadId,
+        agentName: params.agentName,
+      });
+      // A delivery that succeeded and failed to record is logged, so the
+      // continuation never retries a sent reply.
+      const said = await deps.replies.send(
+        seat.id,
+        channel,
+        { text: reply },
+        { ...(turnId ? { turnId } : {}) },
+      );
+      if (!said) throw new Error(`Session ${seat.id} stands in no chat to reply in`);
     },
   };
 }

@@ -38,6 +38,8 @@ Chats reaches a channel through its adapter ([`ChatAdapter`](../../packages/core
 - `send` answers the line's id once the platform took it, and Chats records it under that id. A platform that gives no id gets one the adapter makes (`sentLineId`); Chats records only an id it was given. A refusal rejects with the platform's words, and nothing is recorded.
 - A streamed reply is the adapter's `stream`, which writes through the channel's reply transport and settles to one line: the text the user was shown, under its first message's id. Rome records it as the turn's answer ([`SeatReplies.stream`](../../packages/core/src/sessions/seat-replies.ts)).
 - An app says a message through its seat with the SDK's `chats.send`, which goes through the adapter's `send` and records the line in one step. The system app's `send_message` uses it for every chat but the dashboard. Email, and an app on a host without `chats.send`, still sends on the channel port and records through `recordOutboundMessage`.
+- A hook's channels send through the seat at the address they send to ([`chats/recorded-sends.ts`](../../packages/core/src/chats/recorded-sends.ts)): the seat that heard that address, else the chat Rome holds there, opened for the main agent. So the Inbox hook's answers, such as a `/stop` receipt, are on record. An email is sent on the port as it was.
+- A backend turn's reply is always said through the agent's seat, and is not sent when no seat can be opened, rather than going out unrecorded.
 
 ### Direct messages
 

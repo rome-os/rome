@@ -1179,6 +1179,22 @@ export class WebChatRepository {
     );
   }
 
+  /**
+   * The seat channel `channel`'s account heard platform address `address`
+   * at, by its session's id, or null when none did. A thread's seat is found
+   * by the thread's own address.
+   */
+  seatAt(channel: string, address: string): string | null {
+    return (
+      this.db.all<{ id: string }>(sql`
+        SELECT id FROM rome_sessions
+        WHERE source_channel = ${channel} AND source_thread_id = ${address}
+          AND chat_id IS NOT NULL
+        ORDER BY created_at LIMIT 1
+      `)[0]?.id ?? null
+    );
+  }
+
   /** The message said where session `sessionId` stands whose platform id is
    *  `platformMessageId`, as the platform gave it, or null when none is. */
   async seatMessageId(sessionId: string, platformMessageId: string): Promise<string | null> {
