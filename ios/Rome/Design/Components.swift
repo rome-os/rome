@@ -11,14 +11,65 @@ struct GlassCircleButton<Label: View>: View {
             label()
                 .foregroundStyle(Palette.fg)
                 .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .background(Palette.glass, in: Circle())
-                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
-                .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+                .glassSurface(Circle(), interactive: true)
                 .contentShape(Circle())
         }
-        .buttonStyle(PressScaleStyle())
+        .buttonStyle(GlassPressStyle())
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+extension View {
+    /// The system glass behind a floating control: Liquid Glass on iOS 26 and
+    /// later, a thin material with a hairline before it.
+    @ViewBuilder
+    func glassSurface<S: InsettableShape>(_ shape: S, interactive: Bool = false) -> some View {
+        if #available(iOS 26, *) {
+            glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+        } else {
+            background(.ultraThinMaterial, in: shape)
+                .overlay(shape.strokeBorder(Palette.hair, lineWidth: 0.5))
+                .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+        }
+    }
+
+    /// A bar pinned to the top that the content scrolls under. On iOS 26 and
+    /// later the system softens the content's edge beneath it.
+    @ViewBuilder
+    func floatingTopBar<Bar: View>(@ViewBuilder _ bar: () -> Bar) -> some View {
+        if #available(iOS 26, *) {
+            safeAreaBar(edge: .top, spacing: 0, content: bar)
+        } else {
+            safeAreaInset(edge: .top, spacing: 0, content: bar)
+        }
+    }
+}
+
+extension View {
+    /// Fades scrolled content gradually under a floating top bar, instead of
+    /// the hard cut-off line the system can choose.
+    @ViewBuilder
+    func softTopScrollEdge() -> some View {
+        if #available(iOS 26, *) {
+            scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+    }
+}
+
+/// The press on a glass control: interactive glass answers the touch itself on
+/// iOS 26 and later; before that, the usual scale-and-dim.
+struct GlassPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        if #available(iOS 26, *) {
+            configuration.label
+        } else {
+            configuration.label
+                .scaleEffect(configuration.isPressed ? 0.96 : 1)
+                .opacity(configuration.isPressed ? 0.85 : 1)
+                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
+        }
     }
 }
 

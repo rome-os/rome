@@ -15,9 +15,15 @@ struct ChatScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ChatHeader(needsYou: workspace.tasks.needsYouCount, onMenu: onMenu, onTasks: onTasks)
-            banners
             content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The bar is clear: the transcript scrolls under its glass items.
+        .floatingTopBar {
+            VStack(spacing: 0) {
+                ChatHeader(needsYou: workspace.tasks.needsYouCount, onMenu: onMenu, onTasks: onTasks)
+                banners
+            }
         }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
@@ -147,6 +153,9 @@ struct ChatHeader: View {
             Text("Chat")
                 .romeFont(17, .semibold)
                 .tracking(-0.4)
+                .padding(.horizontal, 18)
+                .frame(height: 44)
+                .glassSurface(Capsule())
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             GlassCircleButton(accessibilityLabel: needsYou > 0 ? "Tasks, \(needsYou) need you" : "Tasks", action: onTasks) {
@@ -252,10 +261,10 @@ struct TranscriptList<Row: View>: View {
     @State private var atBottom = true
     @State private var unseen = 0
     @State private var highlighted: String?
+    @State private var visibleHeight: CGFloat = 0
 
     var body: some View {
         let rows = store.rows
-        GeometryReader { geometry in
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -291,10 +300,15 @@ struct TranscriptList<Row: View>: View {
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .padding(.bottom, 14)
-                .frame(minHeight: alignTop ? geometry.size.height : nil, alignment: .top)
+                .frame(minHeight: alignTop ? visibleHeight : nil, alignment: .top)
                 .animation(.spring(response: 0.38, dampingFraction: 0.88), value: rows.map(\.id))
             }
             .defaultScrollAnchor(.bottom)
+            .softTopScrollEdge()
+            // The height between the bars; the scroll view itself runs under them.
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { visibleHeight = $0 }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: rows.last?.id) {
                 if atBottom {
@@ -350,7 +364,6 @@ struct TranscriptList<Row: View>: View {
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: unseen > 0 && !atBottom)
-        }
         }
     }
 }

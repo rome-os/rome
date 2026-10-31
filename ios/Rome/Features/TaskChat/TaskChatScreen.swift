@@ -23,7 +23,6 @@ struct TaskChatScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             if let store {
                 if store.loaded {
                     transcript(store)
@@ -36,6 +35,8 @@ struct TaskChatScreen: View {
                 Spacer()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .floatingTopBar { header }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -97,6 +98,9 @@ struct TaskChatScreen: View {
                     .transition(.opacity)
                 }
             }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .glassSurface(Capsule())
             .frame(maxWidth: .infinity)
             .animation(.easeInOut(duration: 0.25), value: tone)
             Menu {
@@ -115,10 +119,7 @@ struct TaskChatScreen: View {
                     .romeFont(17, .semibold)
                     .foregroundStyle(Palette.fg)
                     .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .background(Palette.glass, in: Circle())
-                    .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
-                    .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
+                    .glassSurface(Circle(), interactive: true)
             }
             .accessibilityLabel("More")
         }
