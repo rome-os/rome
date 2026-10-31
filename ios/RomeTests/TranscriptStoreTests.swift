@@ -15,10 +15,18 @@ final class FakeBackend: RomeBackend {
     /// Whether an interrupt ends the turn on the server.
     var interruptEndsTurn = true
 
+    /// Runs while an older page is in flight, after the page was read.
+    var duringOlderFetch: (() async -> Void)?
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
-        return MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
+        let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
+        if before != nil, let hook = duringOlderFetch {
+            duringOlderFetch = nil
+            await hook()
+        }
+        return page
     }
 
     func activeTurns(sessionId: String) async throws -> [ActiveTurn] { turns }
@@ -161,5 +169,23 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
         await store.reload()
         #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
+    }
+
+    @Test func olderPageFromBeforeAGapIsDropped() async {
+        let backend = backendWithLongChat()
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+
+        // While the older page is in flight, the chat moves on far enough that
+        // the newest page shares nothing with what is held.
+        backend.duringOlderFetch = {
+            backend.stored = (100..<150).map { chatMessage($0) }
+            await store.reload()
+        }
+        await store.loadOlder()
+
+        #expect(store.olderPage == nil)
+        #expect(store.messages.allSatisfy { Int($0.id.dropFirst())! >= 100 })
+        #expect(store.hasOlder)
     }
 }

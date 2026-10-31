@@ -134,7 +134,11 @@ final class TranscriptStore {
         guard hasOlder, !loadingOlder, olderPage == nil, let cursor else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        olderPage = try? await backend.messages(sessionId: sessionId, before: cursor, limit: 40)
+        let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: 40)
+        // A reload that found a gap started the history over while this ran;
+        // a page from the old cursor would leave a hole in it.
+        guard self.cursor == cursor else { return }
+        olderPage = page
     }
 
     /// Puts the fetched older page above the rows. The list calls it when the
