@@ -17,7 +17,7 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 ## Waiting on the user
 
 - [x] Rome Cloud sign-in on the simulator works end to end (confirmed by the user)
-- [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of f13d07d3, team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
+- [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of b72cb7d8 (with English as the default language), team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
 - [x] English as the default language, zh-Hans a translation: merged from `claude/epic-vaughan-1e52a1` after an independent review found no serious defects (result: [`mobile-app-mvp-english.md`](mobile-app-mvp-english.md))
 - [ ] Reinstall the merged build on the user's iPhone (in progress: worker `iphone-install`)
 - [ ] Try the app on the simulator and list what feels off (keyboard, drawer swipe, Tasks sheet drag, motion)
@@ -42,5 +42,5 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 
 | Name | Session | Task | Status |
 | --- | --- | --- | --- |
-| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: `devicectl` lists Rome 1.0 (1) installed and the launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
+| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: reinstalled b72cb7d8 after the English merge. Mac Catalyst unit tests passed on it (32 tests), `devicectl` install and launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
 | make-english-the-ios-app | local_066dd861-f965-4eff-89db-ee9aa13d5d0c | English default, zh-Hans translation | done, merged; archive pending the user's OK |
