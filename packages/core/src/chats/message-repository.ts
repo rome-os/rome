@@ -19,7 +19,8 @@ import {
   type SaidBy,
   type SaidMessage,
 } from "./message.js";
-import type { Place } from "./place.js";
+import type { ChatId } from "@rome-os/app-runtime";
+import { placeIn, type Place } from "./place.js";
 
 const log = createLogger("chat-messages");
 
@@ -157,6 +158,39 @@ export class MessageRepository {
     };
   }
 
+  /**
+   * Every message said in thread `threadId` of chat `chatId` (the open chat
+   * when null) at or after `since`, oldest first. Lines said in one second
+   * keep the order they were recorded in.
+   */
+  since(chatId: string, threadId: string | null, since: Date): SaidMessage[] {
+    return this.db
+      .all<MessageRow & PlaceRow>(sql`
+        SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
+               m.reply_to_message_id, m.said_at, c.platform, m.chat_id, m.thread_id
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id
+        WHERE m.chat_id = ${chatId} AND m.thread_id IS ${threadId}
+          AND m.said_at >= ${seconds(since)}
+        ORDER BY m.said_at, m.rowid
+      `)
+      .map((row) => said(placeOf(row), row));
+  }
+
+  /** The messages `ids` name that are on record, wherever they were said, in
+   *  the order they were said. */
+  byIds(ids: readonly string[]): SaidMessage[] {
+    if (ids.length === 0) return [];
+    return this.db
+      .all<MessageRow & PlaceRow>(sql`
+        SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
+               m.reply_to_message_id, m.said_at, c.platform, m.chat_id, m.thread_id
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id
+        WHERE m.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+        ORDER BY m.said_at, m.rowid
+      `)
+      .map((row) => said(placeOf(row), row));
+  }
+
   /** The chat `place` is in, which must already exist: a message never
    *  starts its chat. */
   private chatIdOf(place: Place): string {
@@ -179,6 +213,19 @@ interface MessageRow {
   parts: string;
   reply_to_message_id: string | null;
   said_at: number;
+}
+
+interface PlaceRow {
+  platform: string;
+  chat_id: string;
+  thread_id: string | null;
+}
+
+function placeOf(row: PlaceRow): Place {
+  return placeIn(
+    { platform: row.platform, id: row.chat_id },
+    (row.thread_id ?? undefined) as ChatId | undefined,
+  );
 }
 
 function said(place: Place, row: MessageRow): SaidMessage {

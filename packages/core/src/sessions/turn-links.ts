@@ -9,6 +9,8 @@
 import { sql } from "drizzle-orm";
 import type { AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
+import { MessageRepository } from "../chats/message-repository.js";
+import type { SaidMessage } from "../chats/message.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a line
  *  the turn caught up on. */
@@ -32,7 +34,52 @@ export class TurnLinks {
    */
   private readonly undecided = new Set<string>();
 
-  constructor(private readonly db: DrizzleDb) {}
+  /** Chats' reads, which every line a session reads goes through. */
+  private readonly messages: Pick<MessageRepository, "since" | "byIds">;
+
+  constructor(
+    private readonly db: DrizzleDb,
+    messages?: Pick<MessageRepository, "since" | "byIds">,
+  ) {
+    this.messages = messages ?? new MessageRepository(db);
+  }
+
+  /** Where session `sessionId` stands, from its own row, or null for a
+   *  session in no chat. */
+  private seatOf(sessionId: string): {
+    chatId: string;
+    threadId: string | null;
+    since: Date;
+    joined: Date;
+  } | null {
+    const row = this.db.all<{
+      chat_id: string | null;
+      thread_id: string | null;
+      created_at: number;
+      joined: number;
+    }>(sql`
+      SELECT s.chat_id, s.thread_id, s.created_at,
+        (SELECT min(o.created_at) FROM rome_sessions o
+         WHERE o.chat_id = s.chat_id AND o.account_id IS s.account_id) AS joined
+      FROM rome_sessions s WHERE s.id = ${sessionId}
+    `)[0];
+    if (!row?.chat_id) return null;
+    return {
+      chatId: row.chat_id,
+      threadId: row.thread_id,
+      since: new Date(row.created_at * 1000),
+      joined: new Date((row.joined ?? row.created_at) * 1000),
+    };
+  }
+
+  /** The ids of every message session `sessionId` links, and how. */
+  private linksOf(sessionId: string): LinkRow[] {
+    return this.db.all<LinkRow>(sql`
+      SELECT message_id, session_id, turn_id, role, input_state
+      FROM agent_turn_messages WHERE session_id = ${sessionId}
+      ORDER BY rowid
+    `);
+  }
 
   /**
    * Make message `messageId` session `sessionId`'s prompt, for turn `turnId`
@@ -93,12 +140,13 @@ export class TurnLinks {
   /** Mark `messageIds` caught up on by turn `turnId` of session `sessionId`.
    *  A message the session already linked keeps its link. */
   seen(messageIds: readonly string[], sessionId: string, turnId: string): void {
-    if (messageIds.length === 0) return;
+    // Only messages Chats holds: one gone since is nothing to link.
+    const held = this.messages.byIds(messageIds).map((message) => message.id);
+    if (held.length === 0) return;
     this.db.run(sql`
       INSERT OR IGNORE INTO agent_turn_messages (message_id, session_id, turn_id, role, input_state)
       SELECT value, ${sessionId}, ${turnId}, 'seen', NULL
-      FROM json_each(${JSON.stringify(messageIds)})
-      WHERE value IN (SELECT id FROM chat_messages)
+      FROM json_each(${JSON.stringify(held)})
     `);
   }
 
@@ -154,55 +202,79 @@ export class TurnLinks {
     page: { before?: { at: number; id: string } | null; limit?: number } = {},
   ): { lines: TurnLine[]; older: { at: number; id: string } | null } {
     const { before, limit } = page;
-    const rows = this.db.all<TurnRow>(sql`
-      WITH lines AS (
-        -- The turn's own rows Agents keeps: its trace, and with no chat its
-        -- prompt and answer.
-        SELECT t.id, t.turn_id, t.role, t.content, NULL AS input_state,
-               NULL AS sender_account_id, t.sender_name, t.created_at AS at, t.rowid AS seq
-        FROM rome_agent_messages t
-        WHERE t.session_id = ${sessionId}
-          AND (t.role = 'trace'
-               OR (SELECT chat_id FROM rome_sessions WHERE id = ${sessionId}) IS NULL)
-        UNION ALL
-        -- In a chat, the messages its turns took and gave, through the link.
-        SELECT m.id, l.turn_id,
-               CASE WHEN m.sender_agent IS NOT NULL THEN 'assistant' ELSE 'user' END,
-               m.parts, l.input_state, m.sender_account_id, m.sender_name, m.said_at, m.rowid
-        FROM agent_turn_messages l JOIN chat_messages m ON m.id = l.message_id
-        WHERE l.session_id = ${sessionId} AND l.role IN ('prompt', 'answer')
-      ),
-      keyed AS (
-        SELECT *, coalesce(turn_id, id) AS key,
-               MIN(at) OVER (PARTITION BY coalesce(turn_id, id)) AS started_at
-        FROM lines
-      ),
-      turns AS (
-        SELECT DISTINCT key, started_at FROM keyed
-        ${before ? sql`WHERE (started_at, key) < (${before.at}, ${before.id})` : sql``}
-        ORDER BY started_at DESC, key DESC
-        ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
-      ),
-      shown AS (
-        SELECT key FROM turns ${limit === undefined ? sql`` : sql`LIMIT ${limit}`}
+    const seat = this.seatOf(sessionId);
+    // The turn's own rows Agents keeps: its trace, and with no chat its
+    // prompt and answer.
+    const own = this.db
+      .all<OwnRow>(sql`
+        SELECT id, turn_id, role, content, sender_name, created_at AS at
+        FROM rome_agent_messages
+        WHERE session_id = ${sessionId}
+          AND (role = 'trace' OR ${seat === null ? 1 : 0})
+        ORDER BY created_at, rowid
+      `)
+      .map(
+        (row): TurnLine => ({
+          id: row.id,
+          turnId: row.turn_id,
+          role: row.role,
+          content: row.content,
+          inputState: null,
+          senderAccountId: null,
+          senderName: row.sender_name,
+          at: new Date(row.at * 1000),
+        }),
+      );
+    // In a chat, the messages its turns took and gave, read through Chats.
+    const links = new Map(
+      this.linksOf(sessionId)
+        .filter((link) => link.role === "prompt" || link.role === "answer")
+        .map((link) => [link.message_id, link]),
+    );
+    const said = this.messages.byIds([...links.keys()]).map((message): TurnLine => {
+      const link = links.get(message.id);
+      return {
+        id: message.id,
+        turnId: link?.turn_id ?? null,
+        role: message.direction === "fromRome" ? "assistant" : "user",
+        content: message.parts,
+        inputState: link?.input_state ?? null,
+        senderAccountId: message.saidBy?.account.id ?? null,
+        senderName: message.senderName ?? null,
+        at: message.at,
+      };
+    });
+    // A turn's lines go together, ordered by its first line; a line outside
+    // any turn is a turn of its own.
+    const all = [...own, ...said];
+    const keyOf = (line: TurnLine) => line.turnId ?? line.id;
+    const startedAt = new Map<string, number>();
+    for (const line of all) {
+      const at = Math.floor(line.at.getTime() / 1000);
+      const key = keyOf(line);
+      startedAt.set(key, Math.min(startedAt.get(key) ?? at, at));
+    }
+    const cmp = (a: [string, number], b: [string, number]) =>
+      a[1] - b[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    let turns = [...startedAt].sort(cmp);
+    if (before) turns = turns.filter((turn) => cmp(turn, [before.id, before.at]) < 0);
+    const shown = limit === undefined ? turns : turns.slice(-limit);
+    const keep = new Set(shown.map(([key]) => key));
+    const order = new Map(shown.map(([key], i) => [key, i]));
+    const lines = all
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => keep.has(keyOf(line)))
+      .sort(
+        (a, b) =>
+          (order.get(keyOf(a.line)) ?? 0) - (order.get(keyOf(b.line)) ?? 0) ||
+          a.line.at.getTime() - b.line.at.getTime() ||
+          a.i - b.i,
       )
-      SELECT keyed.*, (SELECT count(*) FROM turns) > ${limit ?? -1} AS more
-      FROM keyed JOIN shown USING (key)
-      ORDER BY keyed.started_at, keyed.key, keyed.at, keyed.seq
-    `);
-    const oldest = rows[0];
+      .map(({ line }) => line);
+    const oldest = shown[0];
     return {
-      lines: rows.map((row) => ({
-        id: row.id,
-        turnId: row.turn_id,
-        role: row.role,
-        content: row.content,
-        inputState: row.input_state,
-        senderAccountId: row.sender_account_id,
-        senderName: row.sender_name,
-        at: new Date(row.at * 1000),
-      })),
-      older: oldest?.more ? { at: oldest.started_at, id: oldest.key } : null,
+      lines,
+      older: oldest && shown.length < turns.length ? { at: oldest[1], id: oldest[0] } : null,
     };
   }
 
@@ -214,42 +286,25 @@ export class TurnLinks {
    * in its chat, so a thread's first line can carry the line that started it.
    */
   unseen(sessionId: string): UnseenLine[] {
-    return this.db
-      .all<UnseenRow>(sql`
-        SELECT m.id, ${SENDER_NAME("m")} AS sender_name, m.sender_agent IS NOT NULL AS from_rome,
-               m.text, m.said_at, q.id AS q_id, ${SENDER_NAME("q")} AS q_sender_name,
-               q.text AS q_text, q.said_at AS q_said_at
-        FROM rome_sessions s
-        JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-        -- A quoted line said before Rome's account was in the chat stays out
-        -- of its view, like every other line said then.
-        LEFT JOIN chat_messages q ON q.id = m.reply_to_message_id
-          AND q.said_at >= (
-            SELECT min(o.created_at) FROM rome_sessions o
-            WHERE o.chat_id = s.chat_id AND o.account_id IS s.account_id)
-        WHERE s.id = ${sessionId} AND m.said_at >= s.created_at
-          AND NOT EXISTS (
-            SELECT 1 FROM agent_turn_messages l
-            WHERE l.message_id = m.id AND l.session_id = s.id)
-        ORDER BY m.said_at, m.rowid
-      `)
-      .filter((row) => !this.undecided.has(row.id))
-      .map((row) => ({
-        id: row.id,
-        senderName: row.sender_name,
-        fromRome: Boolean(row.from_rome),
-        text: row.text,
-        at: new Date(row.said_at * 1000),
-        quoted:
-          row.q_id === null
-            ? null
-            : {
-                id: row.q_id,
-                senderName: row.q_sender_name,
-                text: row.q_text ?? "",
-                at: new Date((row.q_said_at ?? 0) * 1000),
-              },
-      }));
+    const seat = this.seatOf(sessionId);
+    if (!seat) return [];
+    const linked = new Set(this.linksOf(sessionId).map((link) => link.message_id));
+    const lines = this.messages
+      .since(seat.chatId, seat.threadId, seat.since)
+      .filter((message) => !linked.has(message.id) && !this.undecided.has(message.id));
+    // A quoted line said before Rome's account was in the chat stays out of
+    // its view, like every other line said then.
+    const quoted = new Map(
+      this.messages
+        .byIds(lines.flatMap((message) => (message.replyTo ? [message.replyTo] : [])))
+        .filter((message) => message.at >= seat.joined)
+        .map((message) => [message.id, contextOf(message)]),
+    );
+    return lines.map((message) => ({
+      ...contextOf(message),
+      fromRome: message.direction === "fromRome",
+      quoted: (message.replyTo && quoted.get(message.replyTo)) || null,
+    }));
   }
 
   /** Hold message `messageId` out of every catch-up until its wake is
@@ -282,18 +337,13 @@ export interface TurnLine {
   readonly at: Date;
 }
 
-interface TurnRow {
+interface OwnRow {
   id: string;
   turn_id: string | null;
   role: TurnLine["role"];
   content: string;
-  input_state: AgentInputState | null;
-  sender_account_id: string | null;
   sender_name: string | null;
   at: number;
-  key: string;
-  started_at: number;
-  more: number;
 }
 
 /** A line said where a session stands, as it would read it. */
@@ -308,18 +358,6 @@ export interface ContextLine {
 export interface UnseenLine extends ContextLine {
   readonly fromRome: boolean;
   readonly quoted: ContextLine | null;
-}
-
-interface UnseenRow {
-  id: string;
-  sender_name: string | null;
-  from_rome: number;
-  text: string;
-  said_at: number;
-  q_id: string | null;
-  q_sender_name: string | null;
-  q_text: string | null;
-  q_said_at: number | null;
 }
 
 interface LinkRow {
@@ -340,10 +378,13 @@ function toLink(row: LinkRow): TurnLink {
   };
 }
 
-/** What a line calls its sender. A line of Rome's that kept no name is
+/** A message as a session reads it. A line of Rome's that kept no name is
  *  Rome's, as the agent has always read it. */
-function SENDER_NAME(alias: "m" | "q") {
-  return sql.raw(
-    `CASE WHEN ${alias}.sender_agent IS NOT NULL THEN coalesce(${alias}.sender_name, 'Rome') ELSE ${alias}.sender_name END`,
-  );
+function contextOf(message: SaidMessage): ContextLine {
+  return {
+    id: message.id,
+    senderName: message.senderName ?? (message.direction === "fromRome" ? "Rome" : null),
+    text: message.body.text,
+    at: message.at,
+  };
 }
