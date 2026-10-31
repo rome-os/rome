@@ -16,7 +16,8 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 
 ## Waiting on the user
 
-- [ ] Rome Cloud sign-in on the simulator (in progress: the device authorization page). Report any error.
+- [x] Rome Cloud sign-in on the simulator works end to end (confirmed by the user)
+- [ ] Install on the user's iPhone (in progress: worker `iphone-install`)
 - [ ] Try the app on the simulator and list what feels off (keyboard, drawer swipe, Tasks sheet drag, motion)
 - [ ] OK to push `feat/ios-app` and open a PR to `main`
 
@@ -35,4 +36,4 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 
 | Name | Session | Task | Status |
 | --- | --- | --- | --- |
-| — | — | — | none yet |
+| iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | running |
