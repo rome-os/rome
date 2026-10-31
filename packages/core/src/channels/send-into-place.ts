@@ -22,14 +22,19 @@ import {
   channelsOn,
   type Channels,
   type PlatformOfChannel,
-} from "../channels/channel.js";
-import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
+} from "./channel.js";
+import { WEBCHAT_CHANNEL } from "./webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { addressOf, isDirectMessage, platformIdOfLine, type ChatAdapters } from "./adapter.js";
-import type { ChatRepository } from "./chat-repository.js";
-import type { MessageRepository } from "./message-repository.js";
-import type { Place } from "./place.js";
+import {
+  addressOf,
+  isDirectMessage,
+  platformIdOfLine,
+  type ChatAdapters,
+} from "../chats/adapter.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
+import type { MessageRepository } from "../chats/message-repository.js";
+import type { Place } from "../chats/place.js";
 
 export interface SendDeps {
   channels: Channels;

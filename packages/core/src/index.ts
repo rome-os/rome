@@ -1560,7 +1560,6 @@ async function main() {
   const inboundRecorder = inboundRecording(
     {
       chats: chatRepo,
-      seats: webchatRepo,
       messages: chatMessages,
       events: chatEvents,
       adapters: chatAdapters,
@@ -1571,6 +1570,8 @@ async function main() {
   // Agents hears each recorded message first, so its wake is held out of
   // catch-up before anything reads it.
   const hookMessagesSaid = messagesSaid({
+    chats: chatRepo,
+    seats: webchatRepo,
     recording: inboundRecorder,
     events: chatEvents,
     wakes: turnLinks,

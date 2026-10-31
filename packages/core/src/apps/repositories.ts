@@ -14,7 +14,7 @@ import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
 import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
-import { openChannelChat, type OpenChannelChatDeps } from "../chats/open-chat.js";
+import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
 import { lineAt } from "../chats/adapter.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { TurnLinks } from "../sessions/turn-links.js";

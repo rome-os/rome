@@ -40,7 +40,7 @@ import {
   type SendDeps,
   type SendIntoPlaceDeps,
   type SendResult,
-} from "../chats/send.js";
+} from "../channels/send-into-place.js";
 
 export { sendersOf, type SendDeps };
 

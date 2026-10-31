@@ -92,7 +92,7 @@ import {
   sessionOwnerKey,
   type SessionActor,
 } from "../../lib/session-actor.js";
-import type { DashboardInbox } from "../../chats/send.js";
+import type { DashboardInbox } from "../../channels/send-into-place.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";

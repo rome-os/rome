@@ -5,7 +5,7 @@ import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type { Account, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
-import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../chats/send.js";
+import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../channels/send-into-place.js";
 import type { AIToolStateValue } from "../core/ai-tool-state.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";

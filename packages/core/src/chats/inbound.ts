@@ -7,7 +7,6 @@
 // (sessions/messages-said.ts).
 
 import type { Channel, InboundEvent } from "@rome-os/app-runtime";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ChatAdapters, ChannelChatAdapter, Inbound } from "./adapter.js";
 import type { ChatRepository } from "./chat-repository.js";
 import type { ChatEvents } from "./events.js";
@@ -18,8 +17,6 @@ import { placeIn } from "./place.js";
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
   chats: Pick<ChatRepository, "start">;
-  /** Opens the seat of Rome's account the message arrived on, in Agents. */
-  seats: Pick<WebChatRepository, "ensureChannelChat" | "advanceActivity">;
   messages: Pick<MessageRepository, "record">;
   events: ChatEvents;
   /** Each channel's chat adapter, which hands over what the channel hears. */
@@ -86,20 +83,6 @@ export function inboundRecording(
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) return null;
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
-    const threadName = message.thread?.name ?? message.chatName ?? undefined;
-    const seat = await deps.seats.ensureChannelChat({
-      channel: via.channel,
-      threadId: via.address,
-      ...(via.parentAddress === undefined ? {} : { parentThreadId: via.parentAddress }),
-      ...(threadName === undefined ? {} : { threadName }),
-      threadType: message.chatKind === "dm" ? "private" : "group",
-      // A chat starts answered by main. Its own agent, when it has one, was
-      // set through its settings, which start the chat's row themselves.
-      agentName: "main",
-      chatId: chat.ref.id,
-      accountId: message.via.account.id,
-    });
-    await deps.seats.advanceActivity(seat.id, message.saidAt);
     // Recorded and raised in one step, with nothing run in between, so
     // MessageSaid's first listener acts before anything reads the message. A
     // redelivery carries the same id, records nothing and raises nothing.
@@ -120,8 +103,7 @@ export function inboundRecording(
     await deps.events.publish({
       type: "MessageSaid",
       message: recorded,
-      chatRecordId: seat.id,
-      via: { channel: via.channel },
+      via: { channel: via.channel, account: via.account },
     });
     return recorded.id;
   };

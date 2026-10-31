@@ -2,32 +2,14 @@
 // accounts, or when Rome first says something there. Vocabulary:
 // docs/domains/chats.md#chat.
 
-import type { ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { EnsureChannelChatInput } from "@rome-os/app-runtime";
 import type { ChatAdapters } from "./adapter.js";
 import type { ChatRepository } from "./chat-repository.js";
 
-export interface OpenChannelChatDeps {
+export interface StartChannelChatDeps {
   chats: Pick<ChatRepository, "start">;
-  webchatRepo: Pick<WebChatRepository, "ensureChannelChat">;
   /** The adapters, which name the chat at a channel address. */
   adapters: Pick<ChatAdapters, "chatAt" | "accountOn">;
-}
-
-/**
- * The seat a message at a channel address is said through: the session of
- * the channel's account in the chat there, opened with the chat when Rome
- * holds neither yet. A thread address names its chat by `parentThreadId`. A
- * dashboard address is opened by the dashboard alone, so it starts nothing
- * here and throws when no chat is there.
- */
-export async function openChannelChat(
-  deps: OpenChannelChatDeps,
-  input: EnsureChannelChatInput,
-): Promise<ChatRecord> {
-  if (input.channel === "webchat") return deps.webchatRepo.ensureChannelChat(input);
-  const { chatId, romeEnd } = startChannelChat(deps, input);
-  return deps.webchatRepo.ensureChannelChat({ ...input, chatId, accountId: romeEnd });
 }
 
 /**
@@ -35,7 +17,7 @@ export async function openChannelChat(
  * opened in it: its id in Chats, and Rome's end, the channel's account.
  */
 export function startChannelChat(
-  deps: Pick<OpenChannelChatDeps, "chats" | "adapters">,
+  deps: StartChannelChatDeps,
   input: Pick<
     EnsureChannelChatInput,
     "channel" | "threadId" | "parentThreadId" | "threadType" | "threadName"

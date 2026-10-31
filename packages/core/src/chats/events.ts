@@ -5,17 +5,17 @@
 // its transaction instead (connections/events.ts): a listener there writes in
 // the same transaction, and a listener here acts on what was written.
 
+import type { Account } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { RecordedMessage } from "./message.js";
 
 const log = createLogger("chat-events");
 
-/**
- * How a message reached Rome, over today's storage. `channel` is the channel
- * of the one of Rome's accounts it arrived on, which keys its chat's row.
- */
+/** Which of Rome's accounts heard a message, and the channel it is reached
+ *  on. */
 export interface Via {
   readonly channel: string;
+  readonly account: Account;
 }
 
 /** A message was said in a chat, and is now on record there. A message
@@ -23,8 +23,6 @@ export interface Via {
 export interface MessageSaid {
   readonly type: "MessageSaid";
   readonly message: RecordedMessage;
-  /** The id of the row the message's chat is over today's storage. */
-  readonly chatRecordId: string;
   readonly via: Via;
 }
 
