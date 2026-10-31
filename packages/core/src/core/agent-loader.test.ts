@@ -63,6 +63,52 @@ describe("AgentLoader", () => {
     }
   });
 
+  it("loads a version-1 app agent whose file-name bare name another app holds", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rome-legacy-agent-"));
+    const agentPath = join(root, "helper.yaml");
+    await writeFile(
+      agentPath,
+      [
+        "name: app-b-helper",
+        "description: Legacy agent fixture.",
+        "tier: small",
+        "permissionMode: bypassPermissions",
+        "tools: []",
+        "systemPromptPrefix: Test agent.",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    try {
+      const legacyBindings = createEmptyLegacyArtifactBindings();
+      legacyBindings.agent.helper = formatArtifactId("app-a", "app-a-helper");
+      const legacy = new AgentLoader({ legacyBindings });
+      const catalog = {
+        listArtifacts: () => [
+          {
+            formatVersion: 1,
+            kind: "agent",
+            publicName: "helper",
+            aliases: [],
+            ownerType: "app",
+            ownerId: "app-b",
+            absolutePath: agentPath,
+          },
+        ],
+      } as unknown as AppCatalog;
+
+      await legacy.loadFromCatalog(catalog);
+
+      expect(legacy.getRegistryLoadFailures()).toEqual([]);
+      expect(legacy.has("app-b:app-b-helper")).toBe(true);
+      expect(legacy.get("app-b-helper").name).toBe("app-b-helper");
+      expect(legacyBindings.agent.helper).toBe("app-a:app-a-helper");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   describe("loadAll()", () => {
     it("loads all YAML files from a directory", async () => {
       const agents = await loader.loadAll(FIXTURES_DIR);

@@ -2,10 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "@rstest/core";
+import type { AppCatalog } from "../apps/catalog.js";
+import { createEmptyLegacyArtifactBindings, formatArtifactId } from "../apps/artifact-id.js";
 import {
   listCompanionFiles,
   parseSkillFrontmatter,
   parseSkillFrontmatterResult,
+  SkillCatalog,
 } from "./skill-catalog.js";
 
 describe("parseSkillFrontmatter", () => {
@@ -144,6 +147,43 @@ describe("listCompanionFiles", () => {
       await writeFile(join(dir, "SKILL.md"), "x");
       expect(await listCompanionFiles(dir)).toEqual([]);
       expect(await listCompanionFiles(join(dir, "missing"))).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("SkillCatalog", () => {
+  it("loads a version-1 app skill whose directory-name bare name another app holds", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rome-legacy-skill-"));
+    try {
+      await writeFile(
+        join(dir, "SKILL.md"),
+        "---\nname: app-b-research\ndescription: Legacy skill fixture.\n---\nbody",
+      );
+      const legacyBindings = createEmptyLegacyArtifactBindings();
+      legacyBindings.skill.research = formatArtifactId("app-a", "app-a-research");
+      const skills = new SkillCatalog({ legacyBindings });
+      const catalog = {
+        listArtifacts: () => [
+          {
+            formatVersion: 1,
+            kind: "skill",
+            publicName: "research",
+            aliases: [],
+            ownerType: "app",
+            ownerId: "app-b",
+            absolutePath: dir,
+          },
+        ],
+      } as unknown as AppCatalog;
+
+      await skills.loadFromCatalog(catalog);
+
+      expect(skills.getRegistryLoadFailures()).toEqual([]);
+      expect(skills.get("app-b:app-b-research")?.localName).toBe("app-b-research");
+      expect(skills.get("app-b-research")?.name).toBe("app-b:app-b-research");
+      expect(legacyBindings.skill.research).toBe("app-a:app-a-research");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
