@@ -3199,7 +3199,8 @@ export class WebChatRepository {
   }
 
   /** The rated exchange's visible chat rows (user prompt + assistant reply),
-   * excluding trace rows, in insertion order. */
+   * excluding trace rows, in insertion order. `created_at` has one-second
+   * precision, so rowid orders the rows of one second. */
   async getTurnChatMessages(sessionId: string, turnId: string) {
     return this.db
       .select({
@@ -3216,7 +3217,7 @@ export class WebChatRepository {
           inArray(romeAgentMessages.role, ["user", "assistant"]),
         ),
       )
-      .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
+      .orderBy(asc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid`);
   }
 
   async getTraceContentByTurn(sessionId: string, turnId: string, options: TraceReadOptions = {}) {

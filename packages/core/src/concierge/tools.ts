@@ -133,6 +133,35 @@ export async function buildConciergeTools(
     ]);
   };
 
+  // A row points back to a message of this chat, so the panel can jump to it.
+  const requireSourceMessage = async (messageId: string) => {
+    const { chatId } = currentTurn();
+    if (!(await webchatRepo.getReplyTarget(chatId, messageId))) {
+      throw new Error(
+        `No message ${messageId} in this chat. Pass the messageId that say, chat_card, or chat_forward returned.`,
+      );
+    }
+    return messageId;
+  };
+
+  // The message a new row points to: the one passed, else the latest thing
+  // said this turn. The guardian's own words are no default, since a row
+  // starts from what the Concierge told them.
+  const sourceMessageForNewRow = async (explicit: string | undefined) => {
+    if (explicit) return requireSourceMessage(explicit);
+    const { chatId, turnId } = currentTurn();
+    const said = (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
+      (row) => row.role === "assistant",
+    );
+    const latest = said[said.length - 1];
+    if (!latest) {
+      throw new Error(
+        "A new row needs a message to point to. Call say first, then pass the messageId it returns.",
+      );
+    }
+    return latest.id;
+  };
+
   const parseTaskWrite = async (
     raw: Record<string, unknown>,
     where: string,
@@ -183,9 +212,21 @@ export async function buildConciergeTools(
       if (typeof raw.archived !== "boolean") throw new Error(`${where}.archived must be a boolean`);
       write.archived = raw.archived;
     }
+    const messageId = raw.messageId === undefined ? undefined : requireString(raw, "messageId");
+    // A row that waits for the guardian points at the message that asks. Only an
+    // entry that sets the state is held to this, so a later write that merely
+    // touches a needs_user row keeps its message.
+    if (write.state === "needs_user" && !messageId) {
+      throw new Error(
+        `${where}: needs_user requires messageId: say or chat_forward the ask first, then pass the messageId it returned`,
+      );
+    }
     if (!write.id) {
       if (!write.title) throw new Error(`${where}.title is required to create a row`);
       write.state ??= write.sessionId ? "doing" : "next";
+      write.sourceMessageId = await sourceMessageForNewRow(messageId);
+    } else if (messageId) {
+      write.sourceMessageId = await requireSourceMessage(messageId);
     }
     return write;
   };
@@ -195,27 +236,30 @@ export async function buildConciergeTools(
 
   const say = async (text: string, format: "bubble" | "long") => {
     const { chatId, turnId } = currentTurn();
-    await webchatRepo.addBackendMessage(chatId, turnId, [
+    const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
     ]);
+    return id;
   };
 
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles.
   const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
     const { chatId, turnId } = currentTurn();
-    await webchatRepo.addBackendMessage(chatId, turnId, [
+    const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
       ...(intro ? [{ type: "text" as const, content: intro }] : []),
       { type: "text", content: text, format: "long", forwardedFrom: from },
     ]);
+    return id;
   };
 
   // A card that opens the task chat; it reads the chat's live status itself.
   const showCard = async (chatId: string, title: string) => {
     const { chatId: conciergeChatId, turnId } = currentTurn();
-    await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
+    const { id } = await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
       { type: "task_chat", chatId, title },
     ]);
+    return id;
   };
 
   return [
@@ -238,16 +282,23 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("say", input, async (args) => {
-          await say(requireString(args, "text"), args.format === "long" ? "long" : "bubble");
-          return "Sent; the guardian sees it. Call say again only for a new message.";
+          const messageId = await say(
+            requireString(args, "text"),
+            args.format === "long" ? "long" : "bubble",
+          );
+          return {
+            sent: "The guardian sees it. Call say again only for a new message.",
+            messageId,
+          };
         }),
     },
     {
       name: "task_upsert",
       description:
         "Write your task list, the guardian's panel of what you are busy with. Batch only: one call writes every row that changed. " +
-        "An entry without id creates a row (title required); an entry with id updates it, and fields you leave out stay. " +
-        "Returns each row's id.",
+        "An entry without id creates a row (title required, and a message to point to); an entry with id updates it, and fields you leave out stay. " +
+        "Setting a row to needs_user needs the messageId of the message that asks the guardian, so say or chat_forward before you write it. " +
+        "Returns each row's id and the message it points to.",
       inputSchema: {
         type: "object",
         required: ["tasks"],
@@ -290,6 +341,11 @@ export async function buildConciergeTools(
                   description: "The task chat this row follows. Each chat belongs to one row.",
                 },
                 archived: { type: "boolean", description: "Archive the row, or bring it back." },
+                messageId: {
+                  type: "string",
+                  description:
+                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required whenever the entry sets state needs_user: it must be the message that asks the guardian, so say or chat_forward first. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it.",
+                },
               },
             },
           },
@@ -308,7 +364,17 @@ export async function buildConciergeTools(
             writes.push(await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`));
           }
           const rows = await tasks.repo.upsertMany(writes);
-          return { tasks: rows.map((row) => ({ id: row.id, title: row.title, state: row.state })) };
+          // Says which message each row points to, and flags the ones that kept an
+          // earlier message because the entry passed none.
+          return {
+            tasks: rows.map((row, index) => ({
+              id: row.id,
+              title: row.title,
+              state: row.state,
+              ...(row.sourceMessageId ? { anchor: row.sourceMessageId } : {}),
+              ...(writes[index].sourceMessageId === undefined ? { anchorKept: true } : {}),
+            })),
+          };
         }),
     },
     {
@@ -354,6 +420,11 @@ export async function buildConciergeTools(
             description:
               "Link the chat to this existing task row, such as one planned under next, and set it to doing. Without it a doing row is created for the chat.",
           },
+          messageId: {
+            type: "string",
+            description:
+              "The message the new row points to, as say returned it. Leave it out to use your latest message this turn. With taskId the row keeps its message unless you pass this.",
+          },
           card: {
             type: "boolean",
             description:
@@ -367,6 +438,7 @@ export async function buildConciergeTools(
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
           const taskId = optionalString(args, "taskId");
+          const messageId = optionalString(args, "messageId");
           if (taskId) {
             const planned = await tasks.repo.get(taskId);
             if (!planned) throw new Error(`No task ${taskId}. Use task_list to find it.`);
@@ -376,6 +448,13 @@ export async function buildConciergeTools(
               );
             }
           }
+          // Settled before the chat starts, so a refusal leaves nothing running.
+          // A linked row keeps its message unless one is passed.
+          const sourceMessageId = taskId
+            ? messageId
+              ? await requireSourceMessage(messageId)
+              : undefined
+            : await sourceMessageForNewRow(messageId);
           const chatId = await service.dashboard.chats.startChat({
             agentName: optionalString(args, "agent"),
             projectPath: await taskProjectPath(optionalString(args, "project")),
@@ -388,8 +467,14 @@ export async function buildConciergeTools(
           // Linked before the first turn, so that turn's events find the row.
           const [task] = await tasks.repo.upsertMany([
             taskId
-              ? { id: taskId, sessionId: chatId, state: "doing", waitingOn: null }
-              : { title, state: "doing", sessionId: chatId },
+              ? {
+                  id: taskId,
+                  sessionId: chatId,
+                  state: "doing",
+                  waitingOn: null,
+                  ...(sourceMessageId ? { sourceMessageId } : {}),
+                }
+              : { title, state: "doing", sessionId: chatId, sourceMessageId },
           ]);
           await sendInput(chatId, brief);
           // Named after the first turn: the first message would rename it.
@@ -538,8 +623,12 @@ export async function buildConciergeTools(
           );
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
-          await forward(answer, { chatId, title: chat.name }, optionalString(args, "intro"));
-          return { forwardedChars: answer.length };
+          const messageId = await forward(
+            answer,
+            { chatId, title: chat.name },
+            optionalString(args, "intro"),
+          );
+          return { forwardedChars: answer.length, messageId };
         }),
     },
     {
@@ -556,8 +645,8 @@ export async function buildConciergeTools(
         runFacadeTool("chat_card", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
-          await showCard(chatId, chat.name);
-          return "Shown; the guardian sees the card.";
+          const messageId = await showCard(chatId, chat.name);
+          return { sent: "Shown; the guardian sees the card.", messageId };
         }),
     },
   ];

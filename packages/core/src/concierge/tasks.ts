@@ -22,7 +22,7 @@ export class ConciergeTasks {
     });
   }
 
-  toDto({ row, chat }: ConciergeTaskWithChat): ConciergeTaskDto {
+  toDto({ row, chat, sourceMessageId }: ConciergeTaskWithChat): ConciergeTaskDto {
     return {
       id: row.id,
       title: row.title,
@@ -32,6 +32,7 @@ export class ConciergeTasks {
       dueAt: row.dueAt?.getTime() ?? null,
       rank: row.rank,
       chat,
+      sourceMessageId,
       createdAt: row.createdAt.getTime(),
       updatedAt: row.updatedAt.getTime(),
       completedAt: row.completedAt?.getTime() ?? null,

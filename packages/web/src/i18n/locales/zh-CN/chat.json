@@ -28,23 +28,31 @@
         "done": "已完成"
       },
       "stop": "停止",
+      "done": "完成",
       "archive": "归档",
       "retry": "再试一次",
       "pending": {
         "stop": "正在停止…",
-        "archive": "正在归档…"
+        "archive": "正在归档…",
+        "done": "正在发送…"
       },
       "unchanged": "Concierge 没有改动这一项",
       "timeout": "Concierge 还没有处理",
       "failed": "没发出去，请再试一次。",
       "notSynced": "未同步",
+      "sourceMissing": "找不到原消息",
+      "findingMessage": "正在查找消息…",
       "showMore": "显示更早的 {{count}} 项",
       "showLess": "收起",
       "openChat": "打开「{{title}}」的对话",
       "actionText": {
         "stop": "停止「{{title}}」",
         "archive": "归档「{{title}}」",
+        "done": "完成了「{{title}}」",
         "withId": "（任务 {{id}}）"
+      },
+      "replyText": {
+        "done": "我已经完成了"
       },
       "pill": {
         "needsYou_one": "任务，{{count}} 项等你处理",

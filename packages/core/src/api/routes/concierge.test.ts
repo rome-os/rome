@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { ConciergeService } from "../../concierge/service.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
+import { romeAgentMessages } from "../../db/schema.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
@@ -157,6 +159,26 @@ describe("GET /concierge/tasks", () => {
     });
     await repo.upsertMany([{ id: row.id, archived: true }]);
     expect(await titles()).not.toContain("Linked");
+  });
+
+  it("carries the source message's id while the message exists, and null after it is gone", async () => {
+    const chats = new WebChatRepository(testDb.db);
+    await chats.createSession("concierge", "Concierge");
+    const { id } = await chats.addBackendMessage("concierge", "turn-1", [
+      { type: "text", content: "Which account?" },
+    ]);
+    const [row] = await repo.upsertMany([
+      { title: "Pay", state: "needs_user", sourceMessageId: id },
+    ]);
+    const sourceOf = async () =>
+      (
+        (await (await app().request("/concierge/tasks", guardian)).json()) as {
+          tasks: Array<{ id: string; sourceMessageId: string | null }>;
+        }
+      ).tasks.find((task) => task.id === row.id)?.sourceMessageId;
+    expect(await sourceOf()).toBe(id);
+    testDb.db.delete(romeAgentMessages).where(eq(romeAgentMessages.id, id)).run();
+    expect(await sourceOf()).toBeNull();
   });
 
   it("404s while Concierge is off", async () => {

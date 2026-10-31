@@ -28,23 +28,31 @@
         "done": "Done"
       },
       "stop": "Stop",
+      "done": "Done",
       "archive": "Archive",
       "retry": "Try again",
       "pending": {
         "stop": "Stopping…",
-        "archive": "Archiving…"
+        "archive": "Archiving…",
+        "done": "Sending…"
       },
       "unchanged": "Concierge did not change it",
       "timeout": "Concierge has not handled this yet",
       "failed": "Could not send",
       "notSynced": "Not synced",
+      "sourceMissing": "Can't find the original message",
+      "findingMessage": "Finding message…",
       "showMore": "Show {{count}} older",
       "showLess": "Show less",
       "openChat": "Open the chat for {{title}}",
       "actionText": {
         "stop": "Stop \"{{title}}\"",
         "archive": "Archive \"{{title}}\"",
+        "done": "Done \"{{title}}\"",
         "withId": "(task {{id}})"
+      },
+      "replyText": {
+        "done": "I've done this"
       },
       "pill": {
         "needsYou_one": "Tasks, {{count}} needs you",

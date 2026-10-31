@@ -1,15 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
+import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
-import { conciergeTasks, romeSessions } from "../schema.js";
+import { conciergeTasks, romeAgentMessages, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];
 
-/** A row with the name of the task chat it links, which is the chat's own. */
+/**
+ * A row with the name of the task chat it links, which is the chat's own, and
+ * the id of its source message when that message still exists in the Concierge chat.
+ */
 export interface ConciergeTaskWithChat {
   row: ConciergeTaskRow;
   chat: { id: string; name: string } | null;
+  sourceMessageId: string | null;
 }
 
 /** One write of a batch. An entry without `id` creates a row, one with `id`
@@ -23,6 +28,8 @@ export interface ConciergeTaskWrite {
   dueAt?: Date | null;
   rank?: number | null;
   sessionId?: string | null;
+  /** A message of the Concierge chat; the caller has checked it. */
+  sourceMessageId?: string | null;
   archived?: boolean;
 }
 
@@ -157,6 +164,10 @@ export class ConciergeTasksRepository {
           rank: write.rank !== undefined ? write.rank : (existing?.rank ?? null),
           sessionId:
             write.sessionId !== undefined ? write.sessionId : (existing?.sessionId ?? null),
+          sourceMessageId:
+            write.sourceMessageId !== undefined
+              ? write.sourceMessageId
+              : (existing?.sourceMessageId ?? null),
           updatedAt: now,
           completedAt,
           archivedAt,
@@ -198,14 +209,24 @@ export class ConciergeTasksRepository {
 
   private async withChat(where: SQL | undefined): Promise<ConciergeTaskWithChat[]> {
     const rows = await this.db
-      .select({ task: conciergeTasks, chatName: romeSessions.name })
+      .select({ task: conciergeTasks, chatName: romeSessions.name, sourceId: romeAgentMessages.id })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
+      // Only a message the Concierge chat still holds counts as a source.
+      .leftJoin(
+        romeAgentMessages,
+        and(
+          eq(romeAgentMessages.id, conciergeTasks.sourceMessageId),
+          eq(romeAgentMessages.sessionId, CONCIERGE_CHAT_ID),
+          inArray(romeAgentMessages.role, ["user", "assistant"]),
+        ),
+      )
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
-    return rows.map(({ task, chatName }) => ({
+    return rows.map(({ task, chatName, sourceId }) => ({
       row: task,
       chat: task.sessionId && chatName !== null ? { id: task.sessionId, name: chatName } : null,
+      sourceMessageId: sourceId,
     }));
   }
 }

@@ -31,6 +31,8 @@ const taskSchema = z.object({
   dueAt: z.number().nullable(),
   rank: z.number().nullable(),
   chat: z.object({ id: z.string(), name: z.string() }).nullable(),
+  // A server from before the field sends none.
+  sourceMessageId: z.string().nullable().default(null),
   createdAt: z.number(),
   updatedAt: z.number(),
   completedAt: z.number().nullable(),

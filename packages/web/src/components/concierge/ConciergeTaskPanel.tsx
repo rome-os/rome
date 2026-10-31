@@ -1,7 +1,8 @@
-import { Archive, ChevronDown, ListChecks, RotateCcw } from "lucide-react";
+import { Archive, Check, ChevronDown, ListChecks, MessageSquare, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import type { ConciergeTaskAction, ConciergeTaskDto } from "@rome/api-types/concierge";
 import {
   EmptyState,
@@ -9,6 +10,7 @@ import {
   EmptyStateIcon,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   List,
@@ -19,7 +21,8 @@ import {
 } from "@/components/ui/list-row";
 import { cn } from "@/lib/utils";
 import { checkPresses } from "./check-presses";
-import { pressText, sendTaskAction } from "./send-task-action";
+import { requestConciergeJump } from "./concierge-jump";
+import { doneMessage, pressText, sendTaskAction } from "./send-task-action";
 import { StopGlyph } from "./StopGlyph";
 import { TaskGlyph } from "./TaskGlyph";
 import { formatTaskTime, groupTasks, taskTime, type TaskGroupKey } from "./tasks";
@@ -29,9 +32,10 @@ import { useConciergeTasks } from "./use-concierge-tasks";
 /** How often a pending press asks whether its turn has ended. */
 const CHECK_PRESSES_MS = 2_000;
 
-/** The action a row offers: Stop on a Doing row with a chat, Archive on a Done one. */
+/** The action a row offers: Stop on a Doing row with a chat, Done on a Needs you one, Archive on a finished one. */
 function rowAction(task: ConciergeTaskDto): ConciergeTaskAction | null {
   if (task.state === "doing" && task.chat) return "stop";
+  if (task.state === "needs_user") return "done";
   if (task.state === "done" || task.state === "dropped") return "archive";
   return null;
 }
@@ -64,37 +68,64 @@ function TaskRow({
     : [detail, task.notSynced ? t("concierge.tasks.notSynced") : null].filter(Boolean).join(" · ");
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
-  const press = (kind: ConciergeTaskAction) =>
-    void sendTaskAction(task, kind, pressText(t, kind, task, rows));
+  const press = (kind: ConciergeTaskAction) => {
+    if (kind === "done") {
+      const { text, replyToMessageId } = doneMessage(t, task, rows);
+      void sendTaskAction(task, kind, text, replyToMessageId);
+    } else {
+      void sendTaskAction(task, kind, pressText(t, kind, task, rows));
+    }
+  };
+  // Closes the mobile sheet first, so the transcript behind it is what scrolls into view.
+  const jump = () => {
+    if (!task.sourceMessageId) {
+      toast.error(t("concierge.tasks.sourceMissing"));
+      return;
+    }
+    onNavigate?.();
+    requestConciergeJump(task.sourceMessageId);
+  };
   const label = retry ? t("concierge.tasks.retry") : action ? t(`concierge.tasks.${action}`) : "";
   const shown = retry || (action !== null && pending === undefined);
   return (
     <ListRow
       asChild
       size="md"
-      className={cn("group/row relative", task.chat && "transition-colors hover:bg-surface-hover")}
+      className="group/row relative transition-colors hover:bg-surface-hover"
     >
       <li data-task-id={task.id} data-task-state={task.state}>
         <TaskGlyph state={task.state} />
         <ListRowContent>
-          {task.chat ? (
-            <Link
-              to={`/chat/${task.chat.id}`}
-              onClick={onNavigate}
-              aria-label={t("concierge.tasks.openChat", { title: task.title })}
-              className="block min-w-0 outline-none after:absolute after:inset-0 focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-solid focus-visible:after:outline-ring/50"
-            >
-              <TitleText task={task} finished={finished} />
-            </Link>
-          ) : (
+          <button
+            type="button"
+            onClick={jump}
+            className="block min-w-0 text-left outline-none after:absolute after:inset-0 focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-solid focus-visible:after:outline-ring/50"
+          >
             <TitleText task={task} finished={finished} />
-          )}
+          </button>
           {status ? (
             <ListRowDescription className="truncate" role={pending ? "status" : undefined}>
               {status}
             </ListRowDescription>
           ) : null}
         </ListRowContent>
+        {task.chat ? (
+          <Button
+            asChild
+            variant="ghost"
+            size="icon-xs"
+            className="relative z-10 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <Link
+              to={`/chat/${task.chat.id}`}
+              onClick={onNavigate}
+              aria-label={t("concierge.tasks.openChat", { title: task.title })}
+              title={t("concierge.tasks.openChat", { title: task.title })}
+            >
+              <MessageSquare />
+            </Link>
+          </Button>
+        ) : null}
         {at !== null || shown ? (
           <span className="relative z-10 grid shrink-0 items-center justify-items-end">
             {at !== null ? (
@@ -120,7 +151,17 @@ function TaskRow({
                   !retry &&
                     "touch-show opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within/row:opacity-100 group-hover/row:opacity-100",
                 )}
-                icon={retry ? <RotateCcw /> : action === "stop" ? <StopGlyph /> : <Archive />}
+                icon={
+                  retry ? (
+                    <RotateCcw />
+                  ) : action === "stop" ? (
+                    <StopGlyph />
+                  ) : action === "done" ? (
+                    <Check />
+                  ) : (
+                    <Archive />
+                  )
+                }
               />
             ) : null}
           </span>

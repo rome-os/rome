@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
 import i18n from "@/i18n";
-import { pressText } from "./send-task-action";
+import { doneMessage, pressText } from "./send-task-action";
 
 const t = (key: string, options: Record<string, string>) => i18n.t(key, { ns: "chat", ...options });
 const row = (id: string, title: string, archivedAt: number | null = null) => ({
@@ -51,5 +51,34 @@ describe("pressText", () => {
   it("keeps a title with quotes or markup as it is", () => {
     const odd = [row("a1b2c3d4", 'Reply to "Ann" & <Bob>')];
     expect(pressText(t, "stop", odd[0], odd)).toBe('Stop "Reply to "Ann" & <Bob>"');
+  });
+});
+
+describe("doneMessage", () => {
+  const rows = [row("a1b2c3d4", "Pay rent"), row("ffeedd00", "Plan next week")];
+
+  it("replies to the row's message with a short sentence that leaves the title out", () => {
+    const task = { id: "a1b2c3d4", title: "Pay rent", sourceMessageId: "m-ask" };
+    expect(doneMessage(t, task, rows)).toEqual({
+      text: "I've done this",
+      replyToMessageId: "m-ask",
+    });
+  });
+
+  it("falls back to plain text naming the row when it has no message", () => {
+    const task = { id: "a1b2c3d4", title: "Pay rent", sourceMessageId: null };
+    expect(doneMessage(t, task, rows)).toEqual({ text: 'Done "Pay rent"' });
+    const twins = [row("a1b2c3d4", "Pay rent"), row("998877aa", "Pay rent")];
+    expect(doneMessage(t, task, twins)).toEqual({ text: 'Done "Pay rent" (task a1b2c3)' });
+  });
+
+  it("speaks the guardian's language", async () => {
+    await i18n.changeLanguage("zh-CN");
+    expect(
+      doneMessage(t, { id: "a1b2c3d4", title: "交房租", sourceMessageId: "m-ask" }, rows).text,
+    ).toBe("我已经完成了");
+    expect(
+      doneMessage(t, { id: "a1b2c3d4", title: "交房租", sourceMessageId: null }, rows).text,
+    ).toBe("完成了「交房租」");
   });
 });
