@@ -17,7 +17,8 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 ## Waiting on the user
 
 - [x] Rome Cloud sign-in on the simulator works end to end (confirmed by the user)
-- [ ] Install on the user's iPhone (in progress: worker `iphone-install`)
+- [ ] Install on the user's iPhone (in progress: worker `iphone-install`). The user chose team B2U93L2LK4 and signs in to Xcode → Settings → Accounts themselves first.
+- [ ] Start the English localization worker (card proposed: English is the default language, zh-Hans a translation)
 - [ ] Try the app on the simulator and list what feels off (keyboard, drawer swipe, Tasks sheet drag, motion)
 - [ ] OK to push `feat/ios-app` and open a PR to `main`
 
