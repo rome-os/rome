@@ -31,7 +31,7 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 - [x] Task chat: no jumping while scrolling during a running turn (`24442a78`, `4f1692cd`, `f631e692`: follows the bottom only while the guardian is there, same-second rows no longer swap, older pages wait for the scroll to rest; checked on demo data and a local Rome)
 - [x] Task chat: after Stop, the "Running" spinner stops (`f3c1fcbb`: the spinner follows the running turn only, the header says "Stopped", and the store re-checks active turns after the interrupt; checked on a local Rome)
 
-Result: [`mobile-app-mvp-feel-1.md`](mobile-app-mvp-feel-1.md).
+Result: [`mobile-app-mvp-feel-1.md`](mobile-app-mvp-feel-1.md). Review round 1 fixes: `f661266a`, `2c003182`, `6fe4f10c`, `5122af04`, `2e8a8b3f`.
 
 ## Next
 

@@ -3,7 +3,8 @@
 Worker result for "Feel fixes, round 1" in [`mobile-app-mvp.md`](mobile-app-mvp.md). It fixes the five things the user found on their iPhone in the iOS app in `ios/`.
 
 - Branch: `feat/ios-app` (local only, not pushed)
-- Commits: `525b6072` (top bar), `4ff00a65` (drawer), `6f8a56ef` (Settings), `24442a78`, `4f1692cd`, `f631e692` (task chat scrolling), `f3c1fcbb` (Stop), plus the commit that adds this file
+- Commits: `525b6072` (top bar), `4ff00a65` (drawer), `6f8a56ef` (Settings), `24442a78`, `4f1692cd`, `f631e692` (task chat scrolling), `f3c1fcbb` (Stop), `14352e57` (this file)
+- Review fixes: `f661266a`, `2c003182`, `6fe4f10c`, `5122af04`, `2e8a8b3f`, plus the commit that updates this file (see "Review round 1")
 
 ## What changed
 
@@ -33,10 +34,39 @@ Demo data: a reply in a demo task chat now streams seven messages of mixed lengt
 Screenshots are in the shared notes folder, outside the repo, under `feel-1/`.
 
 Not checked:
-- The iOS 17–25 fallbacks (material instead of Liquid Glass, and the scroll behavior before iOS 18) ran on no device or simulator, because only iOS 27 runtimes are installed. They compile, and the material path is the same code the app used before.
+- No device or simulator ran iOS 17–25, because only iOS 27 runtimes are installed. The transcript's iOS 17 path was run on iOS 27 with its version checks forced to the old branch (see "Review round 1"). The material glass ran nowhere. It compiles, and it is the same code the app used before.
 - The user's phone. The lead installs it.
 
 ## Open questions
 
 - In the Tasks sheet on the local Rome, the Concierge's task showed "No tasks yet" while its task chat existed. This is outside this round and not investigated.
 - The server orders a task's posted messages (from `send_message`, with no turn id) after the turn's own final reply when that reply started earlier. The app now shows the same order as the server and the web, so a summary like "All 15 steps were posted" can sit above the steps. This is a server ordering question, not an app one.
+
+## Review round 1
+
+An independent review of `525b6072..f631e692` found no crash or stuck spinner. It found five smaller issues, all now fixed:
+
+1. **Same-second ties between rows with no turn** (`f661266a`). A row with no turn id is keyed by its own id, and the server makes those ids at random. Two such rows in the same second, such as a recap and a task card, were ordered by comparing ids, so they swapped about half the time. Ties between different turns now go to the one that arrived first. New test: `rowsWithoutATurnTieByArrivalNotByID`.
+2. **The jump fix on iOS 17** (`2e8a8b3f`). iOS 17 has no scroll phase. The list there took "at the bottom" from the bottom marker appearing, which a lazy stack reports late. It also never left the at-rest state, so an older page could go in mid-fling. Now iOS 17 works like this:
+   - The list compares the marker's frame with the visible area.
+   - A finger on the list counts as a drag, so following turns off.
+   - The scroll counts as at rest once the content offset has held still for 150 ms.
+
+   Following and older-page placement then use the same rules as on iOS 18 and later. Two more changes came with it. The two size readings are merged into one, because a second `CGFloat` geometry reading on the same view never fired. And the older-page spinner gets a new identity per page, so a spinner still on screen asks for the next page. Before, history stopped loading after one page if the spinner never left the screen.
+3. **An older page from before a gap** (`2c003182`). A reload that finds a gap starts the history over. An older page still in flight from the old cursor is now dropped instead of placed. New test: `olderPageFromBeforeAGapIsDropped`.
+4. **"Stopped" hid the task's status** (`6fe4f10c`). "Stopped" now shows only while the task still reads as being worked on. Once the task is done, failed or needs the guardian, the header shows that instead.
+5. **Drawer drag direction** (`5122af04`). The end of a drag now uses the axis locked on its first movement. Before, it decided again from the final translation, so a vertical drag that swung sideways could toggle the drawer.
+
+The rare same-turn socket ordering case (a row pushed before `refreshLatest`) is left as it is, as the lead asked.
+
+What was checked:
+- **Unit tests:** 37 pass on the iPhone 17 simulator (iOS 27.2); the live tests were skipped. Both new tests fail on the code before the fix.
+- **Drawer, real gestures:** an edge drag opens it. A drag that starts vertical and swings far left leaves it open. A horizontal drag closes it.
+- **The iOS 17 transcript path, demo data**, run on iOS 27 with its version checks forced to the old branch (a temporary build, not committed). Measured from screen recordings, frame by frame:
+  - The chat opens at the bottom and follows replies while I stay there.
+  - Scrolled up, it holds still with the "New messages" pill while replies arrive.
+  - Slow drags and a fling to the top, with 3- and 6-message pages, moved the view only with the finger. Pages went in after the scroll came to rest.
+- **The iOS 27 path, demo data:** one more run after the spinner change, with no extra movement.
+
+Not checked: a real iOS 17 device or simulator, for the same reason as above.
+
