@@ -19,8 +19,8 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 - [x] Rome Cloud sign-in on the simulator works end to end (confirmed by the user)
 - [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of b72cb7d8 (with English as the default language), team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
 - [x] English as the default language, zh-Hans a translation: merged from `claude/epic-vaughan-1e52a1` after an independent review found no serious defects (result: [`mobile-app-mvp-english.md`](mobile-app-mvp-english.md))
-- [ ] Reinstall the merged build on the user's iPhone (in progress: worker `iphone-install`)
-- [ ] Try the app on the simulator and list what feels off (keyboard, drawer swipe, Tasks sheet drag, motion)
+- [x] Reinstall the merged build on the user's iPhone (b72cb7d8, tests passed first)
+- [ ] Try the app on the iPhone and list what feels off (keyboard, drawer swipe, Tasks sheet drag, motion)
 - [ ] OK to push `feat/ios-app` and open a PR to `main`
 
 ## Next
