@@ -59,6 +59,7 @@ export interface ConciergeComposerProps {
   boxClassName?: string;
   /** Whether a turn is running. Sending still works: the next message interrupts. */
   isStreaming?: boolean;
+  onStop?: () => void;
   streamError?: string | ChatErrorNotice | null;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
@@ -76,7 +77,7 @@ export interface ConciergeComposerProps {
  */
 export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeComposerProps>(
   function ConciergeComposer(
-    { boxClassName, isStreaming = false, streamError, modelSelection, onSend },
+    { boxClassName, isStreaming = false, onStop, streamError, modelSelection, onSend },
     ref,
   ) {
     const { t } = useTranslation("chat");
@@ -399,6 +400,19 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 disabled={uploadInFlight}
               />
             </div>
+            {isStreaming && onStop && (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={onStop}
+                title={t("composer.stopGenerating")}
+                aria-label={t("composer.stopGenerating")}
+                className="touch-target"
+              >
+                <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
+              </Button>
+            )}
             {uploadInFlight ? (
               <Button
                 variant="secondary"

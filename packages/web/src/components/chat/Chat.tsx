@@ -2443,8 +2443,8 @@ export function Chat({
                       ref={composerRef}
                       boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                       onSend={handleComposerSend}
-                      // No Stop: the next message interrupts.
                       isStreaming={displayedStreaming}
+                      onStop={stopComposerTurn}
                       streamError={streamError}
                       modelSelection={
                         chatModelPickable

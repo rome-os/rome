@@ -36,6 +36,41 @@ function renderComposer(props: Partial<ConciergeComposerProps> = {}, reply?: Rep
 }
 
 describe("ConciergeComposer", () => {
+  it.each([
+    [false, true],
+    [true, false],
+  ])("hides Stop when streaming=%s and a handler is present=%s", (isStreaming, hasHandler) => {
+    renderComposer({ isStreaming, onStop: hasHandler ? rs.fn() : undefined });
+    expect(screen.queryByRole("button", { name: "Stop generating" })).toBeNull();
+  });
+
+  it("stops without sending, and keeps the draft and Send available while running", async () => {
+    const onStop = rs.fn();
+    const { onSend } = renderComposer({ isStreaming: true, onStop });
+    const box = screen.getByPlaceholderText("Message") as HTMLTextAreaElement;
+    const stop = screen.getByRole("button", { name: "Stop generating" });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+
+    await userEvent.type(box, "next question");
+    await userEvent.click(stop);
+
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(box.value).toBe("next question");
+    await userEvent.type(box, "{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "next question" });
+  });
+
+  it("lets the keyboard stop a turn with an empty draft", async () => {
+    const onStop = rs.fn();
+    const { onSend } = renderComposer({ isStreaming: true, onStop });
+    screen.getByRole("button", { name: "Stop generating" }).focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("is one text line between + and Send, and sends on Enter", async () => {
     const { onSend } = renderComposer();
     const box = screen.getByPlaceholderText("Message");
