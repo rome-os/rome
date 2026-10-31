@@ -743,6 +743,13 @@
       "when": 1793433077644,
       "tag": "0106_chats_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1793444593123,
+      "tag": "0107_chats_adapter_ids",
+      "breakpoints": true
     }
   ]
 }

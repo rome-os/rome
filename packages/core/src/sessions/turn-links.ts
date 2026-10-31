@@ -216,13 +216,17 @@ export class TurnLinks {
   unseen(sessionId: string): UnseenLine[] {
     return this.db
       .all<UnseenRow>(sql`
-        SELECT m.id, m.sender_name, m.sender_agent IS NOT NULL AS from_rome, m.text, m.said_at,
-               q.id AS q_id, q.sender_name AS q_sender_name, q.text AS q_text,
-               q.said_at AS q_said_at
+        SELECT m.id, ${SENDER_NAME("m")} AS sender_name, m.sender_agent IS NOT NULL AS from_rome,
+               m.text, m.said_at, q.id AS q_id, ${SENDER_NAME("q")} AS q_sender_name,
+               q.text AS q_text, q.said_at AS q_said_at
         FROM rome_sessions s
         JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-        LEFT JOIN chat_messages q ON q.chat_id = m.chat_id
-          AND q.platform_message_id = m.reply_to_platform_message_id
+        -- A quoted line said before Rome's account was in the chat stays out
+        -- of its view, like every other line said then.
+        LEFT JOIN chat_messages q ON q.id = m.reply_to_message_id
+          AND q.said_at >= (
+            SELECT min(o.created_at) FROM rome_sessions o
+            WHERE o.chat_id = s.chat_id AND o.account_id IS s.account_id)
         WHERE s.id = ${sessionId} AND m.said_at >= s.created_at
           AND NOT EXISTS (
             SELECT 1 FROM agent_turn_messages l
@@ -334,4 +338,12 @@ function toLink(row: LinkRow): TurnLink {
     role: row.role,
     inputState: row.input_state,
   };
+}
+
+/** What a line calls its sender. A line of Rome's that kept no name is
+ *  Rome's, as the agent has always read it. */
+function SENDER_NAME(alias: "m" | "q") {
+  return sql.raw(
+    `CASE WHEN ${alias}.sender_agent IS NOT NULL THEN coalesce(${alias}.sender_name, 'Rome') ELSE ${alias}.sender_name END`,
+  );
 }

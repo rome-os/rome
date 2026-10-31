@@ -13,7 +13,6 @@ import type {
   SaidInboundEvent,
   MessagesSaid,
 } from "@rome-os/app-runtime";
-import { v7 as uuidv7 } from "uuid";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
@@ -22,7 +21,15 @@ import type { ChatRepository } from "./chat-repository.js";
 import type { ChatEvents } from "./events.js";
 import type { MessageRepository } from "./message-repository.js";
 import { messageToRome } from "./message.js";
-import { chatKey, directMessageOn, ownedBy, placeIn, type ChatKey } from "./place.js";
+import {
+  chatKey,
+  directMessageOn,
+  messageIdIn,
+  ownedBy,
+  placeIn,
+  refOf,
+  type ChatKey,
+} from "./place.js";
 
 const log = createLogger("chats-inbound");
 
@@ -33,7 +40,7 @@ export interface InboundRecordingDeps {
   seats: Pick<WebChatRepository, "ensureChannelChat" | "advanceActivity">;
   messages: Pick<MessageRepository, "record">;
   /** Holds a message out of every catch-up until its wake is decided. */
-  wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
+  wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided" | "isWakeUndecided">;
   events: ChatEvents;
   /** The platform a channel's accounts are on, for a message that names no
    *  account it arrived on. */
@@ -108,7 +115,7 @@ export function inboundRecording(
     const romeEnd = message.account?.id ?? channel.name;
     const { key, kind } = chatOf(platform, romeEnd, message);
     const chat = deps.chats.start(
-      key,
+      refOf(key),
       kind,
       message.parentChatId === undefined ? (message.thread?.name ?? null) : null,
     );
@@ -121,35 +128,37 @@ export function inboundRecording(
       // A chat starts answered by main. Its own agent, when it has one, was
       // set through its settings, which start the chat's row themselves.
       agentName: "main",
-      chatId: chat.id,
+      chatId: chat.ref.id,
       accountId: romeEnd,
     });
     const replyTo = message.replyTo?.messageId.trim();
-    // Undecided before the message is recorded, so no catch-up reads it in
-    // between. A redelivery records nothing and leaves its wake as it was.
-    const id = uuidv7();
+    // The adapter's id for the message: the platform's, in its chat. A
+    // redelivery carries the same id and records nothing. Undecided before the
+    // message is recorded, so no catch-up reads it in between; a redelivery
+    // leaves its wake as it was.
+    const id = messageIdIn(chat.ref, ownedBy(key, romeEnd, message.messageId));
+    const fresh = !deps.wakes.isWakeUndecided(id);
     deps.wakes.wakeUndecided(id);
     const recorded = await deps.messages
       .record(
         messageToRome({
           id,
-          place: placeIn(key, message.parentChatId === undefined ? undefined : message.chatId),
+          place: placeIn(chat.ref, message.parentChatId === undefined ? undefined : message.chatId),
           saidBy: {
             account: { platform, id: message.senderId },
             name: message.senderDisplayName ?? message.senderId,
           },
           body: { text: message.text ?? "", attachments: message.attachments },
-          platformMessageId: ownedBy(key, romeEnd, message.messageId),
-          ...(replyTo ? { replyTo: ownedBy(key, romeEnd, replyTo) } : {}),
+          ...(replyTo ? { replyTo: messageIdIn(chat.ref, ownedBy(key, romeEnd, replyTo)) } : {}),
           at: message.timestamp,
         }),
       )
       .catch((error: unknown) => {
-        deps.wakes.wakeDecided(id);
+        if (fresh) deps.wakes.wakeDecided(id);
         throw error;
       });
     if (!recorded) {
-      deps.wakes.wakeDecided(id);
+      if (fresh) deps.wakes.wakeDecided(id);
       return;
     }
     await deps.seats.advanceActivity(seat.id, recorded.at);

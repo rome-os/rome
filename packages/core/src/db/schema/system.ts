@@ -571,18 +571,17 @@ export const romeSessions = sqliteTable(
 // Chats' own record of a chat: one row per place, however many of Rome's
 // accounts are in it. A dashboard chat is a `webchat` chat whose platform id
 // is its own id. Vocabulary: docs/domains/chats.md#chat.
-export const chats = sqliteTable(
-  "chats",
-  {
-    id: text("id").primaryKey(),
-    platform: text("platform").notNull(),
-    platformChatId: text("platform_chat_id").notNull(),
-    kind: text("kind").notNull(), // 'dm' | 'group'
-    name: text("name"),
-    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-  },
-  (table) => [uniqueIndex("uq_chats_platform_chat").on(table.platform, table.platformChatId)],
-);
+export const chats = sqliteTable("chats", {
+  // The adapter's id for the chat. A platform's adapter passes the platform's
+  // key through, behind its platform: `<platform>:<group id>`, or
+  // `<platform>:dm:<Rome's account>:<other>` for a direct message. The
+  // dashboard gives its chats random ids.
+  id: text("id").primaryKey(),
+  platform: text("platform").notNull(),
+  kind: text("kind").notNull(), // 'dm' | 'group'
+  name: text("name"),
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+});
 
 // What was said in a chat, once, whoever heard it. Who said it is the
 // account, and for Rome's lines the agent that spoke. A message Rome sends is
@@ -591,6 +590,11 @@ export const chats = sqliteTable(
 export const chatMessages = sqliteTable(
   "chat_messages",
   {
+    // The adapter's id for the message: `<chat id>/<platform message id>`,
+    // with Rome's account in front of the platform's id where the platform
+    // numbers messages per receiving account. A redelivery, or a group
+    // message heard on two of Rome's accounts, finds its id on record. The
+    // dashboard gives its lines random ids.
     id: text("id").primaryKey(),
     chatId: text("chat_id")
       .notNull()
@@ -604,10 +608,9 @@ export const chatMessages = sqliteTable(
     senderName: text("sender_name"),
     text: text("text").notNull(),
     parts: text("parts").notNull(), // JSON array of blocks, as composed
-    // The platform's id for the message. On the dashboard, where Rome is the
-    // platform, it is the message's own id.
-    platformMessageId: text("platform_message_id").notNull(),
-    replyToPlatformMessageId: text("reply_to_platform_message_id"),
+    // The line this one quotes, by its id. A quote of a line Rome never
+    // recorded still names it.
+    replyToMessageId: text("reply_to_message_id"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
@@ -615,7 +618,6 @@ export const chatMessages = sqliteTable(
     // were recorded in (rowid): a dashboard line's id is the client's, which
     // carries no time.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
-    uniqueIndex("uq_chat_messages_platform").on(table.chatId, table.platformMessageId),
   ],
 );
 

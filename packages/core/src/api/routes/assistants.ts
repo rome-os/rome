@@ -14,7 +14,7 @@ import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import type { SaidMessage } from "../../chats/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/message-repository.js";
-import { chatKey, placeIn } from "../../chats/place.js";
+import { chatKey, placeIn, refOf } from "../../chats/place.js";
 import { send } from "../../chats/send.js";
 import { directPlace } from "../../people/send.js";
 import type { ApiDeps } from "../deps.js";
@@ -159,7 +159,7 @@ function messagesAt(
   limit: number,
   before?: MessageCursor | null,
 ): Promise<MessagePage> {
-  const place = placeIn(chatKey(address.platform, address.id as ChatId));
+  const place = placeIn(refOf(chatKey(address.platform, address.id as ChatId)));
   return deps.chatMessages.read(place, { before: before ?? null, limit });
 }
 

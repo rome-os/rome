@@ -22,7 +22,7 @@ import { sql } from "drizzle-orm";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import type { SaidMessage } from "../chats/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/message-repository.js";
-import { chatKey, placeIn, type Place } from "../chats/place.js";
+import { chatKey, keyOf, placeIn, type Place } from "../chats/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink, type TurnLine } from "../sessions/turn-links.js";
 
@@ -220,18 +220,18 @@ export class ChatReadModel {
   private async seatOf(sessionId: string): Promise<{ place: Place; since: Date } | null> {
     const [row] = await this.db.all<{
       platform: string;
-      platform_chat_id: string;
+      chat_id: string;
       thread_id: string | null;
       created_at: number;
     }>(sql`
-      SELECT c.platform, c.platform_chat_id, r.thread_id, r.created_at
+      SELECT c.platform, c.id AS chat_id, r.thread_id, r.created_at
       FROM rome_sessions r JOIN chats c ON c.id = r.chat_id
       WHERE r.id = ${sessionId}
     `);
     if (!row) return null;
     return {
       place: placeIn(
-        chatKey(row.platform, row.platform_chat_id as ChatId),
+        { platform: row.platform, id: row.chat_id },
         (row.thread_id ?? undefined) as ChatId | undefined,
       ),
       since: new Date(row.created_at * 1000),

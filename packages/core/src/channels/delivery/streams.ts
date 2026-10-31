@@ -106,13 +106,11 @@ export class ReplyStreams {
     const text = shown
       .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source)
       .join("");
-    // The message's id is the one that starts the answer, the last block. A
-    // message whose create is unknown has no id, so the last block with one
-    // stands in. A quote of the reply's other messages reaches the platform's
-    // copy only: Chats keeps one platform id per message.
-    const receipted = shown.filter((part) => part.receipt);
-    const lastBlock = receipted.at(-1)?.block;
-    const quoted = receipted.find((part) => part.block === lastBlock)?.receipt;
+    // A reply the platform split settles to one id, its first message's
+    // (docs/architecture/channels.md). A message whose create is unknown has
+    // no id, so the first one with an id stands in. A quote of the reply's
+    // other messages reaches the platform's copy only.
+    const quoted = shown.find((part) => part.receipt)?.receipt;
     try {
       // Delivered already: recording says so.
       await said.say(

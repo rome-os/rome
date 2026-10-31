@@ -5,11 +5,11 @@
 import type { Account, ChatId, ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ChatRepository } from "./chat-repository.js";
-import { chatKey, directMessageOn, type ChatKey } from "./place.js";
+import { chatKey, directMessageOn, refOf, type ChatKey } from "./place.js";
 
 export interface OpenChannelChatDeps {
   chats: Pick<ChatRepository, "start">;
-  webchatRepo: Pick<WebChatRepository, "ensureChannelChat">;
+  webchatRepo: Pick<WebChatRepository, "ensureChannelChat" | "chatAtAddress">;
   /** Rome's own account on a channel, or null while its record knows none. */
   accountOf(channel: string): Account | null;
   platformOfChannel(channel: string): string;
@@ -34,18 +34,22 @@ export async function openChannelChat(
     input.parentThreadId && input.parentThreadId !== input.threadId
       ? input.parentThreadId
       : undefined;
-  const key = keyOf(
-    platform,
-    romeEnd,
-    parent ?? input.threadId,
-    parent ? "group" : input.threadType,
-  );
-  const chat = deps.chats.start(
-    key,
-    parent || input.threadType !== "private" ? "group" : "dm",
-    parent ? null : (input.threadName ?? null),
-  );
-  return deps.webchatRepo.ensureChannelChat({ ...input, chatId: chat.id, accountId: romeEnd });
+  // A direct message the account already holds at this address is that one,
+  // keyed by both ends when its first message named the sender.
+  const known =
+    !parent && input.threadType === "private"
+      ? deps.webchatRepo.chatAtAddress(input.channel, input.threadId)
+      : null;
+  const chatId =
+    known ??
+    deps.chats.start(
+      refOf(
+        keyOf(platform, romeEnd, parent ?? input.threadId, parent ? "group" : input.threadType),
+      ),
+      parent || input.threadType !== "private" ? "group" : "dm",
+      parent ? null : (input.threadName ?? null),
+    ).ref.id;
+  return deps.webchatRepo.ensureChannelChat({ ...input, chatId, accountId: romeEnd });
 }
 
 /**

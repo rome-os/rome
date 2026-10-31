@@ -38,18 +38,18 @@ export interface MessagePage {
 }
 
 /**
- * Delivers a message to its platform and answers the platform's id for it,
- * when the platform gives one. Throws when the platform refused it. Where Rome
- * is the platform, as on the dashboard, it answers at once with no id, and
- * the message's own id stands for the platform's.
+ * Delivers a message to its platform and answers its adapter's id for it,
+ * unique in its chat. Throws when the platform refused it. On the dashboard,
+ * where Rome is the platform, it answers at once with no id, and the
+ * dashboard's own id for the message stands.
  */
-export type Deliver = () => Promise<{ platformMessageId?: string }>;
+export type Deliver = () => Promise<{ id?: string }>;
 
-/** A sent message: the platform's id for it, and Rome's, which is null when
- *  the platform took it but Rome failed to record it. */
+/** A sent message: its adapter's id, and whether Rome recorded it, which it
+ *  failed to when the platform took it but the record did not land. */
 export interface Sent {
-  readonly id: string | null;
-  readonly platformMessageId: string;
+  readonly id: string;
+  readonly recorded: boolean;
   readonly at: Date;
 }
 
@@ -57,14 +57,13 @@ export class MessageRepository {
   constructor(private readonly db: DrizzleDb) {}
 
   /**
-   * Put `message` on record in its place, and answer it with its id, or null
-   * when the platform's id for it is already on record in that chat:
-   * recording again changes nothing. The place's chat must already exist: a
+   * Put `message` on record in its place, and answer it, or null when its id
+   * is already on record in that chat: recording again changes nothing. The place's chat must already exist: a
    * message never starts its chat. Throws when it does not.
    */
   async record(message: Message): Promise<RecordedMessage | null> {
     const chatId = this.chatIdOf(message.place);
-    const id = message.id ?? uuidv7();
+    const id = message.id;
     const inserted = this.db
       .insert(chatMessages)
       .values({
@@ -78,14 +77,13 @@ export class MessageRepository {
         parts: JSON.stringify(
           message.parts ?? [{ type: "text", content: plainText(message.body) }],
         ),
-        platformMessageId: message.platformMessageId,
-        replyToPlatformMessageId: message.replyTo ?? null,
+        replyToMessageId: message.replyTo ?? null,
         saidAt: message.at,
       })
       .onConflictDoNothing()
       .returning({ id: chatMessages.id })
       .all();
-    return inserted.length === 0 ? null : { ...message, id };
+    return inserted.length === 0 ? null : message;
   }
 
   /**
@@ -97,11 +95,11 @@ export class MessageRepository {
    */
   async send(message: OutboundMessage, deliver: Deliver): Promise<Sent> {
     const chatId = this.chatIdOf(message.place);
-    const id = message.id ?? uuidv7();
-    const { platformMessageId = id } = await deliver();
+    const delivered = await deliver();
+    const id = delivered.id ?? message.id ?? uuidv7();
     const at = new Date();
     try {
-      const inserted = this.db
+      this.db
         .insert(chatMessages)
         .values({
           id,
@@ -112,22 +110,19 @@ export class MessageRepository {
           senderName: message.saidBy.name ?? null,
           text: partsText(message.parts),
           parts: JSON.stringify(message.parts),
-          platformMessageId,
-          replyToPlatformMessageId: message.replyTo ?? null,
+          replyToMessageId: message.replyTo ?? null,
           saidAt: at,
         })
+        // The platform answered an id already on record: the same message.
         .onConflictDoNothing()
-        .returning({ id: chatMessages.id })
-        .all();
-      // The platform answered an id already on record: the same message.
-      const recorded = inserted[0]?.id ?? this.idOf(chatId, platformMessageId);
-      return { id: recorded, platformMessageId, at };
+        .run();
+      return { id, recorded: true, at };
     } catch (error) {
       log.warn("message delivered but recording failed", {
         chatId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return { id: null, platformMessageId, at };
+      return { id, recorded: false, at };
     }
   }
 
@@ -144,10 +139,9 @@ export class MessageRepository {
     // One more than asked says whether any are older.
     const rows = this.db.all<MessageRow>(sql`
       SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
-             m.platform_message_id, m.reply_to_platform_message_id, m.said_at
-      FROM chats c
-      JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS ${place.threadId ?? null}
-      WHERE c.platform = ${place.chat.platform} AND c.platform_chat_id = ${place.chat.id}
+             m.reply_to_message_id, m.said_at
+      FROM chat_messages m
+      WHERE m.chat_id = ${place.chat.id} AND m.thread_id IS ${place.threadId ?? null}
         ${before ? sql`AND (m.said_at, m.rowid) < (${seconds(before.at)}, (SELECT rowid FROM chat_messages WHERE id = ${before.id}))` : sql``}
       ORDER BY m.said_at DESC, m.rowid DESC
       ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
@@ -163,24 +157,16 @@ export class MessageRepository {
     };
   }
 
+  /** The chat `place` is in, which must already exist: a message never
+   *  starts its chat. */
   private chatIdOf(place: Place): string {
     const row = this.db.all<{ id: string }>(sql`
-      SELECT id FROM ${chats}
-      WHERE platform = ${place.chat.platform} AND platform_chat_id = ${place.chat.id}
+      SELECT id FROM ${chats} WHERE id = ${place.chat.id}
     `)[0];
     if (!row) {
       throw new Error(`No chat at ${place.chat.platform}:${place.chat.id} to record a message in`);
     }
     return row.id;
-  }
-
-  private idOf(chatId: string, platformMessageId: string): string | null {
-    return (
-      this.db.all<{ id: string }>(sql`
-        SELECT id FROM chat_messages
-        WHERE chat_id = ${chatId} AND platform_message_id = ${platformMessageId}
-      `)[0]?.id ?? null
-    );
   }
 }
 
@@ -191,8 +177,7 @@ interface MessageRow {
   sender_name: string | null;
   text: string;
   parts: string;
-  platform_message_id: string | null;
-  reply_to_platform_message_id: string | null;
+  reply_to_message_id: string | null;
   said_at: number;
 }
 
@@ -213,10 +198,7 @@ function said(place: Place, row: MessageRow): SaidMessage {
     ...(row.sender_name === null ? {} : { senderName: row.sender_name }),
     body: { text: row.text },
     parts: row.parts,
-    ...(row.platform_message_id === null ? {} : { platformMessageId: row.platform_message_id }),
-    ...(row.reply_to_platform_message_id === null
-      ? {}
-      : { replyTo: row.reply_to_platform_message_id }),
+    ...(row.reply_to_message_id === null ? {} : { replyTo: row.reply_to_message_id }),
     at: new Date(row.said_at * 1000),
   };
 }

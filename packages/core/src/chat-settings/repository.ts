@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
-import { chatKey, directMessageOn, type ChatKey } from "../chats/place.js";
+import { chatKey, directMessageOn, refOf, type ChatKey } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -108,7 +108,7 @@ export class ChatSettingsRepository {
     const shared = this.db.all<{ channel_settings: string | null }>(sql`
       SELECT s.channel_settings FROM chats c
       JOIN rome_sessions s ON s.chat_id = c.id AND s.thread_id IS NULL
-      WHERE c.platform = ${key.platform} AND c.platform_chat_id = ${key.id}
+      WHERE c.id = ${refOf(key).id}
         AND s.channel_settings IS NOT NULL
       ORDER BY s.created_at, s.id
     `);
@@ -207,11 +207,11 @@ export class ChatSettingsRepository {
             ? "private"
             : descriptor.kind;
         const chat = this.deps.chats.start(
-          key,
+          refOf(key),
           descriptor.kind === "dm" ? "dm" : "group",
           descriptor.displayName,
         );
-        this.deps.chats.rename(key, descriptor.displayName);
+        this.deps.chats.rename(chat.ref, descriptor.displayName);
         const id = channelChatId(channel, descriptor.ref.chatId);
         const now = new Date();
         tx.insert(romeSessions)
@@ -228,7 +228,7 @@ export class ChatSettingsRepository {
             sourceThreadId: descriptor.ref.chatId,
             sourceThreadName: descriptor.displayName,
             sourceThreadType,
-            chatId: chat.id,
+            chatId: chat.ref.id,
             accountId: via.id,
             createdAt: now,
             activityAt: now,
@@ -254,7 +254,7 @@ export class ChatSettingsRepository {
           const others = tx
             .select({ id: romeSessions.id, channelSettings: romeSessions.channelSettings })
             .from(romeSessions)
-            .where(and(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId)))
+            .where(and(eq(romeSessions.chatId, chat.ref.id), isNull(romeSessions.threadId)))
             .all()
             .filter((row) => row.id !== id);
           for (const row of others) {

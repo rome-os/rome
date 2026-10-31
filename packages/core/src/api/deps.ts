@@ -119,8 +119,8 @@ export interface ApiDeps {
   webchatRepo: WebChatRepository;
   /** What was said in each place (docs/domains/chats.md#message). */
   chatMessages: Pick<MessageRepository, "read" | "send">;
-  /** The chats Rome holds, by key (docs/domains/chats.md#chat). */
-  chats: Pick<ChatRepository, "byKey" | "start">;
+  /** The chats Rome holds (docs/domains/chats.md#chat). */
+  chats: Pick<ChatRepository, "get" | "start">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

@@ -33,22 +33,19 @@ export interface Body {
 }
 
 /**
- * A message that reached Rome. `platformMessageId` is the platform's own id
- * for it, which makes recording it again a no-op. `replyTo` is the platform id
- * of the message it quotes, when it quotes one.
+ * A message that reached Rome. `id` is its adapter's id for it, unique in its
+ * chat, which makes recording it again a no-op. `replyTo` is the id of the
+ * message it quotes in the same chat, when it quotes one.
  */
 export interface InboundMessage {
   readonly direction: "toRome";
-  /** The id to record it under, when the caller needs it before the record
-   *  exists. Absent, Rome gives one. */
-  readonly id?: string;
+  readonly id: string;
   readonly place: Place;
   readonly saidBy: SaidBy;
   readonly body: Body;
   /** The message as composed, where the platform carries more than text,
    *  as the dashboard does. Absent, the body's text is its one part. */
   readonly parts?: readonly MessagePart[];
-  readonly platformMessageId: string;
   readonly replyTo?: string;
   readonly at: Date;
 }
@@ -60,13 +57,13 @@ export type Message = InboundMessage;
  * A message Rome says into a place. `saidBy` is the account it goes out as,
  * one of Rome's own or the guardian's, with the agent that said it when an
  * agent did. `parts` is the message as composed, which reads as plain text
- * the way any recorded message does. `replyTo` is the platform id of the
- * message it answers.
+ * the way any recorded message does. `replyTo` is the id of the message it
+ * answers in the same chat.
  */
 export interface OutboundMessage {
   readonly direction: "fromRome";
-  /** The id to record it under, when the caller needs it before the send
-   *  answers. Absent, Rome gives one. */
+  /** The id the dashboard adapter records it under, which the caller may
+   *  need before the send answers. A platform's adapter answers its own. */
   readonly id?: string;
   readonly place: Place;
   readonly saidBy: SaidBy;
@@ -74,8 +71,8 @@ export interface OutboundMessage {
   readonly replyTo?: string;
 }
 
-/** A message once it is on record: the id Rome gave it. */
-export type RecordedMessage = Message & { readonly id: string };
+/** A message once it is on record. */
+export type RecordedMessage = Message;
 
 /**
  * A message as a read of its place finds it, either way it went. It is from
@@ -92,15 +89,14 @@ export interface SaidMessage {
   readonly senderName?: string;
   readonly body: Body;
   readonly parts: string;
-  readonly platformMessageId?: string;
   readonly replyTo?: string;
   readonly at: Date;
 }
 
 /**
  * A message to Rome. Refuses a sender on another platform than the place,
- * since everyone in a chat is on its platform, and a message with no
- * platform id, since nothing could tell a redelivery from a new message.
+ * since everyone in a chat is on its platform, and a message with no id,
+ * since nothing could tell a redelivery from a new message.
  */
 export function messageToRome(input: Omit<InboundMessage, "direction">): InboundMessage {
   if (input.saidBy.account.platform !== input.place.chat.platform) {
@@ -108,8 +104,8 @@ export function messageToRome(input: Omit<InboundMessage, "direction">): Inbound
       `A message in a ${input.place.chat.platform} chat cannot be said by a ${input.saidBy.account.platform} account`,
     );
   }
-  if (!input.platformMessageId) {
-    throw new Error("A message to Rome needs the platform's id for it");
+  if (!input.id) {
+    throw new Error("A message to Rome needs its adapter's id");
   }
   return { direction: "toRome", ...input };
 }

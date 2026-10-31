@@ -3,8 +3,8 @@
 // docs/domains/participation.md#reply.
 
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import type { Deliver, MessageRepository, Sent } from "../chats/message-repository.js";
-import { ownedBy } from "../chats/place.js";
+import type { MessageRepository } from "../chats/message-repository.js";
+import { keyOf, messageIdIn, ownedBy } from "../chats/place.js";
 import type { MessagePart } from "../types.js";
 import type { TurnLinks } from "./turn-links.js";
 
@@ -12,6 +12,16 @@ export interface SeatRepliesDeps {
   seats: Pick<WebChatRepository, "seatOf">;
   messages: Pick<MessageRepository, "send">;
   links: Pick<TurnLinks, "answer">;
+}
+
+/** Delivers a message on its channel and answers the platform's id for it,
+ *  when the platform gives one. Throws when the platform refused it. */
+export type ChannelDeliver = () => Promise<{ platformMessageId?: string }>;
+
+/** What a seat said: its id in Chats, or null when it was not recorded. */
+export interface SeatSent {
+  readonly id: string | null;
+  readonly at: Date;
 }
 
 export class SeatReplies {
@@ -26,14 +36,20 @@ export class SeatReplies {
   async say(
     sessionId: string,
     parts: readonly MessagePart[],
-    deliver: Deliver,
+    deliver: ChannelDeliver,
     options: { turnId?: string; replyTo?: string } = {},
-  ): Promise<Sent> {
+  ): Promise<SeatSent> {
     const seat = await this.deps.seats.seatOf(sessionId);
     if (!seat) {
-      const { platformMessageId = "" } = await deliver();
-      return { id: null, platformMessageId, at: new Date() };
+      await deliver();
+      return { id: null, at: new Date() };
     }
+    // The adapter's id for a platform message of this seat's chat.
+    const idOf = (platformMessageId: string) =>
+      messageIdIn(
+        seat.place.chat,
+        ownedBy(keyOf(seat.place.chat), seat.accountId, platformMessageId),
+      );
     const sent = await this.deps.messages.send(
       {
         direction: "fromRome",
@@ -43,20 +59,15 @@ export class SeatReplies {
           agent: seat.agent,
         },
         parts,
-        ...(options.replyTo === undefined
-          ? {}
-          : { replyTo: ownedBy(seat.place.chat, seat.accountId, options.replyTo) }),
+        ...(options.replyTo === undefined ? {} : { replyTo: idOf(options.replyTo) }),
       },
       async () => {
         const { platformMessageId } = await deliver();
-        return platformMessageId === undefined
-          ? {}
-          : { platformMessageId: ownedBy(seat.place.chat, seat.accountId, platformMessageId) };
+        return platformMessageId === undefined ? {} : { id: idOf(platformMessageId) };
       },
     );
-    if (options.turnId !== undefined && sent.id !== null) {
-      this.deps.links.answer(sent.id, sessionId, options.turnId);
-    }
-    return sent;
+    if (!sent.recorded) return { id: null, at: sent.at };
+    if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);
+    return { id: sent.id, at: sent.at };
   }
 }

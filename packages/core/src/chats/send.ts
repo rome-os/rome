@@ -14,7 +14,7 @@
 // said as an agent's dashboard account and wakes the chat's agent, the way the
 // guardian's composer does.
 
-import type { Account } from "@rome-os/app-runtime";
+import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState, SentMessage } from "@rome/api-types/people";
 import { platformOf } from "@rome/api-types/platform";
 import {
@@ -27,7 +27,15 @@ import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { ChatRepository } from "./chat-repository.js";
 import type { MessageRepository } from "./message-repository.js";
-import { addressOf, otherEndOf, ownedBy, type Place } from "./place.js";
+import {
+  addressOf,
+  keyOf,
+  messageIdIn,
+  otherEndOf,
+  ownedBy,
+  platformIdOf,
+  type Place,
+} from "./place.js";
 
 export interface SendDeps {
   channels: Channels;
@@ -54,7 +62,7 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
 
 export interface SendIntoPlaceDeps extends SendDeps {
   /** Where the place's chat is found, or started on Rome's first message. */
-  chats: Pick<ChatRepository, "byKey" | "start">;
+  chats: Pick<ChatRepository, "get" | "start">;
   /** Where a sent message is put on record. */
   chatMessages: Pick<MessageRepository, "send">;
   /** Rome's own account on a channel, which a send names as `as`. Absent, no
@@ -63,6 +71,9 @@ export interface SendIntoPlaceDeps extends SendDeps {
   /** Where a send into a dashboard chat goes. Absent, the dashboard takes no
    *  sends. */
   dashboard?: DashboardInbox;
+  /** The address a channel's seat in a chat heard it at, which a direct
+   *  message whose platform gives it an id of its own is sent to. */
+  addressIn?: (channel: string, chatId: string) => string | null;
 }
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
@@ -140,11 +151,17 @@ export async function send(
   if (!channel) return { ok: false, send: "not-connected" };
   if (!channel.send) return { ok: false, send: "unsupported" };
 
-  const address = addressOf(place);
   const account = deps.accountOf?.(channel.name) ?? { platform, id: channel.name };
   const chat =
-    deps.chats.byKey(place.chat) ??
-    deps.chats.start(place.chat, otherEndOf(place.chat) === null ? "group" : "dm", null);
+    deps.chats.get(place.chat) ??
+    deps.chats.start(place.chat, otherEndOf(keyOf(place.chat)) === null ? "group" : "dm", null);
+  // A direct message goes to the platform's own id for it where the account
+  // heard it there (Feishu's p2p chat), else to the other end.
+  const heardAt =
+    place.threadId === undefined && chat.kind === "dm"
+      ? (deps.addressIn?.(channel.name, chat.ref.id) ?? null)
+      : null;
+  const address = (heardAt ?? addressOf(place)) as ChatId;
   const send = channel.send;
   let sent: Awaited<ReturnType<MessageRepository["send"]>>;
   try {
@@ -158,7 +175,9 @@ export async function send(
       },
       async () => {
         const { messageId } = await send.send(address, { text: body.text });
-        return messageId ? { platformMessageId: ownedBy(chat.key, account.id, messageId) } : {};
+        return messageId
+          ? { id: messageIdIn(chat.ref, ownedBy(keyOf(chat.ref), account.id, messageId)) }
+          : {};
       },
     );
   } catch (error) {
@@ -171,7 +190,7 @@ export async function send(
   return {
     ok: true,
     sent: {
-      ref: `${address}:${sent.platformMessageId}`,
+      ref: `${address}:${platformIdOf(chat.ref.id, sent.id) ?? sent.id}`,
       timestamp: Math.floor(sent.at.getTime() / 1000),
     },
     at: sent.at,
