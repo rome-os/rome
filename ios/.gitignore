@@ -5,3 +5,4 @@ build/
 Config/Local.xcconfig
 .design-ref/
 Config/local-dev.env
+.screenshots/
