@@ -24,7 +24,13 @@ struct TaskChatScreen: View {
     /// The spinner runs only while the chat runs a turn. A task still being
     /// worked on between turns shows a still dot.
     private var spinning: Bool { store?.running == true }
-    private var stoppedHere: Bool { store?.stopped == true && !spinning }
+    /// "Stopped" stands in only while the task still reads as being worked on.
+    /// Once it is done, failed or needs the guardian, that status shows instead.
+    private var stoppedHere: Bool {
+        guard store?.stopped == true, !spinning else { return false }
+        let status = workspace.tasks.tone(forChat: chatId)
+        return status == .running || status == .neutral
+    }
 
     var body: some View {
         VStack(spacing: 0) {
