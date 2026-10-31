@@ -5,28 +5,33 @@
 
 import type { Channel, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import type { ChannelSend } from "../channels/channel.js";
-import { createLogger } from "../logger.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { ChatRepository } from "./chat-repository.js";
+import type { ChatAddresses } from "../channels/chat-addresses.js";
 import { ChatIds } from "../channels/chat-ids.js";
-import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
-import { chatKey } from "./place.js";
+import { channelAdapter, platformIdOfLine, type Outbound } from "./adapter.js";
+import type { MessageRepository } from "./message-repository.js";
+import { startChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
+import { chatKey, ownedBy, placeIn } from "./place.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 
-const log = createLogger("recorded-sends");
-
-export interface RecordedSendsDeps extends Omit<OpenChannelChatDeps, "webchatRepo" | "chats"> {
+export interface RecordedSendsDeps
+  extends Omit<OpenChannelChatDeps, "webchatRepo" | "chats" | "addresses"> {
+  /** The channels layer's address store: where a direct message was heard,
+   *  both ways. */
+  addresses: Pick<ChatAddresses, "keyAt" | "bind" | "addressOf">;
   chats: Pick<ChatRepository, "get" | "start">;
-  webchatRepo: Pick<WebChatRepository, "ensureChannelChat" | "seatAt">;
+  webchatRepo: Pick<WebChatRepository, "seatAt">;
   replies: Pick<SeatReplies, "send">;
+  messages: Pick<MessageRepository, "send">;
 }
 
 /**
- * `channels` with each send port saying what is sent through the seat at the
- * address it is sent to: the seat that heard that address, else the chat Rome
- * holds there, opened for the main agent. The dashboard records its own
- * lines, and an email is sent on the port as it was, since the chat adapter
- * carries no email.
+ * `channels` with each send port saying what is sent through the account's
+ * chat adapter, and recording it: through the seat that heard the address,
+ * else in the chat Rome holds there, started when it holds none, with no
+ * session opened. The dashboard records its own lines, and an email is sent
+ * on the port as it was, since the chat adapter carries no email.
  */
 export function recordedSends<C extends Channel>(
   channels: readonly C[],
@@ -39,53 +44,85 @@ export function recordedSends<C extends Channel>(
     Object.defineProperty(wrapped, "send", {
       value: async (address: ChatId, message: OutgoingMessage): Promise<MessageReceipt> => {
         if ("kind" in message && message.kind === "email") return send.send(address, message);
-        const sessionId = await seatAt(deps, channel.name, address);
-        const said = await deps.replies.send(
-          sessionId,
-          channel,
-          {
-            text: message.text ?? "",
-            ...(message.parts?.length ? { parts: message.parts } : {}),
-            ...(message.attachments?.length ? { attachments: message.attachments } : {}),
-          },
-          {
-            ...(message.turnId ? { turnId: message.turnId } : {}),
-            ...(message.replyToMessageId
-              ? { replyToPlatformMessageId: message.replyToMessageId }
-              : {}),
-          },
-        );
-        if (!said) {
-          log.warn("send has no seat to record it in", { channel: channel.name });
-          return send.send(address, message);
-        }
-        return {
-          chatId: address,
-          ...(said.platformMessageId ? { messageId: said.platformMessageId } : {}),
+        const out = {
+          text: message.text ?? "",
+          ...(message.parts?.length ? { parts: message.parts } : {}),
+          ...(message.attachments?.length ? { attachments: message.attachments } : {}),
         };
+        const seat = deps.webchatRepo.seatAt(channel.name, address);
+        const platformMessageId = seat
+          ? await sayInSeat(deps, channel, seat, out, message)
+          : await sayInChat(deps, channel, address, out, message);
+        return { chatId: address, ...(platformMessageId ? { messageId: platformMessageId } : {}) };
       },
     });
     return { ...channel, send: wrapped } as C;
   });
 }
 
-/** The seat a send to `address` on `channel` is said through. */
-async function seatAt(deps: RecordedSendsDeps, channel: string, address: ChatId): Promise<string> {
-  const heard = deps.webchatRepo.seatAt(channel, address);
-  if (heard) return heard;
-  const account = deps.accountOf(channel);
-  const platform = account?.platform ?? deps.platformOfChannel(channel);
-  // A group Rome holds is named by its address; anything else at an address
-  // is a direct message, as an app's send without a seat has always meant.
+/** Say `out` through seat `sessionId`, which heard the address. Throws when
+ *  the seat stands in no chat, rather than sending a line nobody can read
+ *  back. */
+async function sayInSeat(
+  deps: RecordedSendsDeps,
+  channel: Channel,
+  sessionId: string,
+  out: Outbound,
+  message: OutgoingMessage,
+): Promise<string | null> {
+  const said = await deps.replies.send(sessionId, channel, out, {
+    ...(message.turnId ? { turnId: message.turnId } : {}),
+    ...(message.replyToMessageId ? { replyToPlatformMessageId: message.replyToMessageId } : {}),
+  });
+  if (!said) throw new Error(`Session ${sessionId} stands in no chat to send in`);
+  return said.platformMessageId;
+}
+
+/**
+ * Say `out` at an address no seat of the account heard: in the chat Rome
+ * holds there, started when it holds none, as Rome's main agent. No session
+ * opens, since no agent is in the chat until a message there wakes one. A
+ * group Rome holds is named by its address; anything else at an address is a
+ * direct message.
+ */
+async function sayInChat(
+  deps: RecordedSendsDeps,
+  channel: Channel,
+  address: ChatId,
+  out: Outbound,
+  message: OutgoingMessage,
+): Promise<string | null> {
+  const known = deps.accountOf(channel.name);
+  const platform = known?.platform ?? deps.platformOfChannel(channel.name);
   const group = deps.chats.get(ChatIds.chat(chatKey(platform, address)));
-  const opened = await openChannelChat(
-    { ...deps, webchatRepo: deps.webchatRepo },
+  const { chatId, romeEnd } = startChannelChat(deps, {
+    channel: channel.name,
+    threadId: address,
+    threadType: group?.kind === "group" ? "group" : "private",
+  });
+  const chat = { platform, id: chatId };
+  const account = { platform, id: romeEnd };
+  const adapter = channelAdapter(channel, {
+    accountOf: () => account,
+    platformOfChannel: () => platform,
+    addresses: deps.addresses,
+  });
+  const replyTo = message.replyToMessageId
+    ? ChatIds.message(chat, ownedBy(ChatIds.key(chat), romeEnd, message.replyToMessageId))
+    : undefined;
+  let lineId: string | null = null;
+  await deps.messages.send(
     {
-      channel,
-      threadId: address,
-      agentName: "main",
-      threadType: group && group.kind === "group" ? "group" : "private",
+      direction: "fromRome",
+      place: placeIn(chat),
+      saidBy: { account, agent: "main" },
+      parts: out.parts ?? [{ type: "text", content: out.text }],
+      ...(replyTo ? { replyTo } : {}),
+    },
+    async () => {
+      lineId = await adapter.send(chatId, null, { ...out, ...(replyTo ? { replyTo } : {}) });
+      return { id: lineId };
     },
   );
-  return opened.id;
+  return lineId === null ? null : platformIdOfLine(chat, romeEnd, lineId);
 }

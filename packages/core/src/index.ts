@@ -1547,6 +1547,7 @@ async function main() {
     webchatRepo,
     addresses: chatAddresses,
     replies: seatReplies,
+    messages: chatMessages,
     accountOf: (channel: string) => channelRecords.accountOf(channel),
     platformOfChannel,
   };

@@ -32,6 +32,21 @@ export async function openChannelChat(
   input: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
   if (input.channel === "webchat") return deps.webchatRepo.ensureChannelChat(input);
+  const { chatId, romeEnd } = startChannelChat(deps, input);
+  return deps.webchatRepo.ensureChannelChat({ ...input, chatId, accountId: romeEnd });
+}
+
+/**
+ * The chat at a channel address, started when Rome holds none, with no seat
+ * opened in it: its id in Chats, and Rome's end, the channel's account.
+ */
+export function startChannelChat(
+  deps: Pick<OpenChannelChatDeps, "chats" | "addresses" | "accountOf" | "platformOfChannel">,
+  input: Pick<
+    EnsureChannelChatInput,
+    "channel" | "threadId" | "parentThreadId" | "threadType" | "threadName"
+  >,
+): { chatId: string; romeEnd: string } {
   const account = deps.accountOf(input.channel);
   const platform = account?.platform ?? deps.platformOfChannel(input.channel);
   const romeEnd = account?.id ?? input.channel;
@@ -54,7 +69,7 @@ export async function openChannelChat(
       parent || input.threadType !== "private" ? "group" : "dm",
       parent ? null : (input.threadName ?? null),
     ).ref.id;
-  return deps.webchatRepo.ensureChannelChat({ ...input, chatId, accountId: romeEnd });
+  return { chatId, romeEnd };
 }
 
 /**
