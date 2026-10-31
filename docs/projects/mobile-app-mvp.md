@@ -25,11 +25,13 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 
 ## Feel fixes, round 1 (from the user's iPhone pass)
 
-- [ ] Chat top bar: drop the black bar; the bar is clear, and its three items sit on the iOS glass background
-- [ ] Drawer: a swipe on the uncovered chat area closes it; the divider no longer shakes while it closes
-- [ ] Settings: slides up from the bottom with an X at top right (no back button); opening it leaves the drawer as it is
-- [ ] Task chat: no jumping while scrolling during a running turn
-- [ ] Task chat: after Stop, the "Running" spinner stops
+- [x] Chat top bar: drop the black bar; the bar is clear, and its three items sit on the iOS glass background (`525b6072`: Liquid Glass on iOS 26+, material before; the task chat header matches)
+- [x] Drawer: a swipe on the uncovered chat area closes it; the divider no longer shakes while it closes (`4ff00a65`: the drag read the finger in the moving card's own space; it now reads screen space, and a tap also closes)
+- [x] Settings: slides up from the bottom with an X at top right (no back button); opening it leaves the drawer as it is (`6f8a56ef`: a sheet over the open drawer; instances push inside it)
+- [x] Task chat: no jumping while scrolling during a running turn (`24442a78`, `4f1692cd`, `f631e692`: follows the bottom only while the guardian is there, same-second rows no longer swap, older pages wait for the scroll to rest; checked on demo data and a local Rome)
+- [x] Task chat: after Stop, the "Running" spinner stops (`f3c1fcbb`: the spinner follows the running turn only, the header says "Stopped", and the store re-checks active turns after the interrupt; checked on a local Rome)
+
+Result: [`mobile-app-mvp-feel-1.md`](mobile-app-mvp-feel-1.md).
 
 ## Next
 

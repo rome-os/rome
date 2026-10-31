@@ -25,4 +25,8 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 
 **A literal reaches the catalog only where Swift types it as `LocalizedStringKey` or `String(localized:)`.** `Text("Done")` is looked up; `Text(flag ? "Running" : tone.label)` is a `String` and shows as written, and so does a literal passed to a `String` parameter. Give a view's text parameters the type `LocalizedStringKey`, and wrap literals headed for a `String` in `String(localized:)`.
 
+**A view at the end of a `LazyVStack` is not proof that the bottom is on screen.** The stack keeps it alive while it is off screen, so its `onAppear` and `onDisappear` lag behind the scroll, and a list that trusts them pulls the guardian back to the bottom. `TranscriptList` reads the scroll phase and `onScrollVisibilityChange` instead.
+
+**Message times are whole seconds.** Rows written in the same second tie, so sorting by time alone gives a random order that can change on each load. `TranscriptStore` orders rows the way the server does: by turn, then time, then the order they arrived.
+
 **Mac Catalyst runs the app but cannot capture a system sheet.** Snapshot runs draw the Tasks sheet in a stand-in frame; the sheet on a phone is the system one.
