@@ -14,6 +14,24 @@ If Xcode reports that CoreSimulator is out of date, finish Xcode's first launch 
 
 Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set `DEVELOPMENT_TEAM`. Debug builds use the bundle id `cc.romeos.mobile.dev`.
 
+### On a physical iPhone
+
+Signing is automatic, so Xcode must have an Apple ID for that team under Xcode → Settings → Accounts. A development certificate in the keychain is not enough: without the account the build fails with "No Accounts". `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
+
+```bash
+xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates build
+```
+
+```bash
+xcrun devicectl device install app --device <device-id> /tmp/rome-device/Build/Products/Debug-iphoneos/Rome.app
+```
+
+```bash
+xcrun devicectl device process launch --device <device-id> --terminate-existing cc.romeos.mobile.dev
+```
+
+Installing works on a locked phone, but launching does not: it fails with "Locked", so unlock the phone first.
+
 ## Debug modes
 
 Debug builds read these environment variables (set them in the scheme's Run options):
