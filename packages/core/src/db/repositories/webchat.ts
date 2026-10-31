@@ -48,8 +48,14 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { Account, ChatId, RecentChat, RomeSessionType } from "@rome-os/app-runtime";
-import { chatKey, ownedBy, placeIn, type Place } from "../../chats/place.js";
-import { ChatIds } from "../../channels/chat-ids.js";
+import { placeIn, type Place } from "../../chats/place.js";
+import { lineAt } from "../../chats/adapter.js";
+import {
+  seatsSaidInSince,
+  sessionAwaitingGuardian,
+  sessionLineCount,
+  sessionLines,
+} from "../../webchat/chat-read-model-sql.js";
 import { TurnLinks, type ContextLine } from "../../sessions/turn-links.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
 import { MessageRepository } from "../../chats/message-repository.js";
@@ -379,14 +385,6 @@ const webchatMessageSelectFields = {
   createdAt: romeAgentMessages.createdAt,
 };
 
-// How many lines the session's transcript holds: its chat's messages plus its
-// own traces.
-const sessionLineCount = sql<number>`(
-  (select count(*) from "chat_messages" m
-   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id")
-  + (select count(*) from "rome_agent_messages" t
-     where t."session_id" = "rome_sessions"."id" and t."role" = 'trace')
-)`.mapWith(Number);
 const sessionSelectFields = {
   id: romeSessions.id,
   name: romeSessions.name,
@@ -430,31 +428,6 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
   order by b."seq" desc
   limit 1
 ), 0)`.mapWith(Boolean);
-// Whether the session's chat waits on the guardian: a card (question,
-// connect-AI, app component) in a line from Rome after the guardian's last
-// line, or an approval still pending in this chat. Any answer to a card is
-// saved as the guardian's line, so a card after the last one is still open.
-// rowid is insertion order, and `idx_chat_messages_place` makes "after the
-// last" a range. Every reply adds an auto-approved row to `approvals`, so the
-// pending thread ids are collected once per list rather than scanned per chat.
-// json_valid and the object check skip rows that aren't block arrays
-// (non-JSON, or legacy plain text), which would otherwise fail the whole list.
-export const sessionAwaitingGuardian = sql<boolean>`(exists (
-  select 1 from "chat_messages" m, json_each(m."parts") part
-  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
-  and m."sender_agent" is not null and json_valid(m."parts")
-  and m."rowid" > coalesce((
-    select max(u."rowid") from "chat_messages" u
-    where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
-    and u."sender_agent" is null
-    and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
-  ), 0)
-  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
-) or "rome_sessions"."id" in (
-  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
-  where a."status" = 'pending'
-  and json_extract(a."payload", '$.channelContext.threadId') is not null
-))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const SQL_LIKE_ESCAPE = "\\";
 
@@ -931,11 +904,14 @@ export class WebChatRepository {
           .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
           .run();
         tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
-        tx.run(sql`
-          DELETE FROM chats WHERE platform = ${WEBCHAT_PLATFORM} AND id IN (
-            SELECT chat_id FROM rome_sessions
-            WHERE id IN (SELECT value FROM json_each(${JSON.stringify(chunk)})))
-        `);
+        for (const { chatId } of tx
+          .select({ chatId: romeSessions.chatId })
+          .from(romeSessions)
+          .where(inArray(romeSessions.id, chunk))
+          .all()) {
+          const chat = chatId && this.chats.get({ platform: WEBCHAT_PLATFORM, id: chatId });
+          if (chat) this.chats.end(chat.ref);
+        }
         tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
       }
 
@@ -1071,7 +1047,15 @@ export class WebChatRepository {
             threadType: "group",
           })
         : null;
-    const found = await this.findChannelConversation(input.channel, input.threadId);
+    // A seat is found by the chat it stands in and the account it speaks as;
+    // the dashboard, which names no chat here, by its address.
+    const seat =
+      input.chatId !== undefined && input.accountId !== undefined
+        ? this.seatIn(input.chatId, parent ? input.threadId : null, input.accountId)
+        : null;
+    const found = seat
+      ? await this.channelConversation(seat)
+      : await this.findChannelConversation(input.channel, input.threadId);
     if (found && input.threadName) {
       await this.backfillChannelConversationName(found, input, input.threadName);
     }
@@ -1128,7 +1112,7 @@ export class WebChatRepository {
       })
       .onConflictDoNothing();
 
-    const conversation = await this.findChannelConversation(input.channel, input.threadId);
+    const conversation = await this.channelConversation(id);
     if (!conversation) {
       throw new Error(`Failed to resolve conversation ${input.channel}:${input.threadId}`);
     }
@@ -1141,57 +1125,69 @@ export class WebChatRepository {
    * for a session that stands in no chat, such as a subagent or a fork.
    */
   async seatOf(sessionId: string): Promise<Seat | null> {
-    const row = this.db.all<{
-      platform: string;
-      chat_id: string;
-      thread_id: string | null;
-      account_id: string | null;
-      agent_name: string | null;
-      source_channel: string | null;
-    }>(sql`
-      SELECT c.platform, c.id AS chat_id, s.thread_id, s.account_id, s.agent_name,
-             s.source_channel
-      FROM rome_sessions s JOIN chats c ON c.id = s.chat_id
-      WHERE s.id = ${sessionId}
-    `)[0];
-    if (!row) return null;
+    const row = this.db
+      .select({
+        chatId: romeSessions.chatId,
+        threadId: romeSessions.threadId,
+        accountId: romeSessions.accountId,
+        agentName: romeSessions.agentName,
+        sourceChannel: romeSessions.sourceChannel,
+      })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .get();
+    const chat = row?.chatId ? this.chats.find(row.chatId) : null;
+    if (!row || !chat) return null;
+    const { platform } = chat.ref;
     return {
       sessionId,
-      place: placeIn(
-        { platform: row.platform, id: row.chat_id },
-        row.thread_id === null ? undefined : (row.thread_id as ChatId),
-      ),
-      accountId: row.account_id ?? row.source_channel ?? row.platform,
-      agent: row.agent_name ?? "main",
-      channel: row.source_channel ?? row.platform,
+      place: placeIn(chat.ref, row.threadId === null ? undefined : (row.threadId as ChatId)),
+      accountId: row.accountId ?? row.sourceChannel ?? platform,
+      agent: row.agentName ?? "main",
+      channel: row.sourceChannel ?? platform,
     };
   }
 
   /** The session that stands in the dashboard chat keyed `key`, or null
    *  when Rome holds no dashboard chat there. */
   async dashboardSessionAt(key: string): Promise<string | null> {
-    return (
-      this.db.all<{ id: string }>(sql`
-        SELECT s.id FROM chats c JOIN rome_sessions s ON s.chat_id = c.id
-        WHERE c.platform = ${WEBCHAT_PLATFORM} AND c.id = ${key}
-        ORDER BY s.created_at LIMIT 1
-      `)[0]?.id ?? null
-    );
+    if (!this.chats.get({ platform: WEBCHAT_PLATFORM, id: key })) return null;
+    return this.firstSeat(eq(romeSessions.chatId, key));
   }
 
   /**
-   * The seat channel `channel`'s account heard platform address `address`
-   * at, by its session's id, or null when none did. A thread's seat is found
-   * by the thread's own address.
+   * The seat Rome's account `accountId` holds in chat `chatId`, in thread
+   * `threadId` or the open chat when null, by its session's id, or null when
+   * it holds none there.
    */
-  seatAt(channel: string, address: string): string | null {
+  seatIn(chatId: string, threadId: string | null, accountId: string): string | null {
+    return this.firstSeat(
+      and(
+        eq(romeSessions.chatId, chatId),
+        threadId === null ? isNull(romeSessions.threadId) : eq(romeSessions.threadId, threadId),
+        eq(romeSessions.accountId, accountId),
+      ),
+    );
+  }
+
+  /** The seat Rome's account `accountId` holds in the thread the platform
+   *  calls `threadId`, in whichever chat, or null when it holds none. */
+  seatInThread(threadId: string, accountId: string): string | null {
+    return this.firstSeat(
+      and(eq(romeSessions.threadId, threadId), eq(romeSessions.accountId, accountId)),
+    );
+  }
+
+  /** The oldest session `where` names, by id. */
+  private firstSeat(where: SQL | undefined): string | null {
     return (
-      this.db.all<{ id: string }>(sql`
-        SELECT id FROM rome_sessions
-        WHERE source_channel = ${channel} AND source_thread_id = ${address}
-          AND chat_id IS NOT NULL
-        ORDER BY created_at LIMIT 1
-      `)[0]?.id ?? null
+      this.db
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(where)
+        .orderBy(asc(romeSessions.createdAt))
+        .limit(1)
+        .get()?.id ?? null
     );
   }
 
@@ -1207,29 +1203,17 @@ export class WebChatRepository {
   async seatLine(sessionId: string, platformMessageId: string): Promise<ContextLine | null> {
     const seat = await this.seatOf(sessionId);
     if (!seat) return null;
-    const owned = ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId);
-    const row = this.db.all<{
-      id: string;
-      sender_name: string | null;
-      text: string;
-      said_at: number;
-    }>(sql`
-      SELECT m.id,
-        CASE WHEN m.sender_agent IS NOT NULL THEN coalesce(m.sender_name, 'Rome')
-             ELSE m.sender_name END AS sender_name,
-        m.text, m.said_at
-      FROM rome_sessions s
-      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.id = ${ChatIds.message(seat.place.chat, owned)}
-      WHERE s.id = ${sessionId}
-    `)[0];
-    return row
-      ? {
-          id: row.id,
-          senderName: row.sender_name,
-          text: row.text,
-          at: new Date(row.said_at * 1000),
-        }
-      : null;
+    const [line] = this.lines
+      .byIds([lineAt(seat.place.chat, seat.accountId, platformMessageId)])
+      .filter((said) => said.place.chat.id === seat.place.chat.id);
+    if (!line) return null;
+    return {
+      id: line.id,
+      senderName:
+        line.direction === "fromRome" ? (line.senderName ?? "Rome") : (line.senderName ?? null),
+      text: line.body.text,
+      at: line.at,
+    };
   }
 
   /** Move session `sessionId`'s activity to `at` when `at` is later, as
@@ -1288,6 +1272,20 @@ export class WebChatRepository {
     if (nameMissing && updated[0]?.name === threadName) {
       this.emitSessionNameChanged(row.id, threadName);
     }
+  }
+
+  private async channelConversation(id: string) {
+    const rows = await this.db
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        name: romeSessions.name,
+        sourceThreadName: romeSessions.sourceThreadName,
+      })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, id))
+      .limit(1);
+    return rows[0] ?? null;
   }
 
   private async findChannelConversation(
@@ -2245,14 +2243,9 @@ export class WebChatRepository {
         : sql`s.type = 'channel' AND coalesce(ch.connection_kind, s.source_channel)
             IN (SELECT value FROM json_each(${JSON.stringify(where.accountKinds)}))`;
     return this.db
-      .all<{ id: string; chat_id: string; thread_id: string | null }>(sql`
-        SELECT s.id, s.chat_id, s.thread_id FROM rome_sessions s
-        LEFT JOIN channels ch ON ch.id = s.source_channel
-        JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-        WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
-        GROUP BY s.id
-        ORDER BY max(m.said_at) DESC
-      `)
+      .all<{ id: string; chat_id: string; thread_id: string | null }>(
+        seatsSaidInSince(scope, cutoff),
+      )
       .map((row) => ({ sessionId: row.id, chatId: row.chat_id, threadId: row.thread_id }));
   }
 
@@ -2757,9 +2750,7 @@ export class WebChatRepository {
 
   async getMessageContentForDisplay(id: string, options: TraceReadOptions = {}) {
     // A chat line is the chat's, whichever session reads it.
-    const line = this.db.all<{ parts: string }>(
-      sql`SELECT parts FROM chat_messages WHERE id = ${id}`,
-    )[0];
+    const [line] = this.lines.byIds([id]);
     if (line) return { id, content: line.parts };
     if (options.sessionActivityCutoff) {
       const [message] = await this.db
@@ -3003,45 +2994,4 @@ function storedLine(row: LineRow): StoredWebchatMessage {
     content: row.content,
     createdAt: new Date(row.created_at * 1000),
   };
-}
-
-/**
- * The transcript lines of `sessionIds`, as one table: what was said where
- * each session stands, from Chats, read as the session sees it, beside the
- * session's own lines (traces, and the text of a session that stands in no
- * chat). A line is the session's prompt or answer by its turn link; a line
- * with none is its agent's when its seat said it, the guardian's on the
- * dashboard, and a notification elsewhere. `line_order` puts a prompt before
- * the trace and answer of its turn within one second.
- */
-function sessionLines(sessionIds: readonly string[]) {
-  const ids = JSON.stringify(sessionIds);
-  return sql`(
-    SELECT m.id, s.id AS session_id,
-      -- A line the turn only caught up on is no part of the turn.
-      CASE WHEN l.role IN ('prompt', 'answer') THEN l.turn_id END AS turn_id, l.input_state,
-      CASE WHEN l.role = 'answer'
-             OR (l.role IS NULL AND m.sender_agent IS NOT NULL AND m.sender_account_id IS s.account_id)
-             THEN 'assistant'
-           WHEN l.role = 'prompt' OR s.source_channel = 'webchat' THEN 'user'
-           ELSE 'notification' END AS role,
-      m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
-      m.sender_name, CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS line_order,
-      m.rowid AS seq, m.sender_agent IS NOT NULL AS from_rome
-    FROM rome_sessions s
-    JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-      -- A seat sees the place from when it joined.
-      AND m.said_at >= s.created_at
-    LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
-    WHERE s.id IN (SELECT value FROM json_each(${ids}))
-    UNION ALL
-    SELECT r.id, r.session_id, r.turn_id, NULL AS input_state, r.role,
-      CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
-      r.created_at, r.sender_id, r.sender_name,
-      CASE WHEN r.role = 'user' THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
-      r.rowid AS seq, (r.role = 'assistant' OR r.sender_id IS 'rome') AS from_rome
-    FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
-    WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
-      AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant', 'notification'))
-  )`;
 }

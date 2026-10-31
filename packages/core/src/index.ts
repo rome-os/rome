@@ -278,9 +278,11 @@ import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
 import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
+import { messagesSaid } from "./sessions/messages-said.js";
+import { ChatAdapters } from "./chats/adapter.js";
 import { MessageRepository } from "./chats/message-repository.js";
 import { SeatReplies } from "./sessions/seat-replies.js";
-import { recordedSends } from "./chats/recorded-sends.js";
+import { recordedSends } from "./channels/recorded-sends.js";
 import { ChatAddresses } from "./channels/chat-addresses.js";
 import { ChatReadModel } from "./webchat/chat-read-model.js";
 import { TurnLinks } from "./sessions/turn-links.js";
@@ -412,10 +414,15 @@ async function main() {
   const chatMessages = new MessageRepository(db);
   const turnLinks = new TurnLinks(db);
   // The channels layer's address store, shared by every chat adapter.
-  const chatAddresses = new ChatAddresses(db);
+  // Every channel's chat adapter, over the one address store they share.
+  const chatAdapters = new ChatAdapters({
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel,
+    addresses: new ChatAddresses(db),
+  });
   const seatReplies = new SeatReplies({
     seats: webchatRepo,
-    addresses: chatAddresses,
+    adapters: chatAdapters,
     messages: chatMessages,
     links: turnLinks,
   });
@@ -426,14 +433,12 @@ async function main() {
     webchatRepo,
     chatRepo,
     chatMessages,
-    addresses: chatAddresses,
+    adapters: chatAdapters,
     // `channelsService` is built further down; an app sends after boot.
     sendOn: (channel, address, message) => channelsService.send(channel, address, message),
     links: turnLinks,
     replies: seatReplies,
     reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
-    accountOf: (channel) => channelRecords.accountOf(channel),
-    platformOfChannel,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1545,11 +1550,9 @@ async function main() {
   const recordedSendsDeps = {
     chats: chatRepo,
     webchatRepo,
-    addresses: chatAddresses,
+    adapters: chatAdapters,
     replies: seatReplies,
     messages: chatMessages,
-    accountOf: (channel: string) => channelRecords.accountOf(channel),
-    platformOfChannel,
   };
   const hookChannels = legacyChatIdChannels(
     recordedSends(withInboundSpans(channels, "channel-message"), recordedSendsDeps),
@@ -1562,17 +1565,19 @@ async function main() {
       chats: chatRepo,
       seats: webchatRepo,
       messages: chatMessages,
-      wakes: turnLinks,
       events: chatEvents,
-      adapters: {
-        accountOf: (channel) => channelRecords.accountOf(channel),
-        platformOfChannel,
-        addresses: chatAddresses,
-      },
+      adapters: chatAdapters,
       listens: (connectionId) => accountListening.listens(connectionId),
     },
     hookChannels,
   );
+  // Agents hears each recorded message first, so its wake is held out of
+  // catch-up before anything reads it.
+  const hookMessagesSaid = messagesSaid({
+    recording: inboundRecorder,
+    events: chatEvents,
+    wakes: turnLinks,
+  });
   const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
@@ -1586,7 +1591,7 @@ async function main() {
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
         channels: hookChannels,
-        messagesSaid: inboundRecorder.messagesSaid,
+        messagesSaid: hookMessagesSaid,
         accountAgentOf: hookAgentOf,
         linkedAgentOf: hookAgentOf,
       });
@@ -1629,7 +1634,7 @@ async function main() {
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
           channels: hookChannels,
-          messagesSaid: inboundRecorder.messagesSaid,
+          messagesSaid: hookMessagesSaid,
           accountAgentOf: hookAgentOf,
           linkedAgentOf: hookAgentOf,
         },
@@ -1922,7 +1927,7 @@ async function main() {
       webchatRepo,
       chatMessages,
       chats: chatRepo,
-      addresses: chatAddresses,
+      adapters: chatAdapters,
       webhookInvocationsRepo,
       approvalsRepo,
       approvalHandler,

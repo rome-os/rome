@@ -48,6 +48,7 @@ import { SeatReplies } from "../sessions/seat-replies.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { ChatAddresses } from "../channels/chat-addresses.js";
+import { ChatAdapters } from "../chats/adapter.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -127,25 +128,27 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   // its seat's turns.
   const chatMessages = new MessageRepository(db);
   const turnLinks = new TurnLinks(db);
-  const chatAddresses = new ChatAddresses(db);
+  const chatAdapters = new ChatAdapters({
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
+    addresses: new ChatAddresses(db),
+  });
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db),
     chatMessages,
-    addresses: chatAddresses,
+    adapters: chatAdapters,
     // `channelsService` is built further down; an action sends after boot.
     sendOn: (channel, address, message) => channelsService.send(channel, address, message),
     links: turnLinks,
     replies: new SeatReplies({
       seats: webchatRepo,
-      addresses: chatAddresses,
+      adapters: chatAdapters,
       messages: chatMessages,
       links: turnLinks,
     }),
     reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
-    accountOf: (channel) => channelRecords.accountOf(channel),
-    platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
   });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);

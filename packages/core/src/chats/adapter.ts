@@ -25,17 +25,16 @@ import type { ChatAddresses } from "../channels/chat-addresses.js";
 import { ReplyDelivery, type ReplyOutcome } from "../channels/delivery/reply.js";
 import type { DeliveryPolicy } from "../channels/delivery/types.js";
 import type { Clock } from "../lib/clock.js";
-import { ChatIds } from "../channels/chat-ids.js";
 import {
+  ChatIds,
   chatKey,
   directMessageOn,
   notOwnedBy,
   otherEndOf,
   ownedBy,
   type ChatKey,
-  type ChatRef,
-  type Place,
-} from "./place.js";
+} from "../channels/chat-ids.js";
+import type { ChatRef, Place } from "./place.js";
 
 const log = createLogger("chat-adapter");
 
@@ -85,7 +84,7 @@ export interface Outbound {
 
 /**
  * One of Rome's accounts on a platform, as Chats reaches it. One instance per
- * account; `start` is called at most once.
+ * account; `start` is called again only after `stop`.
  */
 export interface ChatAdapter {
   /** The channel the account is reached on. */
@@ -143,7 +142,7 @@ export interface ChannelAdapterDeps {
   platformOfChannel(channel: string): string;
   /** The channels layer's address store, where a direct message the
    *  platform gives an id of its own is reached. */
-  addresses?: Pick<ChatAddresses, "bind" | "addressOf">;
+  addresses?: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt">;
 }
 
 /**
@@ -157,10 +156,34 @@ export function addressOf(place: Place): ChatId {
 }
 
 /**
- * The id a line Rome sent into `chat` through Rome's account `romeEnd` is
- * recorded under: the platform's id for it, or one the adapter gives it when
- * the platform answered none.
+ * The chat Rome's account on `platform` reaches at platform address
+ * `address`. Without `dm` it is the group the address names. With `dm` it is
+ * the direct message between Rome's end `dm.romeEnd` and `dm.other`, the
+ * party at the other end, who is the address itself when not named.
  */
+export function chatAt(
+  platform: string,
+  address: string,
+  dm?: { readonly romeEnd: string; readonly other?: string },
+): ChatRef {
+  return ChatIds.chat(
+    dm
+      ? directMessageOn(platform, dm.romeEnd, address, dm.other ?? address)
+      : chatKey(platform, address as ChatId),
+  );
+}
+
+/** Whether `chat` is a direct message, which its id says. */
+export function isDirectMessage(chat: ChatRef): boolean {
+  return otherEndOf(ChatIds.key(chat)) !== null;
+}
+
+/** The id of the message the platform calls `platformMessageId` in `chat`,
+ *  as Rome's account `romeEnd` heard or sent it. */
+export function lineAt(chat: ChatRef, romeEnd: string, platformMessageId: string): string {
+  return ChatIds.message(chat, ownedBy(ChatIds.key(chat), romeEnd, platformMessageId));
+}
+
 /** The platform's id for line `lineId` of `chat`, which Rome's account
  *  `romeEnd` sent or heard, or null for a line the platform gave no id. */
 export function platformIdOfLine(chat: ChatRef, romeEnd: string, lineId: string): string | null {
@@ -169,6 +192,11 @@ export function platformIdOfLine(chat: ChatRef, romeEnd: string, lineId: string)
   return notOwnedBy(ChatIds.key(chat), romeEnd, id);
 }
 
+/**
+ * The id a line Rome sent into `chat` through Rome's account `romeEnd` is
+ * recorded under: the platform's id for it, or one the adapter gives it when
+ * the platform answered none.
+ */
 export function sentLineId(
   chat: ChatRef,
   romeEnd: string,
@@ -228,7 +256,7 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
     },
 
     start(deliver, fault) {
-      if (started) throw new Error(`Adapter for ${channel.name} already started`);
+      if (started) throw new Error(`Adapter for ${channel.name} is already receiving`);
       started = true;
       if (!channel.inbound) return;
       unsubscribe = channel.inbound.subscribe(async (event) => {
@@ -270,6 +298,7 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
     async stop() {
       unsubscribe?.();
       unsubscribe = null;
+      started = false;
       await Promise.allSettled([...inFlight]);
     },
 
@@ -328,6 +357,52 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
       };
     },
   };
+}
+
+/**
+ * Every channel's adapter, built once per channel when first asked for, over
+ * one set of deps wired at startup. A channel a Connection mints again, as
+ * after a reconnect, gets an adapter of its own.
+ */
+export class ChatAdapters {
+  private readonly built = new WeakMap<Channel, ChannelChatAdapter>();
+
+  constructor(private readonly deps: Required<ChannelAdapterDeps>) {}
+
+  /** The adapter over `channel`. */
+  of(channel: Channel): ChannelChatAdapter {
+    let adapter = this.built.get(channel);
+    if (!adapter) {
+      adapter = channelAdapter(channel, this.deps);
+      this.built.set(channel, adapter);
+    }
+    return adapter;
+  }
+
+  /** Rome's account on channel `channel`: its record's, else the channel's
+   *  name on its platform while the record knows none. */
+  accountOn(channel: string): Account {
+    return (
+      this.deps.accountOf(channel) ?? {
+        platform: this.deps.platformOfChannel(channel),
+        id: channel,
+      }
+    );
+  }
+
+  /**
+   * The chat channel `channel`'s account reaches at platform address
+   * `address`: the group there, else the direct message the account heard
+   * there, else the one with the party the address names.
+   */
+  chatAt(channel: string, address: string, kind: "group" | "dm"): ChatRef {
+    const account = this.accountOn(channel);
+    if (kind === "group") return chatAt(account.platform, address);
+    const heard = this.deps.addresses.keyAt(account, address);
+    return heard === null
+      ? chatAt(account.platform, address, { romeEnd: account.id })
+      : ChatIds.chat(chatKey(account.platform, heard as ChatId));
+  }
 }
 
 /** The message `event` carries, as the adapter hands it to Chats. */

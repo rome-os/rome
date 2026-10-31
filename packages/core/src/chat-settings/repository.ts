@@ -1,9 +1,10 @@
-import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, like, sql } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import type { ChatRepository } from "../chats/chat-repository.js";
-import { chatKey, directMessageOn, type ChatKey } from "../chats/place.js";
-import { ChatIds } from "../channels/chat-ids.js";
+import { ChatRepository } from "../chats/chat-repository.js";
+import { chatAt } from "../chats/adapter.js";
+import { MessageRepository } from "../chats/message-repository.js";
+import { placeIn, type ChatRef } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -39,10 +40,18 @@ export interface ChatSettingsRepositoryDeps {
  * written to every seat in the chat; each seat keeps its own routing marker.
  */
 export class ChatSettingsRepository {
+  /** Chats, read to tell whether anything was said where a seat stands. */
+  private readonly messages: {
+    chats: Pick<ChatRepository, "find">;
+    lines: Pick<MessageRepository, "read">;
+  };
+
   constructor(
     private readonly db: DrizzleDb,
     private readonly deps: ChatSettingsRepositoryDeps,
-  ) {}
+  ) {
+    this.messages = { chats: new ChatRepository(db), lines: new MessageRepository(db) };
+  }
 
   /** The account `channel` speaks as. */
   private accountOn(channel: string): Account {
@@ -54,12 +63,12 @@ export class ChatSettingsRepository {
     );
   }
 
-  /** The key of the chat at `chatId` as `channel`'s account sees it. */
-  private keyOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatKey {
+  /** The chat at address `chatId` as `channel`'s account sees it. */
+  private chatOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatRef {
     const via = this.accountOn(channel);
     return kind === "dm"
-      ? directMessageOn(via.platform, via.id, chatId, chatId)
-      : chatKey(via.platform, chatId);
+      ? chatAt(via.platform, chatId, { romeEnd: via.id })
+      : chatAt(via.platform, chatId);
   }
 
   find(channel: string, chatId: ChatId): StoredChatRow | null {
@@ -105,18 +114,20 @@ export class ChatSettingsRepository {
       return own?.channelSettings ?? null;
     }
     // Another of Rome's seats in the group may have set the group's rule.
-    const key = this.keyOf(channel, chatId, "group");
-    const shared = this.db.all<{ channel_settings: string | null }>(sql`
-      SELECT s.channel_settings FROM chats c
-      JOIN rome_sessions s ON s.chat_id = c.id AND s.thread_id IS NULL
-      WHERE c.id = ${ChatIds.chat(key).id}
-        AND s.channel_settings IS NOT NULL
-      ORDER BY s.created_at, s.id
-    `);
-    const rule =
-      shared
-        .map((row) => JSON.parse(row.channel_settings as string) as StoredChatSettings)
-        .find(hasRule) ?? null;
+    const chat = this.chatOf(channel, chatId, "group");
+    const shared = this.db
+      .select({ settings: romeSessions.channelSettings })
+      .from(romeSessions)
+      .where(
+        and(
+          eq(romeSessions.chatId, chat.id),
+          isNull(romeSessions.threadId),
+          isNotNull(romeSessions.channelSettings),
+        ),
+      )
+      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+      .all();
+    const rule = shared.map((row) => row.settings as StoredChatSettings).find(hasRule) ?? null;
     return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
   }
 
@@ -148,13 +159,21 @@ export class ChatSettingsRepository {
   /** Whether anything was said where session `sessionId` stands, or it ran
    *  a turn. */
   hasMessageHistory(sessionId: string): boolean {
-    const said = this.db.all(sql`
-      SELECT 1 FROM rome_sessions s
-      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-      WHERE s.id = ${sessionId} LIMIT 1
-    `);
+    const seat = this.db
+      .select({ chatId: romeSessions.chatId, threadId: romeSessions.threadId })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .get();
+    const chat = seat?.chatId ? this.messages.chats.find(seat.chatId) : null;
+    const said =
+      chat !== null &&
+      seat !== undefined &&
+      this.messages.lines.read(
+        placeIn(chat.ref, seat.threadId === null ? undefined : (seat.threadId as ChatId)),
+        { limit: 1 },
+      ).messages.length > 0;
     return (
-      said.length > 0 ||
+      said ||
       this.db
         .select({ id: romeAgentMessages.id })
         .from(romeAgentMessages)
@@ -201,14 +220,14 @@ export class ChatSettingsRepository {
         const kindKnown = input.kindKnown ?? true;
         if (kindKnown) this.classify(tx, descriptor, channel);
         const via = this.accountOn(channel);
-        const key = this.keyOf(channel, descriptor.ref.chatId, descriptor.kind);
+        const place = this.chatOf(channel, descriptor.ref.chatId, descriptor.kind);
         const sourceThreadType = !kindKnown
           ? null
           : descriptor.kind === "dm"
             ? "private"
             : descriptor.kind;
         const chat = this.deps.chats.start(
-          ChatIds.chat(key),
+          place,
           descriptor.kind === "dm" ? "dm" : "group",
           descriptor.displayName,
         );

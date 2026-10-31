@@ -4,24 +4,27 @@
 // docs/architecture/channels.md#chat-adapters.
 
 import type { Channel, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
-import type { ChannelSend } from "../channels/channel.js";
+import type { ChannelSend } from "./channel.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
-import type { ChatRepository } from "./chat-repository.js";
-import type { ChatAddresses } from "../channels/chat-addresses.js";
-import { ChatIds } from "../channels/chat-ids.js";
-import { channelAdapter, platformIdOfLine, type Outbound } from "./adapter.js";
-import type { MessageRepository } from "./message-repository.js";
-import { startChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
-import { chatKey, ownedBy, placeIn } from "./place.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
+import {
+  chatAt,
+  lineAt,
+  platformIdOfLine,
+  type ChatAdapters,
+  type Outbound,
+} from "../chats/adapter.js";
+import type { MessageRepository } from "../chats/message-repository.js";
+import { startChannelChat } from "../chats/open-chat.js";
+import { placeIn } from "../chats/place.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 
-export interface RecordedSendsDeps
-  extends Omit<OpenChannelChatDeps, "webchatRepo" | "chats" | "addresses"> {
-  /** The channels layer's address store: where a direct message was heard,
-   *  both ways. */
-  addresses: Pick<ChatAddresses, "keyAt" | "bind" | "addressOf">;
+export interface RecordedSendsDeps {
+  /** Each channel's chat adapter, which names the chat at an address and
+   *  sends there. */
+  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn">;
   chats: Pick<ChatRepository, "get" | "start">;
-  webchatRepo: Pick<WebChatRepository, "seatAt">;
+  webchatRepo: Pick<WebChatRepository, "seatIn" | "seatInThread">;
   replies: Pick<SeatReplies, "send">;
   messages: Pick<MessageRepository, "send">;
 }
@@ -49,7 +52,7 @@ export function recordedSends<C extends Channel>(
           ...(message.parts?.length ? { parts: message.parts } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
         };
-        const seat = deps.webchatRepo.seatAt(channel.name, address);
+        const seat = seatAt(deps, channel.name, address);
         const platformMessageId = seat
           ? await sayInSeat(deps, channel, seat, out, message)
           : await sayInChat(deps, channel, address, out, message);
@@ -58,6 +61,21 @@ export function recordedSends<C extends Channel>(
     });
     return { ...channel, send: wrapped } as C;
   });
+}
+
+/**
+ * The seat channel `channel`'s account holds in the chat at `address`, by its
+ * session's id, or null when it holds none: the group the address names, else
+ * the direct message there, else the thread the address names.
+ */
+function seatAt(deps: RecordedSendsDeps, channel: string, address: ChatId): string | null {
+  const account = deps.adapters.accountOn(channel).id;
+  for (const kind of ["group", "dm"] as const) {
+    const chat = deps.adapters.chatAt(channel, address, kind);
+    const seat = deps.webchatRepo.seatIn(chat.id, null, account);
+    if (seat) return seat;
+  }
+  return deps.webchatRepo.seatInThread(address, account);
 }
 
 /** Say `out` through seat `sessionId`, which heard the address. Throws when
@@ -92,30 +110,25 @@ async function sayInChat(
   out: Outbound,
   message: OutgoingMessage,
 ): Promise<string | null> {
-  const known = deps.accountOf(channel.name);
-  const platform = known?.platform ?? deps.platformOfChannel(channel.name);
-  const group = deps.chats.get(ChatIds.chat(chatKey(platform, address)));
+  const account = deps.adapters.accountOn(channel.name);
+  const platform = account.platform;
+  const group = deps.chats.get(chatAt(platform, address));
   const { chatId, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: address,
     threadType: group?.kind === "group" ? "group" : "private",
   });
   const chat = { platform, id: chatId };
-  const account = { platform, id: romeEnd };
-  const adapter = channelAdapter(channel, {
-    accountOf: () => account,
-    platformOfChannel: () => platform,
-    addresses: deps.addresses,
-  });
+  const adapter = deps.adapters.of(channel);
   const replyTo = message.replyToMessageId
-    ? ChatIds.message(chat, ownedBy(ChatIds.key(chat), romeEnd, message.replyToMessageId))
+    ? lineAt(chat, romeEnd, message.replyToMessageId)
     : undefined;
   let lineId: string | null = null;
   await deps.messages.send(
     {
       direction: "fromRome",
       place: placeIn(chat),
-      saidBy: { account, agent: "main" },
+      saidBy: { account: { platform, id: romeEnd }, agent: "main" },
       parts: out.parts ?? [{ type: "text", content: out.text }],
       ...(replyTo ? { replyTo } : {}),
     },

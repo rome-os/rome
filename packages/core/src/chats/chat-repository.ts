@@ -39,6 +39,13 @@ export class ChatRepository {
     return row && row.platform === ref.platform ? toChat(row) : null;
   }
 
+  /** The chat Rome holds by id `id`, on whichever platform, or null. A chat's
+   *  id is unique across platforms. */
+  find(id: string): Chat | null {
+    const row = this.db.select().from(chats).where(eq(chats.id, id)).get();
+    return row ? toChat(row) : null;
+  }
+
   /** Every chat on `platform`, oldest first. */
   list(platform: string): Chat[] {
     return this.db

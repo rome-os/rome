@@ -1,3 +1,4 @@
+import { seatMessageCount } from "../../webchat/chat-read-model-sql.js";
 import {
   and,
   asc,
@@ -329,9 +330,7 @@ export class SessionQueryRepository {
         sessionId: romeSessions.id,
         count: sql<number>`(
           (SELECT count(*) FROM rome_agent_messages t WHERE t.session_id = ${romeSessions.id})
-          + (SELECT count(*) FROM chat_messages m
-             WHERE m.chat_id = ${romeSessions.chatId} AND m.thread_id IS ${romeSessions.threadId}
-               AND m.said_at >= ${romeSessions.createdAt})
+          + ${seatMessageCount}
         )`.as("message_count"),
       })
       .from(romeSessions)
@@ -502,9 +501,7 @@ export class SessionQueryRepository {
         .select({
           count: sql<number>`(
             (SELECT count(*) FROM rome_agent_messages t WHERE t.session_id = ${id})
-            + (SELECT count(*) FROM chat_messages m
-               WHERE m.chat_id = ${romeSessions.chatId} AND m.thread_id IS ${romeSessions.threadId}
-               AND m.said_at >= ${romeSessions.createdAt})
+            + ${seatMessageCount}
           )`.mapWith(Number),
         })
         .from(romeSessions)

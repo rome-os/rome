@@ -26,12 +26,10 @@ import {
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { addressOf, channelAdapter } from "./adapter.js";
+import { addressOf, isDirectMessage, platformIdOfLine, type ChatAdapters } from "./adapter.js";
 import type { ChatRepository } from "./chat-repository.js";
 import type { MessageRepository } from "./message-repository.js";
-import { otherEndOf, ownedBy, type Place } from "./place.js";
-import type { ChatAddresses } from "../channels/chat-addresses.js";
-import { ChatIds } from "../channels/chat-ids.js";
+import type { Place } from "./place.js";
 
 export interface SendDeps {
   channels: Channels;
@@ -67,9 +65,8 @@ export interface SendIntoPlaceDeps extends SendDeps {
   /** Where a send into a dashboard chat goes. Absent, the dashboard takes no
    *  sends. */
   dashboard?: DashboardInbox;
-  /** The channels layer's address store, where a direct message whose
-   *  platform gives it an id of its own is sent. */
-  addresses?: Pick<ChatAddresses, "bind" | "addressOf">;
+  /** Each channel's chat adapter, which a send goes out through. */
+  adapters: Pick<ChatAdapters, "of">;
 }
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
@@ -150,16 +147,8 @@ export async function send(
   const account = deps.accountOf?.(channel.name) ?? { platform, id: channel.name };
   const chat =
     deps.chats.get(place.chat) ??
-    deps.chats.start(
-      place.chat,
-      otherEndOf(ChatIds.key(place.chat)) === null ? "group" : "dm",
-      null,
-    );
-  const adapter = channelAdapter(channel, {
-    accountOf: () => account,
-    platformOfChannel: () => platform,
-    ...(deps.addresses ? { addresses: deps.addresses } : {}),
-  });
+    deps.chats.start(place.chat, isDirectMessage(place.chat) ? "dm" : "group", null);
+  const adapter = deps.adapters.of(channel);
   let sent: Awaited<ReturnType<MessageRepository["send"]>>;
   try {
     sent = await deps.chatMessages.send(
@@ -184,7 +173,7 @@ export async function send(
   return {
     ok: true,
     sent: {
-      ref: `${addressOf(place)}:${ChatIds.platformMessage(chat.ref.id, sent.id) ?? sent.id}`,
+      ref: `${addressOf(place)}:${platformIdOfLine(chat.ref, account.id, sent.id) ?? sent.id}`,
       timestamp: Math.floor(sent.at.getTime() / 1000),
     },
     at: sent.at,

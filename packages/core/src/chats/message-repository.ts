@@ -63,7 +63,7 @@ export class MessageRepository {
    * is already on record in that chat: recording again changes nothing. The place's chat must already exist: a
    * message never starts its chat. Throws when it does not.
    */
-  async record(message: Message): Promise<RecordedMessage | null> {
+  record(message: Message): RecordedMessage | null {
     const chatId = this.chatIdOf(message.place);
     const id = message.id;
     const inserted = this.db

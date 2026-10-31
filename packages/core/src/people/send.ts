@@ -29,8 +29,8 @@
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
-import { directMessageOn, placeIn, type Place } from "../chats/place.js";
-import { ChatIds } from "../channels/chat-ids.js";
+import { chatAt } from "../chats/adapter.js";
+import { placeIn, type Place } from "../chats/place.js";
 import {
   type Sender,
   senderNamed,
@@ -186,6 +186,6 @@ export async function directPlace(
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
   const romeEnd = "channel" in as ? as.channel : as.id;
-  const key = directMessageOn(account.platform, romeEnd, resolution.target.chatId, account.id);
-  return { ok: true, place: placeIn(ChatIds.chat(key)), as };
+  const chat = chatAt(account.platform, resolution.target.chatId, { romeEnd, other: account.id });
+  return { ok: true, place: placeIn(chat), as };
 }

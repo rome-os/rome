@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
+import { MessageRepository } from "../../chats/message-repository.js";
 import { conciergeTasks, romeAgentMessages, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
@@ -48,7 +49,12 @@ const isFinished = (state: ConciergeTaskState) => state === "done" || state === 
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
 
-  constructor(private db: DrizzleDb) {}
+  /** Chats' messages, where a task's source message is looked up. */
+  private readonly messages: Pick<MessageRepository, "byIds">;
+
+  constructor(private db: DrizzleDb) {
+    this.messages = new MessageRepository(db);
+  }
 
   onChange(listener: ChangeListener): () => void {
     this.listeners.add(listener);
@@ -212,21 +218,28 @@ export class ConciergeTasksRepository {
       .select({
         task: conciergeTasks,
         chatName: romeSessions.name,
-        // Only a message the Concierge chat still holds counts as a source.
-        sourceId: sql<string | null>`(
-          SELECT m.id FROM rome_sessions cs
-          JOIN chat_messages m ON m.chat_id = cs.chat_id
-          WHERE cs.id = ${CONCIERGE_CHAT_ID} AND m.id = ${conciergeTasks.sourceMessageId}
-        )`,
       })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
-    return rows.map(({ task, chatName, sourceId }) => ({
+    // Only a message the Concierge chat still holds counts as a source.
+    const conciergeChat = this.db
+      .select({ chatId: romeSessions.chatId })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, CONCIERGE_CHAT_ID))
+      .get()?.chatId;
+    const sources = new Set(
+      this.messages
+        .byIds(rows.flatMap(({ task }) => (task.sourceMessageId ? [task.sourceMessageId] : [])))
+        .filter((message) => message.place.chat.id === conciergeChat)
+        .map((message) => message.id),
+    );
+    return rows.map(({ task, chatName }) => ({
       row: task,
       chat: task.sessionId && chatName !== null ? { id: task.sessionId, name: chatName } : null,
-      sourceMessageId: sourceId,
+      sourceMessageId:
+        task.sourceMessageId && sources.has(task.sourceMessageId) ? task.sourceMessageId : null,
     }));
   }
 }

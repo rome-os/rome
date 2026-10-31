@@ -5,7 +5,8 @@
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Channel } from "@rome-os/app-runtime";
 import {
-  channelAdapter,
+  lineAt,
+  type ChatAdapters,
   platformIdOfLine,
   sentLineId,
   type Outbound,
@@ -14,10 +15,7 @@ import {
 import type { DeliveryPolicy } from "../channels/delivery/types.js";
 import type { Clock } from "../lib/clock.js";
 import { createLogger } from "../logger.js";
-import type { ChatAddresses } from "../channels/chat-addresses.js";
 import type { MessageRepository } from "../chats/message-repository.js";
-import { ownedBy } from "../chats/place.js";
-import { ChatIds } from "../channels/chat-ids.js";
 import type { MessagePart } from "../types.js";
 import type { TurnLinks } from "./turn-links.js";
 
@@ -27,9 +25,8 @@ type Seat = NonNullable<Awaited<ReturnType<WebChatRepository["seatOf"]>>>;
 
 export interface SeatRepliesDeps {
   seats: Pick<WebChatRepository, "seatOf">;
-  /** The channels layer's address store, where a direct message the
-   *  platform gives an id of its own is sent. */
-  addresses?: Pick<ChatAddresses, "bind" | "addressOf">;
+  /** Each channel's chat adapter, which the seat says its messages through. */
+  adapters: Pick<ChatAdapters, "of">;
   messages: Pick<MessageRepository, "send">;
   links: Pick<TurnLinks, "answer">;
 }
@@ -66,10 +63,7 @@ export class SeatReplies {
     }
     // The adapter's id for a platform message of this seat's chat.
     const idOf = (platformMessageId: string) =>
-      ChatIds.message(
-        seat.place.chat,
-        ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId),
-      );
+      lineAt(seat.place.chat, seat.accountId, platformMessageId);
     const sent = await this.deps.messages.send(
       {
         direction: "fromRome",
@@ -207,20 +201,12 @@ export class SeatReplies {
 
   private adapterOf(seat: Seat, channel: Channel) {
     const account = { platform: seat.place.chat.platform, id: seat.accountId };
-    const adapter = channelAdapter(channel, {
-      accountOf: () => account,
-      platformOfChannel: () => account.platform,
-      ...(this.deps.addresses ? { addresses: this.deps.addresses } : {}),
-    });
-    return { account, adapter };
+    return { account, adapter: this.deps.adapters.of(channel) };
   }
 
   /** The id of the line the platform calls `platformMessageId` in `seat`'s
    *  chat. */
   private lineIdOf(seat: Seat, platformMessageId: string): string {
-    return ChatIds.message(
-      seat.place.chat,
-      ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId),
-    );
+    return lineAt(seat.place.chat, seat.accountId, platformMessageId);
   }
 }

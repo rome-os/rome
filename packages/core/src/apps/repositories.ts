@@ -15,8 +15,7 @@ import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../chats/open-chat.js";
-import { ownedBy } from "../chats/place.js";
-import { ChatIds } from "../channels/chat-ids.js";
+import { lineAt } from "../chats/adapter.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -39,9 +38,7 @@ export interface CreateAppRuntimeRepositoriesDeps {
   links: Pick<TurnLinks, "prompt">;
   /** The dashboard's read model, which an app's transcript read renders. */
   reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
-  accountOf: OpenChannelChatDeps["accountOf"];
-  addresses: OpenChannelChatDeps["addresses"];
-  platformOfChannel: OpenChannelChatDeps["platformOfChannel"];
+  adapters: OpenChannelChatDeps["adapters"];
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -92,9 +89,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       {
         chats: deps.chatRepo,
         webchatRepo: repo,
-        addresses: deps.addresses,
-        accountOf: deps.accountOf,
-        platformOfChannel: deps.platformOfChannel,
+        adapters: deps.adapters,
       },
       input,
     );
@@ -124,10 +119,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       const seat = await repo.seatOf(input.sessionId);
       if (!seat) throw new Error(`No chat for session ${input.sessionId}`);
       const idOf = (platformMessageId: string) =>
-        ChatIds.message(
-          seat.place.chat,
-          ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId),
-        );
+        lineAt(seat.place.chat, seat.accountId, platformMessageId);
       const recorded = await deps.chatMessages.record({
         direction: "toRome",
         id: idOf(input.platformMessageId),
