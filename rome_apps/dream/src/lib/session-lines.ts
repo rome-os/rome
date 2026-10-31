@@ -17,7 +17,8 @@ import { sql } from "drizzle-orm";
  * packages/core/src/db/repositories/webchat.ts.
  */
 export const SESSION_LINES = sql`(
-  SELECT m.id, s.id AS session_id, l.turn_id,
+  SELECT m.id, s.id AS session_id,
+    CASE WHEN l.role IN ('prompt', 'answer') THEN l.turn_id END AS turn_id,
     CASE WHEN l.role = 'answer'
            OR (l.role IS NULL AND m.sender_agent IS NOT NULL AND m.sender_account_id IS s.account_id)
            THEN 'assistant'

@@ -93,6 +93,9 @@ WHERE r.`type` IN ('channel', 'webchat_handoff') AND r.`source_channel` IS NOT N
 CREATE VIEW `_chat_message_rows` AS
 SELECT
   m.`id` AS `legacy_id`,
+  -- The order the legacy rows were stored in, which ties within one second
+  -- keep: a line's `rowid` in `chat_messages` follows it.
+  m.`rowid` AS `legacy_seq`,
   m.`session_id` AS `session_id`,
   r.`chat_id` AS `chat_id`,
   r.`thread_id` AS `thread_id`,
@@ -157,7 +160,7 @@ INSERT OR IGNORE INTO `chat_messages` (`id`, `chat_id`, `thread_id`, `sender_acc
   `sender_name`, `text`, `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`)
 SELECT `legacy_id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`, `sender_name`, `text`,
   `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`
-FROM `_chat_message_rows` ORDER BY `said_at`, `legacy_id`;
+FROM `_chat_message_rows` ORDER BY `said_at`, `legacy_seq`;
 --> statement-breakpoint
 INSERT OR IGNORE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
 SELECT coalesce(
@@ -165,7 +168,7 @@ SELECT coalesce(
     (SELECT cm.`id` FROM `chat_messages` cm
      WHERE cm.`chat_id` = v.`chat_id` AND cm.`platform_message_id` = v.`platform_message_id`)),
   v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
-FROM `_chat_message_rows` v WHERE v.`link_role` IS NOT NULL;
+FROM `_chat_message_rows` v WHERE v.`link_role` IS NOT NULL ORDER BY v.`said_at`, v.`legacy_seq`;
 --> statement-breakpoint
 UPDATE `rome_sessions` SET `account_id` = (
   SELECT s.`account_id` FROM `_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`

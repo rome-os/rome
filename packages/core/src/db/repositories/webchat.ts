@@ -2225,7 +2225,7 @@ export class WebChatRepository {
         SELECT * FROM ${sessionLines(sessionIds)}
         ORDER BY session_id,
           MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
-          turn_id, created_at, line_order, id
+          turn_id, created_at, line_order, seq
       `)
       .map(storedLine);
   }
@@ -2271,7 +2271,7 @@ export class WebChatRepository {
         WHERE l.created_at >= ${Math.floor(since.getTime() / 1000)}
           AND l.role IN ('user', 'assistant')
         ORDER BY MIN(l.created_at) OVER (PARTITION BY l.session_id, COALESCE(l.turn_id, l.id)),
-          l.created_at, CASE l.role WHEN 'user' THEN 0 ELSE 1 END, l.id
+          l.created_at, CASE l.role WHEN 'user' THEN 0 ELSE 1 END, l.seq
       `)
       .map((row) => ({
         ...storedLine(row),
@@ -2674,7 +2674,7 @@ export class WebChatRepository {
       .all<LineRow>(sql`
         SELECT * FROM ${sessionLines([sessionId])}
         WHERE turn_id = ${turnId} AND role IN ('user', 'assistant')
-        ORDER BY created_at, line_order, id
+        ORDER BY created_at, line_order, seq
       `)
       .map((row) => ({
         id: row.id,
@@ -2968,14 +2968,17 @@ function storedLine(row: LineRow): StoredWebchatMessage {
 function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
   return sql`(
-    SELECT m.id, s.id AS session_id, l.turn_id, l.input_state,
+    SELECT m.id, s.id AS session_id,
+      -- A line the turn only caught up on is no part of the turn.
+      CASE WHEN l.role IN ('prompt', 'answer') THEN l.turn_id END AS turn_id, l.input_state,
       CASE WHEN l.role = 'answer'
              OR (l.role IS NULL AND m.sender_agent IS NOT NULL AND m.sender_account_id IS s.account_id)
              THEN 'assistant'
            WHEN l.role = 'prompt' OR s.source_channel = 'webchat' THEN 'user'
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
-      m.sender_name, CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS line_order
+      m.sender_name, CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS line_order,
+      m.rowid AS seq
     FROM rome_sessions s
     JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
@@ -2984,7 +2987,8 @@ function sessionLines(sessionIds: readonly string[]) {
     SELECT r.id, r.session_id, r.turn_id, NULL AS input_state, r.role,
       CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
       r.created_at, r.sender_id, r.sender_name,
-      CASE WHEN r.role = 'user' THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order
+      CASE WHEN r.role = 'user' THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
+      r.rowid AS seq
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant', 'notification'))
