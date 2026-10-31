@@ -48,12 +48,51 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 
-/** Every seat `scope` names, over the seat `s` and its chat `c`, where something was said since `cutoff` (unix
- *  seconds) and since it took its seat, the latest said first. */
+// The agent that answers in seat `s`, by the rules in
+// docs/architecture/channels.md#an-accounts-agent, over the seat's channel
+// `ch`: an account's agent answers its direct messages, and a group unless
+// the chat is pinned to main. The account's main reads as null.
+const ACCOUNT_AGENT = sql`CASE WHEN ch.agent IN ('main', 'core:main') THEN NULL ELSE ch.agent END`;
+const ANSWERING_AGENT = sql`CASE WHEN ch.agent IS NOT NULL THEN CASE
+    WHEN c.kind = 'dm' THEN ${ACCOUNT_AGENT}
+    WHEN coalesce(json_type(s.channel_settings, '$.overrides.routing.agentName') = 'null', 0) = 1 THEN NULL
+    WHEN coalesce(s.agent_name, 'main') IN ('main', 'core:main') THEN ${ACCOUNT_AGENT}
+    ELSE s.agent_name END
+  ELSE s.agent_name END`;
+
+/** A row of {@link seatsSaidInSince}. */
+export interface SeatSaidIn {
+  id: string;
+  name: string;
+  chat_id: string;
+  thread_id: string | null;
+  thread_name: string | null;
+  owner_key: string | null;
+  archived: number;
+  platform: string;
+  channel: string | null;
+  connection_kind: string | null;
+  agent_name: string | null;
+  project_name: string | null;
+  project_path: string | null;
+  created_at: number;
+}
+
+/** Every seat `scope` names, over the seat `s` and its chat `c`, where
+ *  something was said since `cutoff` (unix seconds) and since it took its
+ *  seat, the latest said first, with what the seat is: its name, owner, the
+ *  channel that is its account on its chat's platform, and its answering
+ *  agent. */
 export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
   return sql`
-    SELECT s.id, s.chat_id, s.thread_id FROM rome_sessions s
+    SELECT s.id, s.name, s.chat_id, s.thread_id, s.source_thread_name AS thread_name,
+      s.owner_key, s.archived_at IS NOT NULL AS archived, c.platform,
+      ch.id AS channel, ch.connection_kind, ${ANSWERING_AGENT} AS agent_name,
+      s.project_name, s.project_path, s.created_at
+    FROM rome_sessions s
     JOIN chats c ON c.id = s.chat_id
+    LEFT JOIN channels ch ON ch.platform = c.platform
+      AND coalesce(ch.platform_account_id, ch.id) = s.account_id
     JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id

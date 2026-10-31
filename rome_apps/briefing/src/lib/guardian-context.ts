@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 import { unwrap } from "./action-result.js";
 
@@ -47,23 +46,14 @@ async function readRecentChats(
   try {
     const chats = appContext.repositories.chats;
     if (!chats) return null;
-    // The dashboard's chats, through the chat repository. Whose chat it is and
-    // whether it is archived is still read from `rome_sessions`.
-    const recent = await chats.recentChats({ since, where: "dashboard" });
-    const ids = recent.map((chat) => chat.sessionId);
-    if (ids.length === 0) return null;
-    const sessions = appContext.db.connection.all(sql`
-      SELECT id, name FROM rome_sessions
-      WHERE id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
-        AND coalesce(owner_key, 'guardian') = 'guardian'
-        AND archived_at IS NULL
-    `) as Array<{ id: string; name: string }>;
-    const names = new Map(sessions.map((row) => [row.id, row.name]));
+    // The guardian's own dashboard chats, through the chat repository.
+    const recent = (await chats.recentChats({ since, where: "dashboard" })).filter(
+      (chat) => chat.ownerKey === "guardian" && !chat.archived,
+    );
+    if (recent.length === 0) return null;
     rows = [];
-    for (const id of ids) {
-      const name = names.get(id);
-      if (name === undefined) continue;
-      const lines = await chats.transcript(id);
+    for (const { sessionId, name } of recent) {
+      const lines = await chats.transcript(sessionId);
       const asked = lines.filter((line) => line.role === "user");
       if (asked.some((line) => line.senderId?.startsWith("visitor:"))) continue;
       for (const line of asked) {

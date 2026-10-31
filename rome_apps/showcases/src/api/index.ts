@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import {
   type CollectionSource,
@@ -18,34 +17,6 @@ import {
   isShowcaseBundle,
 } from "../trace/portable.js";
 import type { ReplyBlock, ReplyInteractionBlock, TraceEventDto } from "../trace/types.js";
-
-interface SourceSessionRow {
-  id: string;
-  name: string;
-  project_name: string | null;
-  project_path: string | null;
-  agent_name: string | null;
-  created_at: number | string | Date;
-  trace_count: number;
-}
-
-interface SourceTraceRow {
-  session_id: string;
-  session_name: string;
-  project_name: string | null;
-  project_path: string | null;
-  agent_name: string | null;
-  session_created_at: number | string | Date;
-  message_id: string;
-  turn_id: string | null;
-  content: string;
-  message_created_at: number | string | Date;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cache_read_tokens: number | null;
-  cache_write_tokens: number | null;
-  cost_usd: number | null;
-}
 
 function json(data: unknown, init?: ResponseInit): Response {
   return Response.json(data, init);
@@ -106,8 +77,8 @@ function extractUserText(content: string): string | null {
   return content.trim() || null;
 }
 
-function sourceTraceTitle(row: SourceTraceRow, index: number): string {
-  const sessionName = row.session_name?.trim() || "Imported trace";
+function sourceTraceTitle(name: string, index: number): string {
+  const sessionName = name.trim() || "Imported trace";
   return index === 0 ? sessionName : `${sessionName} · trace ${index + 1}`;
 }
 
@@ -238,7 +209,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     }
 
     if (request.method === "GET" && route === "sources/sessions") {
-      return json({ sessions: this.listSourceSessions() });
+      return json({ sessions: await this.listSourceSessions() });
     }
 
     if (request.method === "GET" && route === "collections") {
@@ -374,44 +345,38 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     return MOCK_PRESET_CATALOG;
   }
 
-  private listSourceSessions(): Array<{
-    id: string;
-    name: string;
-    projectName: string | null;
-    projectPath: string | null;
-    agentName: string | null;
-    createdAt: string;
-    traceCount: number;
-  }> {
-    // A guardian chat is stored either as a webchat row or as a webchat
-    // channel row addressed by its own id. Same rule as `isWebchatChat` in
-    // packages/core/src/db/session-kind.ts; keep the two in step.
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT
-        ws.id,
-        ws.name,
-        ws.project_name,
-        ws.project_path,
-        ws.agent_name,
-        ws.created_at,
-        cast(count(wm.id) as integer) AS trace_count
-      FROM rome_sessions ws
-      JOIN rome_agent_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
-      WHERE (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
-      GROUP BY ws.id, ws.name, ws.project_name, ws.project_path, ws.agent_name, ws.created_at
-      ORDER BY max(wm.created_at) DESC
-      LIMIT 100
-    `) as SourceSessionRow[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      projectName: row.project_name,
-      projectPath: row.project_path,
-      agentName: row.agent_name,
-      createdAt: toDate(row.created_at).toISOString(),
-      traceCount: Number(row.trace_count) || 0,
-    }));
+  /** The guardian's dashboard chats with traces, most recently active
+   *  first, read through the chat repository. */
+  private async listSourceSessions(): Promise<
+    Array<{
+      id: string;
+      name: string;
+      projectName: string | null;
+      projectPath: string | null;
+      agentName: string | null;
+      createdAt: string;
+      traceCount: number;
+    }>
+  > {
+    const chats = this.ctx.repositories.chats;
+    if (!chats) return [];
+    const recent = await chats.recentChats({ since: new Date(0), where: "dashboard" });
+    const sessions = [];
+    for (const chat of recent) {
+      const traceCount = (await chats.traces(chat.sessionId)).length;
+      if (traceCount === 0) continue;
+      sessions.push({
+        id: chat.sessionId,
+        name: chat.name,
+        projectName: chat.projectName,
+        projectPath: chat.projectPath,
+        agentName: chat.agentName,
+        createdAt: chat.startedAt.toISOString(),
+        traceCount,
+      });
+      if (sessions.length === 100) break;
+    }
+    return sessions;
   }
 
   /** The chat's lines as the session sees them, in the dashboard's order,
@@ -437,36 +402,6 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       if (!row.turn_id || map.has(row.turn_id)) continue;
       const text = extractUserText(row.content);
       if (text) map.set(row.turn_id, text);
-    }
-    return map;
-  }
-
-  // Reassemble each trace message's full block array from the append-only
-  // `rome_agent_trace_blocks` table, keyed by the trace message id.
-  //
-  // Core no longer stores the trace inline: a role='trace' rome_agent_messages row
-  // is a constant `'[]'` stub, and every block (tool_use, thinking, text, …)
-  // lives as its own `rome_agent_trace_blocks` row ordered by seq. Reading
-  // `wm.content` alone yields the empty stub, which is why an imported replay
-  // showed no steps and no final answer. We mirror the repository's
-  // `mergeTraceContent`: concatenate the per-message block JSON back into a
-  // single array (and fall back to the stub for legacy traces with no rows).
-  private traceContentsByMessage(sessionId: string): Map<string, string> {
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT message_id, content
-      FROM rome_agent_trace_blocks
-      WHERE session_id = ${sessionId}
-      ORDER BY message_id ASC, seq ASC
-    `) as Array<{ message_id: string; content: string }>;
-    const blocksByMessage = new Map<string, string[]>();
-    for (const row of rows) {
-      const list = blocksByMessage.get(row.message_id);
-      if (list) list.push(row.content);
-      else blocksByMessage.set(row.message_id, [row.content]);
-    }
-    const map = new Map<string, string>();
-    for (const [messageId, blocks] of blocksByMessage) {
-      map.set(messageId, `[${blocks.join(",")}]`);
     }
     return map;
   }
@@ -578,30 +513,13 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     sessionId: string,
     options: { title?: string },
   ): Promise<{ collectionId: string | null; traceCount: number; message: string }> {
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT
-        ws.id AS session_id,
-        ws.name AS session_name,
-        ws.project_name,
-        ws.project_path,
-        ws.agent_name,
-        ws.created_at AS session_created_at,
-        wm.id AS message_id,
-        wm.turn_id,
-        wm.content,
-        wm.created_at AS message_created_at,
-        wm.input_tokens,
-        wm.output_tokens,
-        wm.cache_read_tokens,
-        wm.cache_write_tokens,
-        wm.cost_usd
-      FROM rome_agent_messages wm
-      JOIN rome_sessions ws ON ws.id = wm.session_id
-      WHERE wm.session_id = ${sessionId}
-        AND wm.role = 'trace'
-        AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
-      ORDER BY wm.created_at ASC
-    `) as SourceTraceRow[];
+    const chats = this.ctx.repositories.chats;
+    const session = chats
+      ? (await chats.recentChats({ since: new Date(0), where: "dashboard" })).find(
+          (chat) => chat.sessionId === sessionId,
+        )
+      : undefined;
+    const rows = session && chats ? await chats.traces(sessionId) : [];
 
     if (rows.length === 0) {
       return {
@@ -612,17 +530,14 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     }
 
     const promptsByTurn = await this.userPromptsByTurn(sessionId);
-    const first = rows[0];
-    const assistantByTurn = await this.assistantTextBlocksByTurn(
-      sessionId,
-      first.agent_name ?? "main",
-    );
-    const traceContentByMessage = this.traceContentsByMessage(sessionId);
+    const agentName = session?.agentName ?? null;
+    const sessionName = session?.name ?? "";
+    const assistantByTurn = await this.assistantTextBlocksByTurn(sessionId, agentName ?? "main");
     const replyByTurn = await this.replyBlocksByTurn(sessionId);
     const collectionId = randomUUID();
     this.repo.upsertCollection({
       id: collectionId,
-      title: options.title?.trim() || first.session_name || "Imported trace session",
+      title: options.title?.trim() || sessionName || "Imported trace session",
       description: `Imported ${rows.length} static trace${rows.length === 1 ? "" : "s"} from local chat history.`,
       source: "local-import",
     });
@@ -630,16 +545,11 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     rows.forEach((row, index) => {
       // The trace row holds only the agent's steps (empty for a plain text
       // reply); append the turn's final assistant text so the replay shows it.
-      // Legacy sessions (pre rome_agent_trace_blocks) instead stored the full trace
-      // — already ending in the final text — inline in wm.content, so skip the
-      // append when the trace already carries a text block to avoid a doubled
-      // reply.
-      // Prefer the reassembled append-only blocks; fall back to the row's
-      // inline content for legacy traces stored before rome_agent_trace_blocks.
-      const traceContent = traceContentByMessage.get(row.message_id) ?? row.content;
-      const traceEvents = parseTraceEvents(traceContent);
+      // A legacy trace already ends in the final text, so skip the append when
+      // the trace carries a text block, to avoid a doubled reply.
+      const traceEvents = parseTraceEvents(row.content);
       const traceHasText = traceEvents.some((b) => b.type === "text");
-      const finalText = (!traceHasText && row.turn_id && assistantByTurn.get(row.turn_id)) || [];
+      const finalText = (!traceHasText && row.turnId && assistantByTurn.get(row.turnId)) || [];
       const blocks = [...traceEvents, ...finalText];
       const snapshot = buildTraceSnapshot({
         idPrefix: `trace-${index}`,
@@ -648,28 +558,28 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       // Conversation blocks (reply text + interaction cards, answers already
       // embedded) for turns that surfaced a card. Text-only turns keep using the
       // snapshot's final message, so leave replyBlocks unset for them.
-      const turnReply = (row.turn_id && replyByTurn.get(row.turn_id)) || [];
+      const turnReply = (row.turnId && replyByTurn.get(row.turnId)) || [];
       const hasCard = turnReply.some((b) => b.type === "pending_interaction");
       const replyBlocks = hasCard ? turnReply : undefined;
       this.repo.upsertTrace({
         collectionId,
-        title: sourceTraceTitle(row, index),
+        title: sourceTraceTitle(sessionName, index),
         description: null,
-        capturedAt: toDate(row.message_created_at),
+        capturedAt: row.createdAt,
         blocks,
         snapshot,
         metadata: {
           tags: ["local-import"],
           importedAt: new Date().toISOString(),
-          userPrompt: (row.turn_id && promptsByTurn.get(row.turn_id)) || undefined,
-          agentName: row.agent_name ?? undefined,
+          userPrompt: (row.turnId && promptsByTurn.get(row.turnId)) || undefined,
+          agentName: agentName ?? undefined,
           replyBlocks,
         },
-        inputTokens: row.input_tokens,
-        outputTokens: row.output_tokens,
-        cacheReadTokens: row.cache_read_tokens,
-        cacheWriteTokens: row.cache_write_tokens,
-        costUsd: row.cost_usd,
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        cacheReadTokens: row.cacheReadTokens,
+        cacheWriteTokens: row.cacheWriteTokens,
+        costUsd: row.costUsd,
       });
     });
 

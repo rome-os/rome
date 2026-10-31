@@ -111,6 +111,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
           createdAt: line.createdAt,
         }));
     },
+    traces: (sessionId) => repo.sessionTraces(sessionId),
     ensureChannelChat: open,
     ensureChannelConversation: open,
     // An app names the seat it opened. The message is recorded where the seat

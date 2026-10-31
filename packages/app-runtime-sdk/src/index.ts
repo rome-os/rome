@@ -2331,6 +2331,39 @@ export interface RecentChat {
   /** Rome's id for the chat, and the thread in it, or null for the chat. */
   chatId: string;
   threadId: string | null;
+  /** The session's name, as the dashboard lists it. */
+  name: string;
+  /** The topic's name when the session stands in one, else null. */
+  threadName: string | null;
+  /** Who a dashboard chat belongs to: `guardian`, or `visitor:<id>`. */
+  ownerKey: string;
+  archived: boolean;
+  /** The platform the chat is on: `webchat` for the dashboard. */
+  platform: string;
+  /** The connection that is the seat's account on that platform, with its
+   *  kind, or null when Rome holds no record of it. */
+  channel: { id: string; kind: string } | null;
+  /** The agent that answers in the seat, or null when none does. */
+  agentName: string | null;
+  projectName: string | null;
+  projectPath: string | null;
+  /** When the session took its seat. */
+  startedAt: Date;
+}
+
+/** One of a session's traces: what its agent did in a turn, as blocks, and
+ *  what the turn used. */
+export interface SessionTrace {
+  id: string;
+  turnId: string | null;
+  /** The trace's blocks as a JSON array. */
+  content: string;
+  createdAt: Date;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  costUsd: number | null;
 }
 
 /**
@@ -2369,6 +2402,8 @@ export interface ChatRepository {
    * and answers.
    */
   transcript(sessionId: string, input?: { since?: Date }): Promise<ChatLine[]>;
+  /** Session `sessionId`'s traces, oldest first. */
+  traces(sessionId: string): Promise<SessionTrace[]>;
   ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
   /** @deprecated Use `ensureChannelChat`, which does the same. */
   ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;

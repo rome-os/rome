@@ -1,6 +1,5 @@
 // Recent chats on every one of Rome's accounts, read from Rome's own
 // transcript. Accounts and channels: docs/architecture/channels.md.
-import { sql } from "drizzle-orm";
 import {
   createAppLogger,
   type Action,
@@ -24,19 +23,6 @@ const CHARS_IN_ALL = 60_000;
 
 const ACCOUNT_SEPARATOR = "\n\n---\n\n";
 
-// The agent that answers a chat, over `rome_sessions s` and `channels c`, by
-// core's rule (`answeringAgentName` in
-// packages/core/src/db/repositories/session-query.ts): on an account with an
-// agent, a private chat and a chat stored as main take the account's agent,
-// unless the chat is pinned to main. Main reads as null.
-const ACCOUNT_AGENT = sql`CASE WHEN c.agent IN ('main', 'core:main') THEN NULL ELSE c.agent END`;
-const ANSWERING_AGENT = sql`CASE WHEN c.agent IS NOT NULL THEN CASE
-    WHEN s.source_thread_type IS 'private' THEN ${ACCOUNT_AGENT}
-    WHEN coalesce(json_type(s.channel_settings, '$.overrides.routing.agentName') = 'null', 0) = 1 THEN NULL
-    WHEN coalesce(s.agent_name, 'main') IN ('main', 'core:main') THEN ${ACCOUNT_AGENT}
-    ELSE s.agent_name END
-  ELSE s.agent_name END`;
-
 interface MessageRow {
   session_id: string;
   session_name: string;
@@ -54,16 +40,6 @@ interface MessageRow {
   created_at: number;
   /** Lines the chat holds in the window, kept or not. */
   chat_total: number;
-}
-
-interface SessionRow {
-  id: string;
-  session_name: string;
-  thread_name: string | null;
-  channel: string;
-  connection_kind: string;
-  platform: string;
-  agent_name: string | null;
 }
 
 interface Chat {
@@ -205,46 +181,28 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       log.info("fetching account chats", { windowHours, cutoffSeconds });
 
-      // Every chat on one of Rome's accounts with a line in the window, read
-      // through the chat repository. What the chat is (its account, name and
-      // answering agent) comes from `rome_sessions` and `channels`. A channel's
-      // id is the connection kind only for that kind's first account, so the
-      // kind and platform come from `channels`, and from the id only when its
-      // record is gone.
+      // Every chat on one of Rome's accounts with a line in the window, with
+      // its account, name and answering agent, read through the chat
+      // repository.
       let rows: MessageRow[];
       try {
         const chats = chatsOf(appContext);
         const since = new Date(cutoffSeconds * 1000);
         const recent = await chats.recentChats({ since, where: { accountKinds: ACCOUNT_KINDS } });
-        const ids = recent.map((chat) => chat.sessionId);
-        const sessions =
-          ids.length === 0
-            ? []
-            : (appContext.db.connection.all(sql`
-                SELECT s.id, s.name AS session_name, s.source_thread_name AS thread_name,
-                  s.source_channel AS channel,
-                  coalesce(c.connection_kind, s.source_channel) AS connection_kind,
-                  coalesce(c.platform, s.source_channel) AS platform,
-                  ${ANSWERING_AGENT} AS agent_name
-                FROM rome_sessions s
-                LEFT JOIN channels c ON c.id = s.source_channel
-                WHERE s.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
-                  AND s.type = 'channel'
-              `) as SessionRow[]);
         rows = [];
-        for (const session of sessions) {
-          const lines = await chats.transcript(session.id, { since });
+        for (const chat of recent) {
+          const lines = await chats.transcript(chat.sessionId, { since });
           const kept = lines.slice(-MESSAGES_PER_CHAT);
           for (const line of kept) {
             rows.push({
-              session_id: session.id,
-              session_name: session.session_name,
-              thread_name: session.thread_name,
-              channel: session.channel,
-              connection_kind: session.connection_kind,
-              platform: session.platform,
+              session_id: chat.sessionId,
+              session_name: chat.name,
+              thread_name: chat.threadName,
+              channel: chat.channel?.id ?? chat.platform,
+              connection_kind: chat.channel?.kind ?? chat.platform,
+              platform: chat.platform,
               role: line.role,
-              agent_name: session.agent_name,
+              agent_name: chat.agentName,
               outbound: line.role === "assistant" ? 1 : 0,
               sender_name: line.senderName,
               sender_id: line.senderId,

@@ -49,11 +49,18 @@ import type {
   TraceSubagentStartEvent,
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { Account, ChatId, RecentChat, RomeSessionType } from "@rome-os/app-runtime";
+import type {
+  Account,
+  ChatId,
+  RecentChat,
+  RomeSessionType,
+  SessionTrace,
+} from "@rome-os/app-runtime";
 import { placeIn, type Place } from "../../chats/place.js";
 import { lineAt } from "../../chats/adapter.js";
 import {
   seatsSaidInSince,
+  type SeatSaidIn,
   sessionAwaitingGuardian,
   sessionLineCount,
   sessionLines,
@@ -2209,11 +2216,24 @@ export class WebChatRepository {
         : sql`s.type = 'channel' AND c.platform IN (SELECT value FROM json_each(${JSON.stringify([
             ...new Set(where.accountKinds.map((kind) => platformOf(kind))),
           ])}))`;
-    return this.db
-      .all<{ id: string; chat_id: string; thread_id: string | null }>(
-        seatsSaidInSince(scope, cutoff),
-      )
-      .map((row) => ({ sessionId: row.id, chatId: row.chat_id, threadId: row.thread_id }));
+    return this.db.all<SeatSaidIn>(seatsSaidInSince(scope, cutoff)).map((row) => ({
+      sessionId: row.id,
+      chatId: row.chat_id,
+      threadId: row.thread_id,
+      name: row.name,
+      threadName: row.thread_name,
+      ownerKey: row.owner_key ?? "guardian",
+      archived: row.archived === 1,
+      platform: row.platform,
+      channel:
+        row.channel === null || row.connection_kind === null
+          ? null
+          : { id: row.channel, kind: row.connection_kind },
+      agentName: row.agent_name,
+      projectName: row.project_name,
+      projectPath: row.project_path,
+      startedAt: new Date(row.created_at * 1000),
+    }));
   }
 
   async getMessages(sessionId: string) {
@@ -2373,6 +2393,29 @@ export class WebChatRepository {
       ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, blocksByMessage.get(stub.id) ?? []),
     }));
+  }
+
+  /** Session `sessionId`'s traces, oldest first, each with its blocks put
+   *  back together and what its turn used. */
+  async sessionTraces(sessionId: string): Promise<SessionTrace[]> {
+    const stubs = await this.db
+      .select({
+        id: romeAgentMessages.id,
+        turnId: romeAgentMessages.turnId,
+        createdAt: romeAgentMessages.createdAt,
+        inputTokens: romeAgentMessages.inputTokens,
+        outputTokens: romeAgentMessages.outputTokens,
+        cacheReadTokens: romeAgentMessages.cacheReadTokens,
+        cacheWriteTokens: romeAgentMessages.cacheWriteTokens,
+        costUsd: romeAgentMessages.costUsd,
+      })
+      .from(romeAgentMessages)
+      .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")))
+      .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
+    const contents = new Map(
+      (await this.getTraceContents(sessionId)).map((trace) => [trace.id, trace.content]),
+    );
+    return stubs.map((stub) => ({ ...stub, content: contents.get(stub.id) ?? "[]" }));
   }
 
   async getTraceContentsByTurns(
