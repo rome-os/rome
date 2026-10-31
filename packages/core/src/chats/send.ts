@@ -6,10 +6,9 @@
 // finding the place first, which `people/send.ts` does for the People and
 // assistants surfaces.
 //
-// Over today's storage a place's chat is a channel's conversation row, and the
-// send goes out on the channel of the one of Rome's accounts that says it.
-// Delivery is answered, not stored: the message is recorded once the platform
-// took it, and a refused one is not recorded, until storage holds a delivery.
+// The send goes out on the channel of the one of Rome's accounts that says it,
+// and the message is recorded once the platform took it. A refused send
+// records nothing: its error is the answer.
 //
 // A dashboard chat is the exception. Rome is its platform, so a send there is
 // said as an agent's dashboard account and wakes the chat's agent, the way the
@@ -26,12 +25,9 @@ import {
 } from "../channels/channel.js";
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import { createLogger } from "../logger.js";
-import type { Delivery } from "./delivery.js";
+import type { ChatRepository } from "./chat-repository.js";
 import type { MessageRepository } from "./message-repository.js";
-import { addressOf, type Place } from "./place.js";
-
-const log = createLogger("chats-send");
+import { addressOf, otherEndOf, ownedBy, type Place } from "./place.js";
 
 export interface SendDeps {
   channels: Channels;
@@ -56,19 +52,11 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
   );
 }
 
-/** The slice of the conversation repository a send opens its chat through. */
-interface OutboundChats {
-  ensureChannelChat(input: {
-    channel: string;
-    threadId: string;
-    parentThreadId?: string;
-  }): Promise<{ id: string }>;
-}
-
 export interface SendIntoPlaceDeps extends SendDeps {
-  webchatRepo: OutboundChats;
+  /** Where the place's chat is found, or started on Rome's first message. */
+  chats: Pick<ChatRepository, "byKey" | "start">;
   /** Where a sent message is put on record. */
-  chatMessages: Pick<MessageRepository, "recordSent">;
+  chatMessages: Pick<MessageRepository, "send">;
   /** Rome's own account on a channel, which a send names as `as`. Absent, no
    *  channel answers to one. */
   accountOf?: ChannelRecordsRepository["accountOf"];
@@ -88,7 +76,7 @@ export const DASHBOARD_PLATFORM = platformOf(WEBCHAT_CHANNEL);
  */
 export interface DashboardInbox {
   post(
-    chatId: string,
+    key: string,
     body: Body,
     as: Account,
   ): Promise<{ ok: true; messageId: string; at: Date } | { ok: false; error: string }>;
@@ -103,12 +91,11 @@ export type RefusedState = Exclude<AccountSendState, "yes">;
 
 /** A send's answer: the platform took it, Rome refused before asking the
  *  platform, the platform refused in its own words, or the request named a
- *  sender Rome cannot send as. Once the platform was asked, `delivery` says
- *  how the message stands with it. */
+ *  sender Rome cannot send as. Only a send the platform took is on record. */
 export type SendResult =
-  | { ok: true; sent: SentMessage; delivery: Delivery }
+  | { ok: true; sent: SentMessage; at: Date }
   | { ok: false; send: RefusedState }
-  | { ok: false; error: string; delivery: Delivery }
+  | { ok: false; error: string; at: Date }
   | { ok: false; invalid: string };
 
 /**
@@ -154,26 +141,40 @@ export async function send(
   if (!channel.send) return { ok: false, send: "unsupported" };
 
   const address = addressOf(place);
-  let messageId: string | null;
+  const account = deps.accountOf?.(channel.name) ?? { platform, id: channel.name };
+  const chat =
+    deps.chats.byKey(place.chat) ??
+    deps.chats.start(place.chat, otherEndOf(place.chat) === null ? "group" : "dm", null);
+  const send = channel.send;
+  let sent: Awaited<ReturnType<MessageRepository["send"]>>;
   try {
-    messageId = (await channel.send.send(address, { text: body.text })).messageId ?? null;
+    sent = await deps.chatMessages.send(
+      {
+        direction: "fromRome",
+        place,
+        // The guardian's own line through Rome's account: no agent said it.
+        saidBy: { account },
+        parts: [{ type: "text", content: body.text }],
+      },
+      async () => {
+        const { messageId } = await send.send(address, { text: body.text });
+        return messageId ? { platformMessageId: ownedBy(chat.key, account.id, messageId) } : {};
+      },
+    );
   } catch (error) {
     // The Connection went between choosing the sender and asking it: the same
     // answer a send that found none to begin with gives.
     if (error instanceof ChannelNotConnected) return { ok: false, send: "not-connected" };
     const words = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: words, delivery: { state: "failed", error: words, at: new Date() } };
+    return { ok: false, error: words, at: new Date() };
   }
-
-  const at = new Date();
-  await record(deps, channel.name, place, body, messageId);
   return {
     ok: true,
     sent: {
-      ref: messageId === null ? null : `${address}:${messageId}`,
-      timestamp: Math.floor(at.getTime() / 1000),
+      ref: `${address}:${sent.platformMessageId}`,
+      timestamp: Math.floor(sent.at.getTime() / 1000),
     },
-    delivery: { state: "sent", at },
+    at: sent.at,
   };
 }
 
@@ -199,20 +200,14 @@ async function sendOnDashboard(
   }
   if (!deps.dashboard) return { ok: false, send: "unsupported" };
   const posted = await deps.dashboard.post(place.chat.id, body, as);
-  if (!posted.ok) {
-    return {
-      ok: false,
-      error: posted.error,
-      delivery: { state: "failed", error: posted.error, at: new Date() },
-    };
-  }
+  if (!posted.ok) return { ok: false, error: posted.error, at: new Date() };
   return {
     ok: true,
     sent: {
       ref: `${place.chat.id}:${posted.messageId}`,
       timestamp: Math.floor(posted.at.getTime() / 1000),
     },
-    delivery: { state: "sent", at: posted.at },
+    at: posted.at,
   };
 }
 
@@ -236,40 +231,4 @@ export function senderNamed(
 export function soleSender(deps: SendDeps, platform: string): string | undefined {
   const senders = sendersOf(deps, platform);
   return senders.length === 1 ? senders[0] : undefined;
-}
-
-/** Rome's own transcript of what it said, written under the channel that
- *  sent it so the line joins the chat Rome holds there. On a channel with a
- *  mirror of its own it sits behind the provider's copy, which is the store
- *  precedence in `people/timeline-sources.ts`. */
-async function record(
-  deps: SendIntoPlaceDeps,
-  channel: string,
-  place: Place,
-  body: Body,
-  messageId: string | null,
-): Promise<void> {
-  try {
-    await deps.webchatRepo.ensureChannelChat({
-      channel,
-      threadId: addressOf(place),
-      ...(place.threadId === undefined ? {} : { parentThreadId: place.chat.id }),
-    });
-    await deps.chatMessages.recordSent(
-      {
-        direction: "fromRome",
-        place,
-        parts: [{ type: "text", content: body.text }],
-        ...(messageId ? { platformMessageId: messageId } : {}),
-        // Not said by an agent turn.
-        turnAnswer: false,
-      },
-      { channel },
-    );
-  } catch (error) {
-    log.warn("outbound message delivered but recording failed", {
-      channel,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 }

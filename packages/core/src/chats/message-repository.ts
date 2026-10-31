@@ -1,19 +1,17 @@
-// Messages on record. Vocabulary: docs/domains/chats.md#message.
+// Messages on record, over `chat_messages`. Vocabulary:
+// docs/domains/chats.md#message.
 //
-// Over today's storage a message is a `rome_agent_messages` row in its chat's
-// `rome_sessions` row, which a channel and the platform's address for the
-// place key. Callers see places and accounts, never rows, so the storage can
-// move under this interface.
+// Three operations: record what reached Rome, send what Rome says, and read a
+// place newest first. Nothing here knows about turns or sessions: Agents
+// links a message to a turn after one of these returns its id.
 
-import type { Account } from "@rome-os/app-runtime";
-import { isAgentMessageOutbound, messageContentText } from "../channels/messages-agent.js";
+import { sql } from "drizzle-orm";
+import { v7 as uuidv7 } from "uuid";
+import type { DrizzleDb } from "../db/index.js";
+import { chatMessages, chats } from "../db/schema/system.js";
+import { createLogger } from "../logger.js";
 import {
-  conversationPlatformMessageId,
-  type StoredSaidMessage,
-  type WebChatRepository,
-} from "../db/repositories/webchat.js";
-import type { ChatEvents, Via } from "./events.js";
-import {
+  partsText,
   plainText,
   type Message,
   type OutboundMessage,
@@ -21,307 +19,208 @@ import {
   type SaidBy,
   type SaidMessage,
 } from "./message.js";
-import { addressOf, type Place } from "./place.js";
+import type { Place } from "./place.js";
 
-/** A position in a place's messages, oldest to newest. Opaque to callers,
- *  which hand back the one a page answered. */
+const log = createLogger("chat-messages");
+
+/** A position in a place's messages: the message a page ended at. Opaque to
+ *  callers, which hand back the one a page answered. */
 export interface MessageCursor {
   readonly at: Date;
   readonly id: string;
 }
 
-/**
- * Some of a place's messages, oldest first. `older` is where the messages
- * before these begin, for {@link MessageRepository.before}, and null when
- * none are older.
- */
+/** Some of a place's messages, oldest first, and where the messages before
+ *  them begin, or null when none are older. */
 export interface MessagePage {
   readonly messages: readonly SaidMessage[];
   readonly older: MessageCursor | null;
 }
 
-export interface MessageRepository {
-  /**
-   * Put `message` on record in its place, and raise MessageSaid once it
-   * is committed. Answers the recorded message, or null when the platform's
-   * id for it is already on record in that place: recording again changes
-   * nothing and raises nothing.
-   *
-   * The place's chat must already exist: a message never starts its chat.
-   * Throws when it does not.
-   */
-  record(message: Message, via: Via): Promise<RecordedMessage | null>;
-
-  /**
-   * Put a message Rome said through the channel `via` names on record in its
-   * place. A message whose platform id is already on record there updates
-   * that record, and one its turn already holds as the answer joins it, so
-   * recording a reply again leaves one message. Raises nothing: nothing
-   * listens for Rome's own messages yet.
-   *
-   * The place's chat must already exist, as for {@link record}.
-   */
-  recordSent(message: OutboundMessage, via: Pick<Via, "channel">): Promise<void>;
-
-  /**
-   * The newest `limit` messages on record in `place`, oldest first. A place
-   * Rome holds no messages in answers an empty page. Today's storage keeps no
-   * delivery, so an agent's reply whose send is pending or was refused is
-   * read too (see {@link SaidMessage}).
-   *
-   * `via` is the one of Rome's accounts reading, over today's storage, and
-   * the place reads as that account heard it. Absent, a group reads as one
-   * chat across every account in it, and a direct message reads only while
-   * one account holds it, since its address alone may name a direct message
-   * with each of Rome's accounts.
-   */
-  recent(place: Place, limit: number, via?: Pick<Via, "channel">): Promise<MessagePage>;
-
-  /** The `limit` messages said in `place` just before `cursor`, oldest
-   *  first, by the same rule as {@link recent}. */
-  before(
-    place: Place,
-    cursor: MessageCursor,
-    limit: number,
-    via?: Pick<Via, "channel">,
-  ): Promise<MessagePage>;
-
-  /**
-   * The messages `ids` name in `place`, oldest first, read by the same rule
-   * as {@link recent}. An id may name any copy of a message, and the message
-   * is read once under its first copy's id. An id the place does not hold is
-   * left out.
-   */
-  find(place: Place, ids: readonly string[], via?: Pick<Via, "channel">): Promise<SaidMessage[]>;
-
-  /**
-   * Note that Participation has decided whether the recorded message `id`
-   * wakes an agent. Until then a turn does not catch up on it, since it may
-   * yet become a turn's prompt of its own.
-   */
-  wakeDecided(id: string): Promise<void>;
-
-  /** Whether the wake for the recorded message `id` is still undecided. */
-  isWakeUndecided(id: string): boolean;
-}
-
 /**
- * Where reads find a platform's messages over today's storage. `channelsOn`
- * names every channel a platform's chats are kept under, so a group two of
- * Rome's accounts are in reads as one chat although each account keeps a row
- * for it. `accountOf` is Rome's own account on a channel, which said Rome's
- * lines there.
+ * Delivers a message to its platform and answers the platform's id for it,
+ * when the platform gives one. Throws when the platform refused it. Where Rome
+ * is the platform, as on the dashboard, it answers at once with no id, and
+ * the message's own id stands for the platform's.
  */
-export interface MessageHistory {
-  channelsOn(platform: string): readonly string[];
-  accountOf?(channel: string): Account | null;
+export type Deliver = () => Promise<{ platformMessageId?: string }>;
+
+/** A sent message: the platform's id for it, and Rome's, which is null when
+ *  the platform took it but Rome failed to record it. */
+export interface Sent {
+  readonly id: string | null;
+  readonly platformMessageId: string;
+  readonly at: Date;
 }
 
-type MessageRows = Pick<
-  WebChatRepository,
-  | "findChannelChat"
-  | "addConversationMessage"
-  | "recordOutboundConversationMessage"
-  | "saidMessagesAt"
->;
+export class MessageRepository {
+  constructor(private readonly db: DrizzleDb) {}
 
-export class StoredMessages implements MessageRepository {
   /**
-   * The messages whose wake is undecided. Kept in memory, not on the row, so
-   * today's schema carries it unchanged. A restart forgets it, which decides
-   * every wake in flight: the decision died with the process.
+   * Put `message` on record in its place, and answer it with its id, or null
+   * when the platform's id for it is already on record in that chat:
+   * recording again changes nothing. The place's chat must already exist: a
+   * message never starts its chat. Throws when it does not.
    */
-  private readonly undecided = new Set<string>();
-
-  constructor(
-    private readonly rows: MessageRows,
-    private readonly events: ChatEvents,
-    private readonly history: MessageHistory,
-  ) {}
-
-  recent(place: Place, limit: number, via?: Pick<Via, "channel">): Promise<MessagePage> {
-    return this.page(place, limit, via);
+  async record(message: Message): Promise<RecordedMessage | null> {
+    const chatId = this.chatIdOf(message.place);
+    const id = message.id ?? uuidv7();
+    const inserted = this.db
+      .insert(chatMessages)
+      .values({
+        id,
+        chatId,
+        threadId: message.place.threadId ?? null,
+        senderAccountId: message.saidBy.account.id,
+        senderAgent: message.saidBy.agent ?? null,
+        senderName: message.saidBy.name ?? null,
+        text: plainText(message.body),
+        parts: JSON.stringify(
+          message.parts ?? [{ type: "text", content: plainText(message.body) }],
+        ),
+        platformMessageId: message.platformMessageId,
+        replyToPlatformMessageId: message.replyTo ?? null,
+        saidAt: message.at,
+      })
+      .onConflictDoNothing()
+      .returning({ id: chatMessages.id })
+      .all();
+    return inserted.length === 0 ? null : { ...message, id };
   }
 
-  before(
+  /**
+   * Deliver `message` and put it on record once the platform took it. A
+   * delivery that throws records nothing and the error reaches the caller.
+   * Once the platform took the message, a failure to record it is logged and
+   * the send still answers, with no id: reporting a sent message as failed
+   * invites a second real one. The place's chat must already exist.
+   */
+  async send(message: OutboundMessage, deliver: Deliver): Promise<Sent> {
+    const chatId = this.chatIdOf(message.place);
+    const id = message.id ?? uuidv7();
+    const { platformMessageId = id } = await deliver();
+    const at = new Date();
+    try {
+      const inserted = this.db
+        .insert(chatMessages)
+        .values({
+          id,
+          chatId,
+          threadId: message.place.threadId ?? null,
+          senderAccountId: message.saidBy.account.id,
+          senderAgent: message.saidBy.agent ?? null,
+          senderName: message.saidBy.name ?? null,
+          text: partsText(message.parts),
+          parts: JSON.stringify(message.parts),
+          platformMessageId,
+          replyToPlatformMessageId: message.replyTo ?? null,
+          saidAt: at,
+        })
+        .onConflictDoNothing()
+        .returning({ id: chatMessages.id })
+        .all();
+      // The platform answered an id already on record: the same message.
+      const recorded = inserted[0]?.id ?? this.idOf(chatId, platformMessageId);
+      return { id: recorded, platformMessageId, at };
+    } catch (error) {
+      log.warn("message delivered but recording failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { id: null, platformMessageId, at };
+    }
+  }
+
+  /**
+   * The newest `limit` messages said in `place` before `before`, oldest
+   * first. Without `before` the newest of all; without `limit` every one. A
+   * place Rome holds no chat for answers an empty page.
+   */
+  async read(
     place: Place,
-    cursor: MessageCursor,
-    limit: number,
-    via?: Pick<Via, "channel">,
+    page: { before?: MessageCursor | null; limit?: number } = {},
   ): Promise<MessagePage> {
-    return this.page(place, limit, via, cursor);
-  }
-
-  async find(
-    place: Place,
-    ids: readonly string[],
-    via?: Pick<Via, "channel">,
-  ): Promise<SaidMessage[]> {
-    if (ids.length === 0) return [];
-    const rows = await this.rows.saidMessagesAt({
-      channels: this.history.channelsOn(place.chat.platform),
-      address: addressOf(place),
-      ...(via ? { ownChannel: via.channel } : {}),
-      localIds: numbersPerAccount(place),
-      ids,
-      limit: ids.length,
-    });
-    return rows.reverse().map((row) => this.said(place, row));
-  }
-
-  private async page(
-    place: Place,
-    limit: number,
-    via?: Pick<Via, "channel">,
-    before?: MessageCursor,
-  ): Promise<MessagePage> {
+    const { before, limit } = page;
     // One more than asked says whether any are older.
-    const rows = await this.rows.saidMessagesAt({
-      channels: this.history.channelsOn(place.chat.platform),
-      address: addressOf(place),
-      ...(via ? { ownChannel: via.channel } : {}),
-      localIds: numbersPerAccount(place),
-      ...(before ? { before } : {}),
-      limit: limit + 1,
-    });
-    const shown = rows.slice(0, limit);
+    const rows = this.db.all<MessageRow>(sql`
+      SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
+             m.platform_message_id, m.reply_to_platform_message_id, m.said_at
+      FROM chats c
+      JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS ${place.threadId ?? null}
+      WHERE c.platform = ${place.chat.platform} AND c.platform_chat_id = ${place.chat.id}
+        ${before ? sql`AND (m.said_at, m.rowid) < (${seconds(before.at)}, (SELECT rowid FROM chat_messages WHERE id = ${before.id}))` : sql``}
+      ORDER BY m.said_at DESC, m.rowid DESC
+      ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
+    `);
+    const shown = limit === undefined ? rows : rows.slice(0, limit);
     const oldest = shown.at(-1);
     return {
-      messages: shown.reverse().map((row) => this.said(place, row)),
-      older: rows.length > limit && oldest ? { at: oldest.createdAt, id: oldest.id } : null,
+      messages: shown.reverse().map((row) => said(place, row)),
+      older:
+        limit !== undefined && rows.length > limit && oldest
+          ? { at: new Date(oldest.said_at * 1000), id: oldest.id }
+          : null,
     };
   }
 
-  private said(place: Place, row: StoredSaidMessage): SaidMessage {
-    const fromRome = isAgentMessageOutbound(row.role, row.senderId);
-    const saidBy = fromRome
-      ? romeSaidBy(this.history.accountOf?.(row.channel) ?? null, row)
-      : personSaidBy(place, row);
-    return {
-      id: row.id,
-      direction: fromRome ? "fromRome" : "toRome",
-      place,
-      ...(saidBy ? { saidBy } : {}),
-      ...(row.senderName === null ? {} : { senderName: row.senderName }),
-      body: { text: messageContentText(row.content) ?? "" },
-      ...(row.platformMessageId === null ? {} : { platformMessageId: row.platformMessageId }),
-      ...(row.replyToPlatformMessageId === null ? {} : { replyTo: row.replyToPlatformMessageId }),
-      at: row.createdAt,
-      ...(row.turnId === null ? {} : { turnId: row.turnId }),
-    };
+  private chatIdOf(place: Place): string {
+    const row = this.db.all<{ id: string }>(sql`
+      SELECT id FROM ${chats}
+      WHERE platform = ${place.chat.platform} AND platform_chat_id = ${place.chat.id}
+    `)[0];
+    if (!row) {
+      throw new Error(`No chat at ${place.chat.platform}:${place.chat.id} to record a message in`);
+    }
+    return row.id;
   }
 
-  async record(message: Message, via: Via): Promise<RecordedMessage | null> {
-    const address = addressOf(message.place);
-    const chat = await this.rows.findChannelChat(via.channel, address);
-    if (!chat) {
-      throw new Error(`No chat at ${via.channel}:${address} to record a message in`);
-    }
-    const { saidBy } = message;
-    if (saidBy.onBehalfOf !== undefined) {
-      throw new Error("A message said on another's behalf cannot be recorded yet");
-    }
-    const id = conversationPlatformMessageId(chat.id, message.platformMessageId);
-    // Undecided before the row is written, so no catch-up read sees it in
-    // between. A redelivery of a message still undecided leaves it so.
-    const alreadyUndecided = this.undecided.has(id);
-    this.undecided.add(id);
-    const { inserted } = await this.rows
-      .addConversationMessage({
-        sessionId: chat.id,
-        // Recorded before any agent is woken by it, so it reads as something
-        // said while the agent was away. A wake makes it the turn's prompt.
-        role: "notification",
-        content: JSON.stringify([{ type: "text", content: plainText(message.body) }]),
-        platformMessageId: message.platformMessageId,
-        // The account's platform is the place's, so the row keeps only its id.
-        senderId: saidBy.account.id,
-        ...(saidBy.name === undefined ? {} : { senderName: saidBy.name }),
-        ...(message.replyTo === undefined ? {} : { replyToPlatformMessageId: message.replyTo }),
-        createdAt: message.at,
-      })
-      .catch((error: unknown) => {
-        if (!alreadyUndecided) this.undecided.delete(id);
-        throw error;
-      });
-    if (!inserted) {
-      if (!alreadyUndecided) this.undecided.delete(id);
-      return null;
-    }
-    const recorded: RecordedMessage = { ...message, id };
-    await this.events.publish({
-      type: "MessageSaid",
-      message: recorded,
-      chatRecordId: chat.id,
-      via,
-    });
-    return recorded;
-  }
-
-  async recordSent(message: OutboundMessage, via: Pick<Via, "channel">): Promise<void> {
-    const address = addressOf(message.place);
-    const chat = await this.rows.findChannelChat(via.channel, address);
-    if (!chat) {
-      throw new Error(`No chat at ${via.channel}:${address} to record a message in`);
-    }
-    await this.rows.recordOutboundConversationMessage({
-      sessionId: chat.id,
-      content: JSON.stringify(message.parts),
-      ...(message.platformMessageId === undefined
-        ? {}
-        : { platformMessageId: message.platformMessageId }),
-      ...(message.otherPlatformMessageIds === undefined
-        ? {}
-        : { otherPlatformMessageIds: [...message.otherPlatformMessageIds] }),
-      ...ROME_SENDER,
-      ...(message.replyTo === undefined ? {} : { replyToPlatformMessageId: message.replyTo }),
-      ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
-      knownToProvider: message.turnAnswer,
-    });
-  }
-
-  async wakeDecided(id: string): Promise<void> {
-    this.undecided.delete(id);
-  }
-
-  isWakeUndecided(id: string): boolean {
-    return this.undecided.has(id);
+  private idOf(chatId: string, platformMessageId: string): string | null {
+    return (
+      this.db.all<{ id: string }>(sql`
+        SELECT id FROM chat_messages
+        WHERE chat_id = ${chatId} AND platform_message_id = ${platformMessageId}
+      `)[0]?.id ?? null
+    );
   }
 }
 
-/** The sender a row of Rome's own keeps. `isAgentMessageOutbound` reads it
- *  back to put the line on Rome's side of the chat. */
-const ROME_SENDER = { senderId: "rome", senderName: "Rome" } as const;
+interface MessageRow {
+  id: string;
+  sender_account_id: string | null;
+  sender_agent: string | null;
+  sender_name: string | null;
+  text: string;
+  parts: string;
+  platform_message_id: string | null;
+  reply_to_platform_message_id: string | null;
+  said_at: number;
+}
 
-/** Rome's line, said as the channel's own account. */
-function romeSaidBy(account: Account | null, row: StoredSaidMessage): SaidBy | undefined {
-  if (!account) return undefined;
+function said(place: Place, row: MessageRow): SaidMessage {
+  const saidBy: SaidBy | undefined =
+    row.sender_account_id === null
+      ? undefined
+      : {
+          account: { platform: place.chat.platform, id: row.sender_account_id },
+          ...(row.sender_name === null ? {} : { name: row.sender_name }),
+          ...(row.sender_agent === null ? {} : { agent: row.sender_agent }),
+        };
   return {
-    account,
-    ...(row.senderName === null ? {} : { name: row.senderName }),
+    id: row.id,
+    direction: row.sender_agent === null ? "toRome" : "fromRome",
+    place,
+    ...(saidBy ? { saidBy } : {}),
+    ...(row.sender_name === null ? {} : { senderName: row.sender_name }),
+    body: { text: row.text },
+    parts: row.parts,
+    ...(row.platform_message_id === null ? {} : { platformMessageId: row.platform_message_id }),
+    ...(row.reply_to_platform_message_id === null
+      ? {}
+      : { replyTo: row.reply_to_platform_message_id }),
+    at: new Date(row.said_at * 1000),
   };
 }
 
-/** A message to Rome, said by the account the row keeps the platform's id
- *  of. The account is on the place's platform, as every participant is. */
-function personSaidBy(place: Place, row: StoredSaidMessage): SaidBy | undefined {
-  if (row.senderId === null) return undefined;
-  return {
-    account: { platform: place.chat.platform, id: row.senderId },
-    ...(row.senderName === null ? {} : { name: row.senderName }),
-  };
-}
-
-/**
- * Whether each of Rome's accounts numbers this place's messages itself. A
- * Telegram basic group gives every member account its own message ids, so
- * the same id on two accounts names two messages. Telegram addresses a basic
- * group as `-<id>` below 10^12 and a supergroup or channel as
- * `-(10^12 + <id>)`, so the range tells them apart
- * (https://core.telegram.org/api/bots/ids).
- */
-function numbersPerAccount(place: Place): boolean {
-  const { platform, id } = place.chat;
-  if (platform !== "telegram" || !/^-[1-9]\d*$/.test(id)) return false;
-  return BigInt(id.slice(1)) < 1_000_000_000_000n;
+function seconds(at: Date): number {
+  return Math.floor(at.getTime() / 1000);
 }

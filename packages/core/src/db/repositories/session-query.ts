@@ -322,10 +322,18 @@ export class SessionQueryRepository {
 
   async querySessionPage(query: SessionPageStorageQuery) {
     const runStats = this.runStats(query.scope);
+    // A session's lines: its own (traces, and the text of a session in no
+    // chat) plus what was said where it stands.
     const messageCounts = this.db
-      .select({ sessionId: romeAgentMessages.sessionId, count: count().as("message_count") })
-      .from(romeAgentMessages)
-      .groupBy(romeAgentMessages.sessionId)
+      .select({
+        sessionId: romeSessions.id,
+        count: sql<number>`(
+          (SELECT count(*) FROM rome_agent_messages t WHERE t.session_id = ${romeSessions.id})
+          + (SELECT count(*) FROM chat_messages m
+             WHERE m.chat_id = ${romeSessions.chatId} AND m.thread_id IS ${romeSessions.threadId})
+        )`.as("message_count"),
+      })
+      .from(romeSessions)
       .as("session_query_message_counts");
     const predicates = [
       ...sessionPredicates(query.scope, query.search, query.searchAgentNames),
@@ -490,9 +498,15 @@ export class SessionQueryRepository {
     const session = withSessionKind(rows[0]);
     const [messageCountRows, parentRows, childRows] = await Promise.all([
       this.db
-        .select({ count: count() })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id)),
+        .select({
+          count: sql<number>`(
+            (SELECT count(*) FROM rome_agent_messages t WHERE t.session_id = ${id})
+            + (SELECT count(*) FROM chat_messages m
+               WHERE m.chat_id = ${romeSessions.chatId} AND m.thread_id IS ${romeSessions.threadId})
+          )`.mapWith(Number),
+        })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, id)),
       session.parentSessionId
         ? this.db.select().from(romeSessions).where(eq(romeSessions.id, session.parentSessionId))
         : Promise.resolve([]),

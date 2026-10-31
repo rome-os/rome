@@ -8,6 +8,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
@@ -117,7 +118,9 @@ export interface ApiDeps {
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
+  chatMessages: Pick<MessageRepository, "read" | "send">;
+  /** The chats Rome holds, by key (docs/domains/chats.md#chat). */
+  chats: Pick<ChatRepository, "byKey" | "start">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

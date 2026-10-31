@@ -1,6 +1,7 @@
 // Recent chats on every one of Rome's accounts, read from Rome's own
 // transcript. Accounts and channels: docs/architecture/channels.md.
 import { sql } from "drizzle-orm";
+import { SESSION_LINES } from "../../lib/session-lines.js";
 import {
   createAppLogger,
   type Action,
@@ -199,9 +200,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // platform come from `channels`, and from the id only when its record is
       // gone. 'notification' is a line that passed outside a turn: someone the
       // agent did not answer, or Rome sending untied to one. Rome's own lines
-      // are told apart by the rule of `agentMessageOutbound` in
-      // packages/core/src/channels/messages-agent.ts. Lines stored in the same
-      // second keep the order they were stored in.
+      // carry the sender id 'rome' (see lib/session-lines.ts). Lines stored in
+      // the same second keep the order they were stored in.
       let rows: MessageRow[];
       try {
         rows = appContext.db.connection.all(
@@ -219,11 +219,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
                 END AS outbound,
                 m.sender_name, m.sender_id, m.content, m.created_at,
                 ROW_NUMBER() OVER (
-                  PARTITION BY m.session_id ORDER BY m.created_at DESC, m.rowid DESC
+                  PARTITION BY m.session_id ORDER BY m.created_at DESC, m.seq DESC
                 ) AS newest,
-                m.rowid AS stored,
+                m.seq AS stored,
                 COUNT(*) OVER (PARTITION BY m.session_id) AS chat_total
-              FROM rome_agent_messages m
+              FROM ${SESSION_LINES} m
               JOIN rome_sessions s ON s.id = m.session_id
               LEFT JOIN channels c ON c.id = s.source_channel
               WHERE m.created_at >= ${cutoffSeconds}

@@ -209,18 +209,18 @@ export class ConciergeTasksRepository {
 
   private async withChat(where: SQL | undefined): Promise<ConciergeTaskWithChat[]> {
     const rows = await this.db
-      .select({ task: conciergeTasks, chatName: romeSessions.name, sourceId: romeAgentMessages.id })
+      .select({
+        task: conciergeTasks,
+        chatName: romeSessions.name,
+        // Only a message the Concierge chat still holds counts as a source.
+        sourceId: sql<string | null>`(
+          SELECT m.id FROM rome_sessions cs
+          JOIN chat_messages m ON m.chat_id = cs.chat_id
+          WHERE cs.id = ${CONCIERGE_CHAT_ID} AND m.id = ${conciergeTasks.sourceMessageId}
+        )`,
+      })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
-      // Only a message the Concierge chat still holds counts as a source.
-      .leftJoin(
-        romeAgentMessages,
-        and(
-          eq(romeAgentMessages.id, conciergeTasks.sourceMessageId),
-          eq(romeAgentMessages.sessionId, CONCIERGE_CHAT_ID),
-          inArray(romeAgentMessages.role, ["user", "assistant"]),
-        ),
-      )
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
     return rows.map(({ task, chatName, sourceId }) => ({

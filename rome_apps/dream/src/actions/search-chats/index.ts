@@ -1,6 +1,7 @@
 // Searches the guardian's requests across the dashboard's past chats, so a
 // dream can tell a one-off task from one the guardian keeps asking for.
 import { sql } from "drizzle-orm";
+import { SESSION_LINES } from "../../lib/session-lines.js";
 import {
   createAppLogger,
   type Action,
@@ -130,7 +131,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         SELECT m.session_id, s.name AS session_name, m.content, m.created_at,
           ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at, m.id) AS n,
           MAX(m.created_at) OVER (PARTITION BY m.session_id) AS last_at
-        FROM rome_agent_messages m
+        FROM ${SESSION_LINES} m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE m.role = 'user'
           AND ${inDashboardChat("s")}
@@ -165,7 +166,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
   function search(words: string[], cutoff: number, days: number, limit: number): ActionResult {
     const rows = connection.all(sql`
       SELECT m.session_id, s.name AS session_name, m.content, m.created_at
-      FROM rome_agent_messages m
+      FROM ${SESSION_LINES} m
       JOIN rome_sessions s ON s.id = m.session_id
       WHERE m.role = 'user'
         AND m.created_at >= ${cutoff}
@@ -182,7 +183,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     const top = ranked.slice(0, limit);
     if (top.length > 0) {
       const starts = connection.all(sql`
-        SELECT session_id, MIN(created_at) AS started_at FROM rome_agent_messages
+        SELECT session_id, MIN(created_at) AS started_at FROM ${SESSION_LINES}
         WHERE session_id IN (${sql.join(
           top.map((chat) => sql`${chat.sessionId}`),
           sql`, `,

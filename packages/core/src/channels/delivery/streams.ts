@@ -1,6 +1,5 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import type { ChatRepository } from "../../chats/chat-repository.js";
-import type { MessageRepository } from "../../chats/message-repository.js";
+import type { SeatReplies } from "../../sessions/seat-replies.js";
 import type { Clock } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import type { ChannelReplies } from "../channel.js";
@@ -47,10 +46,9 @@ export interface ReplyStreamsDeps {
   /** The channel's reply port, read when a reply opens. */
   replies(channel: string): ChannelReplies | null | undefined;
   clock: Clock;
-  /** Where a settled reply is put on record. Absent, nothing records it. */
-  messages?: Pick<MessageRepository, "recordSent">;
-  /** The place the conversation a turn is recorded in stands for. */
-  places?: Pick<ChatRepository, "placeOfRecord">;
+  /** Where a settled reply is put on record, as its turn's answer. Absent,
+   *  nothing records it. */
+  said?: Pick<SeatReplies, "say">;
   policy?: DeliveryPolicy;
 }
 
@@ -102,37 +100,29 @@ export class ReplyStreams {
     // Every part showed or may have: a create whose result is unknown most
     // likely landed, and nothing sends it again.
     const shown = outcome.parts;
-    const { messages, places } = this.deps;
-    if (!messages || !places || shown.length === 0) return;
+    const { said } = this.deps;
+    if (!said || shown.length === 0) return;
     // A block's parts split its source, and each block is a message of its own.
     const text = shown
       .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source)
       .join("");
-    // The message's own id is the one that starts the answer, the last block.
-    // A message whose create is unknown has no id, so the last block with one
-    // stands in. The reply's other messages are kept beside it, so a quote of
-    // any message the reply wrote reaches it.
+    // The message's id is the one that starts the answer, the last block. A
+    // message whose create is unknown has no id, so the last block with one
+    // stands in. A quote of the reply's other messages reaches the platform's
+    // copy only: Chats keeps one platform id per message.
     const receipted = shown.filter((part) => part.receipt);
     const lastBlock = receipted.at(-1)?.block;
     const quoted = receipted.find((part) => part.block === lastBlock)?.receipt;
-    const others = receipted.flatMap(({ receipt }) =>
-      receipt && receipt !== quoted ? [receipt.messageId] : [],
-    );
     try {
-      const at = places.placeOfRecord(target.romeSessionId);
-      if (!at) throw new Error(`No place for conversation ${target.romeSessionId}`);
-      await messages.recordSent(
+      // Delivered already: recording says so.
+      await said.say(
+        target.romeSessionId,
+        [{ type: "text", content: text }],
+        async () => (quoted ? { platformMessageId: quoted.messageId } : {}),
         {
-          direction: "fromRome",
-          place: at.place,
-          parts: [{ type: "text", content: text }],
-          ...(quoted ? { platformMessageId: quoted.messageId } : {}),
-          ...(others.length > 0 ? { otherPlatformMessageIds: others } : {}),
-          ...(target.replyToMessageId ? { replyTo: target.replyToMessageId } : {}),
           turnId: target.turnId,
-          turnAnswer: true,
+          ...(target.replyToMessageId ? { replyTo: target.replyToMessageId } : {}),
         },
-        { channel: at.channel },
       );
     } catch (err) {
       // The messages are already on the platform. A failed record must not

@@ -28,6 +28,15 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Inbound hears a channel only while Rome listens to its account ([An account's agent](#an-accounts-agent)). While Rome does not, the channel keeps its subscribers, but nothing it receives reaches them, and admission does not run.
 - `directory` lists the chats a channel can see, each with its `ChatRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
 
+### Direct messages
+
+Chats keys a direct message by its two ends, `dm:<Rome's account>:<other account>` ([Chat](../domains/chats.md#chat)), and a send into one goes to the other end's address (`addressOf` in [`chats/place.ts`](../../packages/core/src/chats/place.ts)).
+
+- Where the platform addresses a direct message by the other party (Telegram, WhatsApp), the address is that party's id and the key carries it as the other end.
+- Elsewhere the other end is the account that wrote to Rome, and the channel's `send` takes that account's id as an address: Discord opens or finds its DM channel with the user, and Feishu sends to the user's `open_id`.
+- Email and Rome Cloud chats keep their own ids, since each thread or assistant is its own chat.
+- A Telegram basic group numbers messages per member account, so Chats keys its message ids with Rome's account in front (`ownedBy`). The channel sends and quotes the platform's own id.
+
 ### Channels for app actions
 
 App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels, the account each is, and whether each can send. It sends as an account and reads what was said on it, naming the account by its platform and the platform's own id (`Account` in the SDK). A channel's name still works in place of the account, for apps built before accounts and for a channel that has no account yet, such as `webchat` or a connection whose grant has not reported its account. In a worker the same calls cross to the main process over RPC.

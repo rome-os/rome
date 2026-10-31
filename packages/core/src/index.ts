@@ -278,7 +278,9 @@ import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
 import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
-import { StoredMessages } from "./chats/message-repository.js";
+import { MessageRepository } from "./chats/message-repository.js";
+import { SeatReplies } from "./sessions/seat-replies.js";
+import { TurnLinks } from "./sessions/turn-links.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -400,15 +402,16 @@ async function main() {
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
-  const chatRepo = new ChatRepository(db, channelRecords);
-  // What was said in each place (docs/domains/chats.md#message). Reads find a
-  // platform's chats under every channel it is kept under, built or released.
-  // `channels` is built further down, before anything reads.
+  // Chats' places and what was said in them (docs/domains/chats.md), and
+  // Agents' link from turns to those messages.
+  const chatRepo = new ChatRepository(db);
   const chatEvents = new ChatEvents();
-  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
-    channelsOn: (platform) =>
-      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
-    accountOf: (channel) => channelRecords.accountOf(channel),
+  const chatMessages = new MessageRepository(db);
+  const turnLinks = new TurnLinks(db);
+  const seatReplies = new SeatReplies({
+    seats: webchatRepo,
+    messages: chatMessages,
+    links: turnLinks,
   });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
@@ -417,6 +420,10 @@ async function main() {
     webchatRepo,
     chatRepo,
     chatMessages,
+    links: turnLinks,
+    replies: seatReplies,
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -514,8 +521,7 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    messages: chatMessages,
-    places: chatRepo,
+    said: seatReplies,
   });
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
@@ -934,7 +940,11 @@ async function main() {
     run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
   });
   const chatSettings = new ChatSettingsService({
-    repository: new ChatSettingsRepository(db, chatRepo),
+    repository: new ChatSettingsRepository(db, {
+      chats: chatRepo,
+      accountOf: (channel) => channelRecords.accountOf(channel),
+      platformOfChannel,
+    }),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,
@@ -1050,7 +1060,7 @@ async function main() {
       skillCatalog,
       lifecycleDispatcher,
       webchatRepo,
-      chatMessages,
+      turnLinks,
       platformOfChannel,
       subagentExecutionService,
       activeSubagentRegistry,
@@ -1133,8 +1143,7 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
-    messages: chatMessages,
-    places: chatRepo,
+    replies: seatReplies,
     isTextPrivate: (agentName) =>
       agentLoader.has(agentName) &&
       resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
@@ -1525,11 +1534,12 @@ async function main() {
   // Every message the channels deliver is put on record in its chat before the
   // hook hears it (docs/domains/participation.md#wake). It records through the
   // hook's channels, so the hook's trace covers recording as well.
-  webchatRepo.leaveOutOfCatchUp((id) => chatMessages.isWakeUndecided(id));
   const inboundRecorder = inboundRecording(
     {
-      chats: webchatRepo,
+      chats: chatRepo,
+      seats: webchatRepo,
       messages: chatMessages,
+      wakes: turnLinks,
       events: chatEvents,
       platformOfChannel,
       listens: (connectionId) => accountListening.listens(connectionId),
@@ -1882,6 +1892,7 @@ async function main() {
       assistants: listedAgents,
       webchatRepo,
       chatMessages,
+      chats: chatRepo,
       webhookInvocationsRepo,
       approvalsRepo,
       approvalHandler,

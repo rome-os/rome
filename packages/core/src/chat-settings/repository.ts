@@ -1,8 +1,8 @@
-import { and, asc, eq, isNull, like } from "drizzle-orm";
-import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
+import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
+import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { withoutRouting, withRoutingOf, type ChatRepository } from "../chats/chat-repository.js";
-import { chatKey } from "../chats/place.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
+import { chatKey, directMessageOn, type ChatKey } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -24,11 +24,42 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: Chat
     .get();
 }
 
+export interface ChatSettingsRepositoryDeps {
+  /** Where a chat is started when a rule is set before anything was said. */
+  chats: Pick<ChatRepository, "start" | "rename">;
+  /** Rome's own account on a channel, or null while its record knows none. */
+  accountOf(channel: string): Account | null;
+  platformOfChannel(channel: string): string;
+}
+
+/**
+ * Reply rules, kept on each of Rome's seats (`rome_sessions.channel_settings`).
+ * A group's rule is the group's whichever of Rome's accounts set it, so it is
+ * written to every seat in the chat; each seat keeps its own routing marker.
+ */
 export class ChatSettingsRepository {
   constructor(
     private readonly db: DrizzleDb,
-    private readonly chats: ChatRepository,
+    private readonly deps: ChatSettingsRepositoryDeps,
   ) {}
+
+  /** The account `channel` speaks as. */
+  private accountOn(channel: string): Account {
+    return (
+      this.deps.accountOf(channel) ?? {
+        platform: this.deps.platformOfChannel(channel),
+        id: channel,
+      }
+    );
+  }
+
+  /** The key of the chat at `chatId` as `channel`'s account sees it. */
+  private keyOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatKey {
+    const via = this.accountOn(channel);
+    return kind === "dm"
+      ? directMessageOn(via.platform, via.id, chatId, chatId)
+      : chatKey(via.platform, chatId);
+  }
 
   find(channel: string, chatId: ChatId): StoredChatRow | null {
     return rowByAddress(this.db, channel, chatId) ?? null;
@@ -64,11 +95,28 @@ export class ChatSettingsRepository {
   ): StoredChatSettings | null {
     const own = rowByAddress(this.db, channel, chatId);
     if (own === undefined && !isShared(kind)) return null;
-    const via = this.chats.accountOn(channel);
-    return withRoutingOf(
-      own?.channelSettings ?? null,
-      this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null,
-    );
+    if (own?.channelSettings && hasRule(own.channelSettings)) return own.channelSettings;
+    if (
+      !isShared(kind) &&
+      own?.sourceThreadType !== "group" &&
+      own?.sourceThreadType !== "channel"
+    ) {
+      return own?.channelSettings ?? null;
+    }
+    // Another of Rome's seats in the group may have set the group's rule.
+    const key = this.keyOf(channel, chatId, "group");
+    const shared = this.db.all<{ channel_settings: string | null }>(sql`
+      SELECT s.channel_settings FROM chats c
+      JOIN rome_sessions s ON s.chat_id = c.id AND s.thread_id IS NULL
+      WHERE c.platform = ${key.platform} AND c.platform_chat_id = ${key.id}
+        AND s.channel_settings IS NOT NULL
+      ORDER BY s.created_at, s.id
+    `);
+    const rule =
+      shared
+        .map((row) => JSON.parse(row.channel_settings as string) as StoredChatSettings)
+        .find(hasRule) ?? null;
+    return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
   }
 
   /**
@@ -93,11 +141,19 @@ export class ChatSettingsRepository {
 
   /** The platform channel `channel`'s accounts live on. */
   platformOf(channel: string): string {
-    return this.chats.accountOn(channel).platform;
+    return this.accountOn(channel).platform;
   }
 
+  /** Whether anything was said where session `sessionId` stands, or it ran
+   *  a turn. */
   hasMessageHistory(sessionId: string): boolean {
+    const said = this.db.all(sql`
+      SELECT 1 FROM rome_sessions s
+      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE s.id = ${sessionId} LIMIT 1
+    `);
     return (
+      said.length > 0 ||
       this.db
         .select({ id: romeAgentMessages.id })
         .from(romeAgentMessages)
@@ -143,37 +199,71 @@ export class ChatSettingsRepository {
         // first, so the rule below is written to the whole group.
         const kindKnown = input.kindKnown ?? true;
         if (kindKnown) this.classify(tx, descriptor, channel);
-        const via = this.chats.accountOn(channel);
-        const key = chatKey(via.platform, descriptor.ref.chatId);
+        const via = this.accountOn(channel);
+        const key = this.keyOf(channel, descriptor.ref.chatId, descriptor.kind);
         const sourceThreadType = !kindKnown
           ? null
           : descriptor.kind === "dm"
             ? "private"
             : descriptor.kind;
-        this.chats.startIfMissing(
+        const chat = this.deps.chats.start(
           key,
           descriptor.kind === "dm" ? "dm" : "group",
-          via,
           descriptor.displayName,
-          { threadType: sourceThreadType },
         );
-        this.chats.update(
-          key,
-          (chat) => {
-            chat.rename(descriptor.displayName);
-            chat.setReplyRule(via, input.settings && withoutRouting(input.settings));
-          },
-          via,
-        );
+        this.deps.chats.rename(key, descriptor.displayName);
+        const id = channelChatId(channel, descriptor.ref.chatId);
+        const now = new Date();
+        tx.insert(romeSessions)
+          .values({
+            id,
+            name: descriptor.displayName,
+            personaId: null,
+            projectName: DEFAULT_WEBCHAT_PROJECT_NAME,
+            projectPath: null,
+            largeModelSelection: null,
+            agentName: null,
+            type: "channel",
+            sourceChannel: channel,
+            sourceThreadId: descriptor.ref.chatId,
+            sourceThreadName: descriptor.displayName,
+            sourceThreadType,
+            chatId: chat.id,
+            accountId: via.id,
+            createdAt: now,
+            activityAt: now,
+            lastSeenActivityAt: null,
+          })
+          .onConflictDoNothing({ target: romeSessions.id })
+          .run();
         tx.update(romeSessions)
           .set({
             ...(sourceThreadType === null ? {} : { sourceThreadType }),
+            name: descriptor.displayName,
+            sourceThreadName: descriptor.displayName,
             // The routing marker is this account's alone, so only its row holds it.
             channelSettings: input.settings,
             ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
           })
-          .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+          .where(eq(romeSessions.id, id))
           .run();
+        // A group's rule is the group's: every other seat there takes it,
+        // keeping its own routing marker.
+        if (isShared(descriptor.kind) && kindKnown) {
+          const rule = input.settings && withoutRouting(input.settings);
+          const others = tx
+            .select({ id: romeSessions.id, channelSettings: romeSessions.channelSettings })
+            .from(romeSessions)
+            .where(and(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId)))
+            .all()
+            .filter((row) => row.id !== id);
+          for (const row of others) {
+            tx.update(romeSessions)
+              .set({ channelSettings: withRoutingOf(row.channelSettings, rule) })
+              .where(eq(romeSessions.id, row.id))
+              .run();
+          }
+        }
       },
       { behavior: "immediate" },
     );
@@ -241,4 +331,32 @@ export class ChatSettingsRepository {
 
 function isShared(kind: ChatDescriptor["kind"] | null): boolean {
   return kind === "group" || kind === "channel";
+}
+
+/** Whether `settings` holds a rule beyond its routing marker. */
+function hasRule(settings: StoredChatSettings): boolean {
+  return Object.keys(withoutRouting(settings).overrides).length > 0;
+}
+
+/**
+ * `rule` without its routing marker. A row's routing (`overrides.routing`)
+ * pins the agent of the one of Rome's accounts the row is stored under, as the
+ * row's `agent_name` does, so it is no part of the group's rule.
+ */
+export function withoutRouting(rule: StoredChatSettings): StoredChatSettings {
+  if (rule.overrides.routing === undefined) return rule;
+  const { routing: _routing, ...overrides } = rule.overrides;
+  return { ...rule, overrides };
+}
+
+/** `rule` with the routing marker of `stored`, the settings one row already
+ *  holds, since that marker is its account's alone. */
+export function withRoutingOf(
+  stored: StoredChatSettings | null,
+  rule: StoredChatSettings | null,
+): StoredChatSettings | null {
+  const routing = stored?.overrides.routing;
+  if (routing === undefined) return rule;
+  const base = rule ?? { ...stored!, overrides: {} };
+  return { ...base, overrides: { ...base.overrides, routing } };
 }

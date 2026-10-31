@@ -1,4 +1,5 @@
 import { type SQL, sql } from "drizzle-orm";
+import { SESSION_LINES } from "./session-lines.js";
 import type { AppDbContext } from "@rome-os/app-runtime";
 
 // The connection kinds whose accounts are an agent's own, as each kind's
@@ -33,7 +34,7 @@ export function guardianOnlyChat(session: string): SQL {
   // rescanning a chat for every row it reads.
   return sql`(coalesce(${s}.owner_key, 'guardian') = 'guardian'
     AND ${s}.id NOT IN (
-      SELECT session_id FROM rome_agent_messages
+      SELECT session_id FROM ${SESSION_LINES}
       WHERE role = 'user'
         AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
     ))`;
@@ -69,7 +70,7 @@ export function hasChatSince(db: AppDbContext, since: Date): boolean {
   const cutoffSeconds = Math.floor(since.getTime() / 1000);
   const row = db.connection.get(sql`
     SELECT 1 AS found
-    FROM rome_agent_messages m
+    FROM ${SESSION_LINES} m
     JOIN rome_sessions s ON s.id = m.session_id
     LEFT JOIN channels c ON c.id = s.source_channel
     WHERE m.created_at >= ${cutoffSeconds}

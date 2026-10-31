@@ -160,9 +160,7 @@ function messagesAt(
   before?: MessageCursor | null,
 ): Promise<MessagePage> {
   const place = placeIn(chatKey(address.platform, address.id as ChatId));
-  return before
-    ? deps.chatMessages.before(place, before, limit)
-    : deps.chatMessages.recent(place, limit);
+  return deps.chatMessages.read(place, { before: before ?? null, limit });
 }
 
 /** The newest `limit` messages of the assistant's chat, newest first. */

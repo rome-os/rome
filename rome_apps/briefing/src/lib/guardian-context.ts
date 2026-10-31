@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { SESSION_LINES } from "./session-lines.js";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 import { unwrap } from "./action-result.js";
 
@@ -40,13 +41,13 @@ function readRecentChats(appContext: RomeAppContext, tz: string, now: number): s
   try {
     rows = appContext.db.connection.all(sql`
       SELECT s.name AS chat, m.content, m.created_at
-      FROM rome_agent_messages m
+      FROM ${SESSION_LINES} m
       JOIN rome_sessions s ON s.id = m.session_id
       WHERE (s.type IN ('webchat', 'webchat_handoff')
           OR (s.type = 'channel' AND s.source_channel = 'webchat' AND s.source_thread_id = s.id))
         AND coalesce(s.owner_key, 'guardian') = 'guardian'
         AND s.id NOT IN (
-          SELECT session_id FROM rome_agent_messages
+          SELECT session_id FROM ${SESSION_LINES}
           WHERE role = 'user' AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
         )
         AND s.archived_at IS NULL

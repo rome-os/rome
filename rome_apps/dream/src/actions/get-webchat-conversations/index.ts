@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { SESSION_LINES } from "../../lib/session-lines.js";
 import {
   createAppLogger,
   type Action,
@@ -92,7 +93,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM rome_agent_messages wm
+              FROM ${SESSION_LINES} wm
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
@@ -105,7 +106,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM rome_agent_messages wm
+              FROM ${SESSION_LINES} wm
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
                 AND ${inDashboardChat("ws")}

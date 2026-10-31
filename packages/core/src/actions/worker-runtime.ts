@@ -43,8 +43,9 @@ import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/in
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
 import { ChatRepository } from "../chats/chat-repository.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
+import { MessageRepository } from "../chats/message-repository.js";
+import { SeatReplies } from "../sessions/seat-replies.js";
+import { TurnLinks } from "../sessions/turn-links.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -120,14 +121,19 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   );
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  // An action records the messages it sent. Nothing in the worker reads a
-  // place's history or hears what was said, so it keeps no channels to read
-  // under and its events go nowhere.
+  // An action records the messages it hands over or sent, and links them to
+  // its seat's turns.
+  const chatMessages = new MessageRepository(db);
+  const turnLinks = new TurnLinks(db);
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+    chatRepo: new ChatRepository(db),
+    chatMessages,
+    links: turnLinks,
+    replies: new SeatReplies({ seats: webchatRepo, messages: chatMessages, links: turnLinks }),
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
   });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);

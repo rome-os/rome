@@ -4533,10 +4533,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const session = await deps.webchatRepo.getSession(sessionId);
       return Boolean(session && isStoredWebchatSession(session));
     },
-    async post(chatId, body, as) {
+    async post(key, body, as) {
       if (!deps.agentLoader.has(as.id)) {
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
+      // A dashboard chat's key is opaque; the dashboard addresses it by the
+      // session that stands in it.
+      const chatId = await deps.webchatRepo.dashboardSessionAt(key);
+      if (!chatId) return { ok: false, error: `No dashboard chat ${key}` };
       const inputId = randomUUID();
       const sent = await handleChatSend(chatId, { inputId, text: body.text }, { saidBy: as });
       if (sent.status >= 400) {

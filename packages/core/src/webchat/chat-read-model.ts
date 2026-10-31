@@ -3,10 +3,11 @@
 // writes. Vocabulary: docs/domains/chats.md.
 //
 // It has two renders over one shape, a column of turns with the words around
-// them. A chat transcript is Chats' one read (`ChatLog.read`) with Agents'
-// turn link attached to each message. A session transcript is Agents' turns
-// of one session: the messages its turns took and gave, or for a session with
-// no chat (a subagent, a fork, a handoff) the turn's own prompt and answer.
+// them. A chat transcript is Chats' one read (`MessageRepository.read`) with
+// Agents' turn link attached to each message (`TurnLinks.turnsOf`). A session
+// transcript is Agents' turns of one session (`TurnLinks.turns`): the messages
+// its turns took and gave, or for a session with no chat (a subagent, a fork,
+// a handoff) the turn's own prompt and answer.
 // Either way each turn's trace is read apart, as a record whose blocks load
 // only when the guardian opens the turn.
 //
@@ -19,10 +20,11 @@
 
 import { sql } from "drizzle-orm";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
-import { ChatLog, type LoggedMessage } from "../chats/chat-log.js";
-import type { MessageCursor } from "../chats/message-repository.js";
+import type { SaidMessage } from "../chats/message.js";
+import { MessageRepository, type MessageCursor } from "../chats/message-repository.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
 import type { DrizzleDb } from "../db/index.js";
+import { TurnLinks, type TurnLink, type TurnLine } from "../sessions/turn-links.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
  *  it; a line that prompted a turn is the guardian's (or a visitor's) input;
@@ -101,10 +103,18 @@ const lineRole = sql.raw(`CASE
   ELSE 'notification' END`);
 
 export class ChatReadModel {
-  private readonly log: ChatLog;
+  private readonly messages: Pick<MessageRepository, "read">;
+  private readonly links: Pick<TurnLinks, "turnsOf" | "turns">;
 
-  constructor(private readonly db: DrizzleDb) {
-    this.log = new ChatLog(db);
+  constructor(
+    private readonly db: DrizzleDb,
+    deps: {
+      messages?: Pick<MessageRepository, "read">;
+      links?: Pick<TurnLinks, "turnsOf" | "turns">;
+    } = {},
+  ) {
+    this.messages = deps.messages ?? new MessageRepository(db);
+    this.links = deps.links ?? new TurnLinks(db);
   }
 
   /**
@@ -120,7 +130,7 @@ export class ChatReadModel {
     const place = await this.placeOf(sessionId);
     if (!place) return null;
     if (!page) {
-      const read = await this.log.read(place);
+      const read = await this.messages.read(place);
       return this.transcriptOf(sessionId, read.messages, null);
     }
     // Chats reads by message, newest first. Read back in batches until the
@@ -128,12 +138,12 @@ export class ChatReadModel {
     let before: MessageCursor | null = page.before
       ? { at: new Date(page.before.at * 1000), id: page.before.id }
       : null;
-    let messages: LoggedMessage[] = [];
+    let messages: SaidMessage[] = [];
     const links = new Map<string, TurnLink>();
     let exhausted = false;
     for (;;) {
-      const read = await this.log.read(place, { before, limit: page.limit * 4 });
-      for (const [id, link] of await this.turnLinks(read.messages.map((m) => m.id))) {
+      const read = await this.messages.read(place, { before, limit: page.limit * 4 });
+      for (const [id, link] of this.links.turnsOf(read.messages.map((m) => m.id))) {
         links.set(id, link);
       }
       messages = [...read.messages, ...messages];
@@ -146,7 +156,7 @@ export class ChatReadModel {
     const kept = new Set<string>();
     let cut = 0;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const key = turnKey(messages[index] as LoggedMessage, links);
+      const key = turnKey(messages[index] as SaidMessage, links);
       if (!kept.has(key)) {
         if (kept.size === page.limit) {
           cut = index + 1;
@@ -168,11 +178,11 @@ export class ChatReadModel {
 
   private async transcriptOf(
     sessionId: string,
-    messages: readonly LoggedMessage[],
+    messages: readonly SaidMessage[],
     nextCursor: TranscriptCursor | null,
     known?: Map<string, TurnLink>,
   ): Promise<Transcript> {
-    const links = known ?? (await this.turnLinks(messages.map((message) => message.id)));
+    const links = known ?? this.links.turnsOf(messages.map((message) => message.id));
     const lines = messages.map((message) => chatLine(message, links.get(message.id), sessionId));
     return { lines, traces: await this.tracesOf(lines), nextCursor };
   }
@@ -185,62 +195,19 @@ export class ChatReadModel {
    * their first line.
    */
   async sessionTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript> {
-    const before = page?.before;
-    const rows = await this.db.all<SessionRow>(sql`
-      WITH lines AS (
-        -- The turn's own rows Agents keeps: its trace, and with no chat its
-        -- prompt and answer.
-        SELECT t.id, t.turn_id, t.role, t.content, t.input_state,
-               NULL AS sender_account_id, t.sender_name, t.created_at AS at, t.rowid AS seq
-        FROM rome_agent_messages t
-        WHERE t.session_id = ${sessionId}
-          AND (t.role = 'trace'
-               OR (SELECT chat_id FROM rome_sessions WHERE id = ${sessionId}) IS NULL)
-        UNION ALL
-        -- In a chat, the messages its turns took and gave, through the link.
-        SELECT m.id, l.turn_id,
-               CASE WHEN m.sender_agent IS NOT NULL THEN 'assistant' ELSE 'user' END,
-               m.parts, l.input_state, m.sender_account_id, m.sender_name, m.said_at, m.rowid
-        FROM agent_turn_messages l JOIN chat_messages m ON m.id = l.message_id
-        WHERE l.session_id = ${sessionId} AND l.role IN ('prompt', 'answer')
-      ),
-      keyed AS (
-        SELECT *, coalesce(turn_id, id) AS key,
-               MIN(at) OVER (PARTITION BY coalesce(turn_id, id)) AS started_at
-        FROM lines
-      ),
-      turns AS (
-        SELECT DISTINCT key, started_at FROM keyed
-        ${before ? sql`WHERE (started_at, key) < (${before.at}, ${before.id})` : sql``}
-        ORDER BY started_at DESC, key DESC
-        ${page ? sql`LIMIT ${page.limit + 1}` : sql``}
-      ),
-      shown AS (
-        SELECT key FROM turns ${page ? sql`LIMIT ${page.limit}` : sql``}
-      )
-      SELECT keyed.*, (SELECT count(*) FROM turns) > ${page?.limit ?? -1} AS more
-      FROM keyed JOIN shown USING (key)
-      ORDER BY keyed.started_at, keyed.key, keyed.at, keyed.seq
-    `);
-    const oldest = rows[0];
+    const { lines: turnLines, older } = this.links.turns(sessionId, {
+      before: page?.before ?? null,
+      ...(page ? { limit: page.limit } : {}),
+    });
     const traces: TurnTrace[] = [];
     const lines: TranscriptLine[] = [];
-    for (const row of rows) {
-      if (row.role !== "trace") lines.push(sessionLine(row, sessionId));
-      else if (row.turn_id !== null) {
-        traces.push({
-          id: row.id,
-          sessionId,
-          turnId: row.turn_id,
-          createdAt: new Date(row.at * 1000),
-        });
+    for (const line of turnLines) {
+      if (line.role !== "trace") lines.push(sessionLine(line, sessionId));
+      else if (line.turnId !== null) {
+        traces.push({ id: line.id, sessionId, turnId: line.turnId, createdAt: line.at });
       }
     }
-    return {
-      lines,
-      traces,
-      nextCursor: oldest?.more ? { at: oldest.started_at, id: oldest.key } : null,
-    };
+    return { lines, traces, nextCursor: older };
   }
 
   /** The place the session stands in: its chat's key and its thread. */
@@ -259,21 +226,6 @@ export class ChatReadModel {
       chatKey(row.platform, row.platform_chat_id as ChatId),
       (row.thread_id ?? undefined) as ChatId | undefined,
     );
-  }
-
-  /** Each message's first prompt or answer link, by message id. */
-  private async turnLinks(messageIds: readonly string[]): Promise<Map<string, TurnLink>> {
-    if (messageIds.length === 0) return new Map();
-    const rows = await this.db.all<TurnLink & { message_id: string }>(sql`
-      SELECT message_id, session_id, turn_id, input_state, role
-      FROM agent_turn_messages
-      WHERE message_id IN (SELECT value FROM json_each(${JSON.stringify(messageIds)}))
-        AND role IN ('prompt', 'answer')
-      ORDER BY rowid
-    `);
-    const links = new Map<string, TurnLink>();
-    for (const row of rows) if (!links.has(row.message_id)) links.set(row.message_id, row);
-    return links;
   }
 
   /** The trace of each turn `lines` belong to that has one. */
@@ -332,10 +284,11 @@ export class ChatReadModel {
       text: string;
       said_at: number;
     }>(sql`
-      SELECT m.id, m.chat_id, ${lineRole} AS role, m.text, m.said_at
+      SELECT m.id, s.id AS chat_id, ${lineRole} AS role, m.text, m.said_at
       FROM chat_messages m
       JOIN chats c ON c.id = m.chat_id AND c.platform = 'webchat'
-      LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = m.chat_id
+      JOIN rome_sessions s ON s.chat_id = c.id
+      LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       WHERE ${matchesEveryTerm}
       ORDER BY m.said_at DESC, m.id DESC
       LIMIT ${SEARCH_SCAN_LIMIT}
@@ -378,73 +331,52 @@ export class ChatReadModel {
   }
 }
 
-interface TurnLink {
-  session_id: string;
-  turn_id: string | null;
-  input_state: AgentInputState | null;
-  role: "prompt" | "answer";
-}
-
-interface SessionRow {
-  id: string;
-  turn_id: string | null;
-  role: TranscriptRole | "trace";
-  content: string;
-  input_state: AgentInputState | null;
-  sender_account_id: string | null;
-  sender_name: string | null;
-  at: number;
-  key: string;
-  started_at: number;
-  more: number;
-}
-
 /** The turn a message is drawn under: its link's turn, or itself. */
-function turnKey(message: LoggedMessage, links: ReadonlyMap<string, TurnLink>): string {
-  return links.get(message.id)?.turn_id ?? message.id;
+function turnKey(message: SaidMessage, links: ReadonlyMap<string, TurnLink>): string {
+  return links.get(message.id)?.turnId ?? message.id;
 }
 
 function turnKeys(
-  messages: readonly LoggedMessage[],
+  messages: readonly SaidMessage[],
   links: ReadonlyMap<string, TurnLink>,
 ): Set<string> {
   return new Set(messages.map((message) => turnKey(message, links)));
 }
 
 function chatLine(
-  message: LoggedMessage,
+  message: SaidMessage,
   link: TurnLink | undefined,
   openedSessionId: string,
 ): TranscriptLine {
   return {
     id: message.id,
-    sessionId: link?.session_id ?? openedSessionId,
-    turnId: link?.turn_id ?? null,
-    inputState: link?.input_state ?? null,
+    sessionId: link?.sessionId ?? openedSessionId,
+    turnId: link?.turnId ?? null,
+    inputState: link?.inputState ?? null,
     role:
-      message.senderAgent !== null
+      message.direction === "fromRome"
         ? "assistant"
         : link?.role === "prompt"
           ? "user"
           : "notification",
     content: message.parts,
-    senderAccountId: message.senderAccountId,
-    senderName: message.senderName,
+    senderAccountId: message.saidBy?.account.id ?? null,
+    senderName: message.senderName ?? null,
     createdAt: message.at,
   };
 }
 
-function sessionLine(row: SessionRow, sessionId: string): TranscriptLine {
+function sessionLine(line: TurnLine, sessionId: string): TranscriptLine {
   return {
-    id: row.id,
+    id: line.id,
     sessionId,
-    turnId: row.turn_id,
-    inputState: row.input_state,
-    role: row.role as TranscriptRole,
-    content: row.content,
-    senderAccountId: row.sender_account_id,
-    senderName: row.sender_name,
-    createdAt: new Date(row.at * 1000),
+    turnId: line.turnId,
+    inputState: line.inputState,
+    role: line.role as TranscriptRole,
+    content: line.content,
+    senderAccountId: line.senderAccountId,
+    senderName: line.senderName,
+    createdAt: line.at,
   };
 }
 

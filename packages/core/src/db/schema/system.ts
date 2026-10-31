@@ -541,6 +541,10 @@ export const romeSessions = sqliteTable(
     // (handoff, subagent, action runs). Vocabulary: docs/domains/chats.md.
     chatId: text("chat_id"),
     threadId: text("thread_id"),
+    // The one of Rome's accounts this seat speaks as: the channel's platform
+    // account, else the channel's name, and `agent:<name>` on the dashboard.
+    // Replaces `source_channel` at the contract step.
+    accountId: text("account_id"),
   },
   (table) => [
     index("idx_rome_sessions_chat").on(table.chatId, table.threadId),
@@ -600,20 +604,18 @@ export const chatMessages = sqliteTable(
     senderName: text("sender_name"),
     text: text("text").notNull(),
     parts: text("parts").notNull(), // JSON array of blocks, as composed
-    platformMessageId: text("platform_message_id"),
+    // The platform's id for the message. On the dashboard, where Rome is the
+    // platform, it is the message's own id.
+    platformMessageId: text("platform_message_id").notNull(),
     replyToPlatformMessageId: text("reply_to_platform_message_id"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
-    // A place's lines by time, then by the order they were recorded in: SQLite
-    // appends the rowid, which breaks ties within a second.
-    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt),
-    // A place's lines in insertion order: SQLite appends the rowid, so "lines
-    // after the guardian's last" is a range here, not a filter.
-    index("idx_chat_messages_place").on(table.chatId, table.threadId),
-    uniqueIndex("uq_chat_messages_platform")
-      .on(table.chatId, table.platformMessageId)
-      .where(sql`${table.platformMessageId} IS NOT NULL`),
+    // A place's lines by time. Within one second lines keep the order they
+    // were recorded in (rowid): a dashboard line's id is the client's, which
+    // carries no time.
+    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+    uniqueIndex("uq_chat_messages_platform").on(table.chatId, table.platformMessageId),
   ],
 );
 
@@ -816,15 +818,13 @@ export const romeAgentMessages = sqliteTable(
     id: text("id").primaryKey(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
-    inputState: text("input_state").$type<AgentInputState>(),
+    // Set on a fork's or subagent's own prompt. What was said in a chat is
+    // Chats' (`chat_messages`), linked to its turn in `agent_turn_messages`.
     actor: text("actor", { mode: "json" }).$type<SessionActor>(),
-    role: text("role").notNull(), // 'user' | 'assistant' | 'notification' | 'trace'
+    role: text("role").notNull(), // 'user' | 'assistant' | 'trace' | ...
     content: text("content").notNull(), // JSON array of blocks
-    platformMessageId: text("platform_message_id"),
     senderId: text("sender_id"),
     senderName: text("sender_name"),
-    replyToPlatformMessageId: text("reply_to_platform_message_id"),
-    contextInjectedTurnId: text("context_injected_turn_id"),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),
@@ -847,25 +847,7 @@ export const romeAgentMessages = sqliteTable(
     index("idx_rome_agent_messages_session_trace")
       .on(table.sessionId, table.createdAt)
       .where(sql`${table.role} = 'trace'`),
-    index("idx_rome_agent_messages_platform_message")
-      .on(table.sessionId, table.platformMessageId)
-      .where(sql`${table.platformMessageId} IS NOT NULL`),
   ],
-);
-
-// The platform messages a message row stands for besides its own
-// platform_message_id. A reply the platform shows as several messages is one
-// row, and a quote of any of them reaches it. Not a FK, as with the trace
-// blocks below: session-scoped deletes remove these rows explicitly.
-export const romeAgentMessagePlatformIds = sqliteTable(
-  "rome_agent_message_platform_ids",
-  {
-    sessionId: text("session_id").notNull(),
-    platformMessageId: text("platform_message_id").notNull(),
-    // The rome_agent_messages row the platform message belongs to.
-    messageId: text("message_id").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
 );
 
 // Append-only storage for trace content, avoiding the O(N²) cost of storing

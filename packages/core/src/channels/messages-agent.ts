@@ -1,56 +1,13 @@
-// `rome_agent_messages` as an {@link AccountMessages} store: what Rome was told and
-// what it said back, for every channel with no mirror of its own.
+// Chats' messages as an {@link AccountMessages} store: what Rome was told and
+// what it said back in each direct message, for every channel with no mirror
+// of its own.
 
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
 import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
-
-/**
- * The sender id Rome stamps on a message it sent itself.
- *
- * Written by every outbound path that records a channel message — the
- * `send_message` action and the backend turn — and already how
- * `loadConversationContext` picks Rome's own rows out of the pending
- * notifications. Read here for the same reason: it is the one persisted mark
- * that survives a row whose role does not say which way it went.
- */
-const ROME_SENDER_ID = "rome";
-
-/**
- * Which way a stored agent message went, as SQL over its role and sender.
- *
- * The role alone cannot answer it. `assistant` is Rome's and `user` is the
- * person's, but `notification` is written in both directions:
- * `addConversationMessage` stores an inbound line that did not wake the agent
- * under it, and `recordOutboundConversationMessage` stores a *delivered* Rome
- * message under it whenever the send was not tied to a turn
- * (`knownToProvider: false`). Reading the role alone puts those replies on the
- * person's side of the conversation.
- *
- * So the sender settles what the role leaves open, and this is stated once for
- * both stores that read these rows: two spellings would put one message on two
- * sides.
- */
-export function agentMessageOutbound(role: SQL, senderId: SQL): SQL {
-  return sql`CASE
-    WHEN ${role} = 'assistant' THEN 1
-    -- Asked of a notification alone, and not as a rule over every row: a
-    -- sender id is a provider's own opaque string, so a channel is free to
-    -- hand out one that reads as Rome's marker. Where the role already
-    -- answers, that collision decides nothing.
-    WHEN ${role} = 'notification' AND ${senderId} = ${ROME_SENDER_ID} THEN 1
-    ELSE 0
-  END`;
-}
-
-/** {@link agentMessageOutbound} over one row already read, for a reader that
- *  holds the row rather than a query. */
-export function isAgentMessageOutbound(role: string, senderId: string | null): boolean {
-  return role === "assistant" || (role === "notification" && senderId === ROME_SENDER_ID);
-}
 
 /**
  * Rome's own transcript of a channel conversation, read for accounts.
@@ -74,43 +31,42 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
       // by the group and no account answers to that. Said again on the store's
       // own terms so the guarantee survives a caller that hands over a group id
       // as if it were an account's address.
-      const held = sql`${addressed} AND coalesce(s.source_thread_type, '') <> 'group'`;
+      const held = sql`${addressed} AND c.kind = 'dm'`;
       return sql`
         SELECT
           s.source_channel AS source,
           s.source_thread_id AS key,
-          m.created_at AS at,
-          ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
+          m.said_at AS at,
+          -- A line is from Rome when one of its agents said it, or the
+          -- guardian said it through Rome's account there.
+          (m.sender_agent IS NOT NULL OR m.sender_account_id IS s.account_id) AS outbound,
           'agent:' || m.id AS ref,
-          m.content AS body,
+          m.parts AS body,
           m.id AS detail_key
-        FROM rome_agent_messages m
-        JOIN rome_sessions s ON s.id = m.session_id
-        WHERE s.type = 'channel'
+        FROM rome_sessions s
+        JOIN chats c ON c.id = s.chat_id
+        JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS NULL
+        WHERE s.type = 'channel' AND s.thread_id IS NULL
           -- A guardian chat is the guardian talking to Rome, not a conversation
           -- with a person on an account.
-          AND coalesce(s.source_channel, '') <> 'webchat'
-          AND ${held}
-          -- 'notification' is a line that passed outside a turn — something
-          -- the person said without waking the agent, or something Rome sent
-          -- untied to one. Either way it is conversation, and the direction
-          -- above is what tells the two apart. 'trace' is the turn's own
-          -- machinery and belongs to no conversation.
-          AND m.role IN ('user', 'assistant', 'notification')`;
+          AND c.platform <> 'webchat'
+          AND ${held}`;
     },
     body: messageContentText,
     detail: {
       of: (key) => sql`(
         SELECT json_object(
-          'senderId', m.sender_id,
+          'senderId', m.sender_account_id,
           'senderName', m.sender_name,
           'threadId', s.source_thread_id,
-          'threadName', s.source_thread_name,
-          'threadType', s.source_thread_type
+          'threadName', c.name,
+          'threadType', CASE c.kind WHEN 'dm' THEN 'private' ELSE c.kind END
         )
-        FROM rome_agent_messages m
-        JOIN rome_sessions s ON s.id = m.session_id
+        FROM chat_messages m
+        JOIN chats c ON c.id = m.chat_id
+        JOIN rome_sessions s ON s.chat_id = c.id AND s.thread_id IS NULL
         WHERE m.id = ${key}
+        LIMIT 1
       )`,
       map: transcriptDetail,
     },

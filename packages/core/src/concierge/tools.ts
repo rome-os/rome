@@ -120,7 +120,11 @@ export async function buildConciergeTools(
   // Said as Concierge's account, so the task event reads who asked off the
   // message.
   const sendInput = async (chatId: string, text: string) => {
-    const sent = await service.dashboard.send(taskChatPlace(chatId), { text }, CONCIERGE_ACCOUNT);
+    const sent = await service.dashboard.send(
+      await taskChatPlace(webchatRepo, chatId),
+      { text },
+      CONCIERGE_ACCOUNT,
+    );
     if (!sent.ok) throw new Error(refusal(sent));
   };
 
@@ -542,7 +546,12 @@ export async function buildConciergeTools(
             typeof args.last === "number"
               ? Math.min(MAX_READ_LIMIT, Math.max(1, Math.floor(args.last)))
               : DEFAULT_READ_LIMIT;
-          const said = await latestSaid(messages, taskChatPlace(chatId), limit, hasText);
+          const said = await latestSaid(
+            messages,
+            await taskChatPlace(webchatRepo, chatId),
+            limit,
+            hasText,
+          );
           return {
             chatId,
             title: chat.name,
@@ -617,7 +626,7 @@ export async function buildConciergeTools(
           const chat = await requireTaskChat(chatId);
           const [latest] = await latestSaid(
             messages,
-            taskChatPlace(chatId),
+            await taskChatPlace(webchatRepo, chatId),
             1,
             (message) => message.direction === "fromRome" && hasText(message),
           );

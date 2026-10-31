@@ -18,15 +18,14 @@ CREATE TABLE `chat_messages` (
 	`sender_name` text,
 	`text` text NOT NULL,
 	`parts` text NOT NULL,
-	`platform_message_id` text,
+	`platform_message_id` text NOT NULL,
 	`reply_to_platform_message_id` text,
 	`said_at` integer NOT NULL,
 	FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_chat_messages_page` ON `chat_messages` (`chat_id`,`thread_id`,`said_at`);--> statement-breakpoint
-CREATE INDEX `idx_chat_messages_place` ON `chat_messages` (`chat_id`,`thread_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `uq_chat_messages_platform` ON `chat_messages` (`chat_id`,`platform_message_id`) WHERE "chat_messages"."platform_message_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_chat_messages_page` ON `chat_messages` (`chat_id`,`thread_id`,`said_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_chat_messages_platform` ON `chat_messages` (`chat_id`,`platform_message_id`);--> statement-breakpoint
 CREATE TABLE `chats` (
 	`id` text PRIMARY KEY NOT NULL,
 	`platform` text NOT NULL,
@@ -39,18 +38,21 @@ CREATE TABLE `chats` (
 CREATE UNIQUE INDEX `uq_chats_platform_chat` ON `chats` (`platform`,`platform_chat_id`);--> statement-breakpoint
 ALTER TABLE `rome_sessions` ADD `chat_id` text;--> statement-breakpoint
 ALTER TABLE `rome_sessions` ADD `thread_id` text;--> statement-breakpoint
+ALTER TABLE `rome_sessions` ADD `account_id` text;--> statement-breakpoint
 CREATE INDEX `idx_rome_sessions_chat` ON `rome_sessions` (`chat_id`,`thread_id`);--> statement-breakpoint
 -- Every channel row as a seat of one of Rome's accounts in a chat: the chat's
 -- key, Rome's account there, and whether the row is a thread under a parent
--- row. A dashboard chat is a webchat chat keyed by its own id, forks
--- included. A direct message is keyed by both ends. Shared by the backfill below and the mirror
--- triggers, and dropped with them at the contract step.
+-- row. A dashboard chat is a webchat chat keyed by its own id. A fork is a
+-- session, not a chat, until it is promoted. A direct message is keyed by
+-- both ends, as the adapters key it. Read by the backfill below and dropped
+-- at its end.
 CREATE VIEW `_chat_seats` AS
 SELECT
   r.`id` AS `session_id`,
   CASE WHEN r.`source_channel` = 'webchat' THEN 'webchat'
        ELSE coalesce(c.`platform`, r.`source_channel`) END AS `platform`,
-  CASE WHEN r.`source_channel` = 'webchat' THEN r.`id`
+  -- A dashboard chat's key is opaque, given below when its row is written.
+  CASE WHEN r.`source_channel` = 'webchat' THEN NULL
        WHEN coalesce(r.`source_thread_type`, '') IN ('group', 'channel') THEN r.`source_thread_id`
        WHEN coalesce(c.`platform`, r.`source_channel`) IN ('email', 'agents') THEN r.`source_thread_id`
        -- A direct message is keyed by both ends. Where the platform's id is the
@@ -76,7 +78,11 @@ SELECT
   r.`source_thread_id` AS `source_thread_id`,
   CASE WHEN r.`source_channel` = 'webchat' THEN 'agent:' || coalesce(r.`agent_name`, 'main')
        ELSE coalesce(c.`platform_account_id`, r.`source_channel`) END AS `account_id`,
-  coalesce(r.`agent_name`, 'main') AS `agent`
+  coalesce(r.`agent_name`, 'main') AS `agent`,
+  -- A Telegram basic group: `-<id>` below 10^12 (https://core.telegram.org/api/bots/ids).
+  coalesce(c.`platform`, r.`source_channel`) = 'telegram'
+    AND r.`source_thread_id` GLOB '-[1-9]*' AND NOT substr(r.`source_thread_id`, 2) GLOB '*[^0-9]*'
+    AND length(r.`source_thread_id`) <= 13 AS `per_account_ids`
 FROM `rome_sessions` r
 LEFT JOIN `channels` c ON c.`id` = r.`source_channel`
 WHERE r.`type` = 'channel' AND r.`source_channel` IS NOT NULL AND r.`source_thread_id` IS NOT NULL;
@@ -106,8 +112,16 @@ SELECT
          WHERE CASE WHEN b.`type` = 'object' THEN json_extract(b.`value`, '$.type') END = 'text'), '')
        END AS `text`,
   m.`content` AS `parts`,
-  m.`platform_message_id` AS `platform_message_id`,
-  m.`reply_to_platform_message_id` AS `reply_to_platform_message_id`,
+  -- A Telegram basic group numbers messages per member account, so its ids
+  -- carry Rome's account in front, as the adapter writes them. A line with no
+  -- platform id is a dashboard line, where Rome is the platform and the line's
+  -- own id stands for it.
+  CASE WHEN m.`platform_message_id` IS NULL THEN m.`id`
+       WHEN s.`per_account_ids` THEN s.`account_id` || ':' || m.`platform_message_id`
+       ELSE m.`platform_message_id` END AS `platform_message_id`,
+  CASE WHEN s.`per_account_ids` AND m.`reply_to_platform_message_id` IS NOT NULL
+       THEN s.`account_id` || ':' || m.`reply_to_platform_message_id`
+       ELSE m.`reply_to_platform_message_id` END AS `reply_to_platform_message_id`,
   m.`created_at` AS `said_at`,
   CASE m.`role` WHEN 'user' THEN 'prompt' WHEN 'assistant' THEN 'answer'
        WHEN 'notification' THEN CASE WHEN m.`context_injected_turn_id` IS NOT NULL THEN 'seen' END
@@ -120,12 +134,17 @@ JOIN `_chat_seats` s ON s.`session_id` = r.`id`
 WHERE m.`role` <> 'trace' AND r.`chat_id` IS NOT NULL;
 --> statement-breakpoint
 INSERT OR IGNORE INTO `chats` (`id`, `platform`, `platform_chat_id`, `kind`, `name`, `started_at`)
-SELECT `session_id`, `platform`, `platform_chat_id`, `kind`, `name`, `created_at`
+SELECT `session_id`, `platform`, coalesce(`platform_chat_id`, lower(hex(randomblob(16)))), `kind`,
+  `name`, `created_at`
 FROM `_chat_seats` WHERE NOT `is_thread` ORDER BY `created_at`, `session_id`;
 --> statement-breakpoint
+-- A dashboard chat's row was written under its session's id; every other seat
+-- finds its chat by key, so the seats of one group share it.
 UPDATE `rome_sessions` SET `chat_id` = (
   SELECT ch.`id` FROM `_chat_seats` s
-  JOIN `chats` ch ON ch.`platform` = s.`platform` AND ch.`platform_chat_id` = s.`platform_chat_id`
+  JOIN `chats` ch ON ch.`platform` = s.`platform`
+    AND ch.`platform_chat_id` = coalesce(s.`platform_chat_id`,
+      (SELECT w.`platform_chat_id` FROM `chats` w WHERE w.`id` = s.`session_id`))
   WHERE s.`session_id` = `rome_sessions`.`id`
 ) WHERE `id` IN (SELECT `session_id` FROM `_chat_seats` WHERE NOT `is_thread`);
 --> statement-breakpoint
@@ -148,121 +167,10 @@ SELECT coalesce(
   v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
 FROM `_chat_message_rows` v WHERE v.`link_role` IS NOT NULL;
 --> statement-breakpoint
--- Mirror: while readers switch, every write to today's rows lands in Chats'
--- tables too, through the same views the backfill read. Dropped at the
--- contract step, when writers write Chats' tables directly.
-CREATE TRIGGER `_mirror_chat_seat_insert` AFTER INSERT ON `rome_sessions`
-WHEN NEW.`type` = 'channel' AND NEW.`source_channel` IS NOT NULL AND NEW.`source_thread_id` IS NOT NULL
-BEGIN
-  INSERT OR IGNORE INTO `chats` (`id`, `platform`, `platform_chat_id`, `kind`, `name`, `started_at`)
-  SELECT `session_id`, `platform`, `platform_chat_id`, `kind`, `name`, `created_at`
-  FROM `_chat_seats` WHERE `session_id` = NEW.`id` AND NOT `is_thread`;
-  UPDATE `rome_sessions` SET `chat_id` = (
-    SELECT ch.`id` FROM `_chat_seats` s
-    JOIN `chats` ch ON ch.`platform` = s.`platform` AND ch.`platform_chat_id` = s.`platform_chat_id`
-    WHERE s.`session_id` = NEW.`id`)
-  WHERE `id` = NEW.`id` AND NOT (SELECT `is_thread` FROM `_chat_seats` WHERE `session_id` = NEW.`id`);
-  UPDATE `rome_sessions` SET
-    `chat_id` = (SELECT p.`chat_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`parent_session_id`),
-    `thread_id` = NEW.`source_thread_id`
-  WHERE `id` = NEW.`id` AND (SELECT `is_thread` FROM `_chat_seats` WHERE `session_id` = NEW.`id`);
-END;
+UPDATE `rome_sessions` SET `account_id` = (
+  SELECT s.`account_id` FROM `_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`
+) WHERE `id` IN (SELECT `session_id` FROM `_chat_seats`);
 --> statement-breakpoint
--- A fork promoted to a chat becomes a seat by update, not insert.
-CREATE TRIGGER `_mirror_chat_seat_promote` AFTER UPDATE OF `type`, `source_channel`, `source_thread_id` ON `rome_sessions`
-WHEN NEW.`chat_id` IS NULL AND NEW.`type` = 'channel' AND NEW.`source_channel` IS NOT NULL AND NEW.`source_thread_id` IS NOT NULL
-BEGIN
-  INSERT OR IGNORE INTO `chats` (`id`, `platform`, `platform_chat_id`, `kind`, `name`, `started_at`)
-  SELECT `session_id`, `platform`, `platform_chat_id`, `kind`, `name`, `created_at`
-  FROM `_chat_seats` WHERE `session_id` = NEW.`id` AND NOT `is_thread`;
-  UPDATE `rome_sessions` SET `chat_id` = (
-    SELECT ch.`id` FROM `_chat_seats` s
-    JOIN `chats` ch ON ch.`platform` = s.`platform` AND ch.`platform_chat_id` = s.`platform_chat_id`
-    WHERE s.`session_id` = NEW.`id`)
-  WHERE `id` = NEW.`id` AND NOT (SELECT `is_thread` FROM `_chat_seats` WHERE `session_id` = NEW.`id`);
-  UPDATE `rome_sessions` SET
-    `chat_id` = (SELECT p.`chat_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`parent_session_id`),
-    `thread_id` = NEW.`source_thread_id`
-  WHERE `id` = NEW.`id` AND (SELECT `is_thread` FROM `_chat_seats` WHERE `session_id` = NEW.`id`);
-  INSERT OR IGNORE INTO `chat_messages` (`id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`,
-    `sender_name`, `text`, `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`)
-  SELECT `legacy_id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`, `sender_name`, `text`,
-    `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`
-  FROM `_chat_message_rows` WHERE `session_id` = NEW.`id` ORDER BY `said_at`, `legacy_id`;
-  INSERT OR REPLACE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
-  SELECT v.`legacy_id`, v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
-  FROM `_chat_message_rows` v
-  WHERE v.`session_id` = NEW.`id` AND v.`link_role` IS NOT NULL
-    AND EXISTS (SELECT 1 FROM `chat_messages` cm WHERE cm.`id` = v.`legacy_id`);
-END;
+DROP VIEW `_chat_message_rows`;
 --> statement-breakpoint
-CREATE TRIGGER `_mirror_chat_seat_thread` AFTER UPDATE OF `parent_session_id` ON `rome_sessions`
-WHEN NEW.`type` = 'channel' AND NEW.`parent_session_id` IS NOT NULL
-  AND coalesce(NEW.`source_channel`, '') <> 'webchat' AND NEW.`thread_id` IS NULL
-BEGIN
-  UPDATE `rome_sessions` SET
-    `chat_id` = (SELECT p.`chat_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`parent_session_id`),
-    `thread_id` = NEW.`source_thread_id`
-  WHERE `id` = NEW.`id`;
-END;
---> statement-breakpoint
-CREATE TRIGGER `_mirror_chat_name` AFTER UPDATE OF `name`, `source_thread_name` ON `rome_sessions`
-WHEN NEW.`chat_id` IS NOT NULL AND NEW.`thread_id` IS NULL
-BEGIN
-  UPDATE `chats` SET `name` = (SELECT `name` FROM `_chat_seats` WHERE `session_id` = NEW.`id`)
-  WHERE `id` = NEW.`chat_id` AND `id` = NEW.`id`;
-END;
---> statement-breakpoint
-CREATE TRIGGER `_mirror_chat_seat_delete` AFTER DELETE ON `rome_sessions`
-WHEN OLD.`chat_id` IS NOT NULL AND OLD.`thread_id` IS NULL
-BEGIN
-  DELETE FROM `chats` WHERE `id` = OLD.`chat_id` AND NOT EXISTS (
-    SELECT 1 FROM `rome_sessions` WHERE `chat_id` = OLD.`chat_id` AND `thread_id` IS NULL);
-END;
---> statement-breakpoint
-CREATE TRIGGER `_mirror_chat_message_insert` AFTER INSERT ON `rome_agent_messages`
-WHEN NEW.`role` <> 'trace'
-BEGIN
-  INSERT OR IGNORE INTO `chat_messages` (`id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`,
-    `sender_name`, `text`, `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`)
-  SELECT `legacy_id`, `chat_id`, `thread_id`, `sender_account_id`, `sender_agent`, `sender_name`, `text`,
-    `parts`, `platform_message_id`, `reply_to_platform_message_id`, `said_at`
-  FROM `_chat_message_rows` WHERE `legacy_id` = NEW.`id`;
-  INSERT OR REPLACE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
-  SELECT coalesce(
-      (SELECT cm.`id` FROM `chat_messages` cm WHERE cm.`id` = v.`legacy_id`),
-      (SELECT cm.`id` FROM `chat_messages` cm
-       WHERE cm.`chat_id` = v.`chat_id` AND cm.`platform_message_id` = v.`platform_message_id`)),
-    v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
-  FROM `_chat_message_rows` v WHERE v.`legacy_id` = NEW.`id` AND v.`link_role` IS NOT NULL;
-END;
---> statement-breakpoint
-CREATE TRIGGER `_mirror_chat_message_update` AFTER UPDATE ON `rome_agent_messages`
-WHEN NEW.`role` <> 'trace'
-BEGIN
-  UPDATE OR IGNORE `chat_messages` SET
-    (`sender_account_id`, `sender_agent`, `sender_name`, `text`, `parts`, `platform_message_id`,
-     `reply_to_platform_message_id`, `said_at`) = (
-      SELECT `sender_account_id`, `sender_agent`, `sender_name`, `text`, `parts`, `platform_message_id`,
-        `reply_to_platform_message_id`, `said_at`
-      FROM `_chat_message_rows` WHERE `legacy_id` = NEW.`id`)
-  WHERE `id` = NEW.`id`;
-  DELETE FROM `agent_turn_messages` WHERE `session_id` = NEW.`session_id` AND `message_id` = coalesce(
-    (SELECT cm.`id` FROM `chat_messages` cm WHERE cm.`id` = NEW.`id`),
-    (SELECT cm.`id` FROM `chat_messages` cm JOIN `rome_sessions` r ON r.`chat_id` = cm.`chat_id`
-     WHERE r.`id` = NEW.`session_id` AND cm.`platform_message_id` = NEW.`platform_message_id`));
-  INSERT OR REPLACE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
-  SELECT coalesce(
-      (SELECT cm.`id` FROM `chat_messages` cm WHERE cm.`id` = v.`legacy_id`),
-      (SELECT cm.`id` FROM `chat_messages` cm
-       WHERE cm.`chat_id` = v.`chat_id` AND cm.`platform_message_id` = v.`platform_message_id`)),
-    v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
-  FROM `_chat_message_rows` v WHERE v.`legacy_id` = NEW.`id` AND v.`link_role` IS NOT NULL;
-END;
---> statement-breakpoint
-CREATE TRIGGER `_mirror_chat_message_delete` AFTER DELETE ON `rome_agent_messages`
-WHEN OLD.`role` <> 'trace'
-BEGIN
-  DELETE FROM `agent_turn_messages` WHERE `session_id` = OLD.`session_id` AND `message_id` = OLD.`id`;
-  DELETE FROM `chat_messages` WHERE `id` = OLD.`id`;
-END;
+DROP VIEW `_chat_seats`;

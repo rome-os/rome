@@ -6,20 +6,34 @@
 // anything acts on it, whether or not an agent answers it. Participation hears
 // it from MessageSaid and decides the wake there.
 
-import type { Channel, InboundEvent, SaidInboundEvent, MessagesSaid } from "@rome-os/app-runtime";
+import type {
+  Channel,
+  ChannelMessage,
+  InboundEvent,
+  SaidInboundEvent,
+  MessagesSaid,
+} from "@rome-os/app-runtime";
+import { v7 as uuidv7 } from "uuid";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
+import type { TurnLinks } from "../sessions/turn-links.js";
+import type { ChatKind } from "./chat.js";
+import type { ChatRepository } from "./chat-repository.js";
 import type { ChatEvents } from "./events.js";
 import type { MessageRepository } from "./message-repository.js";
 import { messageToRome } from "./message.js";
-import { chatKey, placeIn } from "./place.js";
+import { chatKey, directMessageOn, ownedBy, placeIn, type ChatKey } from "./place.js";
 
 const log = createLogger("chats-inbound");
 
 export interface InboundRecordingDeps {
-  /** Opens the chat a message is said in, or finds it. */
-  chats: Pick<WebChatRepository, "ensureChannelChat">;
-  messages: Pick<MessageRepository, "record" | "wakeDecided" | "isWakeUndecided">;
+  /** Starts the chat a message is said in, or finds it. */
+  chats: Pick<ChatRepository, "start">;
+  /** Opens the seat of Rome's account the message arrived on, in Agents. */
+  seats: Pick<WebChatRepository, "ensureChannelChat" | "advanceActivity">;
+  messages: Pick<MessageRepository, "record">;
+  /** Holds a message out of every catch-up until its wake is decided. */
+  wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
   events: ChatEvents;
   /** The platform a channel's accounts are on, for a message that names no
    *  account it arrived on. */
@@ -88,40 +102,66 @@ export function inboundRecording(
     // channel by to answer it.
     const heard = { ...saved, message: { ...saved.message, channel: channel.name } };
     const { message } = heard;
-    const threadType = message.thread?.kind === "dm" ? "private" : "group";
-    await deps.chats.ensureChannelChat({
+    const platform = message.account?.platform ?? deps.platformOfChannel(channel.name);
+    // Rome's end of the chat: the account's platform id, or the channel's name
+    // while its record knows none.
+    const romeEnd = message.account?.id ?? channel.name;
+    const { key, kind } = chatOf(platform, romeEnd, message);
+    const chat = deps.chats.start(
+      key,
+      kind,
+      message.parentChatId === undefined ? (message.thread?.name ?? null) : null,
+    );
+    const seat = await deps.seats.ensureChannelChat({
       channel: channel.name,
       threadId: message.chatId,
       ...(message.parentChatId === undefined ? {} : { parentThreadId: message.parentChatId }),
       ...(message.thread?.name === undefined ? {} : { threadName: message.thread.name }),
-      threadType,
+      threadType: kind === "dm" ? "private" : "group",
       // A chat starts answered by main. Its own agent, when it has one, was
       // set through its settings, which start the chat's row themselves.
       agentName: "main",
+      chatId: chat.id,
+      accountId: romeEnd,
     });
-    const platform = message.account?.platform ?? deps.platformOfChannel(channel.name);
     const replyTo = message.replyTo?.messageId.trim();
-    const recorded = await deps.messages.record(
-      messageToRome({
-        place: placeIn(
-          chatKey(platform, message.parentChatId ?? message.chatId),
-          message.parentChatId === undefined ? undefined : message.chatId,
-        ),
-        saidBy: {
-          account: { platform, id: message.senderId },
-          name: message.senderDisplayName ?? message.senderId,
-        },
-        body: { text: message.text ?? "", attachments: message.attachments },
-        platformMessageId: message.messageId,
-        ...(replyTo ? { replyTo } : {}),
-        at: message.timestamp,
-      }),
-      { channel: channel.name, heard },
-    );
-    if (!recorded) return;
+    // Undecided before the message is recorded, so no catch-up reads it in
+    // between. A redelivery records nothing and leaves its wake as it was.
+    const id = uuidv7();
+    deps.wakes.wakeUndecided(id);
+    const recorded = await deps.messages
+      .record(
+        messageToRome({
+          id,
+          place: placeIn(key, message.parentChatId === undefined ? undefined : message.chatId),
+          saidBy: {
+            account: { platform, id: message.senderId },
+            name: message.senderDisplayName ?? message.senderId,
+          },
+          body: { text: message.text ?? "", attachments: message.attachments },
+          platformMessageId: ownedBy(key, romeEnd, message.messageId),
+          ...(replyTo ? { replyTo: ownedBy(key, romeEnd, replyTo) } : {}),
+          at: message.timestamp,
+        }),
+      )
+      .catch((error: unknown) => {
+        deps.wakes.wakeDecided(id);
+        throw error;
+      });
+    if (!recorded) {
+      deps.wakes.wakeDecided(id);
+      return;
+    }
+    await deps.seats.advanceActivity(seat.id, recorded.at);
+    await deps.events.publish({
+      type: "MessageSaid",
+      message: recorded,
+      chatRecordId: seat.id,
+      via: { channel: channel.name, heard },
+    });
     // Handed to nobody, as while a hook is being swapped, nothing will decide
     // its wake, so it stands decided as a message no agent answered.
-    if (!delivered.delete(recorded.id)) await deps.messages.wakeDecided(recorded.id);
+    if (!delivered.delete(recorded.id)) deps.wakes.wakeDecided(recorded.id);
   };
 
   const subscribe = (channel: Channel): void => {
@@ -157,7 +197,7 @@ export function inboundRecording(
         recording.clear();
       };
     },
-    decided: (recorded) => deps.messages.wakeDecided(recorded.messageId),
+    decided: async (recorded) => deps.wakes.wakeDecided(recorded.messageId),
   };
 
   return {
@@ -185,4 +225,22 @@ async function materialized(channel: Channel, event: InboundEvent): Promise<Inbo
     });
     return event;
   }
+}
+
+/** The chat a message is said in, and its kind. A thread's chat is its
+ *  parent. */
+function chatOf(
+  platform: string,
+  romeEnd: string,
+  message: ChannelMessage,
+): { key: ChatKey; kind: ChatKind } {
+  if (message.parentChatId !== undefined) {
+    return { key: chatKey(platform, message.parentChatId), kind: "group" };
+  }
+  if (message.thread?.kind !== "dm")
+    return { key: chatKey(platform, message.chatId), kind: "group" };
+  return {
+    key: directMessageOn(platform, romeEnd, message.chatId, message.senderId),
+    kind: "dm",
+  };
 }

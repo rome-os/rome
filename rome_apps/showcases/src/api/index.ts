@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
+import { SESSION_LINES } from "./session-lines.js";
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import {
   type CollectionSource,
@@ -418,7 +419,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     const map = new Map<string, string>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.content AS content
-      FROM rome_agent_messages wm
+      FROM ${SESSION_LINES} wm
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'user'
       ORDER BY wm.created_at ASC
@@ -472,7 +473,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     const map = new Map<string, TraceEventDto[]>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.content AS content
-      FROM rome_agent_messages wm
+      FROM ${SESSION_LINES} wm
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'assistant'
       ORDER BY wm.created_at ASC
@@ -517,7 +518,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     const open = new Map<string, ReplyInteractionBlock>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.role AS role, wm.content AS content
-      FROM rome_agent_messages wm
+      FROM ${SESSION_LINES} wm
       WHERE wm.session_id = ${sessionId}
         AND wm.role IN ('assistant', 'user')
       ORDER BY
