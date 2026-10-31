@@ -60,18 +60,33 @@ function textOf(content: string): string {
   }
 }
 
+// Where Chats keeps no platform ids, the ids its adapters gave carry them:
+// a chat is `<platform>:<platform's id>` and a message `<chat id>/<platform's
+// id>`. A dashboard chat's and line's ids are their own.
+function platformChatIdOf(chat: { id: string; platform: string }): string {
+  return chat.id.startsWith(`${chat.platform}:`)
+    ? chat.id.slice(chat.platform.length + 1)
+    : chat.id;
+}
+
+function platformMessageIdOf(chatId: string, messageId: string): string {
+  return messageId.startsWith(`${chatId}/`) ? messageId.slice(chatId.length + 1) : messageId;
+}
+
 const accountOfChannel = new Map(legacy.channels.map((c) => [c.id, c.platform_account_id]));
 const chatSessions = legacy.sessions.filter((s) => s.type === "channel");
 
 test.describe("data", () => {
   test("every chat session became one chat", async () => {
-    const chats = await control.sql<{
-      id: string;
-      platform: string;
-      platform_chat_id: string;
-      kind: string;
-      name: string | null;
-    }>("select id, platform, platform_chat_id, kind, name from chats");
+    const chats = (
+      await control.sql<{
+        id: string;
+        platform: string;
+        platform_chat_id?: string;
+        kind: string;
+        name: string | null;
+      }>("select * from chats")
+    ).map((c) => ({ ...c, platform_chat_id: c.platform_chat_id ?? platformChatIdOf(c) }));
     const sessions = await control.sql<{
       id: string;
       chat_id: string | null;
@@ -110,16 +125,26 @@ test.describe("data", () => {
   });
 
   test("every message a chat session held is in its chat, with its text", async () => {
-    const rows = await control.sql<{
-      id: string;
-      chat_id: string;
-      text: string;
-      platform_message_id: string;
-      reply_to_platform_message_id: string | null;
-      sender_account_id: string | null;
-    }>(
-      "select id, chat_id, text, platform_message_id, reply_to_platform_message_id, sender_account_id from chat_messages",
-    );
+    const rows = (
+      await control.sql<{
+        id: string;
+        chat_id: string;
+        text: string;
+        platform_message_id?: string;
+        reply_to_platform_message_id?: string | null;
+        reply_to_message_id?: string | null;
+        sender_account_id: string | null;
+      }>("select * from chat_messages")
+    ).map((r) => ({
+      ...r,
+      platform_message_id: r.platform_message_id ?? platformMessageIdOf(r.chat_id, r.id),
+      reply_to_platform_message_id:
+        r.reply_to_platform_message_id !== undefined
+          ? r.reply_to_platform_message_id
+          : r.reply_to_message_id
+            ? platformMessageIdOf(r.chat_id, r.reply_to_message_id)
+            : null,
+    }));
     const links = await control.sql<{
       message_id: string;
       session_id: string;
@@ -320,7 +345,7 @@ test.describe("platform chats", () => {
       .toBe(true);
     const rows = await control.sql<{ n: number }>(
       `select count(*) as n from chat_messages m join chats c on c.id = m.chat_id
-       where c.platform_chat_id = '${SUPERGROUP.id}' and m.text like '%fxsuper5%'`,
+       where c.id like '%${SUPERGROUP.id}' and m.text like '%fxsuper5%'`,
     );
     // The guardian's message, said once in the group, and alpha's reply.
     expect(rows[0]!.n).toBeGreaterThanOrEqual(2);
