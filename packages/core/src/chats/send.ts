@@ -25,6 +25,7 @@ import {
 } from "../channels/channel.js";
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ChatRepository } from "./chat-repository.js";
 import type { MessageRepository } from "./message-repository.js";
 import {
@@ -71,9 +72,9 @@ export interface SendIntoPlaceDeps extends SendDeps {
   /** Where a send into a dashboard chat goes. Absent, the dashboard takes no
    *  sends. */
   dashboard?: DashboardInbox;
-  /** The address a channel's seat in a chat heard it at, which a direct
-   *  message whose platform gives it an id of its own is sent to. */
-  addressIn?: (channel: string, chatId: string) => string | null;
+  /** Where a channel's seat heard its chat, which a direct message whose
+   *  platform gives it an id of its own is sent to. */
+  webchatRepo?: Pick<WebChatRepository, "addressIn">;
 }
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
@@ -159,7 +160,7 @@ export async function send(
   // heard it there (Feishu's p2p chat), else to the other end.
   const heardAt =
     place.threadId === undefined && chat.kind === "dm"
-      ? (deps.addressIn?.(channel.name, chat.ref.id) ?? null)
+      ? (deps.webchatRepo?.addressIn(channel.name, chat.ref.id) ?? null)
       : null;
   const address = (heardAt ?? addressOf(place)) as ChatId;
   const send = channel.send;

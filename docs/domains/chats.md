@@ -7,6 +7,7 @@ Who said what, where, and as whom. Chats follows the definitions in [Connections
 A place where people and agents talk: a group, a direct message, the chat built into the dashboard. The code and the dashboard call it a conversation, a deprecated alias for the same thing.
 
 - A chat is known by its platform and the platform's own id for it. Whether it is a group or a direct message is something about the chat, not part of what it is known by.
+- Rome records a chat and its messages under ids its channel gives them, unique across platforms, and makes none of its own. A platform's channel uses the platform's ids with the platform in front, so a message heard again, or heard by two of Rome's accounts in one group, is recorded once. The dashboard gives its chats and messages ids of their own.
 - A group is named by the platform's own id for it, so one group is one chat however many of Rome's accounts are in it.
 - A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two. Where the platform gives a direct message no id of its own across Rome's accounts, Rome derives one from the two ends.
 - A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
@@ -87,7 +88,8 @@ One thing a participant said or did in a chat.
 How a message Rome sends stands with its platform: sent or failed. Only a send from Rome has one. It is the send's answer to whoever sent, and never part of the chat: it is not stored, and it has no pending state. A chat records a message Rome sends once the platform took it, with the platform's id for it, and nothing for one it refused.
 
 - The platform's answer settles it: sent once the platform took the message, failed with the platform's own words when it refused.
-- Every message on record has its platform's id. Where Rome is the platform, as on the dashboard, a message's own id stands for it.
+- Every message on record carries its platform's id inside its own, and a reply names the message it quotes the same way. On the dashboard, where Rome is the platform, a message's id is its own.
+- A reply the platform split into several messages is recorded once, under the first one's id.
 - Once the platform has taken a message, it is sent, even when Rome fails to write that down. Reporting it failed would invite a second real message.
 - A failed message reads as never said, to the guardian and to the agent. Sending the text again is a new message.
 
