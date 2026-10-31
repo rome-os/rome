@@ -1,5 +1,5 @@
 import type { Account } from "@rome-os/app-runtime";
-import { chatIdsOn } from "../../chats/chat-repository.js";
+import { chatIdsOn, chatIdsOfKind } from "../../chats/chat-repository.js";
 import { seatMessageCount } from "../../webchat/chat-read-model-sql.js";
 import {
   and,
@@ -69,7 +69,7 @@ function answeringAgentName(scope: SessionQueryStorageScope): SQL<string | null>
   )} end`;
   // A null routing override is an explicit pin to main.
   return sql<string | null>`case when ${onLinkedChannel} then case
-    when ${romeSessions.sourceThreadType} IS 'private' then ${accountAgent}
+    when ${seatKind} = 'dm' then ${accountAgent}
     when ${pinnedToMain} then null
     when coalesce(${romeSessions.agentName}, 'main') in ('main', 'core:main') then ${accountAgent}
     else ${romeSessions.agentName} end else ${romeSessions.agentName} end`;
@@ -104,6 +104,14 @@ function seatChannel(scope: Pick<SessionQueryStorageScope, "seatChannels">): SQL
   return sql<string | null>`(case ${sql.join(whens, sql` `)} end)`;
 }
 
+/** The kind of place a session's seat stands in: a topic when it stands in
+ *  a thread, else its chat's kind; null for a session with no seat. */
+const seatKind = sql<"dm" | "group" | "topic" | null>`(case
+  when ${romeSessions.chatId} is null then null
+  when ${romeSessions.threadId} is not null then 'topic'
+  when ${romeSessions.chatId} in ${chatIdsOfKind("dm")} then 'dm'
+  else 'group' end)`;
+
 export interface SessionQueryStorageScope {
   /** Rome's channels and their accounts, which name the channel a seat
    *  speaks through. The repository fills it in. */
@@ -119,7 +127,7 @@ export interface SessionQueryStorageScope {
   ownerAgentNames?: string[];
   includeUninstalledOwners?: boolean;
   knownAgentNames?: string[];
-  sourceChannels?: string[];
+  channels?: string[];
   includeInternalSource?: boolean;
   projectPathPrefix?: string;
   models?: Array<{ provider?: string; name: string } | { unknown: true }>;
@@ -213,10 +221,10 @@ function sessionPredicates(
     }
     predicates.push(ownerPredicates.length > 0 ? or(...ownerPredicates)! : sql`0 = 1`);
   }
-  if (scope.sourceChannels || scope.includeInternalSource) {
+  if (scope.channels || scope.includeInternalSource) {
     const sourcePredicates: SQL[] = [];
-    if (scope.sourceChannels?.length) {
-      sourcePredicates.push(inArray(seatChannel(scope), scope.sourceChannels));
+    if (scope.channels?.length) {
+      sourcePredicates.push(inArray(seatChannel(scope), scope.channels));
     }
     if (scope.includeInternalSource) sourcePredicates.push(isNull(seatChannel(scope)));
     predicates.push(sourcePredicates.length > 0 ? or(...sourcePredicates)! : sql`0 = 1`);
@@ -236,8 +244,8 @@ function sessionPredicates(
     const fields = [
       romeSessions.name,
       romeSessions.id,
-      romeSessions.sourceThreadName,
-      romeSessions.sourceThreadId,
+      romeSessions.threadName,
+      romeSessions.chatId,
       answeringAgentName(scope),
       romeSessions.triggerName,
       romeSessions.triggerActionName,
@@ -398,6 +406,7 @@ export class SessionQueryRepository {
         // The seat's channel, by its account and chat, in place of the stored
         // column.
         seatChannel: seatChannel(query.scope),
+        seatKind,
         type: romeSessionKind,
         messageCount: sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number),
         stats: {
@@ -446,7 +455,7 @@ export class SessionQueryRepository {
     return {
       rows: rows.map((row) => ({ ...row, stats: rawStats(row.stats) })),
       total: totalRows[0]?.count ?? 0,
-      facets: { types: typeRows, sourceChannels: sourceRows },
+      facets: { types: typeRows, channels: sourceRows },
     };
   }
 
@@ -544,6 +553,7 @@ export class SessionQueryRepository {
     const sessionRowWithKind = {
       ...sessionRowWithKindAndColumn,
       seatChannel: seatChannel({ seatChannels: this.channels() }),
+      seatKind,
     };
     const rows = await this.db
       .select(sessionRowWithKind)

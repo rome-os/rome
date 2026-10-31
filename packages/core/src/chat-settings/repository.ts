@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, isNull, like, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { ChatRepository, chatIdsOn } from "../chats/chat-repository.js";
@@ -9,14 +9,22 @@ import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
-export type StoredChatRow = typeof romeSessions.$inferSelect;
+/** A seat as chat settings read it: its row, the kind of place it stands in
+ *  (a topic when it stands in a thread), and the platform address its
+ *  account reaches it at, null when no channel is its account. */
+export type StoredChatRow = typeof romeSessions.$inferSelect & {
+  kind: "dm" | "group" | "topic";
+  address: ChatId | null;
+};
+
+type SeatRow = typeof romeSessions.$inferSelect;
 
 export interface ChatSettingsRepositoryDeps {
   /** Where a chat is started when a rule is set before anything was said. */
   chats: Pick<ChatRepository, "start" | "rename">;
   /** The chat adapters, which name the chat at an address and the channel
    *  that is one of Rome's accounts. */
-  adapters: Pick<ChatAdapters, "chatAt" | "accountOn" | "channelOf">;
+  adapters: Pick<ChatAdapters, "chatAt" | "accountOn" | "channelOf" | "addressAt">;
 }
 
 /**
@@ -57,7 +65,7 @@ export class ChatSettingsRepository {
     exec: DrizzleDb | DrizzleTx,
     channel: string,
     address: ChatId,
-  ): StoredChatRow | undefined {
+  ): SeatRow | undefined {
     const account = this.accountOn(channel).id;
     const first = (...where: SQL[]) =>
       exec
@@ -77,14 +85,30 @@ export class ChatSettingsRepository {
 
   /** The channel the seat `row` speaks through: the one that is its account
    *  on its chat's platform, or null when none is. */
-  channelOf(row: StoredChatRow): string | null {
+  channelOf(row: SeatRow): string | null {
     const chat = row.chatId ? this.messages.chats.find(row.chatId) : null;
     if (!chat || !row.accountId) return null;
     return this.deps.adapters.channelOf({ platform: chat.ref.platform, id: row.accountId });
   }
 
+  /** Seat `row` with the kind of place it stands in and its address. */
+  private stored(row: SeatRow): StoredChatRow {
+    const chat = row.chatId ? this.messages.chats.find(row.chatId) : null;
+    const kind = row.threadId !== null ? "topic" : chat?.kind === "dm" ? "dm" : "group";
+    const channel = this.channelOf(row);
+    const address =
+      chat && channel
+        ? this.deps.adapters.addressAt(
+            channel,
+            placeIn(chat.ref, row.threadId === null ? undefined : (row.threadId as ChatId)),
+          )
+        : null;
+    return { ...row, kind, address };
+  }
+
   find(channel: string, chatId: ChatId): StoredChatRow | null {
-    return this.seatAt(this.db, channel, chatId) ?? null;
+    const row = this.seatAt(this.db, channel, chatId);
+    return row ? this.stored(row) : null;
   }
 
   listKnown(input: { channel?: string; query?: string }): StoredChatRow[] {
@@ -98,14 +122,18 @@ export class ChatSettingsRepository {
       );
     }
     if (input.query?.trim()) {
-      predicates.push(like(romeSessions.sourceThreadName, `%${input.query.trim()}%`));
+      const pattern = `%${input.query.trim()}%`;
+      predicates.push(
+        or(like(romeSessions.name, pattern), like(romeSessions.threadName, pattern))!,
+      );
     }
     return this.db
       .select()
       .from(romeSessions)
       .where(and(...predicates))
-      .orderBy(asc(romeSessions.accountId), asc(romeSessions.sourceThreadName))
-      .all();
+      .orderBy(asc(romeSessions.accountId), asc(romeSessions.name))
+      .all()
+      .map((row) => this.stored(row));
   }
 
   /** The reply rule of the chat at `chatId` as the account `channel` speaks
@@ -123,11 +151,7 @@ export class ChatSettingsRepository {
     const own = this.seatAt(this.db, channel, chatId);
     if (own === undefined && !isShared(kind)) return null;
     if (own?.channelSettings && hasRule(own.channelSettings)) return own.channelSettings;
-    if (
-      !isShared(kind) &&
-      own?.sourceThreadType !== "group" &&
-      own?.sourceThreadType !== "channel"
-    ) {
+    if (!isShared(kind) && (own === undefined || this.stored(own).kind !== "group")) {
       return own?.channelSettings ?? null;
     }
     // Another of Rome's seats in the group may have set the group's rule.
@@ -146,26 +170,6 @@ export class ChatSettingsRepository {
       .all();
     const rule = shared.map((row) => row.settings as StoredChatSettings).find(hasRule) ?? null;
     return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
-  }
-
-  /**
-   * Mark the row of the group or channel `descriptor` names on `channel` with
-   * that kind when its row was stored with none, so it reads as one chat with
-   * the rows of Rome's other accounts in it. Changes no other row.
-   */
-  private classify(exec: DrizzleTx, descriptor: ChatDescriptor, channel: string): void {
-    if (!isShared(descriptor.kind)) return;
-    exec
-      .update(romeSessions)
-      .set({ sourceThreadType: descriptor.kind })
-      .where(
-        and(
-          eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)),
-          isNull(romeSessions.parentSessionId),
-          isNull(romeSessions.sourceThreadType),
-        ),
-      )
-      .run();
   }
 
   /** The platform channel `channel`'s accounts live on. */
@@ -232,17 +236,9 @@ export class ChatSettingsRepository {
     // writes, and another connection may commit in between.
     this.db.transaction(
       (tx) => {
-        // A row stored before its type was known joins its group's other rows
-        // first, so the rule below is written to the whole group.
         const kindKnown = input.kindKnown ?? true;
-        if (kindKnown) this.classify(tx, descriptor, channel);
         const via = this.accountOn(channel);
         const place = this.chatOf(channel, descriptor.ref.chatId, descriptor.kind);
-        const sourceThreadType = !kindKnown
-          ? null
-          : descriptor.kind === "dm"
-            ? "private"
-            : descriptor.kind;
         const chat = this.deps.chats.start(
           place,
           descriptor.kind === "dm" ? "dm" : "group",
@@ -261,9 +257,6 @@ export class ChatSettingsRepository {
             largeModelSelection: null,
             agentName: null,
             type: "channel",
-            sourceThreadId: descriptor.ref.chatId,
-            sourceThreadName: descriptor.displayName,
-            sourceThreadType,
             chatId: chat.ref.id,
             accountId: via.id,
             createdAt: now,
@@ -274,9 +267,7 @@ export class ChatSettingsRepository {
           .run();
         tx.update(romeSessions)
           .set({
-            ...(sourceThreadType === null ? {} : { sourceThreadType }),
             name: descriptor.displayName,
-            sourceThreadName: descriptor.displayName,
             // The routing marker is this account's alone, so only its row holds it.
             channelSettings: input.settings,
             ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
@@ -316,7 +307,6 @@ export class ChatSettingsRepository {
     },
   ): void {
     this.db.transaction((tx) => {
-      const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parent = descriptor.parent
         ? this.seatAt(tx, channel, descriptor.parent.chatId)
         : undefined;
@@ -332,9 +322,7 @@ export class ChatSettingsRepository {
           largeModelSelection: null,
           agentName: null,
           type: "channel",
-          sourceThreadId: descriptor.ref.chatId,
-          sourceThreadName: descriptor.displayName,
-          sourceThreadType,
+          threadName: descriptor.displayName,
           channelSettings: null,
           parentSessionId,
           // A thread's seat stands in its parent's chat, as the account.
@@ -356,8 +344,7 @@ export class ChatSettingsRepository {
       tx.update(romeSessions)
         .set({
           name: descriptor.displayName,
-          sourceThreadName: descriptor.displayName,
-          sourceThreadType,
+          threadName: descriptor.displayName,
           parentSessionId,
           channelSettings: input.settings,
           ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),

@@ -230,7 +230,7 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
   };
   if (session.type === "channel") {
     return (
-      clean(session.sourceThreadName) ??
+      clean(session.threadName) ??
       clean(session.name) ??
       humanize(session.seatChannel) ??
       `Channel ${shortIdentifier(session.id)}`
@@ -341,7 +341,7 @@ export class SessionQueryService {
     if (session.type !== "channel" || !session.seatChannel) return session.agentName;
     const linked = accountAgentOf(session.seatChannel);
     if (!linked) return session.agentName;
-    if (session.sourceThreadType !== "private") {
+    if (session.seatKind !== "dm") {
       // A null routing override is an explicit pin to main.
       if (session.channelSettings?.overrides.routing?.agentName === null) return null;
       if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
@@ -415,7 +415,7 @@ export class SessionQueryService {
       ownerAgentNames: scope.sessions?.owners ? Array.from(ownerAgentNames) : undefined,
       includeUninstalledOwners,
       knownAgentNames,
-      sourceChannels: sources
+      channels: sources
         ?.filter(
           (source): source is Extract<(typeof sources)[number], { kind: "channel" }> =>
             source.kind === "channel",
@@ -461,10 +461,11 @@ export class SessionQueryService {
       projectPath: session.projectPath,
       agentName,
       type: session.type as RomeSessionType,
-      sourceChannel: session.seatChannel,
-      sourceThreadId: session.sourceThreadId,
-      sourceThreadName: session.sourceThreadName,
-      sourceThreadType: session.sourceThreadType,
+      channel: session.seatChannel,
+      chatId: session.chatId,
+      threadId: session.threadId,
+      threadName: session.threadName,
+      seatKind: session.seatKind,
       triggerKind: session.triggerKind,
       triggerName: session.triggerName,
       triggerActionName: session.triggerActionName,

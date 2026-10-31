@@ -138,10 +138,11 @@ const FORK_SESSION = {
   projectPath: "default",
   agentName: null,
   type: "fork",
-  sourceChannel: "webchat",
-  sourceThreadId: "original-chat",
-  sourceThreadName: "Original chat",
-  sourceThreadType: "private",
+  channel: "webchat",
+  chatId: "webchat:original-chat",
+  threadId: null,
+  threadName: null,
+  seatKind: "dm",
   triggerKind: "fork",
   triggerName: "feedback",
   triggerActionName: null,
@@ -270,7 +271,7 @@ beforeEach(() => {
     offset: 0,
     limit: 5,
     nextOffset: null,
-    facets: { types: [], sourceChannels: [] },
+    facets: { types: [], channels: [] },
   });
   rs.mocked(listRomeSessionMessages).mockResolvedValue([]);
   rs.mocked(listSessionTurns).mockResolvedValue([
@@ -745,7 +746,7 @@ describe("SessionsPage explorer", () => {
       nextOffset: null,
       facets: {
         types: [{ value: "action", count: 1 }],
-        sourceChannels: [{ value: null, count: 1 }],
+        channels: [{ value: null, count: 1 }],
       },
     });
 
@@ -815,7 +816,7 @@ describe("SessionsPage explorer", () => {
       nextOffset: null,
       facets: {
         types: [{ value: "action", count: 1 }],
-        sourceChannels: [{ value: null, count: 1 }],
+        channels: [{ value: null, count: 1 }],
       },
     });
 

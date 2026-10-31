@@ -148,22 +148,24 @@ export function sessionLines(sessionIds: readonly string[]) {
 
 /**
  * Rome's direct messages with the accounts `scope` names, each by the channel
- * of Rome's account it is read under, that account, and the other party's
- * address: each line, whether Rome said it, the channel as its source, and its
- * id for {@link accountTranscriptDetail}. A group answers to no address, and
- * a guardian chat is the guardian talking to Rome, so neither is read.
+ * of Rome's account it is read under, that account, the other party's
+ * address, and the direct message there: each line, whether Rome said it,
+ * the channel as its source, and its id for {@link accountTranscriptDetail}.
+ * A group answers to no address, and a guardian chat is the guardian talking
+ * to Rome, so neither is read.
  */
 export function accountTranscript(
-  scope: readonly { channel: string; account: Account; key: string }[],
+  scope: readonly { channel: string; account: Account; key: string; chatId: string }[],
 ): SQL {
   const rows = sql.join(
     scope.map(
-      ({ channel, account, key }) => sql`(${channel}, ${account.platform}, ${account.id}, ${key})`,
+      ({ channel, account, key, chatId }) =>
+        sql`(${channel}, ${account.platform}, ${account.id}, ${key}, ${chatId})`,
     ),
     sql`, `,
   );
   return sql`
-    WITH v(channel, platform, account, key) AS (VALUES ${rows})
+    WITH v(channel, platform, account, key, chat) AS (VALUES ${rows})
     SELECT
       v.channel AS source,
       v.key AS key,
@@ -175,7 +177,7 @@ export function accountTranscript(
       m.parts AS body,
       m.id AS detail_key
     FROM v
-    JOIN rome_sessions s ON s.account_id = v.account AND s.source_thread_id = v.key
+    JOIN rome_sessions s ON s.account_id = v.account AND s.chat_id = v.chat
     JOIN chats c ON c.id = s.chat_id AND c.platform = v.platform
     JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS NULL
     WHERE s.type = 'channel' AND s.thread_id IS NULL
@@ -188,7 +190,9 @@ export function accountTranscriptDetail(key: SQL): SQL {
     SELECT json_object(
       'senderId', m.sender_account_id,
       'senderName', m.sender_name,
-      'threadId', s.source_thread_id,
+      'chatId', c.id,
+      'platform', c.platform,
+      'accountId', s.account_id,
       'threadName', c.name,
       'threadType', CASE c.kind WHEN 'dm' THEN 'private' ELSE c.kind END
     )

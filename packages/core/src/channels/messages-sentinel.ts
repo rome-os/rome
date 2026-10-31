@@ -32,11 +32,11 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
       const direct = sql`
         ${addressed}
         AND NOT EXISTS (
-          SELECT 1 FROM rome_sessions s
+          SELECT 1 FROM rome_sessions s JOIN chats c ON c.id = s.chat_id
           -- The seat at the thread's address, by the id channelChatId gives it.
           WHERE s.id = 'channel:' || l.channel || ':' || l.thread_id
             AND s.type = 'channel'
-            AND s.source_thread_type = 'group'
+            AND (c.kind = 'group' OR s.thread_id IS NOT NULL)
         )`;
       return sql`
         SELECT

@@ -68,7 +68,7 @@ export function evaluateBorrowedExactFork(args: {
 export interface CreateBorrowedExactForkSessionArgs {
   providerId: ProviderId;
   forkSessionId: string;
-  sourceThreadId: string;
+  forkedThreadId: string;
   openParams: ModelSessionForkOpenParams;
   runExclusive<T>(work: () => Promise<T>): Promise<T>;
   runTurn(input: ModelUserInput, runtime: CodexTurnRuntime): Promise<void>;
@@ -122,7 +122,7 @@ export async function createBorrowedExactForkSession(
     providerId: args.providerId,
     model: args.openParams.model,
     events: sink.iter(),
-    providerThreadId: args.sourceThreadId,
+    providerThreadId: args.forkedThreadId,
     get funding(): UsageFunding | undefined {
       return args.funding?.();
     },

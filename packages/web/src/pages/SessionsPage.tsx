@@ -479,7 +479,7 @@ function SessionsIndexPage({
             <div className="mt-2 truncate text-aux text-muted-foreground">
               {session.type === "action"
                 ? (sessionTriggerLabel(session) ?? "Background run")
-                : (session.sourceThreadName ?? sourceLabel(session.sourceChannel))}
+                : (session.threadName ?? sourceLabel(session.channel))}
             </div>
           </div>
         ),
@@ -825,7 +825,7 @@ function SessionsIndexPage({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={ALL}>All sources</SelectItem>
-                        {(data?.facets.sourceChannels ?? []).map((facet) => (
+                        {(data?.facets.channels ?? []).map((facet) => (
                           <SelectItem
                             key={facet.value ?? INTERNAL_SOURCE}
                             value={facet.value ?? INTERNAL_SOURCE}
@@ -1125,12 +1125,10 @@ function ReadOnlySessionChat({
   }, [messages]);
   const identity = useMemo<AgentIdentity>(
     () => ({
-      name: session.agentName
-        ? artifactLocalName(session.agentName)
-        : session.sourceChannel || "Rome",
+      name: session.agentName ? artifactLocalName(session.agentName) : session.channel || "Rome",
       iconUrl: null,
     }),
-    [session.agentName, session.sourceChannel],
+    [session.agentName, session.channel],
   );
   const view = useMemo(
     () => buildChatView(messagesBySession, session.id, identity),
@@ -1261,7 +1259,7 @@ function SessionDetailsSheet({
     ["Owner", session.owner.label],
     ["Agent", sessionAgentLabel(session.agentName)],
     ["Type", SESSION_TYPE_LABELS[session.type]],
-    ["Source", sourceLabel(session.sourceChannel)],
+    ["Source", sourceLabel(session.channel)],
     ["Trigger", sessionTriggerLabel(session)],
     ["Project", session.projectPath ?? session.projectName],
     ["Created", formatDate(session.createdAt)],
@@ -1269,7 +1267,8 @@ function SessionDetailsSheet({
   ].filter((row): row is [string, string] => Boolean(row[1]));
   const technicalRows = [
     ["Session ID", session.id],
-    ["Source thread ID", session.sourceThreadId],
+    ["Chat ID", session.chatId],
+    ["Thread ID", session.threadId],
     ["Trigger execution ID", session.triggerExecutionId],
     ["Root execution ID", session.rootActionExecutionId],
     ["Parent execution ID", session.parentActionExecutionId],
@@ -1591,7 +1590,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           </div>
           <p className="truncate text-aux text-muted-foreground">
             {session
-              ? `${session.owner.label} · ${sessionAgentLabel(session.agentName)} · ${sourceLabel(session.sourceChannel)}`
+              ? `${session.owner.label} · ${sessionAgentLabel(session.agentName)} · ${sourceLabel(session.channel)}`
               : sessionId}
           </p>
         </div>

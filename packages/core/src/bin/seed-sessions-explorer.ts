@@ -100,9 +100,6 @@ for (let index = 0; index < 32; index += 1) {
     agentName: profile.agent === "main" ? null : profile.agent,
     projectName: index % 2 ? "rome" : "default",
     projectPath: index % 2 ? "rome" : "default",
-    sourceThreadId: source ? `thread-${index + 1}` : null,
-    sourceThreadName: source ? `Release planning · ${index + 1}` : null,
-    sourceThreadType: source ? "group" : null,
     trigger: triggerName
       ? {
           triggerKind: "action",

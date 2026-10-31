@@ -488,10 +488,9 @@ export const romeSessions = sqliteTable(
     // Distinguishes top-level webchat, handoff child sessions, first-class
     // subagent sessions, external channels, and action/background agent runs.
     type: text("type").notNull().default("webchat"),
-    sourceChannel: text("source_channel"),
-    sourceThreadId: text("source_thread_id"),
-    sourceThreadName: text("source_thread_name"),
-    sourceThreadType: text("source_thread_type"),
+    // A topic seat's name, as the platform calls the topic. Null elsewhere: a
+    // chat's name is the chat's.
+    threadName: text("thread_name"),
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
     channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
@@ -531,7 +530,6 @@ export const romeSessions = sqliteTable(
     threadId: text("thread_id"),
     // The one of Rome's accounts this seat speaks as: the channel's platform
     // account, else the channel's name, and `agent:<name>` on the dashboard.
-    // Replaces `source_channel` at the contract step.
     accountId: text("account_id"),
   },
   (table) => [

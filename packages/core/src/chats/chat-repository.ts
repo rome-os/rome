@@ -19,6 +19,11 @@ export function chatIdsOn(platform: string): SQL {
   return sql`(SELECT ${chats.id} FROM ${chats} WHERE ${chats.platform} = ${platform})`;
 }
 
+/** The ids of the chats of `kind`, as a subquery like {@link chatIdsOn}. */
+export function chatIdsOfKind(kind: ChatKind): SQL {
+  return sql`(SELECT ${chats.id} FROM ${chats} WHERE ${chats.kind} = ${kind})`;
+}
+
 export class ChatRepository {
   constructor(private readonly db: DrizzleDb) {}
 

@@ -31,11 +31,7 @@ export const isChannelConversation: SQL = and(
 
 /** Every column of a `rome_sessions` row a reader reads, and whether it is a guardian chat,
  *  which {@link withSessionKind} reads. */
-const { sourceChannel: _unread, ...sessionColumns } = getTableColumns(romeSessions);
-
-/** Every column of a `rome_sessions` row a reader reads. `source_channel` is
- *  written by no one and read by no one until the contract step drops it. */
-export { sessionColumns };
+export const sessionColumns = getTableColumns(romeSessions);
 
 export const sessionRowWithKind = {
   ...sessionColumns,

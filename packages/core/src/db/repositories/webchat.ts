@@ -301,9 +301,6 @@ export interface EnsureRomeSessionInput {
   projectPath?: string | null;
   /** A side chat keeps the folder of the chat it branched from. */
   deviceFolder?: DeviceFolder | null;
-  sourceThreadId?: string | null;
-  sourceThreadName?: string | null;
-  sourceThreadType?: "private" | "group" | string | null;
   trigger?: RomeAgentTraceTriggerMetadata;
   /** Lineage for 'fork' sessions: the rome session the fork branched from. */
   parentSessionId?: string | null;
@@ -967,9 +964,6 @@ export class WebChatRepository {
       largeModelSelection: largeModelSelection ?? null,
       agentName,
       type: storedSessionType(type),
-      sourceThreadId: id,
-      sourceThreadName: name,
-      sourceThreadType: "private",
       handoffSpec,
       createdAt: now,
       activityAt: now,
@@ -995,9 +989,6 @@ export class WebChatRepository {
         largeModelSelection: null,
         agentName: input.agentName,
         type: storedSessionType(input.type),
-        sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
-        sourceThreadName: input.sourceThreadName ?? null,
-        sourceThreadType: input.sourceThreadType ?? null,
         triggerKind: input.trigger?.triggerKind ?? null,
         triggerName: input.trigger?.triggerName ?? null,
         triggerActionName: input.trigger?.triggerActionName ?? null,
@@ -1095,9 +1086,7 @@ export class WebChatRepository {
             ? null
             : input.agentName,
         type: "channel",
-        sourceThreadId: input.threadId,
-        sourceThreadName: input.threadName ?? null,
-        sourceThreadType: input.threadType ?? null,
+        threadName: parent ? (input.threadName ?? null) : null,
         parentSessionId: parent?.id ?? null,
         chatId: input.chatId,
         threadId: parent ? input.threadId : null,
@@ -1235,35 +1224,24 @@ export class WebChatRepository {
    *  rows created before the channel reported a name do. A name already
    *  recorded is kept, so email subjects and guardian renames stay put. */
   private async backfillChannelConversationName(
-    row: { id: string; name: string; sourceThreadName: string | null },
+    row: { id: string; name: string },
     address: { channel: string; threadId: string },
     threadName: string,
   ): Promise<void> {
     const placeholders = [address.threadId, `${address.channel}:${address.threadId}`];
-    const sourceMissing =
-      row.sourceThreadName === null || placeholders.includes(row.sourceThreadName);
-    const nameMissing = placeholders.includes(row.name);
-    if (!sourceMissing && !nameMissing) return;
-    // Each column is rewritten only while it still holds a placeholder, so a
-    // concurrent message that already filled it in leaves nothing to change.
+    if (!placeholders.includes(row.name)) return;
+    // Rewritten only while it still holds a placeholder, so a concurrent
+    // message that already filled it in leaves nothing to change. A topic's
+    // seat takes the name as its topic's too.
     const updated = await this.db
       .update(romeSessions)
       .set({
-        sourceThreadName: sql`case when ${romeSessions.sourceThreadName} is null or ${inArray(romeSessions.sourceThreadName, placeholders)} then ${threadName} else ${romeSessions.sourceThreadName} end`,
-        name: sql`case when ${inArray(romeSessions.name, placeholders)} then ${threadName} else ${romeSessions.name} end`,
+        name: threadName,
+        threadName: sql`case when ${romeSessions.threadId} is not null then ${threadName} else ${romeSessions.threadName} end`,
       })
-      .where(
-        and(
-          eq(romeSessions.id, row.id),
-          or(
-            isNull(romeSessions.sourceThreadName),
-            inArray(romeSessions.sourceThreadName, placeholders),
-            inArray(romeSessions.name, placeholders),
-          ),
-        ),
-      )
+      .where(and(eq(romeSessions.id, row.id), inArray(romeSessions.name, placeholders)))
       .returning({ name: romeSessions.name });
-    if (nameMissing && updated[0]?.name === threadName) {
+    if (updated[0]?.name === threadName) {
       this.emitSessionNameChanged(row.id, threadName);
     }
   }
@@ -1274,7 +1252,6 @@ export class WebChatRepository {
         id: romeSessions.id,
         agentName: romeSessions.agentName,
         name: romeSessions.name,
-        sourceThreadName: romeSessions.sourceThreadName,
       })
       .from(romeSessions)
       .where(eq(romeSessions.id, id))
@@ -1576,8 +1553,6 @@ export class WebChatRepository {
       .update(romeSessions)
       .set({
         type: storedSessionType("webchat"),
-        // A fork carries its parent's address. As a chat it answers at its own.
-        sourceThreadId: sql`${romeSessions.id}`,
         lastSeenActivityAt: sql`${romeSessions.activityAt}`,
       })
       .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));

@@ -10,6 +10,8 @@ import type { AccountMessages, MessageDetail } from "./messages.js";
 import type { Account } from "@rome-os/app-runtime";
 import { sqlMessages } from "./messages-sql.js";
 import { accountTranscript, accountTranscriptDetail } from "../webchat/chat-read-model-sql.js";
+import { directMessageAddress, directMessageAt } from "../chats/adapter.js";
+import { ChatAddresses } from "./chat-addresses.js";
 
 /**
  * Rome's own transcript of a channel conversation, read for accounts.
@@ -25,42 +27,52 @@ export function agentMessages(
   db: DrizzleDb,
   accountOn: (channel: string) => Account,
 ): AccountMessages {
+  const addresses = new ChatAddresses(db);
   // No `channel`: the transcript holds every channel that has no mirror of its
   // own, side by side, so it is scoped by the pair throughout. A pair names a
-  // channel, which is Rome's account on a platform: the seats it reads are
-  // that account's, in chats on that platform.
+  // channel, which is Rome's account on a platform, and the address names the
+  // direct message that account has there.
   return sqlMessages({
     db,
     view(scope) {
       if (scope.keys.length === 0) return null;
       return accountTranscript(
-        scope.keys.map(({ channel, key }) => ({ channel, account: accountOn(channel), key })),
+        scope.keys.map(({ channel, key }) => {
+          const account = accountOn(channel);
+          return { channel, account, key, chatId: directMessageAt(account, key, addresses).id };
+        }),
       );
     },
     body: messageContentText,
     detail: {
       of: accountTranscriptDetail,
-      map: transcriptDetail,
+      map: (raw, entry) => transcriptDetail(raw, entry, addresses),
     },
   });
 }
 
-/** Who said a transcript line and in which session's thread, as the row
+/** Who said a transcript line and in which direct message, as the row
  *  recorded them. Rome's own lines carry no sender, the way the sentinel log
- *  reads them. A private thread is a direct one, and a thread type with no kind
- *  of its own reads as unknown. */
-function transcriptDetail(raw: Record<string, unknown>, entry: Message): MessageDetail {
+ *  reads them. The conversation is named by the address Rome's account
+ *  reaches it at. */
+function transcriptDetail(
+  raw: Record<string, unknown>,
+  entry: Message,
+  addresses: Pick<ChatAddresses, "addressOf">,
+): MessageDetail {
   const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
   const detail: MessageDetail = {};
   const sender = { id: text(raw.senderId), name: text(raw.senderName) };
   if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
     detail.sender = sender;
   }
-  const threadId = text(raw.threadId);
-  if (threadId !== null) {
+  const chatId = text(raw.chatId);
+  const platform = text(raw.platform);
+  const accountId = text(raw.accountId);
+  if (chatId !== null && platform !== null && accountId !== null) {
     const type = text(raw.threadType);
     detail.conversation = {
-      id: threadId,
+      id: directMessageAddress({ platform, id: accountId }, { platform, id: chatId }, addresses),
       name: text(raw.threadName),
       kind: type === "private" ? "dm" : type === "group" || type === "topic" ? type : null,
     };

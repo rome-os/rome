@@ -405,6 +405,17 @@ export class ChatAdapters {
     );
   }
 
+  /** Where `channel`'s account reaches `place`: the thread's id, the address
+   *  it heard a direct message at, else the chat's own address. */
+  addressAt(channel: string, place: Place): ChatId {
+    if (place.threadId !== undefined) return place.threadId;
+    return (
+      isDirectMessage(place.chat)
+        ? directMessageAddress(this.accountOn(channel), place.chat, this.deps.addresses)
+        : addressOf(place)
+    ) as ChatId;
+  }
+
   /**
    * The chat channel `channel`'s account reaches at platform address
    * `address`: the group there, else the direct message the account heard
@@ -413,11 +424,31 @@ export class ChatAdapters {
   chatAt(channel: string, address: string, kind: "group" | "dm"): ChatRef {
     const account = this.accountOn(channel);
     if (kind === "group") return chatAt(account.platform, address);
-    const heard = this.deps.addresses.keyAt(account, address);
-    return heard === null
-      ? chatAt(account.platform, address, { romeEnd: account.id })
-      : ChatIds.chat(chatKey(account.platform, heard as ChatId));
+    return directMessageAt(account, address, this.deps.addresses);
   }
+}
+
+/** The direct message `account` has at platform address `address`: the one
+ *  it heard there, else the one with the party the address names. */
+export function directMessageAt(
+  account: Account,
+  address: string,
+  addresses: Pick<ChatAddresses, "keyAt">,
+): ChatRef {
+  const heard = addresses.keyAt(account, address);
+  return heard === null
+    ? chatAt(account.platform, address, { romeEnd: account.id })
+    : ChatIds.chat(chatKey(account.platform, heard as ChatId));
+}
+
+/** Where `account` reaches direct message `chat`: the address it heard the
+ *  chat at, else the other party's. */
+export function directMessageAddress(
+  account: Account,
+  chat: ChatRef,
+  addresses: Pick<ChatAddresses, "addressOf">,
+): string {
+  return addresses.addressOf(account, ChatIds.key(chat).externalId) ?? addressOf({ chat });
 }
 
 /** The message `event` carries, as the adapter hands it to Chats. */

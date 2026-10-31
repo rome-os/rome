@@ -184,22 +184,19 @@ export class AgentTraceRecorder {
     }
     const thread = this.input.threadContext;
     const type = this.sessionType();
-    const sourceThreadName = thread?.threadName ?? null;
+    const threadName = thread?.threadName ?? null;
     const trigger = this.triggerMetadata();
     await this.input.webchatRepo.ensureRomeSession({
       id: this.romeSessionId(),
       type,
       name:
-        sourceThreadName ??
+        threadName ??
         (thread
           ? `${thread.channel}:${thread.threadId}`
           : (this.input.channelThreadKey ?? this.input.agentName)),
       agentName: isCoreMainAgentId(this.input.agentName) ? null : this.input.agentName,
       projectName: thread?.projectName,
       projectPath: thread?.projectPath,
-      sourceThreadId: thread?.threadId ?? null,
-      sourceThreadName,
-      sourceThreadType: thread?.threadType ?? null,
       trigger: type === "action" ? trigger : undefined,
     });
     this.ensured = true;

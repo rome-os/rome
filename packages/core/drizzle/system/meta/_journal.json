@@ -764,6 +764,13 @@
       "when": 1793461620061,
       "tag": "0109_seat_channel_unread",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "6",
+      "when": 1793490951091,
+      "tag": "0110_seat_contract",
+      "breakpoints": true
     }
   ]
 }
