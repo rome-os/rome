@@ -5,7 +5,7 @@
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
 // guardian gets every topic, and a visitor on the dashboard allow-list gets the
-// chat topics but not `apps.catalog`.
+// chat topics but not `apps.catalog` or `concierge.tasks`.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too.
@@ -16,6 +16,7 @@ import {
   APP_CATALOG_TOPIC,
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
+  CONCIERGE_TASKS_TOPIC,
   liveEventsClientMessageSchema,
   type LiveEventsServerMessage,
 } from "@rome/api-types/live-events";
@@ -39,6 +40,8 @@ export interface LiveEventSources {
   hasChatSession(sessionId: string): Promise<boolean>;
   subscribeChatSession(sessionId: string, emit: LiveEventEmit): Unsubscribe;
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
+  /** Emits `task_upsert` for every write to the Concierge's todo list. */
+  subscribeConciergeTasks(emit: LiveEventEmit): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -55,11 +58,13 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 type Topic =
   | { kind: "chat.status" }
   | { kind: "apps.catalog" }
+  | { kind: "concierge.tasks" }
   | { kind: "chat.session"; sessionId: string };
 
 function parseTopic(topic: string): Topic | null {
   if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
   if (topic === APP_CATALOG_TOPIC) return { kind: "apps.catalog" };
+  if (topic === CONCIERGE_TASKS_TOPIC) return { kind: "concierge.tasks" };
   if (topic.startsWith(CHAT_SESSION_TOPIC_PREFIX)) {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
@@ -119,9 +124,11 @@ export function attachLiveEventsServer(
     // the socket at the next ping, as the edge probe would refuse a new stream.
     const visitorAllowed = () =>
       caller.kind === "guardian" || dashboardAccess.isCloudEmailAllowed(caller.email);
-    // App existence and change timing stay guardian-only, as on `/api/apps/events`.
+    // App existence and change timing stay guardian-only, as on `/api/apps/events`,
+    // and so does the Concierge's todo list.
     const permitted = (topic: Topic) =>
-      caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
+      caller.kind === "guardian" ||
+      (topic.kind !== "apps.catalog" && topic.kind !== "concierge.tasks" && visitorAllowed());
     const exists = async (topic: Topic): Promise<boolean> =>
       topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId) : true;
 
@@ -131,6 +138,8 @@ export function attachLiveEventsServer(
           return sources.subscribeChatStatus(emit);
         case "apps.catalog":
           return sources.subscribeAppCatalog(emit);
+        case "concierge.tasks":
+          return sources.subscribeConciergeTasks(emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
       }

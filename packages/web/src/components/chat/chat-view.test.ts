@@ -584,3 +584,79 @@ describe("currentReplyMessages", () => {
     }
   });
 });
+
+describe("buildRows reference stability", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const opts = { runningTurnId: null, isStreaming: false };
+  const summary = { distinctApps: [], totalSteps: 1, invocationCounts: {} };
+  const turn = (turnId: string) => [
+    mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+    mk(MAIN, "trace", turnId, [], { traceSummary: summary }),
+  ];
+
+  it("hands back the same row objects when the messages are the same", () => {
+    const messages = [...turn("t1"), ...turn("t2")];
+    const first = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const second = buildRows(messages, new Map(idMap), { ...MAIN_IDENTITY }, opts);
+
+    expect(second).toHaveLength(first.length);
+    second.forEach((row, index) => expect(row).toBe(first[index]));
+  });
+
+  it("builds only the row of a message that arrives", () => {
+    const messages = [...turn("t1"), ...turn("t2")];
+    const before = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const arrived = mk(MAIN, "user", "t3", [{ type: "text", content: "ask t3" }]);
+    const after = buildRows([...messages, arrived], idMap, MAIN_IDENTITY, {
+      ...opts,
+      runningTurnId: "t3",
+      isStreaming: true,
+    });
+
+    expect(after).toHaveLength(before.length + 1);
+    before.forEach((row, index) => expect(after[index]).toBe(row));
+  });
+
+  it("renews a turn's row when a message joins it, and no other", () => {
+    const messages = [...turn("t1"), ...turn("t2")];
+    const before = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const second = mk(MAIN, "assistant", "t2", [{ type: "text", content: "more" }]);
+    const after = buildRows([...messages, second], idMap, MAIN_IDENTITY, opts);
+
+    expect(after).toHaveLength(before.length);
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(after[2]).toBe(before[2]);
+    expect(after[3]).not.toBe(before[3]);
+  });
+
+  it("renews a row whose message was replaced, or whose agent is named differently", () => {
+    const messages = turn("t1");
+    const before = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+
+    const renamedIdentity = { name: "Renamed", iconUrl: null };
+    const renamed = buildRows(messages, new Map([[MAIN, renamedIdentity]]), renamedIdentity, opts);
+    expect(renamed[0]).toBe(before[0]);
+    expect(renamed[1]).not.toBe(before[1]);
+
+    const edited = [messages[0], { ...messages[1], content: "[]" }, messages[2]];
+    const replaced = buildRows(edited, idMap, MAIN_IDENTITY, opts);
+    expect(replaced[0]).toBe(before[0]);
+    expect(replaced[1]).not.toBe(before[1]);
+  });
+
+  it("keeps a model-switch notice while its turn and models stand", () => {
+    const withModel = (turnId: string, model: string) => [
+      mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+      mk(MAIN, "trace", turnId, [], { traceSummary: { ...summary, model } }),
+      mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+    ];
+    const messages = [...withModel("t1", "m-a"), ...withModel("t2", "m-b")];
+    const first = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const second = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+
+    expect(first.map((row) => row.kind)).toContain("model_switch");
+    second.forEach((row, index) => expect(row).toBe(first[index]));
+  });
+});

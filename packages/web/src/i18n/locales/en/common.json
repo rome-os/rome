@@ -45,6 +45,10 @@
     "concierge": "Concierge",
     "conciergeUnread_one": "Concierge, {{label}} unread message",
     "conciergeUnread_other": "Concierge, {{label}} unread messages",
+    "conciergeUnreadBadge_one": "{{label}} unread message",
+    "conciergeUnreadBadge_other": "{{label}} unread messages",
+    "conciergeNeedsYou_one": "{{count}} task needs you",
+    "conciergeNeedsYou_other": "{{count}} tasks need you",
     "startedByConcierge": "Started by Concierge",
     "rowStatus": {
       "waiting": "Waiting for you",
@@ -258,6 +262,7 @@
     "toolUpdated": "New content",
     "openToolNewTab": "Open {{name}} in new tab",
     "closeTool": "Close {{name}}",
+    "tasksTab": "Tasks",
     "allTools": "All open apps",
     "allToolsHidden_one": "All open apps, {{count}} more",
     "allToolsHidden_other": "All open apps, {{count}} more",

@@ -1,14 +1,12 @@
 import { release } from "os";
-import { existsSync } from "fs";
-import { app, BrowserWindow, net, powerSaveBlocker, shell } from "electron";
+import { app, BrowserWindow, dialog, net, powerSaveBlocker, shell } from "electron";
 import { initDatabase } from "./db/database";
-import { createLogger } from "./logger";
+import { createLogger, LOG_FILE } from "./logger";
 import {
   createMainWindow,
-  createQuittingWindow,
   createSettingsWindow,
-  loadLocalDashboard,
-  shouldNavigateToLocalDashboard,
+  loadDashboard,
+  shouldNavigateToDashboard,
 } from "./window";
 import {
   readDeviceEnabled,
@@ -25,14 +23,11 @@ import { setupFloatingPill } from "./floating-pill";
 import { supportsFloatingPill } from "./floating-pill-state";
 import { setupApplicationMenu } from "./menu";
 import { shouldReturnToDashboard } from "./startup-surface";
-import { RuntimeManager, type RuntimeStatus } from "./runtime/manager";
-import { createRomeImageUpdater, type RomeImageUpdater } from "./runtime/image-updater";
-import { resolveRuntimePaths } from "./runtime/config";
+import type { RuntimeStatus } from "./runtime/provider";
 import { RuntimeController } from "./runtime/controller";
 import { RemoteRuntime } from "./runtime/remote";
 import { DEV_DASHBOARD_URL_ENV, DevUrlRuntime, resolveDevDashboardUrl } from "./runtime/dev-url";
 import type { Runtime } from "./runtime/runtime";
-import type { CloudAccount } from "./cloud/account";
 import { createCloudAccount, deviceName } from "./cloud/electron";
 import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
 import { adoptLoginShellPath } from "./cloud/login-path";
@@ -42,41 +37,16 @@ import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler }
 const log = createLogger("main");
 
 let mainWindow: BrowserWindow | null = null;
-let quittingWindow: BrowserWindow | null = null;
 // Chosen in bootstrap, once the settings database says which Rome this launch
-// opens. The image updater exists only while the private VM is the one open.
-let runtimeManager: Runtime;
-let romeImageUpdater: RomeImageUpdater | null = null;
-
-function createCloudAccountOrNull(): CloudAccount | null {
-  try {
-    return createCloudAccount();
-  } catch (err) {
-    // A staging override that is not an exact https origin cannot back a
-    // sign-in; the local VM still works without one.
-    log.warn(`Rome Cloud sign-in is unavailable (${String(err)})`);
-    return null;
-  }
-}
+// opens.
+let runtime: Runtime;
 
 const netFetch: typeof fetch = (input, init) =>
   net.fetch(input instanceof URL ? input.toString() : input, init);
 
 async function openDebugLog(): Promise<void> {
-  const error = await shell.openPath(resolveRuntimePaths().debugLogFile);
+  const error = await shell.openPath(LOG_FILE);
   if (error) throw new Error(error);
-}
-
-// An install from before Rome Cloud mode keeps its Rome in this directory.
-function hasLocalRuntime(): boolean {
-  return existsSync(resolveRuntimePaths().rootDir);
-}
-
-function createLocalRuntime(): Runtime {
-  const local = new RuntimeManager();
-  romeImageUpdater = createRomeImageUpdater(local);
-  romeImageUpdater.start();
-  return local;
 }
 
 async function bootstrap() {
@@ -86,27 +56,26 @@ async function bootstrap() {
     initDatabase();
     log.info("Database initialized");
 
-    const cloudAccount = createCloudAccountOrNull();
+    // A staging override that is not an exact https origin throws here, and
+    // with no Rome Cloud there is nothing this app can open.
+    const cloudAccount = createCloudAccount();
     const devDashboardUrl = resolveDevDashboardUrl(
       app.isPackaged,
       process.env[DEV_DASHBOARD_URL_ENV],
     );
     const controller = new RuntimeController({
       cloudAccount,
-      savedTarget: readRuntimeTarget(hasLocalRuntime()),
+      savedTarget: readRuntimeTarget(),
       writeTarget: writeRuntimeTarget,
-      createLocal: createLocalRuntime,
-      createRemote: (instance, onSelect) => {
-        if (!cloudAccount) throw new Error("This build cannot sign in to Rome Cloud.");
-        return new RemoteRuntime(instance, {
+      createRemote: (instance, onSelect) =>
+        new RemoteRuntime(instance, {
           account: cloudAccount,
           fetchImpl: netFetch,
           openLogs: openDebugLog,
           openCloud: () =>
             shell.openExternal(new URL("/dashboard", cloudAccount.cloudOrigin).toString()),
           onSelect,
-        });
-      },
+        }),
       relaunch: () => {
         app.relaunch();
         requestStopAndQuit();
@@ -115,42 +84,40 @@ async function bootstrap() {
         ? new DevUrlRuntime(devDashboardUrl, { openLogs: openDebugLog })
         : null,
     });
-    runtimeManager = controller.runtime;
+    runtime = controller.runtime;
     const keepAwake = new KeepAwake(powerSaveBlocker);
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
-    const deviceHost =
-      cloudAccount && !devDashboardUrl
-        ? new DeviceHost({
-            cloudOrigin: cloudAccount.cloudOrigin,
-            deviceName: deviceName(),
-            credential: () => cloudAccount.credential(),
-            enabled: readDeviceEnabled,
-            onRevoked: async () => {
-              await controller.signOut();
-            },
-            prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
-            onStatus: (status) => {
-              keepAwake.sync(status);
-              // Only the app's own pages and the open Rome hear it, as with device:get.
-              const target = controller.activeTarget();
-              const origin = target.kind === "remote" ? target.instance?.origin : null;
-              for (const window of BrowserWindow.getAllWindows()) {
-                if (window.isDestroyed()) continue;
-                const url = window.webContents.getURL();
-                if (url.startsWith("file:") || (origin && url.startsWith(`${origin}/`))) {
-                  window.webContents.send("device:status", status);
-                }
+    const deviceHost = !devDashboardUrl
+      ? new DeviceHost({
+          cloudOrigin: cloudAccount.cloudOrigin,
+          deviceName: deviceName(),
+          credential: () => cloudAccount.credential(),
+          enabled: readDeviceEnabled,
+          onRevoked: async () => {
+            await controller.signOut();
+          },
+          prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
+          onStatus: (status) => {
+            keepAwake.sync(status);
+            // Only the app's own pages and the open Rome hear it, as with device:get.
+            const origin = controller.activeTarget().instance?.origin;
+            for (const window of BrowserWindow.getAllWindows()) {
+              if (window.isDestroyed()) continue;
+              const url = window.webContents.getURL();
+              if (url.startsWith("file:") || (origin && url.startsWith(`${origin}/`))) {
+                window.webContents.send("device:status", status);
               }
-            },
-          })
-        : null;
-    // Only a Rome Cloud launch connects this computer. Switching to the VM
-    // restarts the app, so a VM launch never connects it or changes its PATH.
+            }
+          },
+        })
+      : null;
+    // A dev window opened through DEV_DASHBOARD_URL_ENV never connects this
+    // computer; every other launch does once it is signed in.
     const device = {
       status: (): DeviceStatus => deviceHost?.status() ?? { state: "off" },
       start: async () => {
-        if (controller.activeTarget().kind === "remote") await deviceHost?.start();
+        await deviceHost?.start();
       },
       stop: async () => {
         await deviceHost?.stop();
@@ -166,39 +133,36 @@ async function bootstrap() {
     log.info(
       devDashboardUrl
         ? `Opening ${devDashboardUrl} from ${DEV_DASHBOARD_URL_ENV}`
-        : active.kind === "remote"
-          ? `Opening Rome Cloud${active.instance ? ` (${active.instance.origin})` : ""}`
-          : "Opening the Rome on this computer",
+        : `Opening Rome Cloud${active.instance ? ` (${active.instance.origin})` : ""}`,
     );
 
     registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
       cloudAccount,
-      hasLocalRuntime,
       device,
     });
 
-    mainWindow = await createMainWindow(runtimeManager);
+    mainWindow = await createMainWindow(runtime);
     log.info("Main window created");
 
     setupProtocolHandler({
       ensureMainWindow: async () => {
         if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
-        mainWindow = await createMainWindow(runtimeManager);
+        mainWindow = await createMainWindow(runtime);
         return mainWindow;
       },
-      getDashboardUrl: () => runtimeManager.getDashboardUrl(),
-      // A deep link only needs the runtime reachable right now. isReady() would
-      // trust a cached phase and navigate into a 502 if the container died
-      // since; isServing() checks for real. On a miss, recover — then check
+      getDashboardUrl: () => runtime.getDashboardUrl(),
+      // A deep link only needs the Rome reachable right now. isReady() would
+      // trust a cached phase and navigate into an error page if the instance
+      // went down since; isServing() checks for real. On a miss, recover — then check
       // again, because ensureReady() swallows its own failures (it sets a
       // "failed" phase and resolves), so returning after it would let the
       // caller navigate into the very dead end this guards against.
       waitForRuntime: async () => {
-        if (await runtimeManager.isServing()) return;
-        await runtimeManager.ensureReady();
-        if (!(await runtimeManager.isServing())) {
-          throw new Error("The local Rome runtime did not become reachable.");
+        if (await runtime.isServing()) return;
+        await runtime.ensureReady();
+        if (!(await runtime.isServing())) {
+          throw new Error("Your Rome did not become reachable.");
         }
       },
     });
@@ -209,7 +173,7 @@ async function bootstrap() {
     // instead and leaves argv clean, so this call is a no-op there.
     consumeProtocolFromArgv(process.argv);
 
-    runtimeManager.on("status", (status: RuntimeStatus) => {
+    runtime.on("status", (status: RuntimeStatus) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) {
           window.webContents.send("runtime:status", status);
@@ -218,8 +182,8 @@ async function bootstrap() {
 
       if (status.phase === "ready" && mainWindow && !mainWindow.isDestroyed()) {
         const currentUrl = mainWindow.webContents.getURL();
-        if (shouldNavigateToLocalDashboard(currentUrl, runtimeManager.getDashboardUrl())) {
-          void loadLocalDashboard(mainWindow, runtimeManager.getDashboardUrl());
+        if (shouldNavigateToDashboard(currentUrl, runtime.getDashboardUrl())) {
+          void loadDashboard(mainWindow, runtime.getDashboardUrl());
         }
       }
     });
@@ -231,10 +195,10 @@ async function bootstrap() {
         mainWindow.focus();
         // Before ready the dashboard URL is a placeholder and the window is on
         // onboarding, so raising it is the whole job.
-        if (!runtimeManager.isReady()) return;
-        const dashboardUrl = runtimeManager.getDashboardUrl();
+        if (!runtime.isReady()) return;
+        const dashboardUrl = runtime.getDashboardUrl();
         if (shouldReturnToDashboard(mainWindow.webContents.getURL(), dashboardUrl)) {
-          void loadLocalDashboard(mainWindow, dashboardUrl);
+          void loadDashboard(mainWindow, dashboardUrl);
         }
       },
       () => createSettingsWindow(),
@@ -260,7 +224,7 @@ async function bootstrap() {
         mainWindow.focus();
         return;
       }
-      mainWindow = await createMainWindow(runtimeManager);
+      mainWindow = await createMainWindow(runtime);
     };
 
     // macOS only, and not yet macOS 27: the panel window type is what makes the
@@ -275,7 +239,6 @@ async function bootstrap() {
           openSettings: () => {
             createSettingsWindow();
           },
-          runtimeManager,
         })
       : null;
 
@@ -283,36 +246,34 @@ async function bootstrap() {
       getMainWindow: () => mainWindow,
       ensureMainWindow: async () => {
         if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
-        mainWindow = await createMainWindow(runtimeManager);
+        mainWindow = await createMainWindow(runtime);
         return mainWindow;
       },
       openSettings: () => {
         createSettingsWindow();
       },
-      runtimeManager,
+      runtime,
       floatingPill,
     });
     setupUpdater();
+    // The Rome keeps running in Rome Cloud; quitting only disconnects this
+    // computer.
     setupLifecycle({
-      runtimeManager,
-      onShutdownStart: () => {
-        void device.stop();
-        if (quittingWindow && !quittingWindow.isDestroyed()) return;
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed() && win.isVisible()) win.hide();
-        }
-        quittingWindow = createQuittingWindow();
+      onShutdown: async () => {
+        runtime.dispose?.();
+        await device.stop();
       },
     });
 
     // Enrollment is owned by the dashboard, so desktop startup never waits for
     // an instance token.
-    void runtimeManager.ensureReady();
+    void runtime.ensureReady();
     void device.start();
 
     log.info("Bootstrap complete");
   } catch (err) {
     log.error("Bootstrap failed", err);
+    dialog.showErrorBox("Rome can't start", err instanceof Error ? err.message : String(err));
     app.quit();
   }
 }
@@ -340,7 +301,6 @@ if (!gotTheLock) {
 
   app.on("before-quit", () => {
     updateManager.stop();
-    romeImageUpdater?.stop();
   });
 
   app.on("window-all-closed", () => {
@@ -354,13 +314,13 @@ if (!gotTheLock) {
     // After hide-to-tray the window still exists (just hidden), so the
     // "no windows" check alone would leave Dock-click / relaunch dead
     // until the user finds the tray.
-    if (isQuitting() || !runtimeManager) return;
+    if (isQuitting() || !runtime) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
       return;
     }
-    void createMainWindow(runtimeManager).then((win) => {
+    void createMainWindow(runtime).then((win) => {
       mainWindow = win;
     });
   });

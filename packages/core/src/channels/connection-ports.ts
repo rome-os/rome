@@ -1,11 +1,10 @@
 /**
- * The `send`, `inbound`, `messages` and `directory` ports of a channel a
- * Connection backs.
+ * The `send`, `inbound` and `directory` ports of a channel a Connection
+ * backs.
  * A connection kind's channels each have their own name, and the Connection that backs
  * one is looked up by that name when a port is used, so a port outlives any
  * one Connection epoch.
- * Contract: `Channel` (channel.ts), `ChannelInbound` (the apps SDK), `Messages`
- * (messages.ts).
+ * Contract: `Channel` (channel.ts), `ChannelInbound` (the apps SDK).
  */
 
 import type {
@@ -21,7 +20,6 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import type { Connection, TalkFeatureName, Talker } from "../connections/types.js";
-import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
@@ -35,7 +33,6 @@ import {
 import { ChatBuffers } from "./conversation-buffer.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { DeliveryFailure, type DeliveryTransport } from "./delivery/types.js";
-import { MAX_QUERY_LIMIT, queryPage, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -102,7 +99,6 @@ export function recordedChannelOf(
 export interface ConnectionPorts {
   send: ChannelSend | null;
   inbound: ChannelInbound | null;
-  messages: Messages | null;
   directory: ChannelDirectory;
 }
 
@@ -128,7 +124,6 @@ export function connectionPorts(
   return {
     send: talker.sends === false ? null : connectionSend(backing),
     inbound: talker.receives === false ? null : connectionInbound(backing),
-    messages: talker.history === true ? connectionMessages(backing) : null,
     directory: connectionDirectory(backing),
   };
 }
@@ -180,128 +175,6 @@ function connectionDirectory(backing: Backing): ChannelDirectory {
       );
       return listed.flat();
     },
-  };
-}
-
-/**
- * What was said on a channel with no store of its own, read through its
- * Connection's history. No store answers per-account reads for it, so there is
- * no `byAccount`: a People timeline reads these channels from Rome's own
- * transcript instead.
- *
- * The history answers within the Connection's own caps, and reads a window
- * rounded out to whole hours; this port keeps what falls at or after `since`
- * and answers newest first, as every `query` does. It sorts by time rather
- * than trusting the history's order: a read over every conversation
- * (Discord's) orders each conversation's lines but joins the conversations
- * one after another. The history
- * keeps the oldest thousand lines of a window that holds more, so such a
- * window answers the newest of those.
- *
- * A query naming no `since` reads the last {@link LIVE_DEFAULT_WINDOW_MS}. A
- * wider default would not answer newer lines: some platforms' reads (Discord's)
- * keep the oldest lines after their cutoff, so reaching further back trades
- * the newest lines for older ones. A caller wanting more names a `since`.
- *
- * A query is a live platform read, and one naming no conversation is the
- * costly kind: a Telegram account reads its fifty newest chats and fifty lines
- * of each, Discord every channel of every server the bot is in, and email
- * hydrates up to a thousand message bodies. So a read is shared for
- * {@link LIVE_READ_TTL_MS}: a query for the same conversation, or for every
- * conversation, reuses a read already made or under way over the same
- * whole-hour window. Only the same window will do. A Connection cuts what it
- * answers within its window (Discord keeps the oldest hundred lines of each
- * channel), so a wider read can hold none of the lines a narrower one would.
- * A reused read answers what a fresh one would, older by at most that long,
- * and `fetch_channel_history` reads through it like any other caller.
- *
- * The port reads the channel's one Connection. A connection kind may hold several,
- * and each backs a channel of its own.
- */
-export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
-
-/** How long a live read is shared among the queries its window covers. */
-export const LIVE_READ_TTL_MS = 30_000;
-
-/** One live read, shared while it is fresh. */
-interface SharedRead {
-  at: number;
-  lines: Promise<ChannelMessage[]>;
-}
-
-function connectionMessages(backing: Backing): Messages {
-  const { channel } = backing;
-  const shared = new Map<string, SharedRead>();
-
-  /** The read `key` names, shared while it is fresh. */
-  function read(key: string, fresh: () => Promise<ChannelMessage[]>): Promise<ChannelMessage[]> {
-    const now = Date.now();
-    for (const [held, entry] of shared) {
-      if (now - entry.at >= LIVE_READ_TTL_MS) shared.delete(held);
-    }
-    const hit = shared.get(key);
-    if (hit) return hit.lines;
-    const entry: SharedRead = { at: now, lines: fresh() };
-    shared.set(key, entry);
-    entry.lines.catch(() => {
-      if (shared.get(key) === entry) shared.delete(key);
-    });
-    return entry.lines;
-  }
-
-  return {
-    async query({ chatId, since, after, limit }) {
-      const connection = connectionFor(backing);
-      if (!connection) throw new ChannelNotConnected(channel);
-      const connectionId = connection.id;
-      // A Connection whose talker is not built yet (a credential missing or
-      // degraded) backs nothing, the same as no Connection at all.
-      if (!connection.withTalker((talker) => talker.history !== undefined)) {
-        throw new ChannelNotConnected(channel);
-      }
-      const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
-      // The Connection reads whole hours back, so the window it will read
-      // names the read along with the conversation.
-      const hours = historyWindowHours(from);
-      const lines = await read(
-        `${connectionId}\n${chatId ?? ""}\n${hours}`,
-        () =>
-          connection.withTalker((talker) =>
-            talker.history?.query({
-              ...(chatId ? { chatId } : {}),
-              since: from,
-              limit: MAX_QUERY_LIMIT,
-            }),
-          ) ?? Promise.reject(new ChannelNotConnected(channel)),
-      );
-      // Paged after the read, so a cursor pages back only within the window
-      // the platform answers.
-      // Reversed before the sort, so lines sharing a timestamp come newest
-      // first too.
-      const newestFirst = lines
-        .filter((message) => message.timestamp.getTime() >= from.getTime())
-        .reverse()
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-        .map((message) => copyOf(message, channel));
-      return queryPage(newestFirst, { after, limit });
-    },
-    byAccount: null,
-  };
-}
-
-/** A shared read's message, copied for one caller, so a caller that edits what
- *  it was answered leaves the others' answers as read: every field, the
- *  timestamp, attachments, thread and reply included. `raw` alone stays
- *  shared: it is the provider's own, which no caller edits. A talker names
- *  its connection kind, so the copy names the channel it was read on. */
-function copyOf(message: ChannelMessage, channel: string): ChannelMessage {
-  return {
-    ...message,
-    channel,
-    timestamp: new Date(message.timestamp.getTime()),
-    attachments: message.attachments.map((attachment) => ({ ...attachment })),
-    ...(message.thread ? { thread: { ...message.thread } } : {}),
-    ...(message.replyTo ? { replyTo: { ...message.replyTo } } : {}),
   };
 }
 

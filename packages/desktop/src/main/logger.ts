@@ -5,7 +5,7 @@ import { homedir } from "os";
 import winston from "winston";
 
 const LOG_DIR = join(homedir(), ".rome-desktop");
-const LOG_FILE = join(LOG_DIR, "debug.log");
+export const LOG_FILE = join(LOG_DIR, "debug.log");
 const TRACER_NAME = "rome-desktop";
 
 if (!existsSync(LOG_DIR)) {

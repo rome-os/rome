@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import {
   Archive,
@@ -66,8 +67,8 @@ import type {
   TraceSubagentSummary,
   TraceSummary,
 } from "@rome/api-types/trace-segments";
-import { useSmoothText } from "@/hooks/use-smooth-text";
-import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import { useStableMap } from "@/hooks/use-stable-map";
+import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
   CHAT_PAGE_TURNS,
@@ -102,6 +103,9 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import { onConciergeJump } from "@/components/concierge/concierge-jump";
+import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
   ChatErrorNotice,
@@ -152,6 +156,8 @@ import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 const TIMELINE_JUMP_OFFSET_PX = 24;
 // How long the landed-on question stays tinted.
 const TIMELINE_LANDING_MS = 900;
+/** How many older pages a jump to a Concierge message loads before it gives up. */
+const MAX_JUMP_PAGES = 20;
 
 // Chat Component
 
@@ -218,10 +224,13 @@ const sessionNameSchema = z.object({
   name: z.string(),
 });
 
+const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
+  onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
 }
 
@@ -229,6 +238,7 @@ function ChatSessionEvents({
   sessionId,
   onMessageInsert,
   onSessionName,
+  onSessionRunning,
   onReconnect,
 }: ChatSessionEventsProps) {
   useLiveEvents(
@@ -241,6 +251,12 @@ function ChatSessionEvents({
       session_name: {
         schema: sessionNameSchema,
         fn: (event) => onSessionName(sessionId, event),
+      },
+      session_running: {
+        schema: sessionRunningSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onSessionRunning(event);
+        },
       },
     },
     {
@@ -393,6 +409,7 @@ export function Chat({
   const {
     streams: streamingSessions,
     streamsRef: streamingSessionsRef,
+    liveText: liveTextOf,
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
@@ -526,6 +543,7 @@ export function Chat({
     setCursor: setOlderCursor,
     hasOlder,
     sentinelRef: olderSentinelRef,
+    loadOlder,
   } = useOlderMessages(mainSessionId || null, {
     pageTurns,
     scroller: scrollerEl,
@@ -593,6 +611,9 @@ export function Chat({
         anchor.getBoundingClientRect().top -
         scroller.getBoundingClientRect().top +
         scroller.scrollTop;
+      // A jump that follows loading older pages comes long after the click, so
+      // the pin would read it as drift and snap back to the bottom.
+      anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
       // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
       // scroll outside its 300ms user-gesture window as accidental drift and
       // snaps back to the bottom while pinned; an instant scroll emits its one
@@ -615,6 +636,56 @@ export function Chat({
     },
     [scrollerEl],
   );
+
+  // A row of the task panel points to a Concierge message that may sit pages
+  // above the loaded ones, so the jump pages older history in until it renders.
+  const olderRef = useRef({ hasOlder, loadOlder });
+  olderRef.current = { hasOlder, loadOlder };
+  const shownCountRef = useRef(0);
+  useEffect(() => {
+    shownCountRef.current = displayMessages.length;
+  }, [displayMessages]);
+  const findingMessageRef = useRef(false);
+  const showSourceMessage = useCallback(
+    async (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller || !mainSessionId || findingMessageRef.current) return;
+      if (findMessageAnchor(scroller, messageId)) {
+        jumpToMessage(messageId);
+        return;
+      }
+      findingMessageRef.current = true;
+      const loading = toast.loading(t("concierge.tasks.findingMessage"));
+      try {
+        let stalled = 0;
+        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+          if (!olderRef.current.hasOlder(mainSessionId)) break;
+          const before = shownCountRef.current;
+          await olderRef.current.loadOlder(mainSessionId);
+          // The page lands in state first and renders a moment later.
+          for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          if (findMessageAnchor(scroller, messageId)) {
+            jumpToMessage(messageId);
+            return;
+          }
+          // A page that fails to load changes nothing; two in a row end the search.
+          stalled = shownCountRef.current === before ? stalled + 1 : 0;
+          if (stalled >= 2) break;
+        }
+        toast.error(t("concierge.tasks.sourceMissing"));
+      } finally {
+        toast.dismiss(loading);
+        findingMessageRef.current = false;
+      }
+    },
+    [scrollerEl, mainSessionId, jumpToMessage, t],
+  );
+  useEffect(() => {
+    if (!concierge) return;
+    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+  }, [concierge, showSourceMessage]);
 
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),
@@ -706,16 +777,9 @@ export function Chat({
     [view, runningTurnId],
   );
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
-  // Typewriter-paced reveal of the latest assistant text block — the SSE
-  // stream updates in provider-sized deltas; this smooths them into typing.
-  // Keyed by turn + block: a new block retypes from zero (delayed fold — it
-  // replaces the previous block the moment its first delta arrives).
-  const liveAssistantText = useSmoothText(
-    floorSessionStream?.assistantText ?? "",
-    floorSessionStream
-      ? `${floorSessionStream.turnId}:${floorSessionStream.assistantBlockIx}`
-      : "idle",
-  );
+  // The latest assistant text block. The live row follows it (and smooths it
+  // into typing, see LiveTail); the chat does not render for it.
+  const liveTextStore = liveTextOf(floorSessionId);
 
   // Pull host callbacks through refs so the many internal `useCallback`s
   // depending on them don't need to re-create whenever the host swaps in a
@@ -1302,27 +1366,12 @@ export function Chat({
     ],
   );
 
-  useEffect(() => {
-    // Reattach to whichever session holds the floor — during a handoff that's
-    // the specialist's child session, not the main one (only the floor can have
-    // an in-flight turn, since shallower callers are suspended). On reload this
-    // re-runs as the floor resolves, so the live preview reattaches correctly.
-    const reattachSessionId = floorSessionId;
-    if (!reattachSessionId) return;
-    if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
-
-    let cancelled = false;
-    let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const schedule = (delayMs: number) => {
-      if (cancelled) return;
-      pollTimer = setTimeout(() => {
-        void runOnce();
-      }, delayMs);
-    };
-
-    const runOnce = async () => {
-      if (cancelled) return;
+  // Reattach to whichever session holds the floor — during a handoff that's
+  // the specialist's child session, not the main one (only the floor can have
+  // an in-flight turn, since shallower callers are suspended). On reload this
+  // re-runs as the floor resolves, so the live preview reattaches correctly.
+  const pollTurns = useCallback(
+    async (reattachSessionId: string, isCancelled: () => boolean): Promise<TurnPollOutcome> => {
       // Skip if the foreground send is mid-flight (locallyStreaming was added
       // before its POST, so it catches the window before its per-session
       // entry exists) or a prior reattach hasn't drained yet.
@@ -1330,55 +1379,56 @@ export function Chat({
         locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
         streamingSessionsRef.current.has(reattachSessionId)
       ) {
-        schedule(2000);
-        return;
+        return "busy";
       }
-      try {
-        // List in-flight turns by turnId. Reattach to the running
-        // one (or the first queued one) — its events stream is keyed by
-        // turnId, so reattach is unambiguous even if more turns arrive
-        // while we're polling.
-        const turns = await listSessionTurns(reattachSessionId);
-        if (!turns || turns.length === 0 || cancelled) return;
-        // A foreground send may have started while the lookup was in flight.
-        // It already follows its turn; a second follower would fight it for
-        // the stream controller.
-        if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
+      // List in-flight turns by turnId. Reattach to the running
+      // one (or the first queued one) — its events stream is keyed by
+      // turnId, so reattach is unambiguous even if more turns arrive
+      // while we're polling.
+      const turns = await listSessionTurns(reattachSessionId);
+      if (!turns || turns.length === 0 || isCancelled()) return "idle";
+      // A foreground send may have started while the lookup was in flight.
+      // It already follows its turn; a second follower would fight it for
+      // the stream controller.
+      if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return "busy";
 
-        const target = turns.find((t) => t.status === "running") ?? turns[0];
-        startSessionStream(reattachSessionId, target.turnId);
-        // A backend turn already listed under its agent turn id hides its saved
-        // trace from the first render, before the replayed `turn_id` arrives.
-        if (target.agentTurnId) {
-          adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
-        }
-        setStreamError(null);
-        // Not cancelled with this effect: followTurn ends with its turn (or
-        // on unmount), and the entry it holds keeps this poll from doubling up.
-        await followTurn(reattachSessionId, target.turnId);
-      } catch {
-        // Silent on poll/network blips — keep trying so backend-initiated
-        // streams (e.g. queued approvals) eventually attach.
-      } finally {
-        if (!cancelled) {
-          schedule(2000);
-        }
+      const target = turns.find((t) => t.status === "running") ?? turns[0];
+      startSessionStream(reattachSessionId, target.turnId, target.quiet);
+      // A backend turn already listed under its agent turn id hides its saved
+      // trace from the first render, before the replayed `turn_id` arrives.
+      if (target.agentTurnId) {
+        adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
       }
-    };
-
-    void runOnce();
-
-    return () => {
-      cancelled = true;
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-  }, [
+      setStreamError(null);
+      // Not cancelled with the poll: followTurn ends with its turn (or on
+      // unmount), and the entry it holds pauses the poll meanwhile.
+      await followTurn(reattachSessionId, target.turnId);
+      return "followed";
+    },
+    [followTurn, startSessionStream, adoptSessionAgentTurn, streamingSessionsRef],
+  );
+  // A `session_running` event or a reconnect kicks the poll, so its timer is
+  // only a fallback for a lost event.
+  const kickTurnPoll = useTurnPoll(
     floorSessionId,
-    followTurn,
-    streamReconnectRevision,
-    startSessionStream,
-    adoptSessionAgentTurn,
-  ]);
+    { paused: isActiveSessionStreaming, revision: streamReconnectRevision },
+    pollTurns,
+  );
+  const handleSessionRunning = useCallback(
+    (event: z.infer<typeof sessionRunningSchema>) => {
+      // A turn queued or ended with the chat still running is one to follow.
+      if (event.running && event.sessionId === floorSessionIdRef.current) kickTurnPoll();
+    },
+    [kickTurnPoll],
+  );
+  // Events missed while the stream was down may include a turn's start.
+  const handleSessionEventsReconnect = useCallback(
+    (sid: string) => {
+      resyncSessionMessages(sid);
+      if (sid === floorSessionIdRef.current) kickTurnPoll();
+    },
+    [resyncSessionMessages, kickTurnPoll],
+  );
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
@@ -1831,14 +1881,18 @@ export function Chat({
 
   // The composer's pinned chip = the floor agent (the specialist during a
   // handoff, the main agent otherwise).
-  const floorAgentMention: AgentMention | null = floorHandoff
-    ? {
-        appId: floorHandoff.appId,
-        appLabel: floorHandoff.agentLabel,
-        agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
-        iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
-      }
-    : pinnedAgentMention;
+  const floorAgentMention = useMemo<AgentMention | null>(
+    () =>
+      floorHandoff
+        ? {
+            appId: floorHandoff.appId,
+            appLabel: floorHandoff.agentLabel,
+            agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
+            iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
+          }
+        : pinnedAgentMention,
+    [floorHandoff, pinnedAgentMention],
+  );
   // The floor's own (raw, chronological) messages drive the approve /
   // verbal-approval gates — reordering doesn't affect submission detection.
   const floorMessages = messages.get(floorSessionId) ?? EMPTY_MESSAGES;
@@ -1855,6 +1909,31 @@ export function Chat({
     () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
     [floorHandoff, floorMessages],
   );
+
+  // The composer is memoized so a streaming turn does not render it, which only
+  // holds while what it is handed keeps its identity.
+  const composerModelSelection = useMemo(
+    () => (chatModelPickable ? { value: chatModelValue, onChange: pickChatModel } : undefined),
+    [chatModelPickable, chatModelValue, pickChatModel],
+  );
+  const composerDesigning = useMemo(
+    () =>
+      floorHandoff
+        ? {
+            agentLabel: floorHandoff.agentLabel,
+            // A pending submission turns the banner into an Approve
+            // that resolves the handoff with that payload.
+            onApprove: activeSubmission
+              ? () => void handleResolveHandoff(floorHandoff, activeSubmission.payload, "Approved")
+              : undefined,
+            // Cancel lives here now (off the @mention seam): dismiss
+            // the handoff and hand the floor back to the caller.
+            onCancel: () => handleCancelHandoff(floorHandoff),
+          }
+        : null,
+    [floorHandoff, activeSubmission, handleResolveHandoff, handleCancelHandoff],
+  );
+  const stopComposerTurn = useCallback(() => void stopMessage(), [stopMessage]);
   // A submission waiting on Approve is the specialist asking the guardian, the
   // same as an open card.
   useChatTabStatus(
@@ -1945,14 +2024,22 @@ export function Chat({
 
   // The block-level callbacks + resolved-interaction map, bundled once so the
   // memoized StaticTranscript stays stable across a streaming turn.
+  // `interactionResults` is rebuilt whenever a message changes; kept by value, a
+  // new message does not hand every transcript row new actions.
+  const stableInteractionResults = useStableMap(interactionResults);
   const blockActions = useMemo<BlockActions>(
     () => ({
       onApprovalResolved: refreshActiveSession,
       onSubmitAppComponent: handleSubmitAppComponent,
       onDismissAppComponent: handleDismissAppComponent,
-      interactionResults,
+      interactionResults: stableInteractionResults,
     }),
-    [refreshActiveSession, handleSubmitAppComponent, handleDismissAppComponent, interactionResults],
+    [
+      refreshActiveSession,
+      handleSubmitAppComponent,
+      handleDismissAppComponent,
+      stableInteractionResults,
+    ],
   );
 
   // Keyed by (session, turn) so dismissal naturally clears when the turn
@@ -2076,10 +2163,13 @@ export function Chat({
               model={model}
               reasoningEffort={reasoningEffort}
             />
-            <span className="truncate text-ui text-foreground">
+            <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
               {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
             </span>
-            {sessionName?.trim() && pinnedAgentMention && (
+            {concierge ? <ConciergeTasksPill /> : null}
+            {/* The agent's app beside a titled chat. The Concierge's is always
+                Rome, so it shows none. */}
+            {!concierge && sessionName?.trim() && pinnedAgentMention && (
               <span className="shrink-0 truncate text-aux text-muted-foreground">
                 {pinnedAgentMention.appLabel}
               </span>
@@ -2155,7 +2245,8 @@ export function Chat({
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
           onSessionName={handleSessionName}
-          onReconnect={resyncSessionMessages}
+          onSessionRunning={handleSessionRunning}
+          onReconnect={handleSessionEventsReconnect}
         />
       ))}
       <div
@@ -2222,10 +2313,10 @@ export function Chat({
                     live={{
                       isStreaming: displayedStreaming,
                       runningTurnId,
+                      quiet: floorSessionStream?.quiet,
                       snapshot: currentSnapshot,
-                      text: liveAssistantText,
+                      textStore: liveTextStore,
                       blockIx: floorSessionStream?.assistantBlockIx,
-                      sourceText: floorSessionStream?.assistantText,
                       textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
                       identity: floorIdentity,
                     }}
@@ -2352,8 +2443,8 @@ export function Chat({
                       ref={composerRef}
                       boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                       onSend={handleComposerSend}
-                      // No Stop: the next message interrupts.
                       isStreaming={displayedStreaming}
+                      onStop={stopComposerTurn}
                       streamError={streamError}
                       modelSelection={
                         chatModelPickable
@@ -2374,16 +2465,12 @@ export function Chat({
                       // can change from the next turn.
                       showProjectSelector={!mainSessionId}
                       showModelSelector={!mainSessionId || chatModelPickable}
-                      chatModelSelection={
-                        chatModelPickable
-                          ? { value: chatModelValue, onChange: pickChatModel }
-                          : undefined
-                      }
+                      chatModelSelection={composerModelSelection}
                       initialProjectName={initialProjectName}
                       initialDeviceFolder={initialDeviceFolder}
                       initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
-                      onStop={() => void stopMessage()}
+                      onStop={stopComposerTurn}
                       streamError={streamError}
                       // The chip names the floor agent — the specialist during a
                       // handoff, the main agent otherwise.
@@ -2394,26 +2481,7 @@ export function Chat({
                       lockedReason={
                         lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
                       }
-                      designingInteraction={
-                        floorHandoff
-                          ? {
-                              agentLabel: floorHandoff.agentLabel,
-                              // A pending submission turns the banner into an Approve
-                              // that resolves the handoff with that payload.
-                              onApprove: activeSubmission
-                                ? () =>
-                                    void handleResolveHandoff(
-                                      floorHandoff,
-                                      activeSubmission.payload,
-                                      "Approved",
-                                    )
-                                : undefined,
-                              // Cancel lives here now (off the @mention seam): dismiss
-                              // the handoff and hand the floor back to the caller.
-                              onCancel: () => handleCancelHandoff(floorHandoff),
-                            }
-                          : null
-                      }
+                      designingInteraction={composerDesigning}
                     />
                   )}
                 </div>

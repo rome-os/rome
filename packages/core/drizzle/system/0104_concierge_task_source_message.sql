@@ -1,0 +1,1 @@
+ALTER TABLE `concierge_tasks` ADD `source_message_id` text;

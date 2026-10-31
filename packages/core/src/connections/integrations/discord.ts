@@ -2,7 +2,7 @@
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
 // transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
-// commands, send formatting, history — is `DiscordAdapter`
+// commands, send formatting — is `DiscordAdapter`
 // (packages/core/src/channels/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.
 // The transport already speaks the channel's record, so inbound and send pass
@@ -17,7 +17,7 @@
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
@@ -25,7 +25,7 @@ import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
-import { directoryPage, historyQueryLimit, historyWindowHours } from "./talk-features.js";
+import { directoryPage } from "./talk-features.js";
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
 // (users/@me). Declared next to the material shape ({ token }); parse-then-store,
@@ -245,7 +245,6 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     auth: botScheme,
     capabilities: {
       talker: {
-        history: true,
         build(cred, kit): Talker {
           const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -279,15 +278,6 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             );
           };
 
-          const history: TalkHistory = {
-            async query(input) {
-              const messages = await adapter.fetchHistory(
-                input.chatId ?? null,
-                historyWindowHours(input.since),
-              );
-              return messages.slice(0, historyQueryLimit(input.limit));
-            },
-          };
           const inboundMedia: ChannelInboundMedia = {
             materialize: (message) => adapter.saveIncomingAttachments(message),
           };
@@ -352,7 +342,6 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                   userId,
                 )) as import("@rome-os/app-runtime").ChatId,
             },
-            history,
             inboundMedia,
             activity,
             directory,

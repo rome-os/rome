@@ -69,7 +69,7 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
       if (!built.has(name))
         built.set(name, connectionPorts({ registry, channelOf: kindChannelOf }, name));
       const ports = built.get(name);
-      return ports ? [{ name, accounts: null, ...ports }] : [];
+      return ports ? [{ name, accounts: null, messages: null, ...ports }] : [];
     });
 }
 

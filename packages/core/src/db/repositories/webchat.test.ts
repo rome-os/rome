@@ -59,6 +59,16 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("lists a turn's messages in the order they were stored, even inside one second", async () => {
+    await repo.createSession("chat-1", "Chat");
+    // Ids that sort against the insertion order, so only the order of storing can win.
+    for (const id of ["z-first", "a-second", "m-third"]) {
+      await repo.addSentMessage(id, "chat-1", [{ type: "text", content: id }], "turn-1");
+    }
+    const rows = await repo.getTurnChatMessages("chat-1", "turn-1");
+    expect(rows.map((row) => row.id)).toEqual(["z-first", "a-second", "m-third"]);
+  });
+
   it("never selects block content when all requested traces are archived", async () => {
     await repo.createSession("old-only", "Old only");
     await repo.appendTraceBlocks({

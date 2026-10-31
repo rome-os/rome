@@ -1,9 +1,10 @@
 name: fetch_channel_history
 type: system
 description: >
-  Fetch recent message history from a channel adapter.
+  Fetch recent message history from a channel that keeps its messages, such
+  as WhatsApp, LinkedIn or the dashboard chat.
   Pass threadId to fetch a specific thread, or omit it to fetch all accessible
-  threads (supported by Discord: returns messages from all guild channels).
+  threads.
   Returns the newest messages as a markdown-formatted summary grouped by
   thread. To page back a few at a time, pass limit, then pass the returned
   nextCursor as cursor to read the messages before that page; paging needs

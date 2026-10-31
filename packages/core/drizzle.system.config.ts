@@ -36,6 +36,7 @@ export default defineConfig({
     "connection_grants",
     "channels",
     "rome_sessions",
+    "concierge_tasks",
     "linkedin_threads",
     "linkedin_messages",
     "linkedin_participants",

@@ -719,8 +719,22 @@
     {
       "idx": 103,
       "version": "6",
-      "when": 1793326485596,
-      "tag": "0103_chats_tables",
+      "when": 1793284118375,
+      "tag": "0103_concierge_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "6",
+      "when": 1793377030179,
+      "tag": "0104_concierge_task_source_message",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "6",
+      "when": 1793429431619,
+      "tag": "0105_chats_tables",
       "breakpoints": true
     }
   ]

@@ -17,6 +17,53 @@
     "showFullText": "展开全文",
     "showLess": "收起",
     "openTaskChat": "打开",
+    "tasks": {
+      "title": "任务",
+      "close": "关闭任务",
+      "groups": {
+        "needsYou": "等你处理",
+        "doing": "进行中",
+        "next": "接下来",
+        "watching": "盯着",
+        "done": "已完成"
+      },
+      "stop": "停止",
+      "done": "完成",
+      "archive": "归档",
+      "retry": "再试一次",
+      "pending": {
+        "stop": "正在停止…",
+        "archive": "正在归档…",
+        "done": "正在发送…"
+      },
+      "unchanged": "Concierge 没有改动这一项",
+      "timeout": "Concierge 还没有处理",
+      "failed": "没发出去，请再试一次。",
+      "notSynced": "未同步",
+      "sourceMissing": "找不到原消息",
+      "findingMessage": "正在查找消息…",
+      "showMore": "显示更早的 {{count}} 项",
+      "showLess": "收起",
+      "openChat": "打开「{{title}}」的对话",
+      "actionText": {
+        "stop": "停止「{{title}}」",
+        "archive": "归档「{{title}}」",
+        "done": "完成了「{{title}}」",
+        "withId": "（任务 {{id}}）"
+      },
+      "replyText": {
+        "done": "我已经完成了"
+      },
+      "pill": {
+        "needsYou_one": "任务，{{count}} 项等你处理",
+        "needsYou_other": "任务，{{count}} 项等你处理",
+        "doing_one": "任务，{{count}} 项进行中",
+        "doing_other": "任务，{{count}} 项进行中",
+        "idle": "任务"
+      },
+      "emptyTitle": "还没有任务",
+      "emptyDescription": "Concierge 正在做、计划做或盯着的任务会显示在这里。"
+    },
     "messageDetails": "消息详情",
     "composerMenu": "添加文件或切换模型",
     "placeholder": "发消息",

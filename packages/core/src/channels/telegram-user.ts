@@ -284,46 +284,6 @@ export class TelegramUserAdapter {
     ]);
   }
 
-  /** Messages from the last `windowHours`, oldest first: one conversation's
-   *  last 100, or the last 50 of each of the first 50 dialogs when
-   *  `threadId` is null. Every line is `direction: "inbound"`. Its `raw`
-   *  `Api.Message` carries `out`, which tells the account's own lines apart. */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-    const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
-    if (threadId) {
-      const messages = await this.client.getMessages(entityFromThreadId(threadId), {
-        limit: 100,
-      });
-      return messages
-        .filter((message) => message instanceof Api.Message)
-        .map((message) => this.normalizeMessage(message, { threadId }))
-        .filter((message) => message.timestamp.getTime() >= cutoffMs)
-        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    }
-
-    const dialogs = await this.client.getDialogs({ limit: 50 });
-    const allMessages: ChannelMessage[] = [];
-    for (const dialog of dialogs) {
-      const dialogId = dialog.id?.toString();
-      if (!dialogId) continue;
-
-      const messages = await this.client.getMessages(dialog.inputEntity, { limit: 50 });
-      for (const message of messages) {
-        if (!(message instanceof Api.Message)) continue;
-        const normalized = this.normalizeMessage(message, {
-          threadId: dialogId,
-          threadName: dialog.title ?? dialog.name,
-          threadType: dialog.isUser ? "private" : "group",
-        });
-        if (normalized.timestamp.getTime() >= cutoffMs) {
-          allMessages.push(normalized);
-        }
-      }
-    }
-
-    return allMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }
-
   async listDialogs(limit = 50): Promise<TelegramUserDialogSummary[]> {
     const dialogs = await this.client.getDialogs({ limit });
     return dialogs
@@ -343,26 +303,14 @@ export class TelegramUserAdapter {
     await this.handler(this.normalizeMessage(event.message));
   }
 
-  private normalizeMessage(
-    message: Api.Message,
-    context: {
-      threadId?: string;
-      threadName?: string;
-      threadType?: "private" | "group";
-    } = {},
-  ): ChannelMessage {
-    const threadId = context.threadId ?? peerToThreadId(message.peerId);
+  private normalizeMessage(message: Api.Message): ChannelMessage {
+    const threadId = peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
-    // A sender's name is known only for the guardian's own lines and in a
-    // private dialog, whose name is the other party's. A group's name is not
-    // its sender's, and a live message carries no name at all, so neither
-    // stands in for one: an id there would read as a name to every consumer.
-    const senderDisplayName = isOutgoing
-      ? this.settings.displayName
-      : context.threadType === "private"
-        ? context.threadName
-        : undefined;
+    // A sender's name is known only for the guardian's own lines: a live
+    // message carries no name, and an id would read as a name to every
+    // consumer.
+    const senderDisplayName = isOutgoing ? this.settings.displayName : undefined;
     return {
       channel: "telegram_user",
       direction: "inbound",
@@ -377,11 +325,8 @@ export class TelegramUserAdapter {
         ? { replyTo: { messageId: String(message.replyTo.replyToMsgId) } }
         : {}),
       // A live message carries no dialog context, so it reads as a group even
-      // in a private chat. Only the all-dialogs history read knows a line's kind.
-      thread: {
-        kind: context.threadType === "private" ? "dm" : "group",
-        ...(context.threadName ? { name: context.threadName } : {}),
-      },
+      // in a private chat.
+      thread: { kind: "group" },
       raw: message,
     };
   }

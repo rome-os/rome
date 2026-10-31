@@ -8,11 +8,16 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
+import { useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
 import * as store from "./use-free-cells";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
 
 rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
+// The panel is tested on its own; here it only has to be the tab's body.
+rs.mock("@/components/concierge/ConciergeTaskPanel", () => ({
+  ConciergeTaskPanel: () => <p>Task panel body</p>,
+}));
 
 let viewportWidth = 1200;
 let stripWidth: number | null = null;
@@ -751,5 +756,186 @@ describe("ToolWorkspace Trace tab against the saved tool view", () => {
     await user.click(screen.getByRole("option", { name: "Projects" }));
     expect(selected("Trace")).toBe(false);
     expect(selected("projects")).toBe(true);
+  });
+});
+
+// Stands in for the Concierge chat's pill: it asks the pane for the Tasks tab.
+function TasksOwner() {
+  const pane = useToolTasks();
+  return (
+    <>
+      <button type="button" onClick={() => pane?.show()}>
+        Show tasks
+      </button>
+      <button type="button" onClick={() => pane?.hide()}>
+        Hide tasks
+      </button>
+      <output data-testid="tasks-host">
+        {JSON.stringify({ active: pane?.active, compact: pane?.compact })}
+      </output>
+    </>
+  );
+}
+
+function TasksHarness({
+  initial = { activeId: "a", collapsed: false, unreadIds: [] },
+  selectTool = rs.fn(),
+  setCollapsed = rs.fn(),
+  addWidget = rs.fn(),
+  removeWidget = rs.fn(),
+  withTrace = false,
+}: {
+  initial?: ToolView;
+  selectTool?: (id: string) => void;
+  setCollapsed?: (collapsed: boolean) => void;
+  addWidget?: () => void;
+  removeWidget?: (id: string) => void;
+  withTrace?: boolean;
+}) {
+  const [view, setView] = useState(initial);
+  return (
+    <ToolWorkspace
+      placements={placements}
+      view={view}
+      selectTool={(id) => {
+        selectTool(id);
+        setView((v) => ({ ...v, activeId: id, collapsed: false }));
+      }}
+      setCollapsed={(collapsed) => {
+        setCollapsed(collapsed);
+        setView((v) => ({ ...v, collapsed }));
+      }}
+      addWidget={addWidget}
+      removeWidget={removeWidget}
+      label={(widget) => widget.type}
+      icon={() => null}
+      content={(widget) => <ToolContent id={widget.id} />}
+      fullHref={() => null}
+    >
+      <input aria-label="Chat draft" />
+      <TasksOwner />
+      {withTrace && <TraceOwner />}
+    </ToolWorkspace>
+  );
+}
+
+describe("ToolWorkspace Tasks tab", () => {
+  it("adds an ephemeral Tasks tab ahead of the apps and selects it, writing nothing to the layout", async () => {
+    const user = userEvent.setup();
+    const selectTool = rs.fn();
+    const setCollapsed = rs.fn();
+    const addWidget = rs.fn();
+    const removeWidget = rs.fn();
+    render(
+      <TasksHarness
+        selectTool={selectTool}
+        setCollapsed={setCollapsed}
+        addWidget={addWidget}
+        removeWidget={removeWidget}
+      />,
+    );
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+
+    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Task panel body")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe(
+      "false",
+    );
+    expect(selectTool).not.toHaveBeenCalled();
+    expect(setCollapsed).not.toHaveBeenCalled();
+    expect(addWidget).not.toHaveBeenCalled();
+    expect(removeWidget).not.toHaveBeenCalled();
+    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!)).toEqual({
+      active: true,
+      compact: false,
+    });
+  });
+
+  it("is not part of the saved layout: nothing about it reaches storage", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness />);
+    const before = JSON.stringify({ ...localStorage });
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(JSON.stringify({ ...localStorage })).toBe(before);
+  });
+
+  it("is removed by its close button and by the pill, and the app tab it covered comes back", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Close Tasks" }));
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+    expect(screen.queryByText("Task panel body")).toBeNull();
+    expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe("true");
+
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Hide tasks" }));
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+  });
+
+  it("stays when an app tab is chosen, and chosen again shows the list", async () => {
+    const user = userEvent.setup();
+    const selectTool = rs.fn();
+    render(<TasksHarness selectTool={selectTool} />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("tab", { name: "projects" }));
+    expect(selectTool).toHaveBeenCalledWith("b");
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("false");
+    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).active).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Task panel body")).toBeTruthy();
+  });
+
+  it("shows over a collapsed pane without writing the pane state, and falls back when it goes", async () => {
+    const user = userEvent.setup();
+    const setCollapsed = rs.fn();
+    render(
+      <TasksHarness
+        initial={{ activeId: "a", collapsed: true, unreadIds: [] }}
+        setCollapsed={setCollapsed}
+      />,
+    );
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(screen.getByText("Task panel body")).toBeTruthy();
+    expect(setCollapsed).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Close Tasks" }));
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    expect(setCollapsed).not.toHaveBeenCalled();
+  });
+
+  it("takes turns with the Trace tab, which behaves as before", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTrace />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+
+    expect(tabNames()).toEqual(["Trace", "Tasks", "desktop", "projects"]);
+    expect(screen.getByRole("tab", { name: "Trace" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByText("Trace body first")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Trace" }).getAttribute("aria-selected")).toBe("false");
+
+    await user.click(screen.getByRole("button", { name: "Close Trace" }));
+    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("tells the pill when the pane would take the whole width", async () => {
+    viewportWidth = 500;
+    render(<TasksHarness />);
+    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).compact).toBe(true);
+    viewportWidth = 1200;
+    cleanup();
+    render(<TasksHarness />);
+    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).compact).toBe(false);
   });
 });

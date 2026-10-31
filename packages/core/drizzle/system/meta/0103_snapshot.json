@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f1e78480-2300-4a4c-9ced-ca210b82d6cd",
+  "id": "fe21814b-3b3b-4d16-af8c-5590b4a78d3b",
   "prevId": "83260c26-81ac-406f-905b-f8e484e9aead",
   "tables": {
     "account_profiles": {
@@ -199,82 +199,6 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "agent_turn_messages": {
-      "name": "agent_turn_messages",
-      "columns": {
-        "message_id": {
-          "name": "message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "input_state": {
-          "name": "input_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_agent_turn_messages_turn": {
-          "name": "idx_agent_turn_messages_turn",
-          "columns": [
-            "session_id",
-            "turn_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "agent_turn_messages_message_id_chat_messages_id_fk": {
-          "name": "agent_turn_messages_message_id_chat_messages_id_fk",
-          "tableFrom": "agent_turn_messages",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "agent_turn_messages_message_id_session_id_pk": {
-          "columns": [
-            "message_id",
-            "session_id"
-          ],
-          "name": "agent_turn_messages_message_id_session_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -835,74 +759,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_message_platform_ids": {
-      "name": "chat_message_platform_ids",
-      "columns": {
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform_message_id": {
-          "name": "platform_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "chat_message_platform_ids_chat_id_chats_id_fk": {
-          "name": "chat_message_platform_ids_chat_id_chats_id_fk",
-          "tableFrom": "chat_message_platform_ids",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "chat_message_platform_ids_message_id_chat_messages_id_fk": {
-          "name": "chat_message_platform_ids_message_id_chat_messages_id_fk",
-          "tableFrom": "chat_message_platform_ids",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_message_platform_ids_chat_id_platform_message_id_pk": {
-          "columns": [
-            "chat_id",
-            "platform_message_id"
-          ],
-          "name": "chat_message_platform_ids_chat_id_platform_message_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chat_messages": {
-      "name": "chat_messages",
+    "concierge_tasks": {
+      "name": "concierge_tasks",
       "columns": {
         "id": {
           "name": "id",
@@ -911,318 +769,109 @@
           "notNull": true,
           "autoincrement": false
         },
-        "chat_id": {
-          "name": "chat_id",
+        "title": {
+          "name": "title",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sender_account_id": {
-          "name": "sender_account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sender_agent": {
-          "name": "sender_agent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sender_name": {
-          "name": "sender_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
+        "state": {
+          "name": "state",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "parts": {
-          "name": "parts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform_message_id": {
-          "name": "platform_message_id",
+        "summary": {
+          "name": "summary",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "reply_to_platform_message_id": {
-          "name": "reply_to_platform_message_id",
+        "waiting_on": {
+          "name": "waiting_on",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "said_at": {
-          "name": "said_at",
+        "due_at": {
+          "name": "due_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rank": {
+          "name": "rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
-        "idx_chat_messages_page": {
-          "name": "idx_chat_messages_page",
+        "idx_concierge_tasks_session": {
+          "name": "idx_concierge_tasks_session",
           "columns": [
-            "chat_id",
-            "thread_id",
-            "said_at",
-            "id"
-          ],
-          "isUnique": false
-        },
-        "idx_chat_messages_place": {
-          "name": "idx_chat_messages_place",
-          "columns": [
-            "chat_id",
-            "thread_id"
-          ],
-          "isUnique": false
-        },
-        "uq_chat_messages_platform": {
-          "name": "uq_chat_messages_platform",
-          "columns": [
-            "chat_id",
-            "platform_message_id"
+            "session_id"
           ],
           "isUnique": true,
-          "where": "\"chat_messages\".\"platform_message_id\" IS NOT NULL"
+          "where": "\"concierge_tasks\".\"session_id\" is not null"
         }
       },
       "foreignKeys": {
-        "chat_messages_chat_id_chats_id_fk": {
-          "name": "chat_messages_chat_id_chats_id_fk",
-          "tableFrom": "chat_messages",
-          "tableTo": "chats",
+        "concierge_tasks_session_id_rome_sessions_id_fk": {
+          "name": "concierge_tasks_session_id_rome_sessions_id_fk",
+          "tableFrom": "concierge_tasks",
+          "tableTo": "rome_sessions",
           "columnsFrom": [
-            "chat_id"
+            "session_id"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chat_participants": {
-      "name": "chat_participants",
-      "columns": {
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "since": {
-          "name": "since",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_chat_participants_account": {
-          "name": "idx_chat_participants_account",
-          "columns": [
-            "account_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "chat_participants_chat_id_chats_id_fk": {
-          "name": "chat_participants_chat_id_chats_id_fk",
-          "tableFrom": "chat_participants",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_participants_chat_id_account_id_pk": {
-          "columns": [
-            "chat_id",
-            "account_id"
-          ],
-          "name": "chat_participants_chat_id_account_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chat_threads": {
-      "name": "chat_threads",
-      "columns": {
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform_thread_id": {
-          "name": "platform_thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "opened_from_platform_message_id": {
-          "name": "opened_from_platform_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "chat_threads_chat_id_chats_id_fk": {
-          "name": "chat_threads_chat_id_chats_id_fk",
-          "tableFrom": "chat_threads",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_threads_chat_id_platform_thread_id_pk": {
-          "columns": [
-            "chat_id",
-            "platform_thread_id"
-          ],
-          "name": "chat_threads_chat_id_platform_thread_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chats": {
-      "name": "chats",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "platform_chat_id": {
-          "name": "platform_chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "uq_chats_platform_chat": {
-          "name": "uq_chats_platform_chat",
-          "columns": [
-            "platform",
-            "platform_chat_id"
-          ],
-          "isUnique": true
-        },
-        "idx_chats_platform_name": {
-          "name": "idx_chats_platform_name",
-          "columns": [
-            "platform",
-            "name"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -2823,31 +2472,9 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "idx_rome_sessions_chat": {
-          "name": "idx_rome_sessions_chat",
-          "columns": [
-            "chat_id",
-            "thread_id"
-          ],
-          "isUnique": false
-        },
         "idx_rome_sessions_owner_key": {
           "name": "idx_rome_sessions_owner_key",
           "columns": [

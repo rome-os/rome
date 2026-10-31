@@ -11,6 +11,7 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 import { type AgentIdentity, buildRows } from "./chat-view";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import type { BlockActions, LivePreview } from "./MessageList";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
 
@@ -21,7 +22,7 @@ const live: LivePreview = {
   isStreaming: false,
   runningTurnId: null,
   snapshot: null,
-  text: "",
+  textStore: EMPTY_LIVE_TEXT,
   identity: IDENTITY,
 };
 const actions: BlockActions = {
@@ -48,7 +49,7 @@ const agent = (id: string, turnId: string): ChatMessage => ({
   createdAt: "2026-10-27T00:00:00.000Z",
 });
 
-function transcript(messages: ChatMessage[], streaming = false) {
+function transcript(messages: ChatMessage[], streaming = false, quiet = false) {
   const rows = buildRows(messages, new Map(), IDENTITY, {
     runningTurnId: streaming ? "t9" : null,
     isStreaming: streaming,
@@ -57,7 +58,7 @@ function transcript(messages: ChatMessage[], streaming = false) {
     <ThemeProvider>
       <ConciergeTranscript
         rows={rows}
-        live={{ ...live, isStreaming: streaming, runningTurnId: streaming ? "t9" : null }}
+        live={{ ...live, isStreaming: streaming, runningTurnId: streaming ? "t9" : null, quiet }}
         actions={actions}
         contentRef={() => {}}
       />
@@ -202,5 +203,32 @@ describe("ConciergeTranscript waiting cards", () => {
     expect(card?.closest<HTMLElement>("[data-chat-card-message]")?.dataset.chatCardMessage).toBe(
       "a1",
     );
+  });
+});
+
+describe("ConciergeTranscript typing indicator", () => {
+  const dots = (container: HTMLElement) =>
+    container.querySelector('[role="status"][aria-label="Typing"]');
+
+  it("shows the typing dots while a turn runs", () => {
+    const { container } = render(transcript(history, true));
+    expect(dots(container)).not.toBeNull();
+  });
+
+  it("shows no dots for a quiet turn that has said nothing, and does not mark the log busy", () => {
+    const { container, getByRole } = render(transcript(history, true, true));
+    expect(dots(container)).toBeNull();
+    expect(getByRole("log").hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("shows the dots once the quiet turn says something", () => {
+    const { container, rerender } = render(transcript(history, true, true));
+    rerender(transcript([...history, agent("a9", "t9")], true, true));
+    expect(dots(container)).not.toBeNull();
+  });
+
+  it("does not take another turn's message for the quiet turn speaking", () => {
+    const { container } = render(transcript([...history, agent("a9", "t8")], true, true));
+    expect(dots(container)).toBeNull();
   });
 });

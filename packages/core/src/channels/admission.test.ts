@@ -42,20 +42,6 @@ describe("a channel's Connection across epochs", () => {
                 state.sends.push(message.text ?? "");
                 return { chatId, messageId: `sent-${state.epoch}` };
               },
-              history: {
-                query: async () => [
-                  {
-                    channel: "discord",
-                    direction: "inbound",
-                    messageId: `history-${state.epoch}`,
-                    chatId: "general" as ChatId,
-                    senderId: "guardian",
-                    text: `epoch ${state.epoch}`,
-                    attachments: [],
-                    timestamp: new Date(0),
-                  },
-                ],
-              },
             };
           },
         },
@@ -102,8 +88,6 @@ describe("a channel's Connection across epochs", () => {
     // Admission runs once per message, however many subscribe.
     if (gated) expect(admit).toHaveBeenCalledTimes(1);
 
-    const history = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
-    expect(history?.[0]?.messageId).toBe("history-1");
     await expect(
       ports.send!.send("general" as ChatId, { text: "first reply" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
@@ -144,8 +128,6 @@ describe("a channel's Connection across epochs", () => {
       expect(received).toEqual(["inbound-1", "inbound-2"]);
     }
     unsubscribe();
-    const current = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
-    expect(current?.[0]?.messageId).toBe("history-2");
     await expect(
       ports.send!.send("general" as ChatId, { text: "second reply" }),
     ).resolves.toMatchObject({ messageId: "sent-2" });

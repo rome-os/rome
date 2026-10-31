@@ -6,7 +6,7 @@ import { ConciergeTimeSeparator } from "@/components/chat/ConciergeTimeSeparator
 import type { BlockActions, LivePreview } from "@/components/chat/MessageList";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
-import { buildConciergeItems } from "@/components/chat/concierge-groups";
+import { buildConciergeItems, turnHasSpoken } from "@/components/chat/concierge-groups";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 
 function TypingBubble() {
@@ -24,6 +24,10 @@ function TypingBubble() {
     </ChatBubble>
   );
 }
+
+// One element for every render: a typing bubble has no props, and a fresh one
+// each time would defeat the memoized group that draws it.
+const TYPING_BUBBLE = <TypingBubble />;
 
 /**
  * The Concierge chat's transcript: the guardian's bubbles, the agent's
@@ -46,13 +50,16 @@ export function ConciergeTranscript({
   feedback?: boolean;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  const items = useMemo(
-    () => buildConciergeItems(rows, { typing: live.isStreaming }),
-    [rows, live.isStreaming],
+  // A quiet turn (the agent updating its own list) shows no typing dots until
+  // it says something.
+  const typing = live.isStreaming && (!live.quiet || turnHasSpoken(rows, live.runningTurnId));
+  const items = useMemo(() => buildConciergeItems(rows, { typing }), [rows, typing]);
+  const messageIds = useMemo(
+    () =>
+      items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
+    [items],
   );
-  const arrival = useBubbleArrivals(
-    items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
-  );
+  const arrival = useBubbleArrivals(messageIds);
   return (
     // Padding outside, width cap inside: the composer floor's geometry, so the
     // messages and the composer share both edges at every width.
@@ -64,7 +71,7 @@ export function ConciergeTranscript({
         className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
         role="log"
         aria-relevant="additions"
-        aria-busy={live.isStreaming || undefined}
+        aria-busy={typing || undefined}
       >
         {items.map((item) => {
           if (item.kind === "separator")
@@ -79,7 +86,7 @@ export function ConciergeTranscript({
               runningTurnId={runningTurnId}
               feedback={feedback}
               arrival={arrival}
-              typing={<TypingBubble />}
+              typing={TYPING_BUBBLE}
             />
           );
         })}

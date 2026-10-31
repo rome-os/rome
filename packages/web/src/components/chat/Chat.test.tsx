@@ -1,10 +1,15 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, useImperativeHandle, type ReactNode } from "react";
+import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
+import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
+  rstest: "importActual",
+};
+import { requestConciergeJump } from "@/components/concierge/concierge-jump";
+import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { Chat } from "./Chat";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
@@ -33,6 +38,23 @@ const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }))
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+const toast = rs.hoisted(() => ({
+  loading: rs.fn(() => "finding"),
+  error: rs.fn(),
+  dismiss: rs.fn(),
+}));
+rs.mock("sonner", () => ({ toast }));
+// How often the chat and its composer render: the chat calls this hook once
+// per render, and the composer stand-in counts its own.
+const renders = rs.hoisted(() => ({ chat: 0, composer: 0 }));
+
+rs.mock("@/hooks/use-streaming-sessions", () => ({
+  ...streamingSessionsModule,
+  useStreamingSessions: () => {
+    renders.chat += 1;
+    return streamingSessionsModule.useStreamingSessions();
+  },
+}));
 
 rs.mock("@/hooks/use-tab-status", () => ({
   useChatTabStatus: mockUseChatTabStatus,
@@ -55,6 +77,11 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
+}));
+
+// The pill is tested on its own; here only whether the navbar offers it.
+rs.mock("@/components/concierge/ConciergeTasksPill", () => ({
+  ConciergeTasksPill: () => <span data-testid="tasks-pill" />,
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -80,6 +107,7 @@ rs.mock("@/pages/free/use-free-cells", () => ({
 const stickToBottom = rs.hoisted(() => ({ isAtBottom: true, scrollToBottom: rs.fn() }));
 
 rs.mock("@/hooks/use-stick-to-bottom", () => ({
+  HOLD_STICK_EVENT: "rome:hold-stick",
   // Callback refs, matching the real hook. Chat composes these with its own
   // refs and CALLS them, so a ref object here would throw on mount — and a
   // rs.mock factory is not checked against the module's real shape, so nothing
@@ -90,10 +118,6 @@ rs.mock("@/hooks/use-stick-to-bottom", () => ({
     isAtBottom: stickToBottom.isAtBottom,
     scrollToBottom: stickToBottom.scrollToBottom,
   }),
-}));
-
-rs.mock("@/hooks/use-smooth-text", () => ({
-  useSmoothText: (text: string) => text,
 }));
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
@@ -151,6 +175,7 @@ rs.mock("@/components/chat/MessageList", () => ({
       kind: string;
       key: string;
       message?: {
+        id?: string;
         content: string;
         traceArchived?: boolean;
         sender?: { name: string | null; avatarUrl: string | null };
@@ -182,6 +207,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             key={row.key}
             data-testid="user-row"
             data-row-key={row.key}
+            data-timeline-anchor={row.message?.id}
             data-sender={row.message?.sender?.name}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
@@ -208,65 +234,105 @@ rs.mock("@/components/chat/MessageList", () => ({
 rs.mock("@/components/chat/ChatComposer", () => ({
   // Expose the streaming state + Stop wiring so tests can drive stopMessage
   // the way the real composer's Stop button does.
-  ChatComposer: (props: {
+  // Memoized, as the real one is: it renders again only for new props.
+  ChatComposer: memo(function ChatComposer(props: {
     isStreaming?: boolean;
     onStop?: () => void;
     onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
     streamError?: string | { message: string } | null;
-  }) => (
-    <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
-      {props.streamError ? (
-        <div data-testid="stream-error">
-          {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
-        </div>
-      ) : null}
-      {props.isStreaming && props.onStop ? (
-        <button type="button" data-testid="stop-button" onClick={props.onStop} />
-      ) : null}
-      {props.onSend ? (
-        <button
-          type="button"
-          data-testid="send-button"
-          onClick={() =>
-            void props
-              .onSend?.(
-                { text: "hi", uploads: [], reasoningEffort: "medium", projectPath: "" },
-                { onUploadProgress: () => {}, signal: new AbortController().signal },
-              )
-              .catch(() => {})
-          }
-        />
-      ) : null}
-      {props.onSend ? (
-        <button
-          type="button"
-          data-testid="send-reply-button"
-          onClick={() =>
-            void props
-              .onSend?.(
-                {
-                  text: "and then?",
-                  uploads: [],
-                  reasoningEffort: "medium",
-                  projectPath: "",
-                  inputId: "11111111-1111-4111-8111-111111111111",
-                  replyTo: {
-                    messageId: "a2",
-                    author: "agent",
-                    quote: "Lisbon",
-                    preview: "Lisbon",
+  }) {
+    renders.composer += 1;
+    return (
+      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+        {props.streamError ? (
+          <div data-testid="stream-error">
+            {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
+          </div>
+        ) : null}
+        {props.isStreaming && props.onStop ? (
+          <button type="button" data-testid="stop-button" onClick={props.onStop} />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
+            data-testid="send-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  { text: "hi", uploads: [], reasoningEffort: "medium", projectPath: "" },
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
+            data-testid="send-reply-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  {
+                    text: "and then?",
+                    uploads: [],
+                    reasoningEffort: "medium",
+                    projectPath: "",
+                    inputId: "11111111-1111-4111-8111-111111111111",
+                    replyTo: {
+                      messageId: "a2",
+                      author: "agent",
+                      quote: "Lisbon",
+                      preview: "Lisbon",
+                    },
                   },
-                },
-                { onUploadProgress: () => {}, signal: new AbortController().signal },
-              )
-              .catch(() => {})
-          }
-        />
-      ) : null}
-      {props.onSend ? (
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+        {props.onSend ? (
+          <button
+            type="button"
+            data-testid="send-text-button"
+            onClick={() =>
+              void props
+                .onSend?.(
+                  {
+                    text: "sent at once",
+                    uploads: [],
+                    reasoningEffort: "medium",
+                    projectPath: "",
+                    inputId: "11111111-1111-4111-8111-111111111111",
+                  },
+                  { onUploadProgress: () => {}, signal: new AbortController().signal },
+                )
+                .catch(() => {})
+            }
+          />
+        ) : null}
+      </div>
+    );
+  }),
+}));
+
+// Concierge's composer: records programmatic fills and sends a fixed message.
+rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
+  ConciergeComposer: forwardRef(function ConciergeComposer(
+    props: {
+      onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
+      isStreaming?: boolean;
+      onStop?: () => void;
+    },
+    ref,
+  ) {
+    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
+    return (
+      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
         <button
           type="button"
-          data-testid="send-text-button"
+          data-testid="concierge-send-button"
           onClick={() =>
             void props
               .onSend?.(
@@ -282,37 +348,10 @@ rs.mock("@/components/chat/ChatComposer", () => ({
               .catch(() => {})
           }
         />
-      ) : null}
-    </div>
-  ),
-}));
-
-// Concierge's composer: records programmatic fills and sends a fixed message.
-rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
-  ConciergeComposer: forwardRef(function ConciergeComposer(
-    props: { onSend?: (snapshot: unknown, controls: unknown) => Promise<void> },
-    ref,
-  ) {
-    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
-    return (
-      <button
-        type="button"
-        data-testid="concierge-send-button"
-        onClick={() =>
-          void props
-            .onSend?.(
-              {
-                text: "sent at once",
-                uploads: [],
-                reasoningEffort: "medium",
-                projectPath: "",
-                inputId: "11111111-1111-4111-8111-111111111111",
-              },
-              { onUploadProgress: () => {}, signal: new AbortController().signal },
-            )
-            .catch(() => {})
-        }
-      />
+        {props.isStreaming && props.onStop ? (
+          <button type="button" data-testid="stop-button" onClick={props.onStop} />
+        ) : null}
+      </div>
     );
   }),
 }));
@@ -1009,6 +1048,85 @@ describe("Chat session events over the live-events socket", () => {
   });
 });
 
+describe("Chat turn poll", () => {
+  const sessionTopic = "chat.session:session-1";
+  const flush = (ms = 0) =>
+    act(async () => {
+      await rs.advanceTimersByTimeAsync(ms);
+    });
+  const turnLookups = () => rs.mocked(listSessionTurns).mock.calls.length;
+  const renderIdle = async () => {
+    renderChat(<Chat sessionId="session-1" />, fakeSocketLiveEventsClient());
+    let socket!: FakeWebSocket;
+    act(() => {
+      socket = acceptLatestSocket();
+    });
+    await flush();
+    return socket;
+  };
+
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.useFakeTimers();
+  });
+
+  afterEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    delete (document as { visibilityState?: unknown }).visibilityState;
+  });
+
+  it("asks an idle chat for its turns twice a minute, not every 2 s", async () => {
+    await renderIdle();
+    expect(turnLookups()).toBe(1);
+    await flush(60_000);
+    expect(turnLookups()).toBe(3);
+  });
+
+  it("stops asking while the tab is hidden and asks again as it is shown", async () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    await renderIdle();
+    await flush(120_000);
+    expect(turnLookups()).toBe(1);
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(turnLookups()).toBe(2);
+  });
+
+  it("follows a turn as soon as the chat's topic says one is running", async () => {
+    const socket = await renderIdle();
+    const event = (data: unknown) =>
+      act(() =>
+        socket.receive({ type: "event", topic: sessionTopic, event: "session_running", data }),
+      );
+    event({ sessionId: "session-1", running: false });
+    await flush();
+    expect(turnLookups()).toBe(1);
+
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-9", status: "running" }]);
+    event({ sessionId: "session-1", running: true });
+    await flush();
+    expect(turnLookups()).toBe(2);
+    expect(rs.mocked(openTurnStream).mock.calls.map(([turnId]) => turnId)).toEqual(["turn-9"]);
+    expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("asks for the turns again once the socket comes back", async () => {
+    const socket = await renderIdle();
+    act(() => socket.close());
+    await flush(100);
+    act(() => {
+      acceptLatestSocket();
+    });
+    await flush();
+    expect(turnLookups()).toBe(2);
+  });
+});
+
 describe("Chat turn stream lifecycle", () => {
   it("deletes a chat only after the app confirmation dialog is confirmed", async () => {
     const user = userEvent.setup();
@@ -1675,8 +1793,12 @@ describe("Chat turn stream lifecycle", () => {
   // finished turn (interrupt → 404) that used to be swallowed with no effect
   // until the next message send resynced. Stop must release the stale entry
   // and reload the transcript on the tap itself.
-  it("releases a stale streaming entry when interrupt reports the turn is gone", async () => {
-    renderChat(<Chat sessionId="session-1" />);
+  it.each([
+    "default",
+    "concierge",
+  ] as const)("releases a stale streaming entry when interrupt reports the turn is gone (%s)", async (variant) => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    renderChat(<Chat sessionId="session-1" variant={variant} />);
 
     // The reattach poll installs the streaming entry for turn-1; the mocked
     // stream never emits, mirroring a dead connection.
@@ -1705,10 +1827,13 @@ describe("Chat turn stream lifecycle", () => {
     );
   });
 
-  it("keeps Stop available while the server still reports the turn running", async () => {
+  it.each([
+    "default",
+    "concierge",
+  ] as const)("keeps Stop available while the server still reports the turn running (%s)", async (variant) => {
     rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-    renderChat(<Chat sessionId="session-1" />);
+    renderChat(<Chat sessionId="session-1" variant={variant} />);
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
     const signal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
 
@@ -1731,7 +1856,10 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("false");
   });
 
-  it("does not let a delayed force-release abort a fresh stream for the same turn", async () => {
+  it.each([
+    "default",
+    "concierge",
+  ] as const)("does not let a delayed force-release abort a fresh stream for the same turn (%s)", async (variant) => {
     const streamControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
     rs.mocked(openTurnStream).mockImplementation((_turnId: string, signal?: AbortSignal) => {
@@ -1748,7 +1876,7 @@ describe("Chat turn stream lifecycle", () => {
       return Promise.resolve(new Response(body));
     });
     rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 200 }));
-    renderChat(<Chat sessionId="session-1" />);
+    renderChat(<Chat sessionId="session-1" variant={variant} />);
 
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
@@ -1783,6 +1911,48 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(replacementSignal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+});
+
+describe("Chat while a turn streams text", () => {
+  it("renders neither the chat nor its composer for each delivery of text", async () => {
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              controller = c;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true"),
+    );
+    const deliver = (text: string, blockIx = 0) =>
+      act(async () => {
+        controller.enqueue(
+          encoder.encode(`event: assistant_text\ndata: ${JSON.stringify({ blockIx, text })}\n\n`),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    // The first delivery of a block is the one the chat may draw for.
+    await deliver("first");
+    renders.chat = 0;
+    renders.composer = 0;
+
+    let text = "first";
+    for (let i = 0; i < 100; i++) {
+      text += " word";
+      await deliver(text);
+    }
+
+    expect(renders.chat).toBeLessThanOrEqual(2);
+    expect(renders.composer).toBe(0);
   });
 });
 
@@ -1940,10 +2110,193 @@ describe("Chat Concierge empty state", () => {
     expect(guidance()).toBeNull();
   });
 
+  it("puts the tasks pill in the navbar beside the Concierge's name, and in no other chat's", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    const pill = await screen.findByTestId("tasks-pill");
+    const name = screen.getByText("Concierge");
+    expect(name.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(name.parentElement).toBe(pill.parentElement);
+    // The name keeps its width beside the pill; the label after it gives way.
+    expect(name.className).toContain("shrink-0");
+    view.unmount();
+
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    expect(screen.queryByTestId("tasks-pill")).toBeNull();
+  });
+
+  it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
+    // Core agents all report "Rome" as their app, so the Concierge's label never varies.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: {
+        appId: "core",
+        appLabel: "Rome",
+        agentName: "core:concierge",
+        iconUrl: null,
+      },
+      archivedAt: null,
+    });
+    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await screen.findByTestId("tasks-pill");
+    expect(screen.queryByText("Rome")).toBeNull();
+    view.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the launch",
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: null,
+      },
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(await screen.findByText("Workflow Studio")).toBeTruthy();
+  });
+
   it("is only for Concierge: an empty normal chat keeps its message list", async () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
     expect(screen.getByTestId("message-list")).toBeTruthy();
     expect(guidance()).toBeNull();
+  });
+});
+
+describe("Chat Concierge jump to a message", () => {
+  const message = (n: number) => ({
+    id: `m-${n}`,
+    sessionId: "concierge",
+    turnId: `turn-${n}`,
+    role: "user" as const,
+    content: `question ${n}`,
+    createdAt: new Date(Date.UTC(2026, 9, 27, 12, 0, n)).toISOString(),
+  });
+  const anchor = (id: string) => document.querySelector(`[data-timeline-anchor="${id}"]`);
+  const rows = () => screen.queryAllByTestId("user-row").length;
+  const originalScrollTo = Element.prototype.scrollTo;
+  const scrollTo = rs.fn();
+
+  beforeEach(() => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    Element.prototype.scrollTo = scrollTo as typeof Element.prototype.scrollTo;
+    scrollTo.mockClear();
+    toast.loading.mockClear();
+    toast.error.mockClear();
+    toast.dismiss.mockClear();
+  });
+  afterEach(() => {
+    Element.prototype.scrollTo = originalScrollTo;
+  });
+
+  it("scrolls to a message that is on screen and tints it, with no waiting", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+
+    act(() => requestConciergeJump("m-2"));
+
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
+    expect(toast.loading).not.toHaveBeenCalled();
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(5), message(6)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c2" })
+      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+
+    act(() => requestConciergeJump("m-1"));
+
+    await waitFor(() => expect(anchor("m-1")?.hasAttribute("data-timeline-landed")).toBe(true));
+    expect(toast.loading).toHaveBeenCalledWith("concierge.tasks.findingMessage");
+    expect(toast.dismiss).toHaveBeenCalledWith("finding");
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[1])).toEqual([
+      { limit: expect.any(Number) },
+      { limit: expect.any(Number), before: "c1" },
+      { limit: expect.any(Number), before: "c2" },
+    ]);
+    expect(scrollTo).toHaveBeenCalledOnce();
+  });
+
+  it("holds a pinned view still while it scrolls, so the jump is not read as drift", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+    const order: string[] = [];
+    anchor("m-1")!.addEventListener(HOLD_STICK_EVENT, () => order.push("hold"));
+    scrollTo.mockImplementation(() => order.push("scroll"));
+
+    act(() => requestConciergeJump("m-1"));
+
+    expect(order).toEqual(["hold", "scroll"]);
+  });
+
+  it("gives up after 20 older pages and says it can't find the message", async () => {
+    // The newest page and 20 older ones, each with a page behind it.
+    for (let page = 1; page <= 21; page++) {
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1000 - page)],
+        nextCursor: `c${page}`,
+      });
+    }
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(1));
+
+    act(() => requestConciergeJump("m-missing"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"), {
+      timeout: 10_000,
+    });
+    // The newest page, then 20 older ones.
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(21);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(toast.dismiss).toHaveBeenCalledWith("finding");
+  }, 15_000);
+
+  it("says it can't find a message when all the history is loaded and it is not there", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [message(3), message(4)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [message(1), message(2)], nextCursor: null });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+
+    act(() => requestConciergeJump("m-gone"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("concierge.tasks.sourceMissing"));
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(2);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("is for the Concierge chat only", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [{ ...message(2), sessionId: "session-1" }],
+      nextCursor: "c1",
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(rows()).toBe(1));
+
+    act(() => requestConciergeJump("m-2"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
   });
 });

@@ -34,8 +34,6 @@ const fakeState: {
   typedThread?: string;
   inbound?: (msg: ChannelMessage) => Promise<void>;
   sent: Array<{ chatId: ChatId; message: unknown }>;
-  historyCalls: Array<{ threadId: string | null; windowHours: number }>;
-  historyMessages: ChannelMessage[];
   apiRequests: ChannelApiRequest[];
   apiResult: ChannelApiResult;
   stopCalls: number;
@@ -50,8 +48,6 @@ const fakeState: {
 } = {
   startError: null,
   sent: [],
-  historyCalls: [],
-  historyMessages: [],
   apiRequests: [],
   apiResult: { response: { status: 200, headers: {}, body: { ok: true } } },
   stopCalls: 0,
@@ -81,10 +77,6 @@ rs.mock("../../channels/discord.js", () => ({
     }
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
-    }
-    async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-      fakeState.historyCalls.push({ threadId, windowHours });
-      return fakeState.historyMessages;
     }
     async notifyTyping(threadId: string): Promise<void> {
       fakeState.typedThread = threadId;
@@ -153,8 +145,6 @@ beforeEach(() => {
   fakeState.typedThread = undefined;
   fakeState.inbound = undefined;
   fakeState.sent = [];
-  fakeState.historyCalls = [];
-  fakeState.historyMessages = [];
   fakeState.apiRequests = [];
   fakeState.apiResult = { response: { status: 200, headers: {}, body: { ok: true } } };
   fakeState.stopCalls = 0;
@@ -239,37 +229,6 @@ describe("discord descriptor shape", () => {
       messageId: "sent-1",
     });
     expect(fakeState.sent).toEqual([{ chatId: "chan-1", message: { text: "hi" } }]);
-  });
-
-  // The flag is what gives the channel a \`messages\` port; the feature is what
-  // answers it. A Talk offering one without the other is unreachable or broken.
-  it("declares the history its Talk offers", () => {
-    expect(makeDiscordDescriptor(deps).capabilities.talker?.history).toBe(true);
-  });
-
-  it("exposes provider-neutral history", async () => {
-    fakeState.historyMessages = [
-      {
-        channel: "discord",
-        direction: "inbound",
-        messageId: "message-1",
-        chatId: "chan-1" as ChatId,
-        senderId: "user-1",
-        senderDisplayName: "User",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date("2026-01-01T00:00:00.000Z"),
-        thread: { kind: "group" },
-      },
-    ];
-    const h = buildTalker();
-    h.start();
-    await expect(
-      h.talker.history?.query({
-        chatId: "chan-1" as ChatId,
-      }),
-    ).resolves.toMatchObject([{ messageId: "message-1", text: "hello" }]);
-    expect(fakeState.historyCalls).toEqual([{ threadId: "chan-1", windowHours: 24 }]);
   });
 
   it("exposes provider-neutral activity", async () => {

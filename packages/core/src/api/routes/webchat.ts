@@ -50,15 +50,16 @@ import {
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
-import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
+import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import {
   ChatReadModel,
+  type Transcript,
+  type TranscriptCursor,
   type TranscriptLine,
-  type TurnRef,
   type TurnTrace,
 } from "../../webchat/chat-read-model.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
@@ -97,7 +98,11 @@ import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js"
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
-import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
+import type {
+  BackendEmitOptions,
+  BackendSessionTask,
+  BackendTurnOptions,
+} from "../../actions/backend-turn.js";
 import { z } from "zod";
 import { resolveSessionPolicy } from "../../core/session-policy.js";
 import { withReplyContext } from "../../core/reply-context.js";
@@ -718,6 +723,8 @@ interface ActiveWebchatStream {
    * tells clients through a `turn_id` event.
    */
   agentTurnId?: string;
+  /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
+  quiet?: boolean;
   startedAt: string;
   finished: boolean;
   // Keyed replay buffer: late subscribers receive the latest payload per key
@@ -774,14 +781,22 @@ export interface WebchatRuntime {
    * trace saved and its reply delivered by the task, so the stream only shows
    * it live and mounts its cards.
    */
-  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
+  enqueueSessionTask(
+    sessionId: string,
+    task: BackendSessionTask,
+    options?: BackendTurnOptions,
+  ): Promise<void>;
   /**
    * Emits `session_running` whenever a chat starts or stops running a turn,
    * after first emitting one for every chat running now. Returns the
    * unsubscribe.
    */
   subscribeStatusEvents(emit: LiveEventEmit): () => void;
-  /** Emits `message_insert` and `session_name` for one session. Returns the unsubscribe. */
+  /**
+   * Emits `message_insert`, `session_name`, and `session_running` for one
+   * session, after first emitting `session_running` if it is running now.
+   * Returns the unsubscribe.
+   */
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
@@ -827,12 +842,11 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 /**
  * `lines` with each turn's trace placed where the dashboard draws it: after
  * the turn's prompt, before what the turn said. A trace whose turn has no line
- * on the page is left out.
+ * on the page (a turn that said nothing) goes where its time puts it.
  */
-function withTurnTraces<L extends { turnId: string | null; sessionId: string; role: string }>(
-  lines: L[],
-  traces: TurnTrace[],
-) {
+function withTurnTraces<
+  L extends { turnId: string | null; sessionId: string; role: string; createdAt: Date },
+>(lines: L[], traces: TurnTrace[]) {
   const traceOf = new Map(traces.map((trace) => [`${trace.sessionId}\0${trace.turnId}`, trace]));
   const out: (L | ReturnType<typeof traceLine>)[] = [];
   for (const [index, line] of lines.entries()) {
@@ -849,6 +863,10 @@ function withTurnTraces<L extends { turnId: string | null; sessionId: string; ro
       out.push(traceLine(trace));
       traceOf.delete(key as string);
     }
+  }
+  for (const trace of traceOf.values()) {
+    const at = out.findIndex((line) => line.createdAt > trace.createdAt);
+    out.splice(at === -1 ? out.length : at, 0, traceLine(trace));
   }
   return out;
 }
@@ -901,7 +919,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       runningListeners.delete(listener);
     };
   };
+  // `session_running` here is the open chat's cue to look up the turn to
+  // follow, so it needs no poll. It fires on every turn queued or ended, also
+  // while the chat stays running.
   const subscribeSessionEvents = (sessionId: string, emit: LiveEventEmit): (() => void) => {
+    const runningListener = (event: { sessionId: string; running: boolean }) => {
+      if (event.sessionId === sessionId) emit("session_running", event);
+    };
+    runningListeners.add(runningListener);
+    if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
       if (message.sessionId === sessionId) emit("message_insert", message);
     });
@@ -909,6 +935,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (event.sessionId === sessionId) emit("session_name", event);
     });
     return () => {
+      runningListeners.delete(runningListener);
       unsubscribeMessages();
       unsubscribeSessionName();
     };
@@ -1326,52 +1353,34 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     return resolveChatSenders(deps, actors);
   };
-  /** A transcript read from Chats' tables, as the wire carries it: each
-   *  turn's trace placed after the turn's prompt, with its summary, and each
-   *  guardian-side line with its sender. The trace's blocks stay unread until
-   *  the guardian opens the turn. */
-  const enrichTranscript = async (sessionId: string, lines: TranscriptLine[]) => {
-    const turns = new Map<string, TurnRef>();
-    for (const line of lines) {
-      if (line.turnId) turns.set(traceTurnKey(line.sessionId, line.turnId), line as TurnRef);
-    }
-    const traces = await chatReads.turnTraces([...turns.values()]);
-    const senders = await lineSenders(lines);
+  /** A transcript as the wire carries it: each turn's trace placed after the
+   *  turn's prompt, with its summary, and each guardian-side line with its
+   *  sender. The trace's blocks stay unread until the guardian opens the turn. */
+  const enrichTranscript = async (sessionId: string, transcript: Transcript) => {
+    const senders = await lineSenders(transcript.lines);
     const messages = withTurnTraces(
-      lines.map((line) => {
+      transcript.lines.map((line) => {
         const { senderAccountId: _account, senderName: _name, ...message } = line;
         const sender = senders.get(line.id);
         return sender ? { ...message, sender } : message;
       }),
-      traces,
+      transcript.traces,
     );
     return attachTraceSummaries(sessionId, messages);
   };
-  const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachTraceSummaries(sessionId, messages);
-    const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
-    const shownIds = new Set(messages.map((m) => m.id));
-    const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
-    const senders = await resolveChatSenders(deps, actors);
-    if (senders.size === 0) return withTraces;
-    return withTraces.map((message) => {
-      const sender = senders.get(message.id);
-      return sender ? { ...message, sender } : message;
-    });
-  };
 
-  // `limit` and `before` page the list by turn, newest first, and wrap it as
+  // `limit` and `before` page the list, newest first, and wrap it as
   // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session.
-  const encodeMessageCursor = (cursor: MessagePageCursor): string =>
-    Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
-  const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
+  // the whole session. A chat pages by message, a session with no chat by turn.
+  const encodeMessageCursor = (cursor: TranscriptCursor): string =>
+    Buffer.from(JSON.stringify([cursor.at, cursor.id])).toString("base64url");
+  const decodeMessageCursor = (raw: string): TranscriptCursor | null => {
     try {
       const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
       if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-      const [startedAt, key] = parsed;
-      if (!Number.isFinite(startedAt) || typeof key !== "string" || key === "") return null;
-      return { startedAt: Number(startedAt), key };
+      const [at, id] = parsed;
+      if (!Number.isFinite(at) || typeof id !== "string" || id === "") return null;
+      return { at: Number(at), id };
     } catch {
       return null;
     }
@@ -1379,13 +1388,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const respondWithSessionMessages = async (c: Context, sessionId: string) => {
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
-    if (limitParam === undefined && beforeParam === undefined) {
-      const lines = await chatReads.transcript(sessionId);
-      if (lines) return c.json(await enrichTranscript(sessionId, lines));
-      // A session that is no chat (a handoff, a subagent) keeps its own rows.
-      const messages = await deps.webchatRepo.getMessages(sessionId);
-      return c.json(await enrichStoredMessages(sessionId, messages));
-    }
+    const paged = limitParam !== undefined || beforeParam !== undefined;
     const limit =
       limitParam === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(limitParam, 10);
     if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGE_PAGE_MAX_LIMIT) {
@@ -1394,17 +1397,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
-    const transcript = await chatReads.transcriptPage(sessionId, { limit, before });
-    if (transcript) {
-      return c.json({
-        messages: await enrichTranscript(sessionId, transcript.lines),
-        nextCursor: transcript.nextCursor ? encodeMessageCursor(transcript.nextCursor) : null,
-      });
-    }
-    const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
+    const page = paged ? { limit, before } : undefined;
+    const transcript =
+      (await chatReads.chatTranscript(sessionId, page)) ??
+      (await chatReads.sessionTranscript(sessionId, page));
+    const messages = await enrichTranscript(sessionId, transcript);
+    if (!paged) return c.json(messages);
     return c.json({
-      messages: await enrichStoredMessages(sessionId, page.rows),
-      nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,
+      messages,
+      nextCursor: transcript.nextCursor ? encodeMessageCursor(transcript.nextCursor) : null,
     });
   };
 
@@ -2652,7 +2653,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
+    // The chat's row on the Concierge's todo list stays, unlinked, once the
+    // chat is gone; the Concierge hears of it quietly.
+    const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
     await deps.webchatRepo.deleteSession(sessionId);
+    if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
     // record can outlive the local session data it describes.
@@ -3193,6 +3198,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         .map((s) => ({
           turnId: s.turnId,
           ...(s.agentTurnId ? { agentTurnId: s.agentTurnId } : {}),
+          ...(s.quiet ? { quiet: true } : {}),
           streamId: s.streamId,
           startedAt: s.startedAt,
           status:
@@ -4348,7 +4354,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(sent.body, sent.status);
   });
 
-  const runEnqueuedTask = async (sessionId: string, task: BackendSessionTask): Promise<void> => {
+  const runEnqueuedTask = async (
+    sessionId: string,
+    task: BackendSessionTask,
+    options?: BackendTurnOptions,
+  ): Promise<void> => {
     // Wait behind any in-flight user turn before opening our own stream.
     const predecessor = getLastStream(sessionId);
     if (predecessor && !predecessor.finished) {
@@ -4392,6 +4402,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       webchatSessionKey(sessionId),
       session.agentName ?? "main",
     );
+    if (options?.quiet) stream.quiet = true;
     enqueueStream(sessionId, stream);
 
     // Capture the resumed agent's final reply so it can be persisted as a
@@ -4483,11 +4494,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  const enqueueSessionTask: WebchatRuntime["enqueueSessionTask"] = async (sessionId, task) => {
+  const enqueueSessionTask: WebchatRuntime["enqueueSessionTask"] = async (
+    sessionId,
+    task,
+    options,
+  ) => {
     const previous = sessionTaskChains.get(sessionId) ?? Promise.resolve();
     const next = previous.then(
-      () => runEnqueuedTask(sessionId, task),
-      () => runEnqueuedTask(sessionId, task),
+      () => runEnqueuedTask(sessionId, task, options),
+      () => runEnqueuedTask(sessionId, task, options),
     );
     sessionTaskChains.set(sessionId, next);
     try {

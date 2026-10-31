@@ -44,6 +44,10 @@
     "concierge": "Concierge",
     "conciergeUnread_one": "Concierge，{{label}} 条未读消息",
     "conciergeUnread_other": "Concierge，{{label}} 条未读消息",
+    "conciergeUnreadBadge_one": "{{label}} 条未读消息",
+    "conciergeUnreadBadge_other": "{{label}} 条未读消息",
+    "conciergeNeedsYou_one": "{{count}} 个任务等你处理",
+    "conciergeNeedsYou_other": "{{count}} 个任务等你处理",
     "startedByConcierge": "由 Concierge 发起",
     "empty": "还没有对话",
     "rowStatus": {
@@ -258,6 +262,7 @@
     "toolUpdated": "新内容",
     "openToolNewTab": "在新标签页中打开{{name}}",
     "closeTool": "关闭{{name}}",
+    "tasksTab": "任务",
     "allTools": "所有已打开应用",
     "allToolsHidden_one": "所有已打开应用，另有 {{count}} 个",
     "allToolsHidden_other": "所有已打开应用，另有 {{count}} 个",

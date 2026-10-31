@@ -17,6 +17,53 @@
     "showFullText": "Show full text",
     "showLess": "Show less",
     "openTaskChat": "Open",
+    "tasks": {
+      "title": "Tasks",
+      "close": "Close tasks",
+      "groups": {
+        "needsYou": "Needs you",
+        "doing": "Doing",
+        "next": "Up next",
+        "watching": "Watching",
+        "done": "Done"
+      },
+      "stop": "Stop",
+      "done": "Done",
+      "archive": "Archive",
+      "retry": "Try again",
+      "pending": {
+        "stop": "Stopping…",
+        "archive": "Archiving…",
+        "done": "Sending…"
+      },
+      "unchanged": "Concierge did not change it",
+      "timeout": "Concierge has not handled this yet",
+      "failed": "Could not send",
+      "notSynced": "Not synced",
+      "sourceMissing": "Can't find the original message",
+      "findingMessage": "Finding message…",
+      "showMore": "Show {{count}} older",
+      "showLess": "Show less",
+      "openChat": "Open the chat for {{title}}",
+      "actionText": {
+        "stop": "Stop \"{{title}}\"",
+        "archive": "Archive \"{{title}}\"",
+        "done": "Done \"{{title}}\"",
+        "withId": "(task {{id}})"
+      },
+      "replyText": {
+        "done": "I've done this"
+      },
+      "pill": {
+        "needsYou_one": "Tasks, {{count}} needs you",
+        "needsYou_other": "Tasks, {{count}} need you",
+        "doing_one": "Tasks, {{count}} in progress",
+        "doing_other": "Tasks, {{count}} in progress",
+        "idle": "Tasks"
+      },
+      "emptyTitle": "No tasks yet",
+      "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
+    },
     "messageDetails": "Message details",
     "composerMenu": "Add files or change the model",
     "placeholder": "Message",

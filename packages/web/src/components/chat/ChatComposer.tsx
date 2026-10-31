@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -221,7 +222,7 @@ function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
   el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
-export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
+const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
   {
     persistNewChatDraft = false,
     showProjectSelector = false,
@@ -1467,3 +1468,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     </>
   );
 });
+
+// Memoized: the chat around it renders for trace updates, a finished turn and
+// the like, and none of that is the composer's. Chat holds its props stable.
+export const ChatComposer = memo(ChatComposerImpl);

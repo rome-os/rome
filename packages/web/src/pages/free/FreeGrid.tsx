@@ -39,6 +39,9 @@ import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
+import { cn } from "@/lib/utils";
+import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import { useConciergeChatId } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import { useToolTrace } from "./tool-trace";
 import { getWidgetFullHref } from "./widget-links";
@@ -351,6 +354,8 @@ export function FreeGrid() {
   // reads the same identity the header does, and follows a rename with it.
   useDocumentTitle(sessionName);
   const setPinned = usePinSession();
+  const conciergeChatId = useConciergeChatId();
+  const isConcierge = chatSessionId === conciergeChatId;
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
   // desktop navbar: drop the session, refresh the sidebar list, land on a fresh
@@ -416,10 +421,12 @@ export function FreeGrid() {
                   model={model}
                   reasoningEffort={reasoningEffort}
                 />
-                <span className="truncate text-ui text-foreground">
+                <span className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}>
                   {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
-                {sessionName?.trim() && pinnedAgentMention && (
+                {isConcierge ? <ConciergeTasksPill /> : null}
+                {/* Same label as the desktop navbar, also none for the Concierge. */}
+                {!isConcierge && sessionName?.trim() && pinnedAgentMention && (
                   <span className="shrink-0 truncate text-aux text-muted-foreground">
                     {pinnedAgentMention.appLabel}
                   </span>

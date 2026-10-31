@@ -577,40 +577,7 @@ export const chats = sqliteTable(
     name: text("name"),
     startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
   },
-  (table) => [
-    uniqueIndex("uq_chats_platform_chat").on(table.platform, table.platformChatId),
-    index("idx_chats_platform_name").on(table.platform, table.name),
-  ],
-);
-
-export const chatThreads = sqliteTable(
-  "chat_threads",
-  {
-    chatId: text("chat_id")
-      .notNull()
-      .references(() => chats.id, { onDelete: "cascade" }),
-    platformThreadId: text("platform_thread_id").notNull(),
-    name: text("name"),
-    openedFromPlatformMessageId: text("opened_from_platform_message_id"),
-    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.chatId, table.platformThreadId] })],
-);
-
-export const chatParticipants = sqliteTable(
-  "chat_participants",
-  {
-    chatId: text("chat_id")
-      .notNull()
-      .references(() => chats.id, { onDelete: "cascade" }),
-    // The platform's id for the account; the platform is the chat's.
-    accountId: text("account_id").notNull(),
-    since: integer("since", { mode: "timestamp" }).notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.chatId, table.accountId] }),
-    index("idx_chat_participants_account").on(table.accountId),
-  ],
+  (table) => [uniqueIndex("uq_chats_platform_chat").on(table.platform, table.platformChatId)],
 );
 
 // What was said in a chat, once, whoever heard it. Who said it is the
@@ -638,7 +605,9 @@ export const chatMessages = sqliteTable(
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
-    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+    // A place's lines by time, then by the order they were recorded in: SQLite
+    // appends the rowid, which breaks ties within a second.
+    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt),
     // A place's lines in insertion order: SQLite appends the rowid, so "lines
     // after the guardian's last" is a range here, not a filter.
     index("idx_chat_messages_place").on(table.chatId, table.threadId),
@@ -646,20 +615,6 @@ export const chatMessages = sqliteTable(
       .on(table.chatId, table.platformMessageId)
       .where(sql`${table.platformMessageId} IS NOT NULL`),
   ],
-);
-
-export const chatMessagePlatformIds = sqliteTable(
-  "chat_message_platform_ids",
-  {
-    chatId: text("chat_id")
-      .notNull()
-      .references(() => chats.id, { onDelete: "cascade" }),
-    platformMessageId: text("platform_message_id").notNull(),
-    messageId: text("message_id")
-      .notNull()
-      .references(() => chatMessages.id, { onDelete: "cascade" }),
-  },
-  (table) => [primaryKey({ columns: [table.chatId, table.platformMessageId] })],
 );
 
 // Agents' link from a turn to a chat message: the message prompted the turn,
@@ -680,6 +635,49 @@ export const agentTurnMessages = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.messageId, table.sessionId] }),
     index("idx_agent_turn_messages_turn").on(table.sessionId, table.turnId),
+  ],
+);
+
+/**
+ * The Concierge's own todo list (rome-os/rome#1508). Only the Concierge's
+ * tools write it, and every state is its own judgement. A row links at most
+ * one task chat; deleting the chat leaves the row, unlinked. Times are
+ * milliseconds, so "updated after the click" and "dirty before the build" are
+ * decided finer than a second.
+ */
+export const conciergeTasks = sqliteTable(
+  "concierge_tasks",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    state: text("state", {
+      enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
+    }).notNull(),
+    /** One line, the result or the current status. */
+    summary: text("summary"),
+    /** What a `watching` or `needs_user` row waits for. */
+    waitingOn: text("waiting_on"),
+    /** The next check of a `watching` row, or the planned time of a `next` one. */
+    dueAt: integer("due_at", { mode: "timestamp_ms" }),
+    /** Order inside Up next, decided by the Concierge. */
+    rank: integer("rank"),
+    sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    /**
+     * The Concierge chat message the row points back to. Not a foreign key: the
+     * message may be gone, and the panel then offers no jump. The text is never copied.
+     */
+    sourceMessageId: text("source_message_id"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    /** Set while the state is `done` or `dropped`. */
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    // A chat belongs to at most one row, so a chat event maps to exactly one row.
+    uniqueIndex("idx_concierge_tasks_session")
+      .on(table.sessionId)
+      .where(sql`${table.sessionId} is not null`),
   ],
 );
 

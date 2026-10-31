@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import { createLiveTextSource, type LiveTextSource, type LiveTextStore } from "./live-text";
 
 export type SessionStreamState = {
   /** The id the stream was opened under. Keys its follower, controller and Stop. */
@@ -11,16 +12,19 @@ export type SessionStreamState = {
    */
   agentTurnId?: string;
   snapshot: TraceSnapshot | null;
-  // Live preview of the CURRENT in-flight assistant text block (server
-  // `assistant_text` SSE events, `{blockIx, text}`). Each completed block
-  // becomes its own persisted message in the transcript, so the live tail only
-  // ever holds the block being typed right now; the server clears it (emits an
-  // empty text at the next blockIx) once a block commits. Empty until the first
-  // block streams.
-  assistantText: string;
+  // The CURRENT in-flight assistant text block (server `assistant_text` SSE
+  // events, `{blockIx, text}`). Each completed block becomes its own persisted
+  // message in the transcript, so the live tail only ever holds the block being
+  // typed right now; the server clears it (emits an empty text at the next
+  // blockIx) once a block commits. The text itself lives in the session's
+  // live-text source, not here: it arrives many times a second, and a state
+  // change renders the whole chat.
   assistantBlockIx: number;
   /** Trace activity at or before this ordinal was superseded by text. */
   textThroughOrdinal: number;
+  /** A backend turn that is housekeeping for the agent: the Concierge chat
+   *  shows no typing indicator for it until the agent speaks. */
+  quiet?: boolean;
 };
 
 export type StreamingSessionMap = ReadonlyMap<string, SessionStreamState>;
@@ -29,15 +33,16 @@ export function startStream(
   prev: StreamingSessionMap,
   sessionId: string,
   turnId: string,
+  quiet = false,
 ): StreamingSessionMap {
   if (prev.get(sessionId)?.turnId === turnId) return prev;
   const next = new Map(prev);
   next.set(sessionId, {
     turnId,
     snapshot: null,
-    assistantText: "",
     assistantBlockIx: 0,
     textThroughOrdinal: -1,
+    ...(quiet ? { quiet } : {}),
   });
   return next;
 }
@@ -82,31 +87,28 @@ export function runningTurnIdOf(state: SessionStreamState | null | undefined): s
 // regress to an earlier block. A higher blockIx replaces the current block: the
 // completed block is now its own persisted message, and the server has already
 // cleared the live tail (empty text at the new blockIx), so the tail only holds
-// the block being typed now.
-export function updateAssistantText(
+// the block being typed now. Returns `prev` while the block and the watermark
+// stand, which is every delivery after a block's first: the text is not state.
+export function updateAssistantBlock(
   prev: StreamingSessionMap,
   sessionId: string,
   turnId: string,
   blockIx: number,
-  assistantText: string,
+  hasText: boolean,
 ): StreamingSessionMap {
   const existing = prev.get(sessionId);
   if (!existing || existing.turnId !== turnId) return prev;
   if (blockIx < existing.assistantBlockIx) return prev;
-  if (blockIx === existing.assistantBlockIx && existing.assistantText === assistantText) {
+  // Empty block-boundary events must not erase newer thinking. Retain the
+  // watermark after text commits so summary updates cannot revive it.
+  const textThroughOrdinal = hasText
+    ? Math.max(existing.textThroughOrdinal, existing.snapshot?.segments.at(-1)?.ordinal ?? -1)
+    : existing.textThroughOrdinal;
+  if (blockIx === existing.assistantBlockIx && textThroughOrdinal === existing.textThroughOrdinal) {
     return prev;
   }
   const next = new Map(prev);
-  next.set(sessionId, {
-    ...existing,
-    assistantText,
-    assistantBlockIx: blockIx,
-    // Empty block-boundary events must not erase newer thinking. Retain the
-    // watermark after text commits so summary updates cannot revive it.
-    textThroughOrdinal: assistantText.trim()
-      ? Math.max(existing.textThroughOrdinal, existing.snapshot?.segments.at(-1)?.ordinal ?? -1)
-      : existing.textThroughOrdinal,
-  });
+  next.set(sessionId, { ...existing, assistantBlockIx: blockIx, textThroughOrdinal });
   return next;
 }
 
@@ -130,25 +132,51 @@ export function useStreamingSessions() {
   const [streams, setStreams] = useState<StreamingSessionMap>(() => new Map());
   const streamsRef = useRef(streams);
   streamsRef.current = streams;
+  const liveTexts = useRef(new Map<string, LiveTextSource>());
 
-  const start = useCallback((sessionId: string, turnId: string) => {
-    setStreams((prev) => startStream(prev, sessionId, turnId));
+  const liveSource = useCallback((sessionId: string): LiveTextSource => {
+    let source = liveTexts.current.get(sessionId);
+    if (!source) {
+      source = createLiveTextSource();
+      liveTexts.current.set(sessionId, source);
+    }
+    return source;
   }, []);
+  /** The session's live text, one store for as long as the chat lives. */
+  const liveText = useCallback(
+    (sessionId: string): LiveTextStore => liveSource(sessionId),
+    [liveSource],
+  );
+
+  const start = useCallback(
+    (sessionId: string, turnId: string, quiet?: boolean) => {
+      liveSource(sessionId).open(turnId);
+      setStreams((prev) => startStream(prev, sessionId, turnId, quiet));
+    },
+    [liveSource],
+  );
   const update = useCallback((sessionId: string, turnId: string, snapshot: TraceSnapshot) => {
     setStreams((prev) => updateSnapshot(prev, sessionId, turnId, snapshot));
   }, []);
   const updateText = useCallback(
     (sessionId: string, turnId: string, blockIx: number, assistantText: string) => {
-      setStreams((prev) => updateAssistantText(prev, sessionId, turnId, blockIx, assistantText));
+      liveSource(sessionId).set(turnId, blockIx, assistantText);
+      setStreams((prev) =>
+        updateAssistantBlock(prev, sessionId, turnId, blockIx, assistantText.trim() !== ""),
+      );
     },
-    [],
+    [liveSource],
   );
   const adoptAgentTurn = useCallback((sessionId: string, turnId: string, agentTurnId: string) => {
     setStreams((prev) => adoptAgentTurnId(prev, sessionId, turnId, agentTurnId));
   }, []);
-  const end = useCallback((sessionId: string, turnId: string) => {
-    setStreams((prev) => endStream(prev, sessionId, turnId));
-  }, []);
+  const end = useCallback(
+    (sessionId: string, turnId: string) => {
+      liveSource(sessionId).close(turnId);
+      setStreams((prev) => endStream(prev, sessionId, turnId));
+    },
+    [liveSource],
+  );
 
-  return { streams, streamsRef, start, update, updateText, adoptAgentTurn, end };
+  return { streams, streamsRef, liveText, start, update, updateText, adoptAgentTurn, end };
 }

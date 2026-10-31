@@ -8,6 +8,7 @@ import {
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
@@ -95,7 +96,7 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
               isStreaming: false,
               runningTurnId: null,
               snapshot: null,
-              text: "",
+              textStore: EMPTY_LIVE_TEXT,
               identity: PUBLIC_MAIN_IDENTITY,
             }}
             contentRef={NO_OP}

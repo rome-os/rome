@@ -165,19 +165,6 @@ describe("whatsapp descriptor shape", () => {
     await talker.stop();
     expect(fake.stopped).toBe(true);
   });
-
-  // What was said is the channel's `messages`, read from the mirror
-  // (whatsapp-messages.ts). The Talk no longer reads history of its own.
-  it("leaves history to the channel", async () => {
-    const fake = new FakeWhatsAppAdapter();
-    const { deps } = makeDeps(fake);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      sessionCred(),
-      runtimeKit(),
-    );
-    expect(talker.history).toBeUndefined();
-    expect(createWhatsAppDescriptor(deps).capabilities.talker?.history).toBeUndefined();
-  });
 });
 
 describe("whatsapp descriptor — kit.persist write-through", () => {

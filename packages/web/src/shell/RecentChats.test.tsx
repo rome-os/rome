@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -177,7 +178,7 @@ describe("RecentChats", () => {
   });
 
   describe("Concierge unread badge", () => {
-    const server = { unread: 0 };
+    const server = { unread: 0, tasks: [] as unknown[] };
     const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
       spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
     const mockConcierge = () =>
@@ -187,7 +188,9 @@ describe("RecentChats", () => {
           ? []
           : url === "/api/concierge/session"
             ? { id: "concierge", unread: server.unread }
-            : null;
+            : url.startsWith("/api/concierge/tasks")
+              ? { tasks: server.tasks }
+              : null;
         if (body === null) return new Response("not found", { status: 404 });
         return new Response(JSON.stringify(body), {
           status: 200,
@@ -198,7 +201,25 @@ describe("RecentChats", () => {
     beforeEach(() => {
       concierge.chatId = "concierge";
       server.unread = 0;
+      server.tasks = [];
       FakeWebSocket.instances = [];
+    });
+
+    const taskRow = (id: string, state: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: `Task ${id}`,
+      state,
+      summary: null,
+      waitingOn: null,
+      dueAt: null,
+      rank: null,
+      chat: null,
+      createdAt: 1,
+      updatedAt: 1,
+      completedAt: null,
+      archivedAt: null,
+      notSynced: false,
+      ...extra,
     });
 
     it("counts unread messages", async () => {
@@ -225,6 +246,86 @@ describe("RecentChats", () => {
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Concierge, 99+ unread messages" });
       expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
+    });
+
+    it("counts the tasks that need the guardian beside the unread badge, each badge with its own label", async () => {
+      server.unread = 3;
+      server.tasks = [
+        taskRow("a", "needs_user"),
+        taskRow("b", "needs_user"),
+        taskRow("c", "doing"),
+        taskRow("d", "needs_user", { archivedAt: 5 }),
+      ];
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", {
+        name: "Concierge, 3 unread messages, 2 tasks need you",
+      });
+      const needsYou = within(entry).getByRole("img", { name: "2 tasks need you" });
+      const unread = within(entry).getByRole("img", { name: "3 unread messages" });
+      expect(needsYou.hasAttribute("data-concierge-needs-you")).toBe(true);
+      expect(needsYou.textContent).toBe("2");
+      expect(unread.hasAttribute("data-concierge-unread")).toBe(true);
+      // Apart by shape and colour, and the warning count comes first.
+      expect(needsYou.className).toContain("rounded-8");
+      expect(needsYou.className).toContain("bg-warning-bg");
+      expect(unread.className).toContain("rounded-full");
+      expect(unread.className).toContain("bg-destructive-bg");
+      expect(
+        needsYou.compareDocumentPosition(unread) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("counts a single task that needs the guardian, with no unread badge", async () => {
+      server.tasks = [taskRow("a", "needs_user")];
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
+      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("keeps the Needs you count while the Concierge chat is open", async () => {
+      server.unread = 3;
+      server.tasks = [taskRow("a", "needs_user")];
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat/concierge");
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
+      expect(entry.querySelector("[data-concierge-needs-you]")).not.toBeNull();
+      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("shows no Needs you count when no task needs the guardian, and follows the Concierge's writes", async () => {
+      server.tasks = [taskRow("a", "doing")];
+      mockConcierge();
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByRole("link", { name: "Concierge" });
+      expect(document.querySelector("[data-concierge-needs-you]")).toBeNull();
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toContainEqual({ type: "subscribe", topic: "concierge.tasks" });
+
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "concierge.tasks",
+          event: "task_upsert",
+          data: { task: taskRow("a", "needs_user", { updatedAt: 2 }) },
+        }),
+      );
+      expect(await screen.findByRole("link", { name: "Concierge, 1 task needs you" })).toBeTruthy();
+
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "concierge.tasks",
+          event: "task_upsert",
+          data: { task: taskRow("a", "done", { updatedAt: 3 }) },
+        }),
+      );
+      await waitFor(() => expect(document.querySelector("[data-concierge-needs-you]")).toBeNull());
     });
 
     it("shows no badge on the Concierge page", async () => {
@@ -503,6 +604,11 @@ describe("RecentChats", () => {
     expect(mark("Waiting chat")?.querySelector("svg")?.getAttribute("class")).toContain(
       "text-warning",
     );
+    // The running ring turns on an HTML box: Chrome animates an SVG's
+    // transform on the main thread, once per display frame.
+    const spinner = mark("Running chat")?.querySelector(".rome-status-spin");
+    expect(spinner?.tagName).toBe("SPAN");
+    expect(mark("Running chat")?.querySelector("svg")?.getAttribute("class")).not.toMatch(/spin/);
     expect(mark("Read chat")).toBeNull();
     expect(mark("Open chat")).toBeNull();
     const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
@@ -697,6 +803,112 @@ describe("RecentChats", () => {
       });
       await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeReconnect + 1));
       await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+    });
+  });
+
+  describe("a chat the list does not have yet", () => {
+    const listed = {
+      id: "listed-chat",
+      name: "Listed chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const started = { ...listed, id: "new-task", name: "New task chat" };
+    const running = (socket: FakeWebSocket, sessionId: string, value = true) =>
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.status",
+          event: "session_running",
+          data: { sessionId, running: value },
+        }),
+      );
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeEach(() => {
+      FakeWebSocket.instances = [];
+    });
+
+    it("asks for the list once when the chat starts running, and shows it running", async () => {
+      const stored = [listed];
+      const fetchSpy = mockSessions(stored);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+
+      stored.push(started);
+      running(socket, "new-task");
+
+      expect(await screen.findByText("New task chat")).toBeTruthy();
+      expect(listCalls(fetchSpy)).toBe(before + 1);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      // Listed now, so its next start asks for nothing.
+      running(socket, "new-task", false);
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 2));
+      running(socket, "new-task");
+      await act(async () => {});
+      expect(listCalls(fetchSpy)).toBe(before + 2);
+    });
+
+    it("remembers a chat that is still not listed after the refetch, and never asks for it again", async () => {
+      const fetchSpy = mockSessions([listed]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+
+      running(socket, "elsewhere");
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 1));
+      await act(async () => {});
+      running(socket, "elsewhere");
+      running(socket, "elsewhere");
+      await act(async () => {});
+      expect(listCalls(fetchSpy)).toBe(before + 1);
+
+      // Another chat that is not listed gets its own single ask.
+      running(socket, "another");
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 2));
+    });
+
+    it("asks once for a chat that starts running twice before the first refetch lands", async () => {
+      const fetchSpy = mockSessions([listed]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+      running(socket, "new-task");
+      running(socket, "new-task");
+      await act(async () => {});
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 1));
+    });
+
+    it("does not ask for a chat the list already has", async () => {
+      const fetchSpy = mockSessions([listed]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+      running(socket, "listed-chat");
+      await act(async () => {});
+      expect(listCalls(fetchSpy)).toBe(before);
     });
   });
 
@@ -1554,5 +1766,18 @@ describe("RecentChats chat name tooltip", () => {
     // Outwait the tooltip open delay before concluding nothing appeared.
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+});
+
+describe("running mark style", () => {
+  const css = readFileSync(new URL("../globals.css", import.meta.url), "utf8");
+
+  it("turns at an even speed, not in visible ticks", () => {
+    expect(css).toMatch(/\.rome-status-spin \{\s*animation: rome-status-spin 1s linear infinite;/);
+  });
+
+  it("stands still under reduced motion", () => {
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(/\.rome-status-spin \{\s*animation: none;/);
   });
 });

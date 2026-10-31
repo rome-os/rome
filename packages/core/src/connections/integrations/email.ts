@@ -3,11 +3,11 @@
 // Email is a Talker with a single `inbox` grant: the Rome Cloud-provisioned
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
-// gate + body-pull + the inbound `ChannelMessage`, attachment download, history
-// paging — is `EmailAdapter` (packages/core/src/channels/email.ts), wrapped here
-// so the runtime's grant-epoch lifecycle and fault→grant-state mapping
-// (registry.ts) drive it. The transport already speaks the channel's record, so
-// inbound, send and history pass through without a projection.
+// gate + body-pull + the inbound `ChannelMessage`, attachment download — is
+// `EmailAdapter` (packages/core/src/channels/email.ts), wrapped here so the
+// runtime's grant-epoch lifecycle and fault→grant-state mapping (registry.ts)
+// drive it. The transport already speaks the channel's record, so inbound and
+// send pass through without a projection.
 //
 // Unlike the polling/gateway channels, email is PUSH-driven: there is no live
 // transport loop to report a terminal failure from. Two distinct signals reach
@@ -52,7 +52,6 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 // The `inbox` grant's profile — the non-secret provisioned identity (the
 // `<slug>@romeos.cc` address Rome Cloud minted). Declared next to the material
@@ -280,7 +279,6 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
     auth: inboxScheme,
     capabilities: {
       talker: {
-        history: true,
         build(cred, kit): Talker {
           const material = cred.material as unknown as EmailInboxMaterial;
           const config: EmailInboxCoordinates = {
@@ -302,15 +300,6 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           const features: TalkFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
-            },
-            history: {
-              async query(input) {
-                const messages = await adapter.fetchHistory(
-                  input.chatId ?? null,
-                  historyWindowHours(input.since),
-                );
-                return messages.slice(0, historyQueryLimit(input.limit));
-              },
             },
           };
           return {

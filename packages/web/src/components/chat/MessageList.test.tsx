@@ -29,6 +29,7 @@ import {
 } from "./MessageList";
 import { buildRows, type AgentIdentity } from "./chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
+import { EMPTY_LIVE_TEXT, staticLiveText } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 
@@ -199,7 +200,7 @@ function renderList(streaming: boolean) {
     isStreaming: streaming,
     runningTurnId: "turn-1",
     snapshot: null,
-    text: "",
+    textStore: staticLiveText(""),
     identity: IDENTITY,
   };
   const actions: BlockActions = {
@@ -332,7 +333,7 @@ describe("MessageList side-chat eligibility", () => {
             isStreaming: false,
             runningTurnId: null,
             snapshot: null,
-            text: "",
+            textStore: EMPTY_LIVE_TEXT,
             identity: IDENTITY,
           }}
           contentRef={() => {}}
@@ -383,7 +384,7 @@ function commentary(text: string, id = "a-text", blockIx: number | null = 0): Ch
   };
 }
 
-function streamingList(messages: ChatMessage[], text: string, blockIx = 0, sourceText = text) {
+function streamingList(messages: ChatMessage[], text: string, blockIx = 0) {
   const { live, actions } = renderList(true);
   return (
     <ThemeProvider>
@@ -392,7 +393,7 @@ function streamingList(messages: ChatMessage[], text: string, blockIx = 0, sourc
           runningTurnId: live.runningTurnId,
           isStreaming: true,
         })}
-        live={{ ...live, text, blockIx, sourceText }}
+        live={{ ...live, textStore: staticLiveText(text), blockIx }}
         contentRef={() => {}}
         onOpenLiveTrace={() => {}}
         onOpenStoredTrace={() => {}}
@@ -526,19 +527,13 @@ describe("MessageList streaming input", () => {
     expect(screen.getByText("Current live block.")).toBeTruthy();
   });
 
-  it("does not move the previous typewriter frame below the follow-up at a block boundary", () => {
+  it("does not move the previous block's live text below the follow-up at a block boundary", () => {
     const original = commentary("The first step is complete.");
     const followup = humanReply("Please include pseudocode.");
     const { rerender } = render(streamingList([original], "The first step is complete."));
 
-    rerender(
-      streamingList(
-        [original, followup],
-        "The first step is complete.",
-        1,
-        "Here is the pseudocode.",
-      ),
-    );
+    // The new block starts empty: the live text store moves on with the block.
+    rerender(streamingList([original, followup], "", 1));
 
     expect(screen.getAllByText("The first step is complete.")).toHaveLength(1);
     expectBefore(screen.getByText("Please include pseudocode."), screen.getByLabelText("Working"));
@@ -608,7 +603,7 @@ describe("MessageList Plan placement", () => {
             isStreaming: false,
             runningTurnId: null,
             snapshot: null,
-            text: "",
+            textStore: EMPTY_LIVE_TEXT,
             identity: IDENTITY,
           }}
           contentRef={() => {}}
@@ -671,7 +666,7 @@ function settledList(messages: ChatMessage[], selection?: ShareSelection) {
           isStreaming: false,
           runningTurnId: null,
           snapshot: null,
-          text: "",
+          textStore: EMPTY_LIVE_TEXT,
           identity: IDENTITY,
         }}
         selection={selection}
@@ -851,7 +846,7 @@ describe("MessageList model switch notice", () => {
             isStreaming: false,
             runningTurnId: null,
             snapshot: null,
-            text: "",
+            textStore: EMPTY_LIVE_TEXT,
             identity: IDENTITY,
           }}
           contentRef={() => {}}

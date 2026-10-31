@@ -161,34 +161,6 @@ describe("TelegramUserAdapter", () => {
     ).resolves.toStrictEqual({ chatId: "123" });
   });
 
-  it("reads each dialog's history with its kind and name, own lines carrying `out`", async () => {
-    const own = documentMessage({ out: true });
-    internals.client = {
-      getDialogs: async () => [
-        { id: returnBigInt(111), inputEntity: "dm", title: "Alice", isUser: true },
-      ],
-      getMessages: async () => [own],
-    };
-
-    const lines = await adapter.fetchHistory(null, 24 * 365 * 100);
-    expect(lines).toStrictEqual([
-      {
-        channel: "telegram_user",
-        direction: "inbound",
-        messageId: "7",
-        chatId: "111",
-        senderId: "42",
-        senderDisplayName: "Me",
-        text: "see this",
-        attachments: [{ type: "document" }],
-        timestamp: new Date(1_700_000_000_000),
-        replyTo: { messageId: "5" },
-        thread: { kind: "dm", name: "Alice" },
-        raw: own,
-      },
-    ]);
-  });
-
   describe("saveIncomingAttachments", () => {
     function inbound(raw?: unknown): ChannelMessage {
       return {

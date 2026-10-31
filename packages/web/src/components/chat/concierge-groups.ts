@@ -53,6 +53,53 @@ function sameLocalDay(a: Date, b: Date): boolean {
   );
 }
 
+/** Whether the agent has said something in the turn, as a message the chat draws. */
+export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
+  if (!turnId) return false;
+  return rows.some(
+    (row) =>
+      row.kind === "agent" &&
+      row.messages.some((message) => message.turnId === turnId && isRenderable(message)),
+  );
+}
+
+// What the last build made, keyed by the message each piece starts from. A
+// build gives back the same entry and item objects for messages it has seen,
+// so the memoized rows that draw them skip a render when a message arrives.
+// Weak, so a message that leaves the transcript takes its objects along.
+const builtEntries = new WeakMap<ChatMessage, ConciergeEntry>();
+const builtItems = new WeakMap<ChatMessage, ConciergeItem[]>();
+
+function entryFor(message: ChatMessage, endsTurn: boolean): ConciergeEntry {
+  const built = builtEntries.get(message);
+  if (built && built.endsTurn === endsTurn) return built;
+  const entry = { message, endsTurn };
+  builtEntries.set(message, entry);
+  return entry;
+}
+
+/** The item `next` describes: the one the last build made for it when nothing about it changed. */
+function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
+  const built = builtItems.get(anchor) ?? [];
+  const same = built.find((item) => sameItem(item, next));
+  if (same) return same;
+  builtItems.set(anchor, [...built.filter((item) => item.kind !== next.kind), next]);
+  return next;
+}
+
+function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
+  if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
+  if (a.kind === "notice") return b.kind === "notice" && a.key === b.key && a.model === b.model;
+  return (
+    b.kind === "group" &&
+    a.key === b.key &&
+    a.sender === b.sender &&
+    a.typing === b.typing &&
+    a.entries.length === b.entries.length &&
+    a.entries.every((entry, index) => entry === b.entries[index])
+  );
+}
+
 /**
  * Turns the transcript's rows into what the Concierge draws: groups of
  * same-sender messages, time separators, and model-switch notices. Two
@@ -62,10 +109,19 @@ function sameLocalDay(a: Date, b: Date): boolean {
  * and when the local day changes. It always ends the group before it. A message
  * with an unparsable time gets no separator and is grouped by sender alone.
  * Rows with nothing to draw (trace rows, empty messages) leave no trace.
+ *
+ * Items and entries are reference-stable: building again from the same message
+ * objects returns the objects the last build returned, and only what a new or
+ * changed message touches (usually the last group) comes back new. A caller
+ * must not change what it gets.
  */
 export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }): ConciergeItem[] {
-  const items: ConciergeItem[] = [];
-  let group: Extract<ConciergeItem, { kind: "group" }> | null = null;
+  type Slot =
+    | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
+    | { kind: "notice"; key: string; model: string }
+    | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
+  const slots: Slot[] = [];
+  let group: Extract<Slot, { kind: "group" }> | null = null;
   let previous: ChatMessage | null = null;
 
   const add = (message: ChatMessage, sender: "guardian" | "agent") => {
@@ -77,13 +133,18 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
       !previous ||
       (known && (gap >= SEPARATOR_GAP_MS || !sameLocalDay(new Date(at), new Date(before))));
     if (separate && !Number.isNaN(at)) {
-      items.push({ kind: "separator", key: `time:${message.id}`, at: message.createdAt });
+      slots.push({
+        kind: "separator",
+        anchor: message,
+        key: `time:${message.id}`,
+        at: message.createdAt,
+      });
     }
     if (!group || separate || group.sender !== sender || gap >= GROUP_GAP_MS) {
-      group = { kind: "group", key: message.id, sender, entries: [], typing: false };
-      items.push(group);
+      group = { kind: "group", sender, messages: [] };
+      slots.push(group);
     }
-    group.entries.push({ message, endsTurn: false });
+    group.messages.push(message);
     previous = message;
   };
 
@@ -93,27 +154,56 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
     } else if (row.kind === "agent") {
       for (const message of row.messages) if (isRenderable(message)) add(message, "agent");
     } else if (row.kind === "model_switch") {
-      items.push({ kind: "notice", key: row.key, model: row.model });
+      slots.push({ kind: "notice", key: row.key, model: row.model });
       group = null;
     }
   }
 
   // A turn can span several rows (a guardian message lands mid-turn), so the
   // last text-bearing message is found across all of them.
-  const turnEnds = new Map<string, ConciergeEntry>();
-  for (const item of items) {
-    if (item.kind !== "group" || item.sender !== "agent") continue;
-    for (const entry of item.entries) {
-      const { turnId, sessionId } = entry.message;
-      if (turnId && hasVisibleText(entry.message)) turnEnds.set(`${sessionId}:${turnId}`, entry);
+  const turnEnds = new Map<string, ChatMessage>();
+  for (const slot of slots) {
+    if (slot.kind !== "group" || slot.sender !== "agent") continue;
+    for (const message of slot.messages) {
+      const { turnId, sessionId } = message;
+      if (turnId && hasVisibleText(message)) turnEnds.set(`${sessionId}:${turnId}`, message);
     }
   }
-  for (const entry of turnEnds.values()) entry.endsTurn = true;
+
+  const items: ConciergeItem[] = [];
+  for (const slot of slots) {
+    if (slot.kind === "separator") {
+      items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
+    } else if (slot.kind === "notice") {
+      items.push({ kind: "notice", key: slot.key, model: slot.model });
+    } else {
+      const entries = slot.messages.map((message) =>
+        entryFor(
+          message,
+          slot.sender === "agent" &&
+            !!message.turnId &&
+            turnEnds.get(`${message.sessionId}:${message.turnId}`) === message,
+        ),
+      );
+      items.push(
+        itemFor(slot.messages[0], {
+          kind: "group",
+          key: slot.messages[0].id,
+          sender: slot.sender,
+          entries,
+          typing: false,
+        }),
+      );
+    }
+  }
 
   if (opts.typing) {
     const last = items.at(-1);
-    if (last?.kind === "group" && last.sender === "agent") last.typing = true;
-    else items.push({ kind: "group", key: "typing", sender: "agent", entries: [], typing: true });
+    if (last?.kind === "group" && last.sender === "agent") {
+      items[items.length - 1] = itemFor(last.entries[0].message, { ...last, typing: true });
+    } else {
+      items.push({ kind: "group", key: "typing", sender: "agent", entries: [], typing: true });
+    }
   }
   return items;
 }

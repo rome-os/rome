@@ -41,7 +41,20 @@ function activeActionExecutionApproval() {
   );
 }
 
+/** An approval as {@link ApprovalsRepository.create} stored it. */
+export interface CreatedApproval {
+  id: string;
+  type: ApprovalType;
+  status: ApprovalStatus;
+  description: string;
+  payload: unknown;
+}
+
+export type ApprovalCreatedListener = (approval: CreatedApproval) => void;
+
 export class ApprovalsRepository {
+  private createdListeners = new Set<ApprovalCreatedListener>();
+
   constructor(private db: DrizzleDb) {}
 
   /** Closes every pairing request still pending. Rome creates none and
@@ -120,10 +133,11 @@ export class ApprovalsRepository {
     }
     const id = uuid();
     const now = new Date();
+    const status = data.status ?? "pending";
     await this.db.insert(approvals).values({
       id,
       type: data.type,
-      status: data.status ?? "pending",
+      status,
       requestedBy: data.requestedBy,
       description: data.description,
       payload: data.payload ?? null,
@@ -132,7 +146,25 @@ export class ApprovalsRepository {
       resolvedAt: null,
       resolvedBy: null,
     });
+    // After the insert, so a listener that reads the row finds it.
+    for (const listener of this.createdListeners) {
+      listener({
+        id,
+        type: data.type,
+        status,
+        description: data.description,
+        payload: data.payload ?? null,
+      });
+    }
     return id;
+  }
+
+  /** Tells `listener` about every approval created from now on. Returns the unsubscribe. */
+  onCreated(listener: ApprovalCreatedListener): () => void {
+    this.createdListeners.add(listener);
+    return () => {
+      this.createdListeners.delete(listener);
+    };
   }
 
   async findPending() {

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "@rstest/core";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { ChatReadModel } from "./chat-read-model.js";
+import { ChatReadModel, type Transcript, type TranscriptCursor } from "./chat-read-model.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
 
@@ -44,34 +44,39 @@ describe("ChatReadModel", () => {
     await setSaidAt(`a-${index}`, at + 2);
   }
 
-  describe("transcript", () => {
-    it("draws a dashboard chat by turn, prompt then answer, with the sender", async () => {
+  describe("chatTranscript", () => {
+    it("draws a dashboard chat, each line with its turn and sender, and each turn's trace", async () => {
       await repo.createSession("chat-1", "Chat");
       await seedDashboardTurn("chat-1", 0, 1_000);
       await seedDashboardTurn("chat-1", 1, 2_000);
 
-      const transcript = await reads.transcript("chat-1");
+      const transcript = await reads.chatTranscript("chat-1");
 
       expect(
-        transcript?.map((line) => [line.id, line.role, line.turnId, line.senderAccountId]),
+        transcript?.lines.map((line) => [line.id, line.role, line.turnId, line.senderAccountId]),
       ).toEqual([
         ["u-0", "user", "turn-0", "guardian"],
         ["a-0", "assistant", "turn-0", "agent:main"],
         ["u-1", "user", "turn-1", "guardian"],
         ["a-1", "assistant", "turn-1", "agent:main"],
       ]);
+      expect(transcript?.traces.map((trace) => [trace.id, trace.turnId])).toEqual([
+        ["t-0", "turn-0"],
+        ["t-1", "turn-1"],
+      ]);
+      expect(transcript?.nextCursor).toBeNull();
     });
 
-    it("pages newest turns first and walks back to the start once", async () => {
+    it("pages newest messages first and walks back to the start once", async () => {
       await repo.createSession("chat-1", "Chat");
       for (let index = 0; index < 5; index += 1) {
         await seedDashboardTurn("chat-1", index, 1_000 + index * 10);
       }
 
       const seen: string[] = [];
-      let before: { startedAt: number; key: string } | null = null;
+      let before: TranscriptCursor | null = null;
       for (;;) {
-        const page = await reads.transcriptPage("chat-1", { limit: 2, before });
+        const page: Transcript | null = await reads.chatTranscript("chat-1", { limit: 3, before });
         seen.unshift(...(page?.lines.map((line) => line.id) ?? []));
         if (!page?.nextCursor) break;
         before = page.nextCursor;
@@ -80,10 +85,10 @@ describe("ChatReadModel", () => {
       expect(seen).toEqual([0, 1, 2, 3, 4].flatMap((index) => [`u-${index}`, `a-${index}`]));
     });
 
-    it("is null for a session that is no chat", async () => {
+    it("is null for a session that stands in no chat", async () => {
       await repo.ensureRomeSession({ id: "handoff-1", name: "Handoff", type: "handoff" } as never);
 
-      expect(await reads.transcript("handoff-1")).toBeNull();
+      expect(await reads.chatTranscript("handoff-1")).toBeNull();
     });
 
     it("shows a group two of Rome's agents are in once, each turn under its own agent", async () => {
@@ -148,38 +153,77 @@ describe("ChatReadModel", () => {
 
       const rows = await testDb.db.all<{ n: number }>(sql`SELECT count(*) AS n FROM chats`);
       expect(rows[0]?.n).toBe(1);
-      const fromSales = await reads.transcript(sales.id);
-      const fromSupport = await reads.transcript(support.id);
+      const fromSales = await reads.chatTranscript(sales.id);
+      const fromSupport = await reads.chatTranscript(support.id);
 
-      const drawn = fromSales?.map((line) => [
-        line.role,
-        line.sessionId,
-        line.turnId,
-        line.senderAccountId,
-      ]);
-      expect(drawn).toEqual([
+      expect(
+        fromSales?.lines.map((line) => [
+          line.role,
+          line.sessionId,
+          line.turnId,
+          line.senderAccountId,
+        ]),
+      ).toEqual([
         ["user", sales.id, "sales-turn-7", "ou_wei"],
         ["assistant", sales.id, "sales-turn-7", "bot-sales"],
       ]);
+      expect(fromSales?.traces.map((trace) => trace.id)).toEqual(["sales-trace-7"]);
       // Either seat opens the same place.
-      expect(fromSupport?.map((line) => line.id)).toEqual(fromSales?.map((line) => line.id));
+      expect(fromSupport?.lines.map((line) => line.id)).toEqual(
+        fromSales?.lines.map((line) => line.id),
+      );
     });
   });
 
-  describe("turnTraces", () => {
-    it("reads the traces of the named turns only, each under its own session", async () => {
+  describe("sessionTranscript", () => {
+    async function seedSubagentTurn(index: number, at: number) {
+      const turnId = `sub-turn-${index}`;
+      await repo.addMessage(`sp-${index}`, "sub-1", "user", text(`task ${index}`), turnId);
+      await repo.appendTraceBlocks({
+        messageId: `st-${index}`,
+        sessionId: "sub-1",
+        turnId,
+        startSeq: 0,
+        blocks: [{ type: "turn_end", turnId, status: "completed", durationMs: 1 }],
+      });
+      await repo.addMessage(`sa-${index}`, "sub-1", "assistant", text(`result ${index}`), turnId);
+      await setSaidAt(`sp-${index}`, at);
+      await setSaidAt(`st-${index}`, at + 1);
+      await setSaidAt(`sa-${index}`, at + 2);
+    }
+
+    it("draws a subagent's turns from its own prompt, answer and trace, paged by turn", async () => {
+      await repo.ensureRomeSession({ id: "sub-1", name: "Sub", type: "subagent" } as never);
+      for (let index = 0; index < 3; index += 1) await seedSubagentTurn(index, 1_000 + index * 10);
+
+      const newest = await reads.sessionTranscript("sub-1", { limit: 2 });
+      expect(newest.lines.map((line) => [line.id, line.role])).toEqual([
+        ["sp-1", "user"],
+        ["sa-1", "assistant"],
+        ["sp-2", "user"],
+        ["sa-2", "assistant"],
+      ]);
+      expect(newest.traces.map((trace) => trace.id)).toEqual(["st-1", "st-2"]);
+
+      const older = await reads.sessionTranscript("sub-1", {
+        limit: 2,
+        before: newest.nextCursor,
+      });
+      expect(older.lines.map((line) => line.id)).toEqual(["sp-0", "sa-0"]);
+      expect(older.nextCursor).toBeNull();
+    });
+
+    it("draws a chat seat's own turns through the turn link", async () => {
       await repo.createSession("chat-1", "Chat");
       await seedDashboardTurn("chat-1", 0, 1_000);
-      await seedDashboardTurn("chat-1", 1, 2_000);
 
-      const traces = await reads.turnTraces([
-        { sessionId: "chat-1", turnId: "turn-1" },
-        { sessionId: "other-session", turnId: "turn-0" },
-      ]);
+      const transcript = await reads.sessionTranscript("chat-1");
 
-      expect(traces.map((trace) => [trace.id, trace.sessionId, trace.turnId])).toEqual([
-        ["t-1", "chat-1", "turn-1"],
+      expect(transcript.lines.map((line) => [line.id, line.role, line.turnId])).toEqual([
+        ["u-0", "user", "turn-0"],
+        ["a-0", "assistant", "turn-0"],
       ]);
+      expect(transcript.traces.map((trace) => trace.id)).toEqual(["t-0"]);
     });
   });
 
@@ -224,9 +268,9 @@ describe("ChatReadModel", () => {
   });
 });
 
-describe("0103_chats_tables backfill", () => {
+describe("0105_chats_tables backfill", () => {
   const migration = readFileSync(
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system/0103_chats_tables.sql"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system/0105_chats_tables.sql"),
     "utf8",
   );
   const statements = migration.split("--> statement-breakpoint").map((part) => part.trim());
@@ -261,6 +305,39 @@ describe("0103_chats_tables backfill", () => {
     expect(sqlite.prepare("SELECT id, sender_agent FROM chat_messages ORDER BY id").all()).toEqual([
       { id: "hello", sender_agent: "main" },
       { id: "hi", sender_agent: null },
+    ]);
+  });
+
+  it("keys every direct message by both ends", () => {
+    const testDb = createTestDb();
+    const sqlite = (testDb.db as unknown as { $client: import("better-sqlite3").Database }).$client;
+    for (const { name } of sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_mirror_%'")
+      .all() as { name: string }[]) {
+      sqlite.exec(`DROP TRIGGER "${name}"`);
+    }
+    sqlite.exec(`
+      INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+        VALUES ('tg', 'telegram', 'telegram', 'bot-tg', 1), ('sales', 'feishu', 'feishu', 'bot-sales', 1);
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
+        agent_name, created_at, activity_at)
+      VALUES
+        ('channel:tg:42', 'Ada', 'channel', 'tg', '42', 'private', NULL, 10, 10),
+        ('channel:sales:oc_p2p', 'Wei', 'channel', 'sales', 'oc_p2p', 'private', 'sales', 20, 20);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, sender_id, created_at)
+      VALUES
+        ('wei-hi', 'channel:sales:oc_p2p', 'turn-1', 'user', '[{"type":"text","content":"hi"}]', 'ou_wei', 100);
+    `);
+
+    for (const statement of backfill) sqlite.exec(statement);
+
+    // Telegram's id for a DM is the other party; Feishu's p2p id is opaque, so
+    // the other party is whoever first wrote to Rome there.
+    expect(
+      sqlite.prepare("SELECT id, platform_chat_id, kind FROM chats ORDER BY id").all(),
+    ).toEqual([
+      { id: "channel:sales:oc_p2p", platform_chat_id: "dm:bot-sales:ou_wei", kind: "dm" },
+      { id: "channel:tg:42", platform_chat_id: "dm:bot-tg:42", kind: "dm" },
     ]);
   });
 
