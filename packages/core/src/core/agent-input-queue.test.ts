@@ -249,4 +249,40 @@ describe("input priority", () => {
     expect(s.started).toHaveLength(1);
     expect(s.lastState("a")).toBe("unknown");
   });
+
+  it("replays nothing of a superseded turn the guardian then stops", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.submit("b", "now");
+    s.queue.stop("turn-1");
+    s.queue.finish("turn-1");
+    await tick();
+    // `b` is queued behind the turn, so it still runs, without `a` in front.
+    expect(s.started.map((input) => input.prompt)).toEqual(["a", "b"]);
+    expect(s.lastState("a")).toBe("unknown");
+  });
+
+  it("replays nothing when a now input arrives after the guardian stopped the turn", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.queue.stop("turn-1");
+    s.submit("b", "now");
+    // The turn is already ending, so the supersede adds no second interrupt.
+    expect(s.interrupts).toEqual([]);
+    s.queue.finish("turn-1");
+    await tick();
+    expect(s.started.map((input) => input.prompt)).toEqual(["a", "b"]);
+    expect(s.lastState("a")).toBe("unknown");
+  });
+
+  it("ignores a stop for a turn that is not the running one", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    s.submit("b", "now");
+    s.queue.stop("turn-0");
+    s.queue.finish("turn-1");
+    expect(s.started.at(-1)?.prompt).toBe("a\n\nb");
+  });
 });

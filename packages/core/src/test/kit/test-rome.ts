@@ -38,7 +38,7 @@ import { AgentLoader } from "../../core/agent-loader.js";
 import { SessionManager } from "../../core/session-manager.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
-import { createAgentSessionManager } from "../../core/agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../../core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
@@ -119,6 +119,7 @@ export interface TestRome {
   actionEngine: ActionEngine;
   agentLoader: AgentLoader;
   agentRunner: AgentRunner;
+  agentSessionManager: AgentSessionManager;
   approvalHandler: ApprovalHandler;
   connections: TestConnections;
   /** The channels over `connections`, built by the production `channelList`.
@@ -359,6 +360,7 @@ async function buildHarness(
     actionEngine,
     agentLoader,
     agentRunner,
+    agentSessionManager,
     approvalHandler,
     connections,
     channels,

@@ -1,13 +1,15 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Cpu, MoreHorizontal, Paperclip, Plus, X } from "lucide-react";
+import { ArrowUp, Cpu, LoaderCircle, MoreHorizontal, Paperclip, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { StopGlyph } from "@/components/concierge/StopGlyph";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -47,6 +49,10 @@ import { PendingUploadsList } from "./PendingUploadsList";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
+/** Stop waits this long after the server confirms it, so the old turn's tail can drain. */
+const STOP_SETTLE_MS = 300;
+/** A Stop with no answer by now stops waiting, so the spinner never hangs. */
+const STOP_ANSWER_TIMEOUT_MS = 10_000;
 
 function clampTextareaHeight(el: HTMLTextAreaElement) {
   el.style.height = "auto";
@@ -59,6 +65,14 @@ export interface ConciergeComposerProps {
   boxClassName?: string;
   /** Whether a turn is running. Sending still works: the next message interrupts. */
   isStreaming?: boolean;
+  /**
+   * Whether the guardian can see a turn running. While it holds and nothing is
+   * typed or attached, the Send button is a Stop button that calls `onStop`.
+   * Typing makes it Send again, which still interrupts.
+   */
+  canStop?: boolean;
+  /** Resolves true when the server confirmed the Stop, false when it was refused or failed. */
+  onStop?: () => Promise<boolean>;
   streamError?: string | ChatErrorNotice | null;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
@@ -76,7 +90,15 @@ export interface ConciergeComposerProps {
  */
 export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeComposerProps>(
   function ConciergeComposer(
-    { boxClassName, isStreaming = false, streamError, modelSelection, onSend },
+    {
+      boxClassName,
+      isStreaming = false,
+      canStop = false,
+      onStop,
+      streamError,
+      modelSelection,
+      onSend,
+    },
     ref,
   ) {
     const { t } = useTranslation("chat");
@@ -106,6 +128,12 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       uploads: PendingUpload[];
     } | null>(null);
 
+    // Stop shows a spinner until the server answers, then gives way to Send for
+    // the rest of the turn, while the old turn's tail drains.
+    const [stopPhase, setStopPhase] = useState<"idle" | "stopping" | "stopped">("idle");
+    useEffect(() => {
+      if (!canStop) setStopPhase("idle");
+    }, [canStop]);
     // Programmatic clears fire no `input` event, so resize on every change.
     useLayoutEffect(() => {
       if (textareaRef.current) clampTextareaHeight(textareaRef.current);
@@ -170,6 +198,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       const rawText = inputText;
       const uploads = pendingUploads;
       if (!text && uploads.length === 0) return;
+      // A message supersedes the turn, and the next one gets its own Stop.
+      setStopPhase("idle");
       const failed = failedSendRef.current;
       const inputId =
         failed && failed.text === text && failed.uploads === uploads
@@ -239,7 +269,29 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     );
 
     const empty = !inputText.trim() && pendingUploads.length === 0;
-    const sendLabel = isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle");
+    // Functional updates keep a late answer harmless after a reset.
+    const requestStop = async () => {
+      if (!onStop) return;
+      setStopPhase("stopping");
+      const answer = await Promise.race([
+        onStop().catch(() => false),
+        new Promise<"timeout">((resolve) =>
+          setTimeout(() => resolve("timeout"), STOP_ANSWER_TIMEOUT_MS),
+        ),
+      ]);
+      if (answer === false) return setStopPhase((phase) => (phase === "stopping" ? "idle" : phase));
+      if (answer === true) await new Promise((resolve) => setTimeout(resolve, STOP_SETTLE_MS));
+      setStopPhase((phase) => (phase === "stopping" ? "stopped" : phase));
+    };
+    const stopping = canStop && !!onStop && empty && stopPhase !== "stopped";
+    const stopPending = stopping && stopPhase === "stopping";
+    const sendLabel = stopPending
+      ? t("composer.stopping")
+      : stopping
+        ? t("composer.stopGenerating")
+        : isStreaming
+          ? t("composer.sendWhileRunningTitle")
+          : t("composer.sendTitle");
     const showModel = !!modelSelection && modelSelectorEnabled;
     const [showAllModels, setShowAllModels] = useState(false);
     // Like the model picker in other chats: the common models and the chat's
@@ -412,7 +464,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               </Button>
             ) : (
               <Button
-                variant={empty ? "secondary" : "default"}
+                variant={stopping ? "outline" : empty ? "secondary" : "default"}
                 size="icon-sm"
                 // Keep focus in the textarea, so a phone keeps its keyboard up
                 // (see ChatComposer's Send for the full story).
@@ -431,14 +483,21 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     textarea.focus({ preventScroll: true });
                   }
                   textareaFocusedAtPressRef.current = false;
-                  void runSend();
+                  if (stopping) void requestStop();
+                  else void runSend();
                 }}
-                disabled={empty}
+                disabled={(empty && !stopping) || stopPending}
                 title={sendLabel}
                 aria-label={sendLabel}
                 className="touch-target"
               >
-                <ArrowUp aria-hidden />
+                {stopPending ? (
+                  <LoaderCircle className="animate-spin" aria-hidden />
+                ) : stopping ? (
+                  <StopGlyph />
+                ) : (
+                  <ArrowUp aria-hidden />
+                )}
               </Button>
             )}
           </div>

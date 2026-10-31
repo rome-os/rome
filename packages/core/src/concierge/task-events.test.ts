@@ -20,6 +20,8 @@ function setup() {
   /** Settles the running flush's turn. */
   let endTurn: (() => void) | null = null;
   let holdTurns = false;
+  /** What the next turns report: the guardian pressed Stop on them. */
+  let stopTurns = false;
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     isEnabled: async () => true,
@@ -27,6 +29,7 @@ function setup() {
     deliver: async (prompt, options) => {
       flushes.push({ ids: prompt.split(","), quiet: options.quiet, at: Date.now() });
       if (holdTurns) await new Promise<void>((resolve) => (endTurn = resolve));
+      return { stopped: stopTurns };
     },
     giveUp: (taskId) => gaveUp.push(taskId),
   });
@@ -36,6 +39,9 @@ function setup() {
     gaveUp,
     holdTurns: () => {
       holdTurns = true;
+    },
+    stopTurns: () => {
+      stopTurns = true;
     },
     endTurn: async () => {
       endTurn?.();
@@ -165,6 +171,54 @@ describe("TaskEventCoalescer", () => {
     expect(s.coalescer.pending).toEqual([]);
     await rs.advanceTimersByTimeAsync(10 * QUIET_DELAY_MS);
     expect(s.flushes).toHaveLength(2);
+  });
+
+  it("drops the rows of a flush the guardian stopped, with no retry and no give-up", async () => {
+    const s = setup();
+    s.stopTurns();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.flushes).toHaveLength(1);
+    expect(s.coalescer.pending).toEqual([]);
+    await rs.advanceTimersByTimeAsync(10 * QUIET_DELAY_MS);
+    expect(s.flushes).toHaveLength(1);
+    expect(s.gaveUp).toEqual([]);
+  });
+
+  it("keeps a change that came after the build of a stopped flush for its own flush", async () => {
+    const s = setup();
+    s.holdTurns();
+    s.stopTurns();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    await rs.advanceTimersByTimeAsync(1_000);
+    s.coalescer.mark(urgent("a", "turn_end:completed by=concierge second"));
+    s.coalescer.mark(urgent("b"));
+    await s.endTurn();
+    // `b` was marked after the build too, so both wait for the next flush.
+    expect(s.coalescer.pending).toEqual(["a", "b"]);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS + URGENT_DELAY_MS);
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a"], ["a", "b"]]);
+    expect(s.gaveUp).toEqual([]);
+  });
+
+  it("still retries a flush whose turn a new message superseded", async () => {
+    // A superseded turn reports no stop: `deliver` resolves with nothing.
+    const flushes: string[] = [];
+    const gaveUp: string[] = [];
+    const coalescer = new TaskEventCoalescer({
+      now: () => Date.now(),
+      isEnabled: async () => true,
+      render: async (tasks: DirtyTask[]) => tasks.map((task) => task.taskId).join(","),
+      deliver: async (prompt) => {
+        flushes.push(prompt);
+      },
+      giveUp: (taskId) => gaveUp.push(taskId),
+    });
+    coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS + MIN_FLUSH_SPACING_MS);
+    expect(flushes).toEqual(["a", "a"]);
+    expect(gaveUp).toEqual(["a"]);
   });
 
   it("does not give up a row whose retry the Concierge wrote", async () => {

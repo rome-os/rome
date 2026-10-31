@@ -11,7 +11,9 @@
 // reads the rows from the database when it builds, so delivering a row twice
 // is harmless. The Concierge settles a row by writing it: a write clears the
 // row's mark unless a change came after the build. A row still unsettled after
-// a flush is flushed once more, then given up as not synced.
+// a flush is flushed once more, then given up as not synced. A flush whose turn
+// the guardian stopped is the exception: its rows are dropped, with no retry
+// and no give-up, since the guardian chose not to hear them out.
 
 import { createLogger } from "../logger.js";
 
@@ -47,8 +49,12 @@ export interface TaskEventDeps {
   isEnabled(): Promise<boolean>;
   /** The payload for these rows, read from the database now, or null when none of them exist any more. */
   render(tasks: DirtyTask[]): Promise<string | null>;
-  /** Runs the payload as a system turn and settles when the turn ends. */
-  deliver(prompt: string, options: { quiet: boolean }): Promise<void>;
+  /**
+   * Runs the payload as a system turn and settles when the turn ends. Resolves
+   * `{ stopped: true }` when the guardian pressed Stop on the turn. A new
+   * message that superseded the turn is not a Stop.
+   */
+  deliver(prompt: string, options: { quiet: boolean }): Promise<void | { stopped: boolean }>;
   /** The row was flushed and still not settled after its retry. */
   giveUp(taskId: string): void;
 }
@@ -148,6 +154,7 @@ export class TaskEventCoalescer {
     const builtAt = this.deps.now();
     this.lastFlushStartedAt = builtAt;
     const taken = [...this.dirty.entries()];
+    let stopped = false;
     for (const [, entry] of taken) {
       entry.builtAt = builtAt;
       entry.flushes += 1;
@@ -167,19 +174,25 @@ export class TaskEventCoalescer {
         for (const [taskId] of taken) this.dirty.delete(taskId);
         return;
       }
-      await this.deps.deliver(prompt, { quiet: tasks.every((task) => task.quiet) });
+      const delivery = await this.deps.deliver(prompt, {
+        quiet: tasks.every((task) => task.quiet),
+      });
+      stopped = delivery?.stopped === true;
     } catch (error) {
       log.warn("task event flush failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       this.flushing = false;
-      this.afterFlush(taken.map(([taskId]) => taskId));
+      this.afterFlush(
+        taken.map(([taskId]) => taskId),
+        stopped,
+      );
       this.arm();
     }
   }
 
-  private afterFlush(taskIds: string[]): void {
+  private afterFlush(taskIds: string[], stopped: boolean): void {
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
       if (!entry) continue;
@@ -188,6 +201,8 @@ export class TaskEventCoalescer {
         entry.builtAt = undefined;
         entry.flushes = 0;
         entry.retry = false;
+      } else if (stopped) {
+        this.dirty.delete(taskId);
       } else if (entry.flushes >= MAX_FLUSHES_PER_CHANGE) {
         this.dirty.delete(taskId);
         this.deps.giveUp(taskId);

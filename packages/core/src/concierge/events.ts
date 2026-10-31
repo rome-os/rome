@@ -135,7 +135,15 @@ export function startConciergeEvents(
     render: (dirty) => renderTaskEvents(service, dirty),
     deliver: async (prompt, options) => {
       const chatId = await service.findChatId();
-      if (chatId) await service.runSystemTurn(chatId, prompt, options);
+      if (!chatId) return;
+      let stopped = false;
+      await service.runSystemTurn(chatId, prompt, {
+        ...options,
+        onStopped: () => {
+          stopped = true;
+        },
+      });
+      return { stopped };
     },
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
