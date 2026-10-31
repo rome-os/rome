@@ -28,8 +28,9 @@ import { whatsAppMessages } from "./whatsapp-messages.js";
  *
  * Where an answer comes from is the channel's business. WhatsApp's and
  * LinkedIn's address books and stores read tables a sync fills; every connection kind
- * with a Talk backs its channel's `send` and `inbound` through its Connection,
- * and a Talk that reads the platform's history backs its channel's `messages`.
+ * with a Talk backs its channel's `send` and `inbound` through its Connection.
+ * A channel a Connection backs has no `messages`: Rome does not read a
+ * platform's own history.
  * A channel answering the same questions from a live API call implements the
  * same ports and joins the same way.
  *
@@ -48,9 +49,9 @@ export function channelList(deps: {
    *  It contributes a live store and an address book of the guardian's own
    *  contacts, read straight from the client's database rather than a sync. */
   wechatUserReader?: WechatUserReader;
-  /** The Connections that back `send`, `inbound`, `directory` and, where no
-   *  store does, `messages`. Every registered connection kind with a Talk contributes a channel;
-   *  absent, no channel has those ports. */
+  /** The Connections that back `send`, `inbound` and `directory`. Every
+   *  registered connection kind with a Talk contributes a channel; absent, no
+   *  channel has those ports. */
   connections?: ConnectionPortsDeps;
   /** Address books for channels a Connection backs, by connection kind. A connection kind
    *  absent here has no address book. */
@@ -91,8 +92,13 @@ export function channelList(deps: {
   channels.push(...(deps.own ?? []));
   for (const [name, backed] of ports) {
     if (reads.some((read) => read.name === name)) continue;
-    if (!backed.send && !backed.inbound && !backed.messages) continue;
-    channels.push({ name, accounts: deps.connectionAccounts?.[name] ?? null, ...backed });
+    if (!backed.send && !backed.inbound) continue;
+    channels.push({
+      name,
+      accounts: deps.connectionAccounts?.[name] ?? null,
+      messages: null,
+      ...backed,
+    });
   }
   if (connections) {
     for (const later of deps.laterChannels ?? []) {
@@ -118,8 +124,8 @@ export function laterChannel(
   name: string,
 ): Channel | null {
   const backed = connectionPorts(connections, connectionKind, name);
-  if (!backed || (!backed.send && !backed.inbound && !backed.messages)) return null;
-  return { name, accounts: null, ...backed };
+  if (!backed || (!backed.send && !backed.inbound)) return null;
+  return { name, accounts: null, messages: null, ...backed };
 }
 
 /**

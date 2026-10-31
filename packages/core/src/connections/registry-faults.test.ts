@@ -402,15 +402,15 @@ describe("registry faults", () => {
 
     it("degrades the grant when a feature call rejects with CredentialRejected", async () => {
       const { conn, talker } = await unlocked();
-      talker.history = {
-        query: async () => {
+      talker.directory = {
+        listConversations: async () => {
           throw new CredentialRejected({ grant: "bot" });
         },
       };
 
-      await expect(conn.withTalker((live) => live.history?.query({}))).rejects.toBeInstanceOf(
-        CredentialRejected,
-      );
+      await expect(
+        conn.withTalker((live) => live.directory?.listConversations({ limit: 1 })),
+      ).rejects.toBeInstanceOf(CredentialRejected);
       await flush();
 
       expect(conn.auth.grants().bot).toBe("degraded");
@@ -434,13 +434,13 @@ describe("registry faults", () => {
     it("ignores a rejection that settles after its epoch was replaced", async () => {
       const { registry, fx, conn, talker } = await unlocked();
       let reject: (err: unknown) => void = () => {};
-      talker.history = {
-        query: () =>
+      talker.directory = {
+        listConversations: () =>
           new Promise((_resolve, rejectRead) => {
             reject = rejectRead;
           }),
       };
-      const pending = conn.withTalker((live) => live.history?.query({}));
+      const pending = conn.withTalker((live) => live.directory?.listConversations({ limit: 1 }));
 
       await conn.auth.revoke("bot");
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());

@@ -143,17 +143,16 @@ export function createAction(
         channel: {
           type: "string",
           description:
-            'The account to read, by the channel a message arrived on, such as "telegram_user", "email" or a Feishu account\'s id. Give this or `platform`.',
+            'The account to read, by the channel a message arrived on, such as "whatsapp", "linkedin" or "webchat". Give this or `platform`.',
         },
         platform: {
           type: "string",
           description:
-            'In place of `channel`: read Rome\'s account on this platform, such as "whatsapp" or "email". Refused where Rome holds several accounts there, and the error names their channels.',
+            'In place of `channel`: read Rome\'s account on this platform, such as "whatsapp" or "linkedin". Refused where Rome holds several accounts there, and the error names their channels.',
         },
         threadId: {
           type: "string",
-          description:
-            "Optional thread/channel ID to fetch. Omit to fetch all accessible threads (Discord fetches all guild channels).",
+          description: "Optional thread/channel ID to fetch. Omit to fetch all accessible threads.",
         },
         windowHours: {
           type: "number",
@@ -236,12 +235,7 @@ export function createAction(
         messages = page.reverse();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log.error("fetchHistory failed", { channel, error: message });
-        // A channel with no store reads through its Connection, and with none
-        // connected the service says so (core's `ChannelNotConnected`). That
-        // is the case this tool has always answered as not configured; any
-        // other failure, a store's included, is reported as it is.
-        if (message.startsWith("No connection backs channel")) return notConfigured;
+        log.error("history read failed", { channel, error: message });
         return {
           status: "error",
           error: `Failed to fetch history from "${channel}": ${message}`,

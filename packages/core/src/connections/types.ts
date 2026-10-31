@@ -25,16 +25,6 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
 // the channel's own record: a `ChannelMessage` naming the channel it backs,
 // with direction `inbound`.
 
-/**
- * The platform's own history of a Connection's conversations: at most `limit`
- * of them at or after `since`, oldest first, each saying which channel carried
- * it and which way it went. It backs `messages.query` for a channel with no
- * store of its own (channels/connection-ports.ts).
- */
-export interface TalkHistory {
-  query(input: { chatId?: ChatId; since?: Date; limit?: number }): Promise<ChannelMessage[]>;
-}
-
 /** The conversations a Connection can see, for conversation settings. */
 export interface TalkDirectory {
   listConversations(input: {
@@ -46,7 +36,6 @@ export interface TalkDirectory {
 }
 
 export interface TalkFeatureMap {
-  history: TalkHistory;
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
@@ -380,10 +369,6 @@ export interface ConnectionDescriptor {
        *  the talker does: webchat's talker is wired to `deliver`, but its turns
        *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
-      /** True when the Talk reads the platform's own history, so the channel it
-       *  backs answers `messages.query` through it. Absent means it does not:
-       *  the channel's messages come from a store, or from nowhere. */
-      history?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */

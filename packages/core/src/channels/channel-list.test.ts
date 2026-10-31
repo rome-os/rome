@@ -6,7 +6,7 @@ import type {
   ChannelActivity,
   ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkHistory } from "../connections/types.js";
+import type { TalkDirectory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -42,10 +42,9 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 /** A pasted-token service whose every talker epoch is recorded. */
 function talkKind(
   service: string,
-  ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
+  ports: { sends?: boolean; receives?: boolean } = {},
   direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
   activity: ChannelActivity | null = null,
-  history: TalkHistory | null = null,
   directory: TalkDirectory | null = null,
   replyDelivery: DeliveryTransport | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
@@ -72,7 +71,6 @@ function talkKind(
               },
               ...(direct && { directMessaging: direct }),
               ...(activity && { activity }),
-              ...(history && { history }),
               ...(directory && { directory }),
               ...(replyDelivery && { replyDelivery }),
             };
@@ -199,99 +197,6 @@ describe("channelList", () => {
     });
   });
 
-  it("reads a live channel's history through its Connection, newest first", async () => {
-    // The Connection's history answers oldest first.
-    const said = (messageId: string, at: number): ChannelMessage => ({
-      ...message({ messageId, timestamp: new Date(at) }),
-      channel: "telegram",
-      direction: "inbound",
-    });
-    const now = Date.now();
-    const history: TalkHistory = {
-      query: async () => [said("older", now - 2_000), said("newer", now - 1_000)],
-    };
-    const { registry, channels } = setup([
-      talkKind("telegram", { history: true }, null, null, history).descriptor,
-    ]);
-    const telegram = channels.find((channel) => channel.name === "telegram")!;
-    // Rome keeps no copy of a live channel, so People reads it elsewhere.
-    expect(telegram.messages?.byAccount).toBeNull();
-
-    await expect(telegram.messages!.query({})).rejects.toThrow(
-      'No connection backs channel "telegram"',
-    );
-
-    const connection = await registry.connect("telegram");
-    // The Connection exists but its Talk is not built until a credential backs it.
-    await expect(telegram.messages!.query({})).rejects.toBeInstanceOf(ChannelNotConnected);
-    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
-      material: { token: "t" },
-      expiresAt: "never",
-    });
-    const page = await telegram.messages!.query({});
-    expect(page.map((entry) => entry.messageId)).toEqual(["newer", "older"]);
-    expect((await telegram.messages!.query({ limit: 1 })).map((entry) => entry.messageId)).toEqual([
-      "newer",
-    ]);
-  });
-
-  it("reports a Talk whose history flag and history feature disagree", async () => {
-    testDb = createTestDb();
-    const error = rs.fn();
-    const logger = { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error };
-    const registry = new ConnectionRegistry({
-      repository: new DrizzleConnectionsRepository(testDb.db),
-      logger: logger as never,
-    });
-    // Offers a history read but does not declare one, so its channel would
-    // never get a `messages` port.
-    const history: TalkHistory = { query: async () => [] };
-    registry.register(talkKind("telegram", {}, null, null, history).descriptor);
-    const connection = await registry.connect("telegram");
-    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
-      material: { token: "t" },
-      expiresAt: "never",
-    });
-
-    expect(error).toHaveBeenCalledWith("talker history flag disagrees with its history feature", {
-      connectionId: connection.id,
-      connectionKind: "telegram",
-      declared: false,
-      offered: true,
-    });
-  });
-
-  it("builds a Talk whose history cannot be checked, and says so", async () => {
-    testDb = createTestDb();
-    const warn = rs.fn();
-    const logger = { debug: rs.fn(), info: rs.fn(), warn, error: rs.fn() };
-    const registry = new ConnectionRegistry({
-      repository: new DrizzleConnectionsRepository(testDb.db),
-      logger: logger as never,
-    });
-    const service = talkKind("telegram");
-    const build = service.descriptor.capabilities.talker!.build;
-    service.descriptor.capabilities.talker!.build = (cred, kit) => ({
-      ...build(cred, kit),
-      get history(): never {
-        throw new Error("not started");
-      },
-    });
-    registry.register(service.descriptor);
-    const connection = await registry.connect("telegram");
-    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
-      material: { token: "t" },
-      expiresAt: "never",
-    });
-
-    expect(service.epochs).toHaveLength(1);
-    expect(warn).toHaveBeenCalledWith("could not check the talker's history flag", {
-      connectionId: connection.id,
-      connectionKind: "telegram",
-      error: "not started",
-    });
-  });
-
   it("reaches an account directly only through a Connection that offers it", async () => {
     const chatFor = rs.fn(async (id: string) => id as ChatId);
     const { registry, channels } = setup([
@@ -329,8 +234,8 @@ describe("channelList", () => {
       ],
     }));
     const { registry, channels } = setup([
-      talkKind("discord", {}, null, null, null, { listConversations }).descriptor,
-      talkKind("feishu", {}, null, null, null, {
+      talkKind("discord", {}, null, null, { listConversations }).descriptor,
+      talkKind("feishu", {}, null, null, {
         listConversations: async () => {
           throw new Error("provider down");
         },
@@ -663,7 +568,7 @@ describe("joinLaterChannel", () => {
 
   it("paces a later channel's writes with its Connection's pacer, so its replies can stream", async () => {
     testDb = createTestDb();
-    const service = talkKind("telegram", {}, null, null, null, null, {
+    const service = talkKind("telegram", {}, null, null, null, {
       capabilities: {
         maxPartLength: 10,
         edit: false,
