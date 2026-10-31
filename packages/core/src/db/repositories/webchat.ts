@@ -1,3 +1,4 @@
+import { platformOf } from "@rome/api-types/platform";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import { createHash, randomUUID } from "node:crypto";
@@ -23,7 +24,6 @@ import {
   sharedChats,
   webchatProjects,
   romeSessions,
-  romeAgentMessagePlatformIds,
   romeAgentMessages,
   romeAgentTraceBlocks,
   webchatTurnFeedback,
@@ -35,6 +35,7 @@ import {
   isWebchatChat,
   romeSessionKind,
   storedSessionType,
+  sessionRowWithKind,
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
@@ -48,11 +49,22 @@ import type {
   TraceSubagentStartEvent,
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { Account, RomeSessionType } from "@rome-os/app-runtime";
+import type { Account, ChatId, RecentChat, RomeSessionType } from "@rome-os/app-runtime";
+import { placeIn, type Place } from "../../chats/place.js";
+import { lineAt } from "../../chats/adapter.js";
+import {
+  seatsSaidInSince,
+  sessionAwaitingGuardian,
+  sessionLineCount,
+  sessionLines,
+} from "../../webchat/chat-read-model-sql.js";
+import { TurnLinks, type ContextLine } from "../../sessions/turn-links.js";
+import { ChatRepository } from "../../chats/chat-repository.js";
+import { MessageRepository } from "../../chats/message-repository.js";
+import { partsText, type SaidBy } from "../../chats/message.js";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
-import { agentMessageOutbound } from "../../channels/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 
 export interface StoredTurnFeedback {
@@ -85,6 +97,17 @@ export interface StoredConversationContextMessage {
 
 /** A said message's row, as {@link WebChatRepository.saidMessagesAt} reads
  *  it, with the channel of the chat row that holds it. */
+/** One of Rome's seats in a place: the session an account's agent stands
+ *  in it through. */
+export interface Seat {
+  readonly sessionId: string;
+  readonly place: Place;
+  /** The account the seat speaks as, on the place's platform. */
+  readonly accountId: string;
+  /** The agent that speaks through the seat. */
+  readonly agent: string;
+}
+
 export interface StoredSaidMessage {
   id: string;
   channel: string;
@@ -276,7 +299,6 @@ export interface EnsureRomeSessionInput {
   projectPath?: string | null;
   /** A side chat keeps the folder of the chat it branched from. */
   deviceFolder?: DeviceFolder | null;
-  sourceChannel?: string | null;
   sourceThreadId?: string | null;
   sourceThreadName?: string | null;
   sourceThreadType?: "private" | "group" | string | null;
@@ -382,10 +404,7 @@ const sessionSelectFields = {
     sql<boolean>`case when ${romeSessions.lastSeenActivityAt} is not null and ${romeSessions.activityAt} > ${romeSessions.lastSeenActivityAt} then 1 else 0 end`.mapWith(
       Boolean,
     ),
-  messageCount:
-    sql<number>`(select count(*) from "rome_agent_messages" where "rome_agent_messages"."session_id" = "rome_sessions"."id")`.mapWith(
-      Number,
-    ),
+  messageCount: sessionLineCount,
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
@@ -408,36 +427,8 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
   order by b."seq" desc
   limit 1
 ), 0)`.mapWith(Boolean);
-// Whether the session waits on the guardian: a card (question, connect-AI,
-// app component) posted since their last message, or an approval still
-// pending in this chat. Any answer to a card is saved as a user message, so a
-// card after the last one is still open. rowid is insertion order. Every reply
-// adds an auto-approved row to `approvals`, so the pending thread ids are
-// collected once per list rather than scanned per chat. json_valid and the
-// object check skip rows that aren't block arrays (non-JSON, or legacy plain
-// text), which would otherwise fail the whole list.
-export const sessionAwaitingGuardian = sql<boolean>`(exists (
-  select 1 from "rome_agent_messages" m, json_each(m."content") part
-  where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
-  and json_valid(m."content")
-  and m."rowid" > coalesce((
-    select max(u."rowid") from "rome_agent_messages" u
-    where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
-  ), 0)
-  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
-) or "rome_sessions"."id" in (
-  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
-  where a."status" = 'pending'
-  and json_extract(a."payload", '$.channelContext.threadId') is not null
-))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const SQL_LIKE_ESCAPE = "\\";
-
-// Transcript search: how many LIKE-prefiltered message rows the JS confirm
-// pass scans at most, and the shape of the snippet cut around the first hit.
-const SEARCH_MESSAGE_SCAN_LIMIT = 400;
-const SEARCH_SNIPPET_CONTEXT = 40;
-const SEARCH_SNIPPET_LENGTH = 160;
 
 export { channelChatId };
 
@@ -458,58 +449,6 @@ export function conversationPlatformMessageId(
 
 function escapeSqlLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `${SQL_LIKE_ESCAPE}${character}`);
-}
-
-/**
- * Flattens a stored message's JSON block array into the transcript text a
- * guardian actually sees: `text` block contents joined, whitespace collapsed.
- * Non-text blocks (tool calls, attachments, …) never contribute, so JSON keys
- * and tool payloads can't produce phantom search hits.
- */
-function extractTranscriptText(content: string): string {
-  let blocks: unknown;
-  try {
-    blocks = JSON.parse(content);
-  } catch {
-    return "";
-  }
-  if (!Array.isArray(blocks)) return "";
-  const texts: string[] = [];
-  for (const block of blocks) {
-    if (!block || typeof block !== "object") continue;
-    const type = (block as { type?: unknown }).type;
-    const text = (block as { content?: unknown }).content;
-    if (type === "text" && typeof text === "string" && text.trim()) texts.push(text);
-  }
-  return texts.join("\n").replace(/\s+/g, " ").trim();
-}
-
-/**
- * Confirms every lowercased `term` occurs in `text` (case-insensitive) and
- * returns a single-line snippet cut around the earliest hit, ellipsized on
- * clipped ends. Returns null when any term is missing — the SQL LIKE prefilter
- * matches raw JSON, so this is the authoritative check.
- */
-function buildTranscriptSnippet(text: string, terms: string[]): string | null {
-  const lowered = text.toLocaleLowerCase();
-  let firstHit = Number.POSITIVE_INFINITY;
-  for (const term of terms) {
-    const at = lowered.indexOf(term);
-    if (at === -1) return null;
-    if (at < firstHit) firstHit = at;
-  }
-  if (!Number.isFinite(firstHit)) return null;
-
-  let start = Math.max(0, firstHit - SEARCH_SNIPPET_CONTEXT);
-  if (start > 0) {
-    // Snap the left edge forward to a word boundary when one sits before the hit.
-    const boundary = text.indexOf(" ", start);
-    if (boundary !== -1 && boundary < firstHit) start = boundary + 1;
-  }
-  const end = Math.min(text.length, start + SEARCH_SNIPPET_LENGTH);
-  const prefix = start > 0 ? "…" : "";
-  const suffix = end < text.length ? "…" : "";
-  return `${prefix}${text.slice(start, end).trim()}${suffix}`;
 }
 
 function projectPathChildCondition(
@@ -748,10 +687,41 @@ export class WebChatRepository {
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
 
-  constructor(private db: DrizzleDb) {}
+  /** Chats, where a dashboard chat starts and its lines are said. */
+  private readonly chats: ChatRepository;
+  private readonly lines: MessageRepository;
+  private readonly links: TurnLinks;
 
-  /** Set by {@link leaveOutOfCatchUp}. */
-  private wakeUndecided: (messageId: string) => boolean = () => false;
+  constructor(private db: DrizzleDb) {
+    this.chats = new ChatRepository(db);
+    this.lines = new MessageRepository(db);
+    this.links = new TurnLinks(db);
+  }
+
+  /**
+   * Start the dashboard chat session `sessionId` stands in: a direct message
+   * between the guardian and the agent's dashboard account, keyed by an
+   * opaque id given now. Changes nothing for a session that already has one.
+   */
+  private startDashboardChat(sessionId: string, name: string, agentName: string | null): void {
+    const row = this.db
+      .select({ chatId: romeSessions.chatId })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .get();
+    if (!row || row.chatId) return;
+    // The dashboard is its own adapter and gives its chats random ids.
+    const chat = this.chats.start(
+      { platform: WEBCHAT_PLATFORM, id: randomUUID().replaceAll("-", "") },
+      "dm",
+      name,
+    );
+    this.db
+      .update(romeSessions)
+      .set({ chatId: chat.ref.id, accountId: dashboardAccountId(agentName) })
+      .where(eq(romeSessions.id, sessionId))
+      .run();
+  }
 
   onMessageInserted(listener: WebchatMessageInsertedListener): () => void {
     this.messageInsertedListeners.add(listener);
@@ -928,14 +898,19 @@ export class WebChatRepository {
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
-        tx.delete(romeAgentMessagePlatformIds)
-          .where(inArray(romeAgentMessagePlatformIds.sessionId, chunk))
-          .run();
         tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, chunk)).run();
         tx.delete(webchatWorkspaceLayouts)
           .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
           .run();
         tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
+        for (const { chatId } of tx
+          .select({ chatId: romeSessions.chatId })
+          .from(romeSessions)
+          .where(inArray(romeSessions.id, chunk))
+          .all()) {
+          const chat = chatId && this.chats.get({ platform: WEBCHAT_PLATFORM, id: chatId });
+          if (chat) this.chats.end(chat.ref);
+        }
         tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
       }
 
@@ -990,7 +965,6 @@ export class WebChatRepository {
       largeModelSelection: largeModelSelection ?? null,
       agentName,
       type: storedSessionType(type),
-      sourceChannel: "webchat",
       sourceThreadId: id,
       sourceThreadName: name,
       sourceThreadType: "private",
@@ -999,14 +973,13 @@ export class WebChatRepository {
       activityAt: now,
       lastSeenActivityAt: type === "webchat" ? now : null,
     });
+    this.startDashboardChat(id, name, agentName);
   }
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
-    // A chat is a channel row on the webchat channel, at its own address,
-    // whichever of the two types the caller names it by.
-    const chat =
-      input.type === "webchat" || (input.type === "channel" && input.sourceChannel === "webchat");
+    // A chat is a channel row with a dashboard chat, at its own address.
+    const chat = input.type === "webchat";
     await this.db
       .insert(romeSessions)
       .values({
@@ -1020,7 +993,6 @@ export class WebChatRepository {
         largeModelSelection: null,
         agentName: input.agentName,
         type: storedSessionType(input.type),
-        sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
         sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
         sourceThreadName: input.sourceThreadName ?? null,
         sourceThreadType: input.sourceThreadType ?? null,
@@ -1038,8 +1010,16 @@ export class WebChatRepository {
         lastSeenActivityAt: chat ? now : null,
       })
       .onConflictDoNothing({ target: romeSessions.id });
+    if (chat) this.startDashboardChat(input.id, input.name, input.agentName);
   }
 
+  /**
+   * The seat of Rome's account `accountId` at a channel address: the session
+   * through which its agent stands in chat `chatId`, or in the thread
+   * `threadId` names under `parentThreadId`. Opened on first use, with the
+   * parent chat's seat for a thread. Finding a seat needs only the address;
+   * opening one throws without `chatId` and `accountId`.
+   */
   async ensureChannelChat(input: {
     channel: string;
     threadId: string;
@@ -1049,6 +1029,8 @@ export class WebChatRepository {
     agentName: string;
     projectName?: string;
     projectPath?: string;
+    chatId?: string;
+    accountId?: string;
   }): Promise<{ id: string; agentName: string | null }> {
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
@@ -1060,7 +1042,15 @@ export class WebChatRepository {
             threadType: "group",
           })
         : null;
-    const found = await this.findChannelConversation(input.channel, input.threadId);
+    // A seat is found by the chat it stands in and the account it speaks as;
+    // the dashboard, which names no chat here, by its address.
+    const seat =
+      input.chatId !== undefined && input.accountId !== undefined
+        ? this.seatIn(input.chatId, parent ? input.threadId : null, input.accountId)
+        : null;
+    const found = seat
+      ? await this.channelConversation(seat)
+      : await this.findChannelConversation(input.channel, input.threadId);
     if (found && input.threadName) {
       await this.backfillChannelConversationName(found, input, input.threadName);
     }
@@ -1081,6 +1071,11 @@ export class WebChatRepository {
       throw new Error(`No chat at webchat address ${input.threadId}`);
     }
 
+    if (input.chatId === undefined || input.accountId === undefined) {
+      throw new Error(
+        `No seat at ${input.channel}:${input.threadId}, and no chat named to open one in`,
+      );
+    }
     const id = channelChatId(input.channel, input.threadId);
     const now = new Date();
     await this.db
@@ -1098,358 +1093,140 @@ export class WebChatRepository {
             ? null
             : input.agentName,
         type: "channel",
-        sourceChannel: input.channel,
         sourceThreadId: input.threadId,
         sourceThreadName: input.threadName ?? null,
         sourceThreadType: input.threadType ?? null,
         parentSessionId: parent?.id ?? null,
+        chatId: input.chatId,
+        threadId: parent ? input.threadId : null,
+        accountId: input.accountId,
         createdAt: now,
         activityAt: now,
         lastSeenActivityAt: null,
       })
       .onConflictDoNothing();
 
-    const conversation = await this.findChannelConversation(input.channel, input.threadId);
+    const conversation = await this.channelConversation(id);
     if (!conversation) {
       throw new Error(`Failed to resolve conversation ${input.channel}:${input.threadId}`);
     }
     return { id: conversation.id, agentName: conversation.agentName };
   }
 
-  async addConversationMessage(input: {
-    sessionId: string;
-    role: "user" | "notification";
-    content: string;
-    platformMessageId: string;
-    senderId?: string;
-    senderName?: string;
-    replyToPlatformMessageId?: string;
-    createdAt?: Date;
-  }): Promise<{ inserted: boolean }> {
-    const createdAt = input.createdAt ?? new Date();
-    // The row and the session activity it advances are one fact. Splitting them
-    // across two writes lets a failure in between store the message against
-    // stale activity, which sorts the conversation by the wrong timestamp.
-    return this.db.transaction((tx) => {
-      const rows = tx
-        .insert(romeAgentMessages)
-        .values({
-          id: conversationPlatformMessageId(input.sessionId, input.platformMessageId),
-          sessionId: input.sessionId,
-          turnId: null,
-          role: input.role,
-          content: input.content,
-          platformMessageId: input.platformMessageId,
-          senderId: input.senderId ?? null,
-          senderName: input.senderName ?? null,
-          replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-          contextInjectedTurnId: null,
-          createdAt,
-        })
-        .onConflictDoNothing()
-        .returning({ id: romeAgentMessages.id })
-        .all();
-      // A platform message id we already stored is a redelivery, not new
-      // activity — leave the session's timestamp where it is.
-      if (rows.length === 0) return { inserted: false };
-      tx.update(romeSessions)
-        .set(advanceSessionActivitySet(createdAt))
-        .where(eq(romeSessions.id, input.sessionId))
-        .run();
-      return { inserted: true };
-    });
+  /**
+   * Where session `sessionId` stands as one of Rome's seats: the place, the
+   * account it speaks as, its agent and the channel it speaks through. Null
+   * for a session that stands in no chat, such as a subagent or a fork.
+   */
+  async seatOf(sessionId: string): Promise<Seat | null> {
+    const row = this.db
+      .select({
+        chatId: romeSessions.chatId,
+        threadId: romeSessions.threadId,
+        accountId: romeSessions.accountId,
+        agentName: romeSessions.agentName,
+      })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .get();
+    const chat = row?.chatId ? this.chats.find(row.chatId) : null;
+    if (!row || !chat) return null;
+    const { platform } = chat.ref;
+    return {
+      sessionId,
+      place: placeIn(chat.ref, row.threadId === null ? undefined : (row.threadId as ChatId)),
+      accountId: row.accountId ?? platform,
+      agent: row.agentName ?? "main",
+    };
   }
 
-  async promoteConversationMessageToUser(
-    sessionId: string,
-    platformMessageId: string,
-  ): Promise<void> {
+  /** The session that stands in the dashboard chat keyed `key`, or null
+   *  when Rome holds no dashboard chat there. */
+  async dashboardSessionAt(key: string): Promise<string | null> {
+    if (!this.chats.get({ platform: WEBCHAT_PLATFORM, id: key })) return null;
+    return this.firstSeat(eq(romeSessions.chatId, key));
+  }
+
+  /**
+   * The seat Rome's account `accountId` holds in chat `chatId`, in thread
+   * `threadId` or the open chat when null, by its session's id, or null when
+   * it holds none there.
+   */
+  seatIn(chatId: string, threadId: string | null, accountId: string): string | null {
+    return this.firstSeat(
+      and(
+        eq(romeSessions.chatId, chatId),
+        threadId === null ? isNull(romeSessions.threadId) : eq(romeSessions.threadId, threadId),
+        eq(romeSessions.accountId, accountId),
+      ),
+    );
+  }
+
+  /** The seat Rome's account `accountId` holds in the thread the platform
+   *  calls `threadId`, in whichever chat, or null when it holds none. */
+  seatInThread(threadId: string, accountId: string): string | null {
+    return this.firstSeat(
+      and(eq(romeSessions.threadId, threadId), eq(romeSessions.accountId, accountId)),
+    );
+  }
+
+  /** The oldest session `where` names, by id. */
+  private firstSeat(where: SQL | undefined): string | null {
+    return (
+      this.db
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(where)
+        .orderBy(asc(romeSessions.createdAt))
+        .limit(1)
+        .get()?.id ?? null
+    );
+  }
+
+  /** The message said where session `sessionId` stands whose platform id is
+   *  `platformMessageId`, as the platform gave it, or null when none is. */
+  async seatMessageId(sessionId: string, platformMessageId: string): Promise<string | null> {
+    return (await this.seatLine(sessionId, platformMessageId))?.id ?? null;
+  }
+
+  /** The line said in session `sessionId`'s chat, in any of its threads,
+   *  whose platform id is `platformMessageId` as the platform gave it, or null
+   *  when Rome holds none. */
+  async seatLine(sessionId: string, platformMessageId: string): Promise<ContextLine | null> {
+    const seat = await this.seatOf(sessionId);
+    if (!seat) return null;
+    const [line] = this.lines
+      .byIds([lineAt(seat.place.chat, seat.accountId, platformMessageId)])
+      .filter((said) => said.place.chat.id === seat.place.chat.id);
+    if (!line) return null;
+    return {
+      id: line.id,
+      senderName:
+        line.direction === "fromRome" ? (line.senderName ?? "Rome") : (line.senderName ?? null),
+      text: line.body.text,
+      at: line.at,
+    };
+  }
+
+  /** Move session `sessionId`'s activity to `at` when `at` is later, as
+   *  something said where it stands does. */
+  async advanceActivity(sessionId: string, at: Date): Promise<void> {
     await this.db
-      .update(romeAgentMessages)
-      .set({ role: "user" })
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.platformMessageId, platformMessageId),
-          eq(romeAgentMessages.role, "notification"),
-        ),
-      );
+      .update(romeSessions)
+      .set(advanceSessionActivitySet(at))
+      .where(eq(romeSessions.id, sessionId));
   }
 
+  /** Turn `turnId` of session `sessionId` runs for its prompt, the message
+   *  whose platform id is `platformMessageId`. Changes nothing when no such
+   *  message is its prompt. */
   async assignConversationMessageTurn(
     sessionId: string,
     platformMessageId: string,
     turnId: string,
   ): Promise<void> {
-    await this.db
-      .update(romeAgentMessages)
-      .set({ turnId })
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.platformMessageId, platformMessageId),
-          eq(romeAgentMessages.role, "user"),
-        ),
-      );
-  }
-
-  async recordOutboundConversationMessage(input: {
-    sessionId: string;
-    content: string;
-    platformMessageId?: string;
-    /** The platform's other messages the row stands for, when it showed the
-     *  content as several. A quote of any of them reaches the row. */
-    otherPlatformMessageIds?: string[];
-    senderId?: string;
-    senderName?: string;
-    replyToPlatformMessageId?: string;
-    turnId?: string;
-    knownToProvider: boolean;
-  }): Promise<void> {
-    // Sender-supplied content (send_message, a People send): only the host may
-    // author routine cards, so a forged one never reaches the transcript.
-    input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
-    if (input.platformMessageId) {
-      const delivered = await this.db
-        .select({ id: romeAgentMessages.id })
-        .from(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, input.sessionId),
-            eq(romeAgentMessages.platformMessageId, input.platformMessageId),
-          ),
-        )
-        .limit(1);
-      if (delivered[0]) {
-        await this.db
-          .update(romeAgentMessages)
-          .set({
-            role: input.knownToProvider ? "assistant" : "notification",
-            turnId: input.turnId ?? null,
-            senderId: input.senderId ?? null,
-            senderName: input.senderName ?? null,
-            replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-          })
-          .where(eq(romeAgentMessages.id, delivered[0].id));
-        await this.keepPlatformMessageIds(input, delivered[0].id);
-        return;
-      }
-    }
-    if (input.knownToProvider && input.turnId) {
-      const existing = await this.db
-        .select({ id: romeAgentMessages.id })
-        .from(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, input.sessionId),
-            eq(romeAgentMessages.turnId, input.turnId),
-            eq(romeAgentMessages.role, "assistant"),
-            eq(romeAgentMessages.content, input.content),
-          ),
-        )
-        .orderBy(desc(romeAgentMessages.createdAt))
-        .limit(1);
-      if (existing[0]) {
-        await this.db
-          .update(romeAgentMessages)
-          .set({
-            platformMessageId: input.platformMessageId ?? null,
-            senderId: input.senderId ?? null,
-            senderName: input.senderName ?? null,
-            replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-          })
-          .where(eq(romeAgentMessages.id, existing[0].id));
-        await this.keepPlatformMessageIds(input, existing[0].id);
-        return;
-      }
-    }
-
-    const createdAt = new Date();
-    const id = input.platformMessageId
-      ? conversationPlatformMessageId(input.sessionId, input.platformMessageId)
-      : randomUUID();
-    await this.db.transaction((tx) => {
-      tx.insert(romeAgentMessages)
-        .values({
-          id,
-          sessionId: input.sessionId,
-          turnId: input.turnId ?? null,
-          role: input.knownToProvider ? "assistant" : "notification",
-          content: input.content,
-          platformMessageId: input.platformMessageId ?? null,
-          senderId: input.senderId ?? null,
-          senderName: input.senderName ?? null,
-          replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-          contextInjectedTurnId: null,
-          createdAt,
-        })
-        .onConflictDoNothing()
-        .run();
-      const others = this.otherPlatformMessageIdRows(input, id);
-      if (others.length > 0)
-        tx.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing().run();
-      tx.update(romeSessions)
-        .set(advanceSessionActivitySet(createdAt))
-        .where(eq(romeSessions.id, input.sessionId))
-        .run();
-    });
-  }
-
-  private otherPlatformMessageIdRows(
-    input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
-    messageId: string,
-  ) {
-    const ids = new Set(input.otherPlatformMessageIds);
-    if (input.platformMessageId) ids.delete(input.platformMessageId);
-    return [...ids].map((platformMessageId) => ({
-      sessionId: input.sessionId,
-      platformMessageId,
-      messageId,
-    }));
-  }
-
-  private async keepPlatformMessageIds(
-    input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
-    messageId: string,
-  ): Promise<void> {
-    const others = this.otherPlatformMessageIdRows(input, messageId);
-    if (others.length === 0) return;
-    await this.db.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing();
-  }
-
-  /**
-   * What the agent has not seen in a channel conversation, by id: the
-   * notifications no turn has taken in yet, leaving out any whose wake is
-   * still undecided. The messages themselves are read from the chat (`MessageRepository.recent`).
-   *
-   * Also the two messages a turn quotes from beyond its place: the starter of
-   * a new thread, carried with Rome's first reply in it, and the message
-   * `replyToPlatformMessageId` names, looked up in the parent chat when the
-   * thread does not hold it.
-   */
-  async loadConversationContext(
-    sessionId: string,
-    replyToPlatformMessageId?: string,
-  ): Promise<{
-    unseen: { id: string; platformMessageId: string | null }[];
-    threadStarter: StoredConversationContextMessage | null;
-    repliedTo: StoredConversationContextMessage | null;
-  }> {
-    const pendingNotificationRows = await this.db
-      .select({
-        id: romeAgentMessages.id,
-        platformMessageId: romeAgentMessages.platformMessageId,
-        senderId: romeAgentMessages.senderId,
-        replyToPlatformMessageId: romeAgentMessages.replyToPlatformMessageId,
-      })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.role, "notification"),
-          isNull(romeAgentMessages.contextInjectedTurnId),
-        ),
-      )
-      .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const unseen = pendingNotificationRows
-      // Its wake is still being decided, so it may become a turn's prompt of
-      // its own.
-      .filter(({ id }) => !this.wakeUndecided(id))
-      .map(({ id, platformMessageId }) => ({ id, platformMessageId }));
-    const contextColumns = {
-      id: romeAgentMessages.id,
-      content: romeAgentMessages.content,
-      senderName: romeAgentMessages.senderName,
-      createdAt: romeAgentMessages.createdAt,
-    };
-    const findMessageInSession = async (targetSessionId: string, platformMessageId: string) => {
-      const own = await this.db
-        .select(contextColumns)
-        .from(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, targetSessionId),
-            eq(romeAgentMessages.platformMessageId, platformMessageId),
-          ),
-        )
-        .limit(1);
-      if (own[0]) return own;
-      // A reply shown as several messages keeps the others' ids beside its row.
-      return await this.db
-        .select(contextColumns)
-        .from(romeAgentMessagePlatformIds)
-        .innerJoin(
-          romeAgentMessages,
-          eq(romeAgentMessages.id, romeAgentMessagePlatformIds.messageId),
-        )
-        .where(
-          and(
-            eq(romeAgentMessagePlatformIds.sessionId, targetSessionId),
-            eq(romeAgentMessagePlatformIds.platformMessageId, platformMessageId),
-          ),
-        )
-        .limit(1);
-    };
-    let parentSessionId: string | null | undefined;
-    const loadParentSessionId = async (): Promise<string | null> => {
-      if (parentSessionId !== undefined) return parentSessionId;
-      const sessionRows = await this.db
-        .select({ parentSessionId: romeSessions.parentSessionId })
-        .from(romeSessions)
-        .where(eq(romeSessions.id, sessionId))
-        .limit(1);
-      parentSessionId = sessionRows[0]?.parentSessionId ?? null;
-      return parentSessionId;
-    };
-
-    // A newly created child conversation stores Rome's first reply as a
-    // pending notification that references the triggering parent message.
-    // Carry that one message with the notification; consuming the notification
-    // keeps this context one-shot without copying or mutating the parent row.
-    const parentReferenceMessageId = pendingNotificationRows.find(
-      (row) => row.senderId === "rome" && row.replyToPlatformMessageId,
-    )?.replyToPlatformMessageId;
-    let threadStarter: StoredConversationContextMessage | null = null;
-    if (parentReferenceMessageId) {
-      const referencedParentSessionId = await loadParentSessionId();
-      if (referencedParentSessionId) {
-        const parentMessageRows = await findMessageInSession(
-          referencedParentSessionId,
-          parentReferenceMessageId,
-        );
-        threadStarter = parentMessageRows[0] ?? null;
-      }
-    }
-    const context = { unseen, threadStarter };
-
-    if (!replyToPlatformMessageId) return { ...context, repliedTo: null };
-    const repliedRows = await findMessageInSession(sessionId, replyToPlatformMessageId);
-    if (repliedRows[0]) return { ...context, repliedTo: repliedRows[0] };
-
-    // A provider-native thread may quote its root message from the parent
-    // conversation. Resolve that one explicit relation without merging the
-    // parent's pending notifications into the child thread.
-    const parentSessionIdForReply = await loadParentSessionId();
-    if (!parentSessionIdForReply) return { ...context, repliedTo: null };
-    const parentReplyRows = await findMessageInSession(
-      parentSessionIdForReply,
-      replyToPlatformMessageId,
-    );
-    return { ...context, repliedTo: parentReplyRows[0] ?? null };
-  }
-
-  async markConversationContextInjected(messageIds: string[], turnId: string): Promise<void> {
-    if (messageIds.length === 0) return;
-    await this.db
-      .update(romeAgentMessages)
-      .set({ contextInjectedTurnId: turnId })
-      .where(
-        and(
-          inArray(romeAgentMessages.id, messageIds),
-          eq(romeAgentMessages.role, "notification"),
-          isNull(romeAgentMessages.contextInjectedTurnId),
-        ),
-      );
+    const id = await this.seatMessageId(sessionId, platformMessageId);
+    if (id) this.links.promptRuns(sessionId, id, turnId);
   }
 
   /** Fill in a conversation's name when the row holds only its address, as
@@ -1489,226 +1266,7 @@ export class WebChatRepository {
     }
   }
 
-  /**
-   * Leave every message `undecided` answers true for out of what a turn
-   * catches up on ({@link loadConversationContext}). It is asked once per
-   * pending message at each catch-up read, so it answers from memory.
-   */
-  leaveOutOfCatchUp(undecided: (messageId: string) => boolean): void {
-    this.wakeUndecided = undecided;
-  }
-
-  /**
-   * The said messages of the chat rows `channels` keep for one address, newest
-   * first: at most `limit`, and only those before `before` when it is given.
-   * The order is created_at, then the order the rows were written in, since
-   * created_at keeps whole seconds. `before` names a message by its time and
-   * id. A message two of the rows hold, such as a group's message that reached
-   * two of Rome's accounts, is answered once. Its id, time and place in the
-   * order are its first copy's, so a copy that arrives later never moves it.
-   * What it says and who said it come from the multipart reply that holds it,
-   * else from Rome's own record of it, else from that first copy. With
-   * `ownChannel`, only that channel's record is read. With `localIds`, each
-   * account numbers the chat's messages itself, so a platform id names a
-   * message only within one account's record, and copies across accounts are
-   * not matched. With `ids`, only the
-   * messages one of their copies is named for are. Without `ownChannel`, only
-   * a group is read across channels.
-   * Trace rows belong to no chat and are left out.
-   */
-  async saidMessagesAt(input: {
-    channels: readonly string[];
-    address: string;
-    ownChannel?: string;
-    localIds?: boolean;
-    ids?: readonly string[];
-    before?: { at: Date; id: string };
-    limit: number;
-  }): Promise<StoredSaidMessage[]> {
-    if (input.channels.length === 0 || input.limit < 1) return [];
-    const at = and(
-      eq(romeSessions.type, "channel"),
-      inArray(romeSessions.sourceChannel, [...input.channels]),
-      eq(romeSessions.sourceThreadId, input.address),
-    );
-    // A group or a channel is shared. A native thread opens only inside one,
-    // and its row may not name its type, so a row under a parent chat is
-    // shared too.
-    const isGroup = sql`(coalesce(${romeSessions.sourceThreadType}, '') in ('group', 'channel') or ${romeSessions.parentSessionId} is not null)`;
-    // A row that names a kind other than a group's is a direct message.
-    const isDirect = sql`(${romeSessions.sourceThreadType} is not null and not ${isGroup})`;
-    // Read through one channel, the chat is that channel's record alone.
-    // Otherwise only a group's address names one chat across Rome's accounts.
-    // One account knowing it for a group is enough, since a send opens its row
-    // without knowing the kind, unless another account knows it for a direct
-    // message: Telegram keys a direct message by the other person alone, and
-    // a user account may label one a group, so the address then names two
-    // chats and neither is read. A chat no account knows for a group is one
-    // account's own, read only while one channel holds it.
-    const which = input.ownChannel
-      ? eq(romeSessions.sourceChannel, input.ownChannel)
-      : or(
-          and(
-            sql`exists (select 1 from ${romeSessions} where ${and(at, isGroup)})`,
-            sql`not exists (select 1 from ${romeSessions} where ${and(at, isDirect)})`,
-          ),
-          sql`(select count(*) from ${romeSessions} where ${at}) = 1`,
-        );
-    const outbound = agentMessageOutbound(sql`"r"."role"`, sql`"r"."sender_id"`);
-    const roles = sql.join(
-      ["user", "assistant", "notification"].map((role) => sql`${role}`),
-      sql`, `,
-    );
-    const { before } = input;
-    // Where each account numbers its own messages, a platform id is matched
-    // only within the record that holds it.
-    const sameRecord = (other: SQL) =>
-      input.localIds ? sql`and ${other}."sid" = "r"."sid"` : sql``;
-    // Reading named messages, only their copies are grouped: the rows that
-    // share a platform id with them, through the reply that holds them.
-    const asked = input.ids
-      ? sql`
-        "asked" as materialized (
-          select "id", "platform_message_id" as "pid" from ${romeAgentMessages}
-          where "id" in (${sql.join(
-            input.ids.map((id) => sql`${id}`),
-            sql`, `,
-          )}) and "session_id" in (select "id" from "chats")
-        ),
-        "asked_wholes" as materialized (
-          select "message_id" from "held" where "pid" in (select "pid" from "asked")
-          union select "id" from "asked" where "id" in (select "message_id" from "held")
-          -- A whole named by the platform id an asked row holds.
-          union select "m"."id" from "chats" as "c"
-          cross join "asked" as "a"
-          cross join ${romeAgentMessages} as "m"
-            on "m"."session_id" = "c"."id" and "m"."platform_message_id" = "a"."pid"
-        ),
-        "asked_pids" as materialized (
-          select "pid" from "asked" where "pid" is not null
-          union select "pid" from "held" where "message_id" in (select "message_id" from "asked_wholes")
-          union select "platform_message_id" from ${romeAgentMessages}
-          where "id" in (select "message_id" from "asked_wholes") and "platform_message_id" is not null
-        ),`
-      : sql``;
-    const rows = await this.db.all<{
-      id: string;
-      channel: string;
-      turnId: string | null;
-      role: string;
-      content: string;
-      platformMessageId: string | null;
-      senderId: string | null;
-      senderName: string | null;
-      replyToPlatformMessageId: string | null;
-      createdAt: number;
-    }>(sql`
-      with
-        "chats" as materialized (select "id" from ${romeSessions} where ${and(at, which)}),
-        "held" as materialized (
-          select "message_id", "platform_message_id" as "pid", "session_id" as "sid"
-          from ${romeAgentMessagePlatformIds}
-          where "session_id" in (select "id" from "chats")
-        ),
-        ${asked}
-        "said" as materialized (
-          select "m".rowid as "rid", "m"."id", "m"."platform_message_id" as "pid",
-            "m"."session_id" as "sid", "m"."role", "m"."sender_id"
-          from ${
-            input.ids
-              ? sql`(
-                  select rowid as "picked" from ${romeAgentMessages} where "id" in (select "id" from "asked")
-                  union select rowid from ${romeAgentMessages} where "id" in (select "message_id" from "asked_wholes")
-                  union select rowid from ${romeAgentMessages}
-                  where "session_id" in (select "id" from "chats")
-                    and "platform_message_id" in (select "pid" from "asked_pids")
-                ) as "pick" cross join ${romeAgentMessages} as "m" on "m".rowid = "pick"."picked"`
-              : sql`${romeAgentMessages} as "m"`
-          }
-          where "m"."session_id" in (select "id" from "chats") and "m"."role" in (${roles})
-        ),
-        -- The reply shown as several messages that holds a row's platform id:
-        -- the row itself, or the row that keeps it as another part.
-        "holder" as materialized (
-          select "r"."rid", "w"."rid" as "wrid"
-          from "said" as "r"
-          join "said" as "w" on "w"."pid" = "r"."pid" ${sameRecord(sql`"w"`)}
-          where "w"."id" in (select "message_id" from "held")
-          union all
-          select "r"."rid", "w"."rid"
-          from "said" as "r"
-          join "held" as "h" on "h"."pid" = "r"."pid" ${sameRecord(sql`"h"`)}
-          join "said" as "w" on "w"."id" = "h"."message_id"
-        ),
-        -- Each row's message: the reply that holds it, else its platform id.
-        "copies" as materialized (
-          select "r"."rid", ${outbound} as "outbound",
-            ${input.ids ? sql`"r"."id" in (select "id" from "asked")` : sql`0`} as "named",
-            case
-              when min("x"."wrid") is not null then 'w' || min("x"."wrid")
-              when "r"."pid" is not null then ${input.localIds ? sql`'p' || "r"."sid" || ':' || "r"."pid"` : sql`'p' || "r"."pid"`}
-              else 'r' || "r"."rid"
-            end as "message",
-            min("x"."wrid") as "wrid"
-          from "said" as "r"
-          left join "holder" as "x" on "x"."rid" = "r"."rid"
-          group by "r"."rid"
-        ),
-        -- A message stands where its first copy was written, so a copy that
-        -- arrives later never moves it across a page. It reads as the reply
-        -- that holds it, else as Rome's own record of it, else as that copy.
-        "messages" as (
-          select "message", min("rid") as "at_rid", max("named") as "named",
-            coalesce(min("wrid"), min(case when "outbound" = 1 then "rid" end), min("rid")) as "as_rid"
-          from "copies"
-          group by "message"
-        )
-      select "first"."id" as "id", "s"."source_channel" as "channel",
-        "shown"."turn_id" as "turnId", "shown"."role" as "role", "shown"."content" as "content",
-        "shown"."platform_message_id" as "platformMessageId", "shown"."sender_id" as "senderId",
-        "shown"."sender_name" as "senderName",
-        "shown"."reply_to_platform_message_id" as "replyToPlatformMessageId",
-        "first"."created_at" as "createdAt"
-      from "messages" as "k"
-      join ${romeAgentMessages} as "first" on "first".rowid = "k"."at_rid"
-      join ${romeAgentMessages} as "shown" on "shown".rowid = "k"."as_rid"
-      join ${romeSessions} as "s" on "s"."id" = "shown"."session_id"
-      where 1 = 1
-        ${input.ids ? sql`and "k"."named" = 1` : sql``}
-        ${
-          before
-            ? sql`and ("first"."created_at" < ${Math.floor(before.at.getTime() / 1000)}
-                or ("first"."created_at" = ${Math.floor(before.at.getTime() / 1000)}
-                  and "first".rowid < (select rowid from ${romeAgentMessages} where "id" = ${before.id})))
-              -- The cursor's message was read, even when a copy written
-              -- earlier has since become its first.
-              and "k"."message" is not (
-                select "message" from "copies"
-                where "rid" = (select rowid from ${romeAgentMessages} where "id" = ${before.id}))`
-            : sql``
-        }
-      order by "first"."created_at" desc, "first".rowid desc
-      limit ${input.limit}
-    `);
-    return rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt * 1000) }));
-  }
-
-  /** The id of a channel's chat row for the platform's chat id, or null when
-   *  no message has reached Rome there yet. Never creates one. */
-  async findChannelChat(channel: string, threadId: string): Promise<{ id: string } | null> {
-    const found = await this.findChannelConversation(channel, threadId);
-    return found && { id: found.id };
-  }
-
-  private async findChannelConversation(
-    channel: string,
-    threadId: string,
-  ): Promise<{
-    id: string;
-    agentName: string | null;
-    name: string;
-    sourceThreadName: string | null;
-  } | null> {
+  private async channelConversation(id: string) {
     const rows = await this.db
       .select({
         id: romeSessions.id,
@@ -1717,15 +1275,16 @@ export class WebChatRepository {
         sourceThreadName: romeSessions.sourceThreadName,
       })
       .from(romeSessions)
-      .where(
-        and(
-          eq(romeSessions.type, "channel"),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
-        ),
-      )
+      .where(eq(romeSessions.id, id))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /** The conversation at channel address `threadId` on `channel`, by the id
+   *  {@link channelChatId} gives it, or null when none is there. */
+  private async findChannelConversation(channel: string, threadId: string) {
+    const found = await this.channelConversation(channelChatId(channel, threadId));
+    return found;
   }
 
   /** The id of the conversation a channel address names, or null when none
@@ -1733,22 +1292,24 @@ export class WebChatRepository {
    *  subagent runs copy their parent's address, so only conversation types
    *  match. */
   async findChatIdByAddress(channel: string, threadId: string): Promise<string | null> {
-    const rows = await this.db
+    const row = this.db
       .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(
         and(
+          eq(romeSessions.id, channelChatId(channel, threadId)),
           inArray(romeSessions.type, ["webchat_handoff", "channel"]),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
         ),
       )
-      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
-      .limit(1);
-    return rows[0]?.id ?? null;
+      .get();
+    return row?.id ?? null;
   }
 
   async deleteSession(id: string) {
+    // A dashboard chat is its session's alone, so it ends with it. A channel
+    // chat goes on without the seat.
+    const seat = await this.seatOf(id);
+    if (seat && seat.place.chat.platform === WEBCHAT_PLATFORM) this.chats.end(seat.place.chat);
     // One transaction so a crash mid-cascade can't leave orphan messages or
     // feedback rows behind. `webchat_turn_feedback` also cascades via its FK,
     // but we still issue the explicit delete so the contract holds even if a
@@ -1760,9 +1321,6 @@ export class WebChatRepository {
     await this.db.transaction((tx) => {
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, id)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).run();
-      tx.delete(romeAgentMessagePlatformIds)
-        .where(eq(romeAgentMessagePlatformIds.sessionId, id))
-        .run();
       tx.delete(webchatTurnFeedback).where(eq(webchatTurnFeedback.sessionId, id)).run();
       tx.delete(webchatWorkspaceLayouts).where(eq(webchatWorkspaceLayouts.sessionId, id)).run();
       // Kill the chat's public shares too. They're keyed by sessionId and only
@@ -1837,69 +1395,6 @@ export class WebChatRepository {
         ),
       )
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
-  }
-
-  /**
-   * Searches the guardian-visible transcript (user + assistant messages) of
-   * top-level webchat sessions. Matching is case-insensitive and every
-   * whitespace-separated term of `query` must occur in the same message's
-   * text. Returns at most one match per session — its most recent matching
-   * message — ordered by message recency, capped at `sessionLimit` sessions.
-   */
-  async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
-    const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
-    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    if (terms.length === 0) return [];
-
-    // Cheap SQL prefilter over the raw JSON content; buildTranscriptSnippet
-    // re-checks against extracted text so JSON structure can't match.
-    const likePredicates = terms.map(
-      (term) =>
-        sql`lower(${romeAgentMessages.content}) LIKE ${`%${escapeSqlLikePattern(term)}%`} ESCAPE ${SQL_LIKE_ESCAPE}`,
-    );
-    const rows = await this.db
-      .select({ message: webchatMessageSelectFields, session: sessionSelectFields })
-      .from(romeAgentMessages)
-      .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
-      .where(
-        and(
-          isWebchatChat,
-          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          ...likePredicates,
-        ),
-      )
-      .orderBy(desc(romeAgentMessages.createdAt), desc(romeAgentMessages.id))
-      .limit(SEARCH_MESSAGE_SCAN_LIMIT);
-
-    const matches: {
-      session: (typeof rows)[number]["session"];
-      message: {
-        id: string;
-        role: "user" | "assistant" | "notification";
-        createdAt: Date;
-        snippet: string;
-      };
-    }[] = [];
-    const seenSessions = new Set<string>();
-    for (const row of rows) {
-      if (seenSessions.has(row.session.id)) continue;
-      const text = extractTranscriptText(row.message.content);
-      if (!text) continue;
-      const snippet = buildTranscriptSnippet(text, terms);
-      if (!snippet) continue;
-      seenSessions.add(row.session.id);
-      matches.push({
-        session: row.session,
-        message: {
-          id: row.message.id,
-          role: row.message.role as "user" | "assistant" | "notification",
-          createdAt: row.message.createdAt,
-          snippet,
-        },
-      });
-      if (matches.length >= sessionLimit) break;
-    }
-    return matches;
   }
 
   async archiveSession(id: string, options: { now?: Date } = {}) {
@@ -2030,8 +1525,26 @@ export class WebChatRepository {
     };
   }
 
+  /** The listed dashboard chats among `ids`, as the sidebar reads them, by id. */
+  async listSessionsByIds(ids: string[]) {
+    if (ids.length === 0)
+      return new Map<string, Awaited<ReturnType<typeof this.listSessions>>[number]>();
+    const rows = await this.db
+      .select({
+        ...sessionSelectFields,
+        lastTurnFailed: sessionLastTurnFailed,
+        awaitingGuardian: sessionAwaitingGuardian,
+      })
+      .from(romeSessions)
+      .where(and(isWebchatChat, inArray(romeSessions.id, ids)));
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
   async getSession(id: string) {
-    const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+    const rows = await this.db
+      .select(sessionRowWithKind)
+      .from(romeSessions)
+      .where(eq(romeSessions.id, id));
     return rows[0] ? withSessionKind(rows[0]) : null;
   }
 
@@ -2045,43 +1558,76 @@ export class WebChatRepository {
   }
 
   /**
-   * How many agent messages the chat got since it was last read, counting at
-   * most `cap`. A chat with no read mark has none. `created_at` has one-second
-   * precision, so a message in the same second as the read mark counts as read.
-   */
-  async countUnreadAgentMessages(id: string, cap: number): Promise<number> {
-    const rows = await this.db.all<{ count: number }>(sql`
-      select count(*) as "count" from (
-        select 1 from ${romeAgentMessages}
-        join ${romeSessions} on ${romeSessions.id} = ${romeAgentMessages.sessionId}
-        where ${romeAgentMessages.sessionId} = ${id}
-          and ${romeAgentMessages.role} = 'assistant'
-          and ${romeSessions.lastSeenActivityAt} is not null
-          and ${romeAgentMessages.createdAt} > ${romeSessions.lastSeenActivityAt}
-        limit ${cap}
-      )`);
-    return Number(rows[0]?.count ?? 0);
-  }
-
-  /**
-   * A branch whose first answer completed on its own provider thread stops
-   * being special: it becomes an ordinary chat, listed and managed like any
-   * other. It takes its own address in place of the parent's it copied, and
-   * the unread clock starts; lineage stays in `parent_session_id` and the
-   * trigger columns. Guarded on the current type so a double call, or a call
-   * racing a delete, is a no-op.
+   * Promote fork `id` to a dashboard chat: it starts a chat of its own, its
+   * user and assistant lines are said there as the fork said them, each
+   * linked to the turn it took or gave, and it answers at its own address. A
+   * session that is not a fork, as after a delete racing this, is a no-op.
    */
   async promoteForkToChat(id: string): Promise<void> {
+    const fork = this.db
+      .select({ name: romeSessions.name, agentName: romeSessions.agentName })
+      .from(romeSessions)
+      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")))
+      .get();
+    if (!fork) return;
     await this.db
       .update(romeSessions)
       .set({
         type: storedSessionType("webchat"),
         // A fork carries its parent's address. As a chat it answers at its own.
-        sourceChannel: "webchat",
         sourceThreadId: sql`${romeSessions.id}`,
         lastSeenActivityAt: sql`${romeSessions.activityAt}`,
       })
       .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));
+    this.startDashboardChat(id, fork.name, fork.agentName);
+    const seat = await this.seatOf(id);
+    if (!seat) return;
+    const said = this.db
+      .select({
+        id: romeAgentMessages.id,
+        turnId: romeAgentMessages.turnId,
+        role: romeAgentMessages.role,
+        content: romeAgentMessages.content,
+        actor: romeAgentMessages.actor,
+        createdAt: romeAgentMessages.createdAt,
+      })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, id),
+          inArray(romeAgentMessages.role, ["user", "assistant"]),
+        ),
+      )
+      .orderBy(asc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid`)
+      .all();
+    for (const line of said) {
+      const parts = partsOf(line.content);
+      const fromAgent = line.role === "assistant";
+      const sender = fromAgent
+        ? { account: { platform: WEBCHAT_PLATFORM, id: seat.accountId }, agent: seat.agent }
+        : dashboardSender(line.actor ?? undefined);
+      await this.lines.record({
+        direction: "toRome",
+        id: line.id,
+        place: seat.place,
+        saidBy: sender,
+        body: { text: partsText(parts) },
+        parts,
+        at: line.createdAt,
+      });
+      if (line.turnId === null) continue;
+      if (fromAgent) this.links.answer(line.id, id, line.turnId);
+      else this.links.prompt(line.id, id, line.turnId);
+    }
+    this.db
+      .delete(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, id),
+          inArray(romeAgentMessages.role, ["user", "assistant"]),
+        ),
+      )
+      .run();
   }
 
   /** Marks why a chat exists. Read by the sessions explorer and the chat list. */
@@ -2134,18 +1680,18 @@ export class WebChatRepository {
     await this.db.update(romeSessions).set({ largeModelSelection }).where(eq(romeSessions.id, id));
   }
 
+  /** How many lines session `sessionId`'s transcript holds. */
   async getMessageCount(sessionId: string) {
-    const rows = await this.db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
-      .from(romeAgentMessages)
-      .where(eq(romeAgentMessages.sessionId, sessionId));
-    return rows[0]?.count ?? 0;
+    const rows = this.db.all<{ count: number }>(
+      sql`SELECT count(*) AS count FROM ${sessionLines([sessionId])}`,
+    );
+    return Number(rows[0]?.count ?? 0);
   }
 
   /**
-   * Record a dashboard input. `saidBy` is the agent account that said it when
-   * an agent, not the guardian, sends into the chat; its id is kept as the
-   * sender, since the account's platform is the chat's.
+   * Record a dashboard input, said into the session's chat and queued as its
+   * prompt. `saidBy` is the agent account that said it when an agent, not the
+   * guardian, sends into the chat. False when `id` is already on record.
    */
   async recordUserInput(
     id: string,
@@ -2154,39 +1700,28 @@ export class WebChatRepository {
     actor?: SessionActor,
     saidBy?: Account,
   ): Promise<boolean> {
-    return this.db.transaction((tx) => {
-      const createdAt = new Date();
-      const inserted = tx
-        .insert(romeAgentMessages)
-        .values({
-          id,
-          sessionId,
-          content,
-          role: "user",
-          inputState: "queued",
-          actor: actor ?? null,
-          senderId: saidBy?.id ?? null,
-          createdAt,
-        })
-        .onConflictDoNothing()
-        .returning({ id: romeAgentMessages.id })
-        .all();
-      if (inserted.length)
-        tx.update(romeSessions)
-          .set(advanceSessionActivitySet(createdAt))
-          .where(eq(romeSessions.id, sessionId))
-          .run();
-      return inserted.length > 0;
+    const seat = await this.seatOf(sessionId);
+    if (!seat) throw new Error(`Session ${sessionId} stands in no chat to say an input in`);
+    const parts = partsOf(content);
+    const recorded = await this.lines.record({
+      direction: "toRome",
+      id,
+      place: seat.place,
+      saidBy: saidBy ? { account: saidBy } : dashboardSender(actor),
+      body: { text: partsText(parts) },
+      parts,
+      at: new Date(),
     });
+    if (!recorded) return false;
+    this.links.prompt(id, sessionId, null, "queued");
+    await this.advanceActivity(sessionId, recorded.at);
+    return true;
   }
 
   async recoverInterruptedInputs(): Promise<void> {
     // A process crash can occur between the durable dispatch marker and the
     // provider acknowledgement. Preserve the message without replaying it.
-    await this.db
-      .update(romeAgentMessages)
-      .set({ inputState: "unknown" })
-      .where(inArray(romeAgentMessages.inputState, ["queued", "submitted", "accepted"]));
+    this.links.forgetInputsInFlight();
   }
 
   /**
@@ -2304,35 +1839,25 @@ export class WebChatRepository {
   }
 
   async getUserInput(sessionId: string, inputId: string) {
-    return this.db
-      .select({ turnId: romeAgentMessages.turnId, inputState: romeAgentMessages.inputState })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.id, inputId),
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.role, "user"),
-        ),
-      )
-      .get();
+    const link = this.links.linkOf(sessionId, inputId);
+    return link?.role === "prompt"
+      ? { turnId: link.turnId, inputState: link.inputState }
+      : undefined;
   }
 
   async updateUserInput(
     sessionId: string,
     status: import("@rome-os/app-runtime").InputStatusEvent,
   ): Promise<void> {
-    await this.db
-      .update(romeAgentMessages)
-      .set({ inputState: status.state, turnId: status.turnId ?? null })
-      .where(
-        and(
-          eq(romeAgentMessages.id, status.inputId),
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.role, "user"),
-        ),
-      );
+    this.links.promptRuns(sessionId, status.inputId, status.turnId ?? null, status.state);
   }
 
+  /**
+   * Add a line to session `sessionId`'s transcript. A user or assistant line
+   * of a session that stands in a chat is said there: the guardian's, or the
+   * agent's answer to `turnId`. Every other line, and every line of a session
+   * that stands in no chat, stays the session's own.
+   */
   async addMessage(
     id: string,
     sessionId: string,
@@ -2340,6 +1865,11 @@ export class WebChatRepository {
     content: string,
     turnId: string | null = null,
   ) {
+    const seat = role === "user" || role === "assistant" ? await this.seatOf(sessionId) : null;
+    if (seat) {
+      await this.say(seat, id, role as "user" | "assistant", partsOf(content), turnId);
+      return;
+    }
     const accounting = traceAccountingColumns(role, content);
     await this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2367,57 +1897,76 @@ export class WebChatRepository {
     });
   }
 
+  /** Say a dashboard line where `seat` stands, linked to `turnId`. Rome is
+   *  the platform, so the line is delivered once it is recorded. */
+  private async say(
+    seat: Seat,
+    id: string,
+    role: "user" | "assistant",
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<Date> {
+    const at = new Date();
+    if (role === "user") {
+      await this.lines.record({
+        direction: "toRome",
+        id,
+        place: seat.place,
+        saidBy: dashboardSender(undefined),
+        body: { text: partsText(parts) },
+        parts,
+        at,
+      });
+      if (turnId) this.links.prompt(id, seat.sessionId, turnId);
+    } else {
+      const sent = await this.lines.send(
+        {
+          direction: "fromRome",
+          place: seat.place,
+          saidBy: {
+            account: { platform: WEBCHAT_PLATFORM, id: seat.accountId },
+            agent: seat.agent,
+          },
+          parts,
+        },
+        // The dashboard adapter names its line, and the client knows it by
+        // that id already.
+        async () => ({ id }),
+      );
+      if (sent.id && turnId) this.links.answer(sent.id, seat.sessionId, turnId);
+    }
+    await this.advanceActivity(seat.sessionId, at);
+    return at;
+  }
+
   /**
    * Persist a backend-initiated message and notify subscribers.
    *
-   * Backend-initiated messages — turn recaps, approval-continuation replies,
-   * any agent output produced outside a foreground user turn — have no
+   * Backend-initiated messages (turn recaps, approval-continuation replies,
+   * any agent output produced outside a foreground user turn) have no
    * per-turn SSE stream the browser is attached to, so the `message_inserted`
    * push is the only path by which the session view learns the row exists.
-   * User-initiated turns deliberately do NOT notify on insert (their content
-   * renders live off the per-turn stream and would otherwise double with the
-   * pushed row) — that's why `addMessage` stays silent and this is separate.
-   *
-   * Callers own how the message is constructed (the parts); this owns the
-   * shared persist-and-notify tail.
+   * User-initiated turns deliberately do NOT notify on insert, which is why
+   * `addMessage` stays silent and this is separate.
    */
   private async insertBackendMessage(
     sessionId: string,
     turnId: string | null,
-    role: string,
+    role: "assistant",
     parts: TranscriptPart[],
     id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
-    const message = await this.db.transaction((tx) => {
-      const createdAt = new Date();
-      const rows = tx
-        .insert(romeAgentMessages)
-        .values({
-          id,
-          sessionId,
-          turnId,
-          role,
-          content: JSON.stringify(parts),
-          cacheReadTokens: null,
-          cacheWriteTokens: null,
-          costUsd: null,
-          inputTokens: null,
-          outputTokens: null,
-          createdAt,
-        })
-        .returning(webchatMessageSelectFields)
-        .all();
-      if (isVisibleChatRole(role)) {
-        tx.update(romeSessions)
-          .set(advanceSessionActivitySet(createdAt))
-          .where(eq(romeSessions.id, sessionId))
-          .run();
-      }
-      return rows[0];
-    });
-    if (!message) {
-      throw new Error("Failed to insert backend-initiated message");
-    }
+    const seat = await this.seatOf(sessionId);
+    if (!seat) throw new Error(`Session ${sessionId} stands in no chat to say a message in`);
+    const createdAt = await this.say(seat, id, role, parts as MessagePart[], turnId);
+    const message: StoredWebchatMessage = {
+      id,
+      sessionId,
+      turnId,
+      role,
+      content: JSON.stringify(parts),
+      createdAt: new Date(Math.floor(createdAt.getTime() / 1000) * 1000),
+    };
     this.emitMessageInserted(message);
     return message;
   }
@@ -2577,7 +2126,16 @@ export class WebChatRepository {
           }
         }
       };
-      const transcriptMessages = input.transcriptMessages ?? [];
+      // A chat session's lines are Chats': its prompt is recorded where it was
+      // said and its answer is sent there, so only a session in no chat keeps
+      // a transcript of its own.
+      const inChat =
+        tx
+          .select({ chatId: romeSessions.chatId })
+          .from(romeSessions)
+          .where(eq(romeSessions.id, input.sessionId))
+          .get()?.chatId != null;
+      const transcriptMessages = inChat ? [] : (input.transcriptMessages ?? []);
       insertTranscriptMessages(transcriptMessages.filter((message) => message.role === "user"));
 
       if (input.startSeq === 0) {
@@ -2639,191 +2197,113 @@ export class WebChatRepository {
     });
   }
 
-  async updateMessageContent(id: string, content: string) {
-    const rows = await this.db
-      .select({ role: romeAgentMessages.role })
-      .from(romeAgentMessages)
-      .where(eq(romeAgentMessages.id, id))
-      .limit(1);
-    const accounting = rows[0] ? traceAccountingColumns(rows[0].role, content) : null;
-
-    await this.db
-      .update(romeAgentMessages)
-      .set({
-        content,
-        cacheReadTokens: accounting?.hasAccounting ? accounting.cacheReadTokens : null,
-        cacheWriteTokens: accounting?.hasAccounting ? accounting.cacheWriteTokens : null,
-        costUsd: accounting?.hasCost ? accounting.costUsd : null,
-        inputTokens: accounting?.hasAccounting ? accounting.inputTokens : null,
-        outputTokens: accounting?.hasAccounting ? accounting.outputTokens : null,
-      })
-      .where(eq(romeAgentMessages.id, id));
+  /**
+   * The chats with a line said at or after `since`, by the session that
+   * stands in each, most recently active first: the guardian's dashboard
+   * chats, or chats on Rome's accounts of `accountKinds`. A projection over
+   * Chats' tables for Dream's review.
+   */
+  async recentChats(
+    since: Date,
+    where: "dashboard" | { accountKinds: readonly string[] },
+  ): Promise<RecentChat[]> {
+    const cutoff = Math.floor(since.getTime() / 1000);
+    const scope =
+      where === "dashboard"
+        ? sql`c.platform = ${WEBCHAT_PLATFORM} AND s.type IN ('channel', 'webchat_handoff')`
+        : sql`s.type = 'channel' AND c.platform IN (SELECT value FROM json_each(${JSON.stringify([
+            ...new Set(where.accountKinds.map((kind) => platformOf(kind))),
+          ])}))`;
+    return this.db
+      .all<{ id: string; chat_id: string; thread_id: string | null }>(
+        seatsSaidInSince(scope, cutoff),
+      )
+      .map((row) => ({ sessionId: row.id, chatId: row.chat_id, threadId: row.thread_id }));
   }
 
   async getMessages(sessionId: string) {
-    return this.selectMessages(eq(romeAgentMessages.sessionId, sessionId));
+    return this.selectMessages([sessionId]);
   }
 
   /**
-   * The newest `limit` turn groups of a session, in the order `getMessages`
-   * returns them, plus the cursor for the page of older groups (null when none
-   * remain). A group is every row of a turn, so a page never splits a turn's
-   * user, assistant, and trace rows. Groups order by (earliest `created_at`,
-   * key) and the cursor is a position in that order, so pages stay disjoint
-   * while rows arrive.
+   * The transcript lines of `sessionIds`, each session's in the order the
+   * dashboard draws them: partitioning by turn keeps a turn's user, assistant
+   * and trace lines contiguous even when a later turn's prompt was said
+   * before an earlier turn's reply.
    */
-  async getMessagesPage(sessionId: string, options: MessagePageOptions) {
-    const before = options.before;
-    const groups = await this.db.all<{ key: string; startedAt: number }>(sql`
-      SELECT key, startedAt FROM (
-        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
-               MIN(${romeAgentMessages.createdAt}) AS startedAt
-        FROM ${romeAgentMessages}
-        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
-        GROUP BY key
-      )
-      ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
-      ORDER BY startedAt DESC, key DESC
-      LIMIT ${options.limit + 1}
-    `);
-    const pageGroups = groups.slice(0, options.limit);
-    if (pageGroups.length === 0) return { rows: [], nextCursor: null };
-    const keys = pageGroups.map((group) => group.key);
-    const rows = await this.selectMessages(
-      and(
-        eq(romeAgentMessages.sessionId, sessionId),
-        or(inArray(romeAgentMessages.turnId, keys), inArray(romeAgentMessages.id, keys)),
-      ),
-    );
-    const oldest = pageGroups[pageGroups.length - 1];
-    return {
-      rows,
-      nextCursor:
-        groups.length > options.limit && oldest
-          ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
-          : null,
-    };
-  }
-
-  private selectMessages(where: SQL | undefined) {
-    // Partitioning by turn (not raw createdAt) keeps a turn's user/assistant/
-    // trace rows contiguous even when a later turn's user row is inserted
-    // before an earlier turn's reply; within a group, user sorts before
-    // assistant/trace because handleChatSend inserts it first.
+  private selectMessages(sessionIds: readonly string[]) {
     return this.db
-      .select({
-        id: romeAgentMessages.id,
-        sessionId: romeAgentMessages.sessionId,
-        turnId: romeAgentMessages.turnId,
-        inputState: romeAgentMessages.inputState,
-        role: romeAgentMessages.role,
-        content:
-          sql<string>`CASE WHEN ${romeAgentMessages.role} = 'trace' THEN '[]' ELSE ${romeAgentMessages.content} END`.as(
-            "content",
-          ),
-        createdAt: romeAgentMessages.createdAt,
-      })
-      .from(romeAgentMessages)
-      .where(where)
-      .orderBy(
-        sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
-        asc(romeAgentMessages.turnId),
-        asc(romeAgentMessages.createdAt),
-      );
+      .all<LineRow>(sql`
+        SELECT * FROM ${sessionLines(sessionIds)}
+        ORDER BY session_id,
+          MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
+          turn_id, created_at, line_order, seq
+      `)
+      .map(storedLine);
   }
 
-  /** The person who sent each user message in a session, for messages that
-   * recorded one. */
-  async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
-    const rows = await this.db
-      .select({ id: romeAgentMessages.id, actor: romeAgentMessages.actor })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.role, "user"),
-          isNotNull(romeAgentMessages.actor),
-        ),
-      );
-    return new Map(rows.flatMap((row) => (row.actor ? [[row.id, row.actor] as const] : [])));
-  }
-
-  /** One user or assistant row of the session, with the actor that sent it, or null when the
-   * id is not a chat message of this session. */
+  /** One user or assistant line of the session, with the actor that sent it,
+   *  or null when the id is not a chat line of this session. */
   async getReplyTarget(
     sessionId: string,
     messageId: string,
   ): Promise<
     (StoredWebchatMessage & { role: "user" | "assistant"; actor: SessionActor | null }) | null
   > {
-    const [row] = await this.db
-      .select({ ...webchatMessageSelectFields, actor: romeAgentMessages.actor })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.id, messageId),
-          eq(romeAgentMessages.sessionId, sessionId),
-          inArray(romeAgentMessages.role, ["user", "assistant"]),
-        ),
-      )
-      .limit(1);
-    return row ? { ...row, role: row.role as "user" | "assistant" } : null;
+    const row = this.db.all<LineRow>(sql`
+      SELECT * FROM ${sessionLines([sessionId])}
+      WHERE id = ${messageId} AND role IN ('user', 'assistant')
+    `)[0];
+    if (!row) return null;
+    return {
+      ...storedLine(row),
+      role: row.role as "user" | "assistant",
+      actor: row.role === "user" ? actorOf(row.sender_id, row.sender_name) : null,
+    };
   }
 
   async getHistoryMessages(
     threadId: string | null,
     since: Date,
   ): Promise<StoredWebchatHistoryMessage[]> {
-    const predicates = [
-      gte(romeAgentMessages.createdAt, since),
-      inArray(romeAgentMessages.role, ["user", "assistant"]),
-    ];
-    if (threadId !== null) {
-      predicates.push(eq(romeAgentMessages.sessionId, threadId));
-    } else {
-      predicates.push(isWebchatChat);
-    }
-
+    const sessions =
+      threadId !== null
+        ? [threadId]
+        : this.db
+            .select({ id: romeSessions.id })
+            .from(romeSessions)
+            .where(isWebchatChat)
+            .all()
+            .map((row) => row.id);
+    if (sessions.length === 0) return [];
     return this.db
-      .select({
-        ...webchatMessageSelectFields,
-        sessionName: romeSessions.name,
-        sessionAgentName: romeSessions.agentName,
-      })
-      .from(romeAgentMessages)
-      .innerJoin(romeSessions, eq(romeSessions.id, romeAgentMessages.sessionId))
-      .where(and(...predicates))
-      .orderBy(
-        sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY ${romeAgentMessages.sessionId}, COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
-        asc(romeAgentMessages.createdAt),
-        sql`CASE WHEN ${romeAgentMessages.role} = 'user' THEN 0 WHEN ${romeAgentMessages.role} = 'assistant' THEN 1 ELSE 2 END`,
-        asc(romeAgentMessages.id),
-      );
+      .all<LineRow & { session_name: string; session_agent_name: string | null }>(sql`
+        SELECT l.*, s.name AS session_name, s.agent_name AS session_agent_name
+        FROM ${sessionLines(sessions)} l JOIN rome_sessions s ON s.id = l.session_id
+        WHERE l.created_at >= ${Math.floor(since.getTime() / 1000)}
+          AND l.role IN ('user', 'assistant')
+        ORDER BY MIN(l.created_at) OVER (PARTITION BY l.session_id, COALESCE(l.turn_id, l.id)),
+          l.created_at, CASE l.role WHEN 'user' THEN 0 ELSE 1 END, l.seq
+      `)
+      .map((row) => ({
+        ...storedLine(row),
+        sessionName: row.session_name,
+        sessionAgentName: row.session_agent_name,
+      }));
   }
 
   async getMessagesBatch(sessionIds: string[]) {
     if (sessionIds.length === 0) return [];
-
-    return this.db
-      .select({
-        id: romeAgentMessages.id,
-        sessionId: romeAgentMessages.sessionId,
-        turnId: romeAgentMessages.turnId,
-        role: romeAgentMessages.role,
-        content:
-          sql<string>`CASE WHEN ${romeAgentMessages.role} = 'trace' THEN '[]' ELSE ${romeAgentMessages.content} END`.as(
-            "content",
-          ),
-        createdAt: romeAgentMessages.createdAt,
-      })
-      .from(romeAgentMessages)
-      .where(inArray(romeAgentMessages.sessionId, sessionIds))
-      .orderBy(
-        asc(romeAgentMessages.sessionId),
-        sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY ${romeAgentMessages.sessionId}, COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
-        asc(romeAgentMessages.turnId),
-        asc(romeAgentMessages.createdAt),
-      );
+    return (await this.selectMessages(sessionIds)).map(
+      ({ id, sessionId, turnId, role, content, createdAt }) => ({
+        id,
+        sessionId,
+        turnId,
+        role,
+        content,
+        createdAt,
+      }),
+    );
   }
 
   /** A session stays visible while it or any ancestor has recent conversation activity. */
@@ -3190,34 +2670,30 @@ export class WebChatRepository {
   }
 
   async hasTurnInSession(sessionId: string, turnId: string): Promise<boolean> {
-    const rows = await this.db
-      .select({ id: romeAgentMessages.id })
-      .from(romeAgentMessages)
-      .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.turnId, turnId)))
-      .limit(1);
+    const rows = this.db.all(sql`
+      SELECT 1 FROM rome_agent_messages WHERE session_id = ${sessionId} AND turn_id = ${turnId}
+      UNION ALL
+      SELECT 1 FROM agent_turn_messages WHERE session_id = ${sessionId} AND turn_id = ${turnId}
+      LIMIT 1
+    `);
     return rows.length > 0;
   }
 
-  /** The rated exchange's visible chat rows (user prompt + assistant reply),
-   * excluding trace rows, in insertion order. `created_at` has one-second
-   * precision, so rowid orders the rows of one second. */
+  /** The rated exchange's visible chat lines (user prompt + assistant reply),
+   *  excluding trace rows, in the order they were said. */
   async getTurnChatMessages(sessionId: string, turnId: string) {
     return this.db
-      .select({
-        id: romeAgentMessages.id,
-        role: romeAgentMessages.role,
-        content: romeAgentMessages.content,
-        senderId: romeAgentMessages.senderId,
-      })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, sessionId),
-          eq(romeAgentMessages.turnId, turnId),
-          inArray(romeAgentMessages.role, ["user", "assistant"]),
-        ),
-      )
-      .orderBy(asc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid`);
+      .all<LineRow>(sql`
+        SELECT * FROM ${sessionLines([sessionId])}
+        WHERE turn_id = ${turnId} AND role IN ('user', 'assistant')
+        ORDER BY created_at, line_order, seq
+      `)
+      .map((row) => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        senderId: row.sender_id,
+      }));
   }
 
   async getTraceContentByTurn(sessionId: string, turnId: string, options: TraceReadOptions = {}) {
@@ -3244,11 +2720,10 @@ export class WebChatRepository {
     };
   }
 
-  async getMessageContent(id: string) {
-    return (await this.getMessageContentForDisplay(id))?.content ?? null;
-  }
-
   async getMessageContentForDisplay(id: string, options: TraceReadOptions = {}) {
+    // A chat line is the chat's, whichever session reads it.
+    const [line] = this.lines.byIds([id]);
+    if (line) return { id, content: line.parts };
     if (options.sessionActivityCutoff) {
       const [message] = await this.db
         .select({ sessionId: romeAgentMessages.sessionId, role: romeAgentMessages.role })
@@ -3371,18 +2846,6 @@ export class WebChatRepository {
     return rows.length > 0;
   }
 
-  async deleteMessagesBySession(sessionId: string) {
-    // One transaction so trace block rows can't outlive (or orphan) their
-    // stub message rows — same crash-safety contract as deleteSession.
-    await this.db.transaction((tx) => {
-      tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, sessionId)).run();
-      tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, sessionId)).run();
-      tx.delete(romeAgentMessagePlatformIds)
-        .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
-        .run();
-    });
-  }
-
   async getTurnFeedback(sessionId: string, turnId: string): Promise<StoredTurnFeedback | null> {
     const rows = await this.db
       .select({
@@ -3431,4 +2894,76 @@ export class WebChatRepository {
       });
     return inserted[0] ?? null;
   }
+}
+
+/** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
+const WEBCHAT_PLATFORM = "webchat";
+
+/** The dashboard account agent `agentName` says its lines as. */
+function dashboardAccountId(agentName: string | null): string {
+  return `agent:${agentName ?? "main"}`;
+}
+
+/** Who said a dashboard line the person `actor` sent: the guardian, or a
+ *  visitor by their account, named by their email. */
+function dashboardSender(actor: SessionActor | undefined): SaidBy {
+  if (actor?.kind === "visitor") {
+    return {
+      account: { platform: WEBCHAT_PLATFORM, id: `visitor:${actor.accountId}` },
+      name: actor.email,
+    };
+  }
+  return { account: { platform: WEBCHAT_PLATFORM, id: "guardian" } };
+}
+
+/** The person a dashboard line's sender account stands for. */
+function actorOf(senderId: string | null, senderName: string | null): SessionActor | null {
+  if (senderId === "guardian") return { kind: "guardian", userId: "guardian", via: "cookie" };
+  if (senderId?.startsWith("visitor:")) {
+    return {
+      kind: "visitor",
+      accountId: senderId.slice("visitor:".length),
+      email: senderName ?? "",
+    };
+  }
+  return null;
+}
+
+/** A line's composed parts, read from its stored JSON, or one text part for
+ *  plain text. */
+function partsOf(content: string): MessagePart[] {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (Array.isArray(parsed)) return parsed as MessagePart[];
+  } catch {
+    // Plain text.
+  }
+  return [{ type: "text", content }];
+}
+
+interface LineRow {
+  id: string;
+  session_id: string;
+  turn_id: string | null;
+  input_state: import("@rome-os/app-runtime").AgentInputState | null;
+  role: string;
+  content: string;
+  created_at: number;
+  sender_id: string | null;
+  sender_name: string | null;
+  line_order: number;
+  seq: number;
+  from_rome: number;
+}
+
+function storedLine(row: LineRow): StoredWebchatMessage {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    turnId: row.turn_id,
+    inputState: row.input_state,
+    role: row.role,
+    content: row.content,
+    createdAt: new Date(row.created_at * 1000),
+  };
 }

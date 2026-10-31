@@ -729,6 +729,41 @@
       "when": 1793377030179,
       "tag": "0104_concierge_task_source_message",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "6",
+      "when": 1793429431619,
+      "tag": "0105_chats_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1793433077644,
+      "tag": "0106_chats_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1793444593123,
+      "tag": "0107_chats_adapter_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1793446339472,
+      "tag": "0108_channel_addresses",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1793461620061,
+      "tag": "0109_seat_channel_unread",
+      "breakpoints": true
     }
   ]
 }

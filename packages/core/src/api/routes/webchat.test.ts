@@ -167,7 +167,9 @@ describe("Webchat API", () => {
         name: "lin@example.com",
         avatarUrl: null,
       },
-      unattributed: undefined,
+      // Chats records a dashboard line with no recorded sender as the
+      // guardian's (Chats storage design, data migration).
+      unattributed: { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
     });
   });
 
@@ -728,6 +730,15 @@ describe("Webchat API", () => {
           output: "done",
         },
       ]),
+      parentTurnId,
+    );
+    // The turn's prompt, so the turn is in the chat: the transcript lists the
+    // turns lines were said in, and reads their traces apart.
+    await deps.webchatRepo.addMessage(
+      "parent-summary-ask",
+      parentSessionId,
+      "user",
+      "Plan and research it",
       parentTurnId,
     );
     await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });

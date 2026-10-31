@@ -33,9 +33,9 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
         ${addressed}
         AND NOT EXISTS (
           SELECT 1 FROM rome_sessions s
-          WHERE s.type = 'channel'
-            AND s.source_channel = l.channel
-            AND s.source_thread_id = l.thread_id
+          -- The seat at the thread's address, by the id channelChatId gives it.
+          WHERE s.id = 'channel:' || l.channel || ':' || l.thread_id
+            AND s.type = 'channel'
             AND s.source_thread_type = 'group'
         )`;
       return sql`

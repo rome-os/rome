@@ -131,10 +131,6 @@ export function createSubagentExecutionService(deps: {
           agentName: isCoreMainAgentId(name) ? null : name,
           projectName: parentSession?.projectName,
           projectPath: parentSession?.projectPath,
-          sourceChannel: parentSession?.sourceChannel,
-          sourceThreadId: parentSession?.sourceThreadId,
-          sourceThreadName: parentSession?.sourceThreadName,
-          sourceThreadType: parentSession?.sourceThreadType,
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
         });

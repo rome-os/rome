@@ -69,11 +69,12 @@ export interface ConciergeDeps {
     | "addBackendMessage"
     | "setSessionTrigger"
     | "listProjects"
+    | "seatOf"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
   approvals: Pick<ApprovalsRepository, "onCreated">;
-  messages: Pick<MessageRepository, "recent" | "before">;
+  messages: Pick<MessageRepository, "read">;
   sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
   /** Runs a system turn in a chat and waits for it to end. A quiet turn

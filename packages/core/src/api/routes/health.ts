@@ -25,11 +25,23 @@ const REQUIRED_SCHEMA_PROBES: readonly SchemaProbe[] = [
   },
   {
     name: "rome_sessions",
-    query: sql`SELECT "id", "type", "source_channel", "source_thread_id", "trigger_kind", "handoff_spec", "archived_at", "pinned_at", "activity_at", "last_seen_activity_at" FROM "rome_sessions" LIMIT 0`,
+    query: sql`SELECT "id", "type", "source_thread_id", "chat_id", "account_id", "trigger_kind", "handoff_spec", "archived_at", "pinned_at", "activity_at", "last_seen_activity_at" FROM "rome_sessions" LIMIT 0`,
   },
   {
     name: "rome_agent_messages",
     query: sql`SELECT "id", "session_id", "turn_id", "trigger_kind", "input_tokens", "cost_usd" FROM "rome_agent_messages" LIMIT 0`,
+  },
+  {
+    name: "chats",
+    query: sql`SELECT "id", "platform", "kind", "name", "started_at" FROM "chats" LIMIT 0`,
+  },
+  {
+    name: "chat_messages",
+    query: sql`SELECT "id", "chat_id", "thread_id", "sender_account_id", "sender_agent", "parts", "reply_to_message_id", "said_at" FROM "chat_messages" LIMIT 0`,
+  },
+  {
+    name: "agent_turn_messages",
+    query: sql`SELECT "message_id", "session_id", "turn_id", "role", "input_state" FROM "agent_turn_messages" LIMIT 0`,
   },
   {
     name: "rome_agent_trace_blocks",

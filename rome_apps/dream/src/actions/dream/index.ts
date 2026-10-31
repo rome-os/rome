@@ -11,6 +11,7 @@ import {
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
+import { chatsOf } from "../../lib/chat-lines.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
 import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
 import { profileMemoryDir } from "../../lib/memory-dir.js";
@@ -136,7 +137,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       // list.
       if (
         typeof args.runId !== "string" &&
-        !hasChatSince(appContext.db, new Date(Date.now() - windowHours * 60 * 60 * 1000))
+        !(await hasChatSince(
+          chatsOf(appContext),
+          new Date(Date.now() - windowHours * 60 * 60 * 1000),
+        ))
       ) {
         log.info("dream skipped, no chat in window", { windowHours });
         return {

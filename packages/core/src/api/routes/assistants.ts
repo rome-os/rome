@@ -14,7 +14,8 @@ import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import type { SaidMessage } from "../../chats/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/message-repository.js";
-import { chatKey, placeIn } from "../../chats/place.js";
+import { chatAt } from "../../chats/adapter.js";
+import { placeIn } from "../../chats/place.js";
 import { send } from "../../chats/send.js";
 import { directPlace } from "../../people/send.js";
 import type { ApiDeps } from "../deps.js";
@@ -158,11 +159,9 @@ function messagesAt(
   address: Account,
   limit: number,
   before?: MessageCursor | null,
-): Promise<MessagePage> {
-  const place = placeIn(chatKey(address.platform, address.id as ChatId));
-  return before
-    ? deps.chatMessages.before(place, before, limit)
-    : deps.chatMessages.recent(place, limit);
+): MessagePage {
+  const place = placeIn(chatAt(address.platform, address.id));
+  return deps.chatMessages.read(place, { before: before ?? null, limit });
 }
 
 /** The newest `limit` messages of the assistant's chat, newest first. */

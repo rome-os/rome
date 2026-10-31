@@ -1356,12 +1356,23 @@ Use \`/channel agent clear\` to undo.`,
     log.info("bot stopped");
   }
 
+  /** The Discord channel at `address`: the channel itself, or the DM channel
+   *  with the user it names. */
+  private async channelOf(address: string): Promise<string> {
+    const channel = await this.client.channels.fetch(address).catch(() => null);
+    if (channel) return address;
+    return this.directConversationFor(address);
+  }
+
   async directConversationFor(channelUserId: string): Promise<string> {
     return (await this.client.users.createDM(channelUserId)).id;
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const threadId: string = chatId;
+    // A direct message is addressed by the other party's user id, which Chats
+    // keys it by (docs/architecture/channels.md#direct-messages): Discord's
+    // DM channel for that user is opened, or found, here.
+    const threadId: string = await this.channelOf(chatId);
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Channel ${threadId} is not a text channel`);

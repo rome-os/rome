@@ -28,8 +28,7 @@ import type {
   ChatRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
-import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
-import type { MessageRepository } from "../chats/message-repository.js";
+import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
@@ -107,12 +106,10 @@ export interface BackendTurnRunnerDeps {
     channel: string,
     threadId: string,
   ) => Promise<ThreadContext["deviceFolder"] | undefined>;
-  /** Opens the chat a delivered reply is recorded in. */
-  chats?: ChatRepository;
-  /** Where a delivered reply is put on record, in the place its chat's row
-   *  stands for. Absent, nothing records it. */
-  messages?: Pick<MessageRepository, "recordSent">;
-  places?: Pick<ChatsByKey, "placeOfRecord">;
+  /** Opens the seat a delivered reply is said through. */
+  chats: ChatRepository;
+  /** Says a reply through its seat and records it. */
+  replies: Pick<SeatReplies, "send">;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -217,7 +214,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       }
 
       // Messaging channels: run the turn here in main, then deliver the reply
-      // on the channel's `send` port.
+      // on the channel's `send` port and say it through the agent's seat.
       let reply = "";
       let turnId: string | undefined;
       for await (const msg of runTurn(params, workingDir, {}, deviceFolder)) {
@@ -231,44 +228,25 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         });
         return;
       }
-      const send = deps.channel(params.channel)?.send;
-      if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
-      const delivery = await send.send(params.threadId as ChatId, {
-        text: reply,
-        ...(turnId ? { turnId } : {}),
+      const channel = deps.channel(params.channel);
+      if (!channel?.send) throw new Error(`Channel "${params.channel}" cannot send`);
+      // The reply is said through the agent's seat there, so it goes out
+      // through the seat's adapter and is on record. A reply with no seat to
+      // say it through is not sent: it would be a line nobody can read back.
+      const seat = await deps.chats.ensureChannelChat({
+        channel: params.channel,
+        threadId: params.threadId,
+        agentName: params.agentName,
       });
-      const { chats, messages, places } = deps;
-      if (chats && messages && places) {
-        try {
-          const conversation = await chats.ensureChannelChat({
-            channel: params.channel,
-            threadId: params.threadId,
-            agentName: params.agentName,
-          });
-          const at = places.placeOfRecord(conversation.id);
-          if (!at) throw new Error(`No place for conversation ${conversation.id}`);
-          await messages.recordSent(
-            {
-              direction: "fromRome",
-              place: at.place,
-              parts: [{ type: "text", content: reply }],
-              ...(delivery?.messageId ? { platformMessageId: delivery.messageId } : {}),
-              ...(turnId ? { turnId } : {}),
-              turnAnswer: true,
-            },
-            { channel: at.channel },
-          );
-        } catch (err) {
-          // Delivery already succeeded. A persistence failure must not make the
-          // continuation retry and send the same provider message twice.
-          log.warn("backend reply delivered but conversation recording failed", {
-            channel: params.channel,
-            threadId: params.threadId,
-            messageId: delivery?.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      // A delivery that succeeded and failed to record is logged, so the
+      // continuation never retries a sent reply.
+      const said = await deps.replies.send(
+        seat.id,
+        channel,
+        { text: reply },
+        { ...(turnId ? { turnId } : {}) },
+      );
+      if (!said) throw new Error(`Session ${seat.id} stands in no chat to reply in`);
     },
   };
 }

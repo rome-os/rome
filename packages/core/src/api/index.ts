@@ -218,7 +218,17 @@ export function buildApp(
     accounts: new ConnectedAccountsRepository(deps.db),
   };
   const sessionQueries = new SessionQueryService({
-    repository: new SessionQueryRepository(deps.db),
+    // Every recorded channel and its account, released ones included, so a
+    // seat on a disconnected account still reads its channel.
+    repository: new SessionQueryRepository(deps.db, () =>
+      sessionChannelRecords.all().map((record) => ({
+        channel: record.id,
+        account: sessionChannelRecords.accountOf(record.id) ?? {
+          platform: sessionChannelRecords.platformOfChannel(record.id),
+          id: record.id,
+        },
+      })),
+    ),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>

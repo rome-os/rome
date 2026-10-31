@@ -50,11 +50,18 @@ import {
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
-import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
+import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
+import {
+  ChatReadModel,
+  type Transcript,
+  type TranscriptCursor,
+  type TranscriptLine,
+  type TurnTrace,
+} from "../../webchat/chat-read-model.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
@@ -80,7 +87,11 @@ import {
   conversationTitleLength,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
-import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import {
+  currentSessionActor,
+  sessionOwnerKey,
+  type SessionActor,
+} from "../../lib/session-actor.js";
 import type { DashboardInbox } from "../../chats/send.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
@@ -828,6 +839,50 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([promise.catch(() => null), late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * `lines` with each turn's trace placed where the dashboard draws it: after
+ * the turn's prompt, before what the turn said. A trace whose turn has no line
+ * on the page (a turn that said nothing) goes where its time puts it.
+ */
+function withTurnTraces<
+  L extends { turnId: string | null; sessionId: string; role: string; createdAt: Date },
+>(lines: L[], traces: TurnTrace[]) {
+  const traceOf = new Map(traces.map((trace) => [`${trace.sessionId}\0${trace.turnId}`, trace]));
+  const out: (L | ReturnType<typeof traceLine>)[] = [];
+  for (const [index, line] of lines.entries()) {
+    const key = line.turnId ? `${line.sessionId}\0${line.turnId}` : null;
+    const trace = key ? traceOf.get(key) : undefined;
+    if (trace && line.role !== "user") {
+      out.push(traceLine(trace));
+      traceOf.delete(key as string);
+    }
+    out.push(line);
+    const next = lines[index + 1];
+    const turnEnds = !next || next.turnId !== line.turnId || next.sessionId !== line.sessionId;
+    if (trace && traceOf.has(key as string) && turnEnds) {
+      out.push(traceLine(trace));
+      traceOf.delete(key as string);
+    }
+  }
+  for (const trace of traceOf.values()) {
+    const at = out.findIndex((line) => line.createdAt > trace.createdAt);
+    out.splice(at === -1 ? out.length : at, 0, traceLine(trace));
+  }
+  return out;
+}
+
+function traceLine(trace: TurnTrace) {
+  return {
+    id: trace.id,
+    sessionId: trace.sessionId,
+    turnId: trace.turnId as string | null,
+    inputState: null,
+    role: "trace",
+    content: "[]",
+    createdAt: trace.createdAt,
+  };
+}
+
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
@@ -837,6 +892,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
+  const chatReads = new ChatReadModel(deps.db);
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
@@ -1214,16 +1270,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return { ...summary, subagents };
   };
   type StoredMessages = Awaited<ReturnType<ApiDeps["webchatRepo"]["getMessages"]>>;
-  const attachTraceSummaries = async (sessionId: string, messages: StoredMessages) => {
+  const attachTraceSummaries = async <M extends StoredMessages[number]>(
+    sessionId: string,
+    messages: M[],
+  ) => {
     const hasTrace = messages.some((m) => m.role === "trace");
     if (!hasTrace) return messages;
     const sessionActivityCutoff = sessionTraceCutoff();
     // Only the trace rows in `messages` are read, so a page of a long session
-    // never loads the blocks of the turns outside it.
-    const traceContents = await deps.webchatRepo.getTraceContents(sessionId, {
-      sessionActivityCutoff,
-      messageIds: messages.filter((m) => m.role === "trace").map((m) => m.id),
-    });
+    // never loads the blocks of the turns outside it. A chat two of Rome's
+    // agents are in holds traces of both, each read under its own session.
+    const traceIdsBySession = new Map<string, string[]>();
+    for (const m of messages) {
+      if (m.role !== "trace") continue;
+      const owner = m.sessionId || sessionId;
+      traceIdsBySession.set(owner, [...(traceIdsBySession.get(owner) ?? []), m.id]);
+    }
+    const traceContents = (
+      await Promise.all(
+        [...traceIdsBySession].map(([owner, messageIds]) =>
+          deps.webchatRepo.getTraceContents(owner, { sessionActivityCutoff, messageIds }),
+        ),
+      )
+    ).flat();
     if (traceContents.length === 0) return messages;
     const contentById = new Map(
       traceContents.filter((r) => !r.traceArchived).map((r) => [r.id, r.content]),
@@ -1265,31 +1334,53 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
-  const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachTraceSummaries(sessionId, messages);
-    const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
-    const shownIds = new Set(messages.map((m) => m.id));
-    const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
-    const senders = await resolveChatSenders(deps, actors);
-    if (senders.size === 0) return withTraces;
-    return withTraces.map((message) => {
-      const sender = senders.get(message.id);
-      return sender ? { ...message, sender } : message;
-    });
+  /** The person who sent each guardian-side line, read from the line's own
+   *  sender account: `guardian`, or `visitor:<accountId>` with the visitor's
+   *  email as the line's sender name. */
+  const lineSenders = (lines: TranscriptLine[]) => {
+    const actors = new Map<string, SessionActor>();
+    for (const line of lines) {
+      if (line.role !== "user" || !line.senderAccountId) continue;
+      if (line.senderAccountId === "guardian") {
+        actors.set(line.id, { kind: "guardian", userId: "guardian", via: "cookie" });
+      } else if (line.senderAccountId.startsWith("visitor:")) {
+        actors.set(line.id, {
+          kind: "visitor",
+          accountId: line.senderAccountId.slice("visitor:".length),
+          email: line.senderName ?? "",
+        });
+      }
+    }
+    return resolveChatSenders(deps, actors);
+  };
+  /** A transcript as the wire carries it: each turn's trace placed after the
+   *  turn's prompt, with its summary, and each guardian-side line with its
+   *  sender. The trace's blocks stay unread until the guardian opens the turn. */
+  const enrichTranscript = async (sessionId: string, transcript: Transcript) => {
+    const senders = await lineSenders(transcript.lines);
+    const messages = withTurnTraces(
+      transcript.lines.map((line) => {
+        const { senderAccountId: _account, senderName: _name, ...message } = line;
+        const sender = senders.get(line.id);
+        return sender ? { ...message, sender } : message;
+      }),
+      transcript.traces,
+    );
+    return attachTraceSummaries(sessionId, messages);
   };
 
-  // `limit` and `before` page the list by turn, newest first, and wrap it as
+  // `limit` and `before` page the list, newest first, and wrap it as
   // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session.
-  const encodeMessageCursor = (cursor: MessagePageCursor): string =>
-    Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
-  const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
+  // the whole session. A chat pages by message, a session with no chat by turn.
+  const encodeMessageCursor = (cursor: TranscriptCursor): string =>
+    Buffer.from(JSON.stringify([cursor.at, cursor.id])).toString("base64url");
+  const decodeMessageCursor = (raw: string): TranscriptCursor | null => {
     try {
       const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
       if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-      const [startedAt, key] = parsed;
-      if (!Number.isFinite(startedAt) || typeof key !== "string" || key === "") return null;
-      return { startedAt: Number(startedAt), key };
+      const [at, id] = parsed;
+      if (!Number.isFinite(at) || typeof id !== "string" || id === "") return null;
+      return { at: Number(at), id };
     } catch {
       return null;
     }
@@ -1297,10 +1388,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const respondWithSessionMessages = async (c: Context, sessionId: string) => {
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
-    if (limitParam === undefined && beforeParam === undefined) {
-      const messages = await deps.webchatRepo.getMessages(sessionId);
-      return c.json(await enrichStoredMessages(sessionId, messages));
-    }
+    const paged = limitParam !== undefined || beforeParam !== undefined;
     const limit =
       limitParam === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(limitParam, 10);
     if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGE_PAGE_MAX_LIMIT) {
@@ -1309,10 +1397,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
-    const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
+    const page = paged ? { limit, before } : undefined;
+    const transcript =
+      (await chatReads.chatTranscript(sessionId, page)) ??
+      (await chatReads.sessionTranscript(sessionId, page));
+    const messages = await enrichTranscript(sessionId, transcript);
+    if (!paged) return c.json(messages);
     return c.json({
-      messages: await enrichStoredMessages(sessionId, page.rows),
-      nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,
+      messages,
+      nextCursor: transcript.nextCursor ? encodeMessageCursor(transcript.nextCursor) : null,
     });
   };
 
@@ -2244,17 +2337,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.get("/chat/sessions/search", async (c) => {
     const query = (c.req.query("q") ?? "").trim();
     if (!query) return c.json([]);
-    const matches = await deps.webchatRepo.searchSessionMessages(query, { sessionLimit: 20 });
+    const hits = await chatReads.search(query, 20);
+    const sessions = await deps.webchatRepo.listSessionsByIds(hits.map((hit) => hit.chatId));
     return c.json(
-      matches.map((match) => ({
-        session: toWebchatSessionResponse(match.session, match.session.messageCount),
-        message: {
-          id: match.message.id,
-          role: match.message.role,
-          snippet: match.message.snippet,
-          createdAt: match.message.createdAt.toISOString(),
-        },
-      })),
+      hits.flatMap((hit) => {
+        const session = sessions.get(hit.chatId);
+        if (!session) return [];
+        return [
+          {
+            session: toWebchatSessionResponse(session, session.messageCount),
+            message: {
+              id: hit.messageId,
+              role: hit.role,
+              snippet: hit.snippet,
+              createdAt: hit.createdAt.toISOString(),
+            },
+          },
+        ];
+      }),
     );
   });
 
@@ -4433,10 +4533,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const session = await deps.webchatRepo.getSession(sessionId);
       return Boolean(session && isStoredWebchatSession(session));
     },
-    async post(chatId, body, as) {
+    async post(key, body, as) {
       if (!deps.agentLoader.has(as.id)) {
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
+      // A dashboard chat's key is opaque; the dashboard addresses it by the
+      // session that stands in it.
+      const chatId = await deps.webchatRepo.dashboardSessionAt(key);
+      if (!chatId) return { ok: false, error: `No dashboard chat ${key}` };
       const inputId = randomUUID();
       const sent = await handleChatSend(chatId, { inputId, text: body.text }, { saidBy: as });
       if (sent.status >= 400) {
