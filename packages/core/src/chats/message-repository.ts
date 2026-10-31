@@ -6,7 +6,6 @@
 // links a message to a turn after one of these returns its id.
 
 import { sql } from "drizzle-orm";
-import { v7 as uuidv7 } from "uuid";
 import type { DrizzleDb } from "../db/index.js";
 import { chatMessages, chats } from "../db/schema/system.js";
 import { createLogger } from "../logger.js";
@@ -39,12 +38,12 @@ export interface MessagePage {
 }
 
 /**
- * Delivers a message to its platform and answers its adapter's id for it,
- * unique in its chat. Throws when the platform refused it. On the dashboard,
- * where Rome is the platform, it answers at once with no id, and the
- * dashboard's own id for the message stands.
+ * Delivers a message to its platform and answers the id the channels layer
+ * records it under. Throws when the platform refused it. Chats mints no id:
+ * on the dashboard, where Rome is the platform, the dashboard adapter answers
+ * the id it gave the line.
  */
-export type Deliver = () => Promise<{ id?: string }>;
+export type Deliver = () => Promise<{ id: string }>;
 
 /** A sent message: its adapter's id, and whether Rome recorded it, which it
  *  failed to when the platform took it but the record did not land. */
@@ -97,7 +96,7 @@ export class MessageRepository {
   async send(message: OutboundMessage, deliver: Deliver): Promise<Sent> {
     const chatId = this.chatIdOf(message.place);
     const delivered = await deliver();
-    const id = delivered.id ?? message.id ?? uuidv7();
+    const id = delivered.id;
     const at = new Date();
     try {
       this.db

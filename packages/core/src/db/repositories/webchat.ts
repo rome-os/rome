@@ -48,7 +48,8 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { Account, ChatId, RecentChat, RomeSessionType } from "@rome-os/app-runtime";
-import { chatKey, keyOf, messageIdIn, ownedBy, placeIn, type Place } from "../../chats/place.js";
+import { chatKey, ownedBy, placeIn, type Place } from "../../chats/place.js";
+import { ChatIds } from "../../channels/chat-ids.js";
 import { TurnLinks, type ContextLine } from "../../sessions/turn-links.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
 import { MessageRepository } from "../../chats/message-repository.js";
@@ -1178,40 +1179,6 @@ export class WebChatRepository {
     );
   }
 
-  /**
-   * The chat `channel`'s account stands in at platform address `address`, by
-   * its seat there. A direct message is keyed by both ends, which an address
-   * alone does not name where the platform gives the DM an id of its own
-   * (Feishu's p2p chat, Discord's DM channel); the seat the first message
-   * opened knows it. Null when the account holds no seat there.
-   */
-  chatAtAddress(channel: string, address: string): string | null {
-    return (
-      this.db.all<{ chat_id: string }>(sql`
-        SELECT chat_id FROM rome_sessions
-        WHERE source_channel = ${channel} AND source_thread_id = ${address}
-          AND chat_id IS NOT NULL AND thread_id IS NULL
-        ORDER BY created_at LIMIT 1
-      `)[0]?.chat_id ?? null
-    );
-  }
-
-  /**
-   * The address `channel` sends to in chat `chatId`: where its seat there
-   * heard the chat, which for a direct message is the platform's own id for
-   * it. Null when the account holds no seat there.
-   */
-  addressIn(channel: string, chatId: string): string | null {
-    return (
-      this.db.all<{ address: string }>(sql`
-        SELECT source_thread_id AS address FROM rome_sessions
-        WHERE source_channel = ${channel} AND chat_id = ${chatId} AND thread_id IS NULL
-          AND source_thread_id IS NOT NULL
-        ORDER BY created_at LIMIT 1
-      `)[0]?.address ?? null
-    );
-  }
-
   /** The message said where session `sessionId` stands whose platform id is
    *  `platformMessageId`, as the platform gave it, or null when none is. */
   async seatMessageId(sessionId: string, platformMessageId: string): Promise<string | null> {
@@ -1224,7 +1191,7 @@ export class WebChatRepository {
   async seatLine(sessionId: string, platformMessageId: string): Promise<ContextLine | null> {
     const seat = await this.seatOf(sessionId);
     if (!seat) return null;
-    const owned = ownedBy(keyOf(seat.place.chat), seat.accountId, platformMessageId);
+    const owned = ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId);
     const row = this.db.all<{
       id: string;
       sender_name: string | null;
@@ -1236,7 +1203,7 @@ export class WebChatRepository {
              ELSE m.sender_name END AS sender_name,
         m.text, m.said_at
       FROM rome_sessions s
-      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.id = ${messageIdIn(seat.place.chat, owned)}
+      JOIN chat_messages m ON m.chat_id = s.chat_id AND m.id = ${ChatIds.message(seat.place.chat, owned)}
       WHERE s.id = ${sessionId}
     `)[0];
     return row
@@ -1970,7 +1937,6 @@ export class WebChatRepository {
       const sent = await this.lines.send(
         {
           direction: "fromRome",
-          id,
           place: seat.place,
           saidBy: {
             account: { platform: WEBCHAT_PLATFORM, id: seat.accountId },
@@ -1978,7 +1944,9 @@ export class WebChatRepository {
           },
           parts,
         },
-        async () => ({}),
+        // The dashboard adapter names its line, and the client knows it by
+        // that id already.
+        async () => ({ id }),
       );
       if (sent.id && turnId) this.links.answer(sent.id, seat.sessionId, turnId);
     }

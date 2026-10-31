@@ -18,17 +18,16 @@ import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { ChatKind } from "./chat.js";
+import type { ChatAddresses } from "../channels/chat-addresses.js";
+import { ChatIds } from "../channels/chat-ids.js";
 import {
-  addressOf,
   chatKey,
   directMessageOn,
-  keyOf,
-  messageIdIn,
+  otherEndOf,
   ownedBy,
-  placeIn,
-  refOf,
   type ChatKey,
   type ChatRef,
+  type Place,
 } from "./place.js";
 
 const log = createLogger("chat-adapter");
@@ -104,9 +103,36 @@ export interface ChannelAdapterDeps {
   /** Rome's account on a channel, or null while its record knows none. */
   accountOf(channel: string): Account | null;
   platformOfChannel(channel: string): string;
-  /** The platform address the channel's account heard chat `chatId` at,
-   *  which a direct message with an id of its own is sent to. */
-  addressIn?(channel: string, chatId: string): string | null;
+  /** The channels layer's address store, where a direct message the
+   *  platform gives an id of its own is reached. */
+  addresses?: Pick<ChatAddresses, "bind" | "addressOf">;
+}
+
+/**
+ * The address a channel sends to in `place`: the thread's when it names one,
+ * the other end of a direct message, else the chat's key.
+ */
+export function addressOf(place: Place): ChatId {
+  if (place.threadId !== undefined) return place.threadId;
+  const key = ChatIds.key(place.chat);
+  return (otherEndOf(key) ?? key.externalId) as ChatId;
+}
+
+/**
+ * The id a line Rome sent into `chat` through Rome's account `romeEnd` is
+ * recorded under: the platform's id for it, or one the adapter gives it when
+ * the platform answered none.
+ */
+export function sentLineId(
+  chat: ChatRef,
+  romeEnd: string,
+  platformMessageId: string | undefined,
+): string {
+  if (platformMessageId === undefined) {
+    log.debug("platform answered no message id", { chat: chat.id });
+    return ChatIds.message(chat, `rome:${uuidv7()}`);
+  }
+  return ChatIds.message(chat, ownedBy(ChatIds.key(chat), romeEnd, platformMessageId));
 }
 
 /**
@@ -141,6 +167,15 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
           if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
           const saved = await materialized(channel, event);
           const inbound = toInbound(channel.name, saved.message.account ?? account(), saved);
+          // A direct message is reached where it was heard, which on some
+          // platforms is an id of its own rather than the other end.
+          if (inbound.chatKind === "dm" && inbound.thread === null) {
+            deps.addresses?.bind(
+              inbound.via.account,
+              ChatIds.key(inbound.chat).externalId,
+              saved.message.chatId,
+            );
+          }
           await deliver(inbound);
         })();
         inFlight.add(handed);
@@ -166,20 +201,18 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
       if (!send) throw new Error(`Channel "${channel.name}" cannot send`);
       const own = account();
       const ref: ChatRef = { platform: own.platform, id: chatId };
-      const key = keyOf(ref);
+      const key = ChatIds.key(ref);
       const heardAt =
-        threadId === null && key.externalId.startsWith("dm:")
-          ? (deps.addressIn?.(channel.name, chatId) ?? null)
+        threadId === null && otherEndOf(key) !== null
+          ? (deps.addresses?.addressOf(own, key.externalId) ?? null)
           : null;
-      const address = (heardAt ?? addressOf(placeIn(ref, threadId ?? undefined))) as ChatId;
+      const address = (heardAt ??
+        addressOf(threadId === null ? { chat: ref } : { chat: ref, threadId })) as ChatId;
       const receipt = await send.send(address, {
         text: out.text,
         ...(out.turnId ? { turnId: out.turnId } : {}),
       });
-      if (receipt.messageId) return messageIdIn(ref, ownedBy(key, own.id, receipt.messageId));
-      // The platform took it and gave no id: the adapter names it itself.
-      log.debug("platform answered no message id", { channel: channel.name });
-      return messageIdIn(ref, `rome:${uuidv7()}`);
+      return sentLineId(ref, own.id, receipt.messageId || undefined);
     },
   };
 }
@@ -189,7 +222,7 @@ function toInbound(channelName: string, account: Account, event: InboundEvent): 
   const message = event.message;
   const heard: InboundEvent = { ...event, message: { ...message, channel: channelName } };
   const { key, kind } = chatOf(account.platform, account.id, message);
-  const ref = refOf(key);
+  const ref = ChatIds.chat(key);
   const replyTo = message.replyTo?.messageId.trim();
   return {
     chat: ref,
@@ -202,7 +235,7 @@ function toInbound(channelName: string, account: Account, event: InboundEvent): 
             id: message.chatId,
             ...(message.thread?.name === undefined ? {} : { name: message.thread.name }),
           },
-    id: messageIdIn(ref, ownedBy(key, account.id, message.messageId)),
+    id: ChatIds.message(ref, ownedBy(key, account.id, message.messageId)),
     sender: {
       accountId: message.senderId,
       name: message.senderDisplayName ?? message.senderId,
@@ -210,7 +243,7 @@ function toInbound(channelName: string, account: Account, event: InboundEvent): 
     text: message.text ?? "",
     attachments: message.attachments,
     saidAt: message.timestamp,
-    ...(replyTo ? { replyTo: messageIdIn(ref, ownedBy(key, account.id, replyTo)) } : {}),
+    ...(replyTo ? { replyTo: ChatIds.message(ref, ownedBy(key, account.id, replyTo)) } : {}),
     via: { channel: channelName, account, heard },
   };
 }

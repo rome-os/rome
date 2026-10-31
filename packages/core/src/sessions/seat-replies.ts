@@ -4,14 +4,19 @@
 
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Channel } from "@rome-os/app-runtime";
-import { channelAdapter, type Outbound } from "../chats/adapter.js";
+import { channelAdapter, sentLineId, type Outbound } from "../chats/adapter.js";
+import type { ChatAddresses } from "../channels/chat-addresses.js";
 import type { MessageRepository } from "../chats/message-repository.js";
-import { keyOf, messageIdIn, ownedBy } from "../chats/place.js";
+import { ownedBy } from "../chats/place.js";
+import { ChatIds } from "../channels/chat-ids.js";
 import type { MessagePart } from "../types.js";
 import type { TurnLinks } from "./turn-links.js";
 
 export interface SeatRepliesDeps {
-  seats: Pick<WebChatRepository, "seatOf" | "addressIn">;
+  seats: Pick<WebChatRepository, "seatOf">;
+  /** The channels layer's address store, where a direct message the
+   *  platform gives an id of its own is sent. */
+  addresses?: Pick<ChatAddresses, "bind" | "addressOf">;
   messages: Pick<MessageRepository, "send">;
   links: Pick<TurnLinks, "answer">;
 }
@@ -48,9 +53,9 @@ export class SeatReplies {
     }
     // The adapter's id for a platform message of this seat's chat.
     const idOf = (platformMessageId: string) =>
-      messageIdIn(
+      ChatIds.message(
         seat.place.chat,
-        ownedBy(keyOf(seat.place.chat), seat.accountId, platformMessageId),
+        ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId),
       );
     const sent = await this.deps.messages.send(
       {
@@ -65,7 +70,7 @@ export class SeatReplies {
       },
       async () => {
         const { platformMessageId } = await deliver();
-        return platformMessageId === undefined ? {} : { id: idOf(platformMessageId) };
+        return { id: sentLineId(seat.place.chat, seat.accountId, platformMessageId || undefined) };
       },
     );
     if (!sent.recorded) return { id: null, at: sent.at };
@@ -92,7 +97,7 @@ export class SeatReplies {
     const adapter = channelAdapter(channel, {
       accountOf: () => account,
       platformOfChannel: () => account.platform,
-      addressIn: (name, chatId) => this.deps.seats.addressIn(name, chatId),
+      ...(this.deps.addresses ? { addresses: this.deps.addresses } : {}),
     });
     const sent = await this.deps.messages.send(
       {

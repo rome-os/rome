@@ -2,7 +2,8 @@ import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
-import { chatKey, directMessageOn, refOf, type ChatKey } from "../chats/place.js";
+import { chatKey, directMessageOn, type ChatKey } from "../chats/place.js";
+import { ChatIds } from "../channels/chat-ids.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -108,7 +109,7 @@ export class ChatSettingsRepository {
     const shared = this.db.all<{ channel_settings: string | null }>(sql`
       SELECT s.channel_settings FROM chats c
       JOIN rome_sessions s ON s.chat_id = c.id AND s.thread_id IS NULL
-      WHERE c.id = ${refOf(key).id}
+      WHERE c.id = ${ChatIds.chat(key).id}
         AND s.channel_settings IS NOT NULL
       ORDER BY s.created_at, s.id
     `);
@@ -207,7 +208,7 @@ export class ChatSettingsRepository {
             ? "private"
             : descriptor.kind;
         const chat = this.deps.chats.start(
-          refOf(key),
+          ChatIds.chat(key),
           descriptor.kind === "dm" ? "dm" : "group",
           descriptor.displayName,
         );

@@ -289,9 +289,22 @@ export class TurnLinks {
     const seat = this.seatOf(sessionId);
     if (!seat) return [];
     const linked = new Set(this.linksOf(sessionId).map((link) => link.message_id));
-    const lines = this.messages
-      .since(seat.chatId, seat.threadId, seat.since)
-      .filter((message) => !linked.has(message.id) && !this.undecided.has(message.id));
+    const said = this.messages.since(seat.chatId, seat.threadId, seat.since);
+    // A chat that numbers messages per member account holds one copy of a
+    // message for each of Rome's accounts that heard it. The session has
+    // seen every copy of a message it has seen one of, and reads one copy of
+    // the rest.
+    const seen = new Set(
+      said
+        .filter((message) => linked.has(message.id) || this.undecided.has(message.id))
+        .map(copyOf),
+    );
+    const lines = said.filter((message) => {
+      const copy = copyOf(message);
+      if (seen.has(copy)) return false;
+      seen.add(copy);
+      return true;
+    });
     // A quoted line said before Rome's account was in the chat stays out of
     // its view, like every other line said then.
     const quoted = new Map(
@@ -380,6 +393,16 @@ function toLink(row: LinkRow): TurnLink {
 
 /** A message as a session reads it. A line of Rome's that kept no name is
  *  Rome's, as the agent has always read it. */
+/** What the copies of one message heard on two of Rome's accounts share:
+ *  its sender, its time and its words. */
+function copyOf(message: SaidMessage): string {
+  return [
+    message.saidBy?.account.id ?? message.saidBy?.agent ?? "",
+    message.at.getTime(),
+    message.body.text,
+  ].join("\n");
+}
+
 function contextOf(message: SaidMessage): ContextLine {
   return {
     id: message.id,

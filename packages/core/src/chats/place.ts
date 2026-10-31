@@ -15,8 +15,8 @@ export interface ChatRef {
 /**
  * What a platform calls a chat, on the adapter's side of Chats: the platform
  * and the platform's own id for the chat. A direct message's id names both its
- * ends ({@link directMessageKey}). Chats never sees a key: the adapter turns it
- * into the chat's ref ({@link refOf}), and back ({@link keyOf}).
+ * ends ({@link directMessageKey}). Chats never sees a key: the channels layer
+ * turns it into the chat's ref, and back (`ChatIds` in channels/chat-ids.ts).
  */
 export interface ChatKey {
   readonly platform: string;
@@ -37,66 +37,6 @@ export function chatKey(platform: string, externalId: ChatId): ChatKey {
 /** The chat itself, or the thread `threadId` names in it. */
 export function placeIn(chat: ChatRef, threadId?: ChatId): Place {
   return threadId === undefined ? { chat } : { chat, threadId };
-}
-
-/** The dashboard's platform, whose adapter gives its chats and lines random
- *  ids, with no platform key behind them. */
-const DASHBOARD = "webchat";
-
-/**
- * The chat at `key`, by the id its adapter records it under. A platform's
- * adapter passes the platform's key through behind its platform, so ids never
- * meet across platforms. On the dashboard the key is the chat's own id.
- */
-export function refOf(key: ChatKey): ChatRef {
-  return {
-    platform: key.platform,
-    id: key.platform === DASHBOARD ? key.externalId : `${key.platform}:${key.externalId}`,
-  };
-}
-
-/** The key behind chat `ref`, the inverse of {@link refOf}. */
-export function keyOf(ref: ChatRef): ChatKey {
-  const prefix = `${ref.platform}:`;
-  return chatKey(
-    ref.platform,
-    (ref.platform !== DASHBOARD && ref.id.startsWith(prefix)
-      ? ref.id.slice(prefix.length)
-      : ref.id) as ChatId,
-  );
-}
-
-/**
- * The id a message the platform calls `platformMessageId` is recorded under in
- * chat `chatId`. Platforms number messages per chat, so the chat's id goes in
- * front. A redelivery, or the same group message heard on another of Rome's
- * accounts, finds it on record.
- */
-export function messageIdOf(chatId: string, platformMessageId: string): string {
-  return `${chatId}/${platformMessageId}`;
-}
-
-/** The id of the message the platform calls `platformMessageId` in chat
- *  `chat`. A dashboard line's id is its own. */
-export function messageIdIn(chat: ChatRef, platformMessageId: string): string {
-  return chat.platform === DASHBOARD ? platformMessageId : messageIdOf(chat.id, platformMessageId);
-}
-
-/** The platform's id for message `messageId` of chat `chatId`, or null for a
- *  line whose id the platform did not give, as on the dashboard. */
-export function platformIdOf(chatId: string, messageId: string): string | null {
-  const prefix = `${chatId}/`;
-  return messageId.startsWith(prefix) ? messageId.slice(prefix.length) : null;
-}
-
-/**
- * The address a channel sends to for this place: the thread's when it names
- * one, the other end of a direct message, else the chat's own id.
- */
-export function addressOf(place: Place): ChatId {
-  if (place.threadId !== undefined) return place.threadId;
-  const key = keyOf(place.chat);
-  return (otherEndOf(key) ?? key.externalId) as ChatId;
 }
 
 /** The other end of the direct message `key` names, or null when it names

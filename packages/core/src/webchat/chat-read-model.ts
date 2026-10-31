@@ -22,7 +22,8 @@ import { sql } from "drizzle-orm";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import type { SaidMessage } from "../chats/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/message-repository.js";
-import { chatKey, keyOf, placeIn, type Place } from "../chats/place.js";
+import { chatKey, placeIn, type Place } from "../chats/place.js";
+import { ChatIds } from "../channels/chat-ids.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink, type TurnLine } from "../sessions/turn-links.js";
 

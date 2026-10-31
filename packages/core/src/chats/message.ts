@@ -62,9 +62,6 @@ export type Message = InboundMessage;
  */
 export interface OutboundMessage {
   readonly direction: "fromRome";
-  /** The id the dashboard adapter records it under, which the caller may
-   *  need before the send answers. A platform's adapter answers its own. */
-  readonly id?: string;
   readonly place: Place;
   readonly saidBy: SaidBy;
   readonly parts: readonly MessagePart[];

@@ -621,6 +621,26 @@ export const chatMessages = sqliteTable(
   ],
 );
 
+// The channels layer's address store: where one of Rome's accounts reaches a
+// chat whose key is not its address, as on a platform that gives a direct
+// message an id of its own (Feishu's p2p chat, Discord's DM channel). Shared
+// by every adapter. Chats never reads it.
+export const channelAddresses = sqliteTable(
+  "channel_addresses",
+  {
+    platform: text("platform").notNull(),
+    // Rome's account, by its platform id.
+    accountId: text("account_id").notNull(),
+    // The adapter's key for the chat, with no platform prefix.
+    chatKey: text("chat_key").notNull(),
+    address: text("address").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId, table.chatKey] }),
+    index("idx_channel_addresses_address").on(table.platform, table.accountId, table.address),
+  ],
+);
+
 // Agents' link from a turn to a chat message: the message prompted the turn,
 // was its answer, or was caught up on by it. One row per message per agent
 // seat, so two of Rome's agents in one group each keep their own.

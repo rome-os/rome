@@ -280,6 +280,7 @@ import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
 import { MessageRepository } from "./chats/message-repository.js";
 import { SeatReplies } from "./sessions/seat-replies.js";
+import { ChatAddresses } from "./channels/chat-addresses.js";
 import { ChatReadModel } from "./webchat/chat-read-model.js";
 import { TurnLinks } from "./sessions/turn-links.js";
 import {
@@ -409,8 +410,11 @@ async function main() {
   const chatEvents = new ChatEvents();
   const chatMessages = new MessageRepository(db);
   const turnLinks = new TurnLinks(db);
+  // The channels layer's address store, shared by every chat adapter.
+  const chatAddresses = new ChatAddresses(db);
   const seatReplies = new SeatReplies({
     seats: webchatRepo,
+    addresses: chatAddresses,
     messages: chatMessages,
     links: turnLinks,
   });
@@ -421,6 +425,7 @@ async function main() {
     webchatRepo,
     chatRepo,
     chatMessages,
+    addresses: chatAddresses,
     links: turnLinks,
     replies: seatReplies,
     reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
@@ -1546,7 +1551,7 @@ async function main() {
       adapters: {
         accountOf: (channel) => channelRecords.accountOf(channel),
         platformOfChannel,
-        addressIn: (channel, chatId) => webchatRepo.addressIn(channel, chatId),
+        addresses: chatAddresses,
       },
       listens: (connectionId) => accountListening.listens(connectionId),
     },
@@ -1899,6 +1904,7 @@ async function main() {
       webchatRepo,
       chatMessages,
       chats: chatRepo,
+      addresses: chatAddresses,
       webhookInvocationsRepo,
       approvalsRepo,
       approvalHandler,

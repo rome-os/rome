@@ -1,4 +1,5 @@
 import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
+import type { ChatAddresses } from "../channels/chat-addresses.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -121,6 +122,9 @@ export interface ApiDeps {
   chatMessages: Pick<MessageRepository, "read" | "send">;
   /** The chats Rome holds (docs/domains/chats.md#chat). */
   chats: Pick<ChatRepository, "get" | "start">;
+  /** The channels layer's address store, where a direct message the
+   *  platform gives an id of its own is sent. */
+  addresses: Pick<ChatAddresses, "bind" | "addressOf">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

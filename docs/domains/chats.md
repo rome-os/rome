@@ -8,6 +8,7 @@ A place where people and agents talk: a group, a direct message, the chat built 
 
 - A chat is known by its platform and the platform's own id for it. Whether it is a group or a direct message is something about the chat, not part of what it is known by.
 - Rome records a chat and its messages under ids its channel gives them, unique across platforms, and makes none of its own. A platform's channel uses the platform's ids with the platform in front, so a message heard again, or heard by two of Rome's accounts in one group, is recorded once. The dashboard gives its chats and messages ids of their own.
+- A Telegram basic group numbers messages per member account, so a message there is recorded once for each of Rome's accounts that heard it. An agent's catch-up reads one copy, and none once its turn took any.
 - A group is named by the platform's own id for it, so one group is one chat however many of Rome's accounts are in it.
 - A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two. Where the platform gives a direct message no id of its own across Rome's accounts, Rome derives one from the two ends.
 - A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
