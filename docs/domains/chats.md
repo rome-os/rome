@@ -70,6 +70,7 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 - "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it. What a wake is and what follows it is in [Participation](participation.md#wake).
 - For a delegate on the guardian's own account, the current behaviour stays as it is.
 - A chat with an assistant has one reply rule, every message, and the guardian cannot change it.
+- Which domain owns the reply rule is pending the Envoy design. Until then it is stored as today, on the row of Rome's account in the chat, found by chat and account. The Chats migration moves everything else off that row and leaves the reply rule where it is.
 
 ## Message
 
