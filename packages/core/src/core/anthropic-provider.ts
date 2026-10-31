@@ -302,6 +302,10 @@ function buildAnthropicAccounting(
   providerId: string,
   context?: AgentContextUsage,
   aborted = false,
+  // The turn's own share of the SDK's cumulative `total_cost_usd`, derived
+  // against the session's running-total baseline (see openSession). Undefined
+  // falls back to the token-priced estimate in buildAgentAccounting.
+  reportedCostUsd?: number,
 ) {
   // SDK types mark these required, but mock test data may omit them; treat
   // the absence of `usage` as "no accounting to report" rather than crashing.
@@ -321,7 +325,7 @@ function buildAnthropicAccounting(
       cacheWriteTokens: readPositiveNumber(usage.cache_creation_input_tokens) ?? 0,
       ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     },
-    reportedCostUsd: readPositiveNumber(result.total_cost_usd),
+    reportedCostUsd,
     numTurns: readPositiveNumber(result.num_turns),
     stop: anthropicStop(result, aborted),
     stopReason: result.stop_reason ?? undefined,
@@ -699,6 +703,26 @@ export class AnthropicProvider implements ModelProvider {
     let activeTurnLastAssistantMessageId: string | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
 
+    // The SDK's `total_cost_usd` is the streaming session's running total, not
+    // the turn's own cost: every result repeats all earlier turns' spend, and
+    // a resumed or forked session continues from the total its source
+    // transcript saved. Record each turn as the difference against the
+    // previous result instead. A fresh session starts from zero; a resumed or
+    // forked one has no in-memory baseline, so its first result only seeds the
+    // baseline and Rome prices that turn from its own tokens instead.
+    let lastReportedTotalUsd: number | undefined =
+      params.fork || (!params.isNewSession && params.providerThreadId) ? undefined : 0;
+    const turnReportedCostUsd = (totalCostUsd: number | undefined): number | undefined => {
+      if (totalCostUsd === undefined) return undefined;
+      const previous = lastReportedTotalUsd;
+      lastReportedTotalUsd = totalCostUsd;
+      // A total below the baseline (a re-emitted older result) makes the
+      // difference meaningless; Rome prices that turn from its tokens too.
+      return previous === undefined || totalCostUsd < previous
+        ? undefined
+        : totalCostUsd - previous;
+    };
+
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
     const events: AsyncIterable<AgentEvent> = (async function* () {
@@ -947,6 +971,7 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
             if (abortController.signal.aborted) await queryProcess.abort();
+            const reportedTotalCostUsd = readPositiveNumber(message.total_cost_usd);
             const contextUsage = abortController.signal.aborted
               ? undefined
               : await readSdkContextUsage(q);
@@ -956,6 +981,14 @@ export class AnthropicProvider implements ModelProvider {
               providerId,
               contextUsage,
               abortController.signal.aborted,
+              // An SDK-owned result ends no Rome turn, so its accounting never
+              // reaches a turn log. Advancing the running-total baseline for it
+              // would strand its spend: the difference would be charged to no
+              // turn, and the following Rome turn would diff against the higher
+              // total and report only its own increase. Leave the baseline put
+              // so that next Rome turn's difference carries the background
+              // spend along with its own.
+              sdkOwned ? undefined : turnReportedCostUsd(reportedTotalCostUsd),
             );
             const resultData = {
               subtype: message.subtype,
