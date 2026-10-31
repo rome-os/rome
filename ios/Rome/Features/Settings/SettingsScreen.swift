@@ -1,17 +1,30 @@
 import SwiftUI
 
-/// A pushed page's top: a glass back button and a large title.
+/// A page's top and a large title: a glass back button on a pushed page, or a
+/// close button at the right on the first page of a sheet.
 struct PageHeader: View {
     let title: LocalizedStringKey
+    var onClose: (() -> Void)? = nil
+    /// Pages in a sheet keep their buttons clear of its round top corners.
+    var inSheet = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
-                Image(systemName: "chevron.left").romeFont(17, .semibold)
+            HStack {
+                if let onClose {
+                    Spacer()
+                    GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
+                        Image(systemName: "xmark").romeFont(16, .semibold)
+                    }
+                } else {
+                    GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
+                        Image(systemName: "chevron.left").romeFont(17, .semibold)
+                    }
+                }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 4)
+            .padding(.horizontal, inSheet ? 16 : 12)
+            .padding(.top, inSheet ? 16 : 4)
             Text(title)
                 .romeFont(34, .bold)
                 .tracking(-0.8)
@@ -77,6 +90,7 @@ struct SettingsRow<Trailing: View>: View {
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
+    let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -87,7 +101,7 @@ struct SettingsScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                PageHeader(title: "Settings")
+                PageHeader(title: "Settings", onClose: onClose, inSheet: true)
                 accountCard
                     .padding(.horizontal, 16)
                     .padding(.top, -8)
@@ -139,7 +153,6 @@ struct SettingsScreen: View {
         }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
         .task { usage = try? await workspace.backend.aiTools() }
         .confirmationDialog("After signing out, sign in with Rome Cloud to open Rome again.", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { Task { await model.signOut() } }

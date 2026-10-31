@@ -7,6 +7,8 @@ enum DebugCommand: Equatable {
     case drawer(Bool)
     case tasks(Bool)
     case route([Route])
+    /// The Settings sheet with these pages pushed in it; nil closes it.
+    case settings([SettingsRoute]?)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -59,8 +61,9 @@ enum SnapshotRunner {
             await capture("10-task-failed", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-notion", title: "同步 Notion 数据库")])
             }
-            await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .route([.settings]) }
-            await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .route([.settings, .instances]) }
+            await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
+            await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
+            model.debugCommand = .settings(nil)
             await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .route([.routines]) }
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .route([.search]) }
             await capture("15-task-answered", style: styleName, in: directory, wait: 2) {

@@ -10,7 +10,7 @@ struct InstancesScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHeader(title: "Switch instance")
+                PageHeader(title: "Switch instance", inSheet: true)
                 if model.instances.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(0..<3, id: \.self) { index in

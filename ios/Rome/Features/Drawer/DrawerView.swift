@@ -5,6 +5,7 @@ struct DrawerView: View {
     let workspace: Workspace
     let onChat: () -> Void
     let onRoute: (Route) -> Void
+    let onSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,7 +51,7 @@ struct DrawerView: View {
 
             Spacer()
 
-            Button { onRoute(.settings) } label: {
+            Button(action: onSettings) {
                 HStack(spacing: 12) {
                     InitialAvatar(text: workspace.accountLabel)
                     VStack(alignment: .leading, spacing: 0) {

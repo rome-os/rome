@@ -3,14 +3,17 @@ import SwiftUI
 /// Screens pushed on the main stack.
 enum Route: Hashable {
     case taskChat(chatId: String, title: String)
-    case settings
-    case instances
     case search
     case routines
 }
 
+/// Pages pushed inside the Settings sheet.
+enum SettingsRoute: Hashable {
+    case instances
+}
+
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
-/// and the Tasks sheet.
+/// and the Tasks and Settings sheets.
 struct MainShell: View {
     let workspace: Workspace
     @Environment(AppModel.self) private var model
@@ -21,8 +24,11 @@ struct MainShell: View {
     @GestureState(resetTransaction: Transaction(animation: MainShell.drawerSpring))
     private var drag = DrawerDrag()
     @State private var showTasks = false
+    @State private var showSettings = false
+    @State private var settingsPath: [SettingsRoute] = []
     #if DEBUG
     @State private var sheetPreview = false
+    @State private var settingsPreview = false
     #endif
 
     var body: some View {
@@ -39,6 +45,12 @@ struct MainShell: View {
                     onRoute: { route in
                         path = [route]
                         closeDrawer(popToRoot: false)
+                    },
+                    // The sheet rises over the open drawer, and the drawer is still
+                    // there when it closes: one motion each way, never two at once.
+                    onSettings: {
+                        settingsPath = []
+                        showSettings = true
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
@@ -92,6 +104,9 @@ struct MainShell: View {
             .presentationCornerRadius(22)
             .presentationBackground(Palette.sheet)
         }
+        .sheet(isPresented: $showSettings) {
+            settingsSheet
+        }
         #if DEBUG
         .overlay {
             if sheetPreview {
@@ -101,6 +116,16 @@ struct MainShell: View {
                     Color.black.ignoresSafeArea()
                     TasksSheet(store: workspace.tasks) { _ in }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                        .padding(.top, 64)
+                }
+                .ignoresSafeArea()
+            }
+            if settingsPreview {
+                // Snapshot runs only, for the same reason.
+                ZStack(alignment: .bottom) {
+                    Color.black.ignoresSafeArea()
+                    settingsSheet
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
                         .padding(.top, 64)
                 }
@@ -126,6 +151,9 @@ struct MainShell: View {
             case .tasks(let show):
                 if SnapshotRunner.directory != nil { sheetPreview = show } else { showTasks = show }
             case .route(let routes): path = routes
+            case .settings(let routes):
+                settingsPath = routes ?? []
+                if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
             case nil: break
             }
         }
@@ -138,10 +166,6 @@ struct MainShell: View {
         case .taskChat(let chatId, let title):
             TaskChatScreen(workspace: workspace, chatId: chatId, initialTitle: title)
                 .id(chatId)
-        case .settings:
-            SettingsScreen(workspace: workspace, onInstances: { path.append(.instances) })
-        case .instances:
-            InstancesScreen(onSwitched: { path = [] })
         case .search:
             SearchScreen(workspace: workspace) { hit in
                 if hit.session.id == conciergeChatID {
@@ -153,6 +177,28 @@ struct MainShell: View {
         case .routines:
             RoutinesScreen()
         }
+    }
+
+    /// Settings slides up with its own stack, so the instances page pushes
+    /// inside the sheet and the X closes all of it.
+    private var settingsSheet: some View {
+        NavigationStack(path: $settingsPath) {
+            SettingsScreen(
+                workspace: workspace,
+                onInstances: { settingsPath.append(.instances) },
+                onClose: { showSettings = false }
+            )
+            .navigationDestination(for: SettingsRoute.self) { route in
+                switch route {
+                case .instances:
+                    InstancesScreen(onSwitched: {
+                        showSettings = false
+                        path = []
+                    })
+                }
+            }
+        }
+        .presentationBackground(Palette.bg)
     }
 
     private func openTask(_ task: ConciergeTask) {
