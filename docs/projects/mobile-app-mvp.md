@@ -43,4 +43,4 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 | Name | Session | Task | Status |
 | --- | --- | --- | --- |
 | iphone-install | local_480e26b0-5790-427d-ac71-c9461a5a445b | Sign and install the app on the user's iPhone | done: reinstalled b72cb7d8 after the English merge. Mac Catalyst unit tests passed on it (32 tests), `devicectl` install and launch succeeded (process running). Team B2U93L2LK4, automatic signing, `cc.romeos.mobile.dev`. Open: none |
-| make-english-the-ios-app | local_066dd861-f965-4eff-89db-ee9aa13d5d0c | English default, zh-Hans translation | done, merged; archive pending the user's OK |
+| make-english-the-ios-app | local_066dd861-f965-4eff-89db-ee9aa13d5d0c | English default, zh-Hans translation | done, merged, archived; worktree and branch removed |
