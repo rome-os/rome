@@ -18,6 +18,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { applyGuardianProfile } from "../lib/guardian-profile.js";
+import type { ChatReadModel } from "../webchat/chat-read-model.js";
 
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
@@ -29,6 +30,8 @@ export interface CreateAppRuntimeRepositoriesDeps {
   /** What an app's seat says, recorded and linked to its turn. */
   replies: Pick<SeatReplies, "say">;
   links: Pick<TurnLinks, "prompt">;
+  /** The dashboard's read model, which an app's transcript read renders. */
+  reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
   accountOf: OpenChannelChatDeps["accountOf"];
   platformOfChannel: OpenChannelChatDeps["platformOfChannel"];
   /** Present in the main process only, where the profile write can reschedule
@@ -75,6 +78,7 @@ function createGuardianProfileRepository(deps: {
 
 function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepository {
   const repo = deps.webchatRepo;
+  const reads = deps.reads;
   const open: ChatRepository["ensureChannelChat"] = (input) =>
     openChannelChat(
       {
@@ -86,6 +90,23 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       input,
     );
   return {
+    recentChats: ({ since, where }) => repo.recentChats(since, where),
+    async transcript(sessionId, input = {}) {
+      const transcript =
+        (await reads.chatTranscript(sessionId)) ?? (await reads.sessionTranscript(sessionId));
+      const since = input.since?.getTime() ?? 0;
+      return transcript.lines
+        .filter((line) => line.createdAt.getTime() >= since)
+        .map((line) => ({
+          id: line.id,
+          turnId: line.turnId,
+          role: line.role,
+          senderId: line.senderAccountId,
+          senderName: line.senderName,
+          content: line.content,
+          createdAt: line.createdAt,
+        }));
+    },
     ensureChannelChat: open,
     ensureChannelConversation: open,
     // An app names the seat it opened. The message is recorded where the seat

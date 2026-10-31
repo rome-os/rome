@@ -45,6 +45,7 @@ import { createAppRuntimeRepositories } from "../apps/repositories.js";
 import { ChatRepository } from "../chats/chat-repository.js";
 import { MessageRepository } from "../chats/message-repository.js";
 import { SeatReplies } from "../sessions/seat-replies.js";
+import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
@@ -132,6 +133,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     chatMessages,
     links: turnLinks,
     replies: new SeatReplies({ seats: webchatRepo, messages: chatMessages, links: turnLinks }),
+    reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
     accountOf: (channel) => channelRecords.accountOf(channel),
     platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
   });

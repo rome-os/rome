@@ -127,11 +127,15 @@ export class ChatReadModel {
    * chat.
    */
   async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
-    const place = await this.placeOf(sessionId);
-    if (!place) return null;
+    const seat = await this.seatOf(sessionId);
+    if (!seat) return null;
+    const { place, since } = seat;
+    // A seat sees what was said where it stands from when it joined: a line
+    // said in a group before Rome's account was there never reached it.
+    const seen = (said: readonly SaidMessage[]) => said.filter((message) => message.at >= since);
     if (!page) {
       const read = await this.messages.read(place);
-      return this.transcriptOf(sessionId, read.messages, null);
+      return this.transcriptOf(sessionId, seen(read.messages), null);
     }
     // Chats reads by message, newest first. Read back in batches until the
     // page holds one turn more than asked, so the oldest turn shown is whole.
@@ -143,11 +147,12 @@ export class ChatReadModel {
     let exhausted = false;
     for (;;) {
       const read = await this.messages.read(place, { before, limit: page.limit * 4 });
-      for (const [id, link] of this.links.turnsOf(read.messages.map((m) => m.id))) {
+      const shown = seen(read.messages);
+      for (const [id, link] of this.links.turnsOf(shown.map((m) => m.id))) {
         links.set(id, link);
       }
-      messages = [...read.messages, ...messages];
-      if (!read.older) exhausted = true;
+      messages = [...shown, ...messages];
+      if (!read.older || shown.length < read.messages.length) exhausted = true;
       before = read.older;
       if (exhausted || turnKeys(messages, links).size > page.limit) break;
     }
@@ -210,22 +215,27 @@ export class ChatReadModel {
     return { lines, traces, nextCursor: older };
   }
 
-  /** The place the session stands in: its chat's key and its thread. */
-  private async placeOf(sessionId: string): Promise<Place | null> {
+  /** The place the session stands in, its chat's key and its thread, and
+   *  when the seat joined it. */
+  private async seatOf(sessionId: string): Promise<{ place: Place; since: Date } | null> {
     const [row] = await this.db.all<{
       platform: string;
       platform_chat_id: string;
       thread_id: string | null;
+      created_at: number;
     }>(sql`
-      SELECT c.platform, c.platform_chat_id, r.thread_id
+      SELECT c.platform, c.platform_chat_id, r.thread_id, r.created_at
       FROM rome_sessions r JOIN chats c ON c.id = r.chat_id
       WHERE r.id = ${sessionId}
     `);
     if (!row) return null;
-    return placeIn(
-      chatKey(row.platform, row.platform_chat_id as ChatId),
-      (row.thread_id ?? undefined) as ChatId | undefined,
-    );
+    return {
+      place: placeIn(
+        chatKey(row.platform, row.platform_chat_id as ChatId),
+        (row.thread_id ?? undefined) as ChatId | undefined,
+      ),
+      since: new Date(row.created_at * 1000),
+    };
   }
 
   /** The trace of each turn `lines` belong to that has one. */

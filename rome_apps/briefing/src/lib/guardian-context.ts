@@ -1,5 +1,4 @@
 import { sql } from "drizzle-orm";
-import { SESSION_LINES } from "./session-lines.js";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 import { unwrap } from "./action-result.js";
 
@@ -32,30 +31,52 @@ export async function gatherGuardianContext(
   tz: string,
   now = Date.now(),
 ): Promise<GuardianContext> {
-  return { chats: readRecentChats(appContext, tz, now), profile: await readProfile(appContext) };
+  return {
+    chats: await readRecentChats(appContext, tz, now),
+    profile: await readProfile(appContext),
+  };
 }
 
-function readRecentChats(appContext: RomeAppContext, tz: string, now: number): string | null {
-  const cutoff = Math.floor((now - WINDOW_HOURS * 60 * 60 * 1000) / 1000);
+async function readRecentChats(
+  appContext: RomeAppContext,
+  tz: string,
+  now: number,
+): Promise<string | null> {
+  const since = new Date(now - WINDOW_HOURS * 60 * 60 * 1000);
   let rows: MessageRow[];
   try {
-    rows = appContext.db.connection.all(sql`
-      SELECT s.name AS chat, m.content, m.created_at
-      FROM ${SESSION_LINES} m
-      JOIN rome_sessions s ON s.id = m.session_id
-      WHERE (s.type IN ('webchat', 'webchat_handoff')
-          OR (s.type = 'channel' AND s.source_channel = 'webchat' AND s.source_thread_id = s.id))
-        AND coalesce(s.owner_key, 'guardian') = 'guardian'
-        AND s.id NOT IN (
-          SELECT session_id FROM ${SESSION_LINES}
-          WHERE role = 'user' AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
-        )
-        AND s.archived_at IS NULL
-        AND m.role = 'user'
-        AND m.created_at >= ${cutoff}
-      ORDER BY m.created_at DESC
-      LIMIT ${MAX_MESSAGES}
-    `) as MessageRow[];
+    const chats = appContext.repositories.chats;
+    if (!chats) return null;
+    // The dashboard's chats, through the chat repository. Whose chat it is and
+    // whether it is archived is still read from `rome_sessions`.
+    const recent = await chats.recentChats({ since, where: "dashboard" });
+    const ids = recent.map((chat) => chat.sessionId);
+    if (ids.length === 0) return null;
+    const sessions = appContext.db.connection.all(sql`
+      SELECT id, name FROM rome_sessions
+      WHERE id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+        AND coalesce(owner_key, 'guardian') = 'guardian'
+        AND archived_at IS NULL
+    `) as Array<{ id: string; name: string }>;
+    const names = new Map(sessions.map((row) => [row.id, row.name]));
+    rows = [];
+    for (const id of ids) {
+      const name = names.get(id);
+      if (name === undefined) continue;
+      const lines = await chats.transcript(id);
+      const asked = lines.filter((line) => line.role === "user");
+      if (asked.some((line) => line.senderId?.startsWith("visitor:"))) continue;
+      for (const line of asked) {
+        if (line.createdAt < since) continue;
+        rows.push({
+          chat: name,
+          content: line.content,
+          created_at: Math.floor(line.createdAt.getTime() / 1000),
+        });
+      }
+    }
+    rows.sort((a, b) => b.created_at - a.created_at);
+    rows = rows.slice(0, MAX_MESSAGES);
   } catch {
     return null;
   }

@@ -280,6 +280,7 @@ import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
 import { MessageRepository } from "./chats/message-repository.js";
 import { SeatReplies } from "./sessions/seat-replies.js";
+import { ChatReadModel } from "./webchat/chat-read-model.js";
 import { TurnLinks } from "./sessions/turn-links.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
@@ -422,6 +423,7 @@ async function main() {
     chatMessages,
     links: turnLinks,
     replies: seatReplies,
+    reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
     accountOf: (channel) => channelRecords.accountOf(channel),
     platformOfChannel,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },

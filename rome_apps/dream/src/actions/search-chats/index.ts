@@ -1,7 +1,5 @@
 // Searches the guardian's requests across the dashboard's past chats, so a
 // dream can tell a one-off task from one the guardian keeps asking for.
-import { sql } from "drizzle-orm";
-import { SESSION_LINES } from "../../lib/session-lines.js";
 import {
   createAppLogger,
   type Action,
@@ -9,7 +7,7 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
+import { guardianChats, type ChatHistory } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("search_chats");
@@ -64,10 +62,6 @@ function isoDate(seconds: number): string {
   return new Date(seconds * 1000).toISOString().slice(0, 10);
 }
 
-function likePattern(word: string): string {
-  return `%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-}
-
 /** Groups matching requests by chat, best match first. */
 function rankChats(rows: RequestRow[], words: string[]): ChatHit[] {
   const chats = new Map<string, ChatHit>();
@@ -118,28 +112,27 @@ function formatHit(chat: ChatHit, wordCount: number, now: number): string {
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
-  const { connection } = deps.appContext.db;
+  const { appContext } = deps;
+  /** The guardian's dashboard chats active since `cutoff`, most recent first. */
+  const chats = (cutoff: number) => guardianChats(appContext, new Date(cutoff * 1000));
+  const requestRow = (chat: ChatHistory, line: ChatHistory["lines"][number]): RequestRow => ({
+    session_id: chat.sessionId,
+    session_name: chat.name,
+    content: line.content,
+    created_at: Math.floor(line.createdAt.getTime() / 1000),
+  });
 
   /**
    * The opening request of every chat active in the period, most recently
    * active first. A chat resumed in the period opens with its first request
    * ever, which can predate the period.
    */
-  function listOpenings(cutoff: number, days: number, limit: number): ActionResult {
-    const rows = connection.all(sql`
-      SELECT session_id, session_name, content, created_at FROM (
-        SELECT m.session_id, s.name AS session_name, m.content, m.created_at,
-          ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at, m.id) AS n,
-          MAX(m.created_at) OVER (PARTITION BY m.session_id) AS last_at
-        FROM ${SESSION_LINES} m
-        JOIN rome_sessions s ON s.id = m.session_id
-        WHERE m.role = 'user'
-          AND ${inDashboardChat("s")}
-          AND ${guardianOnlyChat("s")}
-      )
-      WHERE n = 1 AND last_at >= ${cutoff}
-      ORDER BY last_at DESC
-    `) as RequestRow[];
+  async function listOpenings(cutoff: number, days: number, limit: number): Promise<ActionResult> {
+    const rows: RequestRow[] = [];
+    for (const chat of await chats(cutoff)) {
+      const opening = chat.lines.find((line) => line.role === "user");
+      if (opening) rows.push(requestRow(chat, opening));
+    }
     const now = Math.floor(Date.now() / 1000);
     const lines = rows
       .slice(0, limit)
@@ -163,33 +156,36 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
   }
 
   /** Chats whose guardian requests contain the most query words. */
-  function search(words: string[], cutoff: number, days: number, limit: number): ActionResult {
-    const rows = connection.all(sql`
-      SELECT m.session_id, s.name AS session_name, m.content, m.created_at
-      FROM ${SESSION_LINES} m
-      JOIN rome_sessions s ON s.id = m.session_id
-      WHERE m.role = 'user'
-        AND m.created_at >= ${cutoff}
-        AND ${inDashboardChat("s")}
-        AND ${guardianOnlyChat("s")}
-        AND (${sql.join(
-          words.map((word) => sql`lower(m.content) LIKE ${likePattern(word)} ESCAPE '\\'`),
-          sql` OR `,
-        )})
-      ORDER BY m.created_at DESC
-      LIMIT ${MAX_ROWS}
-    `) as RequestRow[];
+  async function search(
+    words: string[],
+    cutoff: number,
+    days: number,
+    limit: number,
+  ): Promise<ActionResult> {
+    const histories = await chats(cutoff);
+    const rows: RequestRow[] = [];
+    for (const chat of histories) {
+      for (const line of chat.lines) {
+        if (line.role !== "user" || line.createdAt.getTime() / 1000 < cutoff) continue;
+        const content = line.content.toLowerCase();
+        if (words.some((word) => content.includes(word))) rows.push(requestRow(chat, line));
+      }
+    }
+    rows.sort((a, b) => b.created_at - a.created_at);
+    rows.splice(MAX_ROWS);
     const ranked = rankChats(rows, words);
     const top = ranked.slice(0, limit);
     if (top.length > 0) {
-      const starts = connection.all(sql`
-        SELECT session_id, MIN(created_at) AS started_at FROM ${SESSION_LINES}
-        WHERE session_id IN (${sql.join(
-          top.map((chat) => sql`${chat.sessionId}`),
-          sql`, `,
-        )})
-        GROUP BY session_id
-      `) as Array<{ session_id: string; started_at: number }>;
+      const starts = histories.flatMap((chat) =>
+        chat.lines[0]
+          ? [
+              {
+                session_id: chat.sessionId,
+                started_at: Math.floor(chat.lines[0].createdAt.getTime() / 1000),
+              },
+            ]
+          : [],
+      );
       for (const { session_id, started_at } of starts) {
         const chat = top.find((c) => c.sessionId === session_id);
         if (chat) chat.startedAt = Math.min(chat.startedAt, started_at);
@@ -249,8 +245,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       try {
         return words.length > 0
-          ? search(words, cutoff, days, limit)
-          : listOpenings(cutoff, days, limit);
+          ? await search(words, cutoff, days, limit)
+          : await listOpenings(cutoff, days, limit);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         log.error("failed to search chats", { error });

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { SESSION_LINES } from "./session-lines.js";
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import {
   type CollectionSource,
@@ -317,7 +316,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       if (typeof sessionId !== "string" || !sessionId.trim()) {
         return json({ error: "session_id_required" }, { status: 400 });
       }
-      const imported = this.importWebchatSession(sessionId.trim(), {
+      const imported = await this.importWebchatSession(sessionId.trim(), {
         title:
           typeof (body as { title?: unknown }).title === "string"
             ? String((body as { title?: unknown }).title)
@@ -415,15 +414,25 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     }));
   }
 
-  private userPromptsByTurn(sessionId: string): Map<string, string> {
+  /** The chat's lines as the session sees them, in the dashboard's order,
+   *  read through the chat repository. */
+  private async chatLines(
+    sessionId: string,
+  ): Promise<Array<{ id: string; turn_id: string | null; role: string; content: string }>> {
+    const chats = this.ctx.repositories.chats;
+    if (!chats) return [];
+    const lines = await chats.transcript(sessionId);
+    return lines.map((line) => ({
+      id: line.id,
+      turn_id: line.turnId,
+      role: line.role,
+      content: line.content,
+    }));
+  }
+
+  private async userPromptsByTurn(sessionId: string): Promise<Map<string, string>> {
     const map = new Map<string, string>();
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT wm.turn_id AS turn_id, wm.content AS content
-      FROM ${SESSION_LINES} wm
-      WHERE wm.session_id = ${sessionId}
-        AND wm.role = 'user'
-      ORDER BY wm.created_at ASC
-    `) as Array<{ turn_id: string | null; content: string }>;
+    const rows = (await this.chatLines(sessionId)).filter((row) => row.role === "user");
     for (const row of rows) {
       if (!row.turn_id || map.has(row.turn_id)) continue;
       const text = extractUserText(row.content);
@@ -466,18 +475,12 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   // agent's steps (empty for a plain text answer); the visible reply is stored
   // in sibling role=assistant rows. Pull their text blocks so an imported turn
   // shows the answer instead of "no final text message".
-  private assistantTextBlocksByTurn(
+  private async assistantTextBlocksByTurn(
     sessionId: string,
     agent: string,
-  ): Map<string, TraceEventDto[]> {
+  ): Promise<Map<string, TraceEventDto[]>> {
     const map = new Map<string, TraceEventDto[]>();
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT wm.turn_id AS turn_id, wm.content AS content
-      FROM ${SESSION_LINES} wm
-      WHERE wm.session_id = ${sessionId}
-        AND wm.role = 'assistant'
-      ORDER BY wm.created_at ASC
-    `) as Array<{ turn_id: string | null; content: string }>;
+    const rows = (await this.chatLines(sessionId)).filter((row) => row.role === "assistant");
     for (const row of rows) {
       if (!row.turn_id) continue;
       let parsed: unknown;
@@ -507,24 +510,15 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   // chronological order. A single global toolUseId→answer map would instead let
   // a later answer overwrite an earlier card's (wrong answer on the prior card).
   //
-  // Ordering matches core's `getMessages()` exactly — group rows by each turn's
-  // earliest timestamp (window function), then by row time within the turn —
-  // because a later turn's user row can be inserted before an earlier turn's
-  // assistant reply; a plain `created_at` sort would interleave turns and pair
-  // a recycled id against the wrong card.
-  private replyBlocksByTurn(sessionId: string): Map<string, ReplyBlock[]> {
+  // The lines come in the dashboard's order, each turn's lines together, so a
+  // recycled id is paired against the card of its own turn.
+  private async replyBlocksByTurn(sessionId: string): Promise<Map<string, ReplyBlock[]>> {
     const byTurn = new Map<string, ReplyBlock[]>();
     // The newest still-open card per toolUseId, awaiting its interaction_result.
     const open = new Map<string, ReplyInteractionBlock>();
-    const rows = this.ctx.db.connection.all(sql`
-      SELECT wm.turn_id AS turn_id, wm.role AS role, wm.content AS content
-      FROM ${SESSION_LINES} wm
-      WHERE wm.session_id = ${sessionId}
-        AND wm.role IN ('assistant', 'user')
-      ORDER BY
-        MIN(wm.created_at) OVER (PARTITION BY COALESCE(wm.turn_id, wm.id)),
-        wm.created_at
-    `) as Array<{ turn_id: string | null; role: string; content: string }>;
+    const rows = (await this.chatLines(sessionId)).filter(
+      (row) => row.role === "assistant" || row.role === "user",
+    );
     const pushBlock = (turnId: string, block: ReplyBlock) => {
       const list = byTurn.get(turnId);
       if (list) list.push(block);
@@ -580,10 +574,10 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     return byTurn;
   }
 
-  private importWebchatSession(
+  private async importWebchatSession(
     sessionId: string,
     options: { title?: string },
-  ): { collectionId: string | null; traceCount: number; message: string } {
+  ): Promise<{ collectionId: string | null; traceCount: number; message: string }> {
     const rows = this.ctx.db.connection.all(sql`
       SELECT
         ws.id AS session_id,
@@ -617,11 +611,14 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       };
     }
 
-    const promptsByTurn = this.userPromptsByTurn(sessionId);
+    const promptsByTurn = await this.userPromptsByTurn(sessionId);
     const first = rows[0];
-    const assistantByTurn = this.assistantTextBlocksByTurn(sessionId, first.agent_name ?? "main");
+    const assistantByTurn = await this.assistantTextBlocksByTurn(
+      sessionId,
+      first.agent_name ?? "main",
+    );
     const traceContentByMessage = this.traceContentsByMessage(sessionId);
-    const replyByTurn = this.replyBlocksByTurn(sessionId);
+    const replyByTurn = await this.replyBlocksByTurn(sessionId);
     const collectionId = randomUUID();
     this.repo.upsertCollection({
       id: collectionId,

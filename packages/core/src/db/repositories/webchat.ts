@@ -47,7 +47,7 @@ import type {
   TraceSubagentStartEvent,
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { Account, ChatId, RomeSessionType } from "@rome-os/app-runtime";
+import type { Account, ChatId, RecentChat, RomeSessionType } from "@rome-os/app-runtime";
 import { chatKey, ownedBy, placeIn, type Place } from "../../chats/place.js";
 import { TurnLinks, type ContextLine } from "../../sessions/turn-links.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
@@ -2209,6 +2209,34 @@ export class WebChatRepository {
     });
   }
 
+  /**
+   * The chats with a line said at or after `since`, by the session that
+   * stands in each, most recently active first: the guardian's dashboard
+   * chats, or chats on Rome's accounts of `accountKinds`. A projection over
+   * Chats' tables for Dream's review.
+   */
+  async recentChats(
+    since: Date,
+    where: "dashboard" | { accountKinds: readonly string[] },
+  ): Promise<RecentChat[]> {
+    const cutoff = Math.floor(since.getTime() / 1000);
+    const scope =
+      where === "dashboard"
+        ? sql`s.source_channel = 'webchat' AND s.type IN ('channel', 'webchat_handoff')`
+        : sql`s.type = 'channel' AND coalesce(ch.connection_kind, s.source_channel)
+            IN (SELECT value FROM json_each(${JSON.stringify(where.accountKinds)}))`;
+    return this.db
+      .all<{ id: string; chat_id: string; thread_id: string | null }>(sql`
+        SELECT s.id, s.chat_id, s.thread_id FROM rome_sessions s
+        LEFT JOIN channels ch ON ch.id = s.source_channel
+        JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+        WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
+        GROUP BY s.id
+        ORDER BY max(m.said_at) DESC
+      `)
+      .map((row) => ({ sessionId: row.id, chatId: row.chat_id, threadId: row.thread_id }));
+  }
+
   async getMessages(sessionId: string) {
     return this.selectMessages([sessionId]);
   }
@@ -2942,6 +2970,8 @@ interface LineRow {
   sender_id: string | null;
   sender_name: string | null;
   line_order: number;
+  seq: number;
+  from_rome: number;
 }
 
 function storedLine(row: LineRow): StoredWebchatMessage {
@@ -2978,9 +3008,11 @@ function sessionLines(sessionIds: readonly string[]) {
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
       m.sender_name, CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS line_order,
-      m.rowid AS seq
+      m.rowid AS seq, m.sender_agent IS NOT NULL AS from_rome
     FROM rome_sessions s
     JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      -- A seat sees the place from when it joined.
+      AND m.said_at >= s.created_at
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
     UNION ALL
@@ -2988,7 +3020,7 @@ function sessionLines(sessionIds: readonly string[]) {
       CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
       r.created_at, r.sender_id, r.sender_name,
       CASE WHEN r.role = 'user' THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
-      r.rowid AS seq
+      r.rowid AS seq, (r.role = 'assistant' OR r.sender_id IS 'rome') AS from_rome
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant', 'notification'))
