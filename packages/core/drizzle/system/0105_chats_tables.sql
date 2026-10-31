@@ -85,7 +85,7 @@ SELECT
     AND length(r.`source_thread_id`) <= 13 AS `per_account_ids`
 FROM `rome_sessions` r
 LEFT JOIN `channels` c ON c.`id` = r.`source_channel`
-WHERE r.`type` = 'channel' AND r.`source_channel` IS NOT NULL AND r.`source_thread_id` IS NOT NULL;
+WHERE r.`type` IN ('channel', 'webchat_handoff') AND r.`source_channel` IS NOT NULL AND r.`source_thread_id` IS NOT NULL;
 --> statement-breakpoint
 -- Each legacy text row as the chat message it stands for: the row itself, or
 -- the copy another of Rome's accounts already recorded for the same platform
