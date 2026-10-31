@@ -467,6 +467,40 @@ jobs:
           retention-days: 7
 
   # ──────────────────────────────────────────
+  # Job 3b: the dashboard against a real Rome. The built web app, served by the
+  # real daemon over a fresh home, driven in Chromium. Only the model API and
+  # WeChat's iLink API are fakes. See packages/web/backend-e2e/README.md.
+  #
+  # On the runner rather than in the Playwright image: the daemon needs the
+  # whole workspace, native modules included, and the image has no toolchain.
+  # ──────────────────────────────────────────
+  backend-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter rome-web exec playwright install --with-deps chromium
+      # Rome serves packages/web/dist and installs the packed first-party apps
+      # at its first boot.
+      - run: pnpm build:apps
+      - run: pnpm --filter rome-web build
+      - run: pnpm --filter rome-web test:backend-e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: backend-e2e-report
+          path: |
+            packages/web/test-results/
+            packages/web/playwright-report/
+          retention-days: 7
+
+  # ──────────────────────────────────────────
   # Job 4: E2E Tests (depends on unit + integration passing)
   # ──────────────────────────────────────────
   e2e-tests:

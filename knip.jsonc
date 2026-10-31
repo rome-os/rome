@@ -88,6 +88,9 @@
         "src/apps/cli/commands/**/*.ts",
         "src/bin/*.ts",
         "src/apps/__fixtures__/**",
+        // The backend browser suite starts this launcher by path from
+        // packages/web/playwright.backend.config.ts's `webServer.command`.
+        "src/test/browser-e2e/server.ts",
         "drizzle.*.config.ts"
       ]
     },

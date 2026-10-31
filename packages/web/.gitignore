@@ -1,1 +1,3 @@
 test-results/
+backend-e2e/.auth/
+playwright-report/
