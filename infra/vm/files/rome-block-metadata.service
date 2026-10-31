@@ -1,0 +1,19 @@
+[Unit]
+Description=Block container egress to the cloud metadata endpoint
+# dockerd recreates DOCKER-USER on every start, dropping this rule with it.
+# PartOf restarts this unit whenever docker restarts, and the docker.service
+# drop-in in files/ pulls it in whenever docker starts.
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null || iptables -I DOCKER-USER -d 169.254.169.254 -j DROP"
+# IPv6 metadata addresses where a provider serves one. The leading dash keeps
+# a host without ip6tables or with IPv6 disabled from failing the unit.
+ExecStart=-/bin/sh -c "ip6tables -C DOCKER-USER -d fd00:ec2::254 -j DROP 2>/dev/null || ip6tables -I DOCKER-USER -d fd00:ec2::254 -j DROP"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
