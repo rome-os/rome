@@ -314,6 +314,11 @@ struct TranscriptList<Row: View>: View {
             .onChange(of: following) { _, now in
                 if now { unseen = 0 }
             }
+            .onChange(of: rows.last?.id) {
+                // Before iOS 18 the scroll anchor does not hold the bottom as
+                // rows arrive, so a list that follows scrolls there itself.
+                if following && !Self.anchorFollowsBottom { scrollToBottom(proxy) }
+            }
             .onChange(of: store.pending.count) { old, new in
                 if new > old { scrollToBottom(proxy) }
             }
@@ -362,6 +367,11 @@ struct TranscriptList<Row: View>: View {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: unseen > 0 && !following)
         }
+    }
+
+    private static var anchorFollowsBottom: Bool {
+        if #available(iOS 18, *) { return true }
+        return false
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
