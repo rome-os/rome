@@ -275,7 +275,7 @@ final class TranscriptStore {
                 approvalPolls[id] = nil
                 watchApproval(id)
             } catch {
-                approvalErrors[id] = "没有提交成功。"
+                approvalErrors[id] = String(localized: "Could not submit")
             }
             resolvingApproval[id] = nil
         }

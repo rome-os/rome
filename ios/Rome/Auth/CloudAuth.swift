@@ -46,13 +46,13 @@ enum AuthError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .cancelled: return "登录已取消。"
-        case .cloudUnauthorized: return "Rome Cloud 登录已过期。"
-        case .instanceNotReady: return "这个 Rome 还没准备好。"
-        case .accessDenied: return "你没有这个 Rome 的访问权限。"
-        case .sessionRejected: return "登录未完成。"
-        case .network: return "连接不上 Rome Cloud。"
-        case .invalidResponse: return "收到的登录信息无效。"
+        case .cancelled: return String(localized: "Sign-in canceled")
+        case .cloudUnauthorized: return String(localized: "Rome Cloud sign-in expired")
+        case .instanceNotReady: return String(localized: "This Rome is not ready yet")
+        case .accessDenied: return String(localized: "No access to this Rome")
+        case .sessionRejected: return String(localized: "Sign-in did not finish")
+        case .network: return String(localized: "Could not reach Rome Cloud")
+        case .invalidResponse: return String(localized: "Invalid sign-in response")
         }
     }
 }

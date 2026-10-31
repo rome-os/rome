@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The 44 pt round glass button the headers use (menu, tasks, back, more).
 struct GlassCircleButton<Label: View>: View {
-    let accessibilityLabel: String
+    let accessibilityLabel: LocalizedStringKey
     let action: () -> Void
     @ViewBuilder var label: () -> Label
 
@@ -93,7 +93,7 @@ struct TypingDots: View {
         .frame(height: 38)
         .background(Palette.bubble, in: Capsule())
         .accessibilityElement()
-        .accessibilityLabel("正在回复")
+        .accessibilityLabel("Typing")
     }
 }
 
@@ -103,10 +103,10 @@ enum TaskTone: Sendable {
 
     var label: String {
         switch self {
-        case .needsYou: return "等你处理"
-        case .running: return "进行中"
-        case .failed: return "失败"
-        case .done: return "已完成"
+        case .needsYou: return String(localized: "Needs you")
+        case .running: return String(localized: "Working")
+        case .failed: return String(localized: "Failed")
+        case .done: return String(localized: "Done")
         case .neutral: return ""
         }
     }
@@ -276,10 +276,10 @@ struct TopBanner: View {
     }
 }
 
-/// "即将推出".
+/// "Coming soon".
 struct ComingSoonTag: View {
     var body: some View {
-        Text("即将推出")
+        Text("Coming soon")
             .romeFont(12, .medium)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 8)

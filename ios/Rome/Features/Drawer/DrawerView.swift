@@ -11,7 +11,7 @@ struct DrawerView: View {
             Button { onRoute(.search) } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").romeFont(16, .medium)
-                    Text("搜索").romeFont(17)
+                    Text("Search").romeFont(17)
                     Spacer()
                 }
                 .foregroundStyle(Palette.sub)
@@ -35,7 +35,7 @@ struct DrawerView: View {
             }
             .padding(.top, 22)
 
-            Text("即将推出")
+            Text("Coming soon")
                 .romeFont(13, .semibold)
                 .foregroundStyle(Palette.sub)
                 .padding(.horizontal, 12)
@@ -77,7 +77,7 @@ struct DrawerView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(PressScaleStyle(scale: 0.98))
-            .accessibilityLabel("\(workspace.instanceName)，设置")
+            .accessibilityLabel("\(workspace.instanceName), settings")
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -134,6 +134,6 @@ private struct ComingSoonItem: View {
         .padding(.horizontal, 12)
         .frame(height: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title)，即将推出")
+        .accessibilityLabel("\(title), coming soon")
     }
 }

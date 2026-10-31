@@ -154,11 +154,11 @@
 				};
 			};
 			buildConfigurationList = A10000000000000000000400 /* Build configuration list for PBXProject "Rome" */;
-			developmentRegion = "zh-Hans";
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				"zh-Hans",
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = A10000000000000000000002;

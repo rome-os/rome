@@ -10,7 +10,7 @@ struct InstancesScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHeader(title: "切换实例")
+                PageHeader(title: "Switch instance")
                 if model.instances.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(0..<3, id: \.self) { index in
@@ -38,7 +38,7 @@ struct InstancesScreen: View {
                         .padding(.horizontal, 20)
                         .transition(.opacity)
                 }
-                Text("实例由 Rome Cloud 管理。")
+                Text("Instances are managed in Rome Cloud.")
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
                     .padding(.horizontal, 20)
@@ -57,7 +57,7 @@ struct InstancesScreen: View {
         return Button {
             guard !current, switching == nil else { return }
             guard instance.isRunning else {
-                stoppedNotice = "「\(instance.name)」已停止。在 Rome Cloud 启动后再打开。"
+                stoppedNotice = String(localized: "“\(instance.name)” is stopped. Start it in Rome Cloud, then open it here.")
                 return
             }
             switching = instance.id
@@ -79,7 +79,7 @@ struct InstancesScreen: View {
                 Spacer()
                 HStack(spacing: 6) {
                     Circle().fill(instance.isRunning ? Palette.success : Palette.sub.opacity(0.4)).frame(width: 7, height: 7)
-                    Text(instance.isRunning ? "运行中" : "已停止")
+                    Text(instance.isRunning ? "Running" : "Stopped")
                         .romeFont(14)
                         .foregroundStyle(Palette.sub)
                 }
@@ -148,12 +148,12 @@ struct SearchScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                GlassCircleButton(accessibilityLabel: "返回", action: { dismiss() }) {
+                GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
                     Image(systemName: "chevron.left").romeFont(17, .semibold)
                 }
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").romeFont(16, .medium).foregroundStyle(Palette.sub)
-                    TextField("搜索消息", text: $query)
+                    TextField("Search messages", text: $query)
                         .romeFont(17)
                         .focused($focused)
                         .submitLabel(.search)
@@ -162,7 +162,7 @@ struct SearchScreen: View {
                         Button { query = ""; hits = []; searched = false } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.sub)
                         }
-                        .accessibilityLabel("清除")
+                        .accessibilityLabel("Clear")
                     }
                 }
                 .padding(.horizontal, 14)
@@ -180,13 +180,13 @@ struct SearchScreen: View {
                 Spacer()
             } else if searched && hits.isEmpty {
                 Spacer()
-                Text("没有找到相关消息").romeFont(17, .semibold)
-                Text("换个词再试试。").romeFont(15).foregroundStyle(Palette.sub).padding(.top, 4)
+                Text("No matching messages").romeFont(17, .semibold)
+                Text("Try a different word.").romeFont(15).foregroundStyle(Palette.sub).padding(.top, 4)
                 Spacer()
                 Spacer()
             } else if !searched {
                 Spacer()
-                Text("搜索 Chat 和任务里的消息").romeFont(15).foregroundStyle(Palette.sub)
+                Text("Search messages in Chat and tasks").romeFont(15).foregroundStyle(Palette.sub)
                 Spacer()
                 Spacer()
             } else {
@@ -277,7 +277,7 @@ struct RoutinesScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 PageHeader(title: "Routines")
-                Text("按时自动运行的工作。在 Chat 里让 Concierge 新建或修改。")
+                Text("Work that runs on its own schedule. To add or change one, ask the Concierge in Chat.")
                     .romeFont(15)
                     .foregroundStyle(Palette.sub)
                     .lineSpacing(4)
@@ -285,7 +285,7 @@ struct RoutinesScreen: View {
                     .padding(.top, -6)
                 if let routines {
                     if routines.isEmpty {
-                        Text("还没有 Routine")
+                        Text("No routines yet")
                             .romeFont(17, .semibold)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
@@ -303,7 +303,7 @@ struct RoutinesScreen: View {
                         .padding(.horizontal, 16)
                     }
                 } else if failed {
-                    CenteredMessage(title: "没能读取 Routines", detail: "检查网络后再试一次。", actionTitle: "重试") {
+                    CenteredMessage(title: "Could not load routines", detail: "Check the network and try again", actionTitle: "Try again") {
                         Task { await load() }
                     }
                     .frame(height: 320)
@@ -358,7 +358,7 @@ struct RoutineRow: View {
                     .foregroundStyle(Palette.sub)
             }
             Spacer()
-            Toggle("", isOn: Binding(get: { routine.enabled }, set: onToggle))
+            Toggle(isOn: Binding(get: { routine.enabled }, set: onToggle)) { EmptyView() }
                 .labelsHidden()
                 .tint(Palette.primary)
         }
@@ -379,7 +379,7 @@ enum RoutineText {
         return words.prefix(1).uppercased() + words.dropFirst()
     }
 
-    /// "每天 08:30 · 下次 明天 08:30".
+    /// "Daily 08:30 · Next: Tomorrow 08:30".
     static func schedule(_ routine: Routine) -> String {
         var parts: [String] = []
         if routine.trigger?["type"]?.string == "schedule" {
@@ -387,12 +387,12 @@ enum RoutineText {
             let rule = routine.trigger?["rrule"]?.string ?? ""
             parts.append("\(frequency(rule)) \(time)".trimmingCharacters(in: .whitespaces))
         } else if let type = routine.trigger?["type"]?.string {
-            parts.append(type == "event" ? "事件触发" : "触发运行")
+            parts.append(type == "event" ? String(localized: "On an event") : String(localized: "On a trigger"))
         }
         if !routine.enabled {
-            parts.append("已暂停")
+            parts.append(String(localized: "Paused"))
         } else if let next = RomeDate.parse(routine.nextRunAt) {
-            parts.append("下次 \(RelativeTime.until(next))")
+            parts.append(String(localized: "Next: \(RelativeTime.until(next))"))
         }
         return parts.joined(separator: " · ")
     }
@@ -404,15 +404,31 @@ enum RoutineText {
         }, uniquingKeysWith: { a, _ in a })
         let interval = Int(fields["INTERVAL"] ?? "1") ?? 1
         switch fields["FREQ"] {
-        case "DAILY": return interval > 1 ? "每 \(interval) 天" : "每天"
+        case "DAILY": return interval > 1 ? String(localized: "Every \(interval) days") : String(localized: "Daily")
         case "WEEKLY":
-            let days = ["MO": "一", "TU": "二", "WE": "三", "TH": "四", "FR": "五", "SA": "六", "SU": "日"]
-            let byDay = (fields["BYDAY"] ?? "").split(separator: ",").compactMap { days[String($0)] }
-            if !byDay.isEmpty { return "每周" + byDay.joined(separator: "、") }
-            return interval > 1 ? "每 \(interval) 周" : "每周"
-        case "HOURLY": return interval > 1 ? "每 \(interval) 小时" : "每小时"
-        case "MONTHLY": return "每月"
-        default: return "按计划"
+            let byDay = (fields["BYDAY"] ?? "").split(separator: ",").compactMap { weekday(String($0)) }
+            if !byDay.isEmpty {
+                let list = byDay.joined(separator: String(localized: "routine.weekdaySeparator", defaultValue: ", ", comment: "Between weekdays in a weekly schedule"))
+                return String(localized: "Weekly on \(list)")
+            }
+            return interval > 1 ? String(localized: "Every \(interval) weeks") : String(localized: "Weekly")
+        case "HOURLY": return interval > 1 ? String(localized: "Every \(interval) hours") : String(localized: "Hourly")
+        case "MONTHLY": return String(localized: "Monthly")
+        default: return String(localized: "On a schedule")
+        }
+    }
+
+    /// An RRULE `BYDAY` code as a schedule shows it: "Mon" in English, "一" in "每周一、五".
+    private static func weekday(_ code: String) -> String? {
+        switch code {
+        case "MO": return String(localized: "Mon", comment: "Monday in a weekly schedule")
+        case "TU": return String(localized: "Tue", comment: "Tuesday in a weekly schedule")
+        case "WE": return String(localized: "Wed", comment: "Wednesday in a weekly schedule")
+        case "TH": return String(localized: "Thu", comment: "Thursday in a weekly schedule")
+        case "FR": return String(localized: "Fri", comment: "Friday in a weekly schedule")
+        case "SA": return String(localized: "Sat", comment: "Saturday in a weekly schedule")
+        case "SU": return String(localized: "Sun", comment: "Sunday in a weekly schedule")
+        default: return nil
         }
     }
 }

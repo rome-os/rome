@@ -2,12 +2,12 @@ import SwiftUI
 
 /// A pushed page's top: a glass back button and a large title.
 struct PageHeader: View {
-    let title: String
+    let title: LocalizedStringKey
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            GlassCircleButton(accessibilityLabel: "返回", action: { dismiss() }) {
+            GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
                 Image(systemName: "chevron.left").romeFont(17, .semibold)
             }
             .padding(.horizontal, 12)
@@ -24,7 +24,7 @@ struct PageHeader: View {
 
 /// An inset group: a white rounded card with hairline rows.
 struct SettingsGroup<Content: View>: View {
-    var header: String? = nil
+    var header: LocalizedStringKey? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -46,7 +46,7 @@ struct SettingsGroup<Content: View>: View {
 /// A row with a 30 pt icon tile, a label, and a trailing accessory.
 struct SettingsRow<Trailing: View>: View {
     let systemImage: String
-    let title: String
+    let title: LocalizedStringKey
     var last = false
     @ViewBuilder let trailing: () -> Trailing
 
@@ -87,20 +87,20 @@ struct SettingsScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                PageHeader(title: "设置")
+                PageHeader(title: "Settings")
                 accountCard
                     .padding(.horizontal, 16)
                     .padding(.top, -8)
-                SettingsGroup(header: "AI 工具用量") {
+                SettingsGroup(header: "AI tool usage") {
                     UsageRow(name: "Claude", provider: usage?.claude, last: false)
                     UsageRow(name: "Codex", provider: usage?.codex, last: true)
                 }
                 .padding(.horizontal, 16)
-                SettingsGroup(header: "其他") {
+                SettingsGroup(header: "Other") {
                     Button {
                         if let url = model.webURL { openURL(url) }
                     } label: {
-                        SettingsRow(systemImage: "safari", title: "在 Web 上管理") {
+                        SettingsRow(systemImage: "safari", title: "Manage on the web") {
                             Image(systemName: "arrow.up.right")
                                 .romeFont(13, .semibold)
                                 .foregroundStyle(Palette.sub)
@@ -108,14 +108,14 @@ struct SettingsScreen: View {
                     }
                     .buttonStyle(RowPressStyle())
                     Button { showFeedback = true } label: {
-                        SettingsRow(systemImage: "bubble.left.and.text.bubble.right", title: "发送反馈") {
+                        SettingsRow(systemImage: "bubble.left.and.text.bubble.right", title: "Send feedback") {
                             Image(systemName: "chevron.right")
                                 .romeFont(13, .semibold)
                                 .foregroundStyle(Palette.sub)
                         }
                     }
                     .buttonStyle(RowPressStyle())
-                    SettingsRow(systemImage: "info.circle", title: "版本", last: true) {
+                    SettingsRow(systemImage: "info.circle", title: "Version", last: true) {
                         Text(appVersion)
                             .romeFont(17, monospacedDigits: true)
                             .foregroundStyle(Palette.sub)
@@ -124,7 +124,7 @@ struct SettingsScreen: View {
                 .padding(.horizontal, 16)
                 SettingsGroup {
                     Button { confirmSignOut = true } label: {
-                        Text("退出登录")
+                        Text("Sign out")
                             .romeFont(17, .medium)
                             .foregroundStyle(Palette.destructive)
                             .frame(maxWidth: .infinity, minHeight: 52)
@@ -141,8 +141,8 @@ struct SettingsScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task { usage = try? await workspace.backend.aiTools() }
-        .confirmationDialog("退出后需要重新用 Rome Cloud 登录。", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button("退出登录", role: .destructive) { Task { await model.signOut() } }
+        .confirmationDialog("After signing out, sign in with Rome Cloud to open Rome again.", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { Task { await model.signOut() } }
         }
         .sheet(isPresented: $showFeedback) {
             FeedbackSheet(backend: workspace.backend)
@@ -163,7 +163,7 @@ struct SettingsScreen: View {
                         .lineLimit(1)
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        Text("\(workspace.instanceName) · \(workspace.host)").lineLimit(1)
+                        Text(verbatim: "\(workspace.instanceName) · \(workspace.host)").lineLimit(1)
                     }
                     .romeFont(14)
                     .foregroundStyle(Palette.sub)
@@ -180,7 +180,7 @@ struct SettingsScreen: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .accessibilityHint("切换实例")
+        .accessibilityHint("Switches instances.")
     }
 
     private var appVersion: String {
@@ -209,7 +209,7 @@ struct UsageRow: View {
                 Text(name).romeFont(17, .medium)
                 Spacer()
                 if provider?.loggedIn == true, window != nil {
-                    Text("\(Int(percent.rounded()))%")
+                    Text(verbatim: "\(Int(percent.rounded()))%")
                         .romeFont(15, .semibold, monospacedDigits: true)
                         .contentTransition(.numericText())
                 }
@@ -225,13 +225,13 @@ struct UsageRow: View {
                 }
                 .frame(height: 6)
                 .accessibilityElement()
-                .accessibilityLabel("\(name) 用量")
-                .accessibilityValue("\(Int(percent))%")
+                .accessibilityLabel("\(name) usage")
+                .accessibilityValue(Text(verbatim: "\(Int(percent))%"))
                 Text(resetText)
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
             } else {
-                Text(provider == nil ? "正在读取…" : "未登录")
+                Text(provider == nil ? "Loading…" : "Not signed in")
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
             }
@@ -247,13 +247,13 @@ struct UsageRow: View {
 
     private var resetText: String {
         guard let date = RomeDate.parse(window?.resetsAt) else {
-            return window == nil ? "暂无用量数据" : "用量会自动重置"
+            return window == nil ? String(localized: "No usage data yet") : String(localized: "Usage resets automatically")
         }
         let seconds = date.timeIntervalSinceNow
-        if seconds <= 0 { return "即将重置" }
-        if seconds < 3600 { return "\(max(1, Int(seconds / 60))) 分钟后重置" }
-        if seconds < 86_400 { return "\(Int(seconds / 3600)) 小时后重置" }
-        return "\(Int(seconds / 86_400)) 天后重置"
+        if seconds <= 0 { return String(localized: "Resets soon") }
+        if seconds < 3600 { return String(localized: "Resets in \(max(1, Int(seconds / 60))) minutes") }
+        if seconds < 86_400 { return String(localized: "Resets in \(Int(seconds / 3600)) hours") }
+        return String(localized: "Resets in \(Int(seconds / 86_400)) days")
     }
 }
 
@@ -269,19 +269,19 @@ struct FeedbackSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("发送反馈").romeFont(24, .bold).tracking(-0.6)
+                Text("Send feedback").romeFont(24, .bold).tracking(-0.6)
                 Spacer()
                 SheetCloseButton { dismiss() }
             }
             if sent {
                 VStack(spacing: 10) {
                     StatusGlyph(tone: .done, size: 36)
-                    Text("已发送。谢谢。").romeFont(17, .semibold)
+                    Text("Sent. Thank you.").romeFont(17, .semibold)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             } else {
-                TextField("哪里好用，哪里不好用？", text: $text, axis: .vertical)
+                TextField("What works, and what does not?", text: $text, axis: .vertical)
                     .romeFont(16)
                     .lineLimit(5...10)
                     .focused($focused)
@@ -289,12 +289,12 @@ struct FeedbackSheet: View {
                     .background(Palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .hairline(radius: 16)
                 if failed {
-                    Text("没发出去，请再试一次。")
+                    Text("Could not send. Please try again.")
                         .romeFont(13, .medium)
                         .foregroundStyle(Palette.destructive)
                 }
                 Spacer()
-                PrimaryButton(title: "发送", loading: sending, disabled: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                PrimaryButton(title: "Send", loading: sending, disabled: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     send()
                 }
             }

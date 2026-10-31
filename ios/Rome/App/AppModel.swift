@@ -157,7 +157,7 @@ final class AppModel {
                 try await cloud.completeSignIn(request, callback: url)
                 await openInstance(preferring: nil, showHint: true)
             } catch {
-                signInError = (error as? LocalizedError)?.errorDescription ?? "登录未完成。"
+                signInError = (error as? LocalizedError)?.errorDescription ?? String(localized: "Sign-in did not finish")
                 phase = .signedOut
             }
         }
@@ -184,7 +184,7 @@ final class AppModel {
             await connect(to: chosen)
             if showHint, pickedAmongMany, !UserDefaults.standard.bool(forKey: Defaults.hintShown) {
                 UserDefaults.standard.set(true, forKey: Defaults.hintShown)
-                autoOpenHint = "已打开「\(chosen.name)」。可以在设置里切换。"
+                autoOpenHint = String(localized: "Opened “\(chosen.name)”. Switch instances in Settings.")
             }
         } catch AuthError.cloudUnauthorized {
             phase = .signedOut
@@ -302,7 +302,7 @@ final class AppModel {
         instances = DemoBackend.instances
         currentInstanceID = DemoBackend.instances.first?.id
         Task {
-            await open(Workspace(backend: backend, instanceName: "我的 Rome", host: "me.romeos.cc", accountLabel: "lin@example.com"))
+            await open(Workspace(backend: backend, instanceName: String(localized: "My Rome"), host: "me.romeos.cc", accountLabel: "lin@example.com"))
         }
     }
 
@@ -321,16 +321,16 @@ final class AppModel {
               let cookie = http.value(forHTTPHeaderField: "Set-Cookie"),
               let value = cookie.components(separatedBy: ";").first?.components(separatedBy: "rome_session=").last
         else {
-            signInError = "连接不上本地 Rome。"
+            signInError = String(localized: "Could not reach the local Rome")
             phase = .signedOut
             return
         }
         token.token = value
-        let local = CloudInstance(id: "local", name: "本地 Rome", slug: "local", origin: origin, status: "running")
+        let local = CloudInstance(id: "local", name: String(localized: "Local Rome"), slug: "local", origin: origin, status: "running")
         instances = [local]
         currentInstanceID = local.id
         let client = APIClient(origin: url, token: { [token] in token.token })
-        await open(Workspace(backend: LiveBackend(client: client), instanceName: "本地 Rome", host: url.host() ?? origin, accountLabel: user))
+        await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user))
     }
     #endif
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "任务说明 · 来自 Chat": the brief the Concierge gave the task.
+/// "Task brief · From Chat": the brief the Concierge gave the task.
 struct BriefCard: View {
     let text: String
 
@@ -9,7 +9,7 @@ struct BriefCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left")
                     .romeFont(11, .semibold)
-                Text("任务说明 · 来自 Chat")
+                Text("Task brief · From Chat")
             }
             .romeFont(12, .semibold)
             .foregroundStyle(Palette.sub)
@@ -24,7 +24,7 @@ struct BriefCard: View {
     }
 }
 
-/// "用了 3 个工具": collapsed by default, it opens to one row per call.
+/// "Used 3 tools": collapsed by default, it opens to one row per call.
 struct ToolSummary: View {
     let count: Int
     let calls: [ToolCall]?
@@ -39,7 +39,7 @@ struct ToolSummary: View {
                     Button { toggle() } label: {
                         HStack(spacing: 6) {
                             WrenchGlyph()
-                            Text("用了 \(count) 个工具")
+                            Text("Used \(count) tools")
                             Spacer()
                             Image(systemName: "chevron.up").romeFont(10, .bold)
                         }
@@ -52,7 +52,7 @@ struct ToolSummary: View {
                     .buttonStyle(.plain)
                     if let calls {
                         if calls.isEmpty {
-                            Text("没有可显示的工具记录。")
+                            Text("No tool calls to show.")
                                 .romeFont(13)
                                 .foregroundStyle(Palette.sub)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,7 +100,7 @@ struct ToolSummary: View {
                 Button { toggle() } label: {
                     HStack(spacing: 6) {
                         WrenchGlyph()
-                        Text("用了 \(count) 个工具")
+                        Text("Used \(count) tools")
                         Image(systemName: "chevron.down").romeFont(9, .bold)
                     }
                     .romeFont(13, .medium)
@@ -179,7 +179,7 @@ struct SheetCloseButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(PressScaleStyle())
-        .accessibilityLabel("关闭")
+        .accessibilityLabel("Close")
     }
 }
 
@@ -202,7 +202,7 @@ struct ApprovalCardView: View {
             case nil:
                 HStack(spacing: 10) {
                     Spinner(size: 16, color: Palette.sub)
-                    Text("正在读取审批…").romeFont(15).foregroundStyle(Palette.sub)
+                    Text("Loading approval…").romeFont(15).foregroundStyle(Palette.sub)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 14)
@@ -212,9 +212,9 @@ struct ApprovalCardView: View {
             case .pending:
                 pendingCard
             case .approved, .executing, .executed:
-                resolvedLine(success: true, label: status == .executed ? "已批准" : "已批准 · 正在执行")
+                resolvedLine(success: true, label: status == .executed ? "Approved" : "Approved · Running")
             case .rejected:
-                resolvedLine(success: false, label: "已拒绝")
+                resolvedLine(success: false, label: "Rejected")
             case .failed:
                 failedCard
             }
@@ -235,7 +235,7 @@ struct ApprovalCardView: View {
                     .frame(width: 36, height: 36)
                     .background(Palette.warnSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("需要批准")
+                    Text("Needs approval")
                         .romeFont(12, .semibold)
                         .foregroundStyle(Palette.warningText)
                     Text(title)
@@ -291,7 +291,7 @@ struct ApprovalCardView: View {
                         if submitting == false {
                             Spinner(size: 18, lineWidth: 2.4, color: Palette.fg, trackOpacity: 0.2)
                         } else {
-                            Text("拒绝")
+                            Text("Reject")
                         }
                     }
                     .romeFont(17, .semibold)
@@ -306,7 +306,7 @@ struct ApprovalCardView: View {
                         if submitting == true {
                             Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
                         } else {
-                            Text("批准")
+                            Text("Approve")
                         }
                     }
                     .romeFont(17, .semibold)
@@ -328,7 +328,7 @@ struct ApprovalCardView: View {
         .padding(.top, 4)
     }
 
-    private func resolvedLine(success: Bool, label: String) -> some View {
+    private func resolvedLine(success: Bool, label: LocalizedStringKey) -> some View {
         HStack(spacing: 10) {
             StatusGlyph(tone: success ? .done : .neutral)
                 .overlay {
@@ -339,7 +339,7 @@ struct ApprovalCardView: View {
                         }
                     }
                 }
-            (Text(label).fontWeight(.semibold) + Text(" · \(title)").foregroundStyle(Palette.sub))
+            (Text(label).fontWeight(.semibold) + Text(verbatim: " · \(title)").foregroundStyle(Palette.sub))
                 .romeFont(15)
             Spacer(minLength: 0)
             if let resolvedAt {
@@ -359,7 +359,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AlertGlyph(size: 15)
-                Text("已批准，但\(title)没有完成。").romeFont(14, .medium)
+                Text("Approved, but “\(title)” did not finish").romeFont(14, .medium)
             }
             .foregroundStyle(Palette.destructive)
             .padding(.horizontal, 12)
@@ -373,7 +373,7 @@ struct ApprovalCardView: View {
     }
 }
 
-/// The agent asked something. Options answer in one tap; "其他回答…" takes text.
+/// The agent asked something. Options answer in one tap; "Or type your own…" takes text.
 struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
@@ -404,7 +404,7 @@ struct QuestionCardView: View {
 
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("在等你回答")
+            Text("Waiting for your answer")
                 .romeFont(12, .semibold)
                 .foregroundStyle(Palette.warningText)
             ForEach(part.questions, id: \.id) { question in
@@ -419,7 +419,7 @@ struct QuestionCardView: View {
                             optionButton(question, option)
                         }
                         HStack(spacing: 8) {
-                            TextField(question.options.isEmpty ? "写下回答…" : "其他回答…", text: binding(question.id), axis: .vertical)
+                            TextField(question.options.isEmpty ? "Type your answer…" : "Or type your own…", text: binding(question.id), axis: .vertical)
                                 .romeFont(16)
                                 .lineLimit(1...4)
                                 .focused($focusedQuestion, equals: question.id)
@@ -446,7 +446,7 @@ struct QuestionCardView: View {
                 }
             }
             if !single {
-                PrimaryButton(title: "提交", loading: sending, disabled: !complete) { submit(override: [:]) }
+                PrimaryButton(title: "Submit", loading: sending, disabled: !complete) { submit(override: [:]) }
             }
         }
         .padding(16)
@@ -523,7 +523,7 @@ struct QuestionCardView: View {
 
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("已回答")
+            Text("Answered")
                 .romeFont(12, .semibold)
                 .foregroundStyle(Palette.sub)
             ForEach(part.questions, id: \.id) { question in
@@ -587,10 +587,10 @@ struct WebOnlyCard: View {
                 .foregroundStyle(Palette.fg)
                 .frame(width: 32, height: 32)
                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("这部分内容需要在 Web 上查看")
+            Text("Shown only on the web")
                 .romeFont(15)
             Spacer(minLength: 0)
-            Button("打开") {
+            Button("Open") {
                 if let url = model.webURL { openURL(url) }
             }
             .romeFont(14, .semibold)

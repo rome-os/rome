@@ -211,7 +211,7 @@ struct MarkdownText: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(ordered ? "\(start + index)." : "•")
+                        Text(verbatim: ordered ? "\(start + index)." : "•")
                             .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
                             .foregroundStyle(Palette.sub)
                             .frame(minWidth: 12, alignment: .trailing)

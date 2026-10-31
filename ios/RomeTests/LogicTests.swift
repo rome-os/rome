@@ -99,9 +99,10 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
 
 @Suite struct RoutineTextTests {
     @Test func describesSchedules() {
-        #expect(RoutineText.frequency("FREQ=DAILY") == "每天")
-        #expect(RoutineText.frequency("FREQ=DAILY;INTERVAL=3") == "每 3 天")
-        #expect(RoutineText.frequency("FREQ=WEEKLY;BYDAY=MO,FR") == "每周一、五")
+        #expect(RoutineText.frequency("FREQ=DAILY") == "Daily")
+        #expect(RoutineText.frequency("FREQ=DAILY;INTERVAL=3") == "Every 3 days")
+        #expect(RoutineText.frequency("FREQ=WEEKLY;BYDAY=MO,FR") == "Weekly on Mon, Fri")
+        #expect(RoutineText.frequency("FREQ=HOURLY;INTERVAL=2") == "Every 2 hours")
         #expect(RoutineText.title("price_watch") == "Price watch")
         #expect(RoutineText.title("每日简报") == "每日简报")
     }
