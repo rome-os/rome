@@ -45,6 +45,8 @@ final class TranscriptStore {
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
     private var cursor: String?
+    /// The order each message id was first received in.
+    private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
 
@@ -102,6 +104,7 @@ final class TranscriptStore {
             let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { known.contains($0.id) }
             if gap {
                 messages = []
+                seen = [:]
                 olderPage = nil
             }
             merge(page.messages)
@@ -154,10 +157,32 @@ final class TranscriptStore {
         Task { await backend.markRead(sessionId: sessionId) }
     }
 
+    /// Keeps the server's order: a turn's rows stay together, turns ordered by
+    /// when they started, rows in a turn by time. Times are whole seconds, so
+    /// rows written in the same second keep the order the server sent them in;
+    /// the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage]) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for message in incoming { byID[message.id] = message }
-        messages = byID.values.sorted { $0.date < $1.date }
+        for message in incoming {
+            byID[message.id] = message
+            if seen[message.id] == nil {
+                seen[message.id] = seen.count
+            }
+        }
+        let all = Array(byID.values)
+        var turnStart: [String: Date] = [:]
+        for message in all {
+            let key = message.turnId ?? message.id
+            turnStart[key] = min(turnStart[key] ?? message.date, message.date)
+        }
+        messages = all.sorted { a, b in
+            let keyA = a.turnId ?? a.id, keyB = b.turnId ?? b.id
+            let startA = turnStart[keyA]!, startB = turnStart[keyB]!
+            if startA != startB { return startA < startB }
+            if keyA != keyB { return keyA < keyB }
+            if a.date != b.date { return a.date < b.date }
+            return seen[a.id]! < seen[b.id]!
+        }
         let stored = Set(messages.map(\.id))
         pending.removeAll { stored.contains($0.id) }
     }

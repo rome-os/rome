@@ -80,7 +80,8 @@ enum TranscriptBuilder {
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
 
-        for message in messages.sorted(by: { $0.date < $1.date }) {
+        // Messages come in the store's order, which follows the server's turns.
+        for message in messages {
             if message.isTrace {
                 guard options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 else { continue }
                 entries.append(Entry(
@@ -121,6 +122,7 @@ enum TranscriptBuilder {
                 entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))
             }
         }
+        // What the guardian just sent is newer than anything stored.
         for send in pending.sorted(by: { $0.createdAt < $1.createdAt }) where !storedIDs.contains(send.id) {
             entries.append(Entry(
                 id: send.id, date: send.createdAt, guardian: true,
@@ -128,7 +130,6 @@ enum TranscriptBuilder {
                 bubbleIndexes: []
             ))
         }
-        entries.sort { $0.date < $1.date }
 
         // Walk the entries: separators, then corner shapes for each agent run.
         var output: [TranscriptRow] = []

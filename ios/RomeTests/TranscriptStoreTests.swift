@@ -124,4 +124,28 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.running)
         #expect(!store.stopped)
     }
+
+    @Test func rowsWrittenInTheSameSecondKeepTheServersOrder() async {
+        func row(_ id: String, turn: String, second: Double, role: String = "assistant") -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: turn, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        // Server order: a turn's rows together, the turn's late reply before
+        // the next turn, two rows in the same second in the order written.
+        backend.stored = [
+            row("u1", turn: "t1", second: 0, role: "user"),
+            row("a1", turn: "t1", second: 20),
+            row("a2", turn: "t1", second: 50),
+            row("a3", turn: "t1", second: 50),
+            row("u2", turn: "t2", second: 30, role: "user"),
+        ]
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        let expected = ["u1", "a1", "a2", "a3", "u2"]
+        #expect(store.messages.map(\.id) == expected)
+
+        await store.reload()
+        await store.reload()
+        #expect(store.messages.map(\.id) == expected)
+    }
 }
