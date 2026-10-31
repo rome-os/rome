@@ -81,10 +81,28 @@ test.describe("on fresh chats", () => {
       mention: beta.username,
     });
     await telegramReplied(beta.username, group.id, "Reply to gapl2");
-    await page.goto(`/sessions/${await sessionOf(beta.id, group.id)}`);
+    const seat = await sessionOf(beta.id, group.id);
+    await page.goto(`/sessions/${seat}`);
     await expect(page.getByText("After beta joined E2E-REPLY gapl2").first()).toBeVisible();
     await page.waitForTimeout(1_000);
     await shot(page, "late-seat");
+    const calls = (await control.model()).calls.filter(
+      (c) => c.directive === "REPLY gapl2",
+    ) as Array<{
+      prompt?: string;
+    }>;
+    const call = calls[0];
+    note(
+      "late-seat",
+      [
+        `Beta's model was called ${calls.length} time(s) for the mention.`,
+        `What the group said before beta joined reached beta: ${call?.prompt?.includes("Before beta joined") ? "yes" : "no"}.`,
+        "",
+        "What beta read as the guardian's message:",
+        "",
+        ...calls.map((c, i) => `--- call ${i + 1} ---\n${c.prompt ?? ""}`),
+      ].join("\n"),
+    );
   });
 
   test("a quote of the first message of a long reply", async ({ page }) => {
