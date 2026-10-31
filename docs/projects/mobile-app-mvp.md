@@ -20,13 +20,20 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 - [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of b72cb7d8 (with English as the default language), team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
 - [x] English as the default language, zh-Hans a translation: merged from `claude/epic-vaughan-1e52a1` after an independent review found no serious defects (result: [`mobile-app-mvp-english.md`](mobile-app-mvp-english.md))
 - [x] Reinstall the merged build on the user's iPhone (b72cb7d8, tests passed first)
-- [ ] Try the app on the iPhone and list what feels off (keyboard, drawer swipe, Tasks sheet drag, motion)
+- [x] Try the app on the iPhone and list what feels off (first pass, 2026-10-31: see "Feel fixes, round 1")
 - [ ] OK to push `feat/ios-app` and open a PR to `main`
+
+## Feel fixes, round 1 (from the user's iPhone pass)
+
+- [ ] Chat top bar: drop the black bar; the bar is clear, and its three items sit on the iOS glass background
+- [ ] Drawer: a swipe on the uncovered chat area closes it; the divider no longer shakes while it closes
+- [ ] Settings: slides up from the bottom with an X at top right (no back button); opening it leaves the drawer as it is
+- [ ] Task chat: no jumping while scrolling during a running turn
+- [ ] Task chat: after Stop, the "Running" spinner stops
 
 ## Next
 
 - [ ] Fix whatever the Cloud sign-in run turns up
-- [ ] Fix the feel issues from the user's simulator pass
 - [ ] Open the PR; get `ios-ci` green
 - [ ] TestFlight: Apple Team ID, signing, and upload steps (needs the user; nothing uploaded without a go)
 
