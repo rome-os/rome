@@ -33,8 +33,63 @@ export const control = {
       body: JSON.stringify({ text, from }),
     }),
   wechatMessages: () => call<WechatMessage[]>("/wechat/messages"),
-  unhandled: () => call<{ model: string[]; wechat: string[] }>("/unhandled"),
+  unhandled: () => call<{ model: string[]; wechat: string[]; telegram: string[] }>("/unhandled"),
+  /** A person writes in a Telegram chat that the named fake bots are in. */
+  telegramSays: (input: TelegramEmit) =>
+    call<Record<string, number>>("/telegram/emit", post(input)),
+  telegramMessages: () => call<TelegramMessage[]>("/telegram/messages"),
+  /** Rows of a read-only query on Rome's database. */
+  sql: <T = Record<string, unknown>>(sql: string) => call<T[]>("/sql", post({ sql })),
+  saveFixture: (dir: string, manifest: unknown) =>
+    call<{ saved: string }>("/fixture/save", post({ dir, manifest })),
 };
+
+function post(body: unknown): RequestInit {
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+/** The fake Telegram's bots (packages/core/src/test/browser-e2e/fake-telegram.ts). */
+export const TELEGRAM_BOTS = {
+  alpha: { username: "e2e_alpha_bot", token: "7000000001:e2e-alpha-token", id: "7000000001" },
+  beta: { username: "e2e_beta_bot", token: "7000000002:e2e-beta-token", id: "7000000002" },
+} as const;
+
+export interface TelegramChat {
+  id: number;
+  type: "private" | "group" | "supergroup";
+  title?: string;
+}
+
+export interface TelegramPerson {
+  id: number;
+  first_name: string;
+  username?: string;
+}
+
+export interface TelegramEmit {
+  chat: TelegramChat;
+  from: TelegramPerson;
+  text: string;
+  /** The bots in the chat, by username; each receives the message. */
+  bots: string[];
+  /** A bot the text names with its @handle. */
+  mention?: string;
+  /** A message to reply to, by the id `bot` knows it by. */
+  replyTo?: { bot: string; messageId: number };
+}
+
+export interface TelegramMessage {
+  bot: string;
+  chatId: number;
+  messageId: number;
+  from: string;
+  text: string;
+  replyTo?: number;
+}
 
 /** A short id that names one test's chats and replies. */
 export function token(prefix: string): string {

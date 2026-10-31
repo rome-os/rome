@@ -1,0 +1,1091 @@
+{
+  "home": "/tmp/nix-shell-bQnqWg/rome-browser-e2e-tQWWmb",
+  "seededAt": "2026-10-31T09:37:30.267Z",
+  "romeCommit": "124a1a5",
+  "dashboardChats": {
+    "plain": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+    "subagent": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+    "renamed": "8785c7e7-a5fe-45d2-8e12-a5e3c022f636",
+    "archived": "60bf8100-6066-4dee-b413-d71dbd494be2",
+    "unread": "e9a466ff-afcf-4ac2-8a85-4c8275e8fa69"
+  },
+  "legacy": {
+    "channels": [
+      {
+        "id": "wechat",
+        "connection_kind": "wechat",
+        "platform": "wechat",
+        "platform_account_id": "e2e-bot@im.bot"
+      },
+      {
+        "id": "b787267a-24ea-4471-a5fe-af79a707b4ee",
+        "connection_kind": "telegram",
+        "platform": "telegram",
+        "platform_account_id": "7000000001"
+      },
+      {
+        "id": "1addef90-ec09-4c6f-8425-6cbdbb24ff5d",
+        "connection_kind": "telegram",
+        "platform": "telegram",
+        "platform_account_id": "7000000002"
+      }
+    ],
+    "sessions": [
+      {
+        "id": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+        "type": "channel",
+        "source_channel": "webchat",
+        "source_thread_id": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+        "source_thread_type": "private",
+        "source_thread_name": "New Chat",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Topic fxplain1"
+      },
+      {
+        "id": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+        "type": "channel",
+        "source_channel": "webchat",
+        "source_thread_id": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+        "source_thread_type": "private",
+        "source_thread_name": "New Chat",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Topic fxsub"
+      },
+      {
+        "id": "ca81508a-a70b-4fa0-a197-9b43a904a381",
+        "type": "subagent",
+        "source_channel": "webchat",
+        "source_thread_id": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+        "source_thread_type": "private",
+        "source_thread_name": "New Chat",
+        "parent_session_id": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+        "agent_name": "assistant:assistant",
+        "name": "assistant:assistant: New Chat"
+      },
+      {
+        "id": "8785c7e7-a5fe-45d2-8e12-a5e3c022f636",
+        "type": "channel",
+        "source_channel": "webchat",
+        "source_thread_id": "8785c7e7-a5fe-45d2-8e12-a5e3c022f636",
+        "source_thread_type": "private",
+        "source_thread_name": "New Chat",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Renamed fxrename"
+      },
+      {
+        "id": "60bf8100-6066-4dee-b413-d71dbd494be2",
+        "type": "channel",
+        "source_channel": "webchat",
+        "source_thread_id": "60bf8100-6066-4dee-b413-d71dbd494be2",
+        "source_thread_type": "private",
+        "source_thread_name": "New Chat",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Topic fxarchive"
+      },
+      {
+        "id": "e9a466ff-afcf-4ac2-8a85-4c8275e8fa69",
+        "type": "channel",
+        "source_channel": "webchat",
+        "source_thread_id": "e9a466ff-afcf-4ac2-8a85-4c8275e8fa69",
+        "source_thread_type": "private",
+        "source_thread_name": "New Chat",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Topic fxunread"
+      },
+      {
+        "id": "channel:wechat:e2e-guardian@im.wechat",
+        "type": "channel",
+        "source_channel": "wechat",
+        "source_thread_id": "e2e-guardian@im.wechat",
+        "source_thread_type": "private",
+        "source_thread_name": null,
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "wechat:e2e-guardian@im.wechat"
+      },
+      {
+        "id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001",
+        "type": "channel",
+        "source_channel": "b787267a-24ea-4471-a5fe-af79a707b4ee",
+        "source_thread_id": "5000001",
+        "source_thread_type": "private",
+        "source_thread_name": null,
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "b787267a-24ea-4471-a5fe-af79a707b4ee:5000001"
+      },
+      {
+        "id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:5000001",
+        "type": "channel",
+        "source_channel": "1addef90-ec09-4c6f-8425-6cbdbb24ff5d",
+        "source_thread_id": "5000001",
+        "source_thread_type": "private",
+        "source_thread_name": null,
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "1addef90-ec09-4c6f-8425-6cbdbb24ff5d:5000001"
+      },
+      {
+        "id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "type": "channel",
+        "source_channel": "1addef90-ec09-4c6f-8425-6cbdbb24ff5d",
+        "source_thread_id": "-4001234567",
+        "source_thread_type": "group",
+        "source_thread_name": "Fixture family",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Fixture family"
+      },
+      {
+        "id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "type": "channel",
+        "source_channel": "b787267a-24ea-4471-a5fe-af79a707b4ee",
+        "source_thread_id": "-4001234567",
+        "source_thread_type": "group",
+        "source_thread_name": "Fixture family",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Fixture family"
+      },
+      {
+        "id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "type": "channel",
+        "source_channel": "1addef90-ec09-4c6f-8425-6cbdbb24ff5d",
+        "source_thread_id": "-1002003004005",
+        "source_thread_type": "group",
+        "source_thread_name": "Fixture team",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Fixture team"
+      },
+      {
+        "id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "type": "channel",
+        "source_channel": "b787267a-24ea-4471-a5fe-af79a707b4ee",
+        "source_thread_id": "-1002003004005",
+        "source_thread_type": "group",
+        "source_thread_name": "Fixture team",
+        "parent_session_id": null,
+        "agent_name": null,
+        "name": "Fixture team"
+      }
+    ],
+    "messages": [
+      {
+        "id": "0e60679a-7268-4f62-871f-c67d626a61f2",
+        "session_id": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "a0fde13e-4a69-4199-912d-dd66695ecc26",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture plain E2E-REPLY fxplain1\"}]"
+      },
+      {
+        "id": "d438e726-0c2b-4a2d-806e-51635f28f546",
+        "session_id": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "a0fde13e-4a69-4199-912d-dd66695ecc26",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxplain1\",\"turnPhase\":\"final\",\"blockId\":\"msg_e2e_3:0\",\"blockIx\":0}]"
+      },
+      {
+        "id": "583ae93c-3123-430e-a313-c3767b0c7863",
+        "session_id": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "f2ca733d-5e74-4404-b72b-44984f8905b3",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"And again E2E-REPLY fxplain2\"}]"
+      },
+      {
+        "id": "9b609245-e3fb-40d5-acb4-4cc50b02e09a",
+        "session_id": "4f1c884f-5fa0-4d61-985a-3d3ef1fb23e3",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "f2ca733d-5e74-4404-b72b-44984f8905b3",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxplain2\",\"turnPhase\":\"final\",\"blockId\":\"msg_e2e_5:0\",\"blockIx\":0}]"
+      },
+      {
+        "id": "306e504f-b141-49ba-a412-1fa5f15c1bf6",
+        "session_id": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "38ade638-038b-4c14-811a-73a23cbd6e72",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture delegate E2E-SUBAGENT fxsub\"}]"
+      },
+      {
+        "id": "transcript-message:ca81508a-a70b-4fa0-a197-9b43a904a381:3b9c34eb-6b12-4da6-9c14-1d39b421c6f6:user",
+        "session_id": "ca81508a-a70b-4fa0-a197-9b43a904a381",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "3b9c34eb-6b12-4da6-9c14-1d39b421c6f6",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"E2E-CHILD fxsub\"}]"
+      },
+      {
+        "id": "transcript-message:ca81508a-a70b-4fa0-a197-9b43a904a381:3b9c34eb-6b12-4da6-9c14-1d39b421c6f6:assistant",
+        "session_id": "ca81508a-a70b-4fa0-a197-9b43a904a381",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "3b9c34eb-6b12-4da6-9c14-1d39b421c6f6",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Child says fxsub\"}]"
+      },
+      {
+        "id": "361845c4-9d06-4f7e-b04b-84d92db4f2ca",
+        "session_id": "a21eefe8-c1c7-4580-aef1-c1b7950c5f39",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "38ade638-038b-4c14-811a-73a23cbd6e72",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Parent done fxsub\",\"turnPhase\":\"final\",\"blockId\":\"msg_e2e_12:0\",\"blockIx\":0}]"
+      },
+      {
+        "id": "b61e523b-8bf3-4bee-b88e-2edf810b87ab",
+        "session_id": "8785c7e7-a5fe-45d2-8e12-a5e3c022f636",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "bdd122ab-ca84-4a97-ab9d-7c2ab58306d3",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture rename E2E-REPLY fxrename\"}]"
+      },
+      {
+        "id": "36fb8c79-d19e-47ee-98c4-faa06c57c016",
+        "session_id": "8785c7e7-a5fe-45d2-8e12-a5e3c022f636",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "bdd122ab-ca84-4a97-ab9d-7c2ab58306d3",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxrename\",\"turnPhase\":\"final\",\"blockId\":\"msg_e2e_14:0\",\"blockIx\":0}]"
+      },
+      {
+        "id": "1200f016-09ae-4770-8f49-43d10f0ba562",
+        "session_id": "60bf8100-6066-4dee-b413-d71dbd494be2",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "4bbc1c35-9a96-418f-9856-3d4338b7c323",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture archive E2E-REPLY fxarchive\"}]"
+      },
+      {
+        "id": "1146640e-2f5a-4ec3-940c-eb36b89fe406",
+        "session_id": "60bf8100-6066-4dee-b413-d71dbd494be2",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "4bbc1c35-9a96-418f-9856-3d4338b7c323",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxarchive\",\"turnPhase\":\"final\",\"blockId\":\"msg_e2e_19:0\",\"blockIx\":0}]"
+      },
+      {
+        "id": "84885d60-df48-412f-bad6-0c145a48afd1",
+        "session_id": "e9a466ff-afcf-4ac2-8a85-4c8275e8fa69",
+        "role": "user",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "aea58a14-f34a-4b93-ae25-3a9a6f9d5a49",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture unread E2E-SLOW fxunread\"}]"
+      },
+      {
+        "id": "bfd0929b-a169-4de4-84c8-3530dcfbf092",
+        "session_id": "e9a466ff-afcf-4ac2-8a85-4c8275e8fa69",
+        "role": "assistant",
+        "sender_id": null,
+        "sender_name": null,
+        "platform_message_id": null,
+        "reply_to_platform_message_id": null,
+        "turn_id": "aea58a14-f34a-4b93-ae25-3a9a6f9d5a49",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Slow reply to fxunread\",\"turnPhase\":\"final\",\"blockId\":\"msg_e2e_24:0\",\"blockIx\":0}]"
+      },
+      {
+        "id": "channel-message:c8230b5103b44c047c771c0aa6e33d65fddbc0dd9d2e6c9f58c867dcc42ef16c",
+        "session_id": "channel:wechat:e2e-guardian@im.wechat",
+        "role": "user",
+        "sender_id": "e2e-guardian@im.wechat",
+        "sender_name": "e2e-guardian",
+        "platform_message_id": "7000000",
+        "reply_to_platform_message_id": null,
+        "turn_id": "7f0e7e37-da76-4a06-97ec-42efe5368b8f",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture wechat E2E-REPLY fxwx1\"}]"
+      },
+      {
+        "id": "transcript-message:channel:wechat:e2e-guardian@im.wechat:7f0e7e37-da76-4a06-97ec-42efe5368b8f:assistant",
+        "session_id": "channel:wechat:e2e-guardian@im.wechat",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "7000001",
+        "reply_to_platform_message_id": "7000000",
+        "turn_id": "7f0e7e37-da76-4a06-97ec-42efe5368b8f",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxwx1\"}]"
+      },
+      {
+        "id": "channel-message:1c1f16608eb844917a0da10bb040f3895ea23b1229bcc5ab7590de314958867f",
+        "session_id": "channel:wechat:e2e-guardian@im.wechat",
+        "role": "user",
+        "sender_id": "e2e-guardian@im.wechat",
+        "sender_name": "e2e-guardian",
+        "platform_message_id": "7000002",
+        "reply_to_platform_message_id": null,
+        "turn_id": "0cc4f42a-69b5-493e-8dc2-9fc8d341bd81",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture wechat again E2E-REPLY fxwx2\"}]"
+      },
+      {
+        "id": "transcript-message:channel:wechat:e2e-guardian@im.wechat:0cc4f42a-69b5-493e-8dc2-9fc8d341bd81:assistant",
+        "session_id": "channel:wechat:e2e-guardian@im.wechat",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "7000003",
+        "reply_to_platform_message_id": "7000002",
+        "turn_id": "0cc4f42a-69b5-493e-8dc2-9fc8d341bd81",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxwx2\"}]"
+      },
+      {
+        "id": "channel-message:f3995c30eec18f68b9833ace1af04313c77cc371c95d52f570ac2dc8c8465d04",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "1",
+        "reply_to_platform_message_id": null,
+        "turn_id": "98b8c635-986a-48a3-a068-99af15cbf176",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture dm E2E-REPLY fxtgdm1\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001:98b8c635-986a-48a3-a068-99af15cbf176:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "2",
+        "reply_to_platform_message_id": "1",
+        "turn_id": "98b8c635-986a-48a3-a068-99af15cbf176",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxtgdm1\"}]"
+      },
+      {
+        "id": "channel-message:7b89d39e83666762fc2a3e69c766fee2c943ba2feb57d2537b857a8bf183d756",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "3",
+        "reply_to_platform_message_id": null,
+        "turn_id": "d228683d-97a7-4ba2-84f0-a41cc4420165",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture dm again E2E-REPLY fxtgdm2\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001:d228683d-97a7-4ba2-84f0-a41cc4420165:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:5000001",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "4",
+        "reply_to_platform_message_id": "3",
+        "turn_id": "d228683d-97a7-4ba2-84f0-a41cc4420165",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxtgdm2\"}]"
+      },
+      {
+        "id": "channel-message:36406de52fb8c641b49e01bf6ef856445ea67d559fc52e8dd6841e291e6f694c",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:5000001",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "1",
+        "reply_to_platform_message_id": null,
+        "turn_id": "f4e47a9a-06ef-45d5-8dfd-c1044b27aa70",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture beta dm E2E-REPLY fxtgbeta\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:5000001:f4e47a9a-06ef-45d5-8dfd-c1044b27aa70:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:5000001",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "2",
+        "reply_to_platform_message_id": "1",
+        "turn_id": "f4e47a9a-06ef-45d5-8dfd-c1044b27aa70",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxtgbeta\"}]"
+      },
+      {
+        "id": "channel-message:f46d0d6479e33add9fa8f32439bba037843aefc2fddc04705fa2bccfa59d75d8",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "1",
+        "reply_to_platform_message_id": null,
+        "turn_id": "0a20cf74-6a87-456a-a2c1-0f84ca4bdd72",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_alpha_bot Fixture basic E2E-REPLY fxbasic1\"}]"
+      },
+      {
+        "id": "channel-message:fead352b4dfe791ae5e0551bf8d62cb06c3d7373fc48824f835639eaeec2f956",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "1",
+        "reply_to_platform_message_id": null,
+        "turn_id": "2428525d-a08c-4ed9-8d7e-7f9c9b9ba1c2",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_alpha_bot Fixture basic E2E-REPLY fxbasic1\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567:0a20cf74-6a87-456a-a2c1-0f84ca4bdd72:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "2",
+        "reply_to_platform_message_id": "1",
+        "turn_id": "0a20cf74-6a87-456a-a2c1-0f84ca4bdd72",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxbasic1\"}]"
+      },
+      {
+        "id": "channel-message:78eff86f46ee831fb2f0eaae4e10e830fcdfa35a694fe15e545dd02d8c829b6f",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "3",
+        "reply_to_platform_message_id": null,
+        "turn_id": "e46df488-abb4-4b4a-ad8e-8c89272ce7e2",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_beta_bot Fixture basic E2E-REPLY fxbasic2\"}]"
+      },
+      {
+        "id": "channel-message:6489017dc5175017ac1a057755cce748dba6a3f901a9444af60cd1b62a615400",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "2",
+        "reply_to_platform_message_id": null,
+        "turn_id": "10ca93c8-183f-47a4-88a1-20b596746d09",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_beta_bot Fixture basic E2E-REPLY fxbasic2\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567:e46df488-abb4-4b4a-ad8e-8c89272ce7e2:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "4",
+        "reply_to_platform_message_id": "3",
+        "turn_id": "e46df488-abb4-4b4a-ad8e-8c89272ce7e2",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxbasic2\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567:2428525d-a08c-4ed9-8d7e-7f9c9b9ba1c2:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "3",
+        "reply_to_platform_message_id": "1",
+        "turn_id": "2428525d-a08c-4ed9-8d7e-7f9c9b9ba1c2",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxbasic1\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567:10ca93c8-183f-47a4-88a1-20b596746d09:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "4",
+        "reply_to_platform_message_id": "2",
+        "turn_id": "10ca93c8-183f-47a4-88a1-20b596746d09",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxbasic2\"}]"
+      },
+      {
+        "id": "channel-message:19d4a1a5316f51f5be551261d2100be81624d9b658c34be712dadc1acc2da87b",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "notification",
+        "sender_id": "5000002",
+        "sender_name": "Iris",
+        "platform_message_id": "5",
+        "reply_to_platform_message_id": null,
+        "turn_id": null,
+        "context_injected_turn_id": "a68ec5e9-a90f-4cf4-90d2-b323a4063812",
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture basic ambient fxbasic3\"}]"
+      },
+      {
+        "id": "channel-message:21bc383223499fb4ab72dd5eadcdb90e65935abac4a624281853b47e79db4476",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "notification",
+        "sender_id": "5000002",
+        "sender_name": "Iris",
+        "platform_message_id": "5",
+        "reply_to_platform_message_id": null,
+        "turn_id": null,
+        "context_injected_turn_id": "b359cb87-770f-4283-b57b-c6fe0d977404",
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture basic ambient fxbasic3\"}]"
+      },
+      {
+        "id": "channel-message:d3a7cefbf656ab93e5994b0e9a5f7cb5fc950732c599455b682f44826527cea2",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "6",
+        "reply_to_platform_message_id": "2",
+        "turn_id": "a68ec5e9-a90f-4cf4-90d2-b323a4063812",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture basic follow-up E2E-REPLY fxbasic4\"}]"
+      },
+      {
+        "id": "channel-message:c5e759684fa054e8eb1df7c32e74970104732028570728533f8c8ddd0cef0a96",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "6",
+        "reply_to_platform_message_id": null,
+        "turn_id": "b359cb87-770f-4283-b57b-c6fe0d977404",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture basic follow-up E2E-REPLY fxbasic4\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567:a68ec5e9-a90f-4cf4-90d2-b323a4063812:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-4001234567",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "7",
+        "reply_to_platform_message_id": "6",
+        "turn_id": "a68ec5e9-a90f-4cf4-90d2-b323a4063812",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxbasic4\"}]"
+      },
+      {
+        "id": "channel-message:8d05ccc91a5a6d2af794b5f47b7401e2dea49938b458e11cc2442a64743dce1c",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "1",
+        "reply_to_platform_message_id": null,
+        "turn_id": "2a9f8e47-acaf-4814-9c23-23ccd1d7896b",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_alpha_bot Fixture super E2E-REPLY fxsuper1\"}]"
+      },
+      {
+        "id": "channel-message:5827accf2c6ee183333d7dfe252482f511d33b70682ed656a0c1cb6127ee7145",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "1",
+        "reply_to_platform_message_id": null,
+        "turn_id": "0ed008e7-8a01-40eb-bb79-9f0e732de07d",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_alpha_bot Fixture super E2E-REPLY fxsuper1\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005:2a9f8e47-acaf-4814-9c23-23ccd1d7896b:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "2",
+        "reply_to_platform_message_id": "1",
+        "turn_id": "2a9f8e47-acaf-4814-9c23-23ccd1d7896b",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxsuper1\"}]"
+      },
+      {
+        "id": "channel-message:a3e260463f62ee0a64aae43e5b47bcd7a36ca14c6f2edefcd32c16a3267d1744",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "3",
+        "reply_to_platform_message_id": null,
+        "turn_id": "622536af-a333-40ab-b569-5875fb73edc4",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_beta_bot Fixture super E2E-REPLY fxsuper2\"}]"
+      },
+      {
+        "id": "channel-message:db042d9916ca1b6ba7f2bbf1fa08b8f5f6e56297f07f4f616ed4bc47b13ae016",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "3",
+        "reply_to_platform_message_id": null,
+        "turn_id": "d6c576de-89c8-472b-9d20-c294c7e4562d",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"@e2e_beta_bot Fixture super E2E-REPLY fxsuper2\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005:622536af-a333-40ab-b569-5875fb73edc4:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "4",
+        "reply_to_platform_message_id": "3",
+        "turn_id": "622536af-a333-40ab-b569-5875fb73edc4",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxsuper2\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567:b359cb87-770f-4283-b57b-c6fe0d977404:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-4001234567",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "7",
+        "reply_to_platform_message_id": "6",
+        "turn_id": "b359cb87-770f-4283-b57b-c6fe0d977404",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxbasic4\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005:0ed008e7-8a01-40eb-bb79-9f0e732de07d:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "5",
+        "reply_to_platform_message_id": "1",
+        "turn_id": "0ed008e7-8a01-40eb-bb79-9f0e732de07d",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxsuper1\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005:d6c576de-89c8-472b-9d20-c294c7e4562d:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "6",
+        "reply_to_platform_message_id": "3",
+        "turn_id": "d6c576de-89c8-472b-9d20-c294c7e4562d",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxsuper2\"}]"
+      },
+      {
+        "id": "channel-message:11948eef540b44e0bd2e4f0514e5bad86deb0ae223275cc6ecffbe5fe8d9951a",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "notification",
+        "sender_id": "5000002",
+        "sender_name": "Iris",
+        "platform_message_id": "7",
+        "reply_to_platform_message_id": null,
+        "turn_id": null,
+        "context_injected_turn_id": "dca71cc1-e13f-41c6-a6bb-c4e449c82133",
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture super ambient fxsuper3\"}]"
+      },
+      {
+        "id": "channel-message:c841d7db771b7fd1d0582e7f77e45be9f27b50aa669bdda2efa81cb8422773ee",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "notification",
+        "sender_id": "5000002",
+        "sender_name": "Iris",
+        "platform_message_id": "7",
+        "reply_to_platform_message_id": null,
+        "turn_id": null,
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture super ambient fxsuper3\"}]"
+      },
+      {
+        "id": "channel-message:dbab91ab67fb1dc9739b0ceb8d47e716d896a969e4787e88db5a7de498eebb39",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "8",
+        "reply_to_platform_message_id": "2",
+        "turn_id": "dca71cc1-e13f-41c6-a6bb-c4e449c82133",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture super follow-up E2E-REPLY fxsuper4\"}]"
+      },
+      {
+        "id": "channel-message:bb879f68a267273d999ca5e926a8f3f27c8ffc01299f88ef866aa101f09bc3f8",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "user",
+        "sender_id": "5000001",
+        "sender_name": "Gina",
+        "platform_message_id": "8",
+        "reply_to_platform_message_id": null,
+        "turn_id": "4123e837-8d75-4446-9e81-a8cc0142e913",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Fixture super follow-up E2E-REPLY fxsuper4\"}]"
+      },
+      {
+        "id": "transcript-message:channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005:dca71cc1-e13f-41c6-a6bb-c4e449c82133:assistant",
+        "session_id": "channel:b787267a-24ea-4471-a5fe-af79a707b4ee:-1002003004005",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "9",
+        "reply_to_platform_message_id": "8",
+        "turn_id": "dca71cc1-e13f-41c6-a6bb-c4e449c82133",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxsuper4\"}]"
+      },
+      {
+        "id": "transcript-message:channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005:4123e837-8d75-4446-9e81-a8cc0142e913:assistant",
+        "session_id": "channel:1addef90-ec09-4c6f-8425-6cbdbb24ff5d:-1002003004005",
+        "role": "assistant",
+        "sender_id": "rome",
+        "sender_name": "Rome",
+        "platform_message_id": "10",
+        "reply_to_platform_message_id": "8",
+        "turn_id": "4123e837-8d75-4446-9e81-a8cc0142e913",
+        "context_injected_turn_id": null,
+        "content": "[{\"type\":\"text\",\"content\":\"Reply to fxsuper4\"}]"
+      }
+    ],
+    "platformIds": []
+  },
+  "platforms": {
+    "telegram": [
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": 5000001,
+        "messageId": 1,
+        "from": "gina_guardian",
+        "text": "Fixture dm E2E-REPLY fxtgdm1"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": 5000001,
+        "messageId": 2,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxtgdm1",
+        "replyTo": 1
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": 5000001,
+        "messageId": 3,
+        "from": "gina_guardian",
+        "text": "Fixture dm again E2E-REPLY fxtgdm2"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": 5000001,
+        "messageId": 4,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxtgdm2",
+        "replyTo": 3
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": 5000001,
+        "messageId": 1,
+        "from": "gina_guardian",
+        "text": "Fixture beta dm E2E-REPLY fxtgbeta"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": 5000001,
+        "messageId": 2,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxtgbeta",
+        "replyTo": 1
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 1,
+        "from": "gina_guardian",
+        "text": "@e2e_alpha_bot Fixture basic E2E-REPLY fxbasic1"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 1,
+        "from": "gina_guardian",
+        "text": "@e2e_alpha_bot Fixture basic E2E-REPLY fxbasic1"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 2,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxbasic1",
+        "replyTo": 1
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 3,
+        "from": "gina_guardian",
+        "text": "@e2e_beta_bot Fixture basic E2E-REPLY fxbasic2"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 2,
+        "from": "gina_guardian",
+        "text": "@e2e_beta_bot Fixture basic E2E-REPLY fxbasic2"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 4,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxbasic2",
+        "replyTo": 3
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 3,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxbasic1",
+        "replyTo": 1
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 4,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxbasic2",
+        "replyTo": 2
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 5,
+        "from": "iris_k",
+        "text": "Fixture basic ambient fxbasic3"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 5,
+        "from": "iris_k",
+        "text": "Fixture basic ambient fxbasic3"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 6,
+        "from": "gina_guardian",
+        "text": "Fixture basic follow-up E2E-REPLY fxbasic4",
+        "replyTo": 2
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 6,
+        "from": "gina_guardian",
+        "text": "Fixture basic follow-up E2E-REPLY fxbasic4"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -4001234567,
+        "messageId": 7,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxbasic4",
+        "replyTo": 6
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 1,
+        "from": "gina_guardian",
+        "text": "@e2e_alpha_bot Fixture super E2E-REPLY fxsuper1"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 1,
+        "from": "gina_guardian",
+        "text": "@e2e_alpha_bot Fixture super E2E-REPLY fxsuper1"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 2,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxsuper1",
+        "replyTo": 1
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 3,
+        "from": "gina_guardian",
+        "text": "@e2e_beta_bot Fixture super E2E-REPLY fxsuper2"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 3,
+        "from": "gina_guardian",
+        "text": "@e2e_beta_bot Fixture super E2E-REPLY fxsuper2"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 4,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxsuper2",
+        "replyTo": 3
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -4001234567,
+        "messageId": 7,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxbasic4",
+        "replyTo": 6
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 5,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxsuper1",
+        "replyTo": 1
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 6,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxsuper2",
+        "replyTo": 3
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 7,
+        "from": "iris_k",
+        "text": "Fixture super ambient fxsuper3"
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 7,
+        "from": "iris_k",
+        "text": "Fixture super ambient fxsuper3"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 8,
+        "from": "gina_guardian",
+        "text": "Fixture super follow-up E2E-REPLY fxsuper4",
+        "replyTo": 2
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 8,
+        "from": "gina_guardian",
+        "text": "Fixture super follow-up E2E-REPLY fxsuper4"
+      },
+      {
+        "bot": "e2e_alpha_bot",
+        "chatId": -1002003004005,
+        "messageId": 9,
+        "from": "e2e_alpha_bot",
+        "text": "Reply to fxsuper4",
+        "replyTo": 8
+      },
+      {
+        "bot": "e2e_beta_bot",
+        "chatId": -1002003004005,
+        "messageId": 10,
+        "from": "e2e_beta_bot",
+        "text": "Reply to fxsuper4",
+        "replyTo": 8
+      }
+    ],
+    "wechat": [
+      {
+        "id": "7000000",
+        "from": "e2e-guardian@im.wechat",
+        "to": "e2e-bot@im.bot",
+        "text": "Fixture wechat E2E-REPLY fxwx1"
+      },
+      {
+        "id": "7000001",
+        "from": "e2e-bot@im.bot",
+        "to": "e2e-guardian@im.wechat",
+        "text": "Reply to fxwx1"
+      },
+      {
+        "id": "7000002",
+        "from": "e2e-guardian@im.wechat",
+        "to": "e2e-bot@im.bot",
+        "text": "Fixture wechat again E2E-REPLY fxwx2"
+      },
+      {
+        "id": "7000003",
+        "from": "e2e-bot@im.bot",
+        "to": "e2e-guardian@im.wechat",
+        "text": "Reply to fxwx2"
+      }
+    ]
+  }
+}
