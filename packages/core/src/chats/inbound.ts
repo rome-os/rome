@@ -12,7 +12,7 @@ import type { TurnLinks } from "../sessions/turn-links.js";
 import {
   channelAdapter,
   type ChannelAdapterDeps,
-  type ChatAdapter,
+  type ChannelChatAdapter,
   type Inbound,
 } from "./adapter.js";
 import type { ChatRepository } from "./chat-repository.js";
@@ -65,7 +65,7 @@ export function inboundRecording(
   /** Each recording channel's adapter, by channel name. Empty while no one
    *  hears recorded messages. An adapter starts once, so a restart of
    *  recording takes a new one. */
-  const recording = new Map<string, ChatAdapter>();
+  const recording = new Map<string, ChannelChatAdapter>();
   let hearers = 0;
   /** The ids of recorded messages a subscriber was handed. */
   const delivered = new Set<string>();
@@ -90,20 +90,16 @@ export function inboundRecording(
   };
 
   const recordOne = async (message: Inbound): Promise<string | null> => {
-    const { heard } = message.via;
+    const { via } = message;
     // What reaches an account Rome does not listen to never forms a chat.
-    if (deps.listens?.(heard.ref.connectionId) === false) return null;
+    if (deps.listens?.(via.connectionId) === false) return null;
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
-    const platformMessage = heard.message;
+    const threadName = message.thread?.name ?? message.chatName ?? undefined;
     const seat = await deps.seats.ensureChannelChat({
-      channel: message.via.channel,
-      threadId: platformMessage.chatId,
-      ...(platformMessage.parentChatId === undefined
-        ? {}
-        : { parentThreadId: platformMessage.parentChatId }),
-      ...(platformMessage.thread?.name === undefined
-        ? {}
-        : { threadName: platformMessage.thread.name }),
+      channel: via.channel,
+      threadId: via.address,
+      ...(via.parentAddress === undefined ? {} : { parentThreadId: via.parentAddress }),
+      ...(threadName === undefined ? {} : { threadName }),
       threadType: message.chatKind === "dm" ? "private" : "group",
       // A chat starts answered by main. Its own agent, when it has one, was
       // set through its settings, which start the chat's row themselves.
@@ -140,15 +136,11 @@ export function inboundRecording(
       return null;
     }
     await deps.seats.advanceActivity(seat.id, recorded.at);
-    const said = {
-      ...heard,
-      message: { ...heard.message, attachments: [...message.attachments] },
-    };
     await deps.events.publish({
       type: "MessageSaid",
       message: recorded,
       chatRecordId: seat.id,
-      via: { channel: message.via.channel, heard: said },
+      via: { channel: via.channel },
     });
     // Handed to nobody, as while a hook is being swapped, nothing will decide
     // its wake, so it stands decided as a message no agent answered.
@@ -168,9 +160,13 @@ export function inboundRecording(
   const messagesSaid: MessagesSaid = {
     subscribe(handler) {
       const unsubscribe = deps.events.subscribe(async (event) => {
-        if (event.type !== "MessageSaid" || !event.via.heard) return;
+        if (event.type !== "MessageSaid") return;
+        // The hook still reads the platform's event, which the adapter
+        // holds while it delivers the message, and Chats never sees.
+        const heard = recording.get(event.via.channel)?.heard(event.message.id);
+        if (!heard) return;
         const recorded: SaidInboundEvent = {
-          ...event.via.heard,
+          ...heard,
           recorded: { chatRecordId: event.chatRecordId, messageId: event.message.id },
         };
         delivered.add(event.message.id);

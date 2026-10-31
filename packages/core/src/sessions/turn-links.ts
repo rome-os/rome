@@ -7,10 +7,11 @@
 // carries no message text.
 
 import { sql } from "drizzle-orm";
-import type { AgentInputState } from "@rome-os/app-runtime";
+import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { MessageRepository } from "../chats/message-repository.js";
 import type { SaidMessage } from "../chats/message.js";
+import { placeIn } from "../chats/place.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a line
  *  the turn caught up on. */
@@ -35,11 +36,11 @@ export class TurnLinks {
   private readonly undecided = new Set<string>();
 
   /** Chats' reads, which every line a session reads goes through. */
-  private readonly messages: Pick<MessageRepository, "since" | "byIds">;
+  private readonly messages: Pick<MessageRepository, "read" | "byIds">;
 
   constructor(
     private readonly db: DrizzleDb,
-    messages?: Pick<MessageRepository, "since" | "byIds">,
+    messages?: Pick<MessageRepository, "read" | "byIds">,
   ) {
     this.messages = messages ?? new MessageRepository(db);
   }
@@ -48,24 +49,27 @@ export class TurnLinks {
    *  session in no chat. */
   private seatOf(sessionId: string): {
     chatId: string;
+    platform: string;
     threadId: string | null;
     since: Date;
     joined: Date;
   } | null {
     const row = this.db.all<{
+      platform: string | null;
       chat_id: string | null;
       thread_id: string | null;
       created_at: number;
       joined: number;
     }>(sql`
-      SELECT s.chat_id, s.thread_id, s.created_at,
+      SELECT c.platform, s.chat_id, s.thread_id, s.created_at,
         (SELECT min(o.created_at) FROM rome_sessions o
          WHERE o.chat_id = s.chat_id AND o.account_id IS s.account_id) AS joined
-      FROM rome_sessions s WHERE s.id = ${sessionId}
+      FROM rome_sessions s LEFT JOIN chats c ON c.id = s.chat_id WHERE s.id = ${sessionId}
     `)[0];
-    if (!row?.chat_id) return null;
+    if (!row?.chat_id || !row.platform) return null;
     return {
       chatId: row.chat_id,
+      platform: row.platform,
       threadId: row.thread_id,
       since: new Date(row.created_at * 1000),
       joined: new Date((row.joined ?? row.created_at) * 1000),
@@ -289,7 +293,15 @@ export class TurnLinks {
     const seat = this.seatOf(sessionId);
     if (!seat) return [];
     const linked = new Set(this.linksOf(sessionId).map((link) => link.message_id));
-    const said = this.messages.since(seat.chatId, seat.threadId, seat.since);
+    // A line said in the second the seat started may have come before it, so
+    // only lines said after that second are the seat's to catch up on.
+    const said = this.messages.read(
+      placeIn(
+        { platform: seat.platform, id: seat.chatId },
+        (seat.threadId ?? undefined) as ChatId | undefined,
+      ),
+      { after: { at: seat.since } },
+    ).messages;
     // A chat that numbers messages per member account holds one copy of a
     // message for each of Rome's accounts that heard it. The session has
     // seen every copy of a message it has seen one of, and reads one copy of
@@ -310,7 +322,7 @@ export class TurnLinks {
     const quoted = new Map(
       this.messages
         .byIds(lines.flatMap((message) => (message.replyTo ? [message.replyTo] : [])))
-        .filter((message) => message.at >= seat.joined)
+        .filter((message) => message.at > seat.joined)
         .map((message) => [message.id, contextOf(message)]),
     );
     return lines.map((message) => ({

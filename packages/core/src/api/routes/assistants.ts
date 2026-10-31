@@ -159,7 +159,7 @@ function messagesAt(
   address: Account,
   limit: number,
   before?: MessageCursor | null,
-): Promise<MessagePage> {
+): MessagePage {
   const place = placeIn(ChatIds.chat(chatKey(address.platform, address.id as ChatId)));
   return deps.chatMessages.read(place, { before: before ?? null, limit });
 }

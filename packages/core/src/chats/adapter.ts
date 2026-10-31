@@ -57,14 +57,18 @@ export interface Inbound {
   /** The quoted message, by the adapter's id for it. */
   readonly replyTo?: string;
   /**
-   * What the platform said, for what still reads it by the platform's
-   * address: the seat of the account in Agents, and the hook that hears
-   * recorded messages. Never part of Chats.
+   * Which of Rome's accounts heard it, and where, for the seat of that
+   * account in Agents, which still keys it by the channel's address. Never
+   * part of Chats.
    */
   readonly via: {
     readonly channel: string;
     readonly account: Account;
-    readonly heard: InboundEvent;
+    /** The Connection it came through. */
+    readonly connectionId: string;
+    /** The platform address it was said at, and the thread's parent. */
+    readonly address: ChatId;
+    readonly parentAddress?: ChatId;
   };
 }
 
@@ -184,7 +188,16 @@ export function sentLineId(
  * an id of its own, it sends to the address the account heard the chat at,
  * and to the other end before it has heard it.
  */
-export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): ChatAdapter {
+/** The adapter over one of today's channels, which also hands the platform's
+ *  event for a message it is delivering to what still reads it. */
+export interface ChannelChatAdapter extends ChatAdapter {
+  /** The event the platform delivered message `id` in, while `deliver` is
+   *  running for it. The hook that hears recorded messages reads it; Chats
+   *  never does. */
+  heard(id: string): InboundEvent | undefined;
+}
+
+export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): ChannelChatAdapter {
   const account = (): Account =>
     deps.accountOf(channel.name) ?? {
       platform: deps.platformOfChannel(channel.name),
@@ -193,6 +206,7 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
   let unsubscribe: (() => void) | null = null;
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
+  const delivering = new Map<string, InboundEvent>();
 
   /** Where the platform takes a message for `ref`: the thread's id, else
    *  where the account heard a direct message, else the chat's key. */
@@ -208,6 +222,7 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
 
   return {
     channel: channel.name,
+    heard: (id) => delivering.get(id),
     get account() {
       return account();
     },
@@ -221,6 +236,10 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
           if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
           const saved = await materialized(channel, event);
           const inbound = toInbound(channel.name, saved.message.account ?? account(), saved);
+          delivering.set(inbound.id, {
+            ...saved,
+            message: { ...saved.message, channel: channel.name },
+          });
           // A direct message is reached where it was heard, which on some
           // platforms is an id of its own rather than the other end.
           if (inbound.chatKind === "dm" && inbound.thread === null) {
@@ -230,7 +249,11 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
               saved.message.chatId,
             );
           }
-          await deliver(inbound);
+          try {
+            await deliver(inbound);
+          } finally {
+            delivering.delete(inbound.id);
+          }
         })();
         inFlight.add(handed);
         try {
@@ -310,7 +333,6 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
 /** The message `event` carries, as the adapter hands it to Chats. */
 function toInbound(channelName: string, account: Account, event: InboundEvent): Inbound {
   const message = event.message;
-  const heard: InboundEvent = { ...event, message: { ...message, channel: channelName } };
   const { key, kind } = chatOf(account.platform, account.id, message);
   const ref = ChatIds.chat(key);
   const replyTo = message.replyTo?.messageId.trim();
@@ -334,7 +356,13 @@ function toInbound(channelName: string, account: Account, event: InboundEvent): 
     attachments: message.attachments,
     saidAt: message.timestamp,
     ...(replyTo ? { replyTo: ChatIds.message(ref, ownedBy(key, account.id, replyTo)) } : {}),
-    via: { channel: channelName, account, heard },
+    via: {
+      channel: channelName,
+      account,
+      connectionId: event.ref.connectionId,
+      address: message.chatId,
+      ...(message.parentChatId === undefined ? {} : { parentAddress: message.parentChatId }),
+    },
   };
 }
 

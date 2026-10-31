@@ -35,6 +35,8 @@ export interface MessageCursor {
 export interface MessagePage {
   readonly messages: readonly SaidMessage[];
   readonly older: MessageCursor | null;
+  /** Where the next page of an `after` read starts, or null at the newest. */
+  readonly newer: MessageCursor | null;
 }
 
 /**
@@ -127,15 +129,25 @@ export class MessageRepository {
   }
 
   /**
-   * The newest `limit` messages said in `place` before `before`, oldest
-   * first. Without `before` the newest of all; without `limit` every one. A
-   * place Rome holds no chat for answers an empty page.
+   * A page of the messages said in `place`, oldest first, bounded one of two
+   * ways. With `before`, or no bound, the newest `limit` said before it, and
+   * a cursor to the older ones. With `after`, the first `limit` said after
+   * it, and a cursor to the newer ones: a cursor names the last message
+   * read, and a bare time leaves out every message said in that second or
+   * before. Without `limit` every one. A place Rome holds no chat for answers
+   * an empty page. Lines said in one second keep the order they were
+   * recorded in.
    */
-  async read(
+  read(
     place: Place,
-    page: { before?: MessageCursor | null; limit?: number } = {},
-  ): Promise<MessagePage> {
-    const { before, limit } = page;
+    page: {
+      before?: MessageCursor | null;
+      after?: MessageCursor | { readonly at: Date };
+      limit?: number;
+    } = {},
+  ): MessagePage {
+    const { before, after, limit } = page;
+    if (after) return this.readAfter(place, after, limit);
     // One more than asked says whether any are older.
     const rows = this.db.all<MessageRow>(sql`
       SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
@@ -154,25 +166,38 @@ export class MessageRepository {
         limit !== undefined && rows.length > limit && oldest
           ? { at: new Date(oldest.said_at * 1000), id: oldest.id }
           : null,
+      newer: null,
     };
   }
 
-  /**
-   * Every message said in thread `threadId` of chat `chatId` (the open chat
-   * when null) at or after `since`, oldest first. Lines said in one second
-   * keep the order they were recorded in.
-   */
-  since(chatId: string, threadId: string | null, since: Date): SaidMessage[] {
-    return this.db
-      .all<MessageRow & PlaceRow>(sql`
-        SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
-               m.reply_to_message_id, m.said_at, c.platform, m.chat_id, m.thread_id
-        FROM chat_messages m JOIN chats c ON c.id = m.chat_id
-        WHERE m.chat_id = ${chatId} AND m.thread_id IS ${threadId}
-          AND m.said_at >= ${seconds(since)}
-        ORDER BY m.said_at, m.rowid
-      `)
-      .map((row) => said(placeOf(row), row));
+  private readAfter(
+    place: Place,
+    after: MessageCursor | { readonly at: Date },
+    limit: number | undefined,
+  ): MessagePage {
+    const bound =
+      "id" in after
+        ? sql`(m.said_at, m.rowid) > (${seconds(after.at)}, (SELECT rowid FROM chat_messages WHERE id = ${after.id}))`
+        : sql`m.said_at > ${seconds(after.at)}`;
+    // One more than asked says whether any are newer.
+    const rows = this.db.all<MessageRow>(sql`
+      SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
+             m.reply_to_message_id, m.said_at
+      FROM chat_messages m
+      WHERE m.chat_id = ${place.chat.id} AND m.thread_id IS ${place.threadId ?? null} AND ${bound}
+      ORDER BY m.said_at, m.rowid
+      ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
+    `);
+    const shown = limit === undefined ? rows : rows.slice(0, limit);
+    const newest = shown.at(-1);
+    return {
+      messages: shown.map((row) => said(place, row)),
+      older: null,
+      newer:
+        limit !== undefined && rows.length > limit && newest
+          ? { at: new Date(newest.said_at * 1000), id: newest.id }
+          : null,
+    };
   }
 
   /** The messages `ids` name that are on record, wherever they were said, in
