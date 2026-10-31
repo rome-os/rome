@@ -16,7 +16,10 @@ struct MainShell: View {
     @Environment(AppModel.self) private var model
     @State private var path: [Route] = []
     @State private var drawerOpen = false
-    @State private var drag: CGFloat = 0
+    /// The finger's pull on the drawer while a drag runs. It springs back to
+    /// zero with the drawer when the drag ends or the system cancels it.
+    @GestureState(resetTransaction: Transaction(animation: MainShell.drawerSpring))
+    private var drag = DrawerDrag()
     @State private var showTasks = false
     #if DEBUG
     @State private var sheetPreview = false
@@ -60,8 +63,8 @@ struct MainShell: View {
                     if progress > 0 {
                         RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
                             .fill(Palette.drawerScrim.opacity(progress))
+                            .contentShape(Rectangle())
                             .onTapGesture { closeDrawer(popToRoot: false) }
-                            .gesture(closeDrag(width: width))
                     }
                 }
                 .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
@@ -72,10 +75,13 @@ struct MainShell: View {
                         Color.clear
                             .frame(width: 22)
                             .contentShape(Rectangle())
-                            .gesture(openDrag(width: width))
+                            .gesture(drawerDrag(width: width))
                     }
                 }
             }
+            // While the drawer is open, a sideways drag anywhere, on the drawer or
+            // the uncovered chat, pulls it closed.
+            .gesture(drawerDrag(width: width), including: drawerOpen ? .all : .subviews)
         }
         .sheet(isPresented: $showTasks) {
             TasksSheet(store: workspace.tasks) { task in
@@ -164,47 +170,46 @@ struct MainShell: View {
 
     // MARK: Drawer motion
 
+    static let drawerSpring = Animation.spring(response: 0.38, dampingFraction: 0.86)
+
+    /// A drag's direction is fixed by its first movement, so a vertical scroll
+    /// never moves the drawer.
+    struct DrawerDrag {
+        var horizontal: Bool?
+        var offset: CGFloat = 0
+    }
+
     private func drawerProgress(width: CGFloat) -> CGFloat {
         let base: CGFloat = drawerOpen ? 1 : 0
-        return min(1, max(0, base + drag / width))
+        return min(1, max(0, base + drag.offset / width))
     }
 
     private func openDrawer() {
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-            drawerOpen = true
-            drag = 0
-        }
+        withAnimation(Self.drawerSpring) { drawerOpen = true }
     }
 
     private func closeDrawer(popToRoot: Bool) {
         if popToRoot { path = [] }
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-            drawerOpen = false
-            drag = 0
-        }
+        withAnimation(Self.drawerSpring) { drawerOpen = false }
     }
 
-    private func openDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in drag = max(0, value.translation.width) }
-            .onEnded { value in
-                let open = value.predictedEndTranslation.width > width * 0.4 || value.translation.width > width * 0.5
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-                    drawerOpen = open
-                    drag = 0
-                }
+    /// Opens from the left edge or closes from anywhere, following the finger.
+    /// The translation is read in screen space: the chat moves under the finger,
+    /// and reading it in the chat's own space would feed the motion back into itself.
+    private func drawerDrag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .updating($drag) { value, state, _ in
+                let move = value.translation
+                if state.horizontal == nil { state.horizontal = abs(move.width) > abs(move.height) }
+                guard state.horizontal == true else { return }
+                state.offset = drawerOpen ? min(0, move.width) : max(0, move.width)
             }
-    }
-
-    private func closeDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in drag = min(0, value.translation.width) }
             .onEnded { value in
-                let close = value.predictedEndTranslation.width < -width * 0.3
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-                    drawerOpen = !close
-                    drag = 0
-                }
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                let travel = drawerOpen ? -value.translation.width : value.translation.width
+                let flung = drawerOpen ? -value.predictedEndTranslation.width : value.predictedEndTranslation.width
+                let toggle = travel > width * 0.35 || flung > width * 0.5
+                if toggle { withAnimation(Self.drawerSpring) { drawerOpen.toggle() } }
             }
     }
 }
