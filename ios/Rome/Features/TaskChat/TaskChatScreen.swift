@@ -140,7 +140,6 @@ struct TaskChatScreen: View {
             taskRow(row, store: store, briefID: briefID)
                 .padding(.top, spacing(row, after: previous))
         }
-        .animation(.easeInOut(duration: 0.25), value: store.running)
         .onTapGesture { composerFocused = false }
     }
 

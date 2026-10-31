@@ -65,7 +65,12 @@ final class DemoBackend: RomeBackend {
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         try await pause(0.3)
-        return MessagePage(messages: messages[sessionId] ?? [], nextCursor: nil)
+        // Pages from the newest back, as the server does; the cursor is the
+        // oldest message of the page before.
+        let all = messages[sessionId] ?? []
+        let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
+        let start = max(0, end - limit)
+        return MessagePage(messages: Array(all[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
     }
 
     func send(sessionId: String, text: String, inputId: String, priority: InputPriority) async throws -> CreatedTurn {
@@ -81,9 +86,18 @@ final class DemoBackend: RomeBackend {
                 try? await pause(0.7)
                 insert(sessionId, agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now))
             } else {
-                insert(sessionId, agent("收到，我按这个继续。", at: .now))
+                // A task turn streams a few replies of mixed length, so scrolling
+                // during a running turn can be tried. Stop ends it early.
+                for (index, text) in Self.taskReplies.enumerated() where running[sessionId] == turnId {
+                    if index > 0 { try? await pause(1.4) }
+                    guard running[sessionId] == turnId else { break }
+                    insert(sessionId, agent(text, at: .now, session: sessionId, long: text.count > 60))
+                }
+                if running[sessionId] == turnId {
+                    insert(sessionId, trace(steps: Self.taskReplies.count, at: .now, session: sessionId))
+                }
             }
-            setRunning(sessionId, nil)
+            if running[sessionId] == turnId { setRunning(sessionId, nil) }
         }
         return CreatedTurn(turnId: turnId, inputId: inputId, disposition: "started")
     }
@@ -245,6 +259,30 @@ final class DemoBackend: RomeBackend {
     private func trace(steps: Int, at date: Date, session: String) -> ChatMessage {
         ChatMessage(id: nextID(), sessionId: session, role: "trace", content: "[]", createdAt: RomeDate.string(date), traceSummary: TraceSummary(totalSteps: steps, turnStatus: "completed"))
     }
+
+    private static let taskReplies = [
+        "收到，我按这个继续。",
+        """
+        先看了现有的页面结构，要改的地方有三处：
+
+        1. 首页 Hero 区的标题和副标题
+        2. 功能卡片的说明文字
+        3. 页脚的联系方式和版权
+        """,
+        "Hero 标题译好了。",
+        """
+        功能卡片的英文稿：
+
+        - **Fast setup**: one command, and Rome runs on your machine.
+        - **Your data stays yours**: everything is stored locally.
+        - **Apps that grow**: install or build apps as your needs change.
+        """,
+        "页脚也改好了，正在核对链接。",
+        """
+        链接都能打开。最后检查了一遍深色模式下的排版，英文比中文长，两张卡片的标题会换行，我把字号调小了一档，现在三张卡片高度一致。
+        """,
+        "全部完成，翻译稿在 `content/home.en.md`。",
+    ]
 
     // MARK: Seed
 

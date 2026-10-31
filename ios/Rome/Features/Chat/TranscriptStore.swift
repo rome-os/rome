@@ -18,6 +18,10 @@ final class TranscriptStore {
     private(set) var loaded = false
     private(set) var loadError: APIError?
     private(set) var loadingOlder = false
+    /// An older page fetched and waiting for the list to place it.
+    private(set) var olderPage: MessagePage?
+    /// An older page is going in above the rows.
+    private(set) var placingOlder = false
     private(set) var hasOlder = false
     /// The chat is running a turn.
     private(set) var running = false
@@ -59,9 +63,11 @@ final class TranscriptStore {
         )
     }
 
-    /// The first message the guardian wrote, which for a task chat is the brief from Concierge.
+    /// The first message the guardian wrote, which for a task chat is the brief
+    /// from Concierge. Unknown until the oldest page is held.
     var brief: ChatMessage? {
-        messages.first { $0.isUser && $0.parts.contains { $0.textContent != nil } }
+        guard !hasOlder else { return nil }
+        return messages.first { $0.isUser && $0.parts.contains { $0.textContent != nil } }
     }
 
     // MARK: Loading
@@ -87,9 +93,20 @@ final class TranscriptStore {
     func reload() async {
         do {
             let page = try await backend.messages(sessionId: sessionId, before: nil, limit: 40)
+            // A newest page that shares nothing with what is held leaves a gap
+            // behind it: start over from it. Otherwise keep the pages already
+            // loaded, so a reload never puts the older-page spinner back on top.
+            let known = Set(messages.map(\.id))
+            let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { known.contains($0.id) }
+            if gap {
+                messages = []
+                olderPage = nil
+            }
             merge(page.messages)
-            cursor = page.nextCursor
-            hasOlder = page.nextCursor != nil
+            if !loaded || gap {
+                cursor = page.nextCursor
+                hasOlder = page.nextCursor != nil
+            }
             loaded = true
             loadError = nil
             await refreshRunning()
@@ -106,16 +123,29 @@ final class TranscriptStore {
         }
     }
 
+    /// Fetches the page before the oldest message held. It waits in
+    /// `olderPage` until the list places it with `placeOlderPage()`.
     func loadOlder() async {
-        guard hasOlder, !loadingOlder, let cursor else { return }
+        guard hasOlder, !loadingOlder, olderPage == nil, let cursor else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        do {
-            let page = try await backend.messages(sessionId: sessionId, before: cursor, limit: 40)
-            merge(page.messages)
-            self.cursor = page.nextCursor
-            hasOlder = page.nextCursor != nil
-        } catch {}
+        olderPage = try? await backend.messages(sessionId: sessionId, before: cursor, limit: 40)
+    }
+
+    /// Puts the fetched older page above the rows. The list calls it when the
+    /// scroll is at rest: a page placed under a moving finger pushes the rows
+    /// in view down.
+    func placeOlderPage() async {
+        guard let page = olderPage else { return }
+        olderPage = nil
+        placingOlder = true
+        merge(page.messages)
+        cursor = page.nextCursor
+        hasOlder = page.nextCursor != nil
+        // The list keeps the rows in view still while this is set; hold it
+        // through the layout that places the page above them.
+        try? await Task.sleep(for: .milliseconds(150))
+        placingOlder = false
     }
 
     func markRead() {

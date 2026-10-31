@@ -245,8 +245,9 @@ struct CenteredMessage: View {
     }
 }
 
-/// A transcript that sticks to its bottom, loads older pages at the top, and
-/// offers a "New messages" pill when something arrives while the guardian reads up.
+/// A transcript that follows its bottom while the guardian is there, loads
+/// older pages at the top, and offers a "New messages" pill when something
+/// arrives while they read further up.
 struct TranscriptList<Row: View>: View {
     let store: TranscriptStore
     var composerFocused = false
@@ -258,7 +259,13 @@ struct TranscriptList<Row: View>: View {
     var focusMessageID: Binding<String?> = .constant(nil)
     @ViewBuilder let row: (TranscriptRow, TranscriptRow?) -> Row
 
-    @State private var atBottom = true
+    /// The list keeps the bottom in view. It turns off when the guardian scrolls
+    /// away from the bottom and back on when they come back, never because
+    /// content arrived.
+    @State private var following = true
+    @State private var bottomVisible = true
+    /// No finger or fling is moving the scroll.
+    @State private var atRest = true
     @State private var unseen = 0
     @State private var highlighted: String?
     @State private var visibleHeight: CGFloat = 0
@@ -284,47 +291,38 @@ struct TranscriptList<Row: View>: View {
                                 }
                             }
                             .id(item.id)
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .offset(y: 8)),
-                                removal: .opacity
-                            ))
                     }
                     if let footer {
-                        footer.transition(.opacity)
+                        footer
                     }
-                    Color.clear
-                        .frame(height: 1)
+                    BottomMarker(visible: $bottomVisible, following: $following)
                         .id("bottom")
-                        .onAppear { atBottom = true; unseen = 0 }
-                        .onDisappear { atBottom = false }
                 }
                 .padding(.horizontal, Metrics.pagePadding)
-                .padding(.bottom, 14)
                 .frame(minHeight: alignTop ? visibleHeight : nil, alignment: .top)
-                .animation(.spring(response: 0.38, dampingFraction: 0.88), value: rows.map(\.id))
             }
-            .defaultScrollAnchor(.bottom)
+            .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest))
+            .onChange(of: store.olderPage != nil && atRest) { _, ready in
+                if ready { Task { await store.placeOlderPage() } }
+            }
+            .scrollDismissesKeyboard(.interactively)
             .softTopScrollEdge()
             // The height between the bars; the scroll view itself runs under them.
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
             } action: { visibleHeight = $0 }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: rows.last?.id) {
-                if atBottom {
-                    withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                }
+            .onChange(of: following) { _, now in
+                if now { unseen = 0 }
             }
             .onChange(of: store.pending.count) { old, new in
-                if new > old {
-                    withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                }
+                if new > old { scrollToBottom(proxy) }
             }
             .onChange(of: store.arrivals) {
-                if !atBottom { unseen += 1 }
+                if !following { unseen += 1 }
             }
             .onChange(of: focusMessageID.wrappedValue, initial: true) { _, target in
                 guard let target, let first = rows.first(where: { $0.id.hasPrefix(target + ":") }) else { return }
+                following = false
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { proxy.scrollTo(first.id, anchor: .center) }
                 withAnimation(.easeOut(duration: 0.2)) { highlighted = target }
                 focusMessageID.wrappedValue = nil
@@ -337,15 +335,14 @@ struct TranscriptList<Row: View>: View {
                 if focused {
                     Task {
                         try? await Task.sleep(for: .milliseconds(300))
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                        scrollToBottom(proxy)
                     }
                 }
             }
             .overlay(alignment: .bottom) {
-                if unseen > 0 && !atBottom {
+                if unseen > 0 && !following {
                     Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                        unseen = 0
+                        scrollToBottom(proxy)
                     } label: {
                         HStack(spacing: 6) {
                             Text("New messages")
@@ -363,7 +360,76 @@ struct TranscriptList<Row: View>: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: unseen > 0 && !atBottom)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: unseen > 0 && !following)
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        following = true
+        unseen = 0
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
+}
+
+/// Where the transcript holds still as its content changes. On iOS 18 and
+/// later: it opens at the bottom; while it follows the bottom, new content
+/// pushes up from there; while the guardian reads further up, the rows they
+/// see stay put, also when an older page lands above them.
+private struct FollowBottom: ViewModifier {
+    @Binding var following: Bool
+    /// The bottom marker is on screen.
+    let bottomVisible: Bool
+    /// An older page is going in at the top; it must land above the rows in view.
+    let holdOlder: Bool
+    @Binding var atRest: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content
+                // The role nearest the scroll view wins over the general anchor.
+                .defaultScrollAnchor(following || holdOlder ? .bottom : .top, for: .sizeChanges)
+                .defaultScrollAnchor(.bottom)
+                .onScrollPhaseChange { old, phase in
+                    atRest = phase == .idle || phase == .animating
+                    switch phase {
+                    case .interacting:
+                        // A drag owns the scroll: nothing moves it from under the finger.
+                        following = false
+                    case .idle:
+                        // Where a drag or fling comes to rest decides; a tap or a
+                        // programmatic scroll only turns following back on.
+                        if old == .interacting || old == .decelerating {
+                            following = bottomVisible
+                        } else if bottomVisible {
+                            following = true
+                        }
+                    default:
+                        break
+                    }
+                }
+        } else {
+            content.defaultScrollAnchor(.bottom)
+        }
+    }
+}
+
+/// The space under the last row. It reports whether the bottom is on screen:
+/// from the scroll view on iOS 18 and later, from appearing and disappearing
+/// before.
+private struct BottomMarker: View {
+    @Binding var visible: Bool
+    @Binding var following: Bool
+
+    var body: some View {
+        if #available(iOS 18, *) {
+            Color.clear
+                .frame(height: 14)
+                .onScrollVisibilityChange(threshold: 0.5) { visible = $0 }
+        } else {
+            Color.clear
+                .frame(height: 14)
+                .onAppear { visible = true; following = true }
+                .onDisappear { visible = false; following = false }
         }
     }
 }
