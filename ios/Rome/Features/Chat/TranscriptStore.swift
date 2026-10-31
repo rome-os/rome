@@ -258,7 +258,8 @@ final class TranscriptStore {
                 }
                 try? await Task.sleep(for: .seconds(delay))
             }
-            self?.approvalPolls[id] = nil
+            // A cancelled poll may already have a replacement; leave its entry alone.
+            if !Task.isCancelled { self?.approvalPolls[id] = nil }
         }
     }
 

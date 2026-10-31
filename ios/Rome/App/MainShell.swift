@@ -108,7 +108,7 @@ struct MainShell: View {
                 TopBanner(kind: .error, text: "会话已过期。", actionTitle: "重新登录") {
                     Task { await model.reauthenticate() }
                 }
-                .padding(.top, 8)
+                .padding(.top, 58)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }

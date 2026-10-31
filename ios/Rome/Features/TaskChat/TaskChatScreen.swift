@@ -60,12 +60,15 @@ struct TaskChatScreen: View {
         }
         .onAppear {
             if store == nil {
-                let created = TranscriptStore(sessionId: chatId, kind: .task, backend: workspace.backend)
-                store = created
-                created.start()
+                store = TranscriptStore(sessionId: chatId, kind: .task, backend: workspace.backend)
             }
+            // Starting again after a return reloads and resubscribes; it is a no-op while running.
+            store?.start()
         }
-        .onDisappear { store?.markRead() }
+        .onDisappear {
+            store?.markRead()
+            store?.stop()
+        }
         // Keep the swipe-back gesture with a hidden navigation bar.
         .background(SwipeBackEnabler())
     }
