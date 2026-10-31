@@ -105,7 +105,7 @@ struct MainShell: View {
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .overlay(alignment: .top) {
             if model.sessionExpired {
-                TopBanner(kind: .error, text: "会话已过期。", actionTitle: "重新登录") {
+                TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
                     Task { await model.reauthenticate() }
                 }
                 .padding(.top, 58)

@@ -15,7 +15,7 @@ struct TasksSheet: View {
                 .frame(width: 36, height: 5)
                 .padding(.top, 7)
             HStack {
-                Text("任务")
+                Text("Tasks")
                     .romeFont(24, .bold)
                     .tracking(-0.6)
                     .accessibilityAddTraits(.isHeader)
@@ -61,10 +61,10 @@ struct TasksSheet: View {
                 .frame(width: 52, height: 52)
                 .background(Palette.fillStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .padding(.bottom, 8)
-            Text("还没有任务")
+            Text("No tasks yet")
                 .romeFont(19, .semibold)
                 .tracking(-0.4)
-            Text("在 Chat 里交代的事，开成任务后会出现在这里。")
+            Text("What you ask for in Chat appears here once it becomes a task.")
                 .romeFont(15)
                 .lineSpacing(4)
                 .foregroundStyle(Palette.sub)
@@ -80,7 +80,7 @@ struct TasksSheet: View {
             HStack(spacing: 7) {
                 Circle().fill(group.key.tone == .neutral ? Palette.sub.opacity(0.6) : group.key.tone.dot).frame(width: 7, height: 7)
                 Text(group.key.title)
-                Text("\(group.tasks.count + group.hidden)").fontWeight(.medium).opacity(0.8)
+                Text(verbatim: "\(group.tasks.count + group.hidden)").fontWeight(.medium).opacity(0.8)
             }
             .romeFont(13, .semibold)
             .foregroundStyle(Palette.sub)
@@ -104,7 +104,7 @@ struct TasksSheet: View {
                 .hairline(radius: Metrics.groupRadius)
             }
             if group.hidden > 0 || (group.key == .done && showAllDone) {
-                Button(showAllDone ? "收起" : "显示更早的 \(group.hidden) 项") {
+                Button(showAllDone ? "Show less" : "Show \(group.hidden) older") {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { showAllDone.toggle() }
                 }
                 .romeFont(14, .semibold)
@@ -178,7 +178,7 @@ struct TaskRow: View {
         .buttonStyle(RowPressStyle())
         .disabled(!tappable)
         .accessibilityElement(children: .combine)
-        .accessibilityHint(task.chat != nil ? "打开任务对话" : (task.sourceMessageId != nil ? "在 Chat 里查看" : ""))
+        .accessibilityHint(task.chat != nil ? String(localized: "Opens the task chat.") : (task.sourceMessageId != nil ? String(localized: "Shows the message in Chat.") : ""))
     }
 
     @ViewBuilder
@@ -188,21 +188,21 @@ struct TaskRow: View {
             Circle()
                 .strokeBorder(Palette.sub, style: StrokeStyle(lineWidth: 1.6, dash: [2.6, 2.4]))
                 .frame(width: 18, height: 18)
-                .accessibilityLabel("接下来")
+                .accessibilityLabel("Up next")
         case .watching:
             Image(systemName: "eye")
                 .romeFont(10, .bold)
                 .foregroundStyle(Palette.sub)
                 .frame(width: 18, height: 18)
                 .overlay(Circle().strokeBorder(Palette.sub, lineWidth: 1.6))
-                .accessibilityLabel("盯着")
+                .accessibilityLabel("Watching")
         case .dropped:
             Image(systemName: "minus")
                 .romeFont(9, .heavy)
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
                 .background(Palette.sub, in: Circle())
-                .accessibilityLabel("已放下")
+                .accessibilityLabel("Dropped")
         default:
             StatusGlyph(tone: tone)
         }
@@ -213,18 +213,18 @@ struct TaskRow: View {
         var parts: [String] = []
         switch task.state {
         case .needsUser:
-            parts.append(task.waitingOn ?? task.summary ?? "等你处理")
+            parts.append(task.waitingOn ?? task.summary ?? String(localized: "Needs you"))
             if let date = RomeDate.fromMillis(task.updatedAt) { parts.append(RelativeTime.ago(date, now: now)) }
         case .doing:
-            parts.append(tone == .failed ? "失败" : (task.summary ?? "进行中"))
+            parts.append(tone == .failed ? String(localized: "Failed") : (task.summary ?? String(localized: "Working")))
         case .next, .watching:
             if let summary = task.summary { parts.append(summary) }
             if let due = RomeDate.fromMillis(task.dueAt) { parts.append(RelativeTime.until(due, now: now)) }
         case .done, .dropped:
-            parts.append(task.summary ?? (task.state == .done ? "已完成" : "已放下"))
+            parts.append(task.summary ?? (task.state == .done ? String(localized: "Done") : String(localized: "Dropped")))
             if let date = RomeDate.fromMillis(task.completedAt ?? task.updatedAt) { parts.append(RelativeTime.ago(date, now: now)) }
         }
-        if task.notSynced == true { parts.append("未同步") }
+        if task.notSynced == true { parts.append(String(localized: "Not synced")) }
         return parts.joined(separator: " · ")
     }
 

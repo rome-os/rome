@@ -12,7 +12,7 @@ struct UserBubble: View {
                 if pending == .failed {
                     Button(action: onRetry) { AlertGlyph(size: 18) }
                         .frame(width: 28, height: 28)
-                        .accessibilityLabel("发送失败，点按重试")
+                        .accessibilityLabel("Not sent. Tap to retry.")
                 }
                 Text(text)
                     .romeFont(16)
@@ -25,7 +25,7 @@ struct UserBubble: View {
                     .contextMenu { CopyButton(text: text) }
             }
             if pending == .failed {
-                Button("未发送 · 点按重试", action: onRetry)
+                Button("Not sent · Tap to retry", action: onRetry)
                     .romeFont(12, .medium)
                     .foregroundStyle(Palette.destructive)
             }
@@ -86,7 +86,7 @@ struct AgentBubble: View {
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "arrowshape.turn.up.right").romeFont(11, .semibold)
-                            Text("来自「\(forwardedFrom.title)」").lineLimit(1)
+                            Text("From “\(forwardedFrom.title)”").lineLimit(1)
                         }
                         .romeFont(12, .semibold)
                         .foregroundStyle(Palette.sub)
@@ -113,7 +113,7 @@ struct AgentBubble: View {
     }
 
     private var expandButton: some View {
-        Button(expanded ? "收起" : "展开全文") {
+        Button(expanded ? "Show less" : "Show full text") {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
         }
         .romeFont(14, .semibold)
@@ -128,12 +128,12 @@ struct CopyButton: View {
         Button {
             UIPasteboard.general.string = text
         } label: {
-            Label("复制", systemImage: "doc.on.doc")
+            Label("Copy", systemImage: "doc.on.doc")
         }
     }
 }
 
-/// A card for a task chat the Concierge started: "任务" + status, then its title.
+/// A card for a task chat the Concierge started: "Task" + status, then its title.
 struct TaskCard: View {
     let title: String
     let tone: TaskTone
@@ -143,7 +143,7 @@ struct TaskCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Text("任务")
+                    Text("Task")
                         .romeFont(12, .semibold)
                         .foregroundStyle(Palette.sub)
                     Spacer(minLength: 0)
@@ -172,7 +172,7 @@ struct TaskCard: View {
         .containerRelativeFrame(.horizontal) { width, _ in (width - 32) * 0.82 }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.easeInOut(duration: 0.25), value: tone)
-        .accessibilityLabel("任务，\(title)，\(tone.label)")
+        .accessibilityLabel("Task, \(title), \(tone.label)")
     }
 }
 
@@ -209,7 +209,7 @@ enum TranscriptSpacing {
 /// The capsule composer: a growing text field and a round send button.
 struct Composer: View {
     @Binding var text: String
-    let placeholder: String
+    let placeholder: LocalizedStringKey
     var stopVisible = false
     var stopping = false
     var focus: FocusState<Bool>.Binding
@@ -237,7 +237,7 @@ struct Composer: View {
                             .opacity(stopping ? 0.5 : 1)
                     }
                     .disabled(stopping)
-                    .accessibilityLabel("停止")
+                    .accessibilityLabel("Stop")
                     .transition(.scale.combined(with: .opacity))
                 } else {
                     Button(action: onSend) {
@@ -249,7 +249,7 @@ struct Composer: View {
                             .opacity(canSend ? 1 : 0.35)
                     }
                     .disabled(!canSend)
-                    .accessibilityLabel("发送")
+                    .accessibilityLabel("Send")
                     .transition(.scale.combined(with: .opacity))
                 }
             }

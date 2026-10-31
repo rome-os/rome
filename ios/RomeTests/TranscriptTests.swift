@@ -62,7 +62,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     @Test func actionNamesReadAsWords() {
         #expect(displayActionName("system:send_email") == "send email")
-        #expect(displayActionName(nil) == "执行操作")
+        #expect(displayActionName(nil) == "Run action")
     }
 }
 
@@ -142,7 +142,23 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     @Test func agoUsesPlainWords() {
         let now = Date()
-        #expect(RelativeTime.ago(now.addingTimeInterval(-30), now: now) == "刚刚")
-        #expect(RelativeTime.ago(now.addingTimeInterval(-600), now: now) == "10 分钟前")
+        #expect(RelativeTime.ago(now.addingTimeInterval(-30), now: now) == "Just now")
+        #expect(RelativeTime.ago(now.addingTimeInterval(-60), now: now) == "1 minute ago")
+        #expect(RelativeTime.ago(now.addingTimeInterval(-600), now: now) == "10 minutes ago")
+    }
+
+    @Test func untilCountsDown() {
+        let now = Date()
+        #expect(RelativeTime.until(now.addingTimeInterval(-5), now: now) == "Due now")
+        #expect(RelativeTime.until(now.addingTimeInterval(1800), now: now) == "In 30 minutes")
+    }
+
+    @Test func olderDaysUseTheLocaleFormat() {
+        var components = DateComponents()
+        components.year = 2025; components.month = 10; components.day = 27; components.hour = 14; components.minute = 5
+        let date = Calendar.current.date(from: components)!
+        let now = date.addingTimeInterval(400 * 86_400)
+        #expect(RelativeTime.separator(date, now: now) == "Oct 27, 2025 14:05")
+        #expect(RelativeTime.weekday(date) == "Mon")
     }
 }

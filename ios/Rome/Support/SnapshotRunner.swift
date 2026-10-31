@@ -36,7 +36,7 @@ enum SnapshotRunner {
             window?.overrideUserInterfaceStyle = style
             await capture("01-login", style: styleName, in: directory) { model.debugSetPhase(.signedOut) }
             await capture("02-login-connecting", style: styleName, in: directory) { model.debugSetPhase(.connecting(host: "me.romeos.cc")) }
-            await capture("03-login-stopped", style: styleName, in: directory) { model.debugSetPhase(.stopped(instanceName: "我的 Rome")) }
+            await capture("03-login-stopped", style: styleName, in: directory) { model.debugSetPhase(.stopped(instanceName: String(localized: "My Rome"))) }
 
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))

@@ -42,7 +42,7 @@ struct TaskChatScreen: View {
             if let store {
                 Composer(
                     text: $draft,
-                    placeholder: "回复这个任务",
+                    placeholder: "Reply to this task",
                     stopVisible: store.running,
                     stopping: store.stopping,
                     focus: $composerFocused,
@@ -75,7 +75,7 @@ struct TaskChatScreen: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            GlassCircleButton(accessibilityLabel: "返回", action: { dismiss() }) {
+            GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
                 Image(systemName: "chevron.left").romeFont(17, .semibold)
             }
             VStack(spacing: 1) {
@@ -90,7 +90,7 @@ struct TaskChatScreen: View {
                         } else {
                             Circle().fill(tone.dot).frame(width: 6, height: 6)
                         }
-                        Text(tone == .running ? "运行中" : tone.label)
+                        Text(tone == .running ? String(localized: "Running") : tone.label)
                     }
                     .romeFont(12, .medium)
                     .foregroundStyle(tone.text)
@@ -103,12 +103,12 @@ struct TaskChatScreen: View {
                 Button {
                     if let url = model.webURL?.appending(path: "chat/\(chatId)") { openURL(url) }
                 } label: {
-                    Label("在 Web 中打开", systemImage: "safari")
+                    Label("Open on the web", systemImage: "safari")
                 }
                 Button {
                     UIPasteboard.general.url = model.webURL?.appending(path: "chat/\(chatId)")
                 } label: {
-                    Label("复制链接", systemImage: "link")
+                    Label("Copy link", systemImage: "link")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -120,7 +120,7 @@ struct TaskChatScreen: View {
                     .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
                     .shadow(color: Palette.softShadow, radius: 7, x: 0, y: 4)
             }
-            .accessibilityLabel("更多")
+            .accessibilityLabel("More")
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -146,7 +146,7 @@ struct TaskChatScreen: View {
     private func runningLine(_ store: TranscriptStore) -> some View {
         HStack(spacing: 8) {
             Spinner(size: 15, color: Palette.running)
-            Text(store.stopping ? "正在停止…" : "运行中…")
+            Text(store.stopping ? "Stopping…" : "Running…")
                 .romeFont(15)
                 .foregroundStyle(Palette.sub)
             Spacer()

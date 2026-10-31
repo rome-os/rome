@@ -112,7 +112,7 @@ enum TranscriptBuilder {
                 case .webOnly:
                     rows.append(.webOnly(id: id))
                 case .error(let text):
-                    rows.append(.error(id: id, text: text.isEmpty ? "这一轮没有完成。" : text))
+                    rows.append(.error(id: id, text: text.isEmpty ? String(localized: "This turn did not finish") : text))
                 case .interactionResult, .other:
                     continue
                 }
@@ -205,47 +205,63 @@ enum RelativeTime {
         return formatter
     }()
 
-    /// "今天 09:12", "昨天 18:20", "周一 08:00", "10月27日 14:05".
+    /// The app's own language with the guardian's region, so a weekday or a
+    /// month never comes out in a different language from the words around it.
+    static var locale: Locale {
+        let language = Bundle.main.preferredLocalizations.first ?? "en"
+        return Locale(identifier: Locale.current.region.map { "\(language)_\($0.identifier)" } ?? language)
+    }
+
+    /// "Today 09:12", "Yesterday 18:20", "Mon 08:00", "Oct 27 14:05";
+    /// "今天 09:12", "周一 08:00", "10月27日 14:05" in Chinese.
     static func separator(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
         let time = clock(date)
-        if calendar.isDateInToday(date) { return "今天 \(time)" }
-        if calendar.isDateInYesterday(date) { return "昨天 \(time)" }
+        if calendar.isDateInToday(date) { return String(localized: "Today \(time)") }
+        if calendar.isDateInYesterday(date) { return String(localized: "Yesterday \(time)") }
         if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day,
            days < 7 {
             return "\(weekday(date, calendar: calendar)) \(time)"
         }
         let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-        let day = sameYear
-            ? "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
-            : "\(calendar.component(.year, from: date))年\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
-        return "\(day) \(time)"
+        return "\(day(date, withYear: !sameYear, calendar: calendar)) \(time)"
     }
 
+    /// "Mon"; "周一" in Chinese.
     static func weekday(_ date: Date, calendar: Calendar = .current) -> String {
-        ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][calendar.component(.weekday, from: date) - 1]
+        date.formatted(style(calendar).weekday(.abbreviated))
     }
 
-    /// "10 分钟前", "2 小时前", "昨天", "周一".
+    /// "Oct 27" or "Oct 27, 2025"; "10月27日" or "2025年10月27日" in Chinese.
+    static func day(_ date: Date, withYear: Bool = false, calendar: Calendar = .current) -> String {
+        let format = style(calendar).month(.abbreviated).day()
+        return date.formatted(withYear ? format.year() : format)
+    }
+
+    private static func style(_ calendar: Calendar) -> Date.FormatStyle {
+        Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+    }
+
+    /// "10 minutes ago", "2 hours ago", "Yesterday 18:20", "Mon".
     static func ago(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
         let seconds = now.timeIntervalSince(date)
-        if seconds < 60 { return "刚刚" }
-        if seconds < 3600 { return "\(Int(seconds / 60)) 分钟前" }
-        if calendar.isDateInToday(date) { return "\(Int(seconds / 3600)) 小时前" }
+        if seconds < 60 { return String(localized: "Just now") }
+        if seconds < 3600 { return String(localized: "\(Int(seconds / 60)) minutes ago") }
+        if calendar.isDateInToday(date) { return String(localized: "\(Int(seconds / 3600)) hours ago") }
         if calendar.isDateInYesterday(date) {
-            return "昨天 \(clock(date))"
+            return String(localized: "Yesterday \(clock(date))")
         }
         if seconds < 7 * 86_400 { return weekday(date, calendar: calendar) }
-        return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日"
+        return day(date, calendar: calendar)
     }
 
-    /// "30 分钟后", "明天 09:00": when a watched or planned task is due.
+    /// "In 30 minutes", "Tomorrow 09:00": when a watched or planned task is due.
     static func until(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
         let seconds = date.timeIntervalSince(now)
-        if seconds <= 0 { return "已到时间" }
-        if seconds < 3600 { return "\(max(1, Int(seconds / 60))) 分钟后" }
+        if seconds <= 0 { return String(localized: "Due now") }
+        if seconds < 3600 { return String(localized: "In \(max(1, Int(seconds / 60))) minutes") }
         let time = clock(date)
-        if calendar.isDateInToday(date) { return "今天 \(time)" }
-        if calendar.isDateInTomorrow(date) { return "明天 \(time)" }
-        return "\(calendar.component(.month, from: date))月\(calendar.component(.day, from: date))日 \(time)"
+        if calendar.isDateInToday(date) { return String(localized: "Today \(time)") }
+        if calendar.isDateInTomorrow(date) { return String(localized: "Tomorrow \(time)") }
+        return "\(day(date, calendar: calendar)) \(time)"
     }
 }

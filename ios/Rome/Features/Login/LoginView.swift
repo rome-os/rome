@@ -24,8 +24,8 @@ struct LoginView: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.9), value: model.phase)
         .animation(.easeOut(duration: 0.2), value: model.signInError)
         #if DEBUG
-        .confirmationDialog("调试", isPresented: $showDebugMenu) {
-            Button("打开演示数据") { model.openDemo() }
+        .confirmationDialog("Debug", isPresented: $showDebugMenu) {
+            Button("Open demo data") { model.openDemo() }
         }
         #endif
     }
@@ -37,7 +37,7 @@ struct LoginView: View {
             VStack(spacing: 18) {
                 Spinner(size: 28, lineWidth: 2.5, color: Palette.fg, trackOpacity: 0.12)
                 VStack(spacing: 4) {
-                    Text("正在打开你的 Rome").romeFont(17, .semibold)
+                    Text("Opening your Rome").romeFont(17, .semibold)
                     Text(host).romeFont(15).foregroundStyle(Palette.sub)
                 }
             }
@@ -50,9 +50,9 @@ struct LoginView: View {
                     .frame(width: 56, height: 56)
                     .background(Palette.fill, in: Circle())
                 VStack(spacing: 6) {
-                    Text(model.phase == .noInstance ? "还没有可打开的 Rome" : "你的 Rome 已停止")
+                    Text(model.phase == .noInstance ? "No Rome to open yet" : "Your Rome is stopped")
                         .romeFont(20, .semibold)
-                    Text(model.phase == .noInstance ? "在 Rome Cloud 创建一个后再打开。" : "在 Rome Cloud 启动后再打开。")
+                    Text(model.phase == .noInstance ? "Create one in Rome Cloud, then open it here." : "Start it in Rome Cloud, then open it here.")
                         .romeFont(15)
                         .foregroundStyle(Palette.sub)
                 }
@@ -72,7 +72,7 @@ struct LoginView: View {
                         showDebugMenu = true
                         #endif
                     }
-                Text("登录后打开你的 Rome")
+                Text("Sign in to open your Rome")
                     .romeFont(20)
                     .tracking(-0.3)
                     .foregroundStyle(Palette.sub)
@@ -98,12 +98,12 @@ struct LoginView: View {
                     .background(Palette.dangerSoft, in: Capsule())
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                PrimaryButton(title: "使用 Rome Cloud 登录", loadingTitle: "正在登录", loading: model.phase == .signingIn) {
+                PrimaryButton(title: "Sign in with Rome Cloud", loadingTitle: "Signing in", loading: model.phase == .signingIn) {
                     signIn()
                 }
             case .stopped, .noInstance:
-                SecondaryButton(title: "重试") { Task { await model.retry() } }
-                Button("退出登录") { Task { await model.signOut() } }
+                SecondaryButton(title: "Try again") { Task { await model.retry() } }
+                Button("Sign out") { Task { await model.signOut() } }
                     .romeFont(17)
                     .foregroundStyle(Palette.sub)
                     .frame(height: 44)
@@ -134,8 +134,8 @@ struct LoginView: View {
 
 /// The filled primary capsule (54 pt) with a soft coral glow.
 struct PrimaryButton: View {
-    let title: String
-    var loadingTitle: String? = nil
+    let title: LocalizedStringKey
+    var loadingTitle: LocalizedStringKey? = nil
     var loading = false
     var disabled = false
     let action: () -> Void
@@ -167,7 +167,7 @@ struct PrimaryButton: View {
 
 /// The neutral filled capsule (54 pt).
 struct SecondaryButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let action: () -> Void
 
     var body: some View {

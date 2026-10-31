@@ -9,11 +9,11 @@ enum TaskGroupKey: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .needsYou: return "等你处理"
-        case .doing: return "进行中"
-        case .next: return "接下来"
-        case .watching: return "盯着"
-        case .done: return "已完成"
+        case .needsYou: return String(localized: "Needs you")
+        case .doing: return String(localized: "Doing")
+        case .next: return String(localized: "Up next")
+        case .watching: return String(localized: "Watching")
+        case .done: return String(localized: "Done")
         }
     }
 

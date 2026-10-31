@@ -13,13 +13,13 @@ enum APIError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unauthorized: return "会话已过期。"
-        case .conciergeOff: return "Concierge 未开启。"
-        case .notFound: return "没有找到。"
-        case .server(_, let message): return message ?? "服务器出错了。"
-        case .offline: return "没有网络连接。"
-        case .network: return "连接不上你的 Rome。"
-        case .decoding: return "收到的数据无法读取。"
+        case .unauthorized: return String(localized: "Session expired")
+        case .conciergeOff: return String(localized: "Concierge is off")
+        case .notFound: return String(localized: "Not found")
+        case .server(_, let message): return message ?? String(localized: "Server error")
+        case .offline: return String(localized: "No network connection")
+        case .network: return String(localized: "Could not reach your Rome")
+        case .decoding: return String(localized: "Could not read the response")
         }
     }
 }

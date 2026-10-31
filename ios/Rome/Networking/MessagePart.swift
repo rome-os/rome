@@ -117,7 +117,7 @@ enum MessagePart: Hashable, Sendable {
         case "sensitive_message":
             summary = preview?["text"]?.string
             if let channel = preview?["channel"]?.string {
-                fields.append(.init(label: "渠道", value: channel))
+                fields.append(.init(label: String(localized: "Channel"), value: channel))
             }
         default:
             break
@@ -167,7 +167,7 @@ extension MessagePart {
 
 /// A human name for an action id such as `system:send_email` → "send email".
 func displayActionName(_ name: String?) -> String {
-    guard let name, !name.isEmpty else { return "执行操作" }
+    guard let name, !name.isEmpty else { return String(localized: "Run action") }
     let local = name.split(separator: ":").last.map(String.init) ?? name
     return local.replacingOccurrences(of: "_", with: " ")
 }

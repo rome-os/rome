@@ -23,7 +23,7 @@ struct ChatScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
-                Composer(text: $draft, placeholder: "发消息", focus: $composerFocused) {
+                Composer(text: $draft, placeholder: "Message", focus: $composerFocused) {
                     if store.send(draft) { draft = "" }
                 }
                 .padding(.horizontal, Metrics.pagePadding)
@@ -49,7 +49,7 @@ struct ChatScreen: View {
                     }
             }
             if store.loadError == .offline {
-                TopBanner(kind: .warning, text: "没有网络连接。")
+                TopBanner(kind: .warning, text: String(localized: "No network connection"))
             }
         }
         .padding(.top, model.autoOpenHint != nil || store.loadError == .offline ? 10 : 0)
@@ -65,24 +65,24 @@ struct ChatScreen: View {
             Spacer()
         case .off:
             CenteredMessage(
-                title: "Concierge 未开启",
-                detail: "开启后就能在这里对话。",
-                actionTitle: "开启 Concierge"
+                title: "Concierge is off",
+                detail: "Turn it on to chat here.",
+                actionTitle: "Turn on Concierge"
             ) { Task { await workspace.enableConcierge() } }
         case .failed:
             CenteredMessage(
-                title: "连接不上你的 Rome",
-                detail: "检查网络后再试一次。",
-                actionTitle: "重试"
+                title: "Could not reach your Rome",
+                detail: "Check the network and try again",
+                actionTitle: "Try again"
             ) { Task { await workspace.openConcierge() } }
         case .ready:
             if store.loaded && store.rows.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
-                    Text("有什么要做的？")
+                    Text("What needs doing?")
                         .romeFont(30, .bold)
                         .tracking(-0.8)
-                    Text("复杂的事我会开成任务去做，做完告诉你。")
+                    Text("I turn bigger jobs into tasks and tell you when they're done.")
                         .romeFont(16)
                         .lineSpacing(5)
                         .foregroundStyle(Palette.sub)
@@ -140,7 +140,7 @@ struct ChatHeader: View {
 
     var body: some View {
         HStack {
-            GlassCircleButton(accessibilityLabel: "打开导航", action: onMenu) {
+            GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
             Spacer()
@@ -149,12 +149,12 @@ struct ChatHeader: View {
                 .tracking(-0.4)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
-            GlassCircleButton(accessibilityLabel: needsYou > 0 ? "任务，\(needsYou) 个等你处理" : "任务", action: onTasks) {
+            GlassCircleButton(accessibilityLabel: needsYou > 0 ? "Tasks, \(needsYou) need you" : "Tasks", action: onTasks) {
                 ChecklistGlyph()
             }
             .overlay(alignment: .topTrailing) {
                 if needsYou > 0 {
-                    Text("\(needsYou)")
+                    Text(verbatim: "\(needsYou)")
                         .romeFont(12, .bold, monospacedDigits: true)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
@@ -213,9 +213,9 @@ struct ChecklistGlyph: View {
 
 /// A title, a line, and one button, centered: empty and error states.
 struct CenteredMessage: View {
-    let title: String
-    let detail: String
-    let actionTitle: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+    let actionTitle: LocalizedStringKey
     let action: () -> Void
 
     var body: some View {
@@ -237,13 +237,13 @@ struct CenteredMessage: View {
 }
 
 /// A transcript that sticks to its bottom, loads older pages at the top, and
-/// offers a "新消息" pill when something arrives while the guardian reads up.
+/// offers a "New messages" pill when something arrives while the guardian reads up.
 struct TranscriptList<Row: View>: View {
     let store: TranscriptStore
     var composerFocused = false
     /// Short transcripts sit at the top instead of the bottom (task chats).
     var alignTop = false
-    /// Drawn after the last row, inside the scroll: the "运行中…" line.
+    /// Drawn after the last row, inside the scroll: the "Running…" line.
     var footer: AnyView? = nil
     /// A message to scroll to and briefly highlight.
     var focusMessageID: Binding<String?> = .constant(nil)
@@ -334,7 +334,7 @@ struct TranscriptList<Row: View>: View {
                         unseen = 0
                     } label: {
                         HStack(spacing: 6) {
-                            Text("新消息")
+                            Text("New messages")
                             Image(systemName: "arrow.down").romeFont(12, .bold)
                         }
                         .romeFont(14, .semibold)
