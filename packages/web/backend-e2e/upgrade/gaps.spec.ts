@@ -101,6 +101,22 @@ test.describe("on fresh chats", () => {
         "What beta read as the guardian's message:",
         "",
         ...calls.map((c, i) => `--- call ${i + 1} ---\n${c.prompt ?? ""}`),
+        "",
+        "The group's seats:",
+        JSON.stringify(
+          (
+            await control.sql<Record<string, unknown>>(
+              `select * from rome_sessions where source_thread_id = '${group.id}' order by created_at`,
+            )
+          ).map(({ id, source_channel, created_at, chat_id }) => ({
+            id,
+            source_channel,
+            created_at,
+            chat_id,
+          })),
+          null,
+          2,
+        ),
       ].join("\n"),
     );
   });
