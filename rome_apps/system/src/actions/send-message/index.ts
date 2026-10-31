@@ -126,6 +126,52 @@ async function recordDeliveredConversationMessage(
   });
 }
 
+/**
+ * Say `input` at `threadId` through the seat it belongs to: the session the
+ * caller names, the run's own when it sends where the run was asked, else
+ * the main agent's seat at that address, opened when Rome holds none.
+ */
+async function sendThroughSeat(
+  chats: ChatRepository,
+  send: NonNullable<ChatRepository["send"]>,
+  input: SendMessageInput,
+  threadId: string,
+): Promise<{ messageId?: string }> {
+  const current = getCurrentActionContext();
+  const sameAmbientConversation =
+    current?.channelContext?.channel === input.channel &&
+    current.channelContext.threadId === threadId;
+  const boundRomeSessionId =
+    input.romeSessionId ??
+    (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined);
+  const sessionId =
+    boundRomeSessionId ??
+    (
+      await ensureChannelChat(chats, {
+        channel: input.channel,
+        threadId,
+        // A send must not bind an unclaimed conversation to whichever
+        // background or sentinel agent happened to send first.
+        agentName: "main",
+        threadType: "private",
+      })
+    ).id;
+  const turnId = input.turnId ?? current?.turnId;
+  return send({
+    sessionId,
+    channel: input.channel,
+    ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.parts?.length ? { parts: [...input.parts] } : {}),
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+    content: outboundContent(input),
+    ...(input.replyToMessageId ? { replyToPlatformMessageId: input.replyToMessageId } : {}),
+    ...(turnId ? { turnId } : {}),
+    knownToProvider:
+      input.knownToProvider ??
+      Boolean(input.turnId || (sameAmbientConversation && current?.turnId)),
+  });
+}
+
 /** Opens the chat for a channel thread, or finds the one already open. A host
  *  that predates the chat names offers only `ensureChannelConversation`. */
 function ensureChannelChat(
@@ -464,6 +510,18 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
+  // A host with Chats' send says the message through the seat's chat
+  // adapter, which sends and records it as one step. The dashboard writes its
+  // own lines, and an older host only records after the send.
+  const chats = deps.chats;
+  const said =
+    channel !== "webchat" && chats?.send
+      ? await sendThroughSeat(chats, chats.send.bind(chats), safeInput, threadId)
+      : null;
+  if (said)
+    return said.messageId
+      ? { status: "ok", data: { messageId: said.messageId } }
+      : { status: "ok" };
   const delivery = await channels.send(account, threadId as ChatId, {
     text,
     parts,

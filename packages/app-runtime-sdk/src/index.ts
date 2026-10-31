@@ -2393,6 +2393,27 @@ export interface ChatRepository {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<void>;
+  /**
+   * Say a message where seat `sessionId` stands, as its account on `channel`:
+   * the host sends it through the chat's adapter, records it once the
+   * platform took it, and makes it turn `turnId`'s answer when the turn knows
+   * it (`knownToProvider`). `content` is the line as it goes on record, as
+   * JSON parts, when it says more than the platform shows. Throws the
+   * platform's refusal, and records nothing then. Answers the platform's id
+   * for the message, when it gave one. A host that predates it lacks it; send
+   * on the channel and call {@link recordOutboundMessage} there.
+   */
+  send?(input: {
+    sessionId: string;
+    channel: string;
+    text?: string;
+    parts?: MessagePart[];
+    attachments?: OutgoingAttachment[];
+    content?: string;
+    replyToPlatformMessageId?: string;
+    turnId?: string;
+    knownToProvider: boolean;
+  }): Promise<{ messageId?: string }>;
 }
 
 export interface WebChatRecapSession {

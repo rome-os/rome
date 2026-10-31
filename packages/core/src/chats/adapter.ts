@@ -9,6 +9,8 @@
 import type {
   Account,
   Attachment,
+  OutgoingAttachment,
+  StreamAgentEvent,
   Channel,
   ChannelMessage,
   ChatId,
@@ -18,11 +20,16 @@ import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { ChatKind } from "./chat.js";
+import type { ChannelSend } from "../channels/channel.js";
 import type { ChatAddresses } from "../channels/chat-addresses.js";
+import { ReplyDelivery, type ReplyOutcome } from "../channels/delivery/reply.js";
+import type { DeliveryPolicy } from "../channels/delivery/types.js";
+import type { Clock } from "../lib/clock.js";
 import { ChatIds } from "../channels/chat-ids.js";
 import {
   chatKey,
   directMessageOn,
+  notOwnedBy,
   otherEndOf,
   ownedBy,
   type ChatKey,
@@ -66,6 +73,7 @@ export interface Inbound {
 export interface Outbound {
   readonly text: string;
   readonly parts?: readonly MessagePart[];
+  readonly attachments?: readonly OutgoingAttachment[];
   readonly replyTo?: string;
   /** The agent turn it answers, which a platform may show it as. */
   readonly turnId?: string;
@@ -97,6 +105,32 @@ export interface ChatAdapter {
    * took it. A refusal rejects with the platform's words. No retry.
    */
   send(chatId: string, threadId: ChatId | null, out: Outbound): Promise<string>;
+  /**
+   * Open a reply in chat `chatId` that is written as the agent's run goes,
+   * or null where the channel cannot stream. It is sent as the platform
+   * allows, maybe in several messages, and settles to one line: the text the
+   * user was shown and the adapter's id for its first message, or null when
+   * nothing showed. `replyTo` is the adapter's id of the message it answers.
+   */
+  stream?(
+    chatId: string,
+    threadId: ChatId | null,
+    out: { readonly replyTo?: string; readonly policy: DeliveryPolicy; readonly clock: Clock },
+  ): StreamedReply | null;
+}
+
+/** A reply {@link ChatAdapter.stream} is writing. */
+export interface StreamedReply {
+  accept(event: StreamAgentEvent): void;
+  /** Stop writing at once. */
+  stop(): void;
+  /** Finish the reply, or stop it when the run was stopped, and answer what
+   *  the user was shown. */
+  settle(stopped: boolean): Promise<{
+    readonly outcome: ReplyOutcome;
+    readonly text: string;
+    readonly id: string | null;
+  }>;
 }
 
 export interface ChannelAdapterDeps {
@@ -123,6 +157,14 @@ export function addressOf(place: Place): ChatId {
  * recorded under: the platform's id for it, or one the adapter gives it when
  * the platform answered none.
  */
+/** The platform's id for line `lineId` of `chat`, which Rome's account
+ *  `romeEnd` sent or heard, or null for a line the platform gave no id. */
+export function platformIdOfLine(chat: ChatRef, romeEnd: string, lineId: string): string | null {
+  const id = ChatIds.platformMessage(chat.id, lineId);
+  if (id === null || id.startsWith("rome:")) return null;
+  return notOwnedBy(ChatIds.key(chat), romeEnd, id);
+}
+
 export function sentLineId(
   chat: ChatRef,
   romeEnd: string,
@@ -151,6 +193,18 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
   let unsubscribe: (() => void) | null = null;
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
+
+  /** Where the platform takes a message for `ref`: the thread's id, else
+   *  where the account heard a direct message, else the chat's key. */
+  const addressIn = (ref: ChatRef, threadId: ChatId | null): ChatId => {
+    const key = ChatIds.key(ref);
+    const heardAt =
+      threadId === null && otherEndOf(key) !== null
+        ? (deps.addresses?.addressOf(account(), key.externalId) ?? null)
+        : null;
+    return (heardAt ??
+      addressOf(threadId === null ? { chat: ref } : { chat: ref, threadId })) as ChatId;
+  };
 
   return {
     channel: channel.name,
@@ -201,18 +255,54 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chat
       if (!send) throw new Error(`Channel "${channel.name}" cannot send`);
       const own = account();
       const ref: ChatRef = { platform: own.platform, id: chatId };
-      const key = ChatIds.key(ref);
-      const heardAt =
-        threadId === null && otherEndOf(key) !== null
-          ? (deps.addresses?.addressOf(own, key.externalId) ?? null)
-          : null;
-      const address = (heardAt ??
-        addressOf(threadId === null ? { chat: ref } : { chat: ref, threadId })) as ChatId;
-      const receipt = await send.send(address, {
+      const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
+      const receipt = await send.send(addressIn(ref, threadId), {
         text: out.text,
+        ...(out.parts ? { parts: [...out.parts] } : {}),
+        ...(out.attachments ? { attachments: [...out.attachments] } : {}),
+        ...(replyTo ? { replyToMessageId: replyTo } : {}),
         ...(out.turnId ? { turnId: out.turnId } : {}),
       });
       return sentLineId(ref, own.id, receipt.messageId || undefined);
+    },
+
+    stream(chatId, threadId, out) {
+      const replies = (channel.send as ChannelSend | undefined)?.replies;
+      if (!replies) return null;
+      const own = account();
+      const ref: ChatRef = { platform: own.platform, id: chatId };
+      const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
+      const delivery = new ReplyDelivery({
+        transport: replies.transport,
+        pacer: replies.pacer,
+        policy: out.policy,
+        conversation: addressIn(ref, threadId),
+        ...(replyTo ? { replyTo } : {}),
+        clock: out.clock,
+      });
+      return {
+        accept: (event) => delivery.accept(event),
+        stop: () => void delivery.stop(),
+        async settle(stopped) {
+          const outcome = await (stopped ? delivery.stop() : delivery.finish());
+          // Every part showed or may have: a create whose result is unknown
+          // most likely landed, and nothing sends it again. A block's parts
+          // split its source, and each block is a message of its own.
+          const shown = outcome.parts;
+          const text = shown
+            .map(
+              (part, i) =>
+                (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source,
+            )
+            .join("");
+          if (shown.length === 0) return { outcome, text, id: null };
+          // A reply the platform split settles to its first message's id. A
+          // message whose create is unknown has no id, so the first one with
+          // an id stands in.
+          const first = shown.find((part) => part.receipt)?.receipt?.messageId;
+          return { outcome, text, id: sentLineId(ref, own.id, first || undefined) };
+        },
+      };
     },
   };
 }

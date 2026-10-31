@@ -134,6 +134,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     chatRepo: new ChatRepository(db),
     chatMessages,
     addresses: chatAddresses,
+    // `channelsService` is built further down; an action sends after boot.
+    sendOn: (channel, address, message) => channelsService.send(channel, address, message),
     links: turnLinks,
     replies: new SeatReplies({
       seats: webchatRepo,

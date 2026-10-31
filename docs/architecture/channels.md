@@ -30,13 +30,14 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 
 ### Chat adapters
 
-Chats reaches a channel through its adapter ([`ChatAdapter`](../../packages/core/src/chats/adapter.ts)): `start(deliver, fault)`, `stop()` and `send(chatId, threadId, out)`. Chats' inbound recording is the adapter's `deliver`, and every send into a chat (People, assistants, Concierge, an agent's backend reply) goes through `send`. Today one adapter, `channelAdapter`, serves every channel over its `inbound` and `send` ports.
+Chats reaches a channel through its adapter ([`ChatAdapter`](../../packages/core/src/chats/adapter.ts)): `start(deliver, fault)`, `stop()` and `send(chatId, threadId, out)`. Chats' inbound recording is the adapter's `deliver`, and every send into a chat (People, assistants, Concierge, an agent's backend or streamed reply, an app's `send_message`) goes through `send` or `stream`. Today one adapter, `channelAdapter`, serves every channel over its `inbound` and `send` ports.
 
 - Chats mints no id and parses none. The adapter names a chat by its key, unique on its platform, and a message by an id unique in its chat, passing the platform's ids through. The channels layer turns those into the ids Chats records, a chat `<platform>:<key>` and a message `<chat id>/<message id>`, and back, in one helper, `ChatIds` in [`channels/chat-ids.ts`](../../packages/core/src/channels/chat-ids.ts). Nothing else spells or strips a prefix. The dashboard is its own adapter and gives its chats and lines random ids.
 - A redelivery, or a group message heard by two of Rome's accounts, carries the same id, so recording it again changes nothing.
 - A quote reaches Chats as the adapter's id for the quoted message, and leaves as the platform's.
 - `send` answers the line's id once the platform took it, and Chats records it under that id. A platform that gives no id gets one the adapter makes (`sentLineId`); Chats records only an id it was given. A refusal rejects with the platform's words, and nothing is recorded.
-- A streamed reply goes out through the channel's reply transport and settles to its first message's id. An app's `send_message` sends on the channel port and records through `recordOutboundMessage`.
+- A streamed reply is the adapter's `stream`, which writes through the channel's reply transport and settles to one line: the text the user was shown, under its first message's id. Rome records it as the turn's answer ([`SeatReplies.stream`](../../packages/core/src/sessions/seat-replies.ts)).
+- An app says a message through its seat with the SDK's `chats.send`, which goes through the adapter's `send` and records the line in one step. The system app's `send_message` uses it for every chat but the dashboard. Email, and an app on a host without `chats.send`, still sends on the channel port and records through `recordOutboundMessage`.
 
 ### Direct messages
 

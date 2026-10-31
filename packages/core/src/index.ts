@@ -426,6 +426,8 @@ async function main() {
     chatRepo,
     chatMessages,
     addresses: chatAddresses,
+    // `channelsService` is built further down; an app sends after boot.
+    sendOn: (channel, address, message) => channelsService.send(channel, address, message),
     links: turnLinks,
     replies: seatReplies,
     reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
@@ -526,7 +528,7 @@ async function main() {
   const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
   const replyStreams = new ReplyStreams({
     streaming: replyStreamingOn,
-    replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
+    channel: (name) => builtChannels?.find((channel) => channel.name === name),
     clock: systemClock,
     said: seatReplies,
   });

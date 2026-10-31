@@ -4,13 +4,26 @@
 
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Channel } from "@rome-os/app-runtime";
-import { channelAdapter, sentLineId, type Outbound } from "../chats/adapter.js";
+import {
+  channelAdapter,
+  platformIdOfLine,
+  sentLineId,
+  type Outbound,
+  type StreamedReply,
+} from "../chats/adapter.js";
+import type { DeliveryPolicy } from "../channels/delivery/types.js";
+import type { Clock } from "../lib/clock.js";
+import { createLogger } from "../logger.js";
 import type { ChatAddresses } from "../channels/chat-addresses.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { ownedBy } from "../chats/place.js";
 import { ChatIds } from "../channels/chat-ids.js";
 import type { MessagePart } from "../types.js";
 import type { TurnLinks } from "./turn-links.js";
+
+const log = createLogger("seat-replies");
+
+type Seat = NonNullable<Awaited<ReturnType<WebChatRepository["seatOf"]>>>;
 
 export interface SeatRepliesDeps {
   seats: Pick<WebChatRepository, "seatOf">;
@@ -81,41 +94,133 @@ export class SeatReplies {
   /**
    * Send `out` where session `sessionId` stands, through its account's
    * adapter on `channel`, record it as the seat's, and make it turn
-   * `turnId`'s answer when one is named. Throws the platform's refusal, and
-   * records nothing then. A session that stands in no chat sends nothing and
-   * answers null.
+   * `turnId`'s answer when one is named. `recorded` is the line as it goes on
+   * record, when it says more than the platform shows. Throws the platform's
+   * refusal, and records nothing then. A session that stands in no chat sends
+   * nothing and answers null.
    */
   async send(
     sessionId: string,
     channel: Channel,
     out: Outbound,
-    options: { turnId?: string } = {},
-  ): Promise<SeatSent | null> {
+    options: {
+      turnId?: string;
+      replyToPlatformMessageId?: string;
+      recorded?: readonly MessagePart[];
+    } = {},
+  ): Promise<(SeatSent & { platformMessageId: string | null }) | null> {
     const seat = await this.deps.seats.seatOf(sessionId);
     if (!seat) return null;
+    const { account, adapter } = this.adapterOf(seat, channel);
+    const replyTo =
+      out.replyTo ??
+      (options.replyToPlatformMessageId === undefined
+        ? undefined
+        : this.lineIdOf(seat, options.replyToPlatformMessageId));
+    let lineId: string | null = null;
+    const sent = await this.deps.messages.send(
+      {
+        direction: "fromRome",
+        place: seat.place,
+        saidBy: { account, agent: seat.agent },
+        parts: options.recorded ?? out.parts ?? [{ type: "text", content: out.text }],
+        ...(replyTo === undefined ? {} : { replyTo }),
+      },
+      async () => {
+        lineId = await adapter.send(seat.place.chat.id, seat.place.threadId ?? null, {
+          ...out,
+          ...(replyTo === undefined ? {} : { replyTo }),
+          ...(options.turnId ? { turnId: options.turnId } : {}),
+        });
+        return { id: lineId };
+      },
+    );
+    const platformMessageId =
+      lineId === null ? null : platformIdOfLine(seat.place.chat, seat.accountId, lineId);
+    if (!sent.recorded) return { id: null, at: sent.at, platformMessageId };
+    if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);
+    return { id: sent.id, at: sent.at, platformMessageId };
+  }
+
+  /**
+   * Open a reply where session `sessionId` stands, written through its
+   * account's adapter on `channel` as the run goes, and put it on record as
+   * turn `turnId`'s answer once it settles. Null when the session stands in
+   * no chat or the channel cannot stream.
+   */
+  async stream(
+    sessionId: string,
+    channel: Channel,
+    options: {
+      turnId: string;
+      replyToPlatformMessageId?: string;
+      policy: DeliveryPolicy;
+      clock: Clock;
+    },
+  ): Promise<StreamedReply | null> {
+    const seat = await this.deps.seats.seatOf(sessionId);
+    if (!seat) return null;
+    const { account, adapter } = this.adapterOf(seat, channel);
+    const replyTo =
+      options.replyToPlatformMessageId === undefined
+        ? undefined
+        : this.lineIdOf(seat, options.replyToPlatformMessageId);
+    const reply = adapter.stream?.(seat.place.chat.id, seat.place.threadId ?? null, {
+      ...(replyTo === undefined ? {} : { replyTo }),
+      policy: options.policy,
+      clock: options.clock,
+    });
+    if (!reply) return null;
+    return {
+      accept: (event) => reply.accept(event),
+      stop: () => reply.stop(),
+      settle: async (stopped) => {
+        const settled = await reply.settle(stopped);
+        if (settled.id === null) return settled;
+        const id = settled.id;
+        try {
+          // Delivered already: recording says so.
+          const sent = await this.deps.messages.send(
+            {
+              direction: "fromRome",
+              place: seat.place,
+              saidBy: { account, agent: seat.agent },
+              parts: [{ type: "text", content: settled.text }],
+              ...(replyTo === undefined ? {} : { replyTo }),
+            },
+            async () => ({ id }),
+          );
+          if (sent.recorded) this.deps.links.answer(sent.id, sessionId, options.turnId);
+        } catch (error) {
+          // The messages are already on the platform. A failed record must
+          // not make anything send them again.
+          log.warn("reply delivered but recording failed", {
+            sessionId,
+            turnId: options.turnId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return settled;
+      },
+    };
+  }
+
+  private adapterOf(seat: Seat, channel: Channel) {
     const account = { platform: seat.place.chat.platform, id: seat.accountId };
     const adapter = channelAdapter(channel, {
       accountOf: () => account,
       platformOfChannel: () => account.platform,
       ...(this.deps.addresses ? { addresses: this.deps.addresses } : {}),
     });
-    const sent = await this.deps.messages.send(
-      {
-        direction: "fromRome",
-        place: seat.place,
-        saidBy: { account, agent: seat.agent },
-        parts: out.parts ?? [{ type: "text", content: out.text }],
-        ...(out.replyTo === undefined ? {} : { replyTo: out.replyTo }),
-      },
-      async () => ({
-        id: await adapter.send(seat.place.chat.id, seat.place.threadId ?? null, {
-          ...out,
-          ...(options.turnId ? { turnId: options.turnId } : {}),
-        }),
-      }),
+    return { account, adapter };
+  }
+
+  /** The id of the line the platform calls `platformMessageId` in `seat`'s
+   *  chat. */
+  private lineIdOf(seat: Seat, platformMessageId: string): string {
+    return ChatIds.message(
+      seat.place.chat,
+      ownedBy(ChatIds.key(seat.place.chat), seat.accountId, platformMessageId),
     );
-    if (!sent.recorded) return { id: null, at: sent.at };
-    if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);
-    return { id: sent.id, at: sent.at };
   }
 }

@@ -1,9 +1,13 @@
 import type {
   AppRuntimeRepositories,
   AppSettingsRepository,
+  Channel,
+  ChatId,
   ChatRepository,
   GuardianProfileRepository,
   MessagePart,
+  MessageReceipt,
+  OutgoingMessage,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
 import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
@@ -29,7 +33,9 @@ export interface CreateAppRuntimeRepositoriesDeps {
   /** Where a message an app hands over is put on record. */
   chatMessages: Pick<MessageRepository, "record">;
   /** What an app's seat says, recorded and linked to its turn. */
-  replies: Pick<SeatReplies, "say">;
+  replies: Pick<SeatReplies, "say" | "send">;
+  /** Sends on a channel by its name, which an app's seat speaks through. */
+  sendOn(channel: string, address: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   links: Pick<TurnLinks, "prompt">;
   /** The dashboard's read model, which an app's transcript read renders. */
   reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
@@ -147,6 +153,40 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
     },
     // An app names the seat it opened. Its message is said there as the
     // seat's, and is the turn's answer when the turn knows it.
+    // An app's seat speaks through its account's chat adapter, which sends
+    // on the channel and names the line Chats records.
+    async send(input) {
+      const channel = {
+        name: input.channel,
+        send: {
+          send: (address: ChatId, message: OutgoingMessage) =>
+            deps.sendOn(input.channel, address, message),
+        },
+      } as unknown as Channel;
+      const parts = input.parts?.length ? stripHostOnly(input.parts) : undefined;
+      const sent = await deps.replies.send(
+        input.sessionId,
+        channel,
+        {
+          text: input.text ?? "",
+          ...(parts ? { parts } : {}),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+        },
+        {
+          ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
+          ...(input.replyToPlatformMessageId
+            ? { replyToPlatformMessageId: input.replyToPlatformMessageId }
+            : {}),
+          ...(input.content
+            ? {
+                recorded: JSON.parse(stripHostOnlyPartsFromContent(input.content)) as MessagePart[],
+              }
+            : {}),
+        },
+      );
+      if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
+      return sent.platformMessageId ? { messageId: sent.platformMessageId } : {};
+    },
     recordOutboundMessage: async (input) => {
       await deps.replies.say(
         input.sessionId,
@@ -161,6 +201,12 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       );
     },
   };
+}
+
+/** `parts` with the parts only the host may author taken out, so a forged
+ *  routine card never reaches the chat. */
+function stripHostOnly(parts: MessagePart[]): MessagePart[] {
+  return JSON.parse(stripHostOnlyPartsFromContent(JSON.stringify(parts))) as MessagePart[];
 }
 
 function createAppSettingsRepository(repo: SettingsRepository): AppSettingsRepository {

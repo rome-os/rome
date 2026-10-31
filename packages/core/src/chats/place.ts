@@ -75,6 +75,15 @@ export function ownedBy(key: ChatKey, romeEnd: string, platformMessageId: string
     : platformMessageId;
 }
 
+/** The platform's own id for message id `messageId` of the chat at `key`, the
+ *  inverse of {@link ownedBy}. */
+export function notOwnedBy(key: ChatKey, romeEnd: string, messageId: string): string {
+  const owned = `${romeEnd}:`;
+  return ownedBy(key, romeEnd, "") === owned && messageId.startsWith(owned)
+    ? messageId.slice(owned.length)
+    : messageId;
+}
+
 /**
  * The key of the direct message at `address` on `platform` between Rome's
  * end and the account `other`. Where the platform names a direct message by
