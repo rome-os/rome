@@ -23,6 +23,9 @@ struct MainShell: View {
     /// zero with the drawer when the drag ends or the system cancels it.
     @GestureState(resetTransaction: Transaction(animation: MainShell.drawerSpring))
     private var drag = DrawerDrag()
+    /// The axis the running drag locked on its first movement, for `onEnded`,
+    /// which gets only the final translation.
+    @State private var dragAxis: DragAxis?
     @State private var showTasks = false
     @State private var showSettings = false
     @State private var settingsPath: [SettingsRoute] = []
@@ -225,6 +228,11 @@ struct MainShell: View {
         var offset: CGFloat = 0
     }
 
+    struct DragAxis {
+        let start: CGPoint
+        let horizontal: Bool
+    }
+
     private func drawerProgress(width: CGFloat) -> CGFloat {
         let base: CGFloat = drawerOpen ? 1 : 0
         return min(1, max(0, base + drag.offset / width))
@@ -250,8 +258,16 @@ struct MainShell: View {
                 guard state.horizontal == true else { return }
                 state.offset = drawerOpen ? min(0, move.width) : max(0, move.width)
             }
+            .onChanged { value in
+                // A new start point is a new drag, also after a cancelled one.
+                // The rule matches the one above, on the same first movement.
+                if dragAxis?.start != value.startLocation {
+                    dragAxis = DragAxis(start: value.startLocation, horizontal: abs(value.translation.width) > abs(value.translation.height))
+                }
+            }
             .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                defer { dragAxis = nil }
+                guard let axis = dragAxis, axis.start == value.startLocation, axis.horizontal else { return }
                 let travel = drawerOpen ? -value.translation.width : value.translation.width
                 let flung = drawerOpen ? -value.predictedEndTranslation.width : value.predictedEndTranslation.width
                 let toggle = travel > width * 0.35 || flung > width * 0.5
