@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 import os
 
@@ -26,6 +27,8 @@ final class Workspace {
     let concierge: TranscriptStore
     private(set) var conciergeState: ConciergeState = .loading
     private(set) var unreadAtOpen = 0
+    /// A Chat message to scroll to and highlight, set from the Tasks sheet.
+    var focusMessageID: String?
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String) {
         self.backend = backend
@@ -284,6 +287,8 @@ final class AppModel {
     #if DEBUG
     /// A screen change requested by the snapshot runner.
     var debugCommand: DebugCommand?
+    /// Text size the snapshot runner forces, to check large Dynamic Type.
+    var dynamicTypeOverride: DynamicTypeSize?
 
     func debugSetPhase(_ phase: Phase) {
         workspace?.stop()
@@ -291,9 +296,9 @@ final class AppModel {
         self.phase = phase
     }
 
-    func openDemo() {
+    func openDemo(_ variant: DemoBackend.Variant = .full) {
         workspace?.stop()
-        let backend = DemoBackend()
+        let backend = DemoBackend(variant: variant)
         instances = DemoBackend.instances
         currentInstanceID = DemoBackend.instances.first?.id
         Task {

@@ -160,7 +160,6 @@ enum MarkdownParser {
                 result[run.range].foregroundColor = Palette.primaryText
             }
             if let intent = run.inlinePresentationIntent, intent.contains(.code) {
-                result[run.range].font = .system(size: 14, design: .monospaced)
                 result[run.range].backgroundColor = Palette.fill
             }
         }
@@ -199,12 +198,12 @@ struct MarkdownText: View {
         switch block {
         case .paragraph(let text):
             Text(MarkdownParser.inline(text))
-                .font(.system(size: fontSize))
+                .romeFont(fontSize)
                 .lineSpacing(lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
         case .heading(let level, let text):
             Text(MarkdownParser.inline(text))
-                .font(.system(size: level <= 1 ? fontSize + 4 : (level == 2 ? fontSize + 2 : fontSize), weight: .semibold))
+                .romeFont(level <= 1 ? fontSize + 4 : (level == 2 ? fontSize + 2 : fontSize), .semibold)
                 .lineSpacing(3)
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -213,11 +212,11 @@ struct MarkdownText: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(ordered ? "\(start + index)." : "•")
-                            .font(.system(size: fontSize, weight: ordered ? .regular : .bold).monospacedDigit())
+                            .romeFont(fontSize, ordered ? .regular : .bold, monospacedDigits: true)
                             .foregroundStyle(Palette.sub)
                             .frame(minWidth: 12, alignment: .trailing)
                         Text(MarkdownParser.inline(item))
-                            .font(.system(size: fontSize))
+                            .romeFont(fontSize)
                             .lineSpacing(lineSpacing)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -227,7 +226,7 @@ struct MarkdownText: View {
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
                 Text(MarkdownParser.inline(text))
-                    .font(.system(size: fontSize))
+                    .romeFont(fontSize)
                     .foregroundStyle(Palette.sub)
                     .lineSpacing(lineSpacing)
                     .fixedSize(horizontal: false, vertical: true)
@@ -235,7 +234,7 @@ struct MarkdownText: View {
         case .code(_, let text):
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(text)
-                    .font(.system(size: 13, design: .monospaced))
+                    .romeFont(13, design: .monospaced)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .padding(.horizontal, 16)

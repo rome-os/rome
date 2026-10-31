@@ -151,10 +151,14 @@ struct MainShell: View {
 
     private func openTask(_ task: ConciergeTask) {
         showTasks = false
-        guard let chat = task.chat else { return }
         Task {
             try? await Task.sleep(for: .milliseconds(250))
-            path = [.taskChat(chatId: chat.id, title: chat.name)]
+            if let chat = task.chat {
+                path = [.taskChat(chatId: chat.id, title: chat.name)]
+            } else if let message = task.sourceMessageId {
+                path = []
+                workspace.focusMessageID = message
+            }
         }
     }
 

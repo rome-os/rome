@@ -1,6 +1,6 @@
 # Rome
 
-A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime dependencies are declared in `packages/core` — the root `package.json` holds only the dev toolchain, and its scripts delegate to the right workspace via `pnpm --filter`.
+A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`; the native iOS app lives in `ios/`. Runtime dependencies are declared in `packages/core` — the root `package.json` holds only the dev toolchain, and its scripts delegate to the right workspace via `pnpm --filter`.
 
 - `packages/core/` (`@rome/core`) — backend runtime: Hono server, agent/action/event subsystems, DB, channel adapters. `src/index.ts` wires the object graph via dependency injection.
 - `packages/web/` (`rome-web`) — Rsbuild SPA dashboard, served by the backend. Guardian-only.
@@ -9,6 +9,7 @@ A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime de
 - `packages/desktop/` (`rome-desktop`) — Electron shell.
 - `packages/cdp-client/` (`rome-cdp-client`) — standalone CDP client.
 - `rome_apps/*` — runtime-loaded apps (plugins), each a workspace package.
+- `ios/` — native iOS app (SwiftUI, Xcode project). Not a pnpm workspace member; read [`ios/CLAUDE.md`](ios/CLAUDE.md) before working in it.
 
 ## Playbook
 

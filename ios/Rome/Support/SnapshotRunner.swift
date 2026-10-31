@@ -63,8 +63,25 @@ enum SnapshotRunner {
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .route([.settings, .instances]) }
             await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .route([.routines]) }
             await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .route([.search]) }
+            await capture("15-task-answered", style: styleName, in: directory, wait: 2) {
+                model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
+            }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))
+            await capture("16-chat-empty", style: styleName, in: directory, wait: 2) { model.openDemo(.empty) }
+            await capture("17-chat-off", style: styleName, in: directory, wait: 2) { model.openDemo(.conciergeOff) }
+            await capture("18-tasks-empty", style: styleName, in: directory, wait: 1.6) {
+                model.openDemo(.empty)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.8))
+                    model.debugCommand = .tasks(true)
+                }
+            }
+            model.debugCommand = .tasks(false)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.dynamicTypeOverride = .xxLarge
+            await capture("19-chat-xxl", style: styleName, in: directory, wait: 2) { model.openDemo() }
+            model.dynamicTypeOverride = nil
             model.debugSetPhase(.signedOut)
             try? await Task.sleep(for: .seconds(0.6))
         }

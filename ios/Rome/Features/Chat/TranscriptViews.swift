@@ -15,7 +15,7 @@ struct UserBubble: View {
                         .accessibilityLabel("发送失败，点按重试")
                 }
                 Text(text)
-                    .font(.system(size: 16))
+                    .romeFont(16)
                     .lineSpacing(5)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -26,7 +26,7 @@ struct UserBubble: View {
             }
             if pending == .failed {
                 Button("未发送 · 点按重试", action: onRetry)
-                    .font(.system(size: 12, weight: .medium))
+                    .romeFont(12, .medium)
                     .foregroundStyle(Palette.destructive)
             }
         }
@@ -85,10 +85,10 @@ struct AgentBubble: View {
                         onOpenChat(forwardedFrom.chatId, forwardedFrom.title)
                     } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "arrowshape.turn.up.right").font(.system(size: 11, weight: .semibold))
+                            Image(systemName: "arrowshape.turn.up.right").romeFont(11, .semibold)
                             Text("来自「\(forwardedFrom.title)」").lineLimit(1)
                         }
-                        .font(.system(size: 12, weight: .semibold))
+                        .romeFont(12, .semibold)
                         .foregroundStyle(Palette.sub)
                     }
                     .buttonStyle(.plain)
@@ -116,7 +116,7 @@ struct AgentBubble: View {
         Button(expanded ? "收起" : "展开全文") {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
         }
-        .font(.system(size: 14, weight: .semibold))
+        .romeFont(14, .semibold)
         .foregroundStyle(Palette.primaryText)
     }
 }
@@ -144,20 +144,20 @@ struct TaskCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text("任务")
-                        .font(.system(size: 12, weight: .semibold))
+                        .romeFont(12, .semibold)
                         .foregroundStyle(Palette.sub)
                     Spacer(minLength: 0)
                     if tone != .neutral { StatusPill(tone: tone) }
                 }
                 HStack(spacing: 8) {
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .romeFont(16, .semibold)
                         .tracking(-0.3)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
+                        .romeFont(12, .bold)
                         .foregroundStyle(Palette.sub)
                 }
             }
@@ -181,7 +181,7 @@ struct TimeSeparator: View {
 
     var body: some View {
         Text(RelativeTime.separator(date))
-            .font(.system(size: 12, weight: .medium))
+            .romeFont(12, .medium)
             .foregroundStyle(Palette.sub)
             .frame(maxWidth: .infinity)
             .accessibilityAddTraits(.isHeader)
@@ -221,7 +221,7 @@ struct Composer: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField(placeholder, text: $text, axis: .vertical)
-                .font(.system(size: 16))
+                .romeFont(16)
                 .lineLimit(1...6)
                 .focused(focus)
                 .padding(.vertical, 14)
@@ -242,7 +242,7 @@ struct Composer: View {
                 } else {
                     Button(action: onSend) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .bold))
+                            .romeFont(16, .bold)
                             .foregroundStyle(.white)
                             .frame(width: 36, height: 36)
                             .background(Palette.primary, in: Circle())

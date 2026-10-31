@@ -10,8 +10,8 @@ struct DrawerView: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { onRoute(.search) } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                    Text("搜索").font(.system(size: 17))
+                    Image(systemName: "magnifyingglass").romeFont(16, .medium)
+                    Text("搜索").romeFont(17)
                     Spacer()
                 }
                 .foregroundStyle(Palette.sub)
@@ -25,18 +25,18 @@ struct DrawerView: View {
             VStack(spacing: 2) {
                 DrawerItem(title: "Chat", selected: true, action: onChat) {
                     Image(systemName: "bubble.left")
-                        .font(.system(size: 18, weight: .medium))
+                        .romeFont(18, .medium)
                         .foregroundStyle(Palette.primaryIcon)
                 }
                 DrawerItem(title: "Routines", selected: false, action: { onRoute(.routines) }) {
                     Image(systemName: "calendar")
-                        .font(.system(size: 18))
+                        .romeFont(18)
                 }
             }
             .padding(.top, 22)
 
             Text("即将推出")
-                .font(.system(size: 13, weight: .semibold))
+                .romeFont(13, .semibold)
                 .foregroundStyle(Palette.sub)
                 .padding(.horizontal, 12)
                 .padding(.top, 26)
@@ -55,17 +55,17 @@ struct DrawerView: View {
                     InitialAvatar(text: workspace.accountLabel)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(workspace.instanceName)
-                            .font(.system(size: 16, weight: .semibold))
+                            .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
                         Text(workspace.host)
-                            .font(.system(size: 13))
+                            .romeFont(13)
                             .foregroundStyle(Palette.sub)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "gearshape")
-                        .font(.system(size: 17))
+                        .romeFont(17)
                         .foregroundStyle(Palette.fg)
                         .frame(width: 36, height: 36)
                         .background(Palette.drawerField, in: Circle())
@@ -97,7 +97,7 @@ private struct DrawerItem<Icon: View>: View {
             HStack(spacing: 12) {
                 icon().frame(width: 22)
                 Text(title)
-                    .font(.system(size: 17, weight: selected ? .semibold : .regular))
+                    .romeFont(17, selected ? .semibold : .regular)
                 Spacer()
             }
             .foregroundStyle(Palette.fg)
@@ -124,9 +124,9 @@ private struct ComingSoonItem: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.system(size: 16))
+                .romeFont(16)
                 .frame(width: 22)
-            Text(title).font(.system(size: 17))
+            Text(title).romeFont(17)
             Spacer()
         }
         .foregroundStyle(Palette.sub)

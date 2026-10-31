@@ -37,8 +37,8 @@ struct LoginView: View {
             VStack(spacing: 18) {
                 Spinner(size: 28, lineWidth: 2.5, color: Palette.fg, trackOpacity: 0.12)
                 VStack(spacing: 4) {
-                    Text("正在打开你的 Rome").font(.system(size: 17, weight: .semibold))
-                    Text(host).font(.system(size: 15)).foregroundStyle(Palette.sub)
+                    Text("正在打开你的 Rome").romeFont(17, .semibold)
+                    Text(host).romeFont(15).foregroundStyle(Palette.sub)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -46,14 +46,14 @@ struct LoginView: View {
         case .stopped, .noInstance:
             VStack(spacing: 16) {
                 Image(systemName: "power")
-                    .font(.system(size: 22, weight: .medium))
+                    .romeFont(22, .medium)
                     .frame(width: 56, height: 56)
                     .background(Palette.fill, in: Circle())
                 VStack(spacing: 6) {
                     Text(model.phase == .noInstance ? "还没有可打开的 Rome" : "你的 Rome 已停止")
-                        .font(.system(size: 20, weight: .semibold))
+                        .romeFont(20, .semibold)
                     Text(model.phase == .noInstance ? "在 Rome Cloud 创建一个后再打开。" : "在 Rome Cloud 启动后再打开。")
-                        .font(.system(size: 15))
+                        .romeFont(15)
                         .foregroundStyle(Palette.sub)
                 }
                 .multilineTextAlignment(.center)
@@ -65,7 +65,7 @@ struct LoginView: View {
         default:
             VStack(alignment: .leading, spacing: 14) {
                 Text("Rome")
-                    .font(.system(size: 64, weight: .semibold))
+                    .romeFont(64, .semibold)
                     .tracking(-2.2)
                     .onLongPressGesture(minimumDuration: 1.2) {
                         #if DEBUG
@@ -73,7 +73,7 @@ struct LoginView: View {
                         #endif
                     }
                 Text("登录后打开你的 Rome")
-                    .font(.system(size: 20))
+                    .romeFont(20)
                     .tracking(-0.3)
                     .foregroundStyle(Palette.sub)
             }
@@ -90,7 +90,7 @@ struct LoginView: View {
                 if let error = model.signInError {
                     HStack(spacing: 6) {
                         AlertGlyph(size: 14)
-                        Text(error).font(.system(size: 14))
+                        Text(error).romeFont(14)
                     }
                     .foregroundStyle(Palette.destructive)
                     .padding(.horizontal, 12)
@@ -104,7 +104,7 @@ struct LoginView: View {
             case .stopped, .noInstance:
                 SecondaryButton(title: "重试") { Task { await model.retry() } }
                 Button("退出登录") { Task { await model.signOut() } }
-                    .font(.system(size: 17))
+                    .romeFont(17)
                     .foregroundStyle(Palette.sub)
                     .frame(height: 44)
             default:
@@ -147,7 +147,7 @@ struct PrimaryButton: View {
                     Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
                 }
                 Text(loading ? (loadingTitle ?? title) : title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .romeFont(17, .semibold)
                     .tracking(-0.3)
             }
             .foregroundStyle(.white)
@@ -173,7 +173,7 @@ struct SecondaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 17, weight: .semibold))
+                .romeFont(17, .semibold)
                 .foregroundStyle(Palette.fg)
                 .frame(maxWidth: .infinity)
                 .frame(height: 54)

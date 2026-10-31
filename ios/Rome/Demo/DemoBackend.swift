@@ -43,12 +43,23 @@ final class DemoBackend: RomeBackend {
     private var running: [String: String] = [:]
     private var counter = 0
 
-    init() { seed() }
+    enum Variant { case full, empty, conciergeOff }
+    private let variant: Variant
+
+    init(variant: Variant = .full) {
+        self.variant = variant
+        seed()
+        if variant != .full {
+            messages[conciergeChatID] = []
+            tasks = []
+        }
+    }
 
     // MARK: RomeBackend
 
     func conciergeSession() async throws -> ConciergeSessionInfo {
         try await pause(0.25)
+        if variant == .conciergeOff { throw APIError.conciergeOff }
         return ConciergeSessionInfo(id: conciergeChatID, unread: 0)
     }
 
@@ -350,8 +361,20 @@ final class DemoBackend: RomeBackend {
         messages["chat-login"] = [
             user("l1", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(10, 0, daysAgo: 3), session: "chat-login"),
             trace(steps: 7, at: at(10, 2, daysAgo: 3), session: "chat-login"),
+            parts([.object([
+                "type": .string("pending_interaction"), "toolUseId": .string("q-login"),
+                "render": .object(["kind": .string("inline"), "componentId": .string("question-card"), "builtin": .bool(true), "props": .object(["questions": .array([
+                    .object(["id": .string("color"), "question": .string("深色模式下按钮用珊瑚色，还是用中性色？"), "type": .string("single"), "options": .array([.string("珊瑚色"), .string("中性色")])]),
+                ])])]),
+            ])], at: at(10, 10, daysAgo: 3), session: "chat-login"),
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("q-login"), "output": .object(["answers": .array([.object(["questionId": .string("color"), "value": .string("珊瑚色")])])])])], at: at(10, 12, daysAgo: 3), session: "chat-login", role: "user"),
+            parts([.object([
+                "type": .string("approval_card"), "approvalId": .string("ap-login"), "actionName": .string("coding:deploy_preview"), "status": .string("pending"),
+                "preview": .object(["kind": .string("generic"), "title": .string("发布预览环境"), "summary": .string("")]),
+            ])], at: at(10, 30, daysAgo: 3), session: "chat-login"),
             agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 40, daysAgo: 3), session: "chat-login"),
         ]
+        approvals["ap-login"] = ApprovalRecord(id: "ap-login", status: "approved", executionState: "succeeded", resolvedAt: RomeDate.string(at(10, 32, daysAgo: 3)))
     }
 }
 #endif

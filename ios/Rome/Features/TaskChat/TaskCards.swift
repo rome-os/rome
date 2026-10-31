@@ -8,10 +8,10 @@ struct BriefCard: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left")
-                    .font(.system(size: 11, weight: .semibold))
+                    .romeFont(11, .semibold)
                 Text("任务说明 · 来自 Chat")
             }
-            .font(.system(size: 12, weight: .semibold))
+            .romeFont(12, .semibold)
             .foregroundStyle(Palette.sub)
             MarkdownText(source: text, fontSize: 15, lineSpacing: 7)
         }
@@ -41,9 +41,9 @@ struct ToolSummary: View {
                             WrenchGlyph()
                             Text("用了 \(count) 个工具")
                             Spacer()
-                            Image(systemName: "chevron.up").font(.system(size: 10, weight: .bold))
+                            Image(systemName: "chevron.up").romeFont(10, .bold)
                         }
-                        .font(.system(size: 13, weight: .medium))
+                        .romeFont(13, .medium)
                         .foregroundStyle(Palette.sub)
                         .padding(.horizontal, 14)
                         .frame(height: 40)
@@ -53,7 +53,7 @@ struct ToolSummary: View {
                     if let calls {
                         if calls.isEmpty {
                             Text("没有可显示的工具记录。")
-                                .font(.system(size: 13))
+                                .romeFont(13)
                                 .foregroundStyle(Palette.sub)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 14)
@@ -64,19 +64,19 @@ struct ToolSummary: View {
                             Button { detail = call } label: {
                                 HStack(spacing: 10) {
                                     Text(call.name)
-                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                        .romeFont(12, .semibold, design: .monospaced)
                                         .foregroundStyle(Palette.fg)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
                                         .background(Palette.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                                     Text(call.detail)
-                                        .font(.system(size: 14))
+                                        .romeFont(14)
                                         .foregroundStyle(Palette.sub)
                                         .lineLimit(1)
                                         .truncationMode(.tail)
                                     Spacer(minLength: 0)
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .bold))
+                                        .romeFont(10, .bold)
                                         .foregroundStyle(Palette.sub)
                                 }
                                 .padding(.horizontal, 14)
@@ -101,9 +101,9 @@ struct ToolSummary: View {
                     HStack(spacing: 6) {
                         WrenchGlyph()
                         Text("用了 \(count) 个工具")
-                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                        Image(systemName: "chevron.down").romeFont(9, .bold)
                     }
-                    .font(.system(size: 13, weight: .medium))
+                    .romeFont(13, .medium)
                     .foregroundStyle(Palette.sub)
                     .padding(.leading, 10)
                     .padding(.trailing, 11)
@@ -130,7 +130,7 @@ struct ToolSummary: View {
 struct WrenchGlyph: View {
     var body: some View {
         Image(systemName: "wrench.adjustable")
-            .font(.system(size: 12, weight: .semibold))
+            .romeFont(12, .semibold)
     }
 }
 
@@ -143,16 +143,16 @@ struct ToolCallDetail: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text(call.name)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .romeFont(20, .bold, design: .monospaced)
                 Spacer()
                 SheetCloseButton { dismiss() }
             }
             if !call.detail.isEmpty {
-                Text(call.detail).font(.system(size: 15)).foregroundStyle(Palette.sub)
+                Text(call.detail).romeFont(15).foregroundStyle(Palette.sub)
             }
             ScrollView {
                 Text(call.input.prettyText)
-                    .font(.system(size: 13, design: .monospaced))
+                    .romeFont(13, design: .monospaced)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,7 +171,7 @@ struct SheetCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .bold))
+                .romeFont(11, .bold)
                 .foregroundStyle(Palette.sub)
                 .frame(width: 30, height: 30)
                 .background(Palette.fillStrong, in: Circle())
@@ -187,7 +187,8 @@ struct SheetCloseButton: View {
 /// screen; once answered it folds into one line.
 struct ApprovalCardView: View {
     let part: MessagePart.ApprovalPart
-    let status: ApprovalStatus
+    /// Nil until the server's record arrives: stored cards always say pending.
+    let status: ApprovalStatus?
     let submitting: Bool?
     let error: String?
     let resolvedAt: Date?
@@ -198,6 +199,16 @@ struct ApprovalCardView: View {
     var body: some View {
         Group {
             switch status {
+            case nil:
+                HStack(spacing: 10) {
+                    Spinner(size: 16, color: Palette.sub)
+                    Text("正在读取审批…").romeFont(15).foregroundStyle(Palette.sub)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                .hairline(radius: Metrics.groupRadius)
             case .pending:
                 pendingCard
             case .approved, .executing, .executed:
@@ -209,22 +220,26 @@ struct ApprovalCardView: View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: status)
+        .sensoryFeedback(trigger: status) { old, new in
+            guard old == .pending else { return nil }
+            return new == .rejected ? .impact(weight: .light) : .success
+        }
     }
 
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Image(systemName: "envelope")
-                    .font(.system(size: 17, weight: .medium))
+                    .romeFont(17, .medium)
                     .foregroundStyle(Palette.warningText)
                     .frame(width: 36, height: 36)
                     .background(Palette.warnSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text("需要批准")
-                        .font(.system(size: 12, weight: .semibold))
+                        .romeFont(12, .semibold)
                         .foregroundStyle(Palette.warningText)
                     Text(title)
-                        .font(.system(size: 17, weight: .semibold))
+                        .romeFont(17, .semibold)
                         .tracking(-0.4)
                 }
             }
@@ -232,7 +247,7 @@ struct ApprovalCardView: View {
                 VStack(spacing: 0) {
                     if let summary = part.summary, !summary.isEmpty {
                         Text(summary)
-                            .font(.system(size: 15))
+                            .romeFont(15)
                             .lineSpacing(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 10)
@@ -240,11 +255,11 @@ struct ApprovalCardView: View {
                     ForEach(Array(part.fields.enumerated()), id: \.offset) { index, field in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(field.label)
-                                .font(.system(size: 13))
+                                .romeFont(13)
                                 .foregroundStyle(Palette.sub)
                                 .frame(width: 44, alignment: .leading)
                             Text(field.value)
-                                .font(.system(size: 15, weight: .medium))
+                                .romeFont(15, .medium)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.vertical, 10)
@@ -262,7 +277,7 @@ struct ApprovalCardView: View {
             if let error {
                 HStack(spacing: 8) {
                     AlertGlyph(size: 15)
-                    Text(error).font(.system(size: 14, weight: .medium))
+                    Text(error).romeFont(14, .medium)
                 }
                 .foregroundStyle(Palette.destructive)
                 .padding(.horizontal, 12)
@@ -279,7 +294,7 @@ struct ApprovalCardView: View {
                             Text("拒绝")
                         }
                     }
-                    .font(.system(size: 17, weight: .semibold))
+                    .romeFont(17, .semibold)
                     .foregroundStyle(Palette.fg)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
@@ -294,7 +309,7 @@ struct ApprovalCardView: View {
                             Text("批准")
                         }
                     }
-                    .font(.system(size: 17, weight: .semibold))
+                    .romeFont(17, .semibold)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
@@ -305,7 +320,6 @@ struct ApprovalCardView: View {
             }
             .buttonStyle(PressScaleStyle(scale: 0.97))
             .disabled(submitting != nil)
-            .sensoryFeedback(.success, trigger: status)
         }
         .padding(16)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
@@ -321,16 +335,16 @@ struct ApprovalCardView: View {
                     if !success {
                         ZStack {
                             Circle().fill(Palette.sub)
-                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+                            Image(systemName: "xmark").romeFont(8, .bold).foregroundStyle(.white)
                         }
                     }
                 }
             (Text(label).fontWeight(.semibold) + Text(" · \(title)").foregroundStyle(Palette.sub))
-                .font(.system(size: 15))
+                .romeFont(15)
             Spacer(minLength: 0)
             if let resolvedAt {
                 Text(RelativeTime.clock(resolvedAt))
-                    .font(.system(size: 13).monospacedDigit())
+                    .romeFont(13, monospacedDigits: true)
                     .foregroundStyle(Palette.sub)
             }
         }
@@ -345,7 +359,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AlertGlyph(size: 15)
-                Text("已批准，但\(title)没有完成。").font(.system(size: 14, weight: .medium))
+                Text("已批准，但\(title)没有完成。").romeFont(14, .medium)
             }
             .foregroundStyle(Palette.destructive)
             .padding(.horizontal, 12)
@@ -391,12 +405,12 @@ struct QuestionCardView: View {
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("在等你回答")
-                .font(.system(size: 12, weight: .semibold))
+                .romeFont(12, .semibold)
                 .foregroundStyle(Palette.warningText)
             ForEach(part.questions, id: \.id) { question in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(question.text)
-                        .font(.system(size: 17, weight: .semibold))
+                        .romeFont(17, .semibold)
                         .tracking(-0.4)
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -406,7 +420,7 @@ struct QuestionCardView: View {
                         }
                         HStack(spacing: 8) {
                             TextField(question.options.isEmpty ? "写下回答…" : "其他回答…", text: binding(question.id), axis: .vertical)
-                                .font(.system(size: 16))
+                                .romeFont(16)
                                 .lineLimit(1...4)
                                 .focused($focusedQuestion, equals: question.id)
                                 .padding(.vertical, 12)
@@ -415,7 +429,7 @@ struct QuestionCardView: View {
                                     submit(override: [question.id: typed[question.id] ?? ""])
                                 } label: {
                                     Image(systemName: "arrow.up")
-                                        .font(.system(size: 14, weight: .bold))
+                                        .romeFont(14, .bold)
                                         .foregroundStyle(.white)
                                         .frame(width: 30, height: 30)
                                         .background(Palette.primary, in: Circle())
@@ -460,14 +474,14 @@ struct QuestionCardView: View {
                 ZStack {
                     if selected {
                         Circle().fill(Palette.primary)
-                        Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy)).foregroundStyle(.white)
+                        Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
                     } else {
                         Circle().strokeBorder(Palette.sub, lineWidth: 1.5)
                     }
                 }
                 .frame(width: 18, height: 18)
                 Text(option)
-                    .font(.system(size: 16, weight: .medium))
+                    .romeFont(16, .medium)
                     .foregroundStyle(Palette.fg)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
@@ -510,12 +524,12 @@ struct QuestionCardView: View {
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("已回答")
-                .font(.system(size: 12, weight: .semibold))
+                .romeFont(12, .semibold)
                 .foregroundStyle(Palette.sub)
             ForEach(part.questions, id: \.id) { question in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(question.text)
-                        .font(.system(size: 16, weight: .semibold))
+                        .romeFont(16, .semibold)
                         .foregroundStyle(Palette.sub)
                         .lineSpacing(3)
                     let answer = answers[question.id] ?? ""
@@ -525,10 +539,10 @@ struct QuestionCardView: View {
                             HStack(spacing: 12) {
                                 ZStack {
                                     Circle().fill(Palette.primary)
-                                    Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy)).foregroundStyle(.white)
+                                    Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
                                 }
                                 .frame(width: 18, height: 18)
-                                Text(option).font(.system(size: 16, weight: .semibold))
+                                Text(option).romeFont(16, .semibold)
                             }
                             .padding(.horizontal, 14)
                             .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
@@ -536,7 +550,7 @@ struct QuestionCardView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5))
                         } else {
                             Text(option)
-                                .font(.system(size: 16))
+                                .romeFont(16)
                                 .foregroundStyle(Palette.sub)
                                 .padding(.leading, 44)
                                 .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
@@ -545,7 +559,7 @@ struct QuestionCardView: View {
                     let extra = picked.subtracting(question.options).filter { !$0.isEmpty }
                     if !extra.isEmpty {
                         Text(extra.sorted().joined(separator: ", "))
-                            .font(.system(size: 16, weight: .semibold))
+                            .romeFont(16, .semibold)
                             .padding(.horizontal, 14)
                             .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                             .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -569,17 +583,17 @@ struct WebOnlyCard: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "safari")
-                .font(.system(size: 17))
+                .romeFont(17)
                 .foregroundStyle(Palette.fg)
                 .frame(width: 32, height: 32)
                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Text("这部分内容需要在 Web 上查看")
-                .font(.system(size: 15))
+                .romeFont(15)
             Spacer(minLength: 0)
             Button("打开") {
                 if let url = model.webURL { openURL(url) }
             }
-            .font(.system(size: 14, weight: .semibold))
+            .romeFont(14, .semibold)
             .foregroundStyle(Palette.fg)
             .padding(.horizontal, 13)
             .frame(height: 32)
@@ -601,7 +615,7 @@ struct ErrorLine: View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
             AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
             Text(text)
-                .font(.system(size: 15))
+                .romeFont(15)
                 .lineSpacing(5)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)

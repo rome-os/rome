@@ -8,12 +8,12 @@ struct PageHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             GlassCircleButton(accessibilityLabel: "返回", action: { dismiss() }) {
-                Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                Image(systemName: "chevron.left").romeFont(17, .semibold)
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)
             Text(title)
-                .font(.system(size: 34, weight: .bold))
+                .romeFont(34, .bold)
                 .tracking(-0.8)
                 .padding(.horizontal, 20)
                 .accessibilityAddTraits(.isHeader)
@@ -31,7 +31,7 @@ struct SettingsGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             if let header {
                 Text(header)
-                    .font(.system(size: 13, weight: .medium))
+                    .romeFont(13, .medium)
                     .foregroundStyle(Palette.sub)
                     .padding(.horizontal, 20)
             }
@@ -53,12 +53,12 @@ struct SettingsRow<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.system(size: 15))
+                .romeFont(15)
                 .foregroundStyle(Palette.fg)
                 .frame(width: 30, height: 30)
                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             HStack {
-                Text(title).font(.system(size: 17)).foregroundStyle(Palette.fg)
+                Text(title).romeFont(17).foregroundStyle(Palette.fg)
                 Spacer(minLength: 8)
                 trailing()
             }
@@ -102,7 +102,7 @@ struct SettingsScreen: View {
                     } label: {
                         SettingsRow(systemImage: "safari", title: "在 Web 上管理") {
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 13, weight: .semibold))
+                                .romeFont(13, .semibold)
                                 .foregroundStyle(Palette.sub)
                         }
                     }
@@ -110,14 +110,14 @@ struct SettingsScreen: View {
                     Button { showFeedback = true } label: {
                         SettingsRow(systemImage: "bubble.left.and.text.bubble.right", title: "发送反馈") {
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
+                                .romeFont(13, .semibold)
                                 .foregroundStyle(Palette.sub)
                         }
                     }
                     .buttonStyle(RowPressStyle())
                     SettingsRow(systemImage: "info.circle", title: "版本", last: true) {
                         Text(appVersion)
-                            .font(.system(size: 17).monospacedDigit())
+                            .romeFont(17, monospacedDigits: true)
                             .foregroundStyle(Palette.sub)
                     }
                 }
@@ -125,7 +125,7 @@ struct SettingsScreen: View {
                 SettingsGroup {
                     Button { confirmSignOut = true } label: {
                         Text("退出登录")
-                            .font(.system(size: 17, weight: .medium))
+                            .romeFont(17, .medium)
                             .foregroundStyle(Palette.destructive)
                             .frame(maxWidth: .infinity, minHeight: 52)
                             .contentShape(Rectangle())
@@ -158,19 +158,19 @@ struct SettingsScreen: View {
                 InitialAvatar(text: workspace.accountLabel, size: 48)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(workspace.accountLabel)
-                        .font(.system(size: 17, weight: .semibold))
+                        .romeFont(17, .semibold)
                         .foregroundStyle(Palette.fg)
                         .lineLimit(1)
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
                         Text("\(workspace.instanceName) · \(workspace.host)").lineLimit(1)
                     }
-                    .font(.system(size: 14))
+                    .romeFont(14)
                     .foregroundStyle(Palette.sub)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .romeFont(13, .semibold)
                     .foregroundStyle(Palette.sub)
             }
             .padding(.horizontal, 16)
@@ -206,11 +206,11 @@ struct UsageRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline) {
-                Text(name).font(.system(size: 17, weight: .medium))
+                Text(name).romeFont(17, .medium)
                 Spacer()
                 if provider?.loggedIn == true, window != nil {
                     Text("\(Int(percent.rounded()))%")
-                        .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                        .romeFont(15, .semibold, monospacedDigits: true)
                         .contentTransition(.numericText())
                 }
             }
@@ -228,11 +228,11 @@ struct UsageRow: View {
                 .accessibilityLabel("\(name) 用量")
                 .accessibilityValue("\(Int(percent))%")
                 Text(resetText)
-                    .font(.system(size: 13))
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
             } else {
                 Text(provider == nil ? "正在读取…" : "未登录")
-                    .font(.system(size: 13))
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
             }
         }
@@ -269,20 +269,20 @@ struct FeedbackSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("发送反馈").font(.system(size: 24, weight: .bold)).tracking(-0.6)
+                Text("发送反馈").romeFont(24, .bold).tracking(-0.6)
                 Spacer()
                 SheetCloseButton { dismiss() }
             }
             if sent {
                 VStack(spacing: 10) {
                     StatusGlyph(tone: .done, size: 36)
-                    Text("已发送。谢谢。").font(.system(size: 17, weight: .semibold))
+                    Text("已发送。谢谢。").romeFont(17, .semibold)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
             } else {
                 TextField("哪里好用，哪里不好用？", text: $text, axis: .vertical)
-                    .font(.system(size: 16))
+                    .romeFont(16)
                     .lineLimit(5...10)
                     .focused($focused)
                     .padding(14)
@@ -290,7 +290,7 @@ struct FeedbackSheet: View {
                     .hairline(radius: 16)
                 if failed {
                     Text("没发出去，请再试一次。")
-                        .font(.system(size: 13, weight: .medium))
+                        .romeFont(13, .medium)
                         .foregroundStyle(Palette.destructive)
                 }
                 Spacer()

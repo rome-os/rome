@@ -4,6 +4,11 @@
 <dict>
 	<key>RomeCloudOrigin</key>
 	<string>$(ROME_CLOUD_ORIGIN)</string>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

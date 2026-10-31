@@ -33,13 +33,13 @@ struct InstancesScreen: View {
                 }
                 if let stoppedNotice {
                     Text(stoppedNotice)
-                        .font(.system(size: 13))
+                        .romeFont(13)
                         .foregroundStyle(Palette.destructive)
                         .padding(.horizontal, 20)
                         .transition(.opacity)
                 }
                 Text("实例由 Rome Cloud 管理。")
-                    .font(.system(size: 13))
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
                     .padding(.horizontal, 20)
             }
@@ -70,17 +70,17 @@ struct InstancesScreen: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(instance.name)
-                        .font(.system(size: 17, weight: .semibold))
+                        .romeFont(17, .semibold)
                         .foregroundStyle(Palette.fg)
                     Text(instance.host)
-                        .font(.system(size: 14))
+                        .romeFont(14)
                         .foregroundStyle(Palette.sub)
                 }
                 Spacer()
                 HStack(spacing: 6) {
                     Circle().fill(instance.isRunning ? Palette.success : Palette.sub.opacity(0.4)).frame(width: 7, height: 7)
                     Text(instance.isRunning ? "运行中" : "已停止")
-                        .font(.system(size: 14))
+                        .romeFont(14)
                         .foregroundStyle(Palette.sub)
                 }
                 Group {
@@ -88,7 +88,7 @@ struct InstancesScreen: View {
                         Spinner(size: 16, color: Palette.sub)
                     } else if current {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 15, weight: .bold))
+                            .romeFont(15, .bold)
                             .foregroundStyle(Palette.primary)
                     } else {
                         Color.clear
@@ -149,12 +149,12 @@ struct SearchScreen: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 GlassCircleButton(accessibilityLabel: "返回", action: { dismiss() }) {
-                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                    Image(systemName: "chevron.left").romeFont(17, .semibold)
                 }
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium)).foregroundStyle(Palette.sub)
+                    Image(systemName: "magnifyingglass").romeFont(16, .medium).foregroundStyle(Palette.sub)
                     TextField("搜索消息", text: $query)
-                        .font(.system(size: 17))
+                        .romeFont(17)
                         .focused($focused)
                         .submitLabel(.search)
                         .onSubmit { run() }
@@ -180,13 +180,13 @@ struct SearchScreen: View {
                 Spacer()
             } else if searched && hits.isEmpty {
                 Spacer()
-                Text("没有找到相关消息").font(.system(size: 17, weight: .semibold))
-                Text("换个词再试试。").font(.system(size: 15)).foregroundStyle(Palette.sub).padding(.top, 4)
+                Text("没有找到相关消息").romeFont(17, .semibold)
+                Text("换个词再试试。").romeFont(15).foregroundStyle(Palette.sub).padding(.top, 4)
                 Spacer()
                 Spacer()
             } else if !searched {
                 Spacer()
-                Text("搜索 Chat 和任务里的消息").font(.system(size: 15)).foregroundStyle(Palette.sub)
+                Text("搜索 Chat 和任务里的消息").romeFont(15).foregroundStyle(Palette.sub)
                 Spacer()
                 Spacer()
             } else {
@@ -197,16 +197,16 @@ struct SearchScreen: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
                                         Text(hit.session.id == conciergeChatID ? "Chat" : hit.session.name)
-                                            .font(.system(size: 13, weight: .semibold))
+                                            .romeFont(13, .semibold)
                                             .foregroundStyle(Palette.sub)
                                             .lineLimit(1)
                                         Spacer()
                                         if let date = RomeDate.parse(hit.message.createdAt) {
-                                            Text(RelativeTime.ago(date)).font(.system(size: 12)).foregroundStyle(Palette.sub)
+                                            Text(RelativeTime.ago(date)).romeFont(12).foregroundStyle(Palette.sub)
                                         }
                                     }
                                     Text(highlighted(hit.message.snippet))
-                                        .font(.system(size: 16))
+                                        .romeFont(16)
                                         .foregroundStyle(Palette.fg)
                                         .lineLimit(3)
                                         .multilineTextAlignment(.leading)
@@ -278,7 +278,7 @@ struct RoutinesScreen: View {
             VStack(alignment: .leading, spacing: 18) {
                 PageHeader(title: "Routines")
                 Text("按时自动运行的工作。在 Chat 里让 Concierge 新建或修改。")
-                    .font(.system(size: 15))
+                    .romeFont(15)
                     .foregroundStyle(Palette.sub)
                     .lineSpacing(4)
                     .padding(.horizontal, 20)
@@ -286,7 +286,7 @@ struct RoutinesScreen: View {
                 if let routines {
                     if routines.isEmpty {
                         Text("还没有 Routine")
-                            .font(.system(size: 17, weight: .semibold))
+                            .romeFont(17, .semibold)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
                     } else {
@@ -351,10 +351,10 @@ struct RoutineRow: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(RoutineText.title(routine.name))
-                    .font(.system(size: 17, weight: .medium))
+                    .romeFont(17, .medium)
                     .foregroundStyle(Palette.fg)
                 Text(RoutineText.schedule(routine))
-                    .font(.system(size: 13))
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
             }
             Spacer()

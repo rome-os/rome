@@ -80,10 +80,10 @@ struct ChatScreen: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Spacer()
                     Text("有什么要做的？")
-                        .font(.system(size: 30, weight: .bold))
+                        .romeFont(30, .bold)
                         .tracking(-0.8)
                     Text("复杂的事我会开成任务去做，做完告诉你。")
-                        .font(.system(size: 16))
+                        .romeFont(16)
                         .lineSpacing(5)
                         .foregroundStyle(Palette.sub)
                     Spacer()
@@ -94,7 +94,10 @@ struct ChatScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, composerFocused: composerFocused) { row, previous in
+                TranscriptList(store: store, composerFocused: composerFocused, focusMessageID: Binding(
+                    get: { workspace.focusMessageID },
+                    set: { workspace.focusMessageID = $0 }
+                )) { row, previous in
                     rowView(row)
                         .padding(.top, TranscriptSpacing.top(row, after: previous))
                 }
@@ -142,7 +145,7 @@ struct ChatHeader: View {
             }
             Spacer()
             Text("Chat")
-                .font(.system(size: 17, weight: .semibold))
+                .romeFont(17, .semibold)
                 .tracking(-0.4)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
@@ -152,7 +155,7 @@ struct ChatHeader: View {
             .overlay(alignment: .topTrailing) {
                 if needsYou > 0 {
                     Text("\(needsYou)")
-                        .font(.system(size: 12, weight: .bold).monospacedDigit())
+                        .romeFont(12, .bold, monospacedDigits: true)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .frame(minWidth: 19, minHeight: 19)
@@ -219,8 +222,8 @@ struct CenteredMessage: View {
         VStack(spacing: 18) {
             Spacer()
             VStack(spacing: 8) {
-                Text(title).font(.system(size: 20, weight: .semibold))
-                Text(detail).font(.system(size: 15)).foregroundStyle(Palette.sub)
+                Text(title).romeFont(20, .semibold)
+                Text(detail).romeFont(15).foregroundStyle(Palette.sub)
             }
             .multilineTextAlignment(.center)
             PrimaryButton(title: actionTitle, action: action)
@@ -242,10 +245,13 @@ struct TranscriptList<Row: View>: View {
     var alignTop = false
     /// Drawn after the last row, inside the scroll: the "运行中…" line.
     var footer: AnyView? = nil
+    /// A message to scroll to and briefly highlight.
+    var focusMessageID: Binding<String?> = .constant(nil)
     @ViewBuilder let row: (TranscriptRow, TranscriptRow?) -> Row
 
     @State private var atBottom = true
     @State private var unseen = 0
+    @State private var highlighted: String?
 
     var body: some View {
         let rows = store.rows
@@ -260,6 +266,14 @@ struct TranscriptList<Row: View>: View {
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
+                            .background {
+                                if let highlighted, item.id.hasPrefix(highlighted + ":") {
+                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                        .fill(Palette.primarySoft)
+                                        .padding(-6)
+                                        .transition(.opacity)
+                                }
+                            }
                             .id(item.id)
                             .transition(.asymmetric(
                                 insertion: .opacity.combined(with: .offset(y: 8)),
@@ -295,6 +309,16 @@ struct TranscriptList<Row: View>: View {
             .onChange(of: store.arrivals) {
                 if !atBottom { unseen += 1 }
             }
+            .onChange(of: focusMessageID.wrappedValue, initial: true) { _, target in
+                guard let target, let first = rows.first(where: { $0.id.hasPrefix(target + ":") }) else { return }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { proxy.scrollTo(first.id, anchor: .center) }
+                withAnimation(.easeOut(duration: 0.2)) { highlighted = target }
+                focusMessageID.wrappedValue = nil
+                Task {
+                    try? await Task.sleep(for: .seconds(1.6))
+                    withAnimation(.easeOut(duration: 0.6)) { highlighted = nil }
+                }
+            }
             .onChange(of: composerFocused) { _, focused in
                 if focused {
                     Task {
@@ -311,9 +335,9 @@ struct TranscriptList<Row: View>: View {
                     } label: {
                         HStack(spacing: 6) {
                             Text("新消息")
-                            Image(systemName: "arrow.down").font(.system(size: 12, weight: .bold))
+                            Image(systemName: "arrow.down").romeFont(12, .bold)
                         }
-                        .font(.system(size: 14, weight: .semibold))
+                        .romeFont(14, .semibold)
                         .foregroundStyle(Palette.fg)
                         .padding(.horizontal, 14)
                         .frame(height: 36)

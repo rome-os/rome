@@ -154,7 +154,7 @@ struct StatusPill: View {
                 Circle().fill(tone.dot).frame(width: compact ? 6 : 7, height: compact ? 6 : 7)
             }
             Text(label ?? tone.label)
-                .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                .romeFont(compact ? 12 : 13, .semibold)
                 .foregroundStyle(tone.text)
         }
         .padding(.horizontal, compact ? 8 : 10)
@@ -233,16 +233,16 @@ struct TopBanner: View {
         HStack(spacing: 7) {
             switch kind {
             case .warning:
-                Image(systemName: "wifi.slash").font(.system(size: 14, weight: .semibold))
+                Image(systemName: "wifi.slash").romeFont(14, .semibold)
             case .error:
                 AlertGlyph(size: 15)
             case .info:
-                Image(systemName: "arrow.left.arrow.right").font(.system(size: 13, weight: .semibold))
+                Image(systemName: "arrow.left.arrow.right").romeFont(13, .semibold)
             }
-            Text(text).font(.system(size: 14, weight: .medium))
+            Text(text).romeFont(14, .medium)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .font(.system(size: 13, weight: .semibold))
+                    .romeFont(13, .semibold)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 10)
                     .frame(height: 28)
@@ -280,7 +280,7 @@ struct TopBanner: View {
 struct ComingSoonTag: View {
     var body: some View {
         Text("即将推出")
-            .font(.system(size: 12, weight: .medium))
+            .romeFont(12, .medium)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)

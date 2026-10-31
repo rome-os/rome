@@ -73,11 +73,11 @@ struct TaskChatScreen: View {
     private var header: some View {
         HStack(spacing: 8) {
             GlassCircleButton(accessibilityLabel: "返回", action: { dismiss() }) {
-                Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                Image(systemName: "chevron.left").romeFont(17, .semibold)
             }
             VStack(spacing: 1) {
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .romeFont(16, .semibold)
                     .tracking(-0.3)
                     .lineLimit(1)
                 if tone != .neutral {
@@ -89,7 +89,7 @@ struct TaskChatScreen: View {
                         }
                         Text(tone == .running ? "运行中" : tone.label)
                     }
-                    .font(.system(size: 12, weight: .medium))
+                    .romeFont(12, .medium)
                     .foregroundStyle(tone.text)
                     .transition(.opacity)
                 }
@@ -109,7 +109,7 @@ struct TaskChatScreen: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 17, weight: .semibold))
+                    .romeFont(17, .semibold)
                     .foregroundStyle(Palette.fg)
                     .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
@@ -144,7 +144,7 @@ struct TaskChatScreen: View {
         HStack(spacing: 8) {
             Spinner(size: 15, color: Palette.running)
             Text(store.stopping ? "正在停止…" : "运行中…")
-                .font(.system(size: 15))
+                .romeFont(15)
                 .foregroundStyle(Palette.sub)
             Spacer()
         }
@@ -176,7 +176,7 @@ struct TaskChatScreen: View {
         case .approval(_, let part, _):
             ApprovalCardView(
                 part: part,
-                status: store.approvalStatus(part),
+                status: store.approvals[part.approvalId] == nil ? nil : store.approvalStatus(part),
                 submitting: store.resolvingApproval[part.approvalId],
                 error: store.approvalErrors[part.approvalId],
                 resolvedAt: RomeDate.parse(store.approvals[part.approvalId]?.resolvedAt ?? store.approvals[part.approvalId]?.updatedAt)
@@ -213,15 +213,22 @@ struct TaskChatScreen: View {
 }
 
 /// Keeps the edge swipe-back working on screens that hide the navigation bar.
+/// The gesture only begins when there is a screen to go back to, so a swipe on
+/// the root screen never leaves the stack waiting on a pop that cannot happen.
 struct SwipeBackEnabler: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController { Controller() }
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
 
-    final class Controller: UIViewController {
+    final class Controller: UIViewController, UIGestureRecognizerDelegate {
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
-            navigationController?.interactivePopGestureRecognizer?.delegate = nil
+            guard let gesture = navigationController?.interactivePopGestureRecognizer else { return }
+            gesture.isEnabled = true
+            gesture.delegate = self
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            (navigationController?.viewControllers.count ?? 0) > 1
         }
     }
 }

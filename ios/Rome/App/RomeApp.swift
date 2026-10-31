@@ -38,5 +38,25 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.35), value: model.phase == .ready)
         .tint(Palette.primary)
+        // Past this size the floating headers and cards stop fitting a phone.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        #if DEBUG
+        .modifier(DynamicTypeOverride(size: model.dynamicTypeOverride))
+        #endif
     }
 }
+
+#if DEBUG
+/// Forces a text size only when the snapshot runner asks for one.
+private struct DynamicTypeOverride: ViewModifier {
+    let size: DynamicTypeSize?
+
+    func body(content: Content) -> some View {
+        if let size {
+            content.dynamicTypeSize(size)
+        } else {
+            content
+        }
+    }
+}
+#endif

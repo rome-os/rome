@@ -16,7 +16,7 @@ struct TasksSheet: View {
                 .padding(.top, 7)
             HStack {
                 Text("任务")
-                    .font(.system(size: 24, weight: .bold))
+                    .romeFont(24, .bold)
                     .tracking(-0.6)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
@@ -62,10 +62,10 @@ struct TasksSheet: View {
                 .background(Palette.fillStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .padding(.bottom, 8)
             Text("还没有任务")
-                .font(.system(size: 19, weight: .semibold))
+                .romeFont(19, .semibold)
                 .tracking(-0.4)
             Text("在 Chat 里交代的事，开成任务后会出现在这里。")
-                .font(.system(size: 15))
+                .romeFont(15)
                 .lineSpacing(4)
                 .foregroundStyle(Palette.sub)
                 .multilineTextAlignment(.center)
@@ -82,7 +82,7 @@ struct TasksSheet: View {
                 Text(group.key.title)
                 Text("\(group.tasks.count + group.hidden)").fontWeight(.medium).opacity(0.8)
             }
-            .font(.system(size: 13, weight: .semibold))
+            .romeFont(13, .semibold)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 6)
             .accessibilityElement(children: .combine)
@@ -107,7 +107,7 @@ struct TasksSheet: View {
                 Button(showAllDone ? "收起" : "显示更早的 \(group.hidden) 项") {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { showAllDone.toggle() }
                 }
-                .font(.system(size: 14, weight: .semibold))
+                .romeFont(14, .semibold)
                 .foregroundStyle(Palette.primaryText)
                 .padding(.horizontal, 6)
                 .padding(.top, 2)
@@ -135,7 +135,7 @@ struct TaskRow: View {
     let last: Bool
     let action: () -> Void
 
-    private var tappable: Bool { task.chat != nil }
+    private var tappable: Bool { task.chat != nil || task.sourceMessageId != nil }
 
     var body: some View {
         Button(action: action) {
@@ -146,14 +146,14 @@ struct TaskRow: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(task.title)
-                            .font(.system(size: 16, weight: .medium))
+                            .romeFont(16, .medium)
                             .tracking(-0.3)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                         if !meta.isEmpty {
                             Text(meta)
-                                .font(.system(size: 13))
+                                .romeFont(13)
                                 .foregroundStyle(metaColor)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -162,7 +162,7 @@ struct TaskRow: View {
                     Spacer(minLength: 0)
                     if tappable {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
+                            .romeFont(11, .bold)
                             .foregroundStyle(Palette.sub)
                     }
                 }
@@ -178,7 +178,7 @@ struct TaskRow: View {
         .buttonStyle(RowPressStyle())
         .disabled(!tappable)
         .accessibilityElement(children: .combine)
-        .accessibilityHint(tappable ? "打开任务对话" : "")
+        .accessibilityHint(task.chat != nil ? "打开任务对话" : (task.sourceMessageId != nil ? "在 Chat 里查看" : ""))
     }
 
     @ViewBuilder
@@ -191,14 +191,14 @@ struct TaskRow: View {
                 .accessibilityLabel("接下来")
         case .watching:
             Image(systemName: "eye")
-                .font(.system(size: 10, weight: .bold))
+                .romeFont(10, .bold)
                 .foregroundStyle(Palette.sub)
                 .frame(width: 18, height: 18)
                 .overlay(Circle().strokeBorder(Palette.sub, lineWidth: 1.6))
                 .accessibilityLabel("盯着")
         case .dropped:
             Image(systemName: "minus")
-                .font(.system(size: 9, weight: .heavy))
+                .romeFont(9, .heavy)
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
                 .background(Palette.sub, in: Circle())
