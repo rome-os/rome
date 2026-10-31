@@ -148,4 +148,18 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         await store.reload()
         #expect(store.messages.map(\.id) == expected)
     }
+
+    @Test func rowsWithoutATurnTieByArrivalNotByID() async {
+        func row(_ id: String) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: "assistant", content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000)))
+        }
+        let backend = FakeBackend()
+        // Same second, no turn: the server sent "z-recap" first.
+        backend.stored = [row("z-recap"), row("a-card")]
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
+    }
 }

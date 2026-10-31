@@ -159,8 +159,8 @@ final class TranscriptStore {
 
     /// Keeps the server's order: a turn's rows stay together, turns ordered by
     /// when they started, rows in a turn by time. Times are whole seconds, so
-    /// rows written in the same second keep the order the server sent them in;
-    /// the order never changes when the same rows arrive again.
+    /// rows and turns that tie within a second keep the order they first
+    /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage]) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for message in incoming {
@@ -171,15 +171,18 @@ final class TranscriptStore {
         }
         let all = Array(byID.values)
         var turnStart: [String: Date] = [:]
+        var turnArrival: [String: Int] = [:]
         for message in all {
             let key = message.turnId ?? message.id
             turnStart[key] = min(turnStart[key] ?? message.date, message.date)
+            turnArrival[key] = min(turnArrival[key] ?? Int.max, seen[message.id]!)
         }
         messages = all.sorted { a, b in
             let keyA = a.turnId ?? a.id, keyB = b.turnId ?? b.id
             let startA = turnStart[keyA]!, startB = turnStart[keyB]!
             if startA != startB { return startA < startB }
-            if keyA != keyB { return keyA < keyB }
+            // Ids are random, so comparing them would decide a tie by chance.
+            if keyA != keyB { return turnArrival[keyA]! < turnArrival[keyB]! }
             if a.date != b.date { return a.date < b.date }
             return seen[a.id]! < seen[b.id]!
         }
