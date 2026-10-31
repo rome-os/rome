@@ -21,6 +21,11 @@ struct TaskChatScreen: View {
         return workspace.tasks.tone(forChat: chatId)
     }
 
+    /// The spinner runs only while the chat runs a turn. A task still being
+    /// worked on between turns shows a still dot.
+    private var spinning: Bool { store?.running == true }
+    private var stoppedHere: Bool { store?.stopped == true && !spinning }
+
     var body: some View {
         VStack(spacing: 0) {
             if let store {
@@ -84,17 +89,17 @@ struct TaskChatScreen: View {
                     .romeFont(16, .semibold)
                     .tracking(-0.3)
                     .lineLimit(1)
-                if tone != .neutral {
+                if spinning || stoppedHere || tone != .neutral {
                     HStack(spacing: 5) {
-                        if tone == .running {
+                        if spinning {
                             Spinner(size: 10, lineWidth: 2.4, color: tone.text, trackOpacity: 0.3)
                         } else {
-                            Circle().fill(tone.dot).frame(width: 6, height: 6)
+                            Circle().fill(stoppedHere ? Palette.sub : tone.dot).frame(width: 6, height: 6)
                         }
-                        Text(tone == .running ? String(localized: "Running") : tone.label)
+                        Text(spinning ? String(localized: "Running") : stoppedHere ? String(localized: "Stopped") : tone.label)
                     }
                     .romeFont(12, .medium)
-                    .foregroundStyle(tone.text)
+                    .foregroundStyle(stoppedHere ? Palette.sub : tone.text)
                     .transition(.opacity)
                 }
             }
@@ -103,6 +108,7 @@ struct TaskChatScreen: View {
             .glassSurface(Capsule())
             .frame(maxWidth: .infinity)
             .animation(.easeInOut(duration: 0.25), value: tone)
+            .animation(.easeInOut(duration: 0.25), value: stoppedHere)
             Menu {
                 Button {
                     if let url = model.webURL?.appending(path: "chat/\(chatId)") { openURL(url) }

@@ -29,6 +29,8 @@ final class TranscriptStore {
     private(set) var visibleTurn = false
     private(set) var activeTurnId: String?
     private(set) var stopping = false
+    /// The guardian stopped the last turn. Cleared when a new turn starts.
+    private(set) var stopped = false
     /// Bumps when a new message arrives, so the view can scroll or count it.
     private(set) var arrivals = 0
 
@@ -185,20 +187,33 @@ final class TranscriptStore {
 
     private func refreshRunning(hint: Bool? = nil) async {
         if hint == false {
-            running = false
-            visibleTurn = false
-            activeTurnId = nil
-            stopping = false
+            markIdle()
             return
         }
         guard let turns = try? await backend.activeTurns(sessionId: sessionId) else {
             if let hint { running = hint }
             return
         }
-        running = !turns.isEmpty
+        guard !turns.isEmpty else {
+            markIdle()
+            return
+        }
+        markRunning()
         visibleTurn = turns.contains { $0.quiet != true }
         activeTurnId = turns.first { $0.status == "running" }?.turnId ?? turns.first?.turnId
-        if !running { stopping = false }
+    }
+
+    private func markRunning() {
+        running = true
+        stopped = false
+    }
+
+    private func markIdle() {
+        if stopping { stopped = true }
+        running = false
+        visibleTurn = false
+        activeTurnId = nil
+        stopping = false
     }
 
     // MARK: Sending
@@ -210,7 +225,7 @@ final class TranscriptStore {
         let inputId = UUID().uuidString.lowercased()
         pending.append(PendingSend(id: inputId, text: trimmed, createdAt: .now, state: .sending))
         if kind == .concierge {
-            running = true
+            markRunning()
             visibleTurn = true
         }
         deliver(inputId: inputId, text: trimmed)
@@ -241,7 +256,7 @@ final class TranscriptStore {
                     await self.refreshLatest()
                 }
                 if kind == .task {
-                    running = true
+                    markRunning()
                     if let turnId = turn.turnId { activeTurnId = turnId }
                 }
             } catch {
@@ -261,7 +276,22 @@ final class TranscriptStore {
                 try await backend.interrupt(turnId: turnId)
             } catch {
                 stopping = false
+                return
             }
+            // The socket usually announces that the turn ended. When that event
+            // never comes, the active turns tell, so Stop never leaves the chat
+            // looking busy.
+            for delay in [0.5, 1.0, 2.0, 4.0] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard stopping else { return }
+                await refreshRunning()
+                if !running {
+                    await reload()
+                    return
+                }
+            }
+            // Still running: let the guardian try again.
+            stopping = false
         }
     }
 
@@ -326,7 +356,7 @@ final class TranscriptStore {
         Task {
             do {
                 try await backend.answer(sessionId: sessionId, toolUseId: part.toolUseId, output: output)
-                running = true
+                markRunning()
             } catch {
                 localAnswers[part.toolUseId] = nil
             }

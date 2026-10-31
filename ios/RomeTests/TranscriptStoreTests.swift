@@ -100,4 +100,28 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         await store.placeOlderPage()
         #expect(store.brief?.id == "m0")
     }
+
+    @Test func stopEndsRunningWithoutALiveEvent() async throws {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user")]
+        backend.turns = [ActiveTurn(turnId: "t1", status: "running", quiet: false)]
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        #expect(store.running)
+
+        // No socket event arrives here: only the active turns can tell it ended.
+        store.stopTurn()
+        for _ in 0..<40 where store.running {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(backend.interrupted == ["t1"])
+        #expect(!store.running)
+        #expect(!store.stopping)
+        #expect(store.stopped)
+
+        backend.turns = [ActiveTurn(turnId: "t2", status: "running", quiet: false)]
+        await store.reload()
+        #expect(store.running)
+        #expect(!store.stopped)
+    }
 }
