@@ -10,7 +10,7 @@ import { chatRow, expect, send, test } from "../fixtures";
 
 const fixture = process.env.E2E_FIXTURE;
 test.skip(!fixture, "Set E2E_FIXTURE to boot on the upgrade fixture");
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "default" });
 
 interface LegacyMessage {
   id: string;
@@ -243,8 +243,16 @@ test.describe("dashboard", () => {
   test("search finds a seeded chat by its reply", async ({ page }) => {
     await page.goto("/chat");
     await page.keyboard.press("Control+k");
-    await page.getByRole("dialog").getByRole("textbox").fill("Reply to fxrename");
-    await expect(page.getByRole("dialog").getByText("Renamed fxrename").first()).toBeVisible();
+    const search = page.getByRole("dialog");
+    await search
+      .getByRole("combobox")
+      .or(search.getByRole("textbox"))
+      .first()
+      .fill("Reply to fxrename");
+    const hit = search.getByRole("option").filter({ hasText: "Renamed fxrename" });
+    await expect(hit).toBeVisible();
+    await hit.click();
+    await expect(page.getByText("Fixture rename E2E-REPLY fxrename")).toBeVisible();
   });
 });
 

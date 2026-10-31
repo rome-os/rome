@@ -40,7 +40,12 @@ export class FakeIlink {
   readonly unhandled: string[] = [];
   private readonly updates: Record<string, unknown>[] = [];
   private readonly wake = new Set<() => void>();
-  private nextId = 7_000_000;
+  /** Ids grow from the boot time, so a run over a fixture never reuses one
+   *  that the fixture's chats already hold. */
+  private nextId = Date.now();
+  /** Names this run in the poll cursors it hands out. A cursor from another
+   *  run, kept in a fixture, starts from this run's first update. */
+  private readonly run = Date.now().toString(36);
   private readonly server: Server = createServer((req, res) => {
     void this.handle(req, res).catch((error: unknown) => {
       this.unhandled.push(`error ${req.method} ${req.url}: ${String(error)}`);
@@ -140,7 +145,8 @@ export class FakeIlink {
   }
 
   private async getUpdates(cursor: unknown, res: ServerResponse) {
-    const from = Number(cursor) || 0;
+    const [run, at] = String(cursor ?? "").split(":");
+    const from = run === this.run ? Number(at) || 0 : 0;
     if (this.updates.length <= from) {
       // Hold the long poll until a message arrives, the client gives up, or
       // a short timeout passes (the adapter's own timeout is 35 s).
@@ -158,7 +164,11 @@ export class FakeIlink {
         res.once("close", wake);
       });
     }
-    return { ret: 0, msgs: this.updates.slice(from), get_updates_buf: String(this.updates.length) };
+    return {
+      ret: 0,
+      msgs: this.updates.slice(from),
+      get_updates_buf: `${this.run}:${this.updates.length}`,
+    };
   }
 
   private sendMessage(msg: Record<string, unknown> | undefined) {

@@ -155,8 +155,12 @@ export class FakeTelegram {
         const offset = input.text.indexOf(handle);
         if (offset >= 0) message.entities = [{ type: "mention", offset, length: handle.length }];
       }
-      if (input.replyTo && input.replyTo.bot === bot.username) {
-        const parent = this.sent.get(key(bot.username, input.chat.id, input.replyTo.messageId));
+      // A supergroup's ids are the same for every bot, so each sees the reply;
+      // elsewhere only the bot whose numbering the reply names can.
+      if (input.replyTo && (shared !== undefined || input.replyTo.bot === bot.username)) {
+        const parent = this.sent.get(
+          key(input.replyTo.bot, input.chat.id, input.replyTo.messageId),
+        );
         if (parent) message.reply_to_message = parent;
       }
       this.sent.set(key(bot.username, input.chat.id, messageId), message);
