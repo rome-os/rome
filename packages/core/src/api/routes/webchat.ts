@@ -714,6 +714,11 @@ interface ActiveWebchatStream {
   agentTurnId?: string;
   /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
   quiet?: boolean;
+  /**
+   * The guardian pressed Stop on this turn. A backend turn whose provider turn
+   * has not started stops the moment it starts.
+   */
+  stopRequested?: boolean;
   startedAt: string;
   finished: boolean;
   // Keyed replay buffer: late subscribers receive the latest payload per key
@@ -806,6 +811,8 @@ export interface WebchatRuntime {
 // approval execution forever — wait at most this long for the predecessor
 // before opening the next backend-initiated stream.
 const ENQUEUE_DRAIN_TIMEOUT_MS = 60_000;
+/** Prefix of the synthetic turn id a backend task streams under. */
+const BACKEND_TURN_PREFIX = "backend:";
 
 // Per-turn SSE keepalive cadence. A turn can legitimately go quiet for
 // minutes (a long tool call emits no frames), and mobile networks / reverse
@@ -3061,8 +3068,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!stream) return answer({ stopped: false, reason: "no_running_turn" }, 404);
     log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
     if (stream.interrupt) {
+      stream.stopRequested = true;
       await stream.interrupt("user-stop");
       return answer({ stopped: stream.finished }, stream.finished ? 200 : 202);
+    }
+    if (turnId.startsWith(BACKEND_TURN_PREFIX)) {
+      // The task has not reached its provider turn, so there is nothing to
+      // interrupt yet. `emit` stops the turn when it starts.
+      stream.stopRequested = true;
+      return answer({ stopped: false }, 202);
     }
     // A stream without a turn-bound interrupt can only be cancelled through
     // its live session owner. Require the exact active turn so a queued turn
@@ -4285,7 +4299,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // arbitrary actions. Mint a synthetic turnId so the stream is still
     // addressable via /turns/:turnId/stream like a user-initiated turn. A
     // recorded turn adds its own id as `agentTurnId` once it starts.
-    const syntheticTurnId = `backend:${randomUUID()}`;
+    const syntheticTurnId = `${BACKEND_TURN_PREFIX}${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
     // Deliberately top-level only. A side chat has no scheduled wake-ups (see
     // `deferEnabled`) and does not host approval continuations: resuming one
@@ -4343,6 +4357,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           stream.interrupt = async (reason) => {
             if (owner.currentTurnId === msg.turnId) await owner.interrupt(reason);
           };
+          // Not awaited: the task's event loop is what awaits this emit, and an
+          // interrupt can wait on that loop to drain.
+          if (stream.stopRequested) {
+            void stream.interrupt("user-stop").catch((error) =>
+              log.warn("stopping a backend turn that had not started failed", {
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+          }
         }
       }
       // Backend turns have no live bubble; drop delta events.
@@ -4392,6 +4416,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         stopped: stream.segmentBuilder.snapshot().summary.stoppedByUser === true,
       };
     });
+    if (stream.stopRequested) options?.onStopped?.();
   };
 
   const enqueueSessionTask: WebchatRuntime["enqueueSessionTask"] = async (

@@ -54,13 +54,25 @@ function sameLocalDay(a: Date, b: Date): boolean {
 }
 
 /** Whether the agent has said something in the turn, as a message the chat draws. */
-export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
+function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
   if (!turnId) return false;
   return rows.some(
     (row) =>
       row.kind === "agent" &&
       row.messages.some((message) => message.turnId === turnId && isRenderable(message)),
   );
+}
+
+/**
+ * Whether the guardian can see a turn running: the typing bubble shows and
+ * Stop applies. A quiet turn (the agent updating its own list) stays unseen
+ * until it says something.
+ */
+export function conciergeTurnVisible(
+  rows: ChatRow[],
+  live: { isStreaming: boolean; quiet?: boolean; runningTurnId: string | null },
+): boolean {
+  return live.isStreaming && (!live.quiet || turnHasSpoken(rows, live.runningTurnId));
 }
 
 // What the last build made, keyed by the message each piece starts from. A

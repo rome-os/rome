@@ -387,6 +387,14 @@ interface ActiveTurn {
   imageTracker: GeneratedImageTracker;
   romeTools: RomeDynamicTools;
   turnId: string | null;
+  /** turn/started arrived: the app-server is running the turn, so it can be interrupted. */
+  started?: boolean;
+  /**
+   * An interrupt arrived before the turn was running. turn/started sends it
+   * for this turn, so it can never reach a later turn. The app-server ignores
+   * turn/interrupt for a turn it has answered turn/start for but not started.
+   */
+  interruptRequested?: boolean;
   initialInputId?: string;
   completed: boolean;
   /** Usage accumulated across every model request in this Rome turn. */
@@ -683,6 +691,10 @@ export class CodexAppServerProvider implements ModelProvider {
     // be replaced.
     let contaminatedReason: string | null = null;
     let activeTurn: ActiveTurn | null = null;
+    // From sendUserInput until runOne opens the turn: an interrupt in this
+    // window has no turn to name yet, so it waits for the turn runOne opens.
+    let sourceStarting = false;
+    let interruptWhileStarting = false;
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
@@ -828,6 +840,21 @@ export class CodexAppServerProvider implements ModelProvider {
       });
     };
 
+    const sendTurnInterrupt = async (tid: string, turnId: string): Promise<void> => {
+      try {
+        await this.appServerManager.requestForThread(tid, Method.turnInterrupt, {
+          threadId: tid,
+          turnId,
+        });
+      } catch (error) {
+        // best-effort; turn/completed (interrupted) still resolves the turn.
+        log.warn("codex app-server turn/interrupt failed", {
+          turnId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+
     const onNotification = (method: string, params2: unknown): void => {
       switch (method) {
         case Notify.turnStarted: {
@@ -835,6 +862,11 @@ export class CodexAppServerProvider implements ModelProvider {
           if (activeTurn) {
             if (activeTurn.turnId && activeTurn.turnId !== p.turn?.id) return;
             activeTurn.turnId = p.turn?.id ?? null;
+            activeTurn.started = true;
+            if (activeTurn.interruptRequested && activeTurn.turnId && threadId) {
+              activeTurn.interruptRequested = false;
+              void sendTurnInterrupt(threadId, activeTurn.turnId);
+            }
             const update = activeTurn.turnId ? usageByTurnId.get(activeTurn.turnId) : undefined;
             if (update?.hasNewRequestUsage) updateTurnUsage(activeTurn, update.usage);
           }
@@ -1146,6 +1178,11 @@ export class CodexAppServerProvider implements ModelProvider {
         reasoningDeltaParts: new Map(),
       };
       activeTurn = turn;
+      if (runtime === sourceRuntime) {
+        turn.interruptRequested = interruptWhileStarting;
+        sourceStarting = false;
+        interruptWhileStarting = false;
+      }
       const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
       // A borrowed exact fork runs here too; only the session's own turns report.
       if (runtime === sourceRuntime) appliedReasoningEffort = effort;
@@ -1268,6 +1305,10 @@ export class CodexAppServerProvider implements ModelProvider {
         try {
           await turnCoordinator.run(async () => await runOne(inputs, sourceRuntime));
         } finally {
+          // runOne can return before it opens a turn (empty text, closed); no
+          // interrupt may wait on a turn that never opens.
+          sourceStarting = false;
+          interruptWhileStarting = false;
           resolveSourceStarted?.();
         }
       },
@@ -1281,6 +1322,8 @@ export class CodexAppServerProvider implements ModelProvider {
           resolveSourceStarted = resolve;
         });
         payerAtSend.set(input, this.appServerManager.getDefaultProvider());
+        sourceStarting = true;
+        interruptWhileStarting = false;
         dispatcher.enqueue(input);
       }
     };
@@ -1338,17 +1381,20 @@ export class CodexAppServerProvider implements ModelProvider {
     };
 
     const interruptOwnerTurn = async (ownerSessionId: string, reason?: string): Promise<void> => {
-      if (closed || !threadId || !activeTurn?.turnId) return;
-      if (activeTurn.ownerSessionId !== ownerSessionId) return;
-      log.info("codex app-server interrupt", { reason, ownerSessionId });
-      try {
-        await this.appServerManager.requestForThread(threadId, Method.turnInterrupt, {
-          threadId,
-          turnId: activeTurn.turnId,
-        });
-      } catch {
-        // best-effort; turn/completed (interrupted) still resolves the turn.
+      if (closed || !threadId) return;
+      const turn = activeTurn;
+      if (!turn) {
+        // Sent but not opened yet; only the session's own input waits here.
+        if (sourceStarting && ownerSessionId === params.sessionId) interruptWhileStarting = true;
+        return;
       }
+      if (turn.ownerSessionId !== ownerSessionId) return;
+      log.info("codex app-server interrupt", { reason, ownerSessionId });
+      if (!turn.started || !turn.turnId) {
+        turn.interruptRequested = true;
+        return;
+      }
+      await sendTurnInterrupt(threadId, turn.turnId);
     };
 
     session.fork = async (forkParams: ModelSessionForkParams): Promise<ModelSessionFork> => {

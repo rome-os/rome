@@ -3051,4 +3051,179 @@ describe("CodexAppServerProvider", () => {
     expect(second).not.toHaveProperty("httpStatus");
     await session.close();
   });
+  describe("an interrupt before the turn id is known", () => {
+    const interrupts = () =>
+      requestMock.mock.calls.filter(([method]) => method === "turn/interrupt");
+
+    /** turn/start of the first turn waits for `release` unless `hold` is off; unheld turns finish at once. */
+    function holdFirstTurnStart(hold = true) {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let starts = 0;
+      requestMock.mockImplementation(async (method: string, params: unknown) => {
+        const n = captured.onNotification!;
+        if (method === "thread/start") n("thread/started", { thread: { id: "thr-1" } });
+        if (method === "turn/start") {
+          const id = `turn-${++starts}`;
+          const held = hold && starts === 1;
+          if (held) await gate;
+          n("turn/started", { threadId: "thr-1", turn: { id } });
+          if (!held) n("turn/completed", { threadId: "thr-1", turn: { id, status: "completed" } });
+          return { turn: { id } };
+        }
+        // Codex ends the interrupted turn itself.
+        if (method === "turn/interrupt") {
+          const { turnId } = params as { turnId: string };
+          n("turn/completed", { threadId: "thr-1", turn: { id: turnId, status: "interrupted" } });
+        }
+        return {};
+      });
+      return release;
+    }
+
+    it("sends turn/interrupt once turn/start answers, for that turn only", async () => {
+      const release = holdFirstTurnStart();
+      const session = await new CodexAppServerProvider().openSession(buildParams());
+      const first = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "go" });
+      await rs.waitFor(() =>
+        expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+      );
+
+      await session.interrupt("user-stop");
+      expect(interrupts()).toHaveLength(0);
+      release();
+      await first;
+
+      expect(interrupts()).toEqual([["turn/interrupt", { threadId: "thr-1", turnId: "turn-1" }]]);
+
+      // The interrupt was spent on turn 1; the next turn runs untouched.
+      const second = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "again" });
+      await second;
+      expect(interrupts()).toHaveLength(1);
+      await session.close();
+    });
+
+    it("keeps an interrupt made right after the send, before the turn opens", async () => {
+      const release = holdFirstTurnStart();
+      const session = await new CodexAppServerProvider().openSession(buildParams());
+      const first = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "go" });
+      await session.interrupt("user-stop");
+      release();
+      await first;
+
+      expect(interrupts()).toEqual([["turn/interrupt", { threadId: "thr-1", turnId: "turn-1" }]]);
+      await session.close();
+    });
+
+    /**
+     * turn/start answers with the turn id at once, and turn/started follows
+     * later, as the app-server does: it ignores turn/interrupt in between.
+     * The test announces the turn with `start()`.
+     */
+    function answerBeforeStarted(interruptFails = false) {
+      requestMock.mockImplementation(async (method: string, params: unknown) => {
+        const n = captured.onNotification!;
+        if (method === "thread/start") n("thread/started", { thread: { id: "thr-1" } });
+        if (method === "turn/start") return { turn: { id: "turn-1" } };
+        if (method === "turn/interrupt") {
+          if (interruptFails) throw new Error("no active turn");
+          const { turnId } = params as { turnId: string };
+          n("turn/completed", { threadId: "thr-1", turn: { id: turnId, status: "interrupted" } });
+        }
+        return {};
+      });
+      return () =>
+        captured.onNotification!("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+    }
+
+    it("holds an interrupt that lands after the turn/start answer until turn/started", async () => {
+      const start = answerBeforeStarted();
+      const session = await new CodexAppServerProvider().openSession(buildParams());
+      const collected = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "go" });
+      await rs.waitFor(() =>
+        expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await session.interrupt("user-stop");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(interrupts()).toHaveLength(0);
+      start();
+      await collected;
+
+      expect(interrupts()).toEqual([["turn/interrupt", { threadId: "thr-1", turnId: "turn-1" }]]);
+      await session.close();
+    });
+
+    it("holds an interrupt made while turn/start was in flight until turn/started", async () => {
+      let answerStart!: () => void;
+      const startAnswer = new Promise<void>((resolve) => {
+        answerStart = resolve;
+      });
+      const started = answerBeforeStarted();
+      const inner = requestMock.getMockImplementation()!;
+      requestMock.mockImplementation(async (method: string, params: unknown) => {
+        if (method === "turn/start") await startAnswer;
+        return inner(method, params);
+      });
+      const session = await new CodexAppServerProvider().openSession(buildParams());
+      const collected = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "go" });
+      await rs.waitFor(() =>
+        expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+      );
+      await session.interrupt("user-stop");
+      answerStart();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      // The answer named the turn, but the app-server has not started it.
+      expect(interrupts()).toHaveLength(0);
+      started();
+      await collected;
+
+      expect(interrupts()).toEqual([["turn/interrupt", { threadId: "thr-1", turnId: "turn-1" }]]);
+      await session.close();
+    });
+
+    it("logs a turn/interrupt the app-server refuses", async () => {
+      const start = answerBeforeStarted(true);
+      const session = await new CodexAppServerProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "go" });
+      await rs.waitFor(() =>
+        expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await session.interrupt("user-stop");
+      start();
+
+      await rs.waitFor(() =>
+        expect(logMock.warn).toHaveBeenCalledWith(
+          "codex app-server turn/interrupt failed",
+          expect.objectContaining({ turnId: "turn-1", error: "no active turn" }),
+        ),
+      );
+      captured.onNotification!("turn/completed", {
+        threadId: "thr-1",
+        turn: { id: "turn-1", status: "completed" },
+      });
+      await session.close();
+    });
+
+    it("does not carry an interrupt of an idle session into its next turn", async () => {
+      holdFirstTurnStart(false);
+      const session = await new CodexAppServerProvider().openSession(buildParams());
+      await session.interrupt("user-stop");
+      const first = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "go" });
+      await first;
+
+      expect(interrupts()).toHaveLength(0);
+      await session.close();
+    });
+  });
 });

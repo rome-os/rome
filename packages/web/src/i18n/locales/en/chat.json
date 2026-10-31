@@ -331,7 +331,8 @@
     "send": "Send",
     "sendTitle": "Send",
     "sendWhileRunningTitle": "Send while agent is working",
-    "stopGenerating": "Stop generating"
+    "stopGenerating": "Stop generating",
+    "stopping": "Stopping…"
   },
   "questionCard": {
     "optional": "optional",

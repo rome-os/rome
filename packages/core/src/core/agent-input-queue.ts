@@ -48,6 +48,8 @@ interface ActiveInputTurn {
   sealed: boolean;
   /** A `now` input ended this turn. */
   superseded: boolean;
+  /** An interrupt other than a supersede ended this turn, so it replays nothing. */
+  stopped: boolean;
   dispatch?: Promise<void>;
 }
 
@@ -108,7 +110,17 @@ export class AgentInputQueue {
     if (active.superseded) return;
     active.superseded = true;
     active.sealed = true;
+    if (active.stopped) return;
     void active.handle.interrupt?.(SUPERSEDED_INTERRUPT_REASON).catch(this.reportError);
+  }
+
+  /**
+   * Records that the guardian or the host ended `turnId` with an interrupt that
+   * is not a supersede. Such a turn carries none of its inputs forward, even
+   * when a `now` input also superseded it. Inputs queued behind it still run.
+   */
+  stop(turnId: string): void {
+    if (this.active?.handle.turnId === turnId) this.active.stopped = true;
   }
 
   // A turn that starts after a superseded one also takes that turn's
@@ -147,6 +159,7 @@ export class AgentInputQueue {
       ready: false,
       sealed: false,
       superseded: false,
+      stopped: false,
     };
     for (const part of parts) {
       part.turnId = handle.turnId;
@@ -251,7 +264,7 @@ export class AgentInputQueue {
     if (active?.handle.turnId !== turnId) return;
     active.sealed = true;
     this.active = undefined;
-    if (active.superseded) {
+    if (active.superseded && !active.stopped) {
       // The provider never saw these, or saw them only in a turn it dropped
       // (Claude resumes from its transcript, which lacks an input it had not
       // read yet). An input the provider retained is already queued again.

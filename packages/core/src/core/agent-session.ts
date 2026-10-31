@@ -3856,6 +3856,9 @@ class AgentSessionImpl implements AgentSession {
               reasoningEffort: mwInput.reasoningEffort,
               injectedToolResult: input.injectedToolResult,
             });
+            // An interrupt that landed while the send was in flight reached a
+            // provider that did not know its turn yet. Send it again now.
+            if (sink.lifecycleInterrupted) await this.modelSession.interrupt("user-stop");
             this.inputs.ready(turnId);
             if (this.deps.webchatRepo && pendingConversationMessageIds.length > 0) {
               try {
@@ -4034,6 +4037,7 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
+    if (reason !== SUPERSEDED_INTERRUPT_REASON) this.inputs.stop(sink.turnId);
     // Cancel the provider before awaiting child cleanup. A slow child must
     // not keep its parent generating after the user presses Stop.
     await Promise.all([

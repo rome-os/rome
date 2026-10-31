@@ -77,8 +77,12 @@ export interface ConciergeDeps {
   sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
-   *  shows the guardian no sign that it runs, until the agent speaks. */
-  runBackendTurn: (params: BackendTurnParams, options?: { quiet?: boolean }) => Promise<void>;
+   *  shows the guardian no sign that it runs, until the agent speaks.
+   *  `onStopped` is called once if the guardian pressed Stop on the turn. */
+  runBackendTurn: (
+    params: BackendTurnParams,
+    options?: { quiet?: boolean; onStopped?: () => void },
+  ) => Promise<void>;
 }
 
 export class ConciergeService {
@@ -171,7 +175,7 @@ export class ConciergeService {
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean } = {},
+    options: { quiet?: boolean; onStopped?: () => void } = {},
   ): Promise<void> {
     const sessionId = await this.runtimeSessionId(chatId);
     if (!sessionId) return;

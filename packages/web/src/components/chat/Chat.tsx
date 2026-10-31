@@ -58,6 +58,7 @@ import {
   type HandoffNode,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
+import { conciergeTurnVisible } from "@/components/chat/concierge-groups";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
 import { useToolTrace } from "@/pages/free/tool-trace";
@@ -329,7 +330,8 @@ export interface ChatProps {
   /**
    * `concierge` makes this the texting-style Concierge chat: a new message
    * interrupts the running turn, and the transcript and composer drop the
-   * trace, turn summary, pickers, and Stop.
+   * trace, turn summary, and pickers. Stop replaces Send while the composer is
+   * empty and a turn the guardian can see is running.
    */
   variant?: ChatVariant;
 }
@@ -1811,11 +1813,12 @@ export function Chat({
 
   // Stop generation for the active streaming session by targeting
   // the specific running turnId; queued turns behind it run normally.
-  const stopMessage = useCallback(async () => {
+  // Resolves true when the server confirmed the Stop (or the turn had ended).
+  const stopMessage = useCallback(async (): Promise<boolean> => {
     const sid = floorSessionIdRef.current;
-    if (!sid) return;
+    if (!sid) return false;
     const turnId = streamingSessionsRef.current.get(sid)?.turnId ?? null;
-    if (!turnId) return;
+    if (!turnId) return false;
     const targetController = turnStreamControllersRef.current.get(turnId);
 
     // A dead SSE connection can miss `done`. Release it only after the server
@@ -1843,10 +1846,12 @@ export function Chat({
         // The turn already finished server-side (stop landed late, or the
         // local entry outlived a dead stream) — release the stale entry now.
         forceReleaseIfStuck(0, true);
+        return true;
       } else if (res.ok) {
         // Interrupt accepted. A healthy stream flips the UI via `done`
         // within moments; the grace-period check only fires on a dead one.
         forceReleaseIfStuck(STOP_FORCE_RELEASE_GRACE_MS);
+        return true;
       } else {
         const message = await res.text().catch(() => "");
         setStreamError(message || t("stream.errors.stopStatus", { status: res.status }));
@@ -1854,6 +1859,7 @@ export function Chat({
     } catch {
       setStreamError(t("stream.errors.stopFallback"));
     }
+    return false;
   }, [streamingSessionsRef, endSessionStream, loadMessages, t]);
 
   const displayedStreaming = isActiveSessionStreaming;
@@ -2443,8 +2449,13 @@ export function Chat({
                       ref={composerRef}
                       boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                       onSend={handleComposerSend}
-                      // No Stop: the next message interrupts.
                       isStreaming={displayedStreaming}
+                      canStop={conciergeTurnVisible(rows, {
+                        isStreaming: displayedStreaming,
+                        quiet: floorSessionStream?.quiet,
+                        runningTurnId,
+                      })}
+                      onStop={stopMessage}
                       streamError={streamError}
                       modelSelection={
                         chatModelPickable

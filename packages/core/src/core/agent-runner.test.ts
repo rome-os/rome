@@ -2497,8 +2497,11 @@ describe("AgentRunner", () => {
       const second = await secondInput.turn;
       const secondMessages = collectMessages(second.events);
       await rs.waitFor(() => expect(prompts).toEqual(["first", "second"]));
+      // A Stop that lands while the send is in flight is repeated once the send
+      // resolves, so the count before the late repeat is not fixed.
+      const cancelsBeforeRepeat = cancels.mock.calls.length;
       await first.interrupt!("late-repeat");
-      expect(cancels).toHaveBeenCalledTimes(1);
+      expect(cancels).toHaveBeenCalledTimes(cancelsBeforeRepeat);
       releaseSecond();
       expect(await secondMessages).toContainEqual(
         expect.objectContaining({ type: "result", content: "Next turn" }),

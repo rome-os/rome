@@ -53,6 +53,11 @@ export interface BackendTurnOptions {
   /** The turn is housekeeping for the agent: a chat that draws a typing
    *  indicator for a running turn holds it back until the agent speaks. */
   quiet?: boolean;
+  /**
+   * Called once after the turn ends, when the guardian pressed Stop on it. A new
+   * message that supersedes the turn is not a Stop, so it does not call this.
+   */
+  onStopped?: () => void;
 }
 
 export interface BackendEmitOptions {

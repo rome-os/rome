@@ -134,8 +134,7 @@ export async function buildConciergeTools(
   };
 
   // A row points back to a message of this chat, so the panel can jump to it.
-  const requireSourceMessage = async (messageId: string) => {
-    const { chatId } = currentTurn();
+  const requireSourceMessage = async (messageId: string, { chatId } = currentTurn()) => {
     if (!(await webchatRepo.getReplyTarget(chatId, messageId))) {
       throw new Error(
         `No message ${messageId} in this chat. Pass the messageId that say, chat_card, or chat_forward returned.`,
@@ -147,9 +146,9 @@ export async function buildConciergeTools(
   // The message a new row points to: the one passed, else the latest thing
   // said this turn. The guardian's own words are no default, since a row
   // starts from what the Concierge told them.
-  const sourceMessageForNewRow = async (explicit: string | undefined) => {
-    if (explicit) return requireSourceMessage(explicit);
-    const { chatId, turnId } = currentTurn();
+  const sourceMessageForNewRow = async (explicit: string | undefined, turn = currentTurn()) => {
+    if (explicit) return requireSourceMessage(explicit, turn);
+    const { chatId, turnId } = turn;
     const said = (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
       (row) => row.role === "assistant",
     );
@@ -165,6 +164,7 @@ export async function buildConciergeTools(
   const parseTaskWrite = async (
     raw: Record<string, unknown>,
     where: string,
+    turn = currentTurn(),
   ): Promise<ConciergeTaskWrite> => {
     const write: ConciergeTaskWrite = {};
     const text = (field: string) => {
@@ -224,9 +224,9 @@ export async function buildConciergeTools(
     if (!write.id) {
       if (!write.title) throw new Error(`${where}.title is required to create a row`);
       write.state ??= write.sessionId ? "doing" : "next";
-      write.sourceMessageId = await sourceMessageForNewRow(messageId);
+      write.sourceMessageId = await sourceMessageForNewRow(messageId, turn);
     } else if (messageId) {
-      write.sourceMessageId = await requireSourceMessage(messageId);
+      write.sourceMessageId = await requireSourceMessage(messageId, turn);
     }
     return write;
   };
@@ -244,8 +244,12 @@ export async function buildConciergeTools(
 
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles.
-  const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
-    const { chatId, turnId } = currentTurn();
+  const forward = async (
+    text: string,
+    from: ForwardedFrom,
+    intro?: string,
+    { chatId, turnId } = currentTurn(),
+  ) => {
     const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
       ...(intro ? [{ type: "text" as const, content: intro }] : []),
       { type: "text", content: text, format: "long", forwardedFrom: from },
@@ -254,8 +258,14 @@ export async function buildConciergeTools(
   };
 
   // A card that opens the task chat; it reads the chat's live status itself.
-  const showCard = async (chatId: string, title: string) => {
-    const { chatId: conciergeChatId, turnId } = currentTurn();
+  // `forward` and `showCard` take the turn a caller read before an await: a
+  // Stop or a new message can end the turn meanwhile, and the message still
+  // belongs to it.
+  const showCard = async (
+    chatId: string,
+    title: string,
+    { chatId: conciergeChatId, turnId } = currentTurn(),
+  ) => {
     const { id } = await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
       { type: "task_chat", chatId, title },
     ]);
@@ -353,7 +363,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("task_upsert", input, async (args) => {
-          currentTurn();
+          const turn = currentTurn();
           if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
             throw new Error("tasks is required: an array with one entry per row to write");
           }
@@ -361,7 +371,9 @@ export async function buildConciergeTools(
           for (const [index, raw] of args.tasks.entries()) {
             if (!raw || typeof raw !== "object")
               throw new Error(`tasks[${index}] must be an object`);
-            writes.push(await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`));
+            writes.push(
+              await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`, turn),
+            );
           }
           const rows = await tasks.repo.upsertMany(writes);
           // Says which message each row points to, and flags the ones that kept an
@@ -434,7 +446,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("chat_start", input, async (args) => {
-          currentTurn();
+          const turn = currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
           const taskId = optionalString(args, "taskId");
@@ -452,9 +464,9 @@ export async function buildConciergeTools(
           // A linked row keeps its message unless one is passed.
           const sourceMessageId = taskId
             ? messageId
-              ? await requireSourceMessage(messageId)
+              ? await requireSourceMessage(messageId, turn)
               : undefined
-            : await sourceMessageForNewRow(messageId);
+            : await sourceMessageForNewRow(messageId, turn);
           const chatId = await service.dashboard.chats.startChat({
             agentName: optionalString(args, "agent"),
             projectPath: await taskProjectPath(optionalString(args, "project")),
@@ -490,7 +502,7 @@ export async function buildConciergeTools(
           } else {
             log.warn("task chat title too long to name the chat", { chatId });
           }
-          if (args.card === true) await showCard(chatId, title);
+          if (args.card === true) await showCard(chatId, title, turn);
           return { chatId, taskId: task.id };
         }),
     },
@@ -613,6 +625,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("chat_forward", input, async (args) => {
+          const turn = currentTurn();
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
           const [latest] = await latestSaid(
@@ -627,6 +640,7 @@ export async function buildConciergeTools(
             answer,
             { chatId, title: chat.name },
             optionalString(args, "intro"),
+            turn,
           );
           return { forwardedChars: answer.length, messageId };
         }),

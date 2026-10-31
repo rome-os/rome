@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { ChatRow } from "./chat-view";
-import { buildConciergeItems, type ConciergeItem } from "./concierge-groups";
+import { buildConciergeItems, conciergeTurnVisible, type ConciergeItem } from "./concierge-groups";
 
 const MIN = 60_000;
 // Local noon, so a few hours either way stays on the same local day.
@@ -277,5 +277,24 @@ describe("buildConciergeItems reference stability", () => {
     expect(after[1]).toBe(before[1]);
     expect(after[2]).not.toBe(before[2]);
     expect(after[3]).toBe(before[3]);
+  });
+});
+
+describe("conciergeTurnVisible", () => {
+  const spoke = [agentRow(say("a1", 0, "t1"))];
+
+  it("is false while nothing runs", () => {
+    expect(conciergeTurnVisible(spoke, { isStreaming: false, runningTurnId: "t1" })).toBe(false);
+  });
+
+  it("is true for a running turn that is not quiet", () => {
+    expect(conciergeTurnVisible([], { isStreaming: true, runningTurnId: "t1" })).toBe(true);
+  });
+
+  it("holds a quiet turn back until it has said something in that turn", () => {
+    const live = { isStreaming: true, quiet: true, runningTurnId: "t1" };
+    expect(conciergeTurnVisible([], live)).toBe(false);
+    expect(conciergeTurnVisible([agentRow(say("a0", 0, "older"))], live)).toBe(false);
+    expect(conciergeTurnVisible(spoke, live)).toBe(true);
   });
 });
