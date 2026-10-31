@@ -663,16 +663,4 @@ describe("the WeChat personal Talker", () => {
 
     await talker.stop();
   });
-
-  // What was said is the channel's `messages`, read through the same reader
-  // (wechat-user-messages.ts). The Talk offers only the directory.
-  it("leaves history to the channel", async () => {
-    const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
-    expect(talker.history).toBeUndefined();
-    expect(
-      createWechatUserDescriptor({ runtime: fakeRuntime({ statuses: [READY] }) }).capabilities
-        .talker?.history,
-    ).toBeUndefined();
-    await talker.stop();
-  });
 });

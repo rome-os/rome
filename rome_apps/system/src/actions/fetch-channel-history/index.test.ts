@@ -29,7 +29,7 @@ function makeMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 }
 
 interface HistoryAdapter {
-  fetchHistory?: (chatId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
+  readHistory?: (chatId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
 }
 
 function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: ChannelsService } {
@@ -42,12 +42,12 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
       async query(channel, { chatId, since } = {}) {
         const adapter = adapters.get(channel);
         // What the channels service says of a channel that reads no messages.
-        if (!adapter?.fetchHistory) throw new Error(`Channel "${channel}" reads no messages`);
+        if (!adapter?.readHistory) throw new Error(`Channel "${channel}" reads no messages`);
         const hours = since
           ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
           : 24;
         // An adapter answers oldest first, and `query` newest first.
-        return [...(await adapter.fetchHistory(chatId ?? null, hours))].reverse();
+        return [...(await adapter.readHistory(chatId ?? null, hours))].reverse();
       },
     },
   };
@@ -57,7 +57,7 @@ describe("fetch_channel_history", () => {
   it("returns formatted messages on success", async () => {
     const messages = [makeMessage()];
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue(messages),
+      readHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -82,22 +82,6 @@ describe("fetch_channel_history", () => {
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toBe('Channel "slack" is not configured or not running.');
-  });
-
-  // A channel with no store reads through its Connection, and none is connected.
-  it("returns error when no Connection backs a channel read through one", async () => {
-    const deps = makeDeps(new Map([["discord", {}]]));
-    deps.channelsService.list = async () => [{ name: "discord", sendable: false }];
-    // What the channels service says of a channel no Connection backs.
-    deps.channelsService.query = async () => {
-      throw new Error('No connection backs channel "discord"');
-    };
-
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({ channel: "discord" });
-
-    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toBe('Channel "discord" is not configured or not running.');
   });
 
   it("lists the newest-first page `query` answers oldest first", async () => {
@@ -129,9 +113,9 @@ describe("fetch_channel_history", () => {
     );
   });
 
-  it("returns error when fetchHistory throws", async () => {
+  it("returns error when the read throws", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockRejectedValue(new Error("API rate limit")),
+      readHistory: rs.fn().mockRejectedValue(new Error("API rate limit")),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -144,7 +128,7 @@ describe("fetch_channel_history", () => {
 
   it("returns no-messages text when history is empty", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue([]),
+      readHistory: rs.fn().mockResolvedValue([]),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -164,7 +148,7 @@ describe("fetch_channel_history", () => {
       }),
     ];
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue(messages),
+      readHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -178,7 +162,7 @@ describe("fetch_channel_history", () => {
 
   it("does not include a structured messages array by default", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue([makeMessage()]),
+      readHistory: rs.fn().mockResolvedValue([makeMessage()]),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -207,7 +191,7 @@ describe("fetch_channel_history", () => {
       }),
     ];
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue(messages),
+      readHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 

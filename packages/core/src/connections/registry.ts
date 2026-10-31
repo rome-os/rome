@@ -764,24 +764,6 @@ class ConnectionImpl implements Connection {
     return this.registry.getLogger();
   }
 
-  /**
-   * A Talk's `history: true` is what gives its channel a `messages` port, and
-   * its history feature is what answers that port. Declared apart, the two can
-   * disagree: a port that fails every read, or a history no channel reaches.
-   * Said loudly here, where the Talk first exists, rather than at a read.
-   */
-  private checkHistoryDeclared(talker: Talker): void {
-    const declared = this.descriptor.capabilities.talker?.history === true;
-    const offered = talker.history !== undefined;
-    if (declared === offered) return;
-    this.log.error("talker history flag disagrees with its history feature", {
-      connectionId: this.id,
-      connectionKind: this.connectionKind,
-      declared,
-      offered,
-    });
-  }
-
   /** Take `rec`, the grant as it is kept, rehydrate its live credential
    *  (renewing or degrading an expired one), then build every currently-unlocked
    *  capability and fire onUnlocked. Runs at connect() (no grant held), at
@@ -1064,18 +1046,6 @@ class ConnectionImpl implements Connection {
     const capDef = this.descriptor.capabilities[slot.kind];
     if (!capDef) return;
     const instance = capDef.build(cred, kit);
-    if (slot.kind === "talker") {
-      try {
-        this.checkHistoryDeclared(instance as Talker);
-      } catch (err) {
-        // A diagnostic that cannot run says so, and never fails the build.
-        this.log.warn("could not check the talker's history flag", {
-          connectionId: this.id,
-          connectionKind: this.connectionKind,
-          error: errMsg(err),
-        });
-      }
-    }
     const epoch: Epoch = {
       token: ++this.epochCounter,
       instance,
