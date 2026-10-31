@@ -828,8 +828,6 @@ export const romeAgentMessages = sqliteTable(
     actor: text("actor", { mode: "json" }).$type<SessionActor>(),
     role: text("role").notNull(), // 'user' | 'assistant' | 'trace' | ...
     content: text("content").notNull(), // JSON array of blocks
-    senderId: text("sender_id"),
-    senderName: text("sender_name"),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),

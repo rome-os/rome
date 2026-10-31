@@ -80,11 +80,6 @@ export interface StoredWebchatMessage {
   inputState?: import("@rome-os/app-runtime").AgentInputState | null;
   role: string;
   content: string;
-  platformMessageId?: string | null;
-  senderId?: string | null;
-  senderName?: string | null;
-  replyToPlatformMessageId?: string | null;
-  contextInjectedTurnId?: string | null;
   createdAt: Date;
 }
 

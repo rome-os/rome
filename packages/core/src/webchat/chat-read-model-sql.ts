@@ -94,9 +94,13 @@ export function sessionLines(sessionIds: readonly string[]) {
     UNION ALL
     SELECT r.id, r.session_id, r.turn_id, NULL AS input_state, r.role,
       CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
-      r.created_at, r.sender_id, r.sender_name,
+      r.created_at,
+      -- A fork's or subagent's own prompt names its sender by its actor.
+      CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
+        WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
+      json_extract(r.actor, '$.email') AS sender_name,
       CASE WHEN r.role = 'user' THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
-      r.rowid AS seq, (r.role = 'assistant' OR r.sender_id IS 'rome') AS from_rome
+      r.rowid AS seq, (r.role = 'assistant') AS from_rome
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant', 'notification'))
