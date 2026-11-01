@@ -15,7 +15,13 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { WebChatRepository } from "../../../../../packages/core/src/db/repositories/webchat.js";
+import {
+  createTestDb,
+  testAppRepositories,
+  type TestDb,
+} from "../../../../../packages/core/src/test/helpers.js";
+import { seatFixture } from "../../../../../packages/core/src/test/seats.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { createAction, type DreamDeps } from "./index.js";
 
@@ -34,7 +40,7 @@ const actionConfig = {
 let testDb: TestDb;
 let carrierDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   carrierDir = join(mkdtempSync(join(tmpdir(), "dream-")), "user-skills");
   testDb = createTestDb();
   migrate(testDb.db as never, {
@@ -42,32 +48,68 @@ beforeEach(() => {
     migrationsTable: "__drizzle_migrations_app_dream",
   });
   // A scheduled dream only runs after a conversation, so most cases start with one.
-  seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 1 });
+  await seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 1 });
 });
 
 let seededSessions = 0;
 
-function seedMessage(input: {
+/** A line said `hoursAgo` hours ago in a fresh session of `sessionType`: a
+ *  dashboard chat, a group on `channel` that Rome's account there is in, or
+ *  a background session that stands in no chat. `role` is who said it: a
+ *  person (`user`, or `notification` for a line no turn took), or Rome. */
+async function seedMessage(input: {
   sessionType: string;
   role: string;
   hoursAgo: number;
   /** The channel a `channel` session is on. */
   channel?: string;
   senderId?: string;
-}): void {
+}): Promise<void> {
   const sessionId = `session-${++seededSessions}`;
-  const createdAt = Math.floor((Date.now() - input.hoursAgo * 60 * 60 * 1000) / 1000);
-  testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, created_at, activity_at)
-    VALUES (${sessionId}, ${sessionId}, ${input.sessionType}, ${input.channel ?? null}, ${createdAt}, ${createdAt})
-  `);
-  testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, sender_id, created_at)
-    VALUES (${`${sessionId}-message`}, ${sessionId}, ${input.role}, '"hi"', ${input.senderId ?? null}, ${createdAt})
-  `);
+  const lineId = `${sessionId}-message`;
+  const saidAt = Math.floor((Date.now() - input.hoursAgo * 60 * 60 * 1000) / 1000);
+  const repo = new WebChatRepository(testDb.db);
+  const fromRome = input.role === "assistant" || input.senderId === "rome";
+  if (input.sessionType === "webchat") {
+    await repo.createSession(sessionId, sessionId);
+    if (fromRome)
+      await repo.addMessage(lineId, sessionId, "assistant", '"hi"', `turn-${sessionId}`);
+    else await repo.recordUserInput(lineId, sessionId, '"hi"');
+  } else if (input.sessionType === "channel") {
+    const channel = input.channel ?? "telegram";
+    const bot = `${channel}-bot`;
+    testDb.db.run(sql`
+      INSERT OR IGNORE INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+      VALUES (${channel}, ${channel}, ${channel}, ${bot}, 0)
+    `);
+    const fixture = seatFixture(testDb.db);
+    const chat = fixture.chat(channel, `${channel}:${sessionId}`, "group");
+    fixture.seat({ id: sessionId, chat, accountId: bot });
+    fixture.say({
+      id: lineId,
+      chat,
+      from: fromRome ? bot : (input.senderId ?? "person"),
+      agent: fromRome ? "main" : null,
+      text: "hi",
+      at: new Date(saidAt * 1000),
+    });
+  } else {
+    await repo.ensureRomeSession({
+      id: sessionId,
+      name: sessionId,
+      type: input.sessionType as "action",
+      agentName: null,
+    });
+    await repo.addMessage(lineId, sessionId, input.role, '"hi"');
+  }
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${saidAt} WHERE id = ${lineId}`);
+  testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${saidAt} WHERE id = ${lineId}`);
+  testDb.db.run(sql`UPDATE rome_sessions SET created_at = 0 WHERE id = ${sessionId}`);
 }
 
 function clearChats(): void {
+  testDb.db.run(sql`DELETE FROM chat_messages`);
+  testDb.db.run(sql`DELETE FROM chats`);
   testDb.db.run(sql`DELETE FROM rome_agent_messages`);
   testDb.db.run(sql`DELETE FROM rome_sessions`);
 }
@@ -105,6 +147,7 @@ function makeDeps(
     } as unknown as AgentRunner,
     appContext: {
       db: appDb(),
+      repositories: testAppRepositories(testDb.db),
       runAction: overrides?.runAction ?? rs.fn().mockResolvedValue({ status: "ok" }),
       listRoutines: overrides?.listRoutines ?? rs.fn().mockResolvedValue([]),
     },
@@ -302,7 +345,7 @@ describe("dream", () => {
 
     it("ignores conversations older than the window", async () => {
       clearChats();
-      seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 80 });
+      await seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 80 });
       const deps = makeDeps([]);
       const run = agentNeverRuns(deps);
 
@@ -314,17 +357,17 @@ describe("dream", () => {
 
     it("counts only messages a person sent in a chat or on one of Rome's accounts", async () => {
       clearChats();
-      seedMessage({ sessionType: "webchat", role: "assistant", hoursAgo: 1 });
-      seedMessage({
+      await seedMessage({ sessionType: "webchat", role: "assistant", hoursAgo: 1 });
+      await seedMessage({
         sessionType: "channel",
         channel: "telegram",
         role: "notification",
         senderId: "rome",
         hoursAgo: 1,
       });
-      seedMessage({ sessionType: "channel", channel: "whatsapp", role: "user", hoursAgo: 1 });
-      seedMessage({ sessionType: "action", role: "user", hoursAgo: 1 });
-      seedMessage({ sessionType: "subagent", role: "user", hoursAgo: 1 });
+      await seedMessage({ sessionType: "channel", channel: "whatsapp", role: "user", hoursAgo: 1 });
+      await seedMessage({ sessionType: "action", role: "user", hoursAgo: 1 });
+      await seedMessage({ sessionType: "subagent", role: "user", hoursAgo: 1 });
       const deps = makeDeps([]);
       const run = agentNeverRuns(deps);
 
@@ -336,7 +379,7 @@ describe("dream", () => {
 
     it("runs when a person messaged Rome on one of its accounts", async () => {
       clearChats();
-      seedMessage({ sessionType: "channel", channel: "telegram", role: "user", hoursAgo: 2 });
+      await seedMessage({ sessionType: "channel", channel: "telegram", role: "user", hoursAgo: 2 });
 
       const result = await createAction(
         actionConfig,
@@ -348,7 +391,7 @@ describe("dream", () => {
 
     it("runs on a line the agent did not answer", async () => {
       clearChats();
-      seedMessage({
+      await seedMessage({
         sessionType: "channel",
         channel: "feishu",
         role: "notification",
@@ -366,7 +409,7 @@ describe("dream", () => {
 
     it("measures the window from windowHours", async () => {
       clearChats();
-      seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 30 });
+      await seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 30 });
 
       const result = await createAction(
         actionConfig,
