@@ -158,20 +158,14 @@ export function readPeopleSearchPage() {
     // A link spanning several lines ends its first line itself, so only a one-line link
     // can share its name's line with trailing text.
     const after = own.length > 1 ? "" : clean(first.lines[end.line].slice(end.col));
-    const name = cleanName(aria?.textContent) || ownName;
-    // A badge inside the link, after the name, is trailing text too, so such a link does not end
-    // its line.
-    const at = own.length === 1 && name ? own[0].indexOf(name) : -1;
-    const inLink = at >= 0 ? clean(own[0].slice(at + name.length)) : "";
     return {
       ...anchor,
       index,
       rendered: true,
       own,
-      name,
+      name: cleanName(aria?.textContent) || ownName,
       before: clean(first.lines[start.line].slice(0, start.col)),
       after,
-      endsLine: own.length === 1 && !after && !(inLink && badge(inLink)),
       endLine: end.line,
     };
   });
@@ -191,18 +185,19 @@ export function readPeopleSearchPage() {
     });
   };
   let layout = "strict";
-  let primaries = views.filter(
-    (view) => standalone(view) && (badge(view.after) || action(view.after)),
+  let primaries = unique(
+    views.filter((view) => standalone(view) && (badge(view.after) || action(view.after))),
   );
-  // Results share one card template. When the matches, or the first standalone name, which is a
-  // result's (see below), carry text after the name on its line, a link that ends its line is
-  // not a result. It is something else, such as a mutual connection in a block of its own whose
-  // sentence goes on in the next block, in whatever language. That link goes before handles are
-  // deduplicated, because the same member can also be a later result.
-  if (primaries.some((view) => view.after) || views.find(standalone)?.after) {
-    primaries = primaries.filter((view) => !view.endsLine);
+  // The first standalone name on the page is a result's (see below). When it is not a match and
+  // every match has no text after it on its line, the matches are links that end their line,
+  // such as mutual connections in blocks of their own, and the labels need the lenient reading.
+  const firstName = views.find(standalone);
+  if (
+    primaries.every((view) => !view.after) &&
+    !primaries.some((view) => view.handle === firstName?.handle)
+  ) {
+    primaries = [];
   }
-  primaries = unique(primaries);
   if (primaries.length === 0) {
     // Unknown trailing labels, such as a degree badge in another language. The first standalone
     // name on the page is a result's, because a result's name precedes its card's other lines,
@@ -314,6 +309,12 @@ export function readPeopleSearchPage() {
             start.handle !== primary.handle && start.col >= chunk.start && start.col < chunk.end,
         );
         if (foreign) break;
+        // Another link to the same profile, such as a second name link, repeats the name.
+        const again = (linkStarts.get(chunk.line) || []).some(
+          (start) =>
+            start.handle === primary.handle && start.col >= chunk.start && start.col < chunk.end,
+        );
+        if (again) continue;
         const line = clean(chunk.text);
         if (metadata(line)) found.push(line);
       }
