@@ -158,16 +158,20 @@ export function readPeopleSearchPage() {
     // A link spanning several lines ends its first line itself, so only a one-line link
     // can share its name's line with trailing text.
     const after = own.length > 1 ? "" : clean(first.lines[end.line].slice(end.col));
+    const name = cleanName(aria?.textContent) || ownName;
+    // A badge inside the link, after the name, is trailing text too, so such a link does not end
+    // its line.
+    const at = own.length === 1 && name ? own[0].indexOf(name) : -1;
+    const inLink = at >= 0 ? clean(own[0].slice(at + name.length)) : "";
     return {
       ...anchor,
       index,
       rendered: true,
       own,
-      name: cleanName(aria?.textContent) || ownName,
+      name,
       before: clean(first.lines[start.line].slice(0, start.col)),
       after,
-      // A badge inside the link, after the name, is trailing text too.
-      endsLine: own.length === 1 && !after && !/[•·∙]/.test(own[0]),
+      endsLine: own.length === 1 && !after && !(inLink && badge(inLink)),
       endLine: end.line,
     };
   });

@@ -684,6 +684,17 @@ const reviewPages = {
   "cards-in-one-article": [avery, blake],
   "mutual-is-later-result": [avery, blake],
   "badge-inside-link": [avery, blake],
+  "badge-inside-link-no-bullet": [avery, blake],
+  "badge-inside-link-variants": [
+    ["avery-example", "Avery Example"],
+    ["blake-example", "Blake Example"],
+    ["casey-sample", "Casey Sample"],
+    ["camille-exemple", "Camille Exemple"],
+    ["dominique-test", "Dominique Test"],
+    ["riley-test", "Riley Test"],
+    ["quinn-demo", "Quinn Demo"],
+    ["morgan-sample", "Morgan Sample"],
+  ].map(([handle, name]) => [handle, name, `Headline of ${name}`, ""]),
 };
 const knownMisreads = {
   "articles-share-footer": [
