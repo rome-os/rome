@@ -46,7 +46,11 @@ struct MainShell: View {
                     workspace: workspace,
                     onChat: { closeDrawer(popToRoot: true) },
                     onRoute: { route in
-                        path = [route]
+                        // The page goes in place under the drawer with no push, so
+                        // closing the drawer shows it, not Chat and then a push.
+                        var instant = Transaction()
+                        instant.disablesAnimations = true
+                        withTransaction(instant) { path = [route] }
                         closeDrawer(popToRoot: false)
                     },
                     // The sheet rises over the open drawer, and the drawer is still
