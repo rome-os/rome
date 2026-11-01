@@ -5,13 +5,16 @@
 // direct message a platform gives an id of its own (Feishu's p2p chat,
 // Discord's DM channel), the adapter keeps the address here, by Rome's
 // account and the chat's key, when it first hears the chat there. A thread's
-// address is kept with the key of the chat it stands in, so a send that names
-// only the thread finds its chat. Chats never reads it.
+// address is kept the same way, under its chat's key and the thread, so a
+// send that names only the thread finds its chat. Chats never reads it.
 
 import type { Account } from "@rome-os/app-runtime";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { channelAddresses, channelThreads } from "../db/schema/system.js";
+import { channelAddresses } from "../db/schema/system.js";
+
+/** The thread a chat's own address is kept under. */
+const CHAT = "";
 
 export class ChatAddresses {
   constructor(private readonly db: DrizzleDb) {}
@@ -23,7 +26,12 @@ export class ChatAddresses {
       .insert(channelAddresses)
       .values({ platform: account.platform, accountId: account.id, chatKey, address })
       .onConflictDoUpdate({
-        target: [channelAddresses.platform, channelAddresses.accountId, channelAddresses.chatKey],
+        target: [
+          channelAddresses.platform,
+          channelAddresses.accountId,
+          channelAddresses.chatKey,
+          channelAddresses.threadId,
+        ],
         set: { address },
       })
       .run();
@@ -41,6 +49,7 @@ export class ChatAddresses {
             eq(channelAddresses.platform, account.platform),
             eq(channelAddresses.accountId, account.id),
             eq(channelAddresses.chatKey, chatKey),
+            eq(channelAddresses.threadId, CHAT),
           ),
         )
         .get()?.address ?? null
@@ -59,18 +68,26 @@ export class ChatAddresses {
             eq(channelAddresses.platform, account.platform),
             eq(channelAddresses.accountId, account.id),
             eq(channelAddresses.address, address),
+            eq(channelAddresses.threadId, CHAT),
           ),
         )
         .get()?.chatKey ?? null
     );
   }
 
-  /** Note that `account` reaches a thread of the chat it keys `chatKey` at
-   *  `address`. */
-  bindThread(account: Account, address: string, chatKey: string): void {
+  /** Note that `account` reaches thread `threadId` of the chat it keys
+   *  `chatKey` at the thread's own id, as a platform whose threads are
+   *  addressed by their id reaches them. */
+  bindThread(account: Account, threadId: string, chatKey: string): void {
     this.db
-      .insert(channelThreads)
-      .values({ platform: account.platform, accountId: account.id, address, chatKey })
+      .insert(channelAddresses)
+      .values({
+        platform: account.platform,
+        accountId: account.id,
+        chatKey,
+        threadId,
+        address: threadId,
+      })
       .onConflictDoNothing()
       .run();
   }
@@ -80,13 +97,14 @@ export class ChatAddresses {
   threadChatAt(account: Account, address: string): string | null {
     return (
       this.db
-        .select({ chatKey: channelThreads.chatKey })
-        .from(channelThreads)
+        .select({ chatKey: channelAddresses.chatKey })
+        .from(channelAddresses)
         .where(
           and(
-            eq(channelThreads.platform, account.platform),
-            eq(channelThreads.accountId, account.id),
-            eq(channelThreads.address, address),
+            eq(channelAddresses.platform, account.platform),
+            eq(channelAddresses.accountId, account.id),
+            eq(channelAddresses.address, address),
+            ne(channelAddresses.threadId, CHAT),
           ),
         )
         .get()?.chatKey ?? null

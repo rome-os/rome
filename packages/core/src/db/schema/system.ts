@@ -630,29 +630,14 @@ export const channelAddresses = sqliteTable(
     accountId: text("account_id").notNull(),
     // The adapter's key for the chat, with no platform prefix.
     chatKey: text("chat_key").notNull(),
+    // The thread of the chat the address reaches, or '' for the chat itself.
+    threadId: text("thread_id").notNull().default(""),
     address: text("address").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.platform, table.accountId, table.chatKey] }),
+    primaryKey({ columns: [table.platform, table.accountId, table.chatKey, table.threadId] }),
     index("idx_channel_addresses_address").on(table.platform, table.accountId, table.address),
   ],
-);
-
-// Where an account reaches a thread: the chat the thread stands in, by the
-// adapter's key, noted when the account first hears the thread. A send that
-// names only the thread's address finds its chat here.
-export const channelThreads = sqliteTable(
-  "channel_threads",
-  {
-    platform: text("platform").notNull(),
-    // Rome's account, by its platform id.
-    accountId: text("account_id").notNull(),
-    // The thread's address on the platform.
-    address: text("address").notNull(),
-    // The adapter's key for the thread's chat, with no platform prefix.
-    chatKey: text("chat_key").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.platform, table.accountId, table.address] })],
 );
 
 // Agents' link from a turn to a chat message: the message prompted the turn,

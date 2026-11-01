@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3fca6e91-cd75-4b9f-bb4f-6f4e2361ef51",
+  "id": "886934dc-9e67-4347-a017-b1f47dd5a2eb",
   "prevId": "94ee4372-b53f-4ffb-b217-843ca36b4652",
   "tables": {
     "account_profiles": {
@@ -783,6 +783,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
         "address": {
           "name": "address",
           "type": "text",
@@ -804,60 +812,14 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "channel_addresses_platform_account_id_chat_key_pk": {
+        "channel_addresses_platform_account_id_chat_key_thread_id_pk": {
           "columns": [
             "platform",
             "account_id",
-            "chat_key"
+            "chat_key",
+            "thread_id"
           ],
-          "name": "channel_addresses_platform_account_id_chat_key_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "channel_threads": {
-      "name": "channel_threads",
-      "columns": {
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "address": {
-          "name": "address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chat_key": {
-          "name": "chat_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "channel_threads_platform_account_id_address_pk": {
-          "columns": [
-            "platform",
-            "account_id",
-            "address"
-          ],
-          "name": "channel_threads_platform_account_id_address_pk"
+          "name": "channel_addresses_platform_account_id_chat_key_thread_id_pk"
         }
       },
       "uniqueConstraints": {},
