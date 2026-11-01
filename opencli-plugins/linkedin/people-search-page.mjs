@@ -175,18 +175,8 @@ export function readPeopleSearchPage() {
   );
   const namedHandles = new Set(views.filter((view) => view.name).map((view) => view.handle));
 
-  // A card holds one result, and the result's name comes before any other member the card names,
-  // such as a mutual connection. So a later name in a card that already has one is not a result.
-  const cardNames = new Map();
-  for (const view of views) {
-    if (!view.rendered || !view.name) continue;
-    const card = view.el.closest('li, [role="listitem"], article');
-    if (!card || !main.contains(card)) continue;
-    if (!cardNames.has(card)) cardNames.set(card, view.handle);
-    view.laterInCard = cardNames.get(card) !== view.handle;
-  }
   // Text before a name on its line can only be presence status, which skip() covers.
-  const standalone = (view) => view.rendered && view.name && skip(view.before) && !view.laterInCard;
+  const standalone = (view) => view.rendered && view.name && skip(view.before);
   const unique = (list) => {
     const seen = new Set();
     return list.filter((view) => {
@@ -288,17 +278,22 @@ export function readPeopleSearchPage() {
   });
 
   const rows = primaries.map((primary, k) => {
-    const nameTokens = new Set(tokens(primary.name));
-    const namePart = (line) => {
-      const parts = tokens(line.replace(/\s*[•·∙].*$/, ""));
-      return parts.length > 0 && parts.every((part) => nameTokens.has(part));
-    };
+    const nameTokens = tokens(primary.name);
+    const words = (line) => tokens(line.replace(/\s*[•·∙].*$/, ""));
     const metadata = (line) => !skip(line) && !badge(line);
-    // The link's first line with a name holds that name and its badges. Its later lines are the
-    // rest of a wrapped name, which namePart() drops, or the metadata of a card the link wraps.
-    // Lines after the link are metadata even when they repeat a name's word, like a location.
+    // The link's first line with a name holds that name, or its start when the name wraps across
+    // lines. The name ends on the line holding its last word. The link's later lines are the
+    // metadata of a card the link wraps, even when they repeat a word of the name, like a location.
     const nameAt = primary.own.findIndex((line) => cleanName(line));
-    const found = primary.own.slice(nameAt + 1).filter((line) => metadata(line) && !namePart(line));
+    const seen = new Set(nameAt >= 0 ? words(primary.own[nameAt]) : []);
+    let rest = nameAt + 1;
+    while (rest < primary.own.length && !nameTokens.every((token) => seen.has(token))) {
+      const part = words(primary.own[rest]);
+      if (part.length === 0 || !part.every((token) => nameTokens.includes(token))) break;
+      for (const token of part) seen.add(token);
+      rest++;
+    }
+    const found = primary.own.slice(rest).filter(metadata);
     const nameEnd = second.marks.get(`${primary.index}:e`);
     const next = k + 1 < primaries.length ? second.marks.get(`${starts[k + 1]}:s`) : listEnd;
     if (nameEnd && next) {

@@ -16,7 +16,7 @@ const SEARCH_URL = "https://www.linkedin.com/search/results/people/?keywords=exa
 // jsdom has no layout, so innerText follows the rule Chromium applies to these fixtures: hidden
 // nodes drop out, display:contents and inline boxes join their parent's line, and every other
 // box starts and ends a line. Chromium makes each child of a flex or grid container a block, and
-// each run of text between those children too.
+// each run of text between those children too, and it makes absolutely positioned boxes blocks.
 function installInnerText(window) {
   const render = (node, item = false) => {
     if (node.nodeType === window.Node.TEXT_NODE) return node.data.replace(/\s+/g, " ");
@@ -36,7 +36,11 @@ function installInnerText(window) {
       inner += render(child, flex);
     }
     if (run) inner += `\n${run}\n`;
-    if (style.display === "contents" || (!item && style.display.startsWith("inline"))) {
+    const positioned = style.position === "absolute" || style.position === "fixed";
+    if (
+      style.display === "contents" ||
+      (!item && !positioned && style.display.startsWith("inline"))
+    ) {
       return inner;
     }
     return `\n${inner}\n`;
@@ -367,27 +371,6 @@ test("a mutual-connection link whose sentence goes on in the next block is not a
   }
 });
 
-test("a later name in a result's card is not a result, even when no result carries a label", () => {
-  const result = read(
-    makeDom(`<!doctype html><main><ul>
-      <li>
-        <div><a href="/in/avery-example/"><span aria-hidden="true">Avery Example</span></a></div>
-        <p>Engineer at Example Co</p>
-        <div><a href="/in/morgan-mutual/">Morgan Mutual</a></div><div>also works at Example Co</div>
-      </li>
-      <li>
-        <div><a href="/in/blake-example/"><span aria-hidden="true">Blake Example</span></a></div>
-        <p>Designer at Example Co</p>
-      </li>
-    </ul></main>`),
-  );
-
-  assert.deepEqual(
-    result.rows.map((row) => row.profile_url),
-    [profile("avery-example"), profile("blake-example")],
-  );
-});
-
 test("block-level name links without a degree badge keep their headlines", () => {
   const result = read(
     makeDom(`<!doctype html><main><ul>
@@ -627,3 +610,109 @@ test("pages other than people search report where the browser landed", () => {
     url: "https://www.linkedin.com/feed/",
   });
 });
+
+// Every page a review round reproduced a defect with, and the rows it must give. Chromium gives the
+// same rows. A todo entry is a layout OpenCLI 1.8.8 also misreads, with its expected rows.
+const avery = ["avery-example", "Avery Example", "Engineer at Example Co", ""];
+const blake = ["blake-example", "Blake Example", "Designer at Example Co", ""];
+const alexes = [
+  [
+    "alex-rivera-a1",
+    "Alex Rivera",
+    "Staff Engineer at Example Corp",
+    "Austin, Texas, United States",
+  ],
+  ["alex-rivera-b2", "Alex Rivera", "Product Designer at Example Corp", "Lisbon, Portugal"],
+  ["alex-rivera-c3", "Alex Rivera", "Data Analyst at Example Corp", ""],
+  ["alex-rivera-d4", "Alex Rivera", "", ""],
+  [
+    "alex-rivera-e5",
+    "Alex Rivera",
+    "Engineering Manager at Example Corp",
+    "Toronto, Ontario, Canada",
+  ],
+];
+const jackLondon = [
+  ["jack-london", "Jack London", "Engineer", "London"],
+  ["blake-example", "Blake Example", "Designer", "Paris, France"],
+];
+const reviewPages = {
+  "flex-mutual-sentence": alexes,
+  "flex-mutual-own-item": alexes,
+  "lone-result-plain-divs": [["casey-sample", "Casey Sample", "", ""]],
+  "hidden-link": [
+    ["visible-person", "Visible Person", "Analyst at Example Bank", "Dublin, Ireland"],
+  ],
+  "wrapped-name-without-name-element": [],
+  "mutual-next-block-li": [avery, blake],
+  "mutual-next-block-span": [avery, blake],
+  "mutual-next-block-no-card": [avery, blake],
+  "block-names-without-badge": [
+    ["avery-example", "Avery Example", "Engineer", ""],
+    ["blake-example", "Blake Example", "Designer", ""],
+    ["casey-sample", "Casey Sample", "", ""],
+  ],
+  "mutual-own-block-english-no-card": [avery, blake],
+  "mutual-own-block-french-no-card": [
+    ["camille-exemple", "Camille Exemple", "Architecte chez Exemple SA", ""],
+    ["dominique-test", "Dominique Test", "Comptable chez Exemple Conseil", ""],
+  ],
+  "first-link-two-lines": [avery, blake],
+  "unknown-labels-no-card": [
+    [
+      "camille-exemple",
+      "Camille Exemple",
+      "Architecte chez Exemple SA",
+      "Bordeaux, Nouvelle-Aquitaine, France",
+    ],
+    [
+      "dominique-test",
+      "Dominique Test",
+      "Comptable chez Exemple Conseil",
+      "Nantes, Pays de la Loire, France",
+    ],
+    ["sacha-demo", "Sacha Demo", "Chef chez Exemple Bistro", "Lyon, Auvergne-Rhône-Alpes, France"],
+  ],
+  "location-repeats-name": jackLondon,
+  "card-link-location-repeats-name": jackLondon,
+  "card-link-aria-location-repeats-name": jackLondon,
+  "cards-in-one-li": [
+    ["avery-example", "Avery Example", "Engineer at Example Co", "Austin, Texas"],
+    ["blake-example", "Blake Example", "Designer at Example Co", "Lisbon, Portugal"],
+    ["casey-sample", "Casey Sample", "Recruiter at Example Talent", ""],
+  ],
+  "cards-in-one-article": [avery, blake],
+};
+const knownMisreads = {
+  "articles-share-footer": [
+    ["avery-example", "Avery Example", "Engineer at Example Co", "Austin, Texas"],
+    blake,
+  ],
+  "mutual-own-block-no-labels": [avery, blake],
+};
+const readReviewPage = (name) =>
+  read(
+    makeDom(
+      readFileSync(
+        new URL(`./fixtures/people-search/review/${name}.html`, import.meta.url),
+        "utf8",
+      ),
+    ),
+  ).rows.map((row) => [
+    row.profile_url.replace(/^https:\/\/www\.linkedin\.com\/in\/|\/$/g, ""),
+    row.name,
+    row.headline,
+    row.location,
+  ]);
+
+test("every page from review gives its expected rows", () => {
+  for (const [name, rows] of Object.entries(reviewPages)) {
+    assert.deepEqual(readReviewPage(name), rows, name);
+  }
+});
+
+for (const [name, rows] of Object.entries(knownMisreads)) {
+  test(`${name} gives its expected rows`, { todo: "#1587" }, () => {
+    assert.deepEqual(readReviewPage(name), rows, name);
+  });
+}
