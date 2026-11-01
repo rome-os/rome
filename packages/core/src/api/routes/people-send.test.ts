@@ -19,9 +19,11 @@ import {
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
+import { directMessageSeat } from "../../test/seats.js";
 import {
   channels as channelRows,
   connectionGrants,
+  chatMessages,
   romeAgentMessages,
   romeSessions,
 } from "../../db/schema.js";
@@ -299,31 +301,11 @@ describe("People on an account whose channel id is opaque", () => {
     });
 
     // What Ada said to that account, as Rome's transcript holds it.
-    const sessionId = channelChatId(OPAQUE, ADA);
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: sessionId,
-        name: sessionId,
-        type: "channel",
-        sourceChannel: OPAQUE,
-        sourceThreadId: ADA,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-ada",
-        sessionId,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "hello from Ada" }]),
-        senderId: ADA,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    directMessageSeat(testDb.db, deps.adapters, {
+      id: channelChatId(OPAQUE, ADA),
+      channel: OPAQUE,
+      person: ADA,
+    }).say({ id: "m-ada", from: ADA, text: "hello from Ada", at: new Date(1_000_000) });
   });
 
   const person = async (): Promise<PersonResource> =>
@@ -364,14 +346,8 @@ describe("People on an account whose channel id is opaque", () => {
       ["hi Ada", "telegram"],
       ["hello from Ada", "telegram"],
     ]);
-    const held = testDb.db
-      .select({ sessionId: romeAgentMessages.sessionId })
-      .from(romeAgentMessages)
-      .all();
-    expect(held.map((row) => row.sessionId)).toEqual([
-      channelChatId(OPAQUE, ADA),
-      channelChatId(OPAQUE, ADA),
-    ]);
+    const held = testDb.db.select({ chatId: chatMessages.chatId }).from(chatMessages).all();
+    expect(new Set(held.map((row) => row.chatId)).size).toBe(1);
   });
 
   // Rome never picks among its accounts on a platform: with a second one
@@ -438,7 +414,7 @@ describe("People on an account whose channel id is opaque", () => {
   // sentinel triaged under the live one. Each channel's history comes from its
   // own store, so neither hides the other.
   it("reads each of Rome's accounts' history from the store that holds it", async () => {
-    testDb.db.delete(romeAgentMessages).run();
+    testDb.db.delete(chatMessages).run();
     testDb.db
       .insert(channelRows)
       .values({
@@ -448,31 +424,11 @@ describe("People on an account whose channel id is opaque", () => {
         createdAt: new Date(0),
       })
       .run();
-    const oldSession = channelChatId("tg-old", ADA);
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: oldSession,
-        name: oldSession,
-        type: "channel",
-        sourceChannel: "tg-old",
-        sourceThreadId: ADA,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-old",
-        sessionId: oldSession,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "said long ago" }]),
-        senderId: ADA,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    directMessageSeat(testDb.db, deps.adapters, {
+      id: channelChatId("tg-old", ADA),
+      channel: "tg-old",
+      person: ADA,
+    }).say({ id: "m-old", from: ADA, text: "said long ago", at: new Date(1_000_000) });
     await deps.sentinelLogRepo.create({
       messageId: "tg-recent",
       channel: OPAQUE,

@@ -176,16 +176,15 @@ export function accountTranscript(
       m.said_at AS at,
       -- A line is from Rome when one of its agents said it, or the
       -- guardian said it through Rome's account there.
-      (m.sender_agent IS NOT NULL OR m.sender_account_id IS s.account_id) AS outbound,
+      (m.sender_agent IS NOT NULL OR m.sender_account_id IS v.account) AS outbound,
       'agent:' || m.id AS ref,
       m.parts AS body,
-      m.id AS detail_key
+      -- The line, and Rome's account at its end of the direct message.
+      json_array(m.id, v.account) AS detail_key
     FROM v
-    JOIN rome_sessions s ON s.account_id = v.account AND s.chat_id = v.chat
-    JOIN chats c ON c.id = s.chat_id AND c.platform = v.platform
+    JOIN chats c ON c.id = v.chat AND c.platform = v.platform
     JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS NULL
-    WHERE s.type = 'channel' AND s.thread_id IS NULL
-      AND c.kind = 'dm' AND c.platform <> 'webchat'`;
+    WHERE c.kind = 'dm' AND c.platform <> 'webchat'`;
 }
 
 /** Who said transcript line `key` and in which seat's thread, as JSON. */
@@ -196,14 +195,12 @@ export function accountTranscriptDetail(key: SQL): SQL {
       'senderName', m.sender_name,
       'chatId', c.id,
       'platform', c.platform,
-      'accountId', s.account_id,
+      'accountId', json_extract(${key}, '$[1]'),
       'threadName', c.name,
       'threadType', CASE c.kind WHEN 'dm' THEN 'private' ELSE c.kind END
     )
     FROM chat_messages m
     JOIN chats c ON c.id = m.chat_id
-    JOIN rome_sessions s ON s.chat_id = c.id AND s.thread_id IS NULL
-    WHERE m.id = ${key}
-    LIMIT 1
+    WHERE m.id = json_extract(${key}, '$[0]')
   )`;
 }

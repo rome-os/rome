@@ -6,6 +6,7 @@ import type { DrizzleDb } from "../db/index.js";
 import { chatMessages, chats, romeSessions } from "../db/schema/system.js";
 import type { ChatKind } from "../chats/chat.js";
 import type { ChatRef } from "../chats/place.js";
+import type { ChatAdapters } from "../chats/adapter.js";
 
 type SessionRow = typeof romeSessions.$inferInsert;
 
@@ -82,5 +83,26 @@ export function seatFixture(db: DrizzleDb) {
         .run();
       return line.id;
     },
+  };
+}
+
+/**
+ * Rome's seat `id` in the direct message channel `channel`'s account has with
+ * `person`, keyed as the adapters key it, and a `say` that puts a line there.
+ */
+export function directMessageSeat(
+  db: DrizzleDb,
+  adapters: Pick<ChatAdapters, "accountOn" | "chatAt">,
+  input: { id: string; channel: string; person: string },
+) {
+  const fixture = seatFixture(db);
+  const account = adapters.accountOn(input.channel);
+  const chat = adapters.chatAt(input.channel, input.person, "dm");
+  fixture.chat(chat.platform, chat.id, "dm");
+  fixture.seat({ id: input.id, chat, accountId: account.id });
+  return {
+    chat,
+    account,
+    say: (line: Omit<SeedLine, "chat">) => fixture.say({ ...line, chat }),
   };
 }
