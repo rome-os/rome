@@ -96,7 +96,6 @@ cli({
     try {
       rawContact = await openLinkedInContactSection(page, contactInfoUrl(profile.profile_url), {
         deadline,
-        profile,
       });
     } catch (error) {
       // Browser and transport failures keep their OpenCLI type, and with it their exit code and

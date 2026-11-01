@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { BrowserConnectError, CommandExecutionError } from "@jackwener/opencli/errors";
 import { getRegistry } from "@jackwener/opencli/registry";
 import { openLinkedInContactSection } from "./linkedin-browser.mjs";
 import { normalizeContactPayload } from "./linkedin-helpers.mjs";
@@ -36,19 +37,12 @@ const PANEL = {
 /**
  * A LinkedIn page double on a simulated clock. Every browser call advances the clock by what it
  * would cost in the worst case, so a test can check the command's total time against OpenCLI's
- * command timeout. `panelOn` lists the states that show a Contact info section: "inline" (on the
+ * command timeout. `gotoMs` is a number, or a function of the target URL. `panelOn` lists the states that show a Contact info section: "inline" (on the
  * profile page), "click" (after the link is clicked), and "overlay" (on the overlay URL).
  */
 function linkedInPage(
   t,
-  {
-    panelOn = [],
-    linkCount = 1,
-    api = { ok: false, status: 404 },
-    clickError = null,
-    gotoMs = 3_000,
-    callMs = 200,
-  } = {},
+  { panelOn = [], linkCount = 1, clickError = null, gotoMs = 3_000, callMs = 200 } = {},
 ) {
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   const calls = [];
@@ -75,7 +69,7 @@ function linkedInPage(
     elapsed: () => Date.now(),
     async goto(target) {
       calls.push(["goto", target]);
-      spend(gotoMs);
+      spend(typeof gotoMs === "function" ? gotoMs(target) : gotoMs);
       url = target;
       clicked = false;
     },
@@ -97,10 +91,6 @@ function linkedInPage(
     },
     async evaluate(source) {
       spend(callMs);
-      if (source.includes("profileContactInfo")) {
-        calls.push(["api"]);
-        return api;
-      }
       if (source.includes("getBoundingClientRect")) {
         calls.push(["link"]);
         return { count: linkCount, index: linkCount > 1 ? 1 : 0 };
@@ -145,10 +135,16 @@ test("a Contact info link that opens nothing returns contact_info_unavailable be
   assert.ok(page.calls.some(([name]) => name === "click"));
 });
 
-test("a failed click falls back to the overlay URL and reports a missing section as a status row", async (t) => {
-  const page = linkedInPage(t, {
-    clickError: new Error('CSS selector "a[href*=\\"/overlay/contact-info\\"]" matched 2 elements'),
+/** The error OpenCLI's click throws when its selector does not resolve to one element. */
+function targetError(code) {
+  return Object.assign(new Error(`CSS selector "a[href*=\\"/overlay/contact-info\\"]": ${code}`), {
+    name: "TargetError",
+    code,
   });
+}
+
+test("a failed click falls back to the overlay URL and reports a missing section as a status row", async (t) => {
+  const page = linkedInPage(t, { clickError: targetError("selector_ambiguous") });
   const rows = await command.func(page, { profile: "avery-example" });
 
   assert.deepEqual(
@@ -166,10 +162,7 @@ test("the opener stops before the overlay navigation when the deadline cannot fi
   const page = linkedInPage(t, { panelOn: ["overlay"] });
   await page.goto(PROFILE_URL);
   const deadline = Date.now() + 15_000;
-  const payload = await openLinkedInContactSection(page, CONTACT_URL, {
-    deadline,
-    profile: { identifier: "avery-example", profile_url: PROFILE_URL },
-  });
+  const payload = await openLinkedInContactSection(page, CONTACT_URL, { deadline });
 
   assert.equal(payload.dialog_found, false);
   assert.equal(payload.timed_out, true);
@@ -194,51 +187,8 @@ test("a section already on the profile page is read without clicking or navigati
   );
 });
 
-test("LinkedIn's contact-info record is used before the page panel", async (t) => {
-  const page = linkedInPage(t, {
-    api: {
-      ok: true,
-      status: 200,
-      data: {
-        emailAddress: "avery@example.com",
-        phoneNumbers: [{ number: "+1 415 555 0142", type: "MOBILE" }],
-      },
-    },
-  });
-  const rows = await command.func(page, { profile: "avery-example" });
-
-  assert.deepEqual(
-    rows.map(({ type, label, value, url }) => ({ type, label, value, url })),
-    [
-      {
-        type: "profile",
-        label: "Profile",
-        value: "linkedin.com/in/avery-example",
-        url: PROFILE_URL,
-      },
-      {
-        type: "email",
-        label: "Email",
-        value: "avery@example.com",
-        url: "mailto:avery@example.com",
-      },
-      {
-        type: "phone",
-        label: "Phone (Mobile)",
-        value: "+1 415 555 0142",
-        url: "tel:+14155550142",
-      },
-    ],
-  );
-  assert.ok(!page.calls.some(([name]) => name === "click" || name === "link"));
-});
-
-test("an unusable contact-info record falls back to clicking the visible Contact info link", async (t) => {
-  const page = linkedInPage(t, {
-    panelOn: ["click"],
-    linkCount: 2,
-    api: { ok: false, status: 410 },
-  });
+test("the visible Contact info link is clicked by index when several match", async (t) => {
+  const page = linkedInPage(t, { panelOn: ["click"], linkCount: 2 });
   const rows = await command.func(page, { profile: "avery-example" });
 
   assert.equal(rows[0].status, "available");
@@ -259,4 +209,44 @@ test("navigation failures keep their error type instead of becoming contact stat
   };
 
   await assert.rejects(command.func(page, { profile: "avery-example" }), BrowserConnectError);
+});
+
+test("the opener skips an overlay navigation that the CDP page's 31s navigation would carry past the deadline", async (t) => {
+  // OpenCLI 1.8.8's CDP page waits up to 30s for the load event and 1s for the DOM to settle.
+  const page = linkedInPage(t, {
+    panelOn: ["overlay"],
+    gotoMs: (target) => (target === CONTACT_URL ? 31_000 : 3_000),
+  });
+  await page.goto(PROFILE_URL);
+  const deadline = Date.now() + 34_000;
+  const payload = await openLinkedInContactSection(page, CONTACT_URL, { deadline });
+
+  assert.equal(payload.timed_out, true);
+  assert.ok(Date.now() <= deadline, `the opener ran ${Date.now() - deadline}ms past its deadline`);
+  assert.equal(page.calls.filter(([name]) => name === "goto").length, 1);
+});
+
+test("browser and transport failures during the click propagate instead of becoming statuses", async (t) => {
+  const disconnected = linkedInPage(t, {
+    clickError: new BrowserConnectError("Browser Bridge disconnected"),
+  });
+  await assert.rejects(
+    command.func(disconnected, { profile: "avery-example" }),
+    BrowserConnectError,
+  );
+  assert.ok(
+    !disconnected.calls.some(([name, target]) => name === "goto" && target === CONTACT_URL),
+  );
+
+  t.mock.timers.reset();
+  const unknownOutcome = Object.assign(
+    new Error("Browser command timed out client-side; the page may still have applied it."),
+    { name: "BrowserCommandError", code: "command_result_unknown" },
+  );
+  const lost = linkedInPage(t, { clickError: unknownOutcome });
+  await assert.rejects(command.func(lost, { profile: "avery-example" }), (error) => {
+    assert.ok(error instanceof CommandExecutionError);
+    assert.equal(error.cause, unknownOutcome);
+    return true;
+  });
 });

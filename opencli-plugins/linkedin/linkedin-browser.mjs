@@ -1,13 +1,13 @@
-import { contactSectionsFromApi, unwrapEvaluateResult } from "./linkedin-helpers.mjs";
+import { unwrapEvaluateResult } from "./linkedin-helpers.mjs";
 
 const CONTACT_LINK_SELECTOR = 'a[href*="/overlay/contact-info"]';
 const CONTACT_PANEL_WAIT_MS = 8_000;
-const CONTACT_SETTLE_MS = 2_000;
-const CONTACT_API_TIMEOUT_MS = 8_000;
+const CONTACT_SETTLE_MS = 3_000;
+const CONTACT_QUIET_MS = 1_000;
 // Time an extraction round trip needs beyond its in-page waits, including the row settle.
 const EXTRACTION_RESERVE_MS = 2_000 + CONTACT_SETTLE_MS;
-// A profile-to-overlay navigation can spend 15s in the browser before its panel wait starts.
-const NAVIGATION_RESERVE_MS = 15_000;
+// OpenCLI 1.8.8's CDP page waits up to 30s for the load event, then up to 1s for the DOM to settle.
+const NAVIGATION_RESERVE_MS = 31_000;
 
 export function buildProfileProbeScript() {
   return String.raw`(function() {
@@ -38,12 +38,18 @@ export function buildProfileProbeScript() {
 
 /**
  * Builds page JavaScript that reads the open Contact info section. It polls for up to `waitMs` for
- * a section to appear, then for up to `settleMs` more for its rows to render, and resolves the last
- * reading. An auth wall ends the polling at once. It never rejects on a missing section.
+ * a section to appear. Once one has, it resolves when some row shows a value and the rows have not
+ * changed for `quietMs`, or `settleMs` after the section appeared, whichever comes first, with the
+ * last reading. An auth wall ends the polling at once. It never rejects on a missing section.
  */
-export function buildContactExtractionScript({ waitMs = 0, settleMs = CONTACT_SETTLE_MS } = {}) {
+export function buildContactExtractionScript({
+  waitMs = 0,
+  settleMs = CONTACT_SETTLE_MS,
+  quietMs = CONTACT_QUIET_MS,
+} = {}) {
   const waitBudget = Math.max(0, Math.floor(waitMs));
   const settleBudget = Math.max(0, Math.floor(settleMs));
+  const quietBudget = Math.max(0, Math.floor(quietMs));
   return String.raw`(function() {
     function clean(value) {
       return typeof value === 'string'
@@ -125,30 +131,42 @@ export function buildContactExtractionScript({ waitMs = 0, settleMs = CONTACT_SE
       };
     }
 
+    function hasValue(payload) {
+      return payload.sections.some(function(section) {
+        return section.blocks.length > 0 || section.lines.length > 0 || section.links.length > 0;
+      });
+    }
+
     var waitMs = ${waitBudget};
     var settleMs = ${settleBudget};
+    var quietMs = ${quietBudget};
     var first = extract();
-    if (first.auth_wall
-      || (first.dialog_found && first.sections.length > 0)
-      || (!first.dialog_found && waitMs <= 0)) {
-      return first;
-    }
+    if (first.auth_wall || (!first.dialog_found && waitMs <= 0)) return first;
     var startedAt = Date.now();
-    var foundAt = first.dialog_found ? startedAt : 0;
+    var foundAt = 0;
+    var lastRows = null;
+    var changedAt = 0;
     return new Promise(function(resolve) {
-      (function poll() {
-        var payload = extract();
+      (function poll(payload) {
         var now = Date.now();
-        if (payload.dialog_found && !foundAt) foundAt = now;
-        if (payload.auth_wall
-          || (payload.dialog_found && payload.sections.length > 0)
-          || (foundAt && now - foundAt >= settleMs)
-          || (!foundAt && now - startedAt >= waitMs)) {
-          resolve(payload);
-          return;
+        if (payload.auth_wall) return resolve(payload);
+        if (payload.dialog_found) {
+          if (!foundAt) foundAt = now;
+          var rows = JSON.stringify(payload.sections);
+          if (rows !== lastRows) {
+            lastRows = rows;
+            changedAt = now;
+          }
+          if ((hasValue(payload) && now - changedAt >= quietMs) || now - foundAt >= settleMs) {
+            return resolve(payload);
+          }
+        } else if (!foundAt && now - startedAt >= waitMs) {
+          return resolve(payload);
+        } else if (foundAt && now - foundAt >= settleMs) {
+          return resolve(payload);
         }
-        setTimeout(poll, 250);
-      })();
+        setTimeout(function() { poll(extract()); }, 250);
+      })(first);
     });
   })()`;
 }
@@ -169,61 +187,34 @@ export async function waitForLinkedInPage(page) {
   }
 }
 
-/**
- * Builds page JavaScript that fetches LinkedIn's contact-info record for `publicId` with the page's
- * session. Resolves `{ ok: true, status, data }` on a 2xx JSON response and `{ ok: false, ... }` on
- * any other response, a missing csrf token, a network error, or `timeoutMs` passing. Never rejects.
- */
-export function buildContactApiScript(publicId, timeoutMs = CONTACT_API_TIMEOUT_MS) {
-  const path = `/voyager/api/identity/profiles/${encodeURIComponent(publicId)}/profileContactInfo`;
-  const budget = Math.max(0, Math.floor(timeoutMs));
-  return String.raw`(async function() {
-    var cookie = (document.cookie || '').split('; ').find(function(entry) {
-      return entry.indexOf('JSESSIONID=') === 0;
-    }) || '';
-    var csrf = cookie.slice('JSESSIONID='.length).replace(/^"|"$/g, '');
-    if (!csrf) return { ok: false, reason: 'missing_csrf' };
-    var controller = new AbortController();
-    var timer = setTimeout(function() { controller.abort(); }, ${budget});
-    try {
-      var response = await fetch(${JSON.stringify(path)}, {
-        credentials: 'include',
-        headers: {
-          accept: 'application/json',
-          'csrf-token': csrf,
-          'x-restli-protocol-version': '2.0.0',
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) return { ok: false, status: response.status };
-      return { ok: true, status: response.status, data: await response.json() };
-    } catch (error) {
-      return { ok: false, reason: String(error && error.message || error) };
-    } finally {
-      clearTimeout(timer);
-    }
-  })()`;
-}
-
 function panelFound(payload) {
   const data = unwrapEvaluateResult(payload);
   return data?.dialog_found === true || data?.auth_wall === true;
 }
 
+// OpenCLI's click throws TargetError when the selector no longer resolves, and a plain
+// "Click failed" error when neither click method lands. TargetError is not exported, so it is
+// matched by name.
+function isRecoverableClickError(error) {
+  return (
+    error?.name === "TargetError" ||
+    (error?.name === "Error" && /^Click failed:/.test(String(error.message)))
+  );
+}
+
 /**
  * Reads the Contact info section for one profile page that is already loaded, returning the
  * extraction payload `normalizeContactPayload` accepts. It tries, in order: a section already on
- * the page, LinkedIn's contact-info record for `profile.identifier`, the profile's Contact info
- * link, and a direct navigation to `contactUrl`. Every step is skipped once `deadline` (epoch ms)
- * leaves too little time for it, so the call settles before OpenCLI's command timeout. When no
- * section opens, the payload has `dialog_found: false`, and `timed_out: true` if the deadline cut
- * the attempts short. A failed click falls through to navigation. Navigation and transport errors
- * propagate.
+ * the page, the profile's Contact info link, and a direct navigation to `contactUrl`. Every step is
+ * skipped once `deadline` (epoch ms) leaves too little time for it, so the call settles before
+ * OpenCLI's command timeout. When no section opens, the payload has `dialog_found: false`, and
+ * `timed_out: true` if the deadline cut the attempts short. A click that cannot find or hit the link
+ * falls through to navigation. Browser and transport errors propagate.
  */
 export async function openLinkedInContactSection(
   page,
   contactUrl,
-  { deadline = Date.now() + 45_000, profile = {}, now = Date.now } = {},
+  { deadline = Date.now() + 45_000, now = Date.now } = {},
 ) {
   const remaining = () => deadline - now();
   const panelWait = () =>
@@ -232,24 +223,15 @@ export async function openLinkedInContactSection(
   let payload = await extractLinkedInContactInfo(page);
   if (panelFound(payload)) return payload;
 
-  const publicId = profile.identifier;
-  if (publicId && publicId !== "me" && remaining() > EXTRACTION_RESERVE_MS) {
-    const timeoutMs = Math.min(CONTACT_API_TIMEOUT_MS, remaining() - EXTRACTION_RESERVE_MS);
-    const api = unwrapEvaluateResult(
-      await page.evaluate(buildContactApiScript(publicId, timeoutMs)),
-    );
-    const sections =
-      api?.ok === true ? contactSectionsFromApi(api.data, profile.profile_url) : null;
-    if (sections) return { dialog_found: true, sections };
-  }
-
   const link = unwrapEvaluateResult(await page.evaluate(buildContactLinkScript()));
   if (link?.count > 0 && panelWait() > 0) {
     let clicked = false;
     try {
       await page.click(CONTACT_LINK_SELECTOR, link.count > 1 ? { nth: link.index } : undefined);
       clicked = true;
-    } catch {}
+    } catch (error) {
+      if (!isRecoverableClickError(error)) throw error;
+    }
     if (clicked) {
       payload = await extractLinkedInContactInfo(page, { waitMs: panelWait() });
       if (panelFound(payload)) return payload;

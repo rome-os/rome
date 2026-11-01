@@ -208,9 +208,8 @@ account. It accepts a full `/in/` profile URL, `/in/` path, `@public-id`, bare p
 `me`, then reads that profile's contact details. Each visible contact value is returned as a
 typed row with its display label and safe link where one exists.
 
-The reader tries four sources in order and stops at the first that answers: a Contact info section
-already on the profile page, LinkedIn's contact-info record for the profile, the profile's Contact
-info link, and the Contact info overlay URL. Each wait is bounded, and the reader stops trying once
+The reader tries three sources in order and stops at the first that answers: a Contact info section
+already on the profile page, the profile's Contact info link, and the Contact info overlay URL. Each wait is bounded, and the reader stops trying once
 too little of OpenCLI's command timeout (`OPENCLI_BROWSER_COMMAND_TIMEOUT`, 60 seconds by default)
 remains, so a section that never opens returns a status row instead of `TIMEOUT`.
 
