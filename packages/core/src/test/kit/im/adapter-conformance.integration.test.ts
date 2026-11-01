@@ -83,16 +83,19 @@ describeAdapterConformance(
         bothHear: (text) => peer.emitMessage(text, FEISHU_CHAT, { mentionsEveryBot: true }).id,
       },
       visible: (at) => peer.visible(at),
-      // Feishu refuses a post to a chat the bot is not in.
-      refuseNextSend: () =>
-        peer.server.once({
-          method: "POST",
-          path: "/open-apis/im/v1/messages",
-          respond: {
-            status: 400,
-            body: { code: 230002, msg: "Bot/User can NOT be out of the chat." },
-          },
-        }),
+      // Feishu refuses a post to a chat the bot is not in. The SDK makes three
+      // more requests for the message once its post is refused, and each is refused.
+      refuseNextSend: () => {
+        for (let i = 0; i < 4; i++)
+          peer.server.once({
+            method: "POST",
+            path: "/open-apis/im/v1/messages",
+            respond: {
+              status: 400,
+              body: { code: 230002, msg: "Bot/User can NOT be out of the chat." },
+            },
+          });
+      },
       stop: async () => {
         await second.stop();
         await adapter.stop();
