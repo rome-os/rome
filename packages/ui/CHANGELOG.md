@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.8](https://github.com/rome-os/rome/compare/ui-v0.3.7...ui-v0.3.8) (2026-10-31)
+
+
+### Bug Fixes
+
+* **ui:** end bare URLs at CJK punctuation ([#1556](https://github.com/rome-os/rome/issues/1556)) ([e8eec9f](https://github.com/rome-os/rome/commit/e8eec9f03b6bfac96416bf6b6ff7589977b11050))
+
+
+### Performance Improvements
+
+* **web:** stop re-rendering whole transcripts, the chat and the sidebar on every update ([#1548](https://github.com/rome-os/rome/issues/1548)) ([d3b7a58](https://github.com/rome-os/rome/commit/d3b7a5828269dcbb4809c58edfff6be0a53ac0bc))
+
 ## [0.3.7](https://github.com/rome-os/rome/compare/ui-v0.3.6...ui-v0.3.7) (2026-10-27)
 
 
