@@ -20,6 +20,7 @@
 
 import { sql } from "drizzle-orm";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
+import { CHAT_LINES, CHATS } from "../chats/lines-sql.js";
 import type { SaidMessage } from "../chats/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/message-repository.js";
 import { placeIn, type Place } from "../chats/place.js";
@@ -225,7 +226,7 @@ export class ChatReadModel {
       created_at: number;
     }>(sql`
       SELECT c.platform, c.id AS chat_id, r.thread_id, r.created_at
-      FROM rome_sessions r JOIN chats c ON c.id = r.chat_id
+      FROM rome_sessions r JOIN ${CHATS} c ON c.id = r.chat_id
       WHERE r.id = ${sessionId}
     `);
     if (!row) return null;
@@ -295,8 +296,8 @@ export class ChatReadModel {
       said_at: number;
     }>(sql`
       SELECT m.id, s.id AS chat_id, ${lineRole} AS role, m.text, m.said_at
-      FROM chat_messages m
-      JOIN chats c ON c.id = m.chat_id AND c.platform = 'webchat'
+      FROM ${CHAT_LINES} m
+      JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
       JOIN rome_sessions s ON s.chat_id = c.id
       LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       WHERE ${matchesEveryTerm}
@@ -331,7 +332,7 @@ export class ChatReadModel {
     const [row] = await this.db.all<{ count: number }>(sql`
       SELECT count(*) AS count FROM (
         SELECT 1 FROM rome_sessions r
-        JOIN chat_messages m ON m.chat_id = r.chat_id AND m.thread_id IS r.thread_id
+        JOIN ${CHAT_LINES} m ON m.chat_id = r.chat_id AND m.thread_id IS r.thread_id
         WHERE r.id = ${sessionId} AND r.last_seen_activity_at IS NOT NULL
           AND m.sender_agent IS NOT NULL
           AND m.said_at > r.last_seen_activity_at

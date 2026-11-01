@@ -1,16 +1,17 @@
 // The read model's SQL: the projections the dashboard, Dream and account
-// transcripts read across Chats' tables and Agents' seats. Outside Chats this
-// is the only SQL that names Chats' tables, so a change to how Chats stores a
-// message changes Chats and this file. Vocabulary: docs/domains/chats.md.
+// transcripts read across Chats' lines and Agents' seats. It reads Chats
+// through the relations Chats publishes (chats/lines-sql.ts), never its
+// tables. Vocabulary: docs/domains/chats.md.
 
 import type { Account } from "@rome-os/app-runtime";
 import { sql, type SQL } from "drizzle-orm";
+import { CHAT_LINES, CHATS } from "../chats/lines-sql.js";
 import { romeSessions } from "../db/schema/system.js";
 
 // How many lines the session's transcript holds: its chat's messages plus its
 // own traces.
 export const sessionLineCount = sql<number>`(
-  (select count(*) from "chat_messages" m
+  (select count(*) from ${CHAT_LINES} m
    where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id")
   + (select count(*) from "rome_agent_messages" t
      where t."session_id" = "rome_sessions"."id" and t."role" = 'trace')
@@ -18,7 +19,7 @@ export const sessionLineCount = sql<number>`(
 
 /** How many messages were said where the current `rome_sessions` row stands
  *  since it took its seat. */
-export const seatMessageCount = sql<number>`(SELECT count(*) FROM chat_messages m
+export const seatMessageCount = sql<number>`(SELECT count(*) FROM ${CHAT_LINES} m
   WHERE m.chat_id = ${romeSessions.chatId} AND m.thread_id IS ${romeSessions.threadId}
     AND m.said_at >= ${romeSessions.createdAt})`;
 
@@ -26,7 +27,7 @@ export const seatMessageCount = sql<number>`(SELECT count(*) FROM chat_messages 
  *  stands, one row per line, as `(session_id, at)`. */
 export function seatLinesSaid(sessionIds: SQL): SQL {
   return sql`SELECT s.id AS session_id, m.said_at AS at FROM ${romeSessions} s
-    JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+    JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE s.id IN ${sessionIds}`;
 }
 
@@ -34,17 +35,17 @@ export function seatLinesSaid(sessionIds: SQL): SQL {
 // connect-AI, app component) in a line from Rome after the guardian's last
 // line, or an approval still pending in this chat. Any answer to a card is
 // saved as the guardian's line, so a card after the last one is still open.
-// rowid is insertion order, and `idx_chat_messages_place` makes "after the
-// last" a range. Every reply adds an auto-approved row to `approvals`, so the
+// `seq` is the order lines were recorded in, and `idx_chat_messages_place`
+// makes "after the last" a range. Every reply adds an auto-approved row to `approvals`, so the
 // pending thread ids are collected once per list rather than scanned per chat.
 // json_valid and the object check skip rows that aren't block arrays
 // (non-JSON, or legacy plain text), which would otherwise fail the whole list.
 export const sessionAwaitingGuardian = sql<boolean>`(exists (
-  select 1 from "chat_messages" m, json_each(m."parts") part
+  select 1 from ${CHAT_LINES} m, json_each(m."parts") part
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
   and m."sender_agent" is not null and json_valid(m."parts")
-  and m."rowid" > coalesce((
-    select max(u."rowid") from "chat_messages" u
+  and m."seq" > coalesce((
+    select max(u."seq") from ${CHAT_LINES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
     and u."sender_agent" is null
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
@@ -98,10 +99,10 @@ export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
       ch.id AS channel, ch.connection_kind, ${ANSWERING_AGENT} AS agent_name,
       s.project_name, s.project_path, s.created_at
     FROM rome_sessions s
-    JOIN chats c ON c.id = s.chat_id
+    JOIN ${CHATS} c ON c.id = s.chat_id
     LEFT JOIN channels ch ON ch.platform = c.platform
       AND coalesce(ch.platform_account_id, ch.id) = s.account_id
-    JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+    JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id
     ORDER BY max(m.said_at) DESC
@@ -134,10 +135,10 @@ export function sessionLines(sessionIds: readonly string[]) {
       -- A line to Rome comes first in its second, as a prompt does.
       CASE WHEN l.role = 'prompt' OR (l.role IS NULL AND m.sender_agent IS NULL) THEN 0 ELSE 2 END
         AS line_order,
-      m.rowid AS seq, m.sender_agent IS NOT NULL AS from_rome
+      m.seq AS seq, m.sender_agent IS NOT NULL AS from_rome
     FROM rome_sessions s
-    JOIN chats c ON c.id = s.chat_id
-    JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+    JOIN ${CHATS} c ON c.id = s.chat_id
+    JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A seat sees the place from when it joined.
       AND m.said_at >= s.created_at
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
@@ -190,8 +191,8 @@ export function accountTranscript(
       -- The line, and Rome's account at its end of the direct message.
       json_array(m.id, v.account) AS detail_key
     FROM v
-    JOIN chats c ON c.id = v.chat AND c.platform = v.platform
-    JOIN chat_messages m ON m.chat_id = c.id AND m.thread_id IS NULL
+    JOIN ${CHATS} c ON c.id = v.chat AND c.platform = v.platform
+    JOIN ${CHAT_LINES} m ON m.chat_id = c.id AND m.thread_id IS NULL
     WHERE c.kind = 'dm' AND c.platform <> 'webchat'`;
 }
 
@@ -207,8 +208,8 @@ export function accountTranscriptDetail(key: SQL): SQL {
       'threadName', c.name,
       'threadType', CASE c.kind WHEN 'dm' THEN 'private' ELSE c.kind END
     )
-    FROM chat_messages m
-    JOIN chats c ON c.id = m.chat_id
+    FROM ${CHAT_LINES} m
+    JOIN ${CHATS} c ON c.id = m.chat_id
     WHERE m.id = json_extract(${key}, '$[0]')
   )`;
 }

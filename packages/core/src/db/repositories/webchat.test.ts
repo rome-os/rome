@@ -1478,9 +1478,10 @@ describe("WebChatRepository", () => {
         .join("\n");
 
       // Without the index, "rowid > ?" filters every line of the chat, which
-      // took seconds per chat on a long one.
+      // took seconds per chat on a long one. Chats' published lines flatten
+      // into the query, so the plan names the table itself.
       expect(details).toMatch(
-        /SEARCH m USING INDEX idx_chat_messages_place \(chat_id=\? AND thread_id=\? AND rowid>\?\)/,
+        /SEARCH chat_messages USING INDEX idx_chat_messages_place \(chat_id=\? AND thread_id=\? AND rowid>\?\)/,
       );
     });
 
