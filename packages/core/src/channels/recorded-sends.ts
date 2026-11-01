@@ -11,7 +11,9 @@ import {
   chatAt,
   lineAt,
   platformIdOfLine,
+  sentLineId,
   type ChatAdapters,
+  type EmailFields,
   type Outbound,
 } from "../chats/adapter.js";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -33,8 +35,8 @@ export interface RecordedSendsDeps {
  * `channels` with each send port saying what is sent through the account's
  * chat adapter, and recording it: through the seat that heard the address,
  * else in the chat Rome holds there, started when it holds none, with no
- * session opened. The dashboard records its own lines, and an email is sent
- * on the port as it was, since the chat adapter carries no email.
+ * session opened. The dashboard records its own lines. An email thread is a
+ * group chat keyed by the thread, as inbound mail records it.
  */
 export function recordedSends<C extends Channel>(
   channels: readonly C[],
@@ -46,12 +48,16 @@ export function recordedSends<C extends Channel>(
     const wrapped = Object.create(send) as ChannelSend;
     Object.defineProperty(wrapped, "send", {
       value: async (address: ChatId, message: OutgoingMessage): Promise<MessageReceipt> => {
-        if ("kind" in message && message.kind === "email") return send.send(address, message);
-        const out = {
+        const email = emailFieldsOf(message);
+        const out: Outbound = {
           text: message.text ?? "",
           ...(message.parts?.length ? { parts: message.parts } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+          ...(email ? { email } : {}),
         };
+        // An email that names no thread starts one, which has no address
+        // until the provider took it.
+        if (email && !address.trim()) return await openThread(deps, channel, out);
         const seat = seatAt(deps, channel.name, address);
         const platformMessageId = seat
           ? await sayInSeat(deps, channel, seat, out, message)
@@ -112,11 +118,12 @@ async function sayInChat(
 ): Promise<string | null> {
   const account = deps.adapters.accountOn(channel.name);
   const platform = account.platform;
-  const group = deps.chats.get(chatAt(platform, address));
+  const group =
+    out.email !== undefined || deps.chats.get(chatAt(platform, address))?.kind === "group";
   const { chatId, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: address,
-    threadType: group?.kind === "group" ? "group" : "private",
+    threadType: group ? "group" : "private",
   });
   const chat = { platform, id: chatId };
   const adapter = deps.adapters.of(channel);
@@ -138,4 +145,52 @@ async function sayInChat(
     },
   );
   return lineId === null ? null : platformIdOfLine(chat, romeEnd, lineId);
+}
+
+/** The fields only an email carries, or none for a chat message. */
+function emailFieldsOf(message: OutgoingMessage): EmailFields | undefined {
+  if (!("kind" in message) || message.kind !== "email") return undefined;
+  const {
+    kind: _kind,
+    text: _text,
+    parts: _parts,
+    attachments: _a,
+    turnId: _t,
+    ...email
+  } = message;
+  return email;
+}
+
+/**
+ * Send email `out` on a thread of its own, and record it in the thread's
+ * chat as Rome's main agent, once the provider named the thread. No session
+ * opens, as for any send at an address no seat heard.
+ */
+async function openThread(
+  deps: RecordedSendsDeps,
+  channel: Channel,
+  out: Outbound,
+): Promise<MessageReceipt> {
+  const adapter = deps.adapters.of(channel);
+  if (!adapter.open) throw new Error(`Channel "${channel.name}" cannot start a thread`);
+  const opened = await adapter.open(out);
+  const { chatId, romeEnd } = startChannelChat(deps, {
+    channel: channel.name,
+    threadId: opened.address,
+    threadType: "group",
+  });
+  const chat = { platform: deps.adapters.accountOn(channel.name).platform, id: chatId };
+  await deps.messages.send(
+    {
+      direction: "fromRome",
+      place: placeIn(chat),
+      saidBy: { account: { platform: chat.platform, id: romeEnd }, agent: "main" },
+      parts: out.parts ?? [{ type: "text", content: out.text }],
+    },
+    async () => ({ id: sentLineId(chat, romeEnd, opened.platformMessageId ?? undefined) }),
+  );
+  return {
+    chatId: opened.address as ChatId,
+    ...(opened.platformMessageId ? { messageId: opened.platformMessageId } : {}),
+  };
 }
