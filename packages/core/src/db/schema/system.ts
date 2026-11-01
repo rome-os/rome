@@ -469,6 +469,15 @@ export const projectSyncLinks = sqliteTable("project_sync_links", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Whether a `rome_sessions` row is a seat in a dashboard chat: a guardian
+ * chat. The sidebar's partial indexes use this exact text, so the query's
+ * WHERE must too: SQLite picks a partial index only for a literal match.
+ */
+export function dashboardSeatWhere(table: { type: SQLiteColumn; chatPlatform: SQLiteColumn }) {
+  return sql`(${table.type} = 'channel' and ${table.chatPlatform} = 'webchat')`;
+}
+
 export const romeSessions = sqliteTable(
   "rome_sessions",
   {
@@ -527,6 +536,9 @@ export const romeSessions = sqliteTable(
     // id when the seat is in a thread. Null on rows that are not chats
     // (handoff, subagent, action runs). Vocabulary: docs/domains/chats.md.
     chatId: text("chat_id"),
+    // The platform of the chat at `chat_id`, so a seat holds the chat's whole
+    // ref and the sidebar can index the dashboard's seats on their own.
+    chatPlatform: text("chat_platform"),
     threadId: text("thread_id"),
     // The one of Rome's accounts this seat speaks as: the channel's platform
     // account, else the channel's name, and `agent:<name>` on the dashboard.
@@ -536,14 +548,15 @@ export const romeSessions = sqliteTable(
     index("idx_rome_sessions_chat").on(table.chatId, table.threadId),
     index("idx_rome_sessions_owner_key").on(table.ownerKey),
     index("idx_rome_sessions_project_path").on(table.projectPath),
-    // Sidebar paging, newest activity first.
     index("idx_rome_sessions_activity").on(table.activityAt, table.createdAt, table.id),
-    index("idx_rome_sessions_project_activity").on(
-      table.projectPath,
-      table.activityAt,
-      table.createdAt,
-      table.id,
-    ),
+    // Sidebar paging for guardian chats, newest activity first. See
+    // `dashboardSeatWhere`.
+    index("idx_rome_sessions_dashboard_activity")
+      .on(table.activityAt, table.createdAt, table.id)
+      .where(dashboardSeatWhere(table)),
+    index("idx_rome_sessions_dashboard_project_activity")
+      .on(table.projectPath, table.activityAt, table.createdAt, table.id)
+      .where(dashboardSeatWhere(table)),
     index("idx_rome_sessions_account").on(table.accountId),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
   ],

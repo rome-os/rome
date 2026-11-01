@@ -258,6 +258,7 @@ export class ChatSettingsRepository {
             agentName: null,
             type: "channel",
             chatId: chat.ref.id,
+            chatPlatform: chat.ref.platform,
             accountId: via.id,
             createdAt: now,
             activityAt: now,
@@ -327,6 +328,7 @@ export class ChatSettingsRepository {
           parentSessionId,
           // A thread's seat stands in its parent's chat, as the account.
           chatId: parent?.chatId ?? null,
+          chatPlatform: parent?.chatPlatform ?? null,
           threadId: descriptor.ref.chatId,
           accountId: this.accountOn(channel).id,
           createdAt: now,

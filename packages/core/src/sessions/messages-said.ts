@@ -95,7 +95,7 @@ async function seatOf(
     ...(threadName === undefined ? {} : { threadName }),
     threadType: kind === "dm" ? "private" : "group",
     agentName: "main",
-    chatId: place.chat.id,
+    chat: place.chat,
     accountId: event.via.account.id,
   });
   await deps.seats.advanceActivity(seat.id, at);

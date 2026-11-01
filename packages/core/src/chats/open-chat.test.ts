@@ -20,7 +20,7 @@ describe("startChannelChat", () => {
       threadName: "Launch",
     });
 
-    expect(deps.chats.find(started.chatId)).toMatchObject({ kind: "group", name: "Launch" });
+    expect(deps.chats.find(started.chat.id)).toMatchObject({ kind: "group", name: "Launch" });
     expect(started.romeEnd).toBe(deps.adapters.accountOn("telegram").id);
   });
 
@@ -32,7 +32,7 @@ describe("startChannelChat", () => {
       threadName: "Alice",
     });
 
-    expect(deps.chats.find(started.chatId)?.kind).toBe("dm");
+    expect(deps.chats.find(started.chat.id)?.kind).toBe("dm");
   });
 
   it("starts a thread's parent chat, unnamed, and no chat for the thread", () => {
@@ -43,7 +43,7 @@ describe("startChannelChat", () => {
       threadName: "Topic",
     });
 
-    expect(deps.chats.find(started.chatId)).toMatchObject({ kind: "group", name: null });
+    expect(deps.chats.find(started.chat.id)).toMatchObject({ kind: "group", name: null });
     expect(deps.chats.list(deps.adapters.accountOn("telegram").platform)).toHaveLength(1);
   });
 
@@ -59,6 +59,6 @@ describe("startChannelChat", () => {
       threadType: "private",
     });
 
-    expect(b.chatId).toBe(a.chatId);
+    expect(b.chat).toEqual(a.chat);
   });
 });

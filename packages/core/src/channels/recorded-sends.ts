@@ -120,12 +120,11 @@ async function sayInChat(
   const platform = account.platform;
   const group =
     out.email !== undefined || deps.chats.get(chatAt(platform, address))?.kind === "group";
-  const { chatId, romeEnd } = startChannelChat(deps, {
+  const { chat, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: address,
     threadType: group ? "group" : "private",
   });
-  const chat = { platform, id: chatId };
   const adapter = deps.adapters.of(channel);
   const replyTo = message.replyToMessageId
     ? lineAt(chat, romeEnd, message.replyToMessageId)
@@ -140,7 +139,7 @@ async function sayInChat(
       ...(replyTo ? { replyTo } : {}),
     },
     async () => {
-      lineId = await adapter.send(chatId, null, { ...out, ...(replyTo ? { replyTo } : {}) });
+      lineId = await adapter.send(chat.id, null, { ...out, ...(replyTo ? { replyTo } : {}) });
       return { id: lineId };
     },
   );
@@ -174,12 +173,11 @@ async function openThread(
   const adapter = deps.adapters.of(channel);
   if (!adapter.open) throw new Error(`Channel "${channel.name}" cannot start a thread`);
   const opened = await adapter.open(out);
-  const { chatId, romeEnd } = startChannelChat(deps, {
+  const { chat, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: opened.address,
     threadType: "group",
   });
-  const chat = { platform: deps.adapters.accountOn(channel.name).platform, id: chatId };
   await deps.messages.send(
     {
       direction: "fromRome",

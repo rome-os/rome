@@ -56,7 +56,7 @@ import type {
   RomeSessionType,
   SessionTrace,
 } from "@rome-os/app-runtime";
-import { placeIn, type Place } from "../../chats/place.js";
+import { placeIn, type ChatRef, type Place } from "../../chats/place.js";
 import { lineAt } from "../../chats/adapter.js";
 import {
   seatsSaidInSince,
@@ -717,7 +717,11 @@ export class WebChatRepository {
     );
     this.db
       .update(romeSessions)
-      .set({ chatId: chat.ref.id, accountId: dashboardAccountId(agentName) })
+      .set({
+        chatId: chat.ref.id,
+        chatPlatform: chat.ref.platform,
+        accountId: dashboardAccountId(agentName),
+      })
       .where(eq(romeSessions.id, sessionId))
       .run();
   }
@@ -1013,7 +1017,7 @@ export class WebChatRepository {
    * through which its agent stands in chat `chatId`, or in the thread
    * `threadId` names under `parentThreadId`. Opened on first use, with the
    * parent chat's seat for a thread. Finding a seat needs only the address;
-   * opening one throws without `chatId` and `accountId`.
+   * opening one throws without `chat` and `accountId`.
    */
   async ensureChannelChat(input: {
     channel: string;
@@ -1024,7 +1028,7 @@ export class WebChatRepository {
     agentName: string;
     projectName?: string;
     projectPath?: string;
-    chatId?: string;
+    chat?: ChatRef;
     accountId?: string;
   }): Promise<{ id: string; agentName: string | null }> {
     const parent =
@@ -1040,8 +1044,8 @@ export class WebChatRepository {
     // A seat is found by the chat it stands in and the account it speaks as;
     // the dashboard, which names no chat here, by its address.
     const seat =
-      input.chatId !== undefined && input.accountId !== undefined
-        ? this.seatIn(input.chatId, parent ? input.threadId : null, input.accountId)
+      input.chat !== undefined && input.accountId !== undefined
+        ? this.seatIn(input.chat.id, parent ? input.threadId : null, input.accountId)
         : null;
     const found = seat
       ? await this.channelConversation(seat)
@@ -1066,7 +1070,7 @@ export class WebChatRepository {
       throw new Error(`No chat at webchat address ${input.threadId}`);
     }
 
-    if (input.chatId === undefined || input.accountId === undefined) {
+    if (input.chat === undefined || input.accountId === undefined) {
       throw new Error(
         `No seat at ${input.channel}:${input.threadId}, and no chat named to open one in`,
       );
@@ -1090,7 +1094,8 @@ export class WebChatRepository {
         type: "channel",
         threadName: parent ? (input.threadName ?? null) : null,
         parentSessionId: parent?.id ?? null,
-        chatId: input.chatId,
+        chatId: input.chat.id,
+        chatPlatform: input.chat.platform,
         threadId: parent ? input.threadId : null,
         accountId: input.accountId,
         createdAt: now,

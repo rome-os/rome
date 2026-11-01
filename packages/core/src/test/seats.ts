@@ -56,6 +56,7 @@ export function seatFixture(db: DrizzleDb) {
           ...row,
           id,
           chatId: chat.id,
+          chatPlatform: chat.platform,
           threadId,
           accountId,
           createdAt: at,

@@ -1,15 +1,12 @@
 // What kind of session a `rome_sessions` row is, as its readers see it.
 //
 // A guardian chat is a channel row whose chat is on the dashboard: `type =
-// 'channel'` with its `chat_id` on the webchat platform. The API still reports
-// it as `webchat`, so readers go through these helpers rather than reading
-// `type` directly.
+// 'channel'` with `chat_platform = 'webchat'`. The API still reports it as
+// `webchat`, so readers go through these helpers rather than reading `type`
+// directly.
 
 import { and, eq, getTableColumns, sql, type SQL } from "drizzle-orm";
-import { chatIdsOn } from "../chats/chat-repository.js";
-import { romeSessions } from "./schema.js";
-
-const dashboardChats = chatIdsOn("webchat");
+import { dashboardSeatWhere, romeSessions } from "./schema.js";
 
 /**
  * The id of the conversation at a channel address. A webchat thread id is the
@@ -20,14 +17,13 @@ export function channelChatId(channel: string, threadId: string): string {
 }
 
 /** Whether a row is a guardian chat: a channel row whose chat is on the
- *  dashboard. The unary `+` keeps SQLite off the chat index, so the sidebar
- *  pages off the activity index instead of sorting every chat. */
-export const isWebchatChat: SQL = sql`(${romeSessions.type} = 'channel' and +${romeSessions.chatId} in ${dashboardChats})`;
+ *  dashboard. The sidebar pages off the partial indexes this matches. */
+export const isWebchatChat: SQL = dashboardSeatWhere(romeSessions);
 
 /** Whether a row is a conversation on a messaging channel, chats excluded. */
 export const isChannelConversation: SQL = and(
   eq(romeSessions.type, "channel"),
-  sql`(${romeSessions.chatId} is null or ${romeSessions.chatId} not in ${dashboardChats})`,
+  sql`coalesce(${romeSessions.chatPlatform}, '') <> 'webchat'`,
 ) as SQL;
 
 /** Every column of a `rome_sessions` row a reader reads, and whether it is a guardian chat,

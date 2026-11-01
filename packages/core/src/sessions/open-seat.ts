@@ -21,6 +21,6 @@ export async function openChannelChat(
   input: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
   if (input.channel === "webchat") return deps.webchatRepo.ensureChannelChat(input);
-  const { chatId, romeEnd } = startChannelChat(deps, input);
-  return deps.webchatRepo.ensureChannelChat({ ...input, chatId, accountId: romeEnd });
+  const { chat, romeEnd } = startChannelChat(deps, input);
+  return deps.webchatRepo.ensureChannelChat({ ...input, chat, accountId: romeEnd });
 }

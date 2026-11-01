@@ -821,7 +821,7 @@ describe("WebChatRepository", () => {
         channel: "feishu",
         threadId: "oc_chat",
         agentName: "main",
-        chatId: GROUP.id,
+        chat: GROUP,
         accountId: "ou_bot",
       };
 
@@ -869,7 +869,7 @@ describe("WebChatRepository", () => {
         parentThreadId: "oc_chat",
         threadName: "Sprint planning",
         agentName: "main",
-        chatId: GROUP.id,
+        chat: GROUP,
         accountId: "ou_bot",
       });
 
