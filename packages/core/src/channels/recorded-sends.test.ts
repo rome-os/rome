@@ -140,7 +140,7 @@ describe("recordedSends", () => {
     expect(sessions()).toEqual([]);
   });
 
-  it("starts a thread for an email that names none, and records it there once", async () => {
+  it("opens a thread for an email that names none, records it once, and finds the thread again", async () => {
     const receipt = await send("email").send(
       "" as ChatId,
       {
@@ -152,9 +152,23 @@ describe("recordedSends", () => {
     );
 
     expect(receipt).toEqual({ chatId: "thread-new", messageId: "m-1" });
-    expect(sent).toHaveLength(1);
-    expect(lines()).toEqual([
-      { chat_id: chatAt("email", "thread-new").id, text: "First note", sender_agent: "main" },
+    expect(sent).toEqual([
+      {
+        channel: "email",
+        address: "",
+        message: expect.objectContaining({ to: "alice@example.com", subject: "Hello" }),
+      },
     ]);
+    const [first] = lines();
+    expect(first).toMatchObject({ text: "First note", sender_agent: "main" });
+    expect(testDb.db.all(sql`SELECT kind, name FROM chats WHERE id = ${first!.chat_id}`)).toEqual([
+      { kind: "group", name: "Hello" },
+    ]);
+
+    // The provider named the thread, which is the same chat from then on.
+    await send("email").send("thread-new" as ChatId, { text: "Second note" });
+    expect(sent[1]).toMatchObject({ address: "thread-new" });
+    expect(lines().map((line) => line.chat_id)).toEqual([first!.chat_id, first!.chat_id]);
+    expect(sessions()).toEqual([]);
   });
 });

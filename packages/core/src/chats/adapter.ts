@@ -15,8 +15,6 @@ import type {
   ChannelMessage,
   ChatId,
   InboundEvent,
-  MessageReceipt,
-  OutgoingEmailMessage,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { v7 as uuidv7 } from "uuid";
@@ -38,6 +36,12 @@ import {
   type ChatKey,
 } from "../channels/chat-ids.js";
 import type { ChatRef, Place } from "./place.js";
+import {
+  EMAIL_PLATFORM,
+  emailChatAdapter,
+  isEmailAdapter,
+  type EmailChatAdapter,
+} from "../channels/email-chat-adapter.js";
 
 const log = createLogger("chat-adapter");
 
@@ -83,16 +87,7 @@ export interface Outbound {
   readonly replyTo?: string;
   /** The agent turn it answers, which a platform may show it as. */
   readonly turnId?: string;
-  /** What only an email carries: its recipients, subject, HTML body and the
-   *  provider message it answers. Sent as an email when present. */
-  readonly email?: EmailFields;
 }
-
-/** The fields of an outgoing email beyond what every message carries. */
-export type EmailFields = Omit<
-  OutgoingEmailMessage,
-  "kind" | "text" | "parts" | "attachments" | "replyToMessageId" | "turnId"
->;
 
 /**
  * One of Rome's accounts on a platform, as Chats reaches it. One instance per
@@ -120,13 +115,6 @@ export interface ChatAdapter {
    * took it. A refusal rejects with the platform's words. No retry.
    */
   send(chatId: string, threadId: ChatId | null, out: Outbound): Promise<string>;
-  /**
-   * Start a conversation the platform names as it takes the first message,
-   * as a new email thread is, and answer the address the platform gave it
-   * and the platform's id for the message. Absent where every conversation
-   * has an address before anything is said in it.
-   */
-  open?(out: Outbound): Promise<{ address: ChatId; platformMessageId: string | null }>;
   /**
    * Open a reply in chat `chatId` that is written as the agent's run goes,
    * or null where the channel cannot stream. It is sent as the platform
@@ -159,10 +147,20 @@ export interface ChannelAdapterDeps {
   /** Rome's account on a channel, or null while its record knows none. */
   accountOf(channel: string): Account | null;
   platformOfChannel(channel: string): string;
-  /** The channels layer's address store, where a direct message the
-   *  platform gives an id of its own is reached. */
+  /** The channels layer's address store, where a chat the platform reaches
+   *  at an id other than its key is reached. */
   addresses?: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt">;
 }
+
+/** How an adapter keys the chat a platform message was said in, and its
+ *  kind, for Rome's account `account`. */
+export type ChatKeying = (
+  account: Account,
+  message: ChannelMessage,
+) => {
+  key: ChatKey;
+  kind: ChatKind;
+};
 
 /**
  * The address a channel sends to in `place`: the thread's when it names one,
@@ -244,7 +242,11 @@ export interface ChannelChatAdapter extends ChatAdapter {
   heard(id: string): InboundEvent | undefined;
 }
 
-export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): ChannelChatAdapter {
+export function channelAdapter(
+  channel: Channel,
+  deps: ChannelAdapterDeps,
+  keying: ChatKeying = (account, message) => chatOf(account.platform, account.id, message),
+): ChannelChatAdapter {
   const account = (): Account =>
     deps.accountOf(channel.name) ?? {
       platform: deps.platformOfChannel(channel.name),
@@ -256,15 +258,12 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
   const delivering = new Map<string, InboundEvent>();
 
   /** Where the platform takes a message for `ref`: the thread's id, else
-   *  where the account heard a direct message, else the chat's key. */
+   *  where the account reaches the chat when that is not its key, else the
+   *  chat's own address. */
   const addressIn = (ref: ChatRef, threadId: ChatId | null): ChatId => {
-    const key = ChatIds.key(ref);
-    const heardAt =
-      threadId === null && otherEndOf(key) !== null
-        ? (deps.addresses?.addressOf(account(), key.externalId) ?? null)
-        : null;
-    return (heardAt ??
-      addressOf(threadId === null ? { chat: ref } : { chat: ref, threadId })) as ChatId;
+    if (threadId !== null) return threadId;
+    const bound = deps.addresses?.addressOf(account(), ChatIds.key(ref).externalId) ?? null;
+    return (bound ?? addressOf({ chat: ref })) as ChatId;
   };
 
   return {
@@ -282,7 +281,12 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
         const handed = (async () => {
           if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
           const saved = await materialized(channel, event);
-          const inbound = toInbound(channel.name, saved.message.account ?? account(), saved);
+          const inbound = toInbound(
+            channel.name,
+            saved.message.account ?? account(),
+            saved,
+            keying,
+          );
           delivering.set(inbound.id, {
             ...saved,
             message: { ...saved.message, channel: channel.name },
@@ -332,19 +336,6 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
         outgoing(out, replyTo || undefined),
       );
       return sentLineId(ref, own.id, receipt.messageId || undefined);
-    },
-
-    async open(out) {
-      const send = channel.send;
-      if (!send) throw new Error(`Channel "${channel.name}" cannot send`);
-      const receipt: MessageReceipt | undefined = await send.send(
-        "" as ChatId,
-        outgoing(out, undefined),
-      );
-      if (typeof receipt?.chatId !== "string" || !receipt.chatId.trim()) {
-        throw new Error(`Channel "${channel.name}" named no conversation for what it sent`);
-      }
-      return { address: receipt.chatId, platformMessageId: receipt.messageId?.trim() || null };
     },
 
     stream(chatId, threadId, out) {
@@ -407,7 +398,10 @@ export class ChatAdapters {
   of(channel: Channel): ChannelChatAdapter {
     let adapter = this.built.get(channel);
     if (!adapter) {
-      adapter = channelAdapter(channel, this.deps);
+      adapter =
+        this.deps.platformOfChannel(channel.name) === EMAIL_PLATFORM
+          ? emailChatAdapter(channel, this.deps)
+          : channelAdapter(channel, this.deps);
       this.built.set(channel, adapter);
     }
     return adapter;
@@ -438,11 +432,7 @@ export class ChatAdapters {
    *  it heard a direct message at, else the chat's own address. */
   addressAt(channel: string, place: Place): ChatId {
     if (place.threadId !== undefined) return place.threadId;
-    return (
-      isDirectMessage(place.chat)
-        ? directMessageAddress(this.accountOn(channel), place.chat, this.deps.addresses)
-        : addressOf(place)
-    ) as ChatId;
+    return directMessageAddress(this.accountOn(channel), place.chat, this.deps.addresses) as ChatId;
   }
 
   /**
@@ -464,22 +454,30 @@ export class ChatAdapters {
    */
   chatAt(channel: string, address: string, kind: "group" | "dm"): ChatRef {
     const account = this.accountOn(channel);
+    const bound = this.deps.addresses.keyAt(account, address);
+    if (bound !== null) return ChatIds.chat(chatKey(account.platform, bound as ChatId));
     if (kind === "group") return chatAt(account.platform, address);
-    return directMessageAt(account, address, this.deps.addresses);
+    return chatAt(account.platform, address, { romeEnd: account.id });
+  }
+
+  /** The email adapter over `channel`, which opens threads; throws for a
+   *  channel on another platform. */
+  emailOf(channel: Channel): EmailChatAdapter {
+    const adapter = this.of(channel);
+    if (!isEmailAdapter(adapter)) throw new Error(`Channel "${channel.name}" sends no email`);
+    return adapter;
   }
 }
 
-/** `out` as the channel port takes it: an email when it carries email
- *  fields, else a chat message quoting the platform's `replyTo`. */
+/** `out` as the channel port takes it, quoting the platform's `replyTo`. */
 function outgoing(out: Outbound, replyTo: string | undefined): OutgoingMessage {
-  const base = {
+  return {
     text: out.text,
     ...(out.parts ? { parts: [...out.parts] } : {}),
     ...(out.attachments ? { attachments: [...out.attachments] } : {}),
     ...(out.turnId ? { turnId: out.turnId } : {}),
+    ...(replyTo ? { replyToMessageId: replyTo } : {}),
   };
-  if (out.email) return { ...base, ...out.email, kind: "email" };
-  return { ...base, ...(replyTo ? { replyToMessageId: replyTo } : {}) };
 }
 
 /** The direct message `account` has at platform address `address`: the one
@@ -495,8 +493,8 @@ export function directMessageAt(
     : ChatIds.chat(chatKey(account.platform, heard as ChatId));
 }
 
-/** Where `account` reaches direct message `chat`: the address it heard the
- *  chat at, else the other party's. */
+/** Where `account` reaches `chat`: the address it heard or bound the chat
+ *  at, else the other party of a direct message, else the chat's key. */
 export function directMessageAddress(
   account: Account,
   chat: ChatRef,
@@ -506,9 +504,14 @@ export function directMessageAddress(
 }
 
 /** The message `event` carries, as the adapter hands it to Chats. */
-function toInbound(channelName: string, account: Account, event: InboundEvent): Inbound {
+function toInbound(
+  channelName: string,
+  account: Account,
+  event: InboundEvent,
+  keying: ChatKeying,
+): Inbound {
   const message = event.message;
-  const { key, kind } = chatOf(account.platform, account.id, message);
+  const { key, kind } = keying(account, message);
   const ref = ChatIds.chat(key);
   const replyTo = message.replyTo?.messageId.trim();
   return {

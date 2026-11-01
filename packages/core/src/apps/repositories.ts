@@ -15,9 +15,12 @@ import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
-import { lineAt, platformIdOfLine, sentLineId, type ChatAdapters } from "../chats/adapter.js";
+import { lineAt, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
+import { ChatIds } from "../channels/chat-ids.js";
+import type { EmailOutbound, EmailRecipients } from "../channels/email-chat-adapter.js";
 import type { Seat } from "../sessions/seat-replies.js";
 import { partsText } from "../chats/message.js";
+import { placeIn } from "../chats/place.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -32,15 +35,15 @@ export interface CreateAppRuntimeRepositoriesDeps {
   /** The chats a channel thread's first message starts. */
   chatRepo: Pick<ChatsByKey, "start">;
   /** Where a message an app hands over is put on record. */
-  chatMessages: Pick<MessageRepository, "record">;
+  chatMessages: Pick<MessageRepository, "record" | "send">;
   /** What an app's seat says, recorded and linked to its turn. */
   replies: Pick<SeatReplies, "say" | "send">;
   /** Sends on a channel by its name, which an app's seat speaks through. */
   sendOn(channel: string, address: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
-  links: Pick<TurnLinks, "prompt">;
+  links: Pick<TurnLinks, "prompt" | "answer">;
   /** The dashboard's read model, which an app's transcript read renders. */
   reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
-  adapters: OpenChannelChatDeps["adapters"] & Pick<ChatAdapters, "of">;
+  adapters: OpenChannelChatDeps["adapters"] & Pick<ChatAdapters, "of" | "emailOf" | "addressAt">;
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -103,6 +106,51 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       },
       input,
     );
+  /**
+   * Open a thread to `recipients` and say `out` there as main: its first
+   * message, which starts it. Main's seat in the thread opens once the
+   * provider took the message, so a refused email leaves no seat or line.
+   */
+  const startThread = async (
+    channel: Channel,
+    recipients: EmailRecipients,
+    subject: string,
+    out: EmailOutbound,
+    recordedParts: readonly MessagePart[],
+    turnId: string | undefined,
+  ) => {
+    const adapter = deps.adapters.emailOf(channel);
+    const chat = adapter.open(recipients, subject);
+    deps.chatRepo.start(chat, "group", subject || null);
+    const romeEnd = adapter.account.id;
+    let seat = "";
+    const sent = await deps.chatMessages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: { platform: chat.platform, id: romeEnd }, agent: "main" },
+        parts: recordedParts,
+      },
+      async () => {
+        const id = await adapter.send(chat.id, null, out);
+        seat = (
+          await open({
+            channel: channel.name,
+            threadId: ChatIds.key(chat).externalId,
+            agentName: "main",
+            threadType: "group",
+            ...(subject ? { threadName: subject } : {}),
+          })
+        ).id;
+        return { id };
+      },
+    );
+    if (sent.recorded && turnId) deps.links.answer(sent.id, seat, turnId);
+    return {
+      messageId: platformIdOfLine(chat, romeEnd, sent.id),
+      threadId: deps.adapters.addressAt(channel.name, placeIn(chat)),
+    };
+  };
   return {
     recentChats: ({ since, where }) => repo.recentChats(since, where),
     async transcript(sessionId, input = {}) {
@@ -193,39 +241,52 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       const recorded = input.content
         ? (JSON.parse(stripHostOnlyPartsFromContent(input.content)) as MessagePart[])
         : undefined;
+      const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
+      if (inReplyToMessageId !== undefined && !inReplyToMessageId.trim()) {
+        throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+      }
       // An email's body is its text, else the text of its parts.
       const text = input.text ?? (parts ? partsText(parts) : "");
-      const out = { text, ...(parts ? { parts } : {}), email: input.email };
-      const turn = input.knownToProvider && input.turnId ? { turnId: input.turnId } : {};
-      // An email thread is a group chat keyed by the thread, as inbound mail
-      // records it; main answers there unless the caller names its seat.
-      const seatAt = async (threadId: string) =>
-        input.sessionId ??
-        (await open({ channel: input.channel, threadId, agentName: "main", threadType: "group" }))
-          .id;
-      if (input.threadId) {
-        const sessionId = await seatAt(input.threadId);
-        const sent = await deps.replies.send(sessionId, channel, out, {
-          ...turn,
-          ...(recorded ? { recorded } : {}),
-        });
-        if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
-        return { messageId: platformIdOfSent(sent), threadId: input.threadId };
+      const out: EmailOutbound = { text, ...(parts ? { parts } : {}), ...(html ? { html } : {}) };
+      const turnId = input.knownToProvider ? input.turnId : undefined;
+      if (!input.threadId && !input.sessionId) {
+        return await startThread(
+          channel,
+          { to: to ?? [], ...(cc ? { cc } : {}), ...(bcc ? { bcc } : {}) },
+          subject?.trim() ?? "",
+          out,
+          recorded ?? parts ?? [{ type: "text", content: text }],
+          turnId,
+        );
       }
-      // A new thread has no address until the provider takes the email, so
-      // it is recorded once the provider named it.
-      const adapter = deps.adapters.of(channel);
-      if (!adapter.open) throw new Error(`Channel "${input.channel}" cannot start a thread`);
-      const opened = await adapter.open(out);
-      const sessionId = await seatAt(opened.address);
-      await deps.replies.say(
+      // An email thread is a group chat, main's unless the caller names its seat.
+      const sessionId =
+        input.sessionId ??
+        (
+          await open({
+            channel: input.channel,
+            threadId: input.threadId!,
+            agentName: "main",
+            threadType: "group",
+          })
+        ).id;
+      const seat = inReplyToMessageId ? await repo.seatOf(sessionId) : null;
+      const sent = await deps.replies.send(
         sessionId,
-        recorded ?? parts ?? [{ type: "text", content: out.text }],
-        async (seat) =>
-          sentLineId(seat.place.chat, seat.accountId, opened.platformMessageId ?? undefined),
-        turn,
+        channel,
+        {
+          ...out,
+          ...(seat && inReplyToMessageId
+            ? { replyTo: lineAt(seat.place.chat, seat.accountId, inReplyToMessageId) }
+            : {}),
+        },
+        { ...(turnId ? { turnId } : {}), ...(recorded ? { recorded } : {}) },
       );
-      return { messageId: opened.platformMessageId, threadId: opened.address };
+      if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
+      return {
+        messageId: platformIdOfSent(sent),
+        threadId: deps.adapters.addressAt(input.channel, sent.seat.place),
+      };
     },
   };
 }

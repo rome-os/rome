@@ -617,7 +617,7 @@ describe("email delivery through send_message", () => {
       h.channels.send = rs.fn(async () => receipt as MessageReceipt);
       await expect(
         executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "hello" }, h.deps),
-      ).rejects.toThrow("named no conversation");
+      ).rejects.toThrow("named no thread");
       expect(h.channels.send).toHaveBeenCalledTimes(1);
       expect(h.seats()).toEqual([]);
       expect(h.recorded()).toEqual([]);
