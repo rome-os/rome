@@ -3,9 +3,11 @@
  * self-contained and serialized with toString().
  *
  * Returns `{ rows, candidate_count, resolved_count, layout }`, or `{ error, url }` off the search
- * page. Each row's headline and location come only from the text between its own result's first
- * profile link and the next result's, so a row never carries another result's metadata. A field
- * stays empty when that span has no line for it.
+ * page. `candidate_count` counts every rendered profile handle, whether or not a name parsed from
+ * its link, so a page of unparsed links reads as an unsupported layout, not an empty search. Each
+ * row's headline and location come only from the text between its own result's first profile link
+ * and the next result's, so a row never carries another result's metadata. A field stays empty
+ * when that span has no line for it.
  */
 export function readPeopleSearchPage() {
   const href = String(location.href || "");
@@ -137,12 +139,14 @@ export function readPeopleSearchPage() {
       .map((chunk) => clean(chunk.text))
       .filter(Boolean);
     const aria = anchor.el.querySelector('span[aria-hidden="true"]');
+    // A link wrapping the whole card can render its photo's presence text before the name.
+    const ownName = own.map(cleanName).find(Boolean) || "";
     return {
       ...anchor,
       index,
       rendered: true,
       own,
-      name: cleanName(aria?.textContent) || cleanName(own[0]),
+      name: cleanName(aria?.textContent) || ownName,
       before: clean(first.lines[start.line].slice(0, start.col)),
       // A link spanning several lines ends its first line itself, so only a one-line link
       // can share its name's line with trailing text.
@@ -150,7 +154,10 @@ export function readPeopleSearchPage() {
       endLine: end.line,
     };
   });
-  const candidateHandles = new Set(views.filter((view) => view.name).map((view) => view.handle));
+  const candidateHandles = new Set(
+    views.filter((view) => view.rendered).map((view) => view.handle),
+  );
+  const namedHandles = new Set(views.filter((view) => view.name).map((view) => view.handle));
 
   // Text before a name on its line can only be presence status, which skip() covers.
   const standalone = (view) => view.rendered && view.name && skip(view.before);
@@ -183,7 +190,7 @@ export function readPeopleSearchPage() {
       ? unique(lenient.filter((view) => shape(view) === shape(lenient[0])))
       : [];
     layout = "lenient";
-    primaries = group.length > 1 || candidateHandles.size === 1 ? group : [];
+    primaries = group.length > 1 || namedHandles.size === 1 ? group : [];
   }
   if (primaries.length === 0) {
     return {

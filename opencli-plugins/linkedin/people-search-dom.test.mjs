@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { CommandExecutionError } from "@jackwener/opencli/errors";
+import { peopleSearchRows } from "./people-search-helpers.mjs";
 import { readPeopleSearchPage } from "./people-search-page.mjs";
 
 // The web test workspace owns jsdom.
@@ -172,6 +174,51 @@ test("a link wrapping the whole card yields its name and metadata, even in two l
       profile_url: profile("riley-test-2"),
     },
   ]);
+});
+
+test("a card link whose photo and presence text render before the name yields that name", () => {
+  const result = read(makeDom(fixture("card-link-presence")));
+
+  assert.deepEqual(
+    peopleSearchRows(result, { keywords: "example", limit: 5, searchUrl: SEARCH_URL }),
+    [
+      {
+        rank: 1,
+        name: "Morgan Sample",
+        headline: "Pharmacist at Example Clinic",
+        location: "Porto, Portugal",
+        profile_url: profile("morgan-sample"),
+      },
+      {
+        rank: 2,
+        name: "Taylor Fixture",
+        headline: "Librarian at Example Library",
+        location: "",
+        profile_url: profile("taylor-fixture"),
+      },
+    ],
+  );
+  assert.equal(result.candidate_count, 2);
+});
+
+test("rendered profile links without a readable name fail as unsupported, not as empty", () => {
+  const html = fixture("card-link-presence").replace(
+    /(<div><img alt=""><span>Status is \w+<\/span><\/div>)[\s\S]*?(<\/a>)/g,
+    "$1$2",
+  );
+
+  const result = read(makeDom(html));
+
+  assert.deepEqual(result, { rows: [], candidate_count: 2, resolved_count: 0, layout: "none" });
+  assert.throws(
+    () => peopleSearchRows(result, { keywords: "example", limit: 5, searchUrl: SEARCH_URL }),
+    (error) => {
+      assert.ok(error instanceof CommandExecutionError);
+      assert.equal(error.code, "COMMAND_EXEC");
+      assert.match(error.message, /layout is not supported/);
+      return true;
+    },
+  );
 });
 
 test("unknown name labels resolve by their shared shape and skip mutual-connection links", () => {
