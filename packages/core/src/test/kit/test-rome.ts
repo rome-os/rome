@@ -16,7 +16,9 @@ import {
   kindChannelOf,
   type TestConnections,
   recordedConnectionKindOf,
+  testChatWiring,
 } from "../helpers.js";
+import { createAppRuntimeRepositories } from "../../apps/repositories.js";
 import type { Channels } from "../../channels/channel.js";
 import { channelList } from "../../channels/channel-list.js";
 import { FakeModel } from "./fake-model.js";
@@ -309,9 +311,26 @@ async function buildHarness(
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 
+  const wiring = testChatWiring(db);
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    chats: createAppRuntimeRepositories({
+      settingsRepo: new SettingsRepository(db),
+      webchatRepo: wiring.webchatRepo,
+      chatRepo: wiring.chats,
+      chatMessages: wiring.messages,
+      adapters: wiring.adapters,
+      sendOn: async (name, address, message) => {
+        const send = channelNamed(channels)(name)?.send;
+        if (!send) throw new Error(`Channel "${name}" cannot send`);
+        return send.send(address, message);
+      },
+      links: wiring.links,
+      replies: wiring.replies,
+      reads: wiring.reads,
+    }).chats!,
+    replies: wiring.replies,
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,

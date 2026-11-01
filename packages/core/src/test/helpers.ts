@@ -64,7 +64,12 @@ import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
 import { storedOn, type Channel, type Channels } from "../channels/channel.js";
 import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
+import { MessageRepository } from "../chats/message-repository.js";
+import { ChatAdapters } from "../chats/adapter.js";
+import { ChatAddresses } from "../channels/chat-addresses.js";
+import { TurnLinks } from "../sessions/turn-links.js";
+import { SeatReplies } from "../sessions/seat-replies.js";
+import { ChatReadModel } from "../webchat/chat-read-model.js";
 import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
@@ -157,9 +162,30 @@ export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
 /** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
 export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
 
-/** The chats by key over `db`, reading the channel records `db` holds. */
+/** The chats over `db`. */
 export function testChatRepository(db: DrizzleDb): ChatRepository {
-  return new ChatRepository(db, new ChannelRecordsRepository(db, testAccountLinkOf));
+  return new ChatRepository(db);
+}
+
+/**
+ * Chats, Agents' seat links and replies, and the chat adapters over `db`, as
+ * Rome wires them: an adapter per channel, whose accounts the channel
+ * records `db` holds name.
+ */
+export function testChatWiring(db: DrizzleDb, webchatRepo = new WebChatRepository(db)) {
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
+  const chats = new ChatRepository(db);
+  const messages = new MessageRepository(db);
+  const links = new TurnLinks(db);
+  const adapters = new ChatAdapters({
+    accountOf: (channel) => records.accountOf(channel),
+    platformOfChannel: (channel) => records.platformOfChannel(channel),
+    addresses: new ChatAddresses(db),
+    channelsOn: (platform) => records.namesOn(platform),
+  });
+  const replies = new SeatReplies({ seats: webchatRepo, adapters, messages, links });
+  const reads = new ChatReadModel(db, { messages, links });
+  return { chats, messages, links, adapters, replies, reads, webchatRepo };
 }
 
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
@@ -605,11 +631,25 @@ export async function buildTestDeps(
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
+  const wiring = testChatWiring(db, webchatRepo);
+  // `channels` is built further down; an app sends after setup.
+  let sendOn: (
+    channel: string,
+    address: ChatId,
+    message: OutgoingMessage,
+  ) => Promise<MessageReceipt> = async () => {
+    throw new Error("No channel can send yet");
+  };
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+    chatRepo: wiring.chats,
+    chatMessages: wiring.messages,
+    adapters: wiring.adapters,
+    sendOn: (channel, address, message) => sendOn(channel, address, message),
+    links: wiring.links,
+    replies: wiring.replies,
+    reads: wiring.reads,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -724,6 +764,8 @@ export async function buildTestDeps(
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    chats: appRuntimeRepositories.chats!,
+    replies: wiring.replies,
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -762,6 +804,7 @@ export async function buildTestDeps(
     registry: connections,
     channelOf: kindChannelOf,
   });
+  sendOn = (channel, address, message) => channelsService.send(channel, address, message);
 
   return {
     connections,
@@ -798,16 +841,9 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), {
-      channelsOn: (platform) =>
-        storedOn(
-          channels,
-          (name) => channelRecords.platformOfChannel(name),
-          platform,
-          (name) => channelRecords.namesOn(name),
-        ),
-      accountOf: (channel) => channelRecords.accountOf(channel),
-    }),
+    chatMessages: wiring.messages,
+    chats: wiring.chats,
+    adapters: wiring.adapters,
     actionExecutionsRepo,
     executionJournalRepo,
     webhookInvocationsRepo,
@@ -1172,11 +1208,19 @@ export async function createAppLifecycleHarness(
     });
     const settingsRepo = new SettingsRepository(db);
     const webchatRepo = new WebChatRepository(db);
+    const wiring = testChatWiring(db, webchatRepo);
     const appRuntimeRepositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
-      chatRepo: testChatRepository(db),
-      chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+      chatRepo: wiring.chats,
+      chatMessages: wiring.messages,
+      adapters: wiring.adapters,
+      sendOn: async () => {
+        throw new Error("The test worker sends on no channel");
+      },
+      links: wiring.links,
+      replies: wiring.replies,
+      reads: wiring.reads,
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
