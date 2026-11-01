@@ -22,13 +22,14 @@ export function readPeopleSearchPage() {
       .trim();
   const action = (line) =>
     /^(?:Message|Connect|Follow|Following|View profile|Pending|Remove|Withdraw)$/i.test(line);
+  const socialProof = (line) => /\b(?:mutual|shared) connections?\b/i.test(line);
   const skip = (line) =>
     !line ||
     /^Status is\b/i.test(line) ||
     action(line) ||
     /^[•·∙]/.test(line) ||
     /^(?:1st|2nd|3rd\+?)(?:\s+degree(?:\s+connection)?)?$/i.test(line) ||
-    /\b(?:mutual|shared) connections?\b/i.test(line) ||
+    socialProof(line) ||
     /^(?:Summary|Current|Past|Skills):/i.test(line) ||
     /^About this profile/i.test(line) ||
     /^View .+['’]s profile$/i.test(line);
@@ -133,6 +134,7 @@ export function readPeopleSearchPage() {
 
   const first = readMarked(null);
   const startsByLine = new Map();
+  const linkLines = new Set();
   const views = anchors.map((anchor, index) => {
     const start = first.marks.get(`${index}:s`);
     const end = first.marks.get(`${index}:e`);
@@ -143,6 +145,7 @@ export function readPeopleSearchPage() {
     startsByLine.get(start.line).push({ col: start.col, handle: anchor.handle });
     const ownChunks = chunks(first.lines, start, end).filter((chunk) => clean(chunk.text));
     const own = ownChunks.map((chunk) => clean(chunk.text));
+    for (const chunk of ownChunks) linkLines.add(chunk.line);
     const aria = anchor.el.querySelector('span[aria-hidden="true"]');
     // A link wrapping the whole card can render its photo's presence text before the name.
     const nameAt = own.findIndex((line) => cleanName(line));
@@ -157,16 +160,9 @@ export function readPeopleSearchPage() {
     const ownName = nameAt >= 0 && !wrapped ? cleanName(own[nameAt]) : "";
     // A link spanning several lines ends its first line itself, so only a one-line link
     // can share its name's line with trailing text.
-    let after = own.length > 1 ? "" : clean(first.lines[end.line].slice(end.col));
-    // A block-level link, such as a flex item, ends its own line, so the text trailing it, such
-    // as the rest of a mutual-connection sentence, starts on a later line.
-    if (own.length === 1 && !after && end.line > ownChunks[0].line) {
-      after =
-        first.lines
-          .slice(end.line + 1)
-          .map(clean)
-          .find(Boolean) || "";
-    }
+    const after = own.length > 1 ? "" : clean(first.lines[end.line].slice(end.col));
+    let nextLine = end.line + 1;
+    while (nextLine < first.lines.length && !clean(first.lines[nextLine])) nextLine++;
     return {
       ...anchor,
       index,
@@ -175,16 +171,39 @@ export function readPeopleSearchPage() {
       name: cleanName(aria?.textContent) || ownName,
       before: clean(first.lines[start.line].slice(0, start.col)),
       after,
+      endsLine: own.length === 1 && !after,
+      nextLine,
       endLine: end.line,
     };
   });
+  // A link that ends its line, such as one in a block of its own, can still sit in a sentence that
+  // goes on in the next block, like "is a mutual connection". Only that wording on a line with no
+  // profile link counts, because the line after a result's name can be its headline or a
+  // sentence that starts with a mutual connection's link.
+  for (const view of views) {
+    view.inSentence =
+      view.endsLine &&
+      !linkLines.has(view.nextLine) &&
+      socialProof(clean(first.lines[view.nextLine]));
+  }
   const candidateHandles = new Set(
     views.filter((view) => view.rendered).map((view) => view.handle),
   );
   const namedHandles = new Set(views.filter((view) => view.name).map((view) => view.handle));
 
+  // A card holds one result, and the result's name comes before any other member the card names,
+  // such as a mutual connection. So a later name in a card that already has one is not a result.
+  const cardNames = new Map();
+  for (const view of views) {
+    if (!view.rendered || !view.name) continue;
+    const card = view.el.closest('li, [role="listitem"], article');
+    if (!card || !main.contains(card)) continue;
+    if (!cardNames.has(card)) cardNames.set(card, view.handle);
+    view.laterInCard = cardNames.get(card) !== view.handle;
+  }
   // Text before a name on its line can only be presence status, which skip() covers.
-  const standalone = (view) => view.rendered && view.name && skip(view.before);
+  const standalone = (view) =>
+    view.rendered && view.name && skip(view.before) && !view.inSentence && !view.laterInCard;
   const unique = (list) => {
     const seen = new Set();
     return list.filter((view) => {
@@ -197,6 +216,16 @@ export function readPeopleSearchPage() {
   let primaries = unique(
     views.filter((view) => standalone(view) && (badge(view.after) || action(view.after))),
   );
+  // The first standalone name on the page is a result's (see below). When it is not a match and
+  // every match has no text after it on its line, the matches are links that end their line,
+  // such as mutual connections in blocks of their own, and the labels need the lenient reading.
+  const firstName = views.find(standalone);
+  if (
+    primaries.every((view) => !view.after) &&
+    !primaries.some((view) => view.handle === firstName?.handle)
+  ) {
+    primaries = [];
+  }
   if (primaries.length === 0) {
     // Unknown trailing labels, such as a degree badge in another language. The first standalone
     // name on the page is a result's, because a result's name precedes its card's other lines,

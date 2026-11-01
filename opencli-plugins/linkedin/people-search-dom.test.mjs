@@ -335,6 +335,105 @@ test("block-level mutual-connection links never stand in for unknown-label resul
   );
 });
 
+test("a mutual-connection link whose sentence goes on in the next block is not a result", () => {
+  const card = (handle, name, badge, headline) =>
+    `<p><a href="/in/${handle}/"><span aria-hidden="true">${name}</span></a> • ${badge}</p>
+    <p>${headline}</p>`;
+  const pages = [
+    // No card element, and the sentence's text is a sibling block.
+    `<div role="list">
+      ${card("avery-example", "Avery Example", "2nd", "Engineer at Example Co")}
+      <div><a href="/in/morgan-mutual/">Morgan Mutual</a></div><div>is a mutual connection</div>
+      ${card("blake-example", "Blake Example", "3rd+", "Designer at Example Co")}
+    </div>`,
+    // The sentence's text is a block inside the same paragraph.
+    `<div role="list">
+      ${card("avery-example", "Avery Example", "2nd", "Engineer at Example Co")}
+      <p><a href="/in/morgan-mutual/">Morgan Mutual</a><span style="display: block">and 3 other mutual connections</span></p>
+      ${card("blake-example", "Blake Example", "3rd+", "Designer at Example Co")}
+    </div>`,
+  ];
+
+  for (const page of pages) {
+    const result = read(makeDom(`<!doctype html><main>${page}</main>`));
+
+    assert.deepEqual(
+      result.rows.map((row) => [row.profile_url, row.headline]),
+      [
+        [profile("avery-example"), "Engineer at Example Co"],
+        [profile("blake-example"), "Designer at Example Co"],
+      ],
+    );
+  }
+});
+
+test("a later name in a result's card is not a result, whatever its sentence says", () => {
+  const result = read(
+    makeDom(`<!doctype html><main><ul>
+      <li>
+        <p><a href="/in/avery-example/"><span aria-hidden="true">Avery Example</span></a> • 2nd</p>
+        <p>Engineer at Example Co</p>
+        <div><a href="/in/morgan-mutual/">Morgan Mutual</a></div><div>also works at Example Co</div>
+      </li>
+      <li>
+        <p><a href="/in/blake-example/"><span aria-hidden="true">Blake Example</span></a> • 3rd+</p>
+        <p>Designer at Example Co</p>
+      </li>
+    </ul></main>`),
+  );
+
+  assert.deepEqual(
+    result.rows.map((row) => row.profile_url),
+    [profile("avery-example"), profile("blake-example")],
+  );
+});
+
+test("block-level name links without a degree badge keep their headlines", () => {
+  const result = read(
+    makeDom(`<!doctype html><main><ul>
+      <li>
+        <a style="display: block" href="/in/avery-example/"><span aria-hidden="true">Avery Example</span></a>
+        <div>Engineer</div>
+      </li>
+      <li>
+        <a style="display: block" href="/in/blake-example/"><span aria-hidden="true">Blake Example</span></a>
+        <div>Designer</div>
+      </li>
+      <li>
+        <div><a href="/in/casey-sample/"><span aria-hidden="true">Casey Sample</span></a></div>
+        <div><a href="/in/morgan-mutual/">Morgan Mutual</a> and 3 other mutual connections</div>
+      </li>
+    </ul></main>`),
+  );
+
+  assert.deepEqual(
+    result.rows.map((row) => [row.profile_url, row.headline]),
+    [
+      [profile("avery-example"), "Engineer"],
+      [profile("blake-example"), "Designer"],
+      [profile("casey-sample"), ""],
+    ],
+  );
+});
+
+test("mutual links in blocks of their own never stand in for unknown-label results", () => {
+  const html = fixture("lenient-mutual")
+    .replace(
+      /<p>(<a href="https:\/\/www\.linkedin\.com\/in\/morgan-mutual-\d\/">[^<]+<\/a>) ([^<]+)<\/p>/g,
+      "<div>$1</div><div>$2</div>",
+    )
+    .replace(/<\/?li>/g, "");
+  assert.notEqual(html, fixture("lenient-mutual"));
+
+  const result = read(makeDom(html));
+
+  assert.equal(result.layout, "lenient");
+  assert.deepEqual(
+    result.rows.map((row) => row.profile_url),
+    [profile("camille-exemple"), profile("dominique-test"), profile("sacha-demo")],
+  );
+});
+
 test("profile links that only appear inside sentences produce no rows", () => {
   const result = read(makeDom(fixture("unsupported")));
 
