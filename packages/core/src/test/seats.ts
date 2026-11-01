@@ -1,0 +1,86 @@
+// Seeds chats, Rome's seats in them and the lines said there, as Chats and
+// Agents store them, for tests that read those tables. Vocabulary:
+// docs/domains/chats.md.
+
+import type { DrizzleDb } from "../db/index.js";
+import { chatMessages, chats, romeSessions } from "../db/schema/system.js";
+import type { ChatKind } from "../chats/chat.js";
+import type { ChatRef } from "../chats/place.js";
+
+type SessionRow = typeof romeSessions.$inferInsert;
+
+export interface SeedSeat
+  extends Partial<Omit<SessionRow, "chatId" | "threadId" | "accountId" | "id">> {
+  id: string;
+  chat: ChatRef;
+  /** The one of Rome's accounts the seat speaks as. */
+  accountId: string;
+  /** The topic the seat stands in, when it stands in one. */
+  threadId?: string | null;
+}
+
+export interface SeedLine {
+  id: string;
+  chat: ChatRef;
+  threadId?: string | null;
+  /** The account that said it. */
+  from: string | null;
+  /** The agent that said it, set on exactly Rome's lines. */
+  agent?: string | null;
+  name?: string | null;
+  text?: string;
+  parts?: unknown[];
+  at: Date;
+}
+
+/** A fixture over `db` that seeds chats, seats and lines directly. */
+export function seatFixture(db: DrizzleDb) {
+  return {
+    /** The chat `id` on `platform`, started when absent. */
+    chat(platform: string, id: string, kind: ChatKind, name: string | null = null): ChatRef {
+      db.insert(chats)
+        .values({ id, platform, kind, name, startedAt: new Date(0) })
+        .onConflictDoNothing()
+        .run();
+      return { platform, id };
+    },
+
+    /** A seat of Rome's account `accountId` in `chat`. */
+    seat({ id, chat, accountId, threadId = null, ...row }: SeedSeat): string {
+      const at = row.createdAt ?? new Date(0);
+      db.insert(romeSessions)
+        .values({
+          name: id,
+          type: "channel",
+          ...row,
+          id,
+          chatId: chat.id,
+          threadId,
+          accountId,
+          createdAt: at,
+          activityAt: row.activityAt ?? at,
+        })
+        .run();
+      return id;
+    },
+
+    /** A line said in `chat`, or in its topic `threadId`. */
+    say(line: SeedLine): string {
+      const text = line.text ?? line.id;
+      db.insert(chatMessages)
+        .values({
+          id: line.id,
+          chatId: line.chat.id,
+          threadId: line.threadId ?? null,
+          senderAccountId: line.from,
+          senderAgent: line.agent ?? null,
+          senderName: line.name ?? null,
+          text,
+          parts: JSON.stringify(line.parts ?? [{ type: "text", content: text }]),
+          saidAt: line.at,
+        })
+        .run();
+      return line.id;
+    },
+  };
+}

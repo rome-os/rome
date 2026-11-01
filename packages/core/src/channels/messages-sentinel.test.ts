@@ -1,8 +1,10 @@
 import { platformOf } from "@rome/api-types/platform";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { DrizzleDb } from "../db/index.js";
-import { romeSessions, sentinelLog } from "../db/schema.js";
+import { sentinelLog } from "../db/schema.js";
+import { channelChatId } from "../db/session-kind.js";
 import { createTestDb } from "../test/helpers.js";
+import { seatFixture } from "../test/seats.js";
 import {
   testAccountMessagesContract,
   WHOLE_HISTORY,
@@ -48,18 +50,12 @@ function row(
   });
 }
 
-function groupSession(db: DrizzleDb, id: string, fields: { channel?: string; threadId: string }) {
-  const now = new Date(0);
-  return db.insert(romeSessions).values({
-    id,
-    name: id,
-    type: "channel",
-    sourceChannel: fields.channel ?? CHANNEL,
-    sourceThreadId: fields.threadId,
-    sourceThreadType: "group",
-    createdAt: now,
-    activityAt: now,
-  });
+/** Rome's seat in the group at `threadId`, as a channel opens it. */
+function groupSession(db: DrizzleDb, _id: string, fields: { channel?: string; threadId: string }) {
+  const fixture = seatFixture(db);
+  const channel = fields.channel ?? CHANNEL;
+  const chat = fixture.chat(platformOf(channel), `${channel}-${fields.threadId}`, "group");
+  fixture.seat({ id: channelChatId(channel, fields.threadId), chat, accountId: `${channel}-bot` });
 }
 
 async function seed(db: DrizzleDb) {
