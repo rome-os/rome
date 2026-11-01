@@ -23,6 +23,9 @@ If the requested browser is disconnected, report that it is unavailable. Do not 
 Settings > Advanced > Computer Use shows observed browser connections and their last seen times.
 Use `--cdp-endpoint` only when the task explicitly requires a direct CDP connection.
 
+The available sites are:
+1688, 36kr, 51job, amazon, antigravity, apple-podcasts, arxiv, baidu-scholar, band, barchart, bbc, bilibili, binance, bloomberg, bluesky, boss, chaoxing, chatgpt, chatgpt-app, chatwise, claude, cnki, codex, coupang, craigslist, ctrip, cursor, dblp, deepseek, devto, dianping, dictionary, discord-app, douban, doubao, doubao-app, douyin, eastmoney, facebook, gemini, gitee, google, google-scholar, gov-law, gov-policy, grok, hackernews, hf, hupu, imdb, indeed, instagram, jd, jianyu, jike, jimeng, ke, lesswrong, linkedin, linux-do, lobsters, maimai, medium, mubu, notebooklm, notion, nowcoder, ones, openreview, paperreview, pixiv, producthunt, quark, reddit, reuters, sinablog, sinafinance, smzdm, spotify, stackoverflow, steam, substack, taobao, tdx, ths, tiktok, toutiao, twitter, uiverse, v2ex, wanfang, web, weibo, weixin, weread, wikipedia, xianyu, xiaoe, xiaohongshu, xiaoyuzhou, xueqiu, yahoo-finance, yollomi, youtube, yuanbao, zhihu, zlibrary, zsxq
+
 ## When a browser command times out
 
 A browser command can fail with `command_result_unknown`, for example `Browser exec command timed out after 120s; it may still complete in the browser.` The command may still finish in the browser, so its outcome is unknown.
@@ -31,9 +34,6 @@ A browser command can fail with `command_result_unknown`, for example `Browser e
 2. Run `opencli --profile <name-or-id> browser <session> tab list`. It reads each tab's URL and title from the browser without running page JavaScript, so it answers when the page does not. `eval` and `state` run page JavaScript and wait on the same stalled page.
 3. If the tab stays stuck, release it with `opencli --profile <name-or-id> browser <session> close`, then open the page again in that session. Other sessions on the same browser keep working.
 4. If the command that timed out changes something, such as a submit or a send, check the site for its effect before acting again. Report an outcome you cannot confirm instead of retrying.
-
-The available sites are:
-1688, 36kr, 51job, amazon, antigravity, apple-podcasts, arxiv, baidu-scholar, band, barchart, bbc, bilibili, binance, bloomberg, bluesky, boss, chaoxing, chatgpt, chatgpt-app, chatwise, claude, cnki, codex, coupang, craigslist, ctrip, cursor, dblp, deepseek, devto, dianping, dictionary, discord-app, douban, doubao, doubao-app, douyin, eastmoney, facebook, gemini, gitee, google, google-scholar, gov-law, gov-policy, grok, hackernews, hf, hupu, imdb, indeed, instagram, jd, jianyu, jike, jimeng, ke, lesswrong, linkedin, linux-do, lobsters, maimai, medium, mubu, notebooklm, notion, nowcoder, ones, openreview, paperreview, pixiv, producthunt, quark, reddit, reuters, sinablog, sinafinance, smzdm, spotify, stackoverflow, steam, substack, taobao, tdx, ths, tiktok, toutiao, twitter, uiverse, v2ex, wanfang, web, weibo, weixin, weread, wikipedia, xianyu, xiaoe, xiaohongshu, xiaoyuzhou, xueqiu, yahoo-finance, yollomi, youtube, yuanbao, zhihu, zlibrary, zsxq
 
 ## Authoring browser automation actions
 
