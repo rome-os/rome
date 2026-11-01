@@ -14,10 +14,14 @@ import { canonicalizeLinkedInProfileUrl, normalizeName } from "./connect-receipt
  * - `inspect_more` opens the owner's More menu, reads its items, and closes it again. It clicks
  *   only the More control, never a menu item.
  * - `activate` clicks the owner's Connect control, directly or from the More menu. LinkedIn can
- *   send the invitation on that click.
+ *   send the invitation on that click. A Connect link is never clicked: it returns
+ *   `{ opened: "link", href }` for the caller to check and open.
  */
 export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // LinkedIn flags clicks that follow each other at machine speed.
+  const jitter = (min = 450, max = 1150) =>
+    sleep(min + Math.floor(Math.random() * (max - min + 1)));
   const clean = (value) =>
     String(value ?? "")
       .replace(/[\u00a0\u202f]/g, " ")
@@ -127,16 +131,26 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
     }
     return roots;
   };
+  const namesOther = (el) => {
+    const target = targetOf(el);
+    if (target && !namesOwner(target)) return true;
+    const inviteVanity = inviteVanityOf(el);
+    return Boolean(inviteVanity) && inviteVanity !== owner;
+  };
+  // An element that names another member makes its whole subtree that member's, because a click
+  // anywhere inside it reaches that member's action.
   const ownedBy = (root) => {
     const foreignRoots = foreignRootsOf(root);
     return (el) => {
       if (foreignRoots.some((foreignRoot) => foreignRoot.contains(el))) return false;
-      const target = targetOf(el);
-      if (target && !namesOwner(target)) return false;
-      const inviteVanity = inviteVanityOf(el);
-      return !inviteVanity || inviteVanity === owner;
+      for (let node = el; node; node = node === root ? null : node.parentElement) {
+        if (namesOther(node)) return false;
+      }
+      return true;
     };
   };
+  // A control that holds an element naming another member could be that member's action.
+  const ownsSubtree = (el) => !Array.from(el.querySelectorAll("*")).some(namesOther);
 
   const lower = (el) => labelOf(el).toLowerCase();
   const isConnect = (el) => {
@@ -170,8 +184,20 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
     /^(?:message|follow|unfollow)\b/i.test(ariaLabel(el));
   const controlsOf = (root) => {
     const owned = ownedBy(root);
-    return Array.from(root.querySelectorAll(CONTROL)).filter((el) => visible(el) && owned(el));
+    return Array.from(root.querySelectorAll(CONTROL)).filter(
+      (el) => visible(el) && owned(el) && ownsSubtree(el),
+    );
   };
+  // A Connect link navigates, so only its URL is used, after the caller checks that it is the
+  // owner's invitation. Clicking it would also end this script along with the document.
+  const linkOf = (el) => el.closest("a[href]");
+  const connectHrefsOf = (els) =>
+    Array.from(new Set(els.filter(isConnect).map(linkOf).filter(Boolean))).map(
+      (link) => link.getAttribute("href") || "",
+    );
+  // A control wraps its own label element, so act on the innermost match.
+  const innermost = (matches) =>
+    matches.find((el) => !matches.some((other) => other !== el && el.contains(other))) || null;
 
   // Climb past name-only cards to the nearest one that also holds the owner's actions. Before the
   // actions render, the nearest card stands in so the caller can wait and probe again.
@@ -208,9 +234,7 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
         );
       if (badge) degrees.add(badge[1].toLowerCase());
     }
-    const connectAnchor = controls.find(
-      (el) => el.tagName === "A" && isConnect(el) && inviteVanityOf(el),
-    );
+    const connectHrefs = connectHrefsOf(controls);
     return {
       url: location.href,
       title: document.title || "",
@@ -221,7 +245,7 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
       firstDegree: degrees.has("1st"),
       pending: controls.some(isPending),
       connectAvailable: controls.some(isConnect),
-      connectHref: connectAnchor ? connectAnchor.getAttribute("href") || "" : "",
+      connectHrefs,
       moreAvailable: controls.some(isMore),
       ownerActions: controls.filter(isOwnerAction).map(labelOf).slice(0, 20),
       buttonLabels: controls.map(labelOf).filter(Boolean).slice(0, 30),
@@ -233,7 +257,10 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
   const dialogs = () =>
     Array.from(document.querySelectorAll('[role="dialog"], dialog')).filter(visible);
   const activate = async (control, via) => {
+    const link = linkOf(control);
+    if (link) return { ok: true, opened: "link", via, href: link.getAttribute("href") || "" };
     const before = new Set(dialogs());
+    await jitter();
     control.click();
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await sleep(100);
@@ -245,7 +272,7 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
   };
 
   if (mode === "activate") {
-    const direct = controls.find((el) => isConnect(el) && !isMore(el));
+    const direct = innermost(controls.filter((el) => isConnect(el) && !isMore(el)));
     if (direct) return activate(direct, "header");
   }
 
@@ -268,9 +295,12 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
       candidate.querySelectorAll(
         '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="button"], button, a, li',
       ),
-    ).filter((el) => visible(el) && owned(el) && labelOf(el));
+    ).filter((el) => visible(el) && owned(el) && ownsSubtree(el) && labelOf(el));
   };
-  if (!wasExpanded) more.click();
+  if (!wasExpanded) {
+    await jitter();
+    more.click();
+  }
   // LinkedIn can show the dropdown before its items render, so a menu counts only once it has
   // items. A menu that stays empty is unreadable, never proof that Connect is absent.
   let menu = null;
@@ -313,14 +343,12 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
     return { ok: false, reason: "more_menu_not_found" };
   }
 
-  // A menu item wraps its own label element, so act on the innermost match.
-  const innermost = (matches) =>
-    matches.find((el) => !matches.some((other) => other !== el && el.contains(other))) || null;
   const connectItem = innermost(items.filter(isConnect));
   const result = {
     ok: true,
     items: Array.from(new Set(items.map(labelOf))).slice(0, 30),
     connect: Boolean(connectItem),
+    connectHrefs: connectHrefsOf(items),
     pending: items.some(isPending),
     removeConnection: items.some((el) => /^remove connection\b/.test(lower(el))),
   };
@@ -330,6 +358,7 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
       await close();
       return { ok: false, reason: "connect_control_not_found" };
     }
+    if (linkOf(connectItem)) await close();
     return activate(connectItem, "more_menu");
   }
   return { ...result, closed: await close() };
@@ -457,8 +486,9 @@ function block(safety, blockReason, connectable = null) {
  * the More menu, the `inspect_more` result.
  *
  * Returns `{ ok: true, method }` only for a Connect control the owner header proves. `method`
- * is `invite_link`, `header_button`, or `more_menu`. A `routine_non_connectable` block is a
- * confirmed state. An `unsafe_block` means the page could not be verified.
+ * is `invite_link`, with the owner's canonical `inviteUrl`, `header_button`, or `more_menu`. A
+ * `routine_non_connectable` block is a confirmed state. An `unsafe_block` means the page could
+ * not be verified.
  */
 export function assessConnectability(probe, menu, expectedName, expectedProfileUrl) {
   const expected = String(expectedName ?? "").trim();
@@ -467,6 +497,22 @@ export function assessConnectability(probe, menu, expectedName, expectedProfileU
   const observedUrl = canonicalizeLinkedInProfileUrl(probe?.url);
   const context = { expectedValue: expected, actualValue: actual, observedUrl };
   const result = (verdict) => ({ ...verdict, ...context });
+  // Every Connect link must be the owner's invitation, since following any other route is not
+  // proven to invite the owner.
+  const connectable = (blockReason, method, hrefs) => {
+    const ownerVanity = linkedInProfileVanity(expectedProfileUrl);
+    const links = Array.isArray(hrefs) ? hrefs : [];
+    const inviteUrls = links.map((href) => canonicalizeLinkedInInviteUrl(href, ownerVanity));
+    if (inviteUrls.some((url) => !url)) {
+      return result(block("unsafe_block", "invalid_connect_link"));
+    }
+    const verdict = { ok: true, safety: "connectable", connectable: true, blockReason, method };
+    return result(
+      inviteUrls.length > 0
+        ? { ...verdict, method: "invite_link", inviteUrl: inviteUrls[0] }
+        : verdict,
+    );
+  };
 
   if (probe?.authRequired) return result(block("unsafe_block", "auth_required"));
   if (!actual) return result(block("unsafe_block", "profile_name_not_found"));
@@ -489,27 +535,10 @@ export function assessConnectability(probe, menu, expectedName, expectedProfileU
   if (probe.pending || menu?.pending) {
     return result(block("routine_non_connectable", "connection_pending", false));
   }
-  if (probe.connectAvailable) {
-    const method = probe.connectHref ? "invite_link" : "header_button";
-    return result({
-      ok: true,
-      safety: "connectable",
-      connectable: true,
-      blockReason: "verified",
-      method,
-    });
-  }
+  if (probe.connectAvailable) return connectable("verified", "header_button", probe.connectHrefs);
   if (probe.moreAvailable) {
     if (!menu?.ok) return result(block("unsafe_block", menu?.reason || "more_menu_not_inspected"));
-    if (menu.connect) {
-      return result({
-        ok: true,
-        safety: "connectable",
-        connectable: true,
-        blockReason: "verified_via_more",
-        method: "more_menu",
-      });
-    }
+    if (menu.connect) return connectable("verified_via_more", "more_menu", menu.connectHrefs);
     return result(block("routine_non_connectable", "connect_button_not_found", false));
   }
   if (Array.isArray(probe.ownerActions) && probe.ownerActions.length > 0) {

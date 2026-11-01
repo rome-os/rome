@@ -12,8 +12,11 @@ import {
   connectLinkLayout,
   followOnlyLayout,
   followPrimaryLayout,
+  followPrimaryWithActions,
   headerWithoutActions,
   MENU_WITH_CONNECT,
+  MENU_WITH_CONNECT_LINK,
+  MENU_WITH_FOREIGN_CONNECT,
   MENU_WITH_REMOVE_CONNECTION,
   MENU_WITHOUT_CONNECT,
   messageAndConnectLayout,
@@ -52,7 +55,7 @@ test("#1542: a first-degree header badge wins over Connect controls in People yo
     assert.equal(probe.headerFound, true);
     assert.equal(probe.firstDegree, true, badge);
     assert.equal(probe.connectAvailable, false);
-    assert.equal(probe.connectHref, "");
+    assert.deepEqual(probe.connectHrefs, []);
     assert.deepEqual(probe.buttonLabels, ["Message", "More"]);
     assert.equal(verdict.blockReason, "already_connected");
     assert.equal(verdict.connectable, false);
@@ -175,7 +178,7 @@ test("Message beside the owner's own Connect stays connectable", async () => {
   const { page, probe, verdict } = await classify(messageAndConnectLayout);
   assert.equal(probe.degree, "2nd");
   assert.equal(probe.connectAvailable, true);
-  assert.equal(probe.connectHref, "");
+  assert.deepEqual(probe.connectHrefs, []);
   assert.equal(verdict.blockReason, "verified");
   assert.equal(verdict.method, "header_button");
   assert.deepEqual(page.clicks, []);
@@ -183,7 +186,7 @@ test("Message beside the owner's own Connect stays connectable", async () => {
 
 test("only the owner's invitation link is captured", async () => {
   const { probe, verdict } = await classify(connectLinkLayout);
-  assert.equal(probe.connectHref, "/preload/custom-invite/?vanityName=jane-doe");
+  assert.deepEqual(probe.connectHrefs, ["/preload/custom-invite/?vanityName=jane-doe"]);
   assert.equal(verdict.method, "invite_link");
 });
 
@@ -233,6 +236,109 @@ test("activate clicks only the owner's Connect menu item", async () => {
   });
   assert.deepEqual(missing.clicks, ["More"]);
   assert.equal(missing.menuOpen(), false);
+});
+
+// An element that names another member marks its whole subtree, and any control that holds it,
+// as that member's.
+const FOREIGN_HEADER_CONNECT = [
+  '<div role="button" aria-label="Invite Alex Example to connect"><button>Connect</button></div>',
+  '<button><span aria-label="Invite Sam Sample to connect">Connect</span></button>',
+  '<div role="button"><a href="/preload/custom-invite/?vanityName=alex-example">Connect</a></div>',
+];
+
+test("a Connect control inside or around another member's action never counts as the owner's", async () => {
+  for (const actions of FOREIGN_HEADER_CONNECT) {
+    const { page, probe, verdict } = await classify(followPrimaryWithActions(actions), {
+      menuItems: MENU_WITHOUT_CONNECT,
+    });
+    assert.equal(probe.connectAvailable, false, actions);
+    assert.equal(verdict.blockReason, "connect_button_not_found", actions);
+    assert.deepEqual(page.clicks, ["More"], actions);
+
+    const activate = profileDom(followPrimaryWithActions(actions), {
+      menuItems: MENU_WITHOUT_CONNECT,
+    });
+    assert.deepEqual(await run(activate, "activate"), {
+      ok: false,
+      reason: "connect_control_not_found",
+    });
+    assert.deepEqual(activate.clicks, ["More"], actions);
+  }
+
+  const { page, menu, verdict } = await classify(followPrimaryLayout(), {
+    menuItems: MENU_WITH_FOREIGN_CONNECT,
+  });
+  assert.equal(menu.connect, false);
+  assert.equal(verdict.blockReason, "connect_button_not_found");
+  assert.deepEqual(page.clicks, ["More"]);
+
+  const activate = profileDom(followPrimaryLayout(), { menuItems: MENU_WITH_FOREIGN_CONNECT });
+  assert.deepEqual(await run(activate, "activate"), {
+    ok: false,
+    reason: "connect_control_not_found",
+  });
+  assert.deepEqual(activate.clicks, ["More"]);
+});
+
+test("a Connect link is captured as a link, and one the owner's invitation does not prove blocks", async () => {
+  for (const href of ["/mynetwork/grow/", "/preload/custom-invite/"]) {
+    const actions = `<a href="${href}">Connect</a>`;
+    const { page, probe, verdict } = await classify(followPrimaryWithActions(actions));
+    assert.equal(probe.connectAvailable, true, href);
+    assert.deepEqual(probe.connectHrefs, [href]);
+    assert.equal(verdict.safety, "unsafe_block", href);
+    assert.equal(verdict.blockReason, "invalid_connect_link", href);
+    assert.deepEqual(page.clicks, [], href);
+
+    const activate = profileDom(followPrimaryWithActions(actions));
+    assert.deepEqual(await run(activate, "activate"), {
+      ok: true,
+      opened: "link",
+      via: "header",
+      href,
+    });
+    assert.deepEqual(activate.clicks, [], href);
+  }
+});
+
+test("a More-menu Connect link is read as the owner's invitation and is never clicked", async () => {
+  const { page, menu, verdict } = await classify(followPrimaryLayout(), {
+    menuItems: MENU_WITH_CONNECT_LINK,
+  });
+  assert.equal(menu.connect, true);
+  assert.deepEqual(menu.connectHrefs, ["/preload/custom-invite/?vanityName=jane-doe"]);
+  assert.equal(verdict.blockReason, "verified_via_more");
+  assert.equal(verdict.method, "invite_link");
+  assert.equal(
+    verdict.inviteUrl,
+    "https://www.linkedin.com/preload/custom-invite/?vanityName=jane-doe",
+  );
+  assert.deepEqual(page.clicks, ["More"]);
+
+  const foreign = await classify(followPrimaryLayout(), {
+    menuItems: '<a role="menuitem" href="/mynetwork/grow/">Connect</a>',
+  });
+  assert.equal(foreign.verdict.blockReason, "invalid_connect_link");
+
+  const activate = profileDom(followPrimaryLayout(), { menuItems: MENU_WITH_CONNECT_LINK });
+  assert.deepEqual(await run(activate, "activate"), {
+    ok: true,
+    opened: "link",
+    via: "more_menu",
+    href: "/preload/custom-invite/?vanityName=jane-doe",
+  });
+  assert.deepEqual(activate.clicks, ["More"]);
+  assert.equal(activate.menuOpen(), false);
+});
+
+test("activate waits a random delay before it clicks More and before it clicks Connect", async () => {
+  const page = profileDom(followPrimaryLayout(), { menuItems: MENU_WITH_CONNECT });
+  const started = Date.now();
+  await run(page, "activate");
+  assert.deepEqual(page.clicks, ["More", "Connect"]);
+  const [more, connect] = page.clickTimes;
+  assert.ok(more - started >= 450, `More clicked ${more - started} ms after the start`);
+  assert.ok(connect - more >= 450, `Connect clicked ${connect - more} ms after More`);
 });
 
 test("identity checks run before connection state", () => {

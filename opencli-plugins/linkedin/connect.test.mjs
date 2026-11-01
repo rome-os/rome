@@ -11,7 +11,11 @@ import {
   connectedWithoutHeader,
   connectLinkLayout,
   followPrimaryLayout,
+  followPrimaryWithActions,
   MENU_WITH_CONNECT,
+  MENU_WITH_CONNECT_LINK,
+  MENU_WITH_FOREIGN_CONNECT,
+  MENU_WITHOUT_CONNECT,
   OWNER_URL,
   profileDom,
 } from "./connect-test-fixtures.mjs";
@@ -234,6 +238,85 @@ test("a send through an invitation link navigates only to the owner's invitation
   ]);
   assert.equal(page.inviteRuns, 1);
   assert.deepEqual(page.profile.clicks, []);
+});
+
+test("a send never activates a Connect control that sits inside or around another member's action", async () => {
+  const pages = [
+    fakePage(followPrimaryLayout(), { domOptions: { menuItems: MENU_WITH_FOREIGN_CONNECT } }),
+    fakePage(
+      followPrimaryWithActions(
+        '<div role="button" aria-label="Invite Alex Example to connect"><button>Connect</button></div>',
+      ),
+      { domOptions: { menuItems: MENU_WITHOUT_CONNECT } },
+    ),
+  ];
+  for (const page of pages) {
+    const [receipt] = await command.func(page, { ...ownerArgs, send: true });
+    assert.equal(receipt.status, "not_connectable");
+    assert.equal(receipt.reason, "connect_button_not_found");
+    assert.deepEqual(page.profile.clicks, ["More"]);
+    assert.deepEqual(page.visited, [OWNER_URL]);
+    assert.equal(page.verificationCalls, 0);
+  }
+});
+
+test("a Connect link that is not the owner's invitation blocks and is never clicked", async () => {
+  for (const href of ["/mynetwork/grow/", "/preload/custom-invite/"]) {
+    for (const send of [false, true]) {
+      const page = fakePage(followPrimaryWithActions(`<a href="${href}">Connect</a>`));
+      await assert.rejects(
+        command.func(page, { ...ownerArgs, send }),
+        (error) =>
+          error instanceof CommandExecutionError && /invalid_connect_link/.test(error.message),
+        href,
+      );
+      assert.deepEqual(page.profile.clicks, [], href);
+      assert.deepEqual(page.visited, [OWNER_URL], href);
+      assert.equal(page.inviteRuns, 0, href);
+    }
+  }
+});
+
+test("a send through a More-menu Connect link navigates to the owner's invitation instead of clicking it", async () => {
+  const page = fakePage(followPrimaryLayout(), {
+    domOptions: { menuItems: MENU_WITH_CONNECT_LINK },
+    invitations: [{ name: "Jane Doe", profile_url: OWNER_URL }],
+  });
+  const [receipt] = await command.func(page, { ...ownerArgs, send: true });
+  assert.equal(receipt.status, "sent_verified");
+  assert.deepEqual(page.visited, [
+    OWNER_URL,
+    "https://www.linkedin.com/preload/custom-invite/?vanityName=jane-doe",
+  ]);
+  assert.equal(page.inviteRuns, 1);
+  assert.deepEqual(page.profile.clicks, ["More"]);
+});
+
+test("a menu Connect that turns into a link before the send is followed only to the owner's invitation", async () => {
+  for (const [href, visited] of [
+    ["/mynetwork/grow/", [OWNER_URL]],
+    [
+      "/preload/custom-invite/?vanityName=jane-doe",
+      [OWNER_URL, "https://www.linkedin.com/preload/custom-invite/?vanityName=jane-doe"],
+    ],
+  ]) {
+    const page = fakePage(followPrimaryLayout(), {
+      domOptions: {
+        menuItems: (opens) =>
+          opens === 1 ? MENU_WITH_CONNECT : `<a role="menuitem" href="${href}">Connect</a>`,
+      },
+      invitations: [{ name: "Jane Doe", profile_url: OWNER_URL }],
+    });
+    const send = command.func(page, { ...ownerArgs, send: true });
+    if (visited.length === 1) {
+      await assert.rejects(send, /invalid_connect_link/, href);
+    } else {
+      assert.equal((await send)[0].status, "sent_verified", href);
+    }
+    assert.deepEqual(page.visited, visited, href);
+    assert.deepEqual(page.profile.clicks, ["More", "More"], href);
+    assert.equal(page.profile.menuOpen(), false, href);
+  }
 });
 
 test("a navigation label with no invitation URL cannot verify delivery", async () => {

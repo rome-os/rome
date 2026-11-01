@@ -146,6 +146,23 @@ export const namesakeBeforeHeader = (ownerName = "<h1>Jane Doe</h1>") => `
     </section>
   </main>`;
 
+/**
+ * A Follow-primary header whose action row also holds `actions`, such as a Connect control that
+ * belongs to another member or a Connect link to a route other than the owner's invitation.
+ */
+export const followPrimaryWithActions = (actions) => `
+  <main>
+    <section class="pv-top-card">
+      <h1>Jane Doe</h1>
+      <span class="dist-value">· 3rd+</span>
+      <div class="pvs-profile-actions">
+        <button aria-label="Follow Jane Doe">Follow</button>
+        ${actions}
+        <button aria-label="More actions" aria-expanded="false">More</button>
+      </div>
+    </section>
+  </main>`;
+
 export const headerWithoutActions = `
   <main><section class="pv-top-card"><h1>Jane Doe</h1></section>${peopleYouMayKnow}</main>`;
 
@@ -163,10 +180,11 @@ function labelOf(el) {
 }
 
 /**
- * Builds a jsdom profile page. `clicks` records the label of every click, and no click reaches
- * a default action. With `menuItems`, the More control toggles a menu portaled to the body:
+ * Builds a jsdom profile page. `clicks` records the label of every click and `clickTimes` its
+ * time, and no click reaches a default action, so a link never navigates. With `menuItems`, the More control toggles a menu portaled to the body:
  * `menuMode: "escape"` also closes it on Escape, and `"toggle"` closes it only on a second click.
- * With `menuItemsDelayMs`, the menu opens empty and its items render after that delay.
+ * With `menuItemsDelayMs`, the menu opens empty and its items render after that delay. A function
+ * `menuItems` is called with the 1-based count of opens and returns that open's items.
  */
 export function profileDom(
   body,
@@ -193,11 +211,13 @@ export function profileDom(
     },
   });
   const clicks = [];
+  const clickTimes = [];
   w.document.addEventListener(
     "click",
     (event) => {
       event.preventDefault();
       clicks.push(labelOf(event.target));
+      clickTimes.push(Date.now());
     },
     true,
   );
@@ -207,6 +227,7 @@ export function profileDom(
       (el) => labelOf(el) === "More",
     );
     let menu = null;
+    let opens = 0;
     const closeMenu = () => {
       menu?.remove();
       menu = null;
@@ -214,16 +235,18 @@ export function profileDom(
     };
     more.addEventListener("click", () => {
       if (menu) return closeMenu();
+      opens += 1;
+      const items = typeof menuItems === "function" ? menuItems(opens) : menuItems;
       menu = w.document.createElement("div");
       menu.setAttribute("role", "menu");
       w.document.body.append(menu);
       if (menuItemsDelayMs > 0) {
         const opened = menu;
         w.setTimeout(() => {
-          opened.innerHTML = menuItems;
+          opened.innerHTML = items;
         }, menuItemsDelayMs);
       } else {
-        menu.innerHTML = menuItems;
+        menu.innerHTML = items;
       }
       more.setAttribute("aria-expanded", "true");
     });
@@ -233,7 +256,12 @@ export function profileDom(
       });
     }
   }
-  return { dom, clicks, menuOpen: () => Boolean(w.document.querySelector('[role="menu"]')) };
+  return {
+    dom,
+    clicks,
+    clickTimes,
+    menuOpen: () => Boolean(w.document.querySelector('[role="menu"]')),
+  };
 }
 
 export const MENU_WITH_CONNECT = `
@@ -241,6 +269,17 @@ export const MENU_WITH_CONNECT = `
   <div role="menuitem">Save to PDF</div>
   <div role="menuitem" aria-label="Invite Jane Doe to connect"><span>Connect</span></div>
   <div role="menuitem">Report / Block</div>`;
+
+/** The owner's Connect as an invitation-route link inside the More menu. */
+export const MENU_WITH_CONNECT_LINK = `
+  <div role="menuitem">Save to PDF</div>
+  <a role="menuitem" href="/preload/custom-invite/?vanityName=jane-doe">Connect</a>`;
+
+/** Connect controls that sit inside, or wrap, an element naming another member. */
+export const MENU_WITH_FOREIGN_CONNECT = `
+  <div role="menuitem">Save to PDF</div>
+  <div role="menuitem" aria-label="Invite Alex Example to connect"><button>Connect</button></div>
+  <button><span aria-label="Invite Sam Sample to connect">Connect</span></button>`;
 
 export const MENU_WITH_REMOVE_CONNECTION = `
   <div role="menuitem">Save to PDF</div>

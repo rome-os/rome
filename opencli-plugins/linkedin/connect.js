@@ -153,19 +153,23 @@ async function verifySentInvitation(page, receipt, expectedName, profileUrl) {
   );
 }
 
-async function sendInvitation(page, verdict, probe, options, note) {
+async function openInvitation(page, href, ownerVanity, note) {
+  const inviteUrl = canonicalizeLinkedInInviteUrl(href, ownerVanity);
+  if (!inviteUrl) throw new CommandExecutionError("LinkedIn connect blocked: invalid_connect_link");
+  await page.goto(inviteUrl);
+  await page.wait(6);
+  let result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
+  if (result?.reason === "invite_dialog_not_found") {
+    await page.wait(5);
+    result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
+  }
+  return result;
+}
+
+async function sendInvitation(page, verdict, options, note) {
   let result;
   if (verdict.method === "invite_link") {
-    const inviteUrl = canonicalizeLinkedInInviteUrl(probe.connectHref, options.ownerVanity);
-    if (!inviteUrl)
-      throw new CommandExecutionError("LinkedIn connect blocked: invalid_connect_link");
-    await page.goto(inviteUrl);
-    await page.wait(6);
-    result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
-    if (result?.reason === "invite_dialog_not_found") {
-      await page.wait(5);
-      result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
-    }
+    result = await openInvitation(page, verdict.inviteUrl, options.ownerVanity, note);
   } else {
     const opened = await runOnPage(page, { ...options, mode: "activate" });
     if (!opened?.ok) {
@@ -173,15 +177,21 @@ async function sendInvitation(page, verdict, probe, options, note) {
         `LinkedIn connect blocked: ${opened?.reason || "connect_control_not_found"}`,
       );
     }
-    await page.wait(3);
-    result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
-    if (result?.reason === "invite_dialog_not_found") {
-      await page.wait(5);
+    if (opened.opened === "link") {
+      // The page can render Connect as a link after the verdict was read. The page script never
+      // clicks a link, so the link opens here only when it is the owner's invitation.
+      result = await openInvitation(page, opened.href, options.ownerVanity, note);
+    } else {
+      await page.wait(3);
       result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
-    }
-    // Activating Connect sent the invitation without a dialog, so the note was not attached.
-    if (result?.reason === "invite_dialog_not_found") {
-      result = { ok: true, status: "sent", reason: "invitation_sent_no_dialog" };
+      if (result?.reason === "invite_dialog_not_found") {
+        await page.wait(5);
+        result = unwrap(await page.evaluate(buildInviteDialogScript(note)));
+      }
+      // Activating Connect sent the invitation without a dialog, so the note was not attached.
+      if (result?.reason === "invite_dialog_not_found") {
+        result = { ok: true, status: "sent", reason: "invitation_sent_no_dialog" };
+      }
     }
   }
   if (!result?.ok) {
@@ -272,7 +282,7 @@ cli({
       ];
     }
 
-    await sendInvitation(page, verdict, probe, options, note);
+    await sendInvitation(page, verdict, options, note);
     return [
       await verifySentInvitation(
         page,
