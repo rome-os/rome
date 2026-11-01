@@ -16,6 +16,7 @@ import {
   UNKNOWN_REPLY_OUTCOME,
   confirmReplyReceipt,
   postLinkedInReply,
+  replyBodyText,
   verifiedReplyTarget,
 } from "./reply-helpers.mjs";
 
@@ -31,7 +32,11 @@ cli({
     { name: "thread-url", required: true, help: "Exact existing LinkedIn thread URL" },
     { name: "expected-recipient", required: true, help: "Recipient member id" },
     { name: "expected-self", required: true, help: "Sending account member id" },
-    { name: "message", required: true, help: "Plain text reply, with whitespace preserved" },
+    {
+      name: "message",
+      required: true,
+      help: "Plain text reply. Line breaks are sent as line feeds, other whitespace as given.",
+    },
     {
       name: "send",
       type: "bool",
@@ -39,12 +44,12 @@ cli({
       help: "Send the reply. Otherwise only verify the destination.",
     },
   ],
-  columns: ["status", "thread_id", "message_id", "sent_at", "text"],
+  columns: ["status", "thread_id", "message_id", "sent_at", "text", "text_matches"],
   func: async (page, args) => {
     if (!page) throw new CommandExecutionError("Browser session required for linkedin reply");
     const threadUrl = requireThreadUrl(args["thread-url"]);
     const threadId = linkedInThreadId(threadUrl);
-    const text = args.message;
+    const text = typeof args.message === "string" ? replyBodyText(args.message) : args.message;
     const recipientId = args["expected-recipient"];
     const selfId = args["expected-self"];
     if (typeof text !== "string" || !text.trim())
@@ -98,7 +103,7 @@ cli({
         await confirmReplyReceipt(
           result?.json,
           payload,
-          { threadId, threadUrl, originToken },
+          { threadId, threadUrl, originToken, text },
           {
             readHistory: () => fetchThreadPayload(page, probe.initial_url, csrf, threadId, "reply"),
             wait: () => page.wait(1),

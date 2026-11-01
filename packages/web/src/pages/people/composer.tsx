@@ -10,7 +10,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import { PAGE_FLOOR } from "@/shell/PageShell";
 import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { sendRefusalKey, type RefusedSendState } from "./send-copy";
@@ -57,7 +59,8 @@ export function Composer({
   const { t } = useTranslation("people");
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const coarsePointer = useCoarsePointer();
 
   // Nothing at all for a person Rome holds no address for. The dossier header
   // already says they have no accounts, and this slot is for a channel giving a
@@ -105,17 +108,23 @@ export function Composer({
           <TargetChip account={target} />
         )}
       </p>
-      <div className="flex items-center gap-2">
-        <Input
+      {/* A text area, because a single-line input turns a pasted line break
+          into a space. A signature under a link then reads as part of it. The
+          padding centers one line in the control height, so an empty box
+          stands as tall as the Send button. */}
+      <div className="flex items-end gap-2">
+        <Textarea
           ref={inputRef}
-          size="sm"
+          rows={1}
+          className="max-h-48 min-h-[var(--control-h-sm)] rounded-[var(--control-r-sm)] px-[var(--control-px-start-sm)] py-[calc((var(--control-h-sm)_-_2px_-_1lh)_/_2)]"
           value={draft}
           onChange={(event) => {
             draftRef.current = event.target.value;
             setDraft(event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            // Same Enter rule as the chat composer: Shift+Enter starts a new line.
+            if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
               event.preventDefault();
               submit();
             }

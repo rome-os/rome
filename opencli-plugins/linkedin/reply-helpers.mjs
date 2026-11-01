@@ -1,4 +1,5 @@
 import {
+  normalizeThreadBodyText,
   parseThreadMessagePayloads,
   parseThreadParticipantPayloads,
   validateThreadConversationPayload,
@@ -80,7 +81,23 @@ export async function postLinkedInReply(csrf, target, text, originToken, trackin
 
 export const UNKNOWN_REPLY_OUTCOME = "Send outcome is unknown. Check LinkedIn before retrying.";
 
-export function parseReplyReceipt(json, payload, { threadId, threadUrl, originToken }) {
+// LinkedIn's composer sends line feeds, so a carriage return is never what a reader sees.
+export function replyBodyText(text) {
+  return text.replace(/\r\n?/g, "\n");
+}
+
+// Spacing within a line may differ between the sent and stored body. The line breaks may not,
+// since a lost break can join a URL to the text after it.
+export function sameReplyText(sent, stored) {
+  const lines = (value) =>
+    normalizeThreadBodyText(value)
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .join("\n");
+  return lines(sent) === lines(stored);
+}
+
+export function parseReplyReceipt(json, payload, { threadId, threadUrl, originToken, text }) {
   const messages = new Map();
   function visit(value) {
     if (!value || typeof value !== "object") return;
@@ -105,7 +122,12 @@ export function parseReplyReceipt(json, payload, { threadId, threadUrl, originTo
   if (rows.length !== 1 || !rows[0].sender_is_self || !rows[0].sent_at) {
     throw new Error(UNKNOWN_REPLY_OUTCOME);
   }
-  return { ...rows[0], status: "sent" };
+  // The provider accepted the send, so a changed body is reported rather than retried.
+  return {
+    ...rows[0],
+    status: "sent",
+    text_matches: rows[0].text ? sameReplyText(text, rows[0].text) : null,
+  };
 }
 
 export async function confirmReplyReceipt(json, payload, expected, { readHistory, wait }) {

@@ -301,11 +301,16 @@ export function parseThreadSnapshot(result: OpencliResult): LinkedInSnapshotMess
   }));
 }
 
+export interface LinkedInReplyReceipt extends LinkedInSnapshotMessage {
+  /**
+   * Whether LinkedIn stored the text that was sent, line breaks included. Null
+   * when the receipt carried no body, or the installed plugin predates the check.
+   */
+  textMatches: boolean | null;
+}
+
 /** A reply receipt must carry the same provider id as the history mirror. */
-export function parseLinkedInReply(
-  result: OpencliResult,
-  threadId: string,
-): LinkedInSnapshotMessage {
+export function parseLinkedInReply(result: OpencliResult, threadId: string): LinkedInReplyReceipt {
   if (result.code === null) {
     throw new OpencliCommandError(
       "linkedin reply",
@@ -327,6 +332,7 @@ export function parseLinkedInReply(
       snapshotRowSchema.extend({
         status: z.literal("sent"),
         sender_is_self: z.literal(true),
+        text_matches: z.boolean().nullish(),
       }),
     )
     .length(1)
@@ -344,7 +350,7 @@ export function parseLinkedInReply(
       "Send outcome is unknown. Check LinkedIn before retrying.",
     );
   }
-  return message;
+  return { ...message, textMatches: parsed.data[0]?.text_matches ?? null };
 }
 
 // ── thread-participants ───────────────────────────────────────────────────
