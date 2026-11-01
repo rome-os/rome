@@ -50,6 +50,23 @@ export interface ConformanceChannel {
     /** The person writes in the group, and the platform's id for it. */
     personWrites(text: string): string | Promise<string>;
   };
+  /** A thread in `group`, where the platform has threads and the peer
+   *  models one. */
+  readonly thread?: {
+    /** Where the platform shows the thread. */
+    readonly at: string;
+    /** The person writes in the thread, and the platform's id for it. */
+    personWrites(text: string): string | Promise<string>;
+  };
+  /** Another of Rome's accounts on the platform, in `group` too, where the
+   *  peer models two. */
+  readonly second?: {
+    readonly account: Account;
+    readonly channel: Channel;
+    /** The person writes in the group so both accounts hear it, and the
+     *  platform's id for the message. */
+    bothHear(text: string): string | Promise<string>;
+  };
   /** What a person in conversation `at` sees there. */
   visible(at: string): VisibleMessage[];
   stop(): Promise<void>;
@@ -105,6 +122,10 @@ export function describeAdapterConformance(
     romeWritesFirst: boolean;
     /** A group, as `group` names it. */
     groups: boolean;
+    /** A second account of Rome's in the group, as `second` names it. */
+    twoAccounts: boolean;
+    /** A thread in the group, as `thread` names it. */
+    threads: boolean;
   },
 ): void {
   describe(`chat adapter conformance: ${name}`, () => {
@@ -116,6 +137,8 @@ export function describeAdapterConformance(
     let said: MessageSaid[];
     let stopRecording: () => void;
     let send: ChannelSend;
+    /** The second account's send port, where the peer models one. */
+    let secondSend: ChannelSend | undefined;
     /** The platform's refusal of the next send, when set. */
     let refusal: Error | null;
 
@@ -123,10 +146,12 @@ export function describeAdapterConformance(
       testDb = createTestDb();
       peer = await start();
       const webchatRepo = new WebChatRepository(testDb.db);
+      const own = [peer, ...(peer.second ? [peer.second] : [])];
       const wiring = chatWiring(testDb.db, {
-        accountOf: (channel) => (channel === peer.channel.name ? peer.account : null),
+        accountOf: (channel) => own.find((at) => at.channel.name === channel)?.account ?? null,
         platformOfChannel: () => peer.account.platform,
-        channelsOn: (platform) => (platform === peer.account.platform ? [peer.channel.name] : []),
+        channelsOn: (platform) =>
+          platform === peer.account.platform ? own.map((at) => at.channel.name) : [],
         seats: webchatRepo,
       });
       ({ chats, messages, adapters } = wiring);
@@ -134,9 +159,10 @@ export function describeAdapterConformance(
       wiring.events.subscribe(async (event) => {
         if (event.type === "MessageSaid") said.push(event);
       });
-      stopRecording = inboundRecording({ chats, messages, events: wiring.events, adapters }, [
-        peer.channel,
-      ]).listen();
+      stopRecording = inboundRecording(
+        { chats, messages, events: wiring.events, adapters },
+        own.map((at) => at.channel),
+      ).listen();
       refusal = null;
       // The platform refuses what it is told to, as a real one refuses a
       // message it cannot take.
@@ -150,14 +176,12 @@ export function describeAdapterConformance(
           return platformSend.send(address, message);
         },
       });
-      const [sending] = recordedSends([{ ...peer.channel, send: refusing }], {
-        adapters,
-        chats,
-        webchatRepo,
-        replies: wiring.replies,
-        messages,
-      });
+      const [sending, secondSending] = recordedSends(
+        [{ ...peer.channel, send: refusing }, ...(peer.second ? [peer.second.channel] : [])],
+        { adapters, chats, webchatRepo, replies: wiring.replies, messages },
+      );
       send = sending!.send as ChannelSend;
+      secondSend = secondSending?.send as ChannelSend | undefined;
     });
 
     afterEach(async () => {
@@ -319,6 +343,62 @@ export function describeAdapterConformance(
         ]);
         expect(chatsOf("group").map((chat) => chat.ref.id)).toEqual([heard.message.place.chat.id]);
         expect(directMessages()).toHaveLength(0);
+      },
+    );
+    (models.groups && models.twoAccounts ? it : it.skip)(
+      "records a group message two of Rome's accounts hear once, in one chat both answer in",
+      async () => {
+        const group = peer.group!;
+        const heard = await personSays("hello both", (text) => peer.second!.bothHear(text));
+        // Give the second account the time the first took to deliver it.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        await send.send(group.at as ChatId, { text: "from the first" });
+        await secondSend!.send(group.at as ChatId, { text: "from the second" });
+
+        // How the platform shows the person naming the other account is the
+        // platform's, so the person's line is checked by its words.
+        const lines = transcript(heard.message.place.chat.id);
+        expect(lines).toHaveLength(3);
+        expect(lines[0]).toMatchObject({ text: expect.stringContaining("hello both") });
+        expect(lines.slice(1)).toEqual([
+          { text: "from the first", fromRome: true },
+          { text: "from the second", fromRome: true },
+        ]);
+        expect(said).toHaveLength(1);
+        expect(chatsOf("group").map((chat) => chat.ref.id)).toEqual([heard.message.place.chat.id]);
+        expect(
+          messages
+            .read(heard.message.place, { limit: 50 })
+            .messages.filter((line) => line.direction === "fromRome")
+            .map((line) => line.saidBy?.account.id),
+        ).toEqual([peer.account.id, peer.second!.account.id]);
+      },
+    );
+    (models.threads ? it : it.skip)(
+      "records a thread's messages in the thread of its group's chat, and answers there",
+      async () => {
+        const thread = peer.thread!;
+        const heard = await personSays("plans?", (text) => thread.personWrites(text));
+
+        await send.send(thread.at as ChatId, { text: "Tuesday" });
+
+        expect(heard.message.place.threadId).toBe(thread.at);
+        expect(peer.visible(thread.at).map((m) => [m.from, m.text])).toEqual([
+          ["user", "plans?"],
+          ["rome", "Tuesday"],
+        ]);
+        expect(
+          messages
+            .read(heard.message.place, { limit: 50 })
+            .messages.map((line) => [line.body.text, line.direction]),
+        ).toEqual([
+          ["plans?", "toRome"],
+          ["Tuesday", "fromRome"],
+        ]);
+        // The thread stands in its group's chat, which holds no line of it.
+        expect(chatsOf("group").map((chat) => chat.ref.id)).toEqual([heard.message.place.chat.id]);
+        expect(transcript(heard.message.place.chat.id)).toEqual([]);
       },
     );
   });

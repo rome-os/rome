@@ -19,6 +19,10 @@ const DISCORD_CHANNEL = "100000000000000003";
 /** The one person the bot can open a DM with, and that DM. */
 export const DISCORD_USER = "100000000000000002";
 export const DISCORD_DM = "100000000000000004";
+/** A thread a person started in the guild text channel, where the peer
+ *  models the guild. */
+export const DISCORD_THREAD = "100000000000000005";
+export { DISCORD_CHANNEL };
 
 const capture = loadCapture(textCapture);
 const created = exemplar<WireMessage>(capture, "create");
@@ -42,6 +46,7 @@ interface WireChannel {
   type: number;
   guild_id?: string;
   recipients?: Array<Record<string, unknown>>;
+  [field: string]: unknown;
 }
 
 const ALICE = { id: DISCORD_USER, username: "alice", discriminator: "0", avatar: null, bot: false };
@@ -63,7 +68,10 @@ export class DiscordPeer implements Peer {
     { timestamp: string; edited_timestamp: string | null }
   >();
   private readonly channels = new Map<string, WireChannel>([
-    [DISCORD_CHANNEL, { id: DISCORD_CHANNEL, type: 0, guild_id: GUILD }],
+    [
+      DISCORD_CHANNEL,
+      { id: DISCORD_CHANNEL, type: 0, guild_id: GUILD, name: "general", permission_overwrites: [] },
+    ],
     [DISCORD_DM, { id: DISCORD_DM, type: 1, recipients: [ALICE] }],
   ]);
   private readonly dmByRecipient = new Map([[DISCORD_USER, DISCORD_DM]]);
@@ -71,10 +79,30 @@ export class DiscordPeer implements Peer {
   private nextId = BigInt(String(created.id));
   private sequence = 0;
 
-  static async start(): Promise<DiscordPeer> {
-    const peer = new DiscordPeer();
+  /** With `guild`, the bot is in the guild, whose text channel has a thread
+   *  a person started; the guild's gateway frame is synthetic. */
+  static async start(options: { guild?: boolean } = {}): Promise<DiscordPeer> {
+    const peer = new DiscordPeer(options.guild ?? false);
     await peer.server.start();
     return peer;
+  }
+
+  private constructor(private readonly inGuild: boolean) {
+    if (inGuild)
+      this.channels.set(DISCORD_THREAD, {
+        id: DISCORD_THREAD,
+        type: 11,
+        guild_id: GUILD,
+        parent_id: DISCORD_CHANNEL,
+        name: "Plans",
+        owner_id: DISCORD_USER,
+        thread_metadata: {
+          archived: false,
+          auto_archive_duration: 1440,
+          archive_timestamp: new Date().toISOString(),
+          locked: false,
+        },
+      });
   }
 
   close(): Promise<void> {
@@ -102,7 +130,8 @@ export class DiscordPeer implements Peer {
     return new DiscordAdapter({ botToken: DISCORD_TOKEN, rest: this.restOptions() });
   }
 
-  /** A user's message, dispatched to every connected gateway session. */
+  /** A user's message, dispatched to every connected gateway session. In a
+   *  guild channel it names the bot, as a guild message must to reach it. */
   emitMessage(text: string, channelId = DISCORD_DM): VisibleMessage {
     if (!this.sessions.size) throw new Error("No discord.js gateway session is connected");
     // A person's message is said now, and Discord's id says when: discord.js
@@ -114,7 +143,20 @@ export class DiscordPeer implements Peer {
       text,
     });
     this.stamp(message.id);
-    this.dispatch("MESSAGE_CREATE", this.wire(message));
+    const wire = this.wire(message);
+    const guild = this.channels.get(channelId)?.guild_id;
+    this.dispatch(
+      "MESSAGE_CREATE",
+      guild
+        ? {
+            ...wire,
+            guild_id: guild,
+            content: `<@${BOT.id}> ${text}`,
+            mentions: [BOT],
+            member: memberOf(),
+          }
+        : wire,
+    );
     return message;
   }
 
@@ -139,17 +181,57 @@ export class DiscordPeer implements Peer {
       if (frame.op === 3) return;
       if (frame.op === 2) {
         if (frame.d.token !== DISCORD_TOKEN) return socket.close(4004, "Authentication failed");
-        return this.dispatch("READY", {
+        this.dispatch("READY", {
           v: 10,
           user: BOT,
-          guilds: [],
+          guilds: this.inGuild ? [{ id: GUILD, unavailable: true }] : [],
           session_id: "fixture-session",
           resume_gateway_url: this.server.socketUrl("/gateway"),
           application: { id: BOT.id, flags: 0 },
         });
+        if (this.inGuild) this.dispatch("GUILD_CREATE", this.guild());
+        return;
       }
       this.server.errors.push(`Unmodeled gateway opcode ${frame.op}`);
     });
+  }
+
+  /** The guild as its GUILD_CREATE frame spells it: its text channel, the
+   *  thread in it, and the bot as a member. */
+  private guild() {
+    const now = new Date().toISOString();
+    return {
+      id: GUILD,
+      name: "Fixture",
+      unavailable: false,
+      owner_id: DISCORD_USER,
+      joined_at: now,
+      large: false,
+      member_count: 2,
+      features: [],
+      emojis: [],
+      stickers: [],
+      voice_states: [],
+      presences: [],
+      stage_instances: [],
+      guild_scheduled_events: [],
+      roles: [
+        {
+          id: GUILD,
+          name: "@everyone",
+          permissions: "1071698660929",
+          position: 0,
+          color: 0,
+          hoist: false,
+          managed: false,
+          mentionable: false,
+          flags: 0,
+        },
+      ],
+      channels: [this.channels.get(DISCORD_CHANNEL)],
+      threads: [this.channels.get(DISCORD_THREAD)],
+      members: [{ user: BOT, roles: [], joined_at: now, deaf: false, mute: false, flags: 0 }],
+    };
   }
 
   private dispatch(type: string, data: unknown) {
@@ -276,6 +358,11 @@ export class DiscordPeer implements Peer {
   private stamp(id: string) {
     this.timestamps.set(id, { timestamp: new Date().toISOString(), edited_timestamp: null });
   }
+}
+
+/** Alice as a member of the guild. */
+function memberOf() {
+  return { roles: [], joined_at: new Date().toISOString(), deaf: false, mute: false, flags: 0 };
 }
 
 function synthetic(body: unknown): Reply {
