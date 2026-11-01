@@ -119,6 +119,9 @@ The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Doc
   metadata. Message text keeps its line breaks.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
+- `opencli linkedin people-search KEYWORDS [--limit N]` — replaces the built-in people search. Each
+  row's headline and location come from that result's own card, so results that share a name
+  keep their own metadata.
 - `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
   With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
   Line breaks are sent as line feeds. The receipt's `text` is the body LinkedIn stored, and
@@ -268,6 +271,27 @@ and when the browser did not land on the exact requested thread.
 ```bash
 opencli linkedin thread-participants --thread-url "https://www.linkedin.com/messaging/thread/2-.../"
 opencli linkedin thread-participants --thread-url "https://www.linkedin.com/messaging/thread/2-.../" -f json
+```
+
+### LinkedIn People Search
+
+The LinkedIn plugin replaces the built-in `people-search`, which matched result names against the
+page text and gave every result with the same display name the first one's headline and location.
+The replacement reads each result's text between its own profile link and the next result's, so
+a row never carries another person's metadata. A headline or location the card does not show
+stays empty. Names that wrap across lines, cards wrapped in one link, and degree labels in other
+languages also resolve.
+
+When the page renders profile links but none of them is a search result, the command fails with
+`COMMAND_EXEC` and a "layout is not supported" message instead of guessing. The error's `help`
+field gives read-only next steps: read the page once with `opencli browser get text main`, and
+confirm a candidate with `opencli linkedin profile-read` before acting on it. Each search counts
+toward LinkedIn's monthly Commercial Use Limit, so when the first read finds no rows, the command
+reads the same page again after a short wait instead of searching again. A search with no results
+stays an `EMPTY_RESULT`.
+
+```bash
+opencli linkedin people-search "site reliability engineer berlin" --limit 5 -f json
 ```
 
 ### Craigslist
