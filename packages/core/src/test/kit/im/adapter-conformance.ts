@@ -34,12 +34,24 @@ export interface ConformanceChannel {
   readonly account: Account;
   /** The adapter as a channel, which Chats' adapter is built over. */
   readonly channel: Channel;
-  /** The person's own address, where Rome opens a direct message to them. */
-  readonly person: string;
-  /** Where the platform shows that direct message. */
-  readonly dm: string;
-  /** The person writes to Rome's account directly. */
-  personWrites(text: string): void;
+  /** The person in a direct message with Rome's account, where the
+   *  platform has direct messages. */
+  readonly direct?: {
+    /** The person's own address, where Rome opens a direct message to them. */
+    readonly person: string;
+    /** Where the platform shows that direct message. */
+    readonly at: string;
+    /** The person writes to Rome's account directly, and the platform's id
+     *  for the message. */
+    personWrites(text: string): string | Promise<string>;
+  };
+  /** A group Rome's account is in, where the peer models one. */
+  readonly group?: {
+    /** Where the platform shows the group. */
+    readonly at: string;
+    /** The person writes in the group, and the platform's id for it. */
+    personWrites(text: string): string | Promise<string>;
+  };
   /** What a person in conversation `at` sees there. */
   visible(at: string): VisibleMessage[];
   stop(): Promise<void>;
@@ -86,6 +98,16 @@ export function channelOver(
 export function describeAdapterConformance(
   name: string,
   start: () => Promise<ConformanceChannel>,
+  /** What the platform has and the peer models. A case it cannot run is
+   *  skipped, so the report shows it as a gap. */
+  models: {
+    /** Direct messages, as `direct` names them. */
+    directMessages: boolean;
+    /** Whether Rome may write first in a direct message. */
+    romeWritesFirst: boolean;
+    /** A group, as `group` names it. */
+    groups: boolean;
+  },
 ): void {
   describe(`chat adapter conformance: ${name}`, () => {
     let testDb: TestDb;
@@ -96,6 +118,8 @@ export function describeAdapterConformance(
     let said: MessageSaid[];
     let stopRecording: () => void;
     let send: ChannelSend;
+    /** The platform's refusal of the next send, when set. */
+    let refusal: Error | null;
 
     beforeEach(async () => {
       testDb = createTestDb();
@@ -117,7 +141,20 @@ export function describeAdapterConformance(
         peer.channel,
       ]).listen();
       const webchatRepo = new WebChatRepository(testDb.db);
-      const [sending] = recordedSends([peer.channel], {
+      refusal = null;
+      // The platform refuses what it is told to, as a real one refuses a
+      // message it cannot take.
+      const platformSend = peer.channel.send as ChannelSend;
+      const refusing = Object.create(platformSend) as ChannelSend;
+      Object.defineProperty(refusing, "send", {
+        value: async (address: ChatId, message: OutgoingMessage) => {
+          const refused = refusal;
+          refusal = null;
+          if (refused) throw refused;
+          return platformSend.send(address, message);
+        },
+      });
+      const [sending] = recordedSends([{ ...peer.channel, send: refusing }], {
         adapters,
         chats,
         webchatRepo,
@@ -138,16 +175,29 @@ export function describeAdapterConformance(
       testDb.close();
     });
 
-    /** The person writes `text`; resolves once Rome has it on record. */
-    async function personSays(text: string): Promise<MessageSaid> {
+    /** The conversation the cases that need only one run in: the direct
+     *  message where the platform has one, else the group. */
+    const conversation = () => {
+      const at = peer.direct ?? peer.group;
+      if (!at) throw new Error("The peer models no conversation");
+      return at;
+    };
+
+    /** The person writes `text` where `writes` says, in the conversation by
+     *  default; resolves once Rome has it on record. */
+    async function personSays(
+      text: string,
+      writes: (text: string) => string | Promise<string> = (said) =>
+        conversation().personWrites(said),
+    ): Promise<MessageSaid & { platformId: string }> {
       const before = said.length;
-      peer.personWrites(text);
+      const platformId = await writes(text);
       const deadline = Date.now() + 3_000;
       while (said.length === before) {
         if (Date.now() > deadline) throw new Error(`Rome recorded nothing of "${text}"`);
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      return said[before]!;
+      return { ...said[before]!, platformId };
     }
 
     /** What Rome's transcript of the chat holds, oldest first. */
@@ -159,64 +209,127 @@ export function describeAdapterConformance(
           fromRome: message.saidBy?.agent !== undefined,
         }));
 
-    /** The platform's direct messages Rome holds, by kind. */
-    const directMessages = () =>
-      chats.list(peer.account.platform).filter((chat) => chat.kind === "dm");
+    /** The platform's chats Rome holds, of `kind`. */
+    const chatsOf = (kind: "dm" | "group") =>
+      chats.list(peer.account.platform).filter((chat) => chat.kind === kind);
+    const directMessages = () => chatsOf("dm");
 
-    it("records a direct message once, in one chat, as the person's", async () => {
-      const heard = await personSays("hello Rome");
+    (models.directMessages ? it : it.skip)(
+      "records a direct message once, in one chat, as the person's",
+      async () => {
+        const heard = await personSays("hello Rome");
 
-      expect(transcript(heard.message.place.chat.id)).toEqual([
-        { text: "hello Rome", fromRome: false },
-      ]);
-      expect(directMessages()).toHaveLength(1);
-    });
+        expect(transcript(heard.message.place.chat.id)).toEqual([
+          { text: "hello Rome", fromRome: false },
+        ]);
+        expect(directMessages()).toHaveLength(1);
+      },
+    );
 
-    it("sends a reply to a direct message where the person sees it, and records it there", async () => {
-      const heard = await personSays("hello Rome");
+    (models.directMessages ? it : it.skip)(
+      "sends a reply to a direct message where the person sees it, and records it there",
+      async () => {
+        const heard = await personSays("hello Rome");
 
-      // Rome answers at the person's address, as a hook or an agent names it.
-      await send.send(peer.person as ChatId, { text: "hello back" });
+        // Rome answers at the person's address, as a hook or an agent names it.
+        await send.send(peer.direct!.person as ChatId, { text: "hello back" });
 
-      expect(peer.visible(peer.dm).map((m) => [m.from, m.text])).toEqual([
-        ["user", "hello Rome"],
-        ["rome", "hello back"],
-      ]);
-      expect(transcript(heard.message.place.chat.id)).toEqual([
-        { text: "hello Rome", fromRome: false },
-        { text: "hello back", fromRome: true },
-      ]);
-      expect(directMessages()).toHaveLength(1);
-    });
+        expect(peer.visible(peer.direct!.at).map((m) => [m.from, m.text])).toEqual([
+          ["user", "hello Rome"],
+          ["rome", "hello back"],
+        ]);
+        expect(transcript(heard.message.place.chat.id)).toEqual([
+          { text: "hello Rome", fromRome: false },
+          { text: "hello back", fromRome: true },
+        ]);
+        expect(directMessages()).toHaveLength(1);
+      },
+    );
 
-    it("sends a reply to the address the direct message was heard at", async () => {
-      const heard = await personSays("hello Rome");
+    (models.directMessages ? it : it.skip)(
+      "sends a reply to the address the direct message was heard at",
+      async () => {
+        const heard = await personSays("hello Rome");
 
-      // The place a reply goes to is the one Rome heard the chat at.
-      await send.send(peer.dm as ChatId, { text: "hello again" });
+        // The place a reply goes to is the one Rome heard the chat at.
+        await send.send(peer.direct!.at as ChatId, { text: "hello again" });
 
-      expect(peer.visible(peer.dm).at(-1)).toMatchObject({ from: "rome", text: "hello again" });
-      expect(transcript(heard.message.place.chat.id).at(-1)).toEqual({
-        text: "hello again",
-        fromRome: true,
+        expect(peer.visible(peer.direct!.at).at(-1)).toMatchObject({
+          from: "rome",
+          text: "hello again",
+        });
+        expect(transcript(heard.message.place.chat.id).at(-1)).toEqual({
+          text: "hello again",
+          fromRome: true,
+        });
+        expect(directMessages()).toHaveLength(1);
+      },
+    );
+
+    (models.directMessages && models.romeWritesFirst ? it : it.skip)(
+      "keeps a direct message Rome opened as the chat the person answers in",
+      async () => {
+        await send.send(peer.direct!.person as ChatId, { text: "Rome writes first" });
+        const answered = await personSays("and the person answers");
+
+        expect(peer.visible(peer.direct!.at).map((m) => [m.from, m.text])).toEqual([
+          ["rome", "Rome writes first"],
+          ["user", "and the person answers"],
+        ]);
+        expect(directMessages()).toHaveLength(1);
+        expect(transcript(answered.message.place.chat.id)).toEqual([
+          { text: "Rome writes first", fromRome: true },
+          { text: "and the person answers", fromRome: false },
+        ]);
+      },
+    );
+
+    it("records a reply that quotes the person's message as a reply to that line", async () => {
+      const heard = await personSays("which day?");
+
+      await send.send(conversation().at as ChatId, {
+        text: "Tuesday",
+        replyToMessageId: heard.platformId,
       });
-      expect(directMessages()).toHaveLength(1);
+
+      const [answer] = messages.read(heard.message.place, { limit: 1 }).messages;
+      expect(answer).toMatchObject({ body: { text: "Tuesday" }, replyTo: heard.message.id });
     });
 
-    it("keeps a direct message Rome opened as the chat the person answers in", async () => {
-      await send.send(peer.person as ChatId, { text: "Rome writes first" });
-      const answered = await personSays("and the person answers");
+    it("puts nothing on record when the platform refuses a send, and says why", async () => {
+      const heard = await personSays("hello Rome");
+      refusal = new Error("Bad Request: chat not found");
 
-      expect(peer.visible(peer.dm).map((m) => [m.from, m.text])).toEqual([
-        ["rome", "Rome writes first"],
-        ["user", "and the person answers"],
+      await expect(send.send(conversation().at as ChatId, { text: "lost" })).rejects.toThrow(
+        "chat not found",
+      );
+
+      expect(transcript(heard.message.place.chat.id)).toEqual([
+        { text: "hello Rome", fromRome: false },
       ]);
-      expect(directMessages()).toHaveLength(1);
-      expect(transcript(answered.message.place.chat.id)).toEqual([
-        { text: "Rome writes first", fromRome: true },
-        { text: "and the person answers", fromRome: false },
-      ]);
+      expect(peer.visible(conversation().at).map((m) => m.text)).toEqual(["hello Rome"]);
     });
+
+    (models.groups ? it : it.skip)(
+      "records a group's messages once, in the group's chat, and answers there",
+      async () => {
+        const group = peer.group!;
+        const heard = await personSays("hello all", (text) => group.personWrites(text));
+
+        await send.send(group.at as ChatId, { text: "hello group" });
+
+        expect(peer.visible(group.at).map((m) => [m.from, m.text])).toEqual([
+          ["user", "hello all"],
+          ["rome", "hello group"],
+        ]);
+        expect(transcript(heard.message.place.chat.id)).toEqual([
+          { text: "hello all", fromRome: false },
+          { text: "hello group", fromRome: true },
+        ]);
+        expect(chatsOf("group").map((chat) => chat.ref.id)).toEqual([heard.message.place.chat.id]);
+        expect(directMessages()).toHaveLength(0);
+      },
+    );
   });
 }
 

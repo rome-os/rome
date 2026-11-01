@@ -219,7 +219,11 @@ export class FeishuPeer implements Peer {
    * the one person modelled, unless `chatId` names a group. The event frame
    * is synthetic until a capture covers it.
    */
-  emitMessage(text: string, chatId = FEISHU_P2P): VisibleMessage {
+  emitMessage(
+    text: string,
+    chatId = FEISHU_P2P,
+    options: { mentionsBot?: boolean } = {},
+  ): VisibleMessage {
     if (!this.sockets.size) throw new Error("No Feishu long connection is open");
     this.chats.add(chatId);
     // Unique across the process: the SDK remembers every message id it
@@ -255,7 +259,19 @@ export class FeishuPeer implements Peer {
           chat_id: chatId,
           chat_type: chatId === FEISHU_P2P ? "p2p" : "group",
           message_type: "text",
-          content: JSON.stringify({ text }),
+          content: JSON.stringify({ text: options.mentionsBot ? `@_user_1 ${text}` : text }),
+          ...(options.mentionsBot
+            ? {
+                mentions: [
+                  {
+                    key: "@_user_1",
+                    id: { open_id: FEISHU_BOT, union_id: "on_fixture_bot", user_id: "" },
+                    name: "Rome",
+                    tenant_key: "fixture_tenant",
+                  },
+                ],
+              }
+            : {}),
         },
       },
     };
@@ -343,6 +359,15 @@ export class FeishuPeer implements Peer {
           msg: "ok",
           bot: { activate_status: 2, app_name: "Rome", avatar_url: "", open_id: FEISHU_BOT },
         },
+        source: "synthetic",
+      };
+    }
+    // A group's name, which the adapter looks up when it first hears the
+    // group. Synthetic until a capture covers it.
+    if (method === "GET" && path === `/open-apis/im/v1/chats/${FEISHU_CHAT}`) {
+      if (headers.get("authorization") !== `Bearer ${TOKEN}`) return undefined;
+      return {
+        body: { code: 0, msg: "success", data: { name: "Launch", chat_mode: "group" } },
         source: "synthetic",
       };
     }
