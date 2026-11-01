@@ -83,10 +83,10 @@ describeAdapterConformance(
         bothHear: (text) => peer.emitMessage(text, FEISHU_CHAT, { mentionsEveryBot: true }).id,
       },
       visible: (at) => peer.visible(at),
-      // Feishu refuses a post to a chat the bot is not in. The SDK makes three
-      // more requests for the message once its post is refused, and each is refused.
+      // Feishu refuses a post to a chat the bot is not in. The SDK sends the
+      // message once more after its post is refused, and that is refused too.
       refuseNextSend: () => {
-        for (let i = 0; i < 4; i++)
+        for (let i = 0; i < 2; i++)
           peer.server.once({
             method: "POST",
             path: "/open-apis/im/v1/messages",
