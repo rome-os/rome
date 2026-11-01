@@ -113,6 +113,41 @@ describe("LinkedIn replies through People", () => {
     });
   });
 
+  it("passes a multiline reply through unchanged and mirrors its line breaks", async () => {
+    const text = "See https://example.com/demo\n\nExample signature";
+    run.mockResolvedValueOnce({
+      code: 0,
+      stdout: JSON.stringify([{ ...reply, text, text_matches: true }]),
+      stderr: "",
+    });
+    const response = await app.request(`/people/${person}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "linkedin", channelUserId: MEMBER, text }),
+    });
+    expect(response.status).toBe(200);
+    expect(run).toHaveBeenCalledWith(expect.arrayContaining([text]), expect.anything());
+    const timeline = (await (
+      await app.request(`/people/${person}/messages`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries[0]).toMatchObject({ body: text });
+  });
+
+  it("answers a reply LinkedIn stored with other text as sent, and mirrors what it stored", async () => {
+    const stored = "Thanks forreaching out";
+    run.mockResolvedValueOnce({
+      code: 0,
+      stdout: JSON.stringify([{ ...reply, text: stored, text_matches: false }]),
+      stderr: "",
+    });
+    expect((await post()).status).toBe(200);
+    expect(run).toHaveBeenCalledTimes(1);
+    const timeline = (await (
+      await app.request(`/people/${person}/messages`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries[0]).toMatchObject({ body: stored });
+  });
+
   it("answers a failed reply with LinkedIn's error, and sends nothing more", async () => {
     run.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "LinkedIn rejected the reply" });
     const response = await post();

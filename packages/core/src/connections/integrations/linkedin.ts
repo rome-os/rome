@@ -354,6 +354,13 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                 }
                 throw error;
               }
+              if (message.textMatches === false) {
+                // Sent, so never resent. The mirror below holds the text LinkedIn stored.
+                log.warn("LinkedIn stored the reply with different text or line breaks", {
+                  threadId: chatId,
+                  messageId: message.messageId,
+                });
+              }
               try {
                 await deps.syncSink.upsertMessages([message]);
               } catch (error) {

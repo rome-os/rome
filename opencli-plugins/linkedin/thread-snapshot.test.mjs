@@ -303,6 +303,28 @@ test("payload parsing deduplicates messages across API pages", () => {
   );
 });
 
+test("message text keeps its line breaks", () => {
+  const signed = "See https://example.com/demo\n\nExample signature";
+  const rows = parseThreadMessagePayloads(
+    [
+      payload([
+        message("m1", THREAD_ID, SELF, 1000, signed),
+        message("m2", THREAD_ID, EVAN, 2000, "  First line \r\nSecond\u00a0line\rThird  \n\n"),
+        {
+          ...message("m3", THREAD_ID, EVAN, 3000, ""),
+          renderContentFallbackText: "Shared a link\nhttps://example.com/demo",
+        },
+      ]),
+    ],
+    { threadId: THREAD_ID, threadUrl: THREAD_URL, limit: 20 },
+  );
+
+  assert.deepEqual(
+    rows.map((row) => row.text),
+    [signed, "First line\nSecond line\nThird", "Shared a link\nhttps://example.com/demo"],
+  );
+});
+
 test("the browser probe selects only the target thread request", () => {
   const originalDocument = globalThis.document;
   const originalLocation = globalThis.location;

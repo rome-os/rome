@@ -116,11 +116,15 @@ The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Doc
   phone numbers, addresses, birthdays, connected dates, and other displayed contact fields.
 - `opencli linkedin thread-snapshot --thread-url URL [--limit N]` — returns the latest messages
   from one exact LinkedIn thread with sender, timestamp, profile, participant id, and reaction
-  metadata.
+  metadata. Message text keeps its line breaks.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
 - `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
   With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
+  Line breaks are sent as line feeds. The receipt's `text` is the body LinkedIn stored, and
+  `text_matches` says whether it kept the sent text's line breaks and words, or is null when no
+  body came back. A `false` there is still a sent message, so check LinkedIn rather than sending
+  again.
   Without `--send`, it only verifies the destination.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
