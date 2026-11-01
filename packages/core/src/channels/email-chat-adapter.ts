@@ -93,6 +93,7 @@ export function emailChatAdapter(
       return base.account;
     },
     heard: (id) => base.heard(id),
+    threadAt: (address) => base.threadAt(address),
     start: (deliver, fault) => base.start(deliver, fault),
     stop: () => base.stop(),
     stream: (chatId, threadId, out) => base.stream?.(chatId, threadId, out) ?? null,

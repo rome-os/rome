@@ -35,7 +35,7 @@ import {
   ownedBy,
   type ChatKey,
 } from "../channels/chat-ids.js";
-import type { ChatRef, Place } from "./place.js";
+import { placeIn, type ChatRef, type Place } from "./place.js";
 
 const log = createLogger("chat-adapter");
 
@@ -143,7 +143,7 @@ export interface ChannelAdapterDeps {
   platformOfChannel(channel: string): string;
   /** The channels layer's address store, where a chat the platform reaches
    *  at an id other than its key is reached. */
-  addresses?: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt">;
+  addresses?: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt" | "bindThread" | "threadChatAt">;
 }
 
 /** How an adapter keys the chat a platform message was said in, and its
@@ -234,6 +234,13 @@ export interface ChannelChatAdapter extends ChatAdapter {
    *  running for it. The hook that hears recorded messages reads it; Chats
    *  never does. */
   heard(id: string): InboundEvent | undefined;
+  /**
+   * The thread the account heard at platform address `address`, in its
+   * chat, or null when it heard none there. Only today's channel ports name
+   * a thread by its address alone, so this goes with them: a sender that
+   * holds a place sends to its chat and thread.
+   */
+  threadAt(address: string): Place | null;
 }
 
 export function channelAdapter(
@@ -263,6 +270,12 @@ export function channelAdapter(
   return {
     channel: channel.name,
     heard: (id) => delivering.get(id),
+    threadAt(address) {
+      const own = account();
+      const key = deps.addresses?.threadChatAt(own, address) ?? null;
+      if (key === null) return null;
+      return placeIn(ChatIds.chat(chatKey(own.platform, key as ChatId)), address as ChatId);
+    },
     get account() {
       return account();
     },
@@ -292,6 +305,15 @@ export function channelAdapter(
               inbound.via.account,
               ChatIds.key(inbound.chat).externalId,
               saved.message.chatId,
+            );
+          }
+          // A thread is reached at its own address, which names no chat:
+          // noted for today's ports, which send to that address alone.
+          if (inbound.thread !== null) {
+            deps.addresses?.bindThread(
+              inbound.via.account,
+              inbound.thread.id,
+              ChatIds.key(inbound.chat).externalId,
             );
           }
           try {

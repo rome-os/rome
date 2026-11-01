@@ -4,13 +4,14 @@
 // A chat's key is its address on most platforms. Where it is not, as for a
 // direct message a platform gives an id of its own (Feishu's p2p chat,
 // Discord's DM channel), the adapter keeps the address here, by Rome's
-// account and the chat's key, when it first hears the chat there. Chats never
-// reads it.
+// account and the chat's key, when it first hears the chat there. A thread's
+// address is kept with the key of the chat it stands in, so a send that names
+// only the thread finds its chat. Chats never reads it.
 
 import type { Account } from "@rome-os/app-runtime";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { channelAddresses } from "../db/schema/system.js";
+import { channelAddresses, channelThreads } from "../db/schema/system.js";
 
 export class ChatAddresses {
   constructor(private readonly db: DrizzleDb) {}
@@ -58,6 +59,34 @@ export class ChatAddresses {
             eq(channelAddresses.platform, account.platform),
             eq(channelAddresses.accountId, account.id),
             eq(channelAddresses.address, address),
+          ),
+        )
+        .get()?.chatKey ?? null
+    );
+  }
+
+  /** Note that `account` reaches a thread of the chat it keys `chatKey` at
+   *  `address`. */
+  bindThread(account: Account, address: string, chatKey: string): void {
+    this.db
+      .insert(channelThreads)
+      .values({ platform: account.platform, accountId: account.id, address, chatKey })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /** The key of the chat whose thread `account` reaches at `address`, or
+   *  null when it heard no thread there. */
+  threadChatAt(account: Account, address: string): string | null {
+    return (
+      this.db
+        .select({ chatKey: channelThreads.chatKey })
+        .from(channelThreads)
+        .where(
+          and(
+            eq(channelThreads.platform, account.platform),
+            eq(channelThreads.accountId, account.id),
+            eq(channelThreads.address, address),
           ),
         )
         .get()?.chatKey ?? null

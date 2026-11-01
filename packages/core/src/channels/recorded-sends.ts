@@ -124,27 +124,35 @@ async function sayInChat(
 ): Promise<string | null> {
   const account = deps.adapters.accountOn(channel.name);
   const platform = account.platform;
+  const adapter = deps.adapters.of(channel);
+  // The port names a thread by its address alone; the adapter knows the
+  // thread's chat once it has heard the thread.
+  const threadOf = adapter.threadAt(address)?.chat ?? null;
   const group =
+    threadOf !== null ||
     message.kind === "email" ||
     deps.chats.get(deps.adapters.chatAt(channel.name, address, "group"))?.kind === "group";
   const { chat, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: address,
+    ...(threadOf
+      ? { parentThreadId: deps.adapters.addressAt(channel.name, placeIn(threadOf)) }
+      : {}),
     threadType: group ? "group" : "private",
   });
-  const adapter = deps.adapters.of(channel);
+  const thread = threadOf ? address : null;
   const replyTo = quoted ? lineAt(chat, romeEnd, quoted) : undefined;
   let lineId: string | null = null;
   await deps.messages.send(
     {
       direction: "fromRome",
-      place: placeIn(chat),
+      place: placeIn(chat, thread ?? undefined),
       saidBy: { account: { platform, id: romeEnd }, agent: "main" },
       parts: out.parts ?? [{ type: "text", content: out.text }],
       ...(replyTo ? { replyTo } : {}),
     },
     async () => {
-      lineId = await adapter.send(chat.id, null, { ...out, ...(replyTo ? { replyTo } : {}) });
+      lineId = await adapter.send(chat.id, thread, { ...out, ...(replyTo ? { replyTo } : {}) });
       return { id: lineId };
     },
   );
