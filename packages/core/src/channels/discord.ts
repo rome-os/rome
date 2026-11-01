@@ -694,6 +694,22 @@ export class DiscordAdapter {
       await this.handleSlashCommand(interaction);
     });
 
+    // discord.js 14 builds a DM's channel only from a message whose channel
+    // it has cached, and a bot's READY caches none, so a person's first DM
+    // would be dropped. The raw event runs before the message's handler, so
+    // the DM is cached here, partial, with its sender as the recipient.
+    this.client.on("raw", (packet: { t?: string; d?: Record<string, unknown> }) => {
+      const data = packet.d;
+      if (packet.t !== "MESSAGE_CREATE" || !data || "guild_id" in data) return;
+      const channelId = data.channel_id;
+      if (typeof channelId !== "string" || this.client.channels.cache.has(channelId)) return;
+      (
+        this.client.channels as unknown as {
+          _add(data: { id: string; type: ChannelType; recipients: unknown[] }): unknown;
+        }
+      )._add({ id: channelId, type: ChannelType.DM, recipients: [data.author] });
+    });
+
     this.client.on("messageCreate", async (message: Message) => {
       if (!this.handler) return;
 

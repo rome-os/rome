@@ -28,6 +28,8 @@ const GUILD = String(
     .guild_id,
 );
 const API = "/api/v10";
+/** The first second of 2015, from which Discord's ids count milliseconds. */
+const DISCORD_EPOCH = 1420070400000n;
 const TEXT_LIMIT = 2000;
 const MESSAGE_TYPE_REPLY = 19;
 
@@ -103,8 +105,10 @@ export class DiscordPeer implements Peer {
   /** A user's message, dispatched to every connected gateway session. */
   emitMessage(text: string, channelId = DISCORD_DM): VisibleMessage {
     if (!this.sessions.size) throw new Error("No discord.js gateway session is connected");
+    // A person's message is said now, and Discord's id says when: discord.js
+    // reads its time from the id, so it is minted from the clock.
     const message = this.store.add({
-      id: this.allocateId(),
+      id: String(((BigInt(Date.now()) - DISCORD_EPOCH) << 22n) | BigInt(this.sequence & 0xfff)),
       conversation: channelId,
       from: "user",
       text,
@@ -177,6 +181,14 @@ export class DiscordPeer implements Peer {
     if (!match) return undefined;
     const [, channelId, messages, messageId] = match;
     const channel = this.channels.get(channelId);
+    // A user's id names no channel: Discord answers it as unknown, which is
+    // how Rome tells a person's id from a channel's.
+    if (!channel && method === "GET" && !messages && channelId === DISCORD_USER)
+      return {
+        status: 404,
+        body: { code: 10003, message: "Unknown Channel" },
+        source: "synthetic",
+      };
     if (!channel) return undefined;
     if (!messages) return method === "GET" ? synthetic(channel) : undefined;
 
