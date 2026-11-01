@@ -53,6 +53,39 @@ body`;
     if (!result.ok) expect(result.reason).toBe("name-has-reserved-separator");
   });
 
+  it("reads a quoted name and description without their quotes", () => {
+    const content = `---
+name: "sample-skill"
+description: 'A sample skill.'
+---
+body`;
+    expect(parseSkillFrontmatter(content)).toEqual({
+      name: "sample-skill",
+      description: "A sample skill.",
+      tools: undefined,
+    });
+  });
+
+  it("unescapes quotes inside a quoted description", () => {
+    const single = parseSkillFrontmatter(`---\nname: a\ndescription: 'It''s a skill.'\n---`);
+    expect(single?.description).toBe("It's a skill.");
+    const double = parseSkillFrontmatter(`---\nname: a\ndescription: "Say \\"hi\\"."\n---`);
+    expect(double?.description).toBe('Say "hi".');
+  });
+
+  it("decodes YAML-only escapes in a quoted name", () => {
+    const content = `---\nname: "sample\\x2dskill"\ndescription: x\n---`;
+    const result = parseSkillFrontmatterResult(content);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.name).toBe("sample-skill");
+  });
+
+  it("still rejects a quoted name with internal whitespace", () => {
+    const result = parseSkillFrontmatterResult(`---\nname: "deep research"\ndescription: x\n---`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("name-has-whitespace");
+  });
+
   it("returns null without frontmatter", () => {
     expect(parseSkillFrontmatter("no frontmatter here")).toBeNull();
   });
