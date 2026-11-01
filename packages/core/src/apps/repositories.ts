@@ -15,7 +15,7 @@ import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
-import { lineAt } from "../chats/adapter.js";
+import { lineAt, type ChatAdapters } from "../chats/adapter.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -38,7 +38,7 @@ export interface CreateAppRuntimeRepositoriesDeps {
   links: Pick<TurnLinks, "prompt">;
   /** The dashboard's read model, which an app's transcript read renders. */
   reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
-  adapters: OpenChannelChatDeps["adapters"];
+  adapters: OpenChannelChatDeps["adapters"] & Pick<ChatAdapters, "of">;
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -83,6 +83,14 @@ function createGuardianProfileRepository(deps: {
 
 function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepository {
   const repo = deps.webchatRepo;
+  /** Channel `name` as an app's seat speaks through it: its send port. */
+  const channelNamed = (name: string): Channel =>
+    ({
+      name,
+      send: {
+        send: (address: ChatId, message: OutgoingMessage) => deps.sendOn(name, address, message),
+      },
+    }) as unknown as Channel;
   const reads = deps.reads;
   const open: ChatRepository["ensureChannelChat"] = (input) =>
     openChannelChat(
@@ -149,13 +157,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
     // An app's seat speaks through its account's chat adapter, which sends
     // on the channel and names the line Chats records.
     async send(input) {
-      const channel = {
-        name: input.channel,
-        send: {
-          send: (address: ChatId, message: OutgoingMessage) =>
-            deps.sendOn(input.channel, address, message),
-        },
-      } as unknown as Channel;
+      const channel = channelNamed(input.channel);
       const parts = input.parts?.length ? stripHostOnly(input.parts) : undefined;
       const sent = await deps.replies.send(
         input.sessionId,
@@ -180,18 +182,43 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
       return sent.platformMessageId ? { messageId: sent.platformMessageId } : {};
     },
-    recordOutboundMessage: async (input) => {
+    async sendEmail(input) {
+      const channel = channelNamed(input.channel);
+      const parts = input.parts?.length ? stripHostOnly(input.parts) : undefined;
+      const recorded = input.content
+        ? (JSON.parse(stripHostOnlyPartsFromContent(input.content)) as MessagePart[])
+        : undefined;
+      const out = { text: input.text ?? "", ...(parts ? { parts } : {}), email: input.email };
+      const turn = input.knownToProvider && input.turnId ? { turnId: input.turnId } : {};
+      // An email thread is a group chat keyed by the thread, as inbound mail
+      // records it; main answers there unless the caller names its seat.
+      const seatAt = async (threadId: string) =>
+        input.sessionId ??
+        (await open({ channel: input.channel, threadId, agentName: "main", threadType: "group" }))
+          .id;
+      if (input.threadId) {
+        const sessionId = await seatAt(input.threadId);
+        const sent = await deps.replies.send(sessionId, channel, out, {
+          ...turn,
+          ...(recorded ? { recorded } : {}),
+        });
+        if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
+        return { messageId: sent.platformMessageId, threadId: input.threadId };
+      }
+      // A new thread has no address until the provider takes the email, so
+      // it is recorded once the provider named it.
+      const adapter = deps.adapters.of(channel);
+      if (!adapter.open) throw new Error(`Channel "${input.channel}" cannot start a thread`);
+      const opened = await adapter.open(out);
+      const sessionId = await seatAt(opened.address);
       await deps.replies.say(
-        input.sessionId,
-        // Only the host may author routine cards, so a forged one never
-        // reaches the chat.
-        JSON.parse(stripHostOnlyPartsFromContent(input.content)) as MessagePart[],
-        async () => (input.platformMessageId ? { platformMessageId: input.platformMessageId } : {}),
-        {
-          ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
-          ...(input.replyToPlatformMessageId ? { replyTo: input.replyToPlatformMessageId } : {}),
-        },
+        sessionId,
+        recorded ?? parts ?? [{ type: "text", content: out.text }],
+        async () =>
+          opened.platformMessageId ? { platformMessageId: opened.platformMessageId } : {},
+        turn,
       );
+      return { messageId: opened.platformMessageId, threadId: opened.address };
     },
   };
 }

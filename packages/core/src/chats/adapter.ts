@@ -15,6 +15,8 @@ import type {
   ChannelMessage,
   ChatId,
   InboundEvent,
+  OutgoingEmailMessage,
+  OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
@@ -80,7 +82,16 @@ export interface Outbound {
   readonly replyTo?: string;
   /** The agent turn it answers, which a platform may show it as. */
   readonly turnId?: string;
+  /** What only an email carries: its recipients, subject, HTML body and the
+   *  provider message it answers. Sent as an email when present. */
+  readonly email?: EmailFields;
 }
+
+/** The fields of an outgoing email beyond what every message carries. */
+export type EmailFields = Omit<
+  OutgoingEmailMessage,
+  "kind" | "text" | "parts" | "attachments" | "replyToMessageId" | "turnId"
+>;
 
 /**
  * One of Rome's accounts on a platform, as Chats reaches it. One instance per
@@ -108,6 +119,13 @@ export interface ChatAdapter {
    * took it. A refusal rejects with the platform's words. No retry.
    */
   send(chatId: string, threadId: ChatId | null, out: Outbound): Promise<string>;
+  /**
+   * Start a conversation the platform names as it takes the first message,
+   * as a new email thread is, and answer the address the platform gave it
+   * and the platform's id for the message. Absent where every conversation
+   * has an address before anything is said in it.
+   */
+  open?(out: Outbound): Promise<{ address: ChatId; platformMessageId: string | null }>;
   /**
    * Open a reply in chat `chatId` that is written as the agent's run goes,
    * or null where the channel cannot stream. It is sent as the platform
@@ -308,14 +326,21 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
       const own = account();
       const ref: ChatRef = { platform: own.platform, id: chatId };
       const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
-      const receipt = await send.send(addressIn(ref, threadId), {
-        text: out.text,
-        ...(out.parts ? { parts: [...out.parts] } : {}),
-        ...(out.attachments ? { attachments: [...out.attachments] } : {}),
-        ...(replyTo ? { replyToMessageId: replyTo } : {}),
-        ...(out.turnId ? { turnId: out.turnId } : {}),
-      });
+      const receipt = await send.send(
+        addressIn(ref, threadId),
+        outgoing(out, replyTo || undefined),
+      );
       return sentLineId(ref, own.id, receipt.messageId || undefined);
+    },
+
+    async open(out) {
+      const send = channel.send;
+      if (!send) throw new Error(`Channel "${channel.name}" cannot send`);
+      const receipt = await send.send("" as ChatId, outgoing(out, undefined));
+      if (typeof receipt.chatId !== "string" || !receipt.chatId.trim()) {
+        throw new Error(`Channel "${channel.name}" named no conversation for what it sent`);
+      }
+      return { address: receipt.chatId, platformMessageId: receipt.messageId || null };
     },
 
     stream(chatId, threadId, out) {
@@ -426,6 +451,19 @@ export class ChatAdapters {
     if (kind === "group") return chatAt(account.platform, address);
     return directMessageAt(account, address, this.deps.addresses);
   }
+}
+
+/** `out` as the channel port takes it: an email when it carries email
+ *  fields, else a chat message quoting the platform's `replyTo`. */
+function outgoing(out: Outbound, replyTo: string | undefined): OutgoingMessage {
+  const base = {
+    text: out.text,
+    ...(out.parts ? { parts: [...out.parts] } : {}),
+    ...(out.attachments ? { attachments: [...out.attachments] } : {}),
+    ...(out.turnId ? { turnId: out.turnId } : {}),
+  };
+  if (out.email) return { ...base, ...out.email, kind: "email" };
+  return { ...base, ...(replyTo ? { replyToMessageId: replyTo } : {}) };
 }
 
 /** The direct message `account` has at platform address `address`: the one
