@@ -91,6 +91,9 @@ describe("backend turn delivery", () => {
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "webchat" ? webchat : null),
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     runner.setWebchatRuntime({
       enqueueSessionTask: async (_sessionId, task) => {
@@ -142,6 +145,9 @@ describe("backend turn delivery", () => {
       const runner = createBackendTurnRunner({
         agentRunner,
         channel: (name) => (name === "webchat" ? webchat : null),
+        // No messaging-channel reply is said here, so no seat is wired.
+        chats: {} as never,
+        replies: {} as never,
       });
       const seen: unknown[] = [];
       runner.setWebchatRuntime({
@@ -175,6 +181,9 @@ describe("backend turn delivery", () => {
       agentRunner,
       channel: (name) => (name === "webchat" ? webchat : null),
       isTextPrivate: (agentName) => agentName === "core:concierge",
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     runner.setWebchatRuntime({
       enqueueSessionTask: async (_sessionId, task) => {
@@ -205,6 +214,9 @@ describe("backend turn delivery", () => {
           send: { send: rs.fn(), direct: null, activity: null },
         }) as unknown as Channel,
       resolveDeviceFolder,
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     runner.setWebchatRuntime({
       enqueueSessionTask: async (_sessionId, task) => {
@@ -240,6 +252,9 @@ describe("backend turn delivery", () => {
         messages: null,
         directory: null,
       }),
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
 
     await expect(

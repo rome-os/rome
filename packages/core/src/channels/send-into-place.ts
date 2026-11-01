@@ -26,12 +26,7 @@ import {
 import { WEBCHAT_CHANNEL } from "./webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import {
-  addressOf,
-  isDirectMessage,
-  platformIdOfLine,
-  type ChatAdapters,
-} from "../chats/adapter.js";
+import { isDirectMessage, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
@@ -70,8 +65,9 @@ export interface SendIntoPlaceDeps extends SendDeps {
   /** Where a send into a dashboard chat goes. Absent, the dashboard takes no
    *  sends. */
   dashboard?: DashboardInbox;
-  /** Each channel's chat adapter, which a send goes out through. */
-  adapters: Pick<ChatAdapters, "of">;
+  /** Each channel's chat adapter, which a send goes out through, and where
+   *  each channel's account reaches a place. */
+  adapters: Pick<ChatAdapters, "of" | "addressAt">;
 }
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
@@ -178,7 +174,7 @@ export async function send(
   return {
     ok: true,
     sent: {
-      ref: `${addressOf(place)}:${platformIdOfLine(chat.ref, account.id, sent.id) ?? sent.id}`,
+      ref: `${deps.adapters.addressAt(channel.name, place)}:${platformIdOfLine(chat.ref, account.id, sent.id) ?? sent.id}`,
       timestamp: Math.floor(sent.at.getTime() / 1000),
     },
     at: sent.at,

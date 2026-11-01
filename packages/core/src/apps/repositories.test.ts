@@ -48,7 +48,12 @@ describe("app chat repository", () => {
       agentName: "main",
     });
 
-    await repository.send({ sessionId: seat.id, channel: "telegram", text: "on it" });
+    await repository.send({
+      sessionId: seat.id,
+      channel: "telegram",
+      text: "on it",
+      knownToProvider: false,
+    });
 
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ channel: "telegram", message: { text: "on it" } });
@@ -64,7 +69,12 @@ describe("app chat repository", () => {
 
   it("refuses a seat that stands in no chat, and sends nothing", async () => {
     await expect(
-      chats().send({ sessionId: "no-such-row", channel: "telegram", text: "on it" }),
+      chats().send({
+        sessionId: "no-such-row",
+        channel: "telegram",
+        text: "on it",
+        knownToProvider: false,
+      }),
     ).rejects.toThrow();
     expect(sent).toHaveLength(0);
   });

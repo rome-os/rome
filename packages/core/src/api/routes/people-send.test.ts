@@ -201,9 +201,10 @@ describe("People send API — after the channel answers", () => {
     // The provider accepted the message: it is out on a network Rome does not
     // own. A local write failing afterwards cannot take it back, and reporting
     // the send as failed invites a retry that delivers a second real message.
-    deps.webchatRepo.recordOutboundConversationMessage = async () => {
-      throw new Error("disk is full");
-    };
+    testDb.db.run(sql`
+      CREATE TRIGGER disk_full BEFORE INSERT ON chat_messages
+      BEGIN SELECT RAISE(ABORT, 'disk is full'); END
+    `);
 
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",

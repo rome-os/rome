@@ -123,7 +123,7 @@ export interface ApiDeps {
   /** The chats Rome holds (docs/domains/chats.md#chat). */
   chats: Pick<ChatRepository, "get" | "start">;
   /** Each channel's chat adapter, which a send goes out through. */
-  adapters: Pick<ChatAdapters, "of">;
+  adapters: Pick<ChatAdapters, "of" | "addressAt" | "directMessageReached">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

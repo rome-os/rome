@@ -545,6 +545,8 @@ export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig 
 
 export interface TestDeps extends ApiDeps {
   // Test-owned extras not part of the ApiDeps surface.
+  /** The chat adapters in full, so a test can key chats as they do. */
+  adapters: ChatAdapters;
   /** The LinkedIn inbox mirror. No route reads it — the poller fills it and
    *  the person timeline reads through it — so a test that wants LinkedIn
    *  history seeds it here rather than through the API's own dependencies. */

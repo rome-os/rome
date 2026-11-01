@@ -76,6 +76,9 @@ describe("defer session continuity", () => {
     const backendTurnRunner = createBackendTurnRunner({
       agentRunner: rome.agentRunner,
       channel: (name) => rome?.channels.find((channel) => channel.name === name) ?? null,
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     const resumeSession = createResumeSessionAction(resumeSessionConfig, {
       backendTurnRunner,
@@ -118,6 +121,9 @@ describe("defer session continuity", () => {
     runner = createBackendTurnRunner({
       agentRunner: testRome.agentRunner,
       channel: (name) => testRome.channels.find((channel) => channel.name === name) ?? null,
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
 
     const channelContext = {

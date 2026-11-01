@@ -82,7 +82,7 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
     const page = await messagesAt(deps, address, timelinePageLimit(c.req.query("limit")), before);
-    const entries = page.messages.map(timelineEntry).reverse();
+    const entries = page.messages.map(timelineEntry(address)).reverse();
     const oldest = entries.at(-1);
     return c.json({
       entries,
@@ -124,9 +124,15 @@ function unknownAssistant(c: Context) {
  *  ref the People timeline gave it. */
 const REF_PREFIX = "agent:";
 
-/** A message as the timeline wire shows it. */
-function timelineEntry(message: SaidMessage): Message {
-  const inbound = message.direction === "toRome";
+/** A message of the chat with `assistant` as the timeline wire shows it.
+ *  The chat is a direct message, so only the assistant's own lines come in:
+ *  the guardian's, said through Rome's account with no agent, go out. */
+const timelineEntry =
+  (assistant: Account) =>
+  (message: SaidMessage): Message =>
+    entryOf(message, message.saidBy?.account.id === assistant.id);
+
+function entryOf(message: SaidMessage, inbound: boolean): Message {
   return {
     source: message.place.chat.platform,
     timestamp: Math.floor(message.at.getTime() / 1000),
@@ -167,5 +173,5 @@ function messagesAt(
 /** The newest `limit` messages of the assistant's chat, newest first. */
 async function newest(deps: ApiDeps, address: Account, limit: number): Promise<Message[]> {
   const page = await messagesAt(deps, address, limit);
-  return page.messages.map(timelineEntry).reverse();
+  return page.messages.map(timelineEntry(address)).reverse();
 }

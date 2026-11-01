@@ -1,3 +1,4 @@
+import { chatAt } from "../chats/adapter.js";
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
@@ -131,8 +132,14 @@ describe("a link on a platform Rome holds accounts on", () => {
         sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
         accountOf: (name: string) =>
           recorded && !vacated.has(name) ? { platform: "telegram", id: `${name}-account` } : null,
-        webchatRepo: { ensureChannelChat: unused },
-        chatMessages: { recordSent: unused },
+        chats: { get: () => null, start: unused as never },
+        chatMessages: { send: unused },
+        adapters: {
+          of: unused as never,
+          addressAt: unused as never,
+          directMessageReached: (_channel: string, other: string, address: string) =>
+            chatAt("telegram", address, { romeEnd: "rome", other }),
+        },
       };
 
       const found = await directPlace(deps, link);

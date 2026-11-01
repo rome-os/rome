@@ -29,7 +29,7 @@
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
-import { chatAt } from "../chats/adapter.js";
+import { chatAt, type ChatAdapters } from "../chats/adapter.js";
 import { placeIn, type Place } from "../chats/place.js";
 import {
   type Sender,
@@ -168,7 +168,9 @@ export async function readSendStates(
  * to go out as `as`: another account's channel may hold another address.
  */
 export async function directPlace(
-  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf">,
+  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf"> & {
+    adapters?: Pick<ChatAdapters, "directMessageReached">;
+  },
   account: Account,
   from?: Account,
 ): Promise<{ ok: true; place: Place; as: Sender } | Extract<SendResult, { ok: false }>> {
@@ -186,6 +188,8 @@ export async function directPlace(
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
   const romeEnd = "channel" in as ? as.channel : as.id;
-  const chat = chatAt(account.platform, resolution.target.chatId, { romeEnd, other: account.id });
+  const chat =
+    deps.adapters?.directMessageReached(sender, account.id, resolution.target.chatId) ??
+    chatAt(account.platform, resolution.target.chatId, { romeEnd, other: account.id });
   return { ok: true, place: placeIn(chat), as };
 }

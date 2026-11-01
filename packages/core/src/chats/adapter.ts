@@ -442,6 +442,18 @@ export class ChatAdapters {
   }
 
   /**
+   * The direct message channel `channel`'s account has with `other`, which
+   * the channel reaches at `address`. The address is kept, so a send there
+   * goes where the channel answered, as for a direct message it heard.
+   */
+  directMessageReached(channel: string, other: string, address: string): ChatRef {
+    const account = this.accountOn(channel);
+    const chat = chatAt(account.platform, address, { romeEnd: account.id, other });
+    if (address !== other) this.deps.addresses.bind(account, ChatIds.key(chat).externalId, address);
+    return chat;
+  }
+
+  /**
    * The chat channel `channel`'s account reaches at platform address
    * `address`: the group there, else the direct message the account heard
    * there, else the one with the party the address names.

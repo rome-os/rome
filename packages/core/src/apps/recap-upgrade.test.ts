@@ -6,12 +6,10 @@ import type { RomeAppContext } from "@rome-os/app-runtime";
 import { createApiHandler } from "../../../../rome_apps/system/src/api/index.js";
 import { getRecapSettings } from "../../../../rome_apps/system/src/settings.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
+import { createTestDb, testAppRepositories, type TestDb } from "../test/helpers.js";
 import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
 import { packArtifact } from "./packaging/index.js";
 import { preserveRecapOptOutAtBoot } from "./recap-upgrade.js";
-import { createAppRuntimeRepositories } from "./repositories.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 
 describe("recap to system upgrade", () => {
@@ -57,12 +55,7 @@ describe("recap to system upgrade", () => {
   }
 
   function repositories() {
-    return createAppRuntimeRepositories({
-      settingsRepo,
-      webchatRepo: new WebChatRepository(testDb.db),
-      chatRepo: testChatRepository(testDb.db),
-      chatMessages: { recordSent: async () => undefined },
-    });
+    return testAppRepositories(testDb.db);
   }
 
   it.each([
@@ -90,7 +83,7 @@ describe("recap to system upgrade", () => {
     const handler = createApiHandler({
       app: { id: "system", version: "0.2.21" },
       repositories: repositories(),
-    } as RomeAppContext);
+    } as unknown as RomeAppContext);
     const response = await handler.handle({
       method: "GET",
       path: ["settings"],
