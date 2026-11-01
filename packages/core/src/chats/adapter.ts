@@ -15,6 +15,7 @@ import type {
   ChannelMessage,
   ChatId,
   InboundEvent,
+  MessageReceipt,
   OutgoingEmailMessage,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
@@ -336,11 +337,14 @@ export function channelAdapter(channel: Channel, deps: ChannelAdapterDeps): Chan
     async open(out) {
       const send = channel.send;
       if (!send) throw new Error(`Channel "${channel.name}" cannot send`);
-      const receipt = await send.send("" as ChatId, outgoing(out, undefined));
-      if (typeof receipt.chatId !== "string" || !receipt.chatId.trim()) {
+      const receipt: MessageReceipt | undefined = await send.send(
+        "" as ChatId,
+        outgoing(out, undefined),
+      );
+      if (typeof receipt?.chatId !== "string" || !receipt.chatId.trim()) {
         throw new Error(`Channel "${channel.name}" named no conversation for what it sent`);
       }
-      return { address: receipt.chatId, platformMessageId: receipt.messageId || null };
+      return { address: receipt.chatId, platformMessageId: receipt.messageId?.trim() || null };
     },
 
     stream(chatId, threadId, out) {

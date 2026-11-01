@@ -99,7 +99,10 @@ import {
 import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
-import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import {
+  createAppRuntimeRepositories,
+  type CreateAppRuntimeRepositoriesDeps,
+} from "../apps/repositories.js";
 import { ChatRepository } from "../chats/chat-repository.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -194,8 +197,17 @@ export function testChatWiring(db: DrizzleDb, webchatRepo = new WebChatRepositor
  * fails, since no channel is connected.
  */
 export function testAppRepositories(db: DrizzleDb, webchatRepo = new WebChatRepository(db)) {
+  return createAppRuntimeRepositories(appRepositoryDeps(db, webchatRepo));
+}
+
+/** What {@link testAppRepositories} builds the repositories from, for a test
+ *  that sends on a channel of its own through `sendOn`. */
+export function appRepositoryDeps(
+  db: DrizzleDb,
+  webchatRepo = new WebChatRepository(db),
+): CreateAppRuntimeRepositoriesDeps {
   const wiring = testChatWiring(db, webchatRepo);
-  return createAppRuntimeRepositories({
+  return {
     settingsRepo: new SettingsRepository(db),
     webchatRepo,
     chatRepo: wiring.chats,
@@ -207,7 +219,7 @@ export function testAppRepositories(db: DrizzleDb, webchatRepo = new WebChatRepo
     links: wiring.links,
     replies: wiring.replies,
     reads: wiring.reads,
-  });
+  };
 }
 
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */

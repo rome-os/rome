@@ -16,6 +16,7 @@ import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
 import { lineAt, type ChatAdapters } from "../chats/adapter.js";
+import { partsText } from "../chats/message.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -188,7 +189,9 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       const recorded = input.content
         ? (JSON.parse(stripHostOnlyPartsFromContent(input.content)) as MessagePart[])
         : undefined;
-      const out = { text: input.text ?? "", ...(parts ? { parts } : {}), email: input.email };
+      // An email's body is its text, else the text of its parts.
+      const text = input.text ?? (parts ? partsText(parts) : "");
+      const out = { text, ...(parts ? { parts } : {}), email: input.email };
       const turn = input.knownToProvider && input.turnId ? { turnId: input.turnId } : {};
       // An email thread is a group chat keyed by the thread, as inbound mail
       // records it; main answers there unless the caller names its seat.

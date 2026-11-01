@@ -57,11 +57,13 @@ function pageOf(rows: Row[], place: Place, end: number, limit: number): MessageP
     direction: row.role === "assistant" ? "fromRome" : "toRome",
     place,
     body: { text: textOf(row.content) },
+    parts: row.content,
     at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
   }));
   return {
     messages,
     older: start > 0 ? { at: messages[0].at, id: String(start) } : null,
+    newer: null,
   };
 }
 
@@ -131,7 +133,7 @@ function setup(
     return {
       ok: true,
       sent: { ref: `${place.chat.id}:${id}`, timestamp: 0 },
-      delivery: { state: "sent", at: new Date(0) },
+      at: new Date(0),
     };
   });
   const deps = {
@@ -436,7 +438,7 @@ describe("Concierge tools", () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     const error = "This chat is archived and read-only";
-    s.refuseSends({ ok: false, error, delivery: { state: "failed", error, at: new Date(0) } });
+    s.refuseSends({ ok: false, error, at: new Date(0) });
     const result = await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("This chat is archived and read-only");
