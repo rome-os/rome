@@ -15,15 +15,30 @@ const SEARCH_URL = "https://www.linkedin.com/search/results/people/?keywords=exa
 
 // jsdom has no layout, so innerText follows the rule Chromium applies to these fixtures: hidden
 // nodes drop out, display:contents and inline boxes join their parent's line, and every other
-// box starts and ends a line.
+// box starts and ends a line. Chromium makes each child of a flex or grid container a block, and
+// each run of text between those children too.
 function installInnerText(window) {
-  const render = (node) => {
+  const render = (node, item = false) => {
     if (node.nodeType === window.Node.TEXT_NODE) return node.data.replace(/\s+/g, " ");
     if (node.nodeType !== window.Node.ELEMENT_NODE) return "";
     const style = window.getComputedStyle(node);
     if (node.hidden || style.display === "none" || style.visibility === "hidden") return "";
-    const inner = Array.from(node.childNodes, render).join("");
-    if (style.display === "contents" || style.display.startsWith("inline")) return inner;
+    const flex = /(?:flex|grid)$/.test(style.display);
+    let inner = "";
+    let run = "";
+    for (const child of node.childNodes) {
+      if (flex && child.nodeType === window.Node.TEXT_NODE) {
+        run += render(child);
+        continue;
+      }
+      if (run) inner += `\n${run}\n`;
+      run = "";
+      inner += render(child, flex);
+    }
+    if (run) inner += `\n${run}\n`;
+    if (style.display === "contents" || (!item && style.display.startsWith("inline"))) {
+      return inner;
+    }
     return `\n${inner}\n`;
   };
   Object.defineProperty(window.HTMLElement.prototype, "innerText", {
@@ -176,6 +191,18 @@ test("a link wrapping the whole card yields its name and metadata, even in two l
   ]);
 });
 
+test("a name wrapped across lines without an aria-hidden name fails as unsupported", () => {
+  const html = fixture("split-name").replace(
+    /<span aria-hidden="true">([\s\S]*?<\/span>)<\/span><\/a>/,
+    "$1</a>",
+  );
+  assert.notEqual(html, fixture("split-name"));
+
+  const result = read(makeDom(html));
+
+  assert.deepEqual(result, { rows: [], candidate_count: 1, resolved_count: 0, layout: "none" });
+});
+
 test("a card link whose photo and presence text render before the name yields that name", () => {
   const result = read(makeDom(fixture("card-link-presence")));
 
@@ -272,6 +299,42 @@ test("an unknown label no other result shares produces no rows, not the mutual l
   assert.deepEqual(result, { rows: [], candidate_count: 6, resolved_count: 0, layout: "none" });
 });
 
+test("block-level mutual-connection links are neither headlines nor results", () => {
+  const result = read(makeDom(fixture("flex-social-proof")));
+
+  assert.deepEqual(result.rows, [
+    {
+      name: "Avery Example",
+      headline: "",
+      location: "",
+      profile_url: profile("avery-example"),
+    },
+    {
+      name: "Blake Example",
+      headline: "Product Manager at Example Labs",
+      location: "Seattle, Washington, United States",
+      profile_url: profile("blake-example"),
+    },
+  ]);
+  assert.equal(result.candidate_count, 4);
+});
+
+test("block-level mutual-connection links never stand in for unknown-label results", () => {
+  const html = fixture("lenient-mutual").replace(
+    /<p>(<a href="https:\/\/www\.linkedin\.com\/in\/morgan-mutual-\d\/">[^<]+<\/a>) ([^<]+)<\/p>/g,
+    '<p style="display: flex">$1<span>$2</span></p>',
+  );
+  assert.notEqual(html, fixture("lenient-mutual"));
+
+  const result = read(makeDom(html));
+
+  assert.equal(result.layout, "lenient");
+  assert.deepEqual(
+    result.rows.map((row) => row.profile_url),
+    [profile("camille-exemple"), profile("dominique-test"), profile("sacha-demo")],
+  );
+});
+
 test("profile links that only appear inside sentences produce no rows", () => {
   const result = read(makeDom(fixture("unsupported")));
 
@@ -301,6 +364,66 @@ test("duplicated leading names collapse and localized degree badges are accepted
       profile_url: profile("micah-example"),
     },
   ]);
+});
+
+test("a lone result with no card or list element reads no metadata past its link", () => {
+  const result = read(
+    makeDom(`<!doctype html><main><div><div>
+      <a href="/in/casey-sample/"><span aria-hidden="true">Casey Sample</span></a>
+      <div>Engineer</div>
+    </div></div>
+    <p>Are these results helpful?</p></main>`),
+  );
+
+  assert.deepEqual(result.rows, [
+    { name: "Casey Sample", headline: "", location: "", profile_url: profile("casey-sample") },
+  ]);
+});
+
+test("results bounded only by the main element leave the last one's metadata empty", () => {
+  const result = read(
+    makeDom(`<!doctype html><main>
+      <p><a href="/in/sam-placeholder/"><span aria-hidden="true">Sam Placeholder</span></a> · 2nd</p>
+      <p>Founder at Example Studio</p>
+      <p>Denver, Colorado, United States</p>
+      <p><a href="/in/casey-sample/"><span aria-hidden="true">Casey Sample</span></a> · 2nd</p>
+      <p>Recruiter at Example Talent</p>
+      <p>Are these results helpful?</p>
+    </main>`),
+  );
+
+  assert.deepEqual(
+    result.rows.map((row) => [row.name, row.headline, row.location]),
+    [
+      ["Sam Placeholder", "Founder at Example Studio", "Denver, Colorado, United States"],
+      ["Casey Sample", "", ""],
+    ],
+  );
+});
+
+test("hidden profile links never become rows, whether the link or its card is hidden", () => {
+  const result = read(
+    makeDom(`<!doctype html><main><ul>
+      <li>
+        <a hidden href="/in/hidden-link/"><span aria-hidden="true">Hidden Link</span></a>
+        <div>Should Not Appear</div>
+      </li>
+      <li>
+        <a style="visibility: hidden" href="/in/invisible-link/"><span aria-hidden="true">Invisible Link</span></a>
+        <div>Should Not Appear Either</div>
+      </li>
+      <li>
+        <a href="/in/visible-person/"><span aria-hidden="true">Visible Person</span></a>
+        <div>Analyst at Example Bank</div>
+      </li>
+    </ul></main>`),
+  );
+
+  assert.deepEqual(
+    result.rows.map((row) => row.profile_url),
+    [profile("visible-person")],
+  );
+  assert.equal(result.candidate_count, 1);
 });
 
 test("hidden duplicates and links off LinkedIn never become rows", () => {

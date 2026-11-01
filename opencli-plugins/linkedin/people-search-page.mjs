@@ -6,8 +6,9 @@
  * page. `candidate_count` counts every rendered profile handle, whether or not a name parsed from
  * its link, so a page of unparsed links reads as an unsupported layout, not an empty search. Each
  * row's headline and location come only from the text between its own result's first profile link
- * and the next result's, so a row never carries another result's metadata. A field stays empty
- * when that span has no line for it.
+ * and the next result's, so a row never carries another result's metadata. The last result's text
+ * ends with its card or the results list. A field stays empty when that span has no line for it,
+ * or when no card or list element bounds the last result.
  */
 export function readPeopleSearchPage() {
   const href = String(location.href || "");
@@ -81,7 +82,7 @@ export function readPeopleSearchPage() {
   // page never paints the markers, because nothing yields to the event loop before removal.
   const MARK = "\u2063";
   const nonce = String(Math.floor(Math.random() * 1e9));
-  const markerPattern = new RegExp(`${MARK}${nonce}:(\\d+|end):([se])${MARK}`, "gi");
+  const markerPattern = new RegExp(`${MARK}${nonce}:(\\d+|end):([sei])${MARK}`, "gi");
   const readMarked = (endContainer) => {
     const inserted = [];
     const insert = (parent, before, id, kind) => {
@@ -95,6 +96,9 @@ export function readPeopleSearchPage() {
         if (!el.parentNode) return;
         insert(el.parentNode, el, index, "s");
         insert(el.parentNode, el.nextSibling, index, "e");
+        // The markers around a hidden link still render, so a third one inside the link shows
+        // whether the link itself renders.
+        insert(el, el.firstChild, index, "i");
       });
       if (endContainer) insert(endContainer, null, "end", "e");
       text = String(main.innerText || "");
@@ -132,15 +136,37 @@ export function readPeopleSearchPage() {
   const views = anchors.map((anchor, index) => {
     const start = first.marks.get(`${index}:s`);
     const end = first.marks.get(`${index}:e`);
-    if (!start || !end) return { ...anchor, index, rendered: false, name: "" };
+    if (!start || !end || !first.marks.has(`${index}:i`)) {
+      return { ...anchor, index, rendered: false, name: "" };
+    }
     if (!startsByLine.has(start.line)) startsByLine.set(start.line, []);
     startsByLine.get(start.line).push({ col: start.col, handle: anchor.handle });
-    const own = chunks(first.lines, start, end)
-      .map((chunk) => clean(chunk.text))
-      .filter(Boolean);
+    const ownChunks = chunks(first.lines, start, end).filter((chunk) => clean(chunk.text));
+    const own = ownChunks.map((chunk) => clean(chunk.text));
     const aria = anchor.el.querySelector('span[aria-hidden="true"]');
     // A link wrapping the whole card can render its photo's presence text before the name.
-    const ownName = own.map(cleanName).find(Boolean) || "";
+    const nameAt = own.findIndex((line) => cleanName(line));
+    // A link rendering lines after its name either wraps a card, where a degree badge follows
+    // the name, or wraps the name itself across lines. Without that badge the two read alike, so
+    // the name stays unresolved rather than taking the name's first line alone.
+    const wrapped =
+      nameAt >= 0 &&
+      nameAt + 1 < own.length &&
+      !/[•·∙]/.test(own[nameAt]) &&
+      !badge(own[nameAt + 1]);
+    const ownName = nameAt >= 0 && !wrapped ? cleanName(own[nameAt]) : "";
+    // A link spanning several lines ends its first line itself, so only a one-line link
+    // can share its name's line with trailing text.
+    let after = own.length > 1 ? "" : clean(first.lines[end.line].slice(end.col));
+    // A block-level link, such as a flex item, ends its own line, so the text trailing it, such
+    // as the rest of a mutual-connection sentence, starts on a later line.
+    if (own.length === 1 && !after && end.line > ownChunks[0].line) {
+      after =
+        first.lines
+          .slice(end.line + 1)
+          .map(clean)
+          .find(Boolean) || "";
+    }
     return {
       ...anchor,
       index,
@@ -148,9 +174,7 @@ export function readPeopleSearchPage() {
       own,
       name: cleanName(aria?.textContent) || ownName,
       before: clean(first.lines[start.line].slice(0, start.col)),
-      // A link spanning several lines ends its first line itself, so only a one-line link
-      // can share its name's line with trailing text.
-      after: own.length > 1 ? "" : clean(first.lines[end.line].slice(end.col)),
+      after,
       endLine: end.line,
     };
   });
@@ -217,7 +241,9 @@ export function readPeopleSearchPage() {
 
   // The last span ends with the results list, not the page, so pagination and footer text never
   // become its metadata. The list is the deepest node holding every result's name link. A lone
-  // result ends with its card, or with the list when no element wraps the card.
+  // result ends with its card, or with the list when no element wraps the card. The main element
+  // holds the page's footer text too, so it bounds nothing, and without a bound the last result
+  // reads no metadata from outside its own link.
   let endContainer = null;
   if (primaries.length > 1) {
     const ancestors = (node) => {
@@ -235,14 +261,21 @@ export function readPeopleSearchPage() {
       primaries[0].el.closest('li, [role="listitem"], article') ||
       primaries[0].el.closest('[role="list"], ul, ol');
   }
+  if (endContainer === main || !main.contains(endContainer)) endContainer = null;
   const second = readMarked(endContainer);
   const listEnd = second.marks.get("end:e") || null;
   const linkStarts = new Map();
   views.forEach((view) => {
     const start = second.marks.get(`${view.index}:s`);
-    if (!start) return;
-    if (!linkStarts.has(start.line)) linkStarts.set(start.line, []);
-    linkStarts.get(start.line).push({ col: start.col, handle: view.handle });
+    const end = second.marks.get(`${view.index}:e`);
+    if (!view.rendered || !start || !end) return;
+    for (const chunk of chunks(second.lines, start, end)) {
+      // A block-level link, such as a flex item, puts its start marker on a line of its own, so
+      // each line its text covers counts as a start too.
+      if (chunk.line !== start.line && !chunk.text.trim()) continue;
+      if (!linkStarts.has(chunk.line)) linkStarts.set(chunk.line, []);
+      linkStarts.get(chunk.line).push({ col: chunk.start, handle: view.handle });
+    }
   });
 
   const rows = primaries.map((primary, k) => {
@@ -258,7 +291,7 @@ export function readPeopleSearchPage() {
     const found = primary.own.slice(nameAt + 1).filter(metadata);
     const nameEnd = second.marks.get(`${primary.index}:e`);
     const next = k + 1 < primaries.length ? second.marks.get(`${starts[k + 1]}:s`) : listEnd;
-    if (nameEnd) {
+    if (nameEnd && next) {
       for (const chunk of chunks(second.lines, nameEnd, next)) {
         // The rest of the name's own line holds badges, never the headline.
         if (chunk.line === nameEnd.line) continue;

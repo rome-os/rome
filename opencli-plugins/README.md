@@ -278,13 +278,16 @@ opencli linkedin thread-participants --thread-url "https://www.linkedin.com/mess
 The LinkedIn plugin replaces the built-in `people-search`, which matched result names against the
 page text and gave every result with the same display name the first one's headline and location.
 The replacement reads each result's text between its own profile link and the next result's, so
-a row never carries another person's metadata. A headline or location the card does not show
-stays empty. Names that wrap across lines, cards wrapped in one link, and degree labels in other
-languages also resolve.
+a row never carries another person's metadata. The last result's text ends with its card or the
+results list. A headline or location the card does not show stays empty. When no card or list
+element bounds the last result, that row keeps its name and profile URL, and its headline and
+location stay empty. Names that wrap across lines, cards wrapped in one link, and degree labels in
+other languages also resolve.
 
 When the page renders profile links but the command cannot tell which of them are search results,
-such as when an unknown degree label is not shared by the other results, it fails with
-`COMMAND_EXEC` and a "layout is not supported" message instead of guessing. The error's `help`
+it fails with `COMMAND_EXEC` and a "layout is not supported" message instead of guessing. This
+happens when an unknown degree label is not shared by the other results, or when a name wraps
+across lines and neither a name element nor a degree badge shows where it ends. The error's `help`
 field gives read-only next steps: read the page once with `opencli browser get text main`, and
 confirm a candidate with `opencli linkedin profile-read` before acting on it. Each search counts
 toward LinkedIn's monthly Commercial Use Limit, so when the first read finds no rows, the command
