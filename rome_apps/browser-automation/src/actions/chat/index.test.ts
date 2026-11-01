@@ -26,7 +26,12 @@ rs.mock("./clipboard_lock.js", () => ({
   acquireChatGPTClipboardLock: acquireChatGPTClipboardLockMock,
 }));
 
+import { createFakeOpencli } from "../../../test/fake-opencli.js";
+import type { RunOpencli } from "../../lib/browser-page.js";
 import { createChatGPTChatAction, postProcessCopiedReportMarkdown } from "./index.js";
+
+const CDP_ENDPOINT = { name: "cdp-local-chromium", browserUrl: "http://127.0.0.1:9222" };
+const CDP_DISCOVERY = { getBrowserEndpoints: () => [CDP_ENDPOINT] };
 
 describe("chatgpt_chat action", () => {
   beforeEach(() => {
@@ -58,7 +63,7 @@ describe("chatgpt_chat action", () => {
     };
     const close = rs.fn().mockResolvedValue(undefined);
     const release = rs.fn().mockResolvedValue(undefined);
-    openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+    openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
     acquireChatGPTClipboardLockMock.mockResolvedValue({ release });
 
     const readClipboardText = rs
@@ -130,7 +135,7 @@ describe("chatgpt_chat action", () => {
         .mockResolvedValueOnce({ copyConfirmed: true }),
     };
     const close = rs.fn().mockResolvedValue(undefined);
-    openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+    openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
 
     const readClipboardText = rs
       .fn()
@@ -167,7 +172,7 @@ If it helps, I can rewrite this as a compact executive summary.
         .mockResolvedValueOnce({ complete: false }),
     };
     const close = rs.fn().mockResolvedValue(undefined);
-    openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+    openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
 
     const readClipboardText = rs.fn().mockResolvedValue("existing clipboard");
     const action = createActionForTest(readClipboardText);
@@ -208,7 +213,7 @@ If it helps, I can rewrite this as a compact executive summary.
         .mockResolvedValueOnce({ copyConfirmed: false }),
     };
     const close = rs.fn().mockResolvedValue(undefined);
-    openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+    openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
 
     const readClipboardText = rs
       .fn()
@@ -245,7 +250,7 @@ If it helps, I can rewrite this as a compact executive summary.
       };
       const close = rs.fn().mockResolvedValue(undefined);
       const release = rs.fn().mockResolvedValue(undefined);
-      openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+      openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
       acquireChatGPTClipboardLockMock.mockResolvedValue({ release });
 
       const readClipboardText = rs
@@ -298,7 +303,7 @@ If it helps, I can rewrite this as a compact executive summary.
         .mockResolvedValueOnce({ copyConfirmed: false }),
     };
     const close = rs.fn().mockResolvedValue(undefined);
-    openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+    openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
 
     const action = createActionForTest(rs.fn().mockResolvedValue("same clipboard"));
 
@@ -346,7 +351,7 @@ If it helps, I can rewrite this as a compact executive summary.
     };
     const close = rs.fn().mockResolvedValue(undefined);
     const release = rs.fn().mockResolvedValue(undefined);
-    openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
+    openDiscoveredPageSessionMock.mockResolvedValue({ endpoint: CDP_ENDPOINT, session, close });
     acquireChatGPTClipboardLockMock.mockResolvedValue({ release });
 
     const action = createActionForTest(readClipboardText);
@@ -372,6 +377,95 @@ If it helps, I can rewrite this as a compact executive summary.
       release.mock.invocationCallOrder[0],
     );
     expect(release.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
+  });
+
+  it("runs through OpenCLI's Browser Bridge when CDP discovery found no browser", async () => {
+    // Discovery stays empty while ROME_ENABLE_CDP_AUTOMATION=false, the shipped default.
+    openDiscoveredPageSessionMock.mockImplementation(
+      browserRuntimeModule.openDiscoveredPageSession,
+    );
+    buildBrowserScriptExpressionMock.mockImplementation(
+      ({ entrypointExpression }: { entrypointExpression: string }) => {
+        const value = entrypointExpression.includes("chatWithChatGPT")
+          ? {
+              prompt: "Reply with OK",
+              responseText: "OK",
+              sources: [],
+              timestamp: "2026-11-01T00:00:00.000Z",
+            }
+          : entrypointExpression.includes("waitForLatestChatGPTResponseComplete")
+            ? { complete: true }
+            : { copyConfirmed: true };
+        return `(async () => (${JSON.stringify(value)}))()`;
+      },
+    );
+    const fake = createFakeOpencli();
+    const readClipboardText = rs
+      .fn()
+      .mockResolvedValueOnce("old clipboard")
+      .mockResolvedValueOnce("**OK**");
+    const action = createActionForTest(readClipboardText, {
+      capabilityDiscovery: { getBrowserEndpoints: () => [] },
+      runOpencli: fake.run,
+    });
+
+    const result = await action.execute({ prompt: "Reply with OK" });
+
+    expect(result).toEqual({ status: "ok", data: "**OK**" });
+    expect(fake.calls[0]).toEqual([
+      "browser",
+      expect.stringMatching(/^rome-chatgpt-chat-/),
+      "open",
+      "https://chatgpt.com/",
+    ]);
+    expect(fake.subcommands().at(-1)).toBe("close");
+    expect(buildBrowserScriptExpressionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entrypointExpression: expect.stringContaining("chatWithChatGPT"),
+        autorunFlag: "__ROME_CHATGPT_CHAT_AUTORUN__",
+      }),
+    );
+  });
+
+  it("passes the requested OpenCLI profile to every browser command", async () => {
+    buildBrowserScriptExpressionMock.mockImplementation(
+      ({ entrypointExpression }: { entrypointExpression: string }) =>
+        entrypointExpression.includes("chatWithChatGPT")
+          ? `(async () => (${JSON.stringify({ prompt: "test", responseText: "plain", sources: [], timestamp: "2026-11-01T00:00:00.000Z" })}))()`
+          : "(async () => ({ complete: false }))()",
+    );
+    const fake = createFakeOpencli();
+    const action = createActionForTest(rs.fn().mockResolvedValue("same"), {
+      capabilityDiscovery: CDP_DISCOVERY,
+      runOpencli: fake.run,
+    });
+    rs.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await action.execute({ prompt: "test", profile: "work-laptop" });
+
+    expect(result).toEqual({ status: "ok", data: { response: "plain", sources: [] } });
+    expect(openDiscoveredPageSessionMock).not.toHaveBeenCalled();
+    expect(fake.calls.length).toBeGreaterThan(0);
+    expect(fake.calls.every((args) => args[0] === "--profile" && args[1] === "work-laptop")).toBe(
+      true,
+    );
+  });
+
+  it("names the unmet browser prerequisite when no browser is connected", async () => {
+    const fake = createFakeOpencli({
+      openResult: { code: 1, stdout: "", stderr: "Browser Bridge extension not connected\n" },
+    });
+    const action = createActionForTest(rs.fn(), {
+      capabilityDiscovery: { getBrowserEndpoints: () => [] },
+      runOpencli: fake.run,
+    });
+
+    const result = await action.execute({ prompt: "Reply with OK" });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.error).toMatch(
+      /OpenCLI's Browser Bridge.*Browser Bridge extension not connected.*`profile`/s,
+    );
   });
 
   it("removes a trailing offer paragraph before references for long copied reports", () => {
@@ -427,7 +521,13 @@ If needed, I can expand this into a longer memo.`;
   });
 });
 
-function createActionForTest(readClipboardText?: () => Promise<string>) {
+function createActionForTest(
+  readClipboardText?: () => Promise<string>,
+  browser: {
+    capabilityDiscovery: { getBrowserEndpoints: () => { name: string; browserUrl: string }[] };
+    runOpencli?: RunOpencli;
+  } = { capabilityDiscovery: CDP_DISCOVERY },
+) {
   return createChatGPTChatAction(
     {
       name: "chatgpt_chat",
@@ -439,8 +539,9 @@ function createActionForTest(readClipboardText?: () => Promise<string>) {
       sideEffects: "write",
     },
     {
-      capabilityDiscovery: {} as never,
+      capabilityDiscovery: browser.capabilityDiscovery,
       readClipboardText,
+      runOpencli: browser.runOpencli,
     },
   );
 }

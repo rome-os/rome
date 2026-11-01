@@ -1,6 +1,6 @@
 name: chatgpt_chat
 type: custom
-description: Send a prompt to ChatGPT via browser automation and return the markdown response
+description: Send a prompt to ChatGPT in the signed-in browser and return the markdown response. Uses OpenCLI's default browser unless `profile` names another
 entry: ./index.ts
 complexity: moderate
 speed: slow

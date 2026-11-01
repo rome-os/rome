@@ -1,7 +1,22 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { dirname } from "node:path";
 import { setCurrentActionContextResolver } from "@rome-os/app-runtime";
+import * as browserRuntimeModule from "@rome-os/app-runtime/browser" with {
+  rstest: "importActual",
+};
 
+const { buildBrowserScriptExpressionMock, loadCachedScriptSourceMock } = rs.hoisted(() => ({
+  buildBrowserScriptExpressionMock: rs.fn(),
+  loadCachedScriptSourceMock: rs.fn(),
+}));
+
+rs.mock("@rome-os/app-runtime/browser", () => ({
+  ...browserRuntimeModule,
+  buildBrowserScriptExpression: buildBrowserScriptExpressionMock,
+  loadCachedScriptSource: loadCachedScriptSourceMock,
+}));
+
+import { createFakeOpencli } from "../../../test/fake-opencli.js";
 import { createChatGPTImageAction, type ChatGPTImageBrowserResult } from "./index.js";
 
 describe("chatgpt_image action", () => {
@@ -86,10 +101,7 @@ describe("chatgpt_image action", () => {
       height: 1024,
     };
     const runImageGeneration = rs.fn().mockResolvedValue({
-      endpoint: {
-        name: "cdp-local-chromium",
-        browserUrl: "http://127.0.0.1:9222",
-      },
+      browser: "cdp-local-chromium",
       result: browserResult,
     });
     const mkdirMock = rs.fn().mockResolvedValue(undefined);
@@ -130,6 +142,7 @@ describe("chatgpt_image action", () => {
         pageUrl: "https://chatgpt.com/",
         timeoutMs: 900000,
       }),
+      expect.anything(),
     );
     expect(mkdirMock).toHaveBeenCalledWith(dirname(expectedPath), { recursive: true });
     expect(writeFileMock).toHaveBeenCalledWith(expectedPath, Buffer.from("fake image bytes"));
@@ -161,10 +174,7 @@ describe("chatgpt_image action", () => {
       {
         capabilityDiscovery: {} as never,
         runImageGeneration: rs.fn().mockResolvedValue({
-          endpoint: {
-            name: "cdp-local-chromium",
-            browserUrl: "http://127.0.0.1:9222",
-          },
+          browser: "cdp-local-chromium",
           result: {
             prompt: "apple",
             imageUrl: "https://chatgpt.com/backend-api/estuary/content?id=file_apple",
@@ -208,10 +218,7 @@ describe("chatgpt_image action", () => {
       {
         capabilityDiscovery: {} as never,
         runImageGeneration: rs.fn().mockResolvedValue({
-          endpoint: {
-            name: "cdp-local-chromium",
-            browserUrl: "http://127.0.0.1:9222",
-          },
+          browser: "cdp-local-chromium",
           result: browserResult,
         }),
         mkdir: mkdirMock,
@@ -282,5 +289,93 @@ describe("chatgpt_image action", () => {
       status: "error",
       error: "ChatGPT Images send button is unavailable",
     });
+  });
+
+  it("generates through OpenCLI's Browser Bridge when CDP discovery found no browser", async () => {
+    // Discovery stays empty while ROME_ENABLE_CDP_AUTOMATION=false, the shipped default.
+    const conversationUrl = "https://chatgpt.com/c/example-conversation";
+    loadCachedScriptSourceMock.mockResolvedValue("// browser script");
+    buildBrowserScriptExpressionMock.mockImplementation(
+      ({ entrypointExpression }: { entrypointExpression: string }) => {
+        if (entrypointExpression.includes("generateChatGPTImage")) {
+          return `(async () => {
+            history.pushState(null, "", ${JSON.stringify(conversationUrl)});
+            return { prompt: "apple", conversationUrl: location.href };
+          })()`;
+        }
+        return `(async () => (${JSON.stringify({
+          imageUrl: "https://chatgpt.com/backend-api/estuary/content?id=file_apple",
+          mimeType: "image/png",
+          imageDataBase64: Buffer.from("fake image bytes").toString("base64"),
+          width: 1024,
+          height: 1024,
+        })}))()`;
+      },
+    );
+    const fake = createFakeOpencli();
+    const writeFileMock = rs.fn().mockResolvedValue(undefined);
+    const action = createChatGPTImageAction(
+      {
+        name: "chatgpt_image",
+        type: "custom",
+        description: "Generate image with ChatGPT",
+        complexity: "moderate",
+        speed: "slow",
+        reliability: "medium",
+        sideEffects: "write",
+      },
+      {
+        capabilityDiscovery: { getBrowserEndpoints: () => [] },
+        runOpencli: fake.run,
+        mkdir: rs.fn().mockResolvedValue(undefined),
+        writeFile: writeFileMock,
+        getCurrentActionContext: () => ({
+          channelContext: {
+            channel: "webchat",
+            threadId: "thread-321",
+            threadPath: "/tmp/runtime-threads/thread-321",
+          },
+        }),
+      },
+    );
+
+    rs.useFakeTimers();
+    try {
+      let settled = false;
+      const pending = action
+        .execute({ prompt: "apple", relative_path: "apple.png" })
+        .finally(() => {
+          settled = true;
+        });
+      while (!settled) {
+        await rs.advanceTimersByTimeAsync(500);
+      }
+
+      await expect(pending).resolves.toEqual({
+        status: "ok",
+        data: {
+          path: "/tmp/runtime-threads/thread-321/apple.png",
+          prompt: "apple",
+          imageUrl: "https://chatgpt.com/backend-api/estuary/content?id=file_apple",
+          mimeType: "image/png",
+          width: 1024,
+          height: 1024,
+          browser: "opencli",
+        },
+      });
+    } finally {
+      rs.useRealTimers();
+    }
+    expect(writeFileMock).toHaveBeenCalledWith(
+      "/tmp/runtime-threads/thread-321/apple.png",
+      Buffer.from("fake image bytes"),
+    );
+    expect(fake.calls[0]).toEqual([
+      "browser",
+      expect.stringMatching(/^rome-chatgpt-image-/),
+      "open",
+      "https://chatgpt.com/",
+    ]);
+    expect(fake.subcommands().at(-1)).toBe("close");
   });
 });
