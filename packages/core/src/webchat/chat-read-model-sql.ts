@@ -85,7 +85,7 @@ export interface SeatSaidIn {
  *  agent. */
 export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
   return sql`
-    SELECT s.id, s.name, s.chat_id, s.thread_id, s.source_thread_name AS thread_name,
+    SELECT s.id, s.name, s.chat_id, s.thread_id, s.thread_name,
       s.owner_key, s.archived_at IS NOT NULL AS archived, c.platform,
       ch.id AS channel, ch.connection_kind, ${ANSWERING_AGENT} AS agent_name,
       s.project_name, s.project_path, s.created_at

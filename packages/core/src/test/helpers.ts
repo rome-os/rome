@@ -188,6 +188,28 @@ export function testChatWiring(db: DrizzleDb, webchatRepo = new WebChatRepositor
   return { chats, messages, links, adapters, replies, reads, webchatRepo };
 }
 
+/**
+ * The repositories an app reads Rome through, over `db`, as the action worker
+ * builds them: what an app test hands its action as `repositories`. A send
+ * fails, since no channel is connected.
+ */
+export function testAppRepositories(db: DrizzleDb, webchatRepo = new WebChatRepository(db)) {
+  const wiring = testChatWiring(db, webchatRepo);
+  return createAppRuntimeRepositories({
+    settingsRepo: new SettingsRepository(db),
+    webchatRepo,
+    chatRepo: wiring.chats,
+    chatMessages: wiring.messages,
+    adapters: wiring.adapters,
+    sendOn: async () => {
+      throw new Error("No channel is connected in this test");
+    },
+    links: wiring.links,
+    replies: wiring.replies,
+    reads: wiring.reads,
+  });
+}
+
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
 export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
