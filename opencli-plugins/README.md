@@ -126,6 +126,9 @@ The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Doc
   body came back. A `false` there is still a sent message, so check LinkedIn rather than sending
   again.
   Without `--send`, it only verifies the destination.
+- `opencli linkedin connections [--limit N] [--offset N]` lists first-degree connections in
+  LinkedIn's API order. Every row carries `total`, `coverage`, and `next_offset`, so a partial list
+  is distinguishable from the whole list.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across
@@ -218,6 +221,36 @@ opencli linkedin contact-info satyanadella -f json
 opencli linkedin contact-info @satyanadella
 opencli linkedin contact-info "https://www.linkedin.com/in/satyanadella/" -f yaml
 opencli linkedin contact-info me -f json
+```
+
+### LinkedIn Connections
+
+The LinkedIn plugin replaces the built-in `connections` command. The built-in stopped at the first
+page shorter than it requested and returned bare rows, so a partial list looked like the whole list.
+
+The command reads LinkedIn's connections API in pages of up to 40. A short page does not end the
+read. The read ends at `--limit` (1 to 500, default 20), at an empty page, or when the next offset
+reaches the total LinkedIn reports. Entries repeated across pages appear once.
+
+Rows follow LinkedIn's API order, and `rank` is the position in this result. That order is not
+guaranteed to match the connections page's "Recently added" sort. Sort by `connected_at`, the
+connection time in epoch milliseconds, when recency matters.
+
+Every row carries the same coverage fields:
+
+- `total`: the connection count LinkedIn reports, or `null` when the response carries none.
+- `coverage`: `complete` when LinkedIn confirmed the end of the list. `limit` when the read stopped
+  at `--limit` and more connections remain or may remain. `partial` when LinkedIn stopped returning
+  connections before its reported total, or the read hit its request budget.
+- `next_offset`: the `--offset` that continues the read, or `null` when `coverage` is `complete`.
+
+Any coverage other than `complete` also prints a one-line notice on stderr, leaving stdout as the
+rows. Authentication walls and failed or malformed responses fail the command instead of returning
+the rows read so far.
+
+```bash
+opencli linkedin connections --limit 500 -f json
+opencli linkedin connections --limit 500 --offset "$NEXT_OFFSET" -f json
 ```
 
 ### LinkedIn Thread Snapshot
