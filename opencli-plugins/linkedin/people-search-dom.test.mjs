@@ -682,6 +682,8 @@ const reviewPages = {
     ["casey-sample", "Casey Sample", "Recruiter at Example Talent", ""],
   ],
   "cards-in-one-article": [avery, blake],
+  "mutual-is-later-result": [avery, blake],
+  "badge-inside-link": [avery, blake],
 };
 const knownMisreads = {
   "articles-share-footer": [

@@ -166,7 +166,8 @@ export function readPeopleSearchPage() {
       name: cleanName(aria?.textContent) || ownName,
       before: clean(first.lines[start.line].slice(0, start.col)),
       after,
-      endsLine: own.length === 1 && !after,
+      // A badge inside the link, after the name, is trailing text too.
+      endsLine: own.length === 1 && !after && !/[•·∙]/.test(own[0]),
       endLine: end.line,
     };
   });
@@ -186,16 +187,18 @@ export function readPeopleSearchPage() {
     });
   };
   let layout = "strict";
-  let primaries = unique(
-    views.filter((view) => standalone(view) && (badge(view.after) || action(view.after))),
+  let primaries = views.filter(
+    (view) => standalone(view) && (badge(view.after) || action(view.after)),
   );
   // Results share one card template. When the matches, or the first standalone name, which is a
   // result's (see below), carry text after the name on its line, a link that ends its line is
   // not a result. It is something else, such as a mutual connection in a block of its own whose
-  // sentence goes on in the next block, in whatever language.
+  // sentence goes on in the next block, in whatever language. That link goes before handles are
+  // deduplicated, because the same member can also be a later result.
   if (primaries.some((view) => view.after) || views.find(standalone)?.after) {
     primaries = primaries.filter((view) => !view.endsLine);
   }
+  primaries = unique(primaries);
   if (primaries.length === 0) {
     // Unknown trailing labels, such as a degree badge in another language. The first standalone
     // name on the page is a result's, because a result's name precedes its card's other lines,
