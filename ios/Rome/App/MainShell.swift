@@ -177,24 +177,31 @@ struct MainShell: View {
         }
     }
 
-    @ViewBuilder
     private var root: some View {
-        switch section {
-        case .chat:
+        // Chat stays alive under the other pages: rebuilt, its list would load
+        // again from the top and scroll down while the drawer closes onto it.
+        ZStack {
             ChatScreen(
                 workspace: workspace,
                 onMenu: { openDrawer() },
                 onTasks: { showTasks = true },
                 onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) }
             )
-        case .routines:
-            RoutinesScreen(onMenu: { openDrawer() })
-        case .search:
-            SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
-                if hit.session.id == conciergeChatID {
-                    show(.chat)
-                } else {
-                    path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
+            .opacity(section == .chat ? 1 : 0)
+            .allowsHitTesting(section == .chat)
+            .accessibilityHidden(section != .chat)
+            switch section {
+            case .chat:
+                EmptyView()
+            case .routines:
+                RoutinesScreen(onMenu: { openDrawer() })
+            case .search:
+                SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
+                    if hit.session.id == conciergeChatID {
+                        show(.chat)
+                    } else {
+                        path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
+                    }
                 }
             }
         }
