@@ -136,7 +136,7 @@ test("a name wrapped across lines resolves even when presence text renders first
   ]);
 });
 
-test("a link wrapping the whole card yields its name and metadata", () => {
+test("a link wrapping the whole card yields its name and metadata, even in two lines", () => {
   const result = read(makeDom(fixture("card-link")));
 
   assert.deepEqual(result.rows, [
@@ -151,6 +151,12 @@ test("a link wrapping the whole card yields its name and metadata", () => {
       headline: "Chef at Example Bistro",
       location: "Osaka, Japan",
       profile_url: profile("quinn-demo"),
+    },
+    {
+      name: "Riley Test",
+      headline: "Baker at Example Bakery",
+      location: "",
+      profile_url: profile("riley-test-2"),
     },
   ]);
 });
@@ -174,6 +180,36 @@ test("unknown name labels resolve by their shared shape and skip mutual-connecti
       ],
     ],
   );
+});
+
+test("mutual-connection links never stand in for results whose labels differ by ordinal", () => {
+  const result = read(makeDom(fixture("lenient-mutual")));
+
+  assert.equal(result.layout, "lenient");
+  assert.deepEqual(
+    result.rows.map((row) => [row.profile_url, row.headline, row.location]),
+    [
+      [
+        profile("camille-exemple"),
+        "Architecte chez Exemple SA",
+        "Bordeaux, Nouvelle-Aquitaine, France",
+      ],
+      [
+        profile("dominique-test"),
+        "Comptable chez Exemple Conseil",
+        "Nantes, Pays de la Loire, France",
+      ],
+      [profile("sacha-demo"), "Chef chez Exemple Bistro", "Lyon, Auvergne-Rhône-Alpes, France"],
+    ],
+  );
+});
+
+test("an unknown label no other result shares produces no rows, not the mutual links", () => {
+  const html = fixture("lenient-mutual").replace("Relation de 1er niveau", "Vous");
+
+  const result = read(makeDom(html));
+
+  assert.deepEqual(result, { rows: [], candidate_count: 6, resolved_count: 0, layout: "none" });
 });
 
 test("profile links that only appear inside sentences produce no rows", () => {

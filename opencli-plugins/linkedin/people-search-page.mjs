@@ -167,27 +167,23 @@ export function readPeopleSearchPage() {
     views.filter((view) => standalone(view) && (badge(view.after) || action(view.after))),
   );
   if (primaries.length === 0) {
-    // Unknown trailing labels, such as a degree badge in another language. Results share one
-    // card template, so their names share the shape of the trailing text, digits aside. A
-    // sentence such as a mutual-connection line has its own shape, and when it ties with the
-    // results the earlier group wins, because a result's name precedes its card's other lines.
-    const groups = new Map();
-    for (const view of views) {
+    // Unknown trailing labels, such as a degree badge in another language. The first standalone
+    // name on the page is a result's, because a result's name precedes its card's other lines,
+    // social proof included. Results share one card template, so the other results' names share
+    // the shape of its trailing text, with numbers and their ordinal suffixes aside. Every
+    // other standalone link, such as a mutual connection in a sentence, is left out.
+    const shape = (view) => view.after.toLowerCase().replace(/\d+\S*/g, "#");
+    const lenient = views.filter((view) => {
       const foreign = (startsByLine.get(view.endLine) || []).some(
         (start) => start.handle !== view.handle,
       );
-      if (!standalone(view) || foreign) continue;
-      const shape = view.after.toLowerCase().replace(/\d+/g, "#");
-      if (!groups.has(shape)) groups.set(shape, []);
-      groups.get(shape).push(view);
-    }
-    let best = [];
-    for (const group of groups.values()) {
-      const members = unique(group);
-      if (members.length > best.length) best = members;
-    }
+      return standalone(view) && !foreign;
+    });
+    const group = lenient.length
+      ? unique(lenient.filter((view) => shape(view) === shape(lenient[0])))
+      : [];
     layout = "lenient";
-    primaries = best.length > 1 || candidateHandles.size === 1 ? best : [];
+    primaries = group.length > 1 || candidateHandles.size === 1 ? group : [];
   }
   if (primaries.length === 0) {
     return {
@@ -246,9 +242,10 @@ export function readPeopleSearchPage() {
       return parts.length > 0 && parts.every((part) => nameTokens.has(part));
     };
     const metadata = (line) => !skip(line) && !badge(line) && !namePart(line);
-    // A link that renders three or more lines wraps the whole card, so its own lines after the
-    // name are metadata. A shorter link holds only the name, possibly wrapped across two lines.
-    const found = primary.own.length >= 3 ? primary.own.filter(metadata) : [];
+    // The link's first line with a name holds that name and its badges. Its later lines are the
+    // rest of a wrapped name, which namePart() drops, or the metadata of a card the link wraps.
+    const nameAt = primary.own.findIndex((line) => cleanName(line));
+    const found = primary.own.slice(nameAt + 1).filter(metadata);
     const nameEnd = second.marks.get(`${primary.index}:e`);
     const next = k + 1 < primaries.length ? second.marks.get(`${starts[k + 1]}:s`) : listEnd;
     if (nameEnd) {

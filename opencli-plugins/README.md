@@ -282,7 +282,8 @@ a row never carries another person's metadata. A headline or location the card d
 stays empty. Names that wrap across lines, cards wrapped in one link, and degree labels in other
 languages also resolve.
 
-When the page renders profile links but none of them is a search result, the command fails with
+When the page renders profile links but the command cannot tell which of them are search results,
+such as when an unknown degree label is not shared by the other results, it fails with
 `COMMAND_EXEC` and a "layout is not supported" message instead of guessing. The error's `help`
 field gives read-only next steps: read the page once with `opencli browser get text main`, and
 confirm a candidate with `opencli linkedin profile-read` before acting on it. Each search counts
