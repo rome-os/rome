@@ -43,7 +43,7 @@ describe("isWebchatChat", () => {
         .limit(51),
     );
 
-    expect(details).toContain("idx_rome_sessions_chat_activity");
+    expect(details).toContain("idx_rome_sessions_activity");
     expect(details).not.toContain("TEMP B-TREE");
   });
 
@@ -57,7 +57,7 @@ describe("isWebchatChat", () => {
         .limit(51),
     );
 
-    expect(details).toContain("idx_rome_sessions_chat_project_activity");
+    expect(details).toContain("idx_rome_sessions_project_activity");
     expect(details).not.toContain("TEMP B-TREE");
   });
 });

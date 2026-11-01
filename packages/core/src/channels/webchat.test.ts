@@ -3,7 +3,7 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { readWebchatMessages, WebChatAdapter } from "./webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { romeAgentMessages } from "../db/schema.js";
+import { chatMessages, romeSessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 
 /** The instant `hours` before the test's fixed clock. */
@@ -68,9 +68,9 @@ describe("WebChatAdapter", () => {
       JSON.stringify([{ type: "text", content: "Old context" }]),
     );
     await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2030-01-01T00:00:00.000Z") })
-      .where(eq(romeAgentMessages.id, "msg-old"));
+      .update(chatMessages)
+      .set({ saidAt: new Date("2030-01-01T00:00:00.000Z") })
+      .where(eq(chatMessages.id, "msg-old"));
 
     const messages = await readWebchatMessages(repo, "sess-1", hoursAgo(2));
 
@@ -114,14 +114,16 @@ describe("WebChatAdapter", () => {
       "assistant",
       JSON.stringify([{ type: "text", content: "First session" }]),
     );
+    // A seat sees only what was said since it sat down.
+    await testDb.db.update(romeSessions).set({ createdAt: new Date("2030-01-01T10:00:00.000Z") });
     await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2030-01-01T11:00:00.000Z") })
-      .where(eq(romeAgentMessages.id, "msg-a"));
+      .update(chatMessages)
+      .set({ saidAt: new Date("2030-01-01T11:00:00.000Z") })
+      .where(eq(chatMessages.id, "msg-a"));
     await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2030-01-01T11:30:00.000Z") })
-      .where(eq(romeAgentMessages.id, "msg-b"));
+      .update(chatMessages)
+      .set({ saidAt: new Date("2030-01-01T11:30:00.000Z") })
+      .where(eq(chatMessages.id, "msg-b"));
 
     const messages = await readWebchatMessages(repo, null, hoursAgo(24));
 

@@ -20,8 +20,9 @@ export function channelChatId(channel: string, threadId: string): string {
 }
 
 /** Whether a row is a guardian chat: a channel row whose chat is on the
- *  dashboard. */
-export const isWebchatChat: SQL = sql`(${romeSessions.type} = 'channel' and ${romeSessions.chatId} in ${dashboardChats})`;
+ *  dashboard. The unary `+` keeps SQLite off the chat index, so the sidebar
+ *  pages off the activity index instead of sorting every chat. */
+export const isWebchatChat: SQL = sql`(${romeSessions.type} = 'channel' and +${romeSessions.chatId} in ${dashboardChats})`;
 
 /** Whether a row is a conversation on a messaging channel, chats excluded. */
 export const isChannelConversation: SQL = and(

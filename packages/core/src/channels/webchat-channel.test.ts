@@ -96,10 +96,10 @@ describe("webchat channel", () => {
   });
 
   it("pages back one message at a time through a second holding several", async () => {
-    await repo.createSession("sess-5", "Paging Session");
     rs.useFakeTimers({ toFake: ["Date"] });
     try {
       rs.setSystemTime(new Date("2026-10-26T00:00:00Z"));
+      await repo.createSession("sess-5", "Paging Session");
       await repo.addMessage(
         "msg-old",
         "sess-5",
