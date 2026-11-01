@@ -7,13 +7,8 @@ import type {
   CurrentActionContext,
 } from "@rome-os/app-runtime";
 import { getCurrentActionContext } from "@rome-os/app-runtime";
-import type { BrowserCapabilityDiscovery, CdpSession } from "@rome-os/app-runtime/browser";
-import {
-  buildBrowserScriptExpression,
-  isPageReadyForAutomation,
-  loadCachedScriptSource,
-  openDiscoveredPageSession,
-} from "@rome-os/app-runtime/browser";
+import type { BrowserCapabilityDiscovery } from "@rome-os/app-runtime/browser";
+import { openAutomationPage, type RunOpencli } from "../../lib/browser-page.js";
 
 const IMAGE_GENERATION_SCRIPT_URL = new URL(
   /* rspackIgnore: true */ "./scraping_scripts/image_action.js",
@@ -25,9 +20,8 @@ const IMAGE_DOWNLOAD_SCRIPT_URL = new URL(
 );
 const DEFAULT_PAGE_URL = "https://chatgpt.com/";
 const THREADS_PROJECTS_ROOT = "/home/user";
-const PAGE_READY_TIMEOUT_MS = 20_000;
-const PAGE_READY_POLL_MS = 500;
 const POST_RELOAD_SETTLE_MS = 10_000;
+const IMAGE_DOWNLOAD_TIMEOUT_MS = 120_000;
 
 export interface ChatGPTImageBrowserResult {
   prompt: string;
@@ -38,15 +32,27 @@ export interface ChatGPTImageBrowserResult {
   height?: number;
 }
 
+export interface ChatGPTImageGenerationInput {
+  prompt: string;
+  pageUrl: string;
+  timeoutMs: number;
+  profile?: string;
+}
+
+export interface ChatGPTImageGeneration {
+  /** The browser that generated the image, as AutomationPage.browser names it. */
+  browser: string;
+  result: ChatGPTImageBrowserResult;
+}
+
 export interface ChatGPTImageDeps {
   capabilityDiscovery: BrowserCapabilityDiscovery;
+  runOpencli?: RunOpencli;
   runImageGeneration?: (
     capabilityDiscovery: BrowserCapabilityDiscovery,
-    input: { prompt: string; pageUrl: string; timeoutMs: number },
-  ) => Promise<{
-    endpoint: { name: string; browserUrl: string };
-    result: ChatGPTImageBrowserResult;
-  }>;
+    input: ChatGPTImageGenerationInput,
+    options?: { runOpencli?: RunOpencli },
+  ) => Promise<ChatGPTImageGeneration>;
   mkdir?: typeof mkdir;
   writeFile?: typeof writeFile;
   getCurrentActionContext?: () => CurrentActionContext | undefined;
@@ -65,46 +71,38 @@ interface ChatGPTImageDownloadResult {
   height?: number;
 }
 
-interface PageReadyProbe {
-  readyState?: string;
-  href?: string;
-}
-
 export async function generateImageWithChatGPT(
   capabilityDiscovery: BrowserCapabilityDiscovery,
-  input: { prompt: string; pageUrl: string; timeoutMs: number },
-): Promise<{
-  endpoint: { name: string; browserUrl: string };
-  result: ChatGPTImageBrowserResult;
-}> {
-  const page = await openDiscoveredPageSession(capabilityDiscovery, input.pageUrl);
+  input: ChatGPTImageGenerationInput,
+  options: { runOpencli?: RunOpencli } = {},
+): Promise<ChatGPTImageGeneration> {
+  const page = await openAutomationPage(capabilityDiscovery, input.pageUrl, {
+    profile: input.profile,
+    sessionPrefix: "rome-chatgpt-image",
+    runOpencli: options.runOpencli,
+  });
 
   try {
-    const generationResult = await runBrowserScriptInSession<ChatGPTImageGenerationResult>(
-      page.session,
-      {
-        scriptUrl: IMAGE_GENERATION_SCRIPT_URL,
-        entrypointExpression: "generateChatGPTImage",
-        args: [{ prompt: input.prompt, timeout: input.timeoutMs }],
-        autorunFlag: "__ROME_CHATGPT_IMAGE_AUTORUN__",
-      },
-    );
+    const generationResult = await page.runScript<ChatGPTImageGenerationResult>({
+      scriptUrl: IMAGE_GENERATION_SCRIPT_URL,
+      entrypointExpression: "generateChatGPTImage",
+      args: [{ prompt: input.prompt, timeout: input.timeoutMs }],
+      autorunFlag: "__ROME_CHATGPT_IMAGE_AUTORUN__",
+      timeoutMs: input.timeoutMs,
+    });
 
-    await page.session.send("Page.reload", { ignoreCache: true });
-    await waitForPageReadyAfterReload(page.session, generationResult.conversationUrl);
+    await page.reload(generationResult.conversationUrl);
     await sleep(POST_RELOAD_SETTLE_MS);
 
-    const downloadResult = await runBrowserScriptInSession<ChatGPTImageDownloadResult>(
-      page.session,
-      {
-        scriptUrl: IMAGE_DOWNLOAD_SCRIPT_URL,
-        entrypointExpression: "downloadGeneratedChatGPTImage",
-        autorunFlag: "__ROME_CHATGPT_IMAGE_DOWNLOAD_AUTORUN__",
-      },
-    );
+    const downloadResult = await page.runScript<ChatGPTImageDownloadResult>({
+      scriptUrl: IMAGE_DOWNLOAD_SCRIPT_URL,
+      entrypointExpression: "downloadGeneratedChatGPTImage",
+      autorunFlag: "__ROME_CHATGPT_IMAGE_DOWNLOAD_AUTORUN__",
+      timeoutMs: IMAGE_DOWNLOAD_TIMEOUT_MS,
+    });
 
     return {
-      endpoint: page.endpoint,
+      browser: page.browser,
       result: {
         prompt: generationResult.prompt,
         imageUrl: downloadResult.imageUrl,
@@ -142,6 +140,11 @@ export function createChatGPTImageAction(config: ActionConfig, deps: ChatGPTImag
           type: "number",
           description: "Max wait time in milliseconds for image generation (default: 900000)",
         },
+        profile: {
+          type: "string",
+          description:
+            "OpenCLI browser profile name or id from `opencli profile list`. Omit to use the default browser.",
+        },
       },
       required: ["prompt", "relative_path"],
     },
@@ -173,11 +176,16 @@ export function createChatGPTImageAction(config: ActionConfig, deps: ChatGPTImag
 
         const runImageGeneration = deps.runImageGeneration ?? generateImageWithChatGPT;
 
-        const { endpoint, result } = await runImageGeneration(deps.capabilityDiscovery, {
-          prompt,
-          pageUrl,
-          timeoutMs,
-        });
+        const { browser, result } = await runImageGeneration(
+          deps.capabilityDiscovery,
+          {
+            prompt,
+            pageUrl,
+            timeoutMs,
+            profile: typeof args.profile === "string" ? args.profile : undefined,
+          },
+          { runOpencli: deps.runOpencli },
+        );
 
         const currentActionContext = deps.getCurrentActionContext ?? getCurrentActionContext;
         const targetPath = resolveRelativeThreadPath(rawRelativePath, currentActionContext());
@@ -197,7 +205,7 @@ export function createChatGPTImageAction(config: ActionConfig, deps: ChatGPTImag
             mimeType: result.mimeType,
             width: result.width,
             height: result.height,
-            browser: endpoint.name,
+            browser,
           },
         };
       } catch (error) {
@@ -274,54 +282,6 @@ function normalizePathSegment(value: string | undefined, fieldName: string): str
   }
 
   return trimmed;
-}
-
-async function runBrowserScriptInSession<TResult>(
-  session: CdpSession,
-  options: {
-    scriptUrl: URL;
-    entrypointExpression: string;
-    args?: unknown[];
-    autorunFlag?: string;
-  },
-): Promise<TResult> {
-  const scriptSource = await loadCachedScriptSource(options.scriptUrl);
-  const expression = buildBrowserScriptExpression({
-    scriptSource,
-    entrypointExpression: options.entrypointExpression,
-    args: options.args,
-    autorunFlag: options.autorunFlag,
-  });
-
-  return await session.evaluateByValue<TResult>(expression);
-}
-
-async function waitForPageReadyAfterReload(
-  session: CdpSession,
-  expectedUrl?: string,
-): Promise<void> {
-  const deadline = Date.now() + PAGE_READY_TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    try {
-      const probe = await session.evaluateByValue<PageReadyProbe>(
-        "({ readyState: document.readyState, href: location.href })",
-      );
-      const href = probe.href?.trim();
-
-      if (isPageReadyForAutomation(probe) && (!expectedUrl || !href || href === expectedUrl)) {
-        return;
-      }
-    } catch {
-      // The page may be mid-navigation; keep polling.
-    }
-
-    await sleep(PAGE_READY_POLL_MS);
-  }
-
-  throw new Error(
-    `Timed out waiting for the page to finish reloading after ${PAGE_READY_TIMEOUT_MS}ms`,
-  );
 }
 
 function sleep(ms: number): Promise<void> {

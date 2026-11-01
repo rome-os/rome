@@ -1,12 +1,12 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
-import type { BrowserCapabilityDiscovery, OpenedPageSession } from "@rome-os/app-runtime/browser";
+import type { BrowserCapabilityDiscovery } from "@rome-os/app-runtime/browser";
 import {
-  buildBrowserScriptExpression,
-  loadCachedScriptSource,
-  openDiscoveredPageSession,
-} from "@rome-os/app-runtime/browser";
+  type AutomationPage,
+  openAutomationPage,
+  type RunOpencli,
+} from "../../lib/browser-page.js";
 import { acquireChatGPTClipboardLock } from "./clipboard_lock.js";
 
 const CHAT_SCRIPT_URL = new URL(
@@ -24,10 +24,12 @@ const COPY_RESPONSE_SCRIPT_URL = new URL(
 const execFile = promisify(execFileCallback);
 const CLIPBOARD_POST_COPY_CONFIRMED_DELAY_MS = 100;
 const CLIPBOARD_SETTLE_DELAY_MS = 350;
+const COPY_RESPONSE_TIMEOUT_MS = 30_000;
 
 export interface ChatGPTChatDeps {
   capabilityDiscovery: BrowserCapabilityDiscovery;
   readClipboardText?: () => Promise<string>;
+  runOpencli?: RunOpencli;
 }
 
 interface ChatGPTBrowserResponse {
@@ -106,11 +108,16 @@ export function createChatGPTChatAction(config: ActionConfig, deps: ChatGPTChatD
           type: "number",
           description: "Max wait time in milliseconds for the response (default: 1800000)",
         },
+        profile: {
+          type: "string",
+          description:
+            "OpenCLI browser profile name or id from `opencli profile list`. Omit to use the default browser.",
+        },
       },
       required: ["prompt"],
     },
     execute: async (args: Record<string, unknown>): Promise<ActionResult> => {
-      let page: OpenedPageSession | null = null;
+      let page: AutomationPage | null = null;
       try {
         const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
         if (!prompt) {
@@ -122,12 +129,17 @@ export function createChatGPTChatAction(config: ActionConfig, deps: ChatGPTChatD
           typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : 1_800_000;
         const clipboardReader = deps.readClipboardText ?? readClipboardText;
 
-        page = await openDiscoveredPageSession(deps.capabilityDiscovery, url);
-        const result = await runBrowserScriptInOpenPage<ChatGPTBrowserResponse>(page, {
+        page = await openAutomationPage(deps.capabilityDiscovery, url, {
+          profile: typeof args.profile === "string" ? args.profile : undefined,
+          sessionPrefix: "rome-chatgpt-chat",
+          runOpencli: deps.runOpencli,
+        });
+        const result = await page.runScript<ChatGPTBrowserResponse>({
           scriptUrl: CHAT_SCRIPT_URL,
           entrypointExpression: "chatWithChatGPT",
           args: [{ prompt, timeout }],
           autorunFlag: "__ROME_CHATGPT_CHAT_AUTORUN__",
+          timeoutMs: timeout,
         });
 
         let responseComplete = false;
@@ -137,7 +149,7 @@ export function createChatGPTChatAction(config: ActionConfig, deps: ChatGPTChatD
 
         const lock = await acquireChatGPTClipboardLock();
         try {
-          await page.session.send("Page.bringToFront");
+          await page.bringToFront();
           responseComplete = await checkLatestChatGPTResponseComplete(page);
 
           if (responseComplete) {
@@ -216,36 +228,17 @@ export function createAction(config: ActionConfig, deps: ChatGPTChatDeps): Actio
   return createChatGPTChatAction(config, deps);
 }
 
-async function runBrowserScriptInOpenPage<TResult>(
-  page: OpenedPageSession,
-  options: {
-    scriptUrl: URL;
-    entrypointExpression: string;
-    args?: unknown[];
-    autorunFlag?: string;
-  },
-): Promise<TResult> {
-  const scriptSource = await loadCachedScriptSource(options.scriptUrl);
-  const expression = buildBrowserScriptExpression({
-    scriptSource,
-    entrypointExpression: options.entrypointExpression,
-    args: options.args,
-    autorunFlag: options.autorunFlag,
-  });
-
-  return await page.session.evaluateByValue<TResult>(expression);
-}
-
 async function copyLatestChatGPTResponseWithRetry(
-  page: OpenedPageSession,
+  page: AutomationPage,
   maxAttempts: number = 2,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      const copyResult = await runBrowserScriptInOpenPage<ChatGPTCopyBrowserResponse>(page, {
+      const copyResult = await page.runScript<ChatGPTCopyBrowserResponse>({
         scriptUrl: COPY_RESPONSE_SCRIPT_URL,
         entrypointExpression: "copyLatestChatGPTResponse",
         autorunFlag: "__ROME_CHATGPT_COPY_RESPONSE_AUTORUN__",
+        timeoutMs: COPY_RESPONSE_TIMEOUT_MS,
       });
 
       if (copyResult.copyConfirmed) {
@@ -260,14 +253,15 @@ async function copyLatestChatGPTResponseWithRetry(
 }
 
 async function checkLatestChatGPTResponseComplete(
-  page: OpenedPageSession,
+  page: AutomationPage,
   timeout: number = 5_000,
 ): Promise<boolean> {
-  const result = await runBrowserScriptInOpenPage<ChatGPTResponseCompleteBrowserResponse>(page, {
+  const result = await page.runScript<ChatGPTResponseCompleteBrowserResponse>({
     scriptUrl: CHECK_RESPONSE_COMPLETE_SCRIPT_URL,
     entrypointExpression: "waitForLatestChatGPTResponseComplete",
     args: [{ timeout }],
     autorunFlag: "__ROME_CHATGPT_CHECK_RESPONSE_COMPLETE_AUTORUN__",
+    timeoutMs: timeout,
   });
 
   return result.complete;
