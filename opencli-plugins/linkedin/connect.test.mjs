@@ -1,10 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, getRegistry, Strategy } from "@jackwener/opencli/registry";
 import {
   canonicalizeLinkedInProfileUrl,
   matchesLinkedInSentInvitation,
 } from "./connect-receipt.mjs";
+import {
+  connectedHashedLayout,
+  connectedWithoutHeader,
+  connectLinkLayout,
+  followPrimaryLayout,
+  followPrimaryWithActions,
+  MENU_WITH_CONNECT,
+  MENU_WITH_CONNECT_LINK,
+  MENU_WITH_FOREIGN_CONNECT,
+  MENU_WITHOUT_CONNECT,
+  OWNER_URL,
+  profileDom,
+} from "./connect-test-fixtures.mjs";
 
 cli({
   site: "linkedin",
@@ -17,9 +31,8 @@ cli({
   aliases: ["invite"],
   args: [],
   columns: ["status", "delivery_verified", "matched_invitation_name", "matched_invitation_url"],
-  func: async (page) => {
-    page.connectCalls = (page.connectCalls ?? 0) + 1;
-    return page.connectReceipt;
+  func: async () => {
+    throw new Error("Rome's override must not delegate to the upstream connect command");
   },
 });
 
@@ -32,7 +45,7 @@ cli({
   strategy: Strategy.UI,
   browser: true,
   func: async (page) => {
-    page.verificationCalls = (page.verificationCalls ?? 0) + 1;
+    page.verificationCalls += 1;
     if (page.verificationError) throw page.verificationError;
     return page.invitations;
   },
@@ -43,9 +56,42 @@ await import("./connect.js");
 const command = getRegistry().get("linkedin/connect");
 const expectedName = "Example Member";
 const expectedProfileUrl = "https://ca.linkedin.com/in/example-member/?trk=profile";
+const ownerArgs = { "profile-url": OWNER_URL, "expected-name": "Jane Doe" };
 
-function page(connectReceipt, invitations = []) {
-  return { connectReceipt, invitations };
+/**
+ * A browser page whose profile URL is a jsdom fixture. The invitation route answers with
+ * `inviteResult`, and the sent-invitations fixture command reads `invitations`.
+ */
+function fakePage(body, { domOptions = {}, invitations = [], inviteResult } = {}) {
+  const profile = profileDom(body, domOptions);
+  let currentUrl = "";
+  const page = {
+    profile,
+    visited: [],
+    inviteRuns: 0,
+    verificationCalls: 0,
+    invitations,
+    goto: async (url) => {
+      currentUrl = url;
+      page.visited.push(url);
+    },
+    wait: async () => {},
+    evaluate: async (script) => {
+      if (currentUrl === OWNER_URL) {
+        return JSON.parse(JSON.stringify(await profile.dom.window.eval(script)));
+      }
+      if (currentUrl.startsWith("https://www.linkedin.com/preload/custom-invite/")) {
+        page.inviteRuns += 1;
+        return inviteResult ?? { ok: true, status: "sent", reason: "invitation_sent_without_note" };
+      }
+      throw new Error(`Unexpected browser URL: ${currentUrl}`);
+    },
+  };
+  return page;
+}
+
+function receiptPage(invitations) {
+  return fakePage(connectLinkLayout, { invitations });
 }
 
 test("profile URL canonicalization rejects unsafe or non-profile URLs", () => {
@@ -113,115 +159,203 @@ test("invitation identity requires the same canonical profile URL and expected n
   );
 });
 
-test("the wrapper preserves upstream command metadata and does not verify dry runs", async () => {
+test("the override keeps the upstream identity and documents that Connect can send at once", () => {
   assert.equal(command.access, "write");
-  assert.equal(command.description, "upstream connect fixture");
   assert.equal(command.strategy, Strategy.UI);
   assert.equal(command, getRegistry().get("linkedin/invite"));
+  const send = command.args.find((arg) => arg.name === "send");
+  assert.equal(send.default, false);
+  assert.match(send.help, /moment Connect is activated/);
+  assert.match(command.description, /never activate Connect/);
+});
 
-  const dryRun = page([{ status: "connectable_dry_run", connectable: true }]);
-  const result = await command.func(dryRun, {
-    send: false,
-    "expected-name": expectedName,
-    "profile-url": expectedProfileUrl,
+test("#1542: an existing connection is not connectable despite recommendation Connect controls", async () => {
+  for (const send of [false, true]) {
+    const page = fakePage(connectedHashedLayout());
+    const [receipt] = await command.func(page, { ...ownerArgs, send });
+    assert.deepEqual(receipt, {
+      status: "not_connectable",
+      recipient: "Jane Doe",
+      reason: "already_connected",
+      profile_url: OWNER_URL,
+      note_chars: 0,
+      connectable: false,
+    });
+    assert.deepEqual(page.visited, [OWNER_URL]);
+    assert.deepEqual(page.profile.clicks, []);
+    assert.equal(page.verificationCalls, 0);
+  }
+});
+
+test("#1542: a profile without an owner header blocks instead of reporting connectable", async () => {
+  const page = fakePage(connectedWithoutHeader);
+  await assert.rejects(
+    command.func(page, { ...ownerArgs, send: true }),
+    (error) =>
+      error instanceof CommandExecutionError && /owner_header_not_found/.test(error.message),
+  );
+  assert.deepEqual(page.visited, [OWNER_URL]);
+  assert.deepEqual(page.profile.clicks, []);
+});
+
+test("#1491: a dry run finds Connect in the More menu and clicks only More", async () => {
+  const page = fakePage(followPrimaryLayout(), { domOptions: { menuItems: MENU_WITH_CONNECT } });
+  const [receipt] = await command.func(page, { ...ownerArgs, note: "Hello from Example Co" });
+  assert.deepEqual(receipt, {
+    status: "connectable_dry_run",
+    recipient: "Jane Doe",
+    reason: "verified_via_more",
+    profile_url: OWNER_URL,
+    note_chars: 21,
+    connectable: true,
   });
+  assert.deepEqual(page.profile.clicks, ["More"]);
+  assert.equal(page.profile.menuOpen(), false);
+  assert.deepEqual(page.visited, [OWNER_URL]);
+});
 
-  assert.deepEqual(result, dryRun.connectReceipt);
-  assert.equal(dryRun.connectCalls, 1);
-  assert.equal(dryRun.verificationCalls, undefined);
+test("#1491: a send activates the owner's More-menu Connect and verifies the invitation", async () => {
+  const page = fakePage(followPrimaryLayout(), {
+    domOptions: { menuItems: MENU_WITH_CONNECT },
+    invitations: [{ name: "Jane Doe", profile_url: OWNER_URL }],
+  });
+  const [receipt] = await command.func(page, { ...ownerArgs, send: true });
+  assert.equal(receipt.status, "sent_verified");
+  assert.equal(receipt.delivery_verified, true);
+  assert.equal(receipt.matched_invitation_url, OWNER_URL);
+  assert.deepEqual(page.profile.clicks, ["More", "More", "Connect"]);
+  assert.equal(page.inviteRuns, 0);
+  assert.equal(page.verificationCalls, 1);
+});
+
+test("a send through an invitation link navigates only to the owner's invitation", async () => {
+  const page = receiptPage([{ name: "Jane Doe", profile_url: OWNER_URL }]);
+  const [receipt] = await command.func(page, { ...ownerArgs, send: true });
+  assert.equal(receipt.status, "sent_verified");
+  assert.deepEqual(page.visited, [
+    OWNER_URL,
+    "https://www.linkedin.com/preload/custom-invite/?vanityName=jane-doe",
+  ]);
+  assert.equal(page.inviteRuns, 1);
+  assert.deepEqual(page.profile.clicks, []);
+});
+
+test("a send never activates a Connect control that sits inside or around another member's action", async () => {
+  const pages = [
+    fakePage(followPrimaryLayout(), { domOptions: { menuItems: MENU_WITH_FOREIGN_CONNECT } }),
+    fakePage(
+      followPrimaryWithActions(
+        '<div role="button" aria-label="Invite Alex Example to connect"><button>Connect</button></div>',
+      ),
+      { domOptions: { menuItems: MENU_WITHOUT_CONNECT } },
+    ),
+  ];
+  for (const page of pages) {
+    const [receipt] = await command.func(page, { ...ownerArgs, send: true });
+    assert.equal(receipt.status, "not_connectable");
+    assert.equal(receipt.reason, "connect_button_not_found");
+    assert.deepEqual(page.profile.clicks, ["More"]);
+    assert.deepEqual(page.visited, [OWNER_URL]);
+    assert.equal(page.verificationCalls, 0);
+  }
+});
+
+test("a Connect link that is not the owner's invitation blocks and is never clicked", async () => {
+  for (const href of ["/mynetwork/grow/", "/preload/custom-invite/"]) {
+    for (const send of [false, true]) {
+      const page = fakePage(followPrimaryWithActions(`<a href="${href}">Connect</a>`));
+      await assert.rejects(
+        command.func(page, { ...ownerArgs, send }),
+        (error) =>
+          error instanceof CommandExecutionError && /invalid_connect_link/.test(error.message),
+        href,
+      );
+      assert.deepEqual(page.profile.clicks, [], href);
+      assert.deepEqual(page.visited, [OWNER_URL], href);
+      assert.equal(page.inviteRuns, 0, href);
+    }
+  }
+});
+
+test("a send through a More-menu Connect link navigates to the owner's invitation instead of clicking it", async () => {
+  const page = fakePage(followPrimaryLayout(), {
+    domOptions: { menuItems: MENU_WITH_CONNECT_LINK },
+    invitations: [{ name: "Jane Doe", profile_url: OWNER_URL }],
+  });
+  const [receipt] = await command.func(page, { ...ownerArgs, send: true });
+  assert.equal(receipt.status, "sent_verified");
+  assert.deepEqual(page.visited, [
+    OWNER_URL,
+    "https://www.linkedin.com/preload/custom-invite/?vanityName=jane-doe",
+  ]);
+  assert.equal(page.inviteRuns, 1);
+  assert.deepEqual(page.profile.clicks, ["More"]);
+});
+
+test("a menu Connect that turns into a link before the send is followed only to the owner's invitation", async () => {
+  for (const [href, visited] of [
+    ["/mynetwork/grow/", [OWNER_URL]],
+    [
+      "/preload/custom-invite/?vanityName=jane-doe",
+      [OWNER_URL, "https://www.linkedin.com/preload/custom-invite/?vanityName=jane-doe"],
+    ],
+  ]) {
+    const page = fakePage(followPrimaryLayout(), {
+      domOptions: {
+        menuItems: (opens) =>
+          opens === 1 ? MENU_WITH_CONNECT : `<a role="menuitem" href="${href}">Connect</a>`,
+      },
+      invitations: [{ name: "Jane Doe", profile_url: OWNER_URL }],
+    });
+    const send = command.func(page, { ...ownerArgs, send: true });
+    if (visited.length === 1) {
+      await assert.rejects(send, /invalid_connect_link/, href);
+    } else {
+      assert.equal((await send)[0].status, "sent_verified", href);
+    }
+    assert.deepEqual(page.visited, visited, href);
+    assert.deepEqual(page.profile.clicks, ["More", "More"], href);
+    assert.equal(page.profile.menuOpen(), false, href);
+  }
 });
 
 test("a navigation label with no invitation URL cannot verify delivery", async () => {
-  const sent = page(
-    [
-      {
-        status: "sent_verified",
-        delivery_verified: true,
-        matched_invitation_name: "Me",
-        matched_invitation_url: "",
-      },
-    ],
-    [{ name: "Me", profile_url: "" }],
-  );
-
-  const [receipt] = await command.func(sent, {
-    send: true,
-    "expected-name": expectedName,
-    "profile-url": expectedProfileUrl,
-  });
+  const sent = receiptPage([{ name: "Me", profile_url: "" }]);
+  const [receipt] = await command.func(sent, { ...ownerArgs, send: true });
 
   assert.equal(receipt.status, "send_unverified");
+  assert.equal(receipt.reason, "sent_invitation_not_found_after_retries");
   assert.equal(receipt.delivery_verified, false);
   assert.equal(receipt.matched_invitation_name, "");
   assert.equal(receipt.matched_invitation_url, "");
-  assert.equal(sent.connectCalls, 1);
-  assert.equal(sent.verificationCalls, 1);
+  assert.equal(sent.inviteRuns, 1);
+  assert.equal(sent.verificationCalls, 3);
 });
 
 test("matching only the name or only the URL cannot verify delivery", async () => {
   for (const invitation of [
-    {
-      name: expectedName,
-      profile_url: "https://www.linkedin.com/in/someone-else/",
-    },
-    {
-      name: "Someone Else",
-      profile_url: "https://www.linkedin.com/in/example-member/",
-    },
-    { name: expectedName, profile_url: "" },
+    { name: "Jane Doe", profile_url: "https://www.linkedin.com/in/someone-else/" },
+    { name: "Someone Else", profile_url: OWNER_URL },
+    { name: "Jane Doe", profile_url: "" },
   ]) {
-    const sent = page([{ status: "send_unverified", delivery_verified: false }], [invitation]);
-    const [receipt] = await command.func(sent, {
-      send: true,
-      "expected-name": expectedName,
-      "profile-url": expectedProfileUrl,
-    });
+    const sent = receiptPage([invitation]);
+    const [receipt] = await command.func(sent, { ...ownerArgs, send: true });
 
     assert.equal(receipt.status, "send_unverified");
     assert.equal(receipt.delivery_verified, false);
-    assert.equal(sent.connectCalls, 1);
-    assert.equal(sent.verificationCalls, 1);
+    assert.equal(sent.inviteRuns, 1);
   }
 });
 
-test("a sent-invitations row with both matching identity fields verifies delivery", async () => {
-  const sent = page(
-    [{ status: "send_unverified", delivery_verified: false }],
-    [
-      {
-        name: "Example Member · 2nd",
-        profile_url: "https://www.linkedin.com/in/example-member/?trk=sent",
-      },
-    ],
-  );
-
-  const [receipt] = await command.func(sent, {
-    send: true,
-    "expected-name": expectedName,
-    "profile-url": expectedProfileUrl,
-  });
-
-  assert.equal(receipt.status, "sent_verified");
-  assert.equal(receipt.delivery_verified, true);
-  assert.equal(receipt.matched_invitation_name, "Example Member · 2nd");
-  assert.equal(receipt.matched_invitation_url, "https://www.linkedin.com/in/example-member/");
-  assert.equal(sent.connectCalls, 1);
-  assert.equal(sent.verificationCalls, 1);
-});
-
 test("a failed post-send read leaves the outcome unverified without resending", async () => {
-  const sent = page([{ status: "sent_verified", delivery_verified: true }]);
+  const sent = receiptPage([]);
   sent.verificationError = new Error("sent invitation page unavailable");
 
-  const [receipt] = await command.func(sent, {
-    send: true,
-    "expected-name": expectedName,
-    "profile-url": expectedProfileUrl,
-  });
+  const [receipt] = await command.func(sent, { ...ownerArgs, send: true });
 
   assert.equal(receipt.status, "send_unverified");
   assert.equal(receipt.reason, "sent_invitation_verification_failed");
   assert.equal(receipt.delivery_verified, false);
-  assert.equal(sent.connectCalls, 1);
-  assert.equal(sent.verificationCalls, 1);
+  assert.equal(sent.inviteRuns, 1);
+  assert.equal(sent.verificationCalls, 3);
 });
