@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
-import { createTestDb, testChatRepository, type TestDb } from "../../test/helpers.js";
+import { createTestDb, testChatWiring, type TestDb } from "../../test/helpers.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
@@ -606,7 +606,7 @@ describe("WebChatRepository", () => {
     expect(archived?.pinnedAt).not.toBeNull();
     expect(ids(await repo.listSessions("archived"))).toEqual(["chat-1"]);
 
-    const settings = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const settings = new ChatSettingsRepository(testDb.db, testChatWiring(testDb.db));
     expect(settings.listKnown({})).toEqual([]);
   });
 
