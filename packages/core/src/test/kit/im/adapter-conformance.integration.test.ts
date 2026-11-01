@@ -9,6 +9,8 @@ import { channelOver, describeAdapterConformance } from "./adapter-conformance.j
 import {
   DISCORD_CHANNEL,
   DISCORD_DM,
+  DISCORD_SECOND_BOT_ID,
+  DISCORD_SECOND_TOKEN,
   DISCORD_THREAD,
   DISCORD_USER,
   DiscordPeer,
@@ -23,7 +25,7 @@ import {
   FeishuPeer,
 } from "./feishu.js";
 import { EMAIL_MAILBOX, EmailPeer } from "./email.js";
-import { TELEGRAM_CHAT, TelegramPeer } from "./telegram.js";
+import { TELEGRAM_CHAT, TELEGRAM_GROUP, TELEGRAM_SECOND_TOKEN, TelegramPeer } from "./telegram.js";
 import { WECHAT_USER, WechatPeer } from "./wechat.js";
 
 // Feishu: the app hears a person in their p2p chat (`oc_…`), and reaches
@@ -82,6 +84,10 @@ describeAdapterConformance(
     const channel = channelOver("discord", "00000000-0000-4000-8000-000000000002", adapter);
     await adapter.start();
     await peer.server.waitFor((e) => e.request.path.endsWith("/commands") && !!e.response);
+    // A second of Rome's accounts, a second bot in the guild. Discord gives a
+    // message one id whichever bot reads it.
+    const second = peer.createAdapter(DISCORD_SECOND_TOKEN);
+    await second.start();
     return {
       account: { platform: "discord", id: "100000000000000001" },
       channel,
@@ -99,19 +105,25 @@ describeAdapterConformance(
         at: DISCORD_THREAD,
         personWrites: (text) => peer.emitMessage(text, DISCORD_THREAD).id,
       },
+      second: {
+        account: { platform: "discord", id: DISCORD_SECOND_BOT_ID },
+        channel: channelOver("discord-2", "00000000-0000-4000-8000-000000000007", second),
+        bothHear: (text) => peer.emitMessage(text, DISCORD_CHANNEL, { mentionsEveryBot: true }).id,
+      },
       visible: (at) => peer.visible(at),
       stop: async () => {
+        await second.stop();
         await adapter.stop();
         await peer.close();
         peer.server.assertClean();
       },
     };
   },
-  { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: false, threads: true },
+  { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: true },
 );
 
 // Telegram: the bot hears a person in their private chat, whose id is the
-// person's own, and reaches them there. The peer models private chats only.
+// person's own, and reaches them there.
 describeAdapterConformance(
   "Telegram",
   async () => {
@@ -119,26 +131,35 @@ describeAdapterConformance(
     const adapter = peer.createAdapter();
     const channel = channelOver("telegram", "00000000-0000-4000-8000-000000000003", adapter);
     await adapter.start();
+    // A second of Rome's accounts, a second bot in the same supergroup.
+    const second = peer.createAdapter(TELEGRAM_SECOND_TOKEN);
+    await second.start();
     const person = String(TELEGRAM_CHAT);
+    const group = String(TELEGRAM_GROUP);
     return {
       account: { platform: "telegram", id: "telegram-bot" },
       channel,
       direct: { person, at: person, personWrites: (text) => peer.emitMessage(text).id },
+      // Both bots are the group's admins, so each hears every message in it.
+      group: {
+        at: group,
+        personWrites: (text) => peer.emitMessage(text, TELEGRAM_GROUP).id,
+      },
+      second: {
+        account: { platform: "telegram", id: "telegram-bot-2" },
+        channel: channelOver("telegram-2", "00000000-0000-4000-8000-000000000008", second),
+        bothHear: (text) => peer.emitMessage(text, TELEGRAM_GROUP).id,
+      },
       visible: (at) => peer.visible(at),
       stop: async () => {
+        await second.stop();
         await adapter.stop();
         await peer.close();
         peer.server.assertClean();
       },
     };
   },
-  {
-    directMessages: true,
-    romeWritesFirst: true,
-    groups: false,
-    twoAccounts: false,
-    threads: false,
-  },
+  { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: false },
 );
 
 // WeChat: the bot hears a person by their user id and answers there, with the
@@ -180,7 +201,10 @@ describeAdapterConformance(
 );
 
 // Email: a thread is a group chat, and there are no direct messages. The
-// person writes in a thread, and Rome answers on it.
+// person writes in a thread, and Rome answers on it. Two of Rome's mailboxes
+// on one email each hold their own copy, under their own thread and message
+// ids, so the adapter reads them as two threads and the two-account case does
+// not apply.
 describeAdapterConformance(
   "Email",
   async () => {

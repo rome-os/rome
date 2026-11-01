@@ -82,7 +82,6 @@ export function decodeFrame(buffer: Uint8Array): Frame {
     at += length;
     return data;
   };
-  const text = (data: Uint8Array) => new TextDecoder().decode(data);
   while (at < buffer.length) {
     const tag = Number(varint());
     const field = tag >> 3;

@@ -27,6 +27,15 @@ export { DISCORD_CHANNEL };
 const capture = loadCapture(textCapture);
 const created = exemplar<WireMessage>(capture, "create");
 const BOT = created.author;
+/** A second bot, as a second of Rome's accounts in the guild. Synthetic. */
+export const DISCORD_SECOND_BOT_ID = "100000000000000009";
+export const DISCORD_SECOND_TOKEN = "MTAwMDAwMDAwMDAwMDAwMDA5.fixture.fixture";
+const SECOND_BOT = { ...BOT, id: DISCORD_SECOND_BOT_ID, username: "Rome 2" };
+/** Each bot the peer models, by its token. */
+const BOTS = new Map<string, WireMessage["author"]>([
+  [DISCORD_TOKEN, BOT],
+  [DISCORD_SECOND_TOKEN, SECOND_BOT],
+]);
 const GUILD = String(
   exemplar<{ message_reference: { guild_id: string } }>(capture, "reply").message_reference
     .guild_id,
@@ -75,7 +84,10 @@ export class DiscordPeer implements Peer {
     [DISCORD_DM, { id: DISCORD_DM, type: 1, recipients: [ALICE] }],
   ]);
   private readonly dmByRecipient = new Map([[DISCORD_USER, DISCORD_DM]]);
-  private readonly sessions = new Set<WebSocket>();
+  /** Each identified gateway session, and the bot it is. */
+  private readonly sessions = new Map<WebSocket, WireMessage["author"]>();
+  /** The bot that sent each of Rome's messages, where it was not the first. */
+  private readonly authors = new Map<string, WireMessage["author"]>();
   private nextId = BigInt(String(created.id));
   private sequence = 0;
 
@@ -126,13 +138,18 @@ export class DiscordPeer implements Peer {
     };
   }
 
-  createAdapter(): DiscordAdapter {
-    return new DiscordAdapter({ botToken: DISCORD_TOKEN, rest: this.restOptions() });
+  createAdapter(token = DISCORD_TOKEN): DiscordAdapter {
+    return new DiscordAdapter({ botToken: token, rest: this.restOptions() });
   }
 
   /** A user's message, dispatched to every connected gateway session. In a
    *  guild channel it names the bot, as a guild message must to reach it. */
-  emitMessage(text: string, channelId = DISCORD_DM): VisibleMessage {
+  emitMessage(
+    text: string,
+    channelId = DISCORD_DM,
+    /** Whom a guild message names: the first bot, or every bot. */
+    options: { mentionsEveryBot?: boolean } = {},
+  ): VisibleMessage {
     if (!this.sessions.size) throw new Error("No discord.js gateway session is connected");
     // A person's message is said now, and Discord's id says when: discord.js
     // reads its time from the id, so it is minted from the clock.
@@ -145,17 +162,20 @@ export class DiscordPeer implements Peer {
     this.stamp(message.id);
     const wire = this.wire(message);
     const guild = this.channels.get(channelId)?.guild_id;
+    const named = options.mentionsEveryBot ? [...BOTS.values()] : [BOT];
+    // A DM is with the first bot alone; every bot is in the guild.
     this.dispatch(
       "MESSAGE_CREATE",
       guild
         ? {
             ...wire,
             guild_id: guild,
-            content: `<@${BOT.id}> ${text}`,
-            mentions: [BOT],
+            content: `${named.map((bot) => `<@${bot.id}>`).join(" ")} ${text}`,
+            mentions: named,
             member: memberOf(),
           }
         : wire,
+      guild ? undefined : BOT,
     );
     return message;
   }
@@ -166,7 +186,6 @@ export class DiscordPeer implements Peer {
       socket.close(4000);
       return;
     }
-    this.sessions.add(socket);
     socket.on("close", () => this.sessions.delete(socket));
     socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 45_000 } }));
     socket.on("message", (raw) => {
@@ -180,16 +199,22 @@ export class DiscordPeer implements Peer {
       if (frame.op === 1) return socket.send(JSON.stringify({ op: 11, d: null }));
       if (frame.op === 3) return;
       if (frame.op === 2) {
-        if (frame.d.token !== DISCORD_TOKEN) return socket.close(4004, "Authentication failed");
-        this.dispatch("READY", {
-          v: 10,
-          user: BOT,
-          guilds: this.inGuild ? [{ id: GUILD, unavailable: true }] : [],
-          session_id: "fixture-session",
-          resume_gateway_url: this.server.socketUrl("/gateway"),
-          application: { id: BOT.id, flags: 0 },
-        });
-        if (this.inGuild) this.dispatch("GUILD_CREATE", this.guild());
+        const bot = BOTS.get(String(frame.d.token));
+        if (!bot) return socket.close(4004, "Authentication failed");
+        this.sessions.set(socket, bot);
+        this.dispatch(
+          "READY",
+          {
+            v: 10,
+            user: bot,
+            guilds: this.inGuild ? [{ id: GUILD, unavailable: true }] : [],
+            session_id: `fixture-session-${bot.id}`,
+            resume_gateway_url: this.server.socketUrl("/gateway"),
+            application: { id: bot.id, flags: 0 },
+          },
+          bot,
+        );
+        if (this.inGuild) this.dispatch("GUILD_CREATE", this.guild(), bot);
         return;
       }
       this.server.errors.push(`Unmodeled gateway opcode ${frame.op}`);
@@ -230,19 +255,27 @@ export class DiscordPeer implements Peer {
       ],
       channels: [this.channels.get(DISCORD_CHANNEL)],
       threads: [this.channels.get(DISCORD_THREAD)],
-      members: [{ user: BOT, roles: [], joined_at: now, deaf: false, mute: false, flags: 0 }],
+      members: [...BOTS.values()].map((user) => ({
+        user,
+        roles: [],
+        joined_at: now,
+        deaf: false,
+        mute: false,
+        flags: 0,
+      })),
     };
   }
 
-  private dispatch(type: string, data: unknown) {
+  /** Send `data` to every session, or to bot `to`'s alone. */
+  private dispatch(type: string, data: unknown, to?: WireMessage["author"]) {
     const frame = JSON.stringify({ op: 0, t: type, s: ++this.sequence, d: data });
-    for (const session of this.sessions) session.send(frame);
+    for (const [session, bot] of this.sessions) if (!to || bot.id === to.id) session.send(frame);
   }
 
   private route({ method, path, headers, body }: PeerRequest): Reply | undefined {
     if (!path.startsWith(API)) return undefined;
-    if (headers.get("authorization") !== `Bot ${DISCORD_TOKEN}`)
-      throw new Error(`Discord request without the bot token: ${method} ${path}`);
+    const bot = BOTS.get((headers.get("authorization") ?? "").replace(/^Bot /, ""));
+    if (!bot) throw new Error(`Discord request without a bot token: ${method} ${path}`);
     const route = `${method} ${path.slice(API.length)}`;
 
     if (route === "GET /gateway/bot")
@@ -251,8 +284,8 @@ export class DiscordPeer implements Peer {
         shards: 1,
         session_start_limit: { total: 1000, remaining: 1000, reset_after: 0, max_concurrency: 1 },
       });
-    if (route === "GET /users/@me") return synthetic(BOT);
-    if (route === `PUT /applications/${BOT.id}/commands`) return synthetic(body);
+    if (route === "GET /users/@me") return synthetic(bot);
+    if (route === `PUT /applications/${bot.id}/commands`) return synthetic(body);
     if (route === "POST /users/@me/channels") {
       // Strict: a DM with anyone else is unmodeled, so a wrong recipient fails.
       const channel = this.dmByRecipient.get(String(body.recipient_id));
@@ -274,7 +307,7 @@ export class DiscordPeer implements Peer {
     if (!channel) return undefined;
     if (!messages) return method === "GET" ? synthetic(channel) : undefined;
 
-    if (method === "POST" && !messageId) return this.create(channel, body);
+    if (method === "POST" && !messageId) return this.create(channel, body, bot);
     // Other requests on the whole collection are unmodeled.
     if (!messageId) return undefined;
     const message = this.store.get(messageId);
@@ -289,7 +322,11 @@ export class DiscordPeer implements Peer {
     return undefined;
   }
 
-  private create(channel: WireChannel, body: Record<string, unknown>): Reply {
+  private create(
+    channel: WireChannel,
+    body: Record<string, unknown>,
+    bot: WireMessage["author"] = BOT,
+  ): Reply {
     const text = String(body.content ?? "");
     if (!text || text.length > TEXT_LIMIT) return invalidContent(text);
     const reference = (body.message_reference as { message_id?: string } | undefined)?.message_id;
@@ -307,6 +344,7 @@ export class DiscordPeer implements Peer {
       ...(reference !== undefined ? { replyTo: reference } : {}),
     });
     this.stamp(message.id);
+    if (bot.id !== BOT.id) this.authors.set(message.id, bot);
     return { body: this.wire(message), source: "capture", accepted: true };
   }
 
@@ -333,7 +371,7 @@ export class DiscordPeer implements Peer {
       ...structuredClone(created),
       id: message.id,
       channel_id: message.conversation,
-      author: message.from === "rome" ? BOT : ALICE,
+      author: message.from === "rome" ? (this.authors.get(message.id) ?? BOT) : ALICE,
       content: message.text,
       ...this.timestamps.get(message.id),
       ...(parent

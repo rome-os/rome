@@ -16,10 +16,24 @@ import {
 export const TELEGRAM_TOKEN = "123456:fixture-token";
 /** The private chat the capture was recorded in. */
 export const TELEGRAM_CHAT = 123;
+/** A second bot, another of Rome's accounts. */
+export const TELEGRAM_SECOND_TOKEN = "654321:fixture-token-2";
+/** A supergroup both bots are admins of. A supergroup numbers its messages
+ *  once for every member, so both bots read a message under one id. */
+export const TELEGRAM_GROUP = -1001000000001;
+const GROUP_TITLE = "Fixture group";
 
 const capture = loadCapture(textCapture);
 const sent = exemplar<{ result: RecordedMessage }>(capture, "send").result;
 const TEXT_LIMIT = 4096;
+/** Each bot by its token, as getMe answers for it. */
+const BOTS = new Map<string, Record<string, unknown>>([
+  [TELEGRAM_TOKEN, sent.from],
+  [
+    TELEGRAM_SECOND_TOKEN,
+    { id: 654321, is_bot: true, first_name: "Rome Two", username: "rome_fixture_2_bot" },
+  ],
+]);
 
 interface RecordedMessage extends Record<string, unknown> {
   from: Record<string, unknown>;
@@ -41,10 +55,15 @@ export class TelegramPeer implements Peer {
   readonly server = new PeerServer((request) => this.route(request));
   private readonly store = new MessageStore();
   /** Chats the bot can write to: the recorded one and any a user wrote from. */
-  private readonly chats = new Set([String(TELEGRAM_CHAT)]);
+  private readonly chats = new Set([String(TELEGRAM_CHAT), String(TELEGRAM_GROUP)]);
   private readonly dates = new Map<string, { date: number; edit_date?: number }>();
   private readonly markup = new Map<string, string>();
-  private updates: Update[] = [];
+  /** The bot that sent each of Rome's messages, by its token. */
+  private readonly senders = new Map<string, string>();
+  /** Each bot's pending updates, by its token. */
+  private readonly updates = new Map<string, Update[]>(
+    [...BOTS.keys()].map((token) => [token, []]),
+  );
   private nextMessageId = 1;
   private nextUpdateId = 1;
   private readonly polling = deferred();
@@ -96,11 +115,13 @@ export class TelegramPeer implements Peer {
       },
     });
 
-  createAdapter(): TelegramAdapter {
-    return new TelegramAdapter({ botToken: TELEGRAM_TOKEN }, this.createBot);
+  createAdapter(token = TELEGRAM_TOKEN): TelegramAdapter {
+    return new TelegramAdapter({ botToken: token }, this.createBot);
   }
 
-  /** A user's text message, delivered on the bot's next getUpdates. */
+  /** A user's text message, delivered on the next getUpdates of every bot in
+   *  the chat: the first bot alone in a private chat, and both in the group,
+   *  where an admin bot hears every message. */
   emitMessage(text: string, chatId = TELEGRAM_CHAT): VisibleMessage {
     this.chats.add(String(chatId));
     const message = this.store.add({
@@ -110,24 +131,28 @@ export class TelegramPeer implements Peer {
       text,
     });
     this.dates.set(message.id, { date: now() });
-    this.updates.push({ update_id: this.nextUpdateId++, message: this.wire(message) });
+    const hearing = chatId === TELEGRAM_GROUP ? [...BOTS.keys()] : [TELEGRAM_TOKEN];
+    for (const token of hearing)
+      this.updates
+        .get(token)!
+        .push({ update_id: this.nextUpdateId++, message: this.wire(message) });
     for (const wake of [...this.wake]) wake();
     return message;
   }
 
   private async route({ method, path, body, signal }: PeerRequest): Promise<Reply | undefined> {
-    const prefix = `/bot${TELEGRAM_TOKEN}/`;
-    if (method !== "POST" || !path.startsWith(prefix)) return undefined;
-    switch (path.slice(prefix.length)) {
+    const [, token, call] = /^\/bot([^/]+)\/(\w+)$/.exec(path) ?? [];
+    if (method !== "POST" || !token || !BOTS.has(token)) return undefined;
+    switch (call) {
       case "getMe":
-        return { body: { ok: true, result: sent.from }, source: "synthetic" };
+        return { body: { ok: true, result: BOTS.get(token) }, source: "synthetic" };
       case "deleteWebhook":
       case "sendChatAction":
         return { body: { ok: true, result: true }, source: "synthetic" };
       case "getUpdates":
-        return this.getUpdates(body, signal);
+        return this.getUpdates(token, body, signal);
       case "sendMessage":
-        return this.sendMessage(body);
+        return this.sendMessage(token, body);
       case "editMessageText":
         return this.editMessageText(body);
       default:
@@ -135,11 +160,21 @@ export class TelegramPeer implements Peer {
     }
   }
 
-  private async getUpdates(body: Record<string, unknown>, signal: AbortSignal): Promise<Reply> {
+  private async getUpdates(
+    token: string,
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<Reply> {
     this.polling.resolve();
     const offset = Number(body.offset ?? 0);
-    this.updates = this.updates.filter((update) => update.update_id >= offset);
-    if (!this.updates.length && Number(body.timeout ?? 0) > 0 && !signal.aborted) {
+    const pending = () =>
+      this.updates
+        .set(
+          token,
+          this.updates.get(token)!.filter((update) => update.update_id >= offset),
+        )
+        .get(token)!;
+    if (!pending().length && Number(body.timeout ?? 0) > 0 && !signal.aborted) {
       await new Promise<void>((resolve) => {
         const finish = () => {
           this.wake.delete(finish);
@@ -150,10 +185,10 @@ export class TelegramPeer implements Peer {
         signal.addEventListener("abort", finish, { once: true });
       });
     }
-    return { body: { ok: true, result: this.updates }, source: "synthetic" };
+    return { body: { ok: true, result: pending() }, source: "synthetic" };
   }
 
-  private sendMessage(body: Record<string, unknown>): Reply {
+  private sendMessage(token: string, body: Record<string, unknown>): Reply {
     const chat = String(body.chat_id);
     if (!this.chats.has(chat)) return badRequest("chat not found");
     const read = readText(body);
@@ -172,6 +207,7 @@ export class TelegramPeer implements Peer {
     });
     this.dates.set(message.id, { date: now() });
     this.markup.set(message.id, markup);
+    this.senders.set(message.id, token);
     return { body: { ok: true, result: this.wire(message) }, source, accepted: true };
   }
 
@@ -197,13 +233,18 @@ export class TelegramPeer implements Peer {
    *  message a reply points at carries no reply of its own, as in the Bot API. */
   private wire(message: VisibleMessage, nested = false): Record<string, unknown> {
     const parent = message.replyTo ? this.store.get(message.replyTo) : undefined;
+    const group = Number(message.conversation) === TELEGRAM_GROUP;
     return {
       ...structuredClone(sent),
       message_id: Number(message.id),
-      ...(message.from === "user"
-        ? { from: { ...userOf(sent.chat), id: Number(message.conversation) } }
-        : {}),
-      chat: { ...sent.chat, id: Number(message.conversation) },
+      from:
+        message.from === "user"
+          ? // The person writes in the group under the id of their private chat.
+            { ...userOf(sent.chat), id: group ? TELEGRAM_CHAT : Number(message.conversation) }
+          : BOTS.get(this.senders.get(message.id) ?? TELEGRAM_TOKEN),
+      chat: group
+        ? { id: TELEGRAM_GROUP, title: GROUP_TITLE, type: "supergroup" }
+        : { ...sent.chat, id: Number(message.conversation) },
       ...this.dates.get(message.id),
       text: message.text,
       ...(parent && !nested ? { reply_to_message: this.wire(parent, true) } : {}),
