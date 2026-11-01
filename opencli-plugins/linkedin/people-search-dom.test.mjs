@@ -367,16 +367,16 @@ test("a mutual-connection link whose sentence goes on in the next block is not a
   }
 });
 
-test("a later name in a result's card is not a result, whatever its sentence says", () => {
+test("a later name in a result's card is not a result, even when no result carries a label", () => {
   const result = read(
     makeDom(`<!doctype html><main><ul>
       <li>
-        <p><a href="/in/avery-example/"><span aria-hidden="true">Avery Example</span></a> • 2nd</p>
+        <div><a href="/in/avery-example/"><span aria-hidden="true">Avery Example</span></a></div>
         <p>Engineer at Example Co</p>
         <div><a href="/in/morgan-mutual/">Morgan Mutual</a></div><div>also works at Example Co</div>
       </li>
       <li>
-        <p><a href="/in/blake-example/"><span aria-hidden="true">Blake Example</span></a> • 3rd+</p>
+        <div><a href="/in/blake-example/"><span aria-hidden="true">Blake Example</span></a></div>
         <p>Designer at Example Co</p>
       </li>
     </ul></main>`),
@@ -432,6 +432,71 @@ test("mutual links in blocks of their own never stand in for unknown-label resul
     result.rows.map((row) => row.profile_url),
     [profile("camille-exemple"), profile("dominique-test"), profile("sacha-demo")],
   );
+});
+
+test("without card elements, a link that ends its line is not a result when results carry labels", () => {
+  const pages = [
+    `<p><a href="/in/camille-exemple/"><span aria-hidden="true">Camille Exemple</span></a> • 1er</p>
+    <p>Architecte chez Exemple SA</p>
+    <div><a href="/in/morgan-mutuel/">Morgan Mutuel</a></div><div>et 3 autres relations en commun</div>
+    <p><a href="/in/dominique-test/"><span aria-hidden="true">Dominique Test</span></a> • 2e</p>
+    <p>Comptable chez Exemple Conseil</p>`,
+    `<p><a href="/in/camille-exemple/"><span aria-hidden="true">Camille Exemple</span></a> • 2nd</p>
+    <p>Engineer at Example Co</p>
+    <div><a href="/in/morgan-mutuel/">Morgan Mutuel</a></div><div>also works at Example Co</div>
+    <p><a href="/in/dominique-test/"><span aria-hidden="true">Dominique Test</span></a> • 3rd+</p>
+    <p>Designer at Example Co</p>`,
+  ];
+
+  for (const page of pages) {
+    const result = read(makeDom(`<!doctype html><main><div role="list">${page}</div></main>`));
+
+    assert.deepEqual(
+      result.rows.map((row) => row.profile_url),
+      [profile("camille-exemple"), profile("dominique-test")],
+    );
+  }
+});
+
+test("labelled results drop a link that ends its line even when the first result's link spans two", () => {
+  // Chromium puts an absolutely positioned span on a line of its own, so the first result's link
+  // renders two lines and has no text after it.
+  const result = read(
+    makeDom(`<!doctype html><main><div role="list">
+      <p><a href="/in/avery-example/"><span aria-hidden="true">Avery Example</span><span style="display: block">View Avery Example’s profile</span></a> • 2nd</p>
+      <p>Engineer at Example Co</p>
+      <div><a href="/in/morgan-mutual/">Morgan Mutual</a></div><div>also works at Example Co</div>
+      <p><a href="/in/blake-example/"><span aria-hidden="true">Blake Example</span></a> • 3rd+</p>
+      <p>Designer at Example Co</p>
+    </div></main>`),
+  );
+
+  assert.deepEqual(
+    result.rows.map((row) => [row.profile_url, row.headline]),
+    [
+      [profile("avery-example"), "Engineer at Example Co"],
+      [profile("blake-example"), "Designer at Example Co"],
+    ],
+  );
+});
+
+test("a location that repeats a word of the name stays the location", () => {
+  const result = read(
+    makeDom(`<!doctype html><main><ul><li>
+      <p><a href="/in/jack-london/"><span aria-hidden="true">Jack London</span></a> • 2nd</p>
+      <p>Engineer</p>
+      <p>London</p>
+    </li></ul></main>`),
+  );
+
+  assert.deepEqual(result.rows, [
+    {
+      name: "Jack London",
+      headline: "Engineer",
+      location: "London",
+      profile_url: profile("jack-london"),
+    },
+  ]);
 });
 
 test("profile links that only appear inside sentences produce no rows", () => {
