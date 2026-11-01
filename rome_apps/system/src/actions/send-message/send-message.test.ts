@@ -9,8 +9,63 @@ import {
   type ChannelsService,
   type ChatRepository,
 } from "@rome-os/app-runtime";
-import { createSendMessageAction, executeSendMessage } from "./index.js";
+import { sql } from "drizzle-orm";
+import {
+  appRepositoryDeps,
+  createTestDb,
+  type TestDb,
+} from "../../../../../packages/core/src/test/helpers.js";
+import { createAppRuntimeRepositories } from "../../../../../packages/core/src/apps/repositories.js";
+import { createSendMessageAction, executeSendMessage as executeOn } from "./index.js";
 import type { AgentNamesService, SendMessageInput } from "./index.js";
+
+/** Every database a host opened, closed after each test. */
+const opened: TestDb[] = [];
+afterEach(() => {
+  for (const db of opened.splice(0)) db.close();
+});
+
+/**
+ * Rome's chats over a database of their own, sending on `channels`: the
+ * repository a host hands send_message, and what its seats said.
+ */
+function hostOver(channels: ChannelsService) {
+  const testDb = createTestDb();
+  opened.push(testDb);
+  const repositories = createAppRuntimeRepositories({
+    ...appRepositoryDeps(testDb.db),
+    sendOn: (channel, address, message) => channels.send(channel, address, message),
+  });
+  return {
+    chats: repositories.chats!,
+    /** Rome's lines on record, oldest first. */
+    lines: () =>
+      testDb.db.all<{ id: string; text: string; sender_agent: string | null }>(
+        sql`SELECT id, text, sender_agent FROM chat_messages ORDER BY rowid`,
+      ),
+    /** The lines a turn links as its answer. */
+    answers: () =>
+      testDb.db.all<{ message_id: string }>(
+        sql`SELECT message_id FROM agent_turn_messages WHERE role = 'answer'`,
+      ),
+    /** Makes every later write of a line fail, as a full disk would. */
+    failWrites: () =>
+      testDb.db.run(sql`
+        CREATE TRIGGER unavailable BEFORE INSERT ON chat_messages
+        BEGIN SELECT RAISE(ABORT, 'database unavailable'); END
+      `),
+  };
+}
+
+/** send_message through a host over `channels`, unless the test names the
+ *  chats itself. */
+function executeSendMessage(
+  channels: ChannelsService,
+  input: SendMessageInput,
+  deps: Parameters<typeof executeOn>[2] = {},
+) {
+  return executeOn(channels, input, { chats: hostOver(channels).chats, ...deps });
+}
 
 let tempDir = "";
 let projectsRoot = "";
@@ -56,10 +111,8 @@ describe("send_message attachments", () => {
     });
 
     expect(adapter.send).toHaveBeenCalledWith("discord", "thread-1", {
-      text: undefined,
+      text: "",
       attachments: [{ type: "document", source: safeSource, caption: "Report" }],
-      replyToMessageId: undefined,
-      turnId: undefined,
     });
   });
 
@@ -414,11 +467,8 @@ describe("send_message to an account with an opaque id", () => {
 
     await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      account,
-      "42",
-      expect.objectContaining({ text: "hi" }),
-    );
+    // Said through the seat of that account, on the channel that is it.
+    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
   });
 
   it("resolves to: guardian through the link People keys by platform", async () => {
@@ -473,77 +523,26 @@ describe("send_message to an account with an opaque id", () => {
 });
 
 describe("send_message conversation recording", () => {
-  it("stores a confirmed out-of-band delivery as a pending notification", async () => {
+  it("records a confirmed out-of-band delivery in the seat's chat, as no turn's answer", async () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-1",
       chatId: "thread-1",
     });
-    const ensureChannelChat = rs.fn(async () => ({
-      id: "channel:discord:thread-1",
-      agentName: null,
-    }));
-    const recordOutboundMessage = rs.fn(async () => undefined);
+    const host = hostOver(adapter);
 
     const result = await executeSendMessage(
       adapter,
       { channel: "discord", threadId: "thread-1", text: "Background update" },
-      {
-        chats: {
-          ensureChannelChat,
-          recordOutboundMessage,
-          addMessage: rs.fn(),
-          promoteMessageToUser: rs.fn(),
-        },
-      },
+      { chats: host.chats },
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
-    expect(ensureChannelChat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "discord",
-        threadId: "thread-1",
-      }),
-    );
-    expect(recordOutboundMessage).toHaveBeenCalledWith({
-      sessionId: "channel:discord:thread-1",
-      content: JSON.stringify([{ type: "text", content: "Background update" }]),
-      platformMessageId: "platform-out-1",
-      senderId: "rome",
-      senderName: "Rome",
-      replyToPlatformMessageId: undefined,
-      turnId: undefined,
-      knownToProvider: false,
-    });
-  });
-
-  it("records a delivery through a host that predates the chat names", async () => {
-    const adapter = makeAdapter();
-    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
-      messageId: "platform-out-1",
-      chatId: "thread-1",
-    });
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    // Only the old method, reading its own receiver as a host repository can.
-    const legacy = {
-      sessionId: "channel:discord:thread-1",
-      async ensureChannelConversation() {
-        return { id: this.sessionId, agentName: null };
-      },
-      recordOutboundMessage,
-      addMessage: rs.fn(),
-      promoteMessageToUser: rs.fn(),
-    };
-
-    await executeSendMessage(
-      adapter,
-      { channel: "discord", threadId: "thread-1", text: "Background update" },
-      { chats: legacy as unknown as ChatRepository },
-    );
-
-    expect(recordOutboundMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "channel:discord:thread-1" }),
-    );
+    expect(host.lines()).toEqual([
+      expect.objectContaining({ text: "Background update", sender_agent: "main" }),
+    ]);
+    expect(host.lines()[0]!.id).toMatch(/platform-out-1$/);
+    expect(host.answers()).toEqual([]);
   });
 
   it("leaves a webchat send to the channel, which writes it into the chat", async () => {
@@ -552,25 +551,16 @@ describe("send_message conversation recording", () => {
       messageId: "webchat-out-1",
       chatId: "session-1",
     });
-    const ensureChannelChat = rs.fn();
-    const recordOutboundMessage = rs.fn();
+    const host = hostOver(adapter);
 
     const result = await executeSendMessage(
       adapter,
       { channel: "webchat", threadId: "session-1", text: "Background update" },
-      {
-        chats: {
-          ensureChannelChat,
-          recordOutboundMessage,
-          addMessage: rs.fn(),
-          promoteMessageToUser: rs.fn(),
-        },
-      },
+      { chats: host.chats },
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
-    expect(ensureChannelChat).not.toHaveBeenCalled();
-    expect(recordOutboundMessage).not.toHaveBeenCalled();
+    expect(host.lines()).toEqual([]);
   });
 
   it("keeps a confirmed delivery successful when transcript recording fails", async () => {
@@ -579,30 +569,17 @@ describe("send_message conversation recording", () => {
       messageId: "platform-out-2",
       chatId: "thread-2",
     });
+    const host = hostOver(adapter);
+    host.failWrites();
 
     await expect(
       executeSendMessage(
         adapter,
-        {
-          channel: "discord",
-          threadId: "thread-2",
-          text: "Already delivered",
-          romeSessionId: "channel:discord:thread-2",
-          knownToProvider: true,
-          turnId: "turn-2",
-        },
-        {
-          chats: {
-            ensureChannelChat: rs.fn(),
-            recordOutboundMessage: rs.fn(async () => {
-              throw new Error("database unavailable");
-            }),
-            addMessage: rs.fn(),
-            promoteMessageToUser: rs.fn(),
-          },
-        },
+        { channel: "discord", threadId: "thread-2", text: "Already delivered", turnId: "turn-2" },
+        { chats: host.chats },
       ),
     ).resolves.toEqual({ status: "ok", data: { messageId: "platform-out-2" } });
+    expect(adapter.send).toHaveBeenCalledTimes(1);
   });
 });
 
