@@ -90,15 +90,23 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
   );
   const name = clean(heading?.innerText || heading?.textContent) || titleName;
 
-  // The header is the card around the first visible element that shows exactly the owner's name.
+  // The header is the card around the page heading when it shows exactly the owner's name, and
+  // otherwise around the first visible element that does. A name inside a link to another member
+  // belongs to a namesake's card, so it never anchors the header.
+  const showsOwnerName = (el) => {
+    const value = el.textContent || "";
+    if (value.length > expected.length + 80 || normalizeName(value) !== expected) return false;
+    const memberLink = el.closest('a[href*="/in/"]');
+    const linkedVanity = memberLink ? vanityOf(memberLink.getAttribute("href")) : "";
+    return (!linkedVanity || linkedVanity === owner) && visible(el);
+  };
   const nameElement =
     main && expected
-      ? Array.from(main.querySelectorAll("h1, h2, h3, h4, p, span, a, strong")).find((el) => {
-          const value = el.textContent || "";
-          return (
-            value.length <= expected.length + 80 && normalizeName(value) === expected && visible(el)
-          );
-        })
+      ? (heading && showsOwnerName(heading) ? heading : null) ||
+        Array.from(main.querySelectorAll("h1, h2, h3, h4, p, span, a, strong")).find(
+          showsOwnerName,
+        ) ||
+        null
       : null;
   const CARD = 'section, .pv-top-card, [data-view-name*="top-card" i], [componentkey*="topcard" i]';
   const CONTROL = 'button, a, [role="button"], [role="menuitem"]';

@@ -127,6 +127,25 @@ export const nestedRecommendationLayout = (badge) => `
     </section>
   </main>`;
 
+/**
+ * A namesake's recommendation card that precedes the owner's header in main. The namesake links
+ * to another vanity and offers Connect, while the owner is already a first-degree connection.
+ */
+export const namesakeBeforeHeader = (ownerName = "<h1>Jane Doe</h1>") => `
+  <main>
+    <section class="pymk">
+      <a href="/in/jane-doe-2/"><span>Jane Doe</span></a>
+      <span>· 2nd</span>
+      <button>Connect</button>
+    </section>
+    <section class="p7q2">
+      <div class="h4x1">${ownerName}<span>· 1st</span></div>
+      <div class="b6t0">
+        <a href="/messaging/compose/?recipient=jane-doe">Message</a>
+      </div>
+    </section>
+  </main>`;
+
 export const headerWithoutActions = `
   <main><section class="pv-top-card"><h1>Jane Doe</h1></section>${peopleYouMayKnow}</main>`;
 

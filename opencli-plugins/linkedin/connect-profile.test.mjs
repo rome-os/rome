@@ -17,6 +17,7 @@ import {
   MENU_WITH_REMOVE_CONNECTION,
   MENU_WITHOUT_CONNECT,
   messageAndConnectLayout,
+  namesakeBeforeHeader,
   nestedRecommendationLayout,
   OWNER_NAME,
   OWNER_URL,
@@ -56,6 +57,26 @@ test("#1542: a first-degree header badge wins over Connect controls in People yo
     assert.equal(verdict.blockReason, "already_connected");
     assert.equal(verdict.connectable, false);
     assert.deepEqual(page.clicks, []);
+  }
+});
+
+test("#1542: a namesake's card before the owner's header never stands in for it", async () => {
+  for (const ownerName of ["<h1>Jane Doe</h1>", '<h2 class="n8v3">Jane Doe</h2>']) {
+    const { page, probe, verdict } = await classify(namesakeBeforeHeader(ownerName));
+    assert.equal(probe.headerFound, true, ownerName);
+    assert.equal(probe.firstDegree, true, ownerName);
+    assert.equal(probe.degree, "1st", ownerName);
+    assert.equal(probe.connectAvailable, false, ownerName);
+    assert.deepEqual(probe.buttonLabels, ["Message"], ownerName);
+    assert.equal(verdict.blockReason, "already_connected", ownerName);
+    assert.deepEqual(page.clicks, [], ownerName);
+
+    const activate = profileDom(namesakeBeforeHeader(ownerName));
+    assert.deepEqual(await run(activate, "activate"), {
+      ok: false,
+      reason: "owner_more_button_not_found",
+    });
+    assert.deepEqual(activate.clicks, [], ownerName);
   }
 });
 
