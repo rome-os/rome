@@ -275,6 +275,11 @@ class OpencliAutomationPage implements AutomationPage {
           "The page navigated away or reloaded while the browser script ran, so its result was lost",
         );
       }
+      if (job.state !== "running") {
+        throw new Error(
+          `OpenCLI returned an unexpected browser script state: ${JSON.stringify(job).slice(0, 200)}`,
+        );
+      }
     }
 
     throw new Error(
@@ -388,7 +393,9 @@ function reloadExpression(marker: string): string {
 }
 
 // Chunks are stored by index, so an eval OpenCLI retries after a navigation
-// error writes the same slot again.
+// error writes the same slot again. A navigation partway through staging
+// leaves holes in the new document's array, and the start check reads them
+// through Array.from because Array.prototype.some skips holes.
 function stageInputExpression(jobId: string, index: number, chunk: string): string {
   return `(() => {
   const inputs = (globalThis.${INPUTS_GLOBAL} ??= {});
@@ -406,7 +413,7 @@ function startJobExpression(jobId: string, chunkCount: number, scriptExpression:
   const inputs = globalThis.${INPUTS_GLOBAL} ?? {};
   const chunks = inputs[${id}];
   delete inputs[${id}];
-  if (!Array.isArray(chunks) || chunks.length !== ${chunkCount} || chunks.some((chunk) => typeof chunk !== "string")) {
+  if (!Array.isArray(chunks) || chunks.length !== ${chunkCount} || Array.from(chunks).some((chunk) => typeof chunk !== "string")) {
     return JSON.stringify({ started: false, inputLost: true });
   }
   const __romeScriptArgs = JSON.parse(chunks.join(""));
@@ -428,7 +435,9 @@ function startJobExpression(jobId: string, chunkCount: number, scriptExpression:
 })()`;
 }
 
-// Removes a settled job as it reports it, so the page does not keep results.
+// Keeps a settled job after reporting it, so a poll whose output never
+// reached Rome can be repeated. The page is disposable, and closing it
+// discards the jobs.
 function waitJobExpression(jobId: string, waitMs: number): string {
   const id = JSON.stringify(jobId);
   return `(async () => {
@@ -439,7 +448,6 @@ function waitJobExpression(jobId: string, waitMs: number): string {
     await Promise.race([job.settled, new Promise((resolve) => setTimeout(resolve, ${waitMs}))]);
   }
   if (job.state === "running") return JSON.stringify({ state: "running" });
-  delete jobs[${id}];
   return JSON.stringify(
     job.state === "done" ? { state: "done", value: job.value } : { state: "error", message: job.message },
   );

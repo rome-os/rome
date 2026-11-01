@@ -384,22 +384,24 @@ If it helps, I can rewrite this as a compact executive summary.
     openDiscoveredPageSessionMock.mockImplementation(
       browserRuntimeModule.openDiscoveredPageSession,
     );
-    buildBrowserScriptExpressionMock.mockImplementation(
-      ({ entrypointExpression }: { entrypointExpression: string }) => {
-        const value = entrypointExpression.includes("chatWithChatGPT")
-          ? {
-              prompt: "Reply with OK",
-              responseText: "OK",
-              sources: [],
-              timestamp: "2026-11-01T00:00:00.000Z",
-            }
-          : entrypointExpression.includes("waitForLatestChatGPTResponseComplete")
-            ? { complete: true }
-            : { copyConfirmed: true };
-        return `(async () => (${JSON.stringify(value)}))()`;
-      },
-    );
     const fake = createFakeOpencli();
+    // The page scripts read their results from the page's globals.
+    fake.testGlobals.chat = {
+      prompt: "Reply with OK",
+      responseText: "OK",
+      sources: [],
+      timestamp: "2026-11-01T00:00:00.000Z",
+    };
+    fake.testGlobals.complete = { complete: true };
+    fake.testGlobals.copy = { copyConfirmed: true };
+    buildBrowserScriptExpressionMock.mockImplementation(
+      ({ entrypointExpression }: { entrypointExpression: string }) =>
+        entrypointExpression.includes("chatWithChatGPT")
+          ? "(async () => globalThis.__test.chat)()"
+          : entrypointExpression.includes("waitForLatestChatGPTResponseComplete")
+            ? "(async () => globalThis.__test.complete)()"
+            : "(async () => globalThis.__test.copy)()",
+    );
     const readClipboardText = rs
       .fn()
       .mockResolvedValueOnce("old clipboard")
@@ -428,13 +430,19 @@ If it helps, I can rewrite this as a compact executive summary.
   });
 
   it("passes the requested OpenCLI profile to every browser command", async () => {
+    const fake = createFakeOpencli();
+    fake.testGlobals.chat = {
+      prompt: "test",
+      responseText: "plain",
+      sources: [],
+      timestamp: "2026-11-01T00:00:00.000Z",
+    };
     buildBrowserScriptExpressionMock.mockImplementation(
       ({ entrypointExpression }: { entrypointExpression: string }) =>
         entrypointExpression.includes("chatWithChatGPT")
-          ? `(async () => (${JSON.stringify({ prompt: "test", responseText: "plain", sources: [], timestamp: "2026-11-01T00:00:00.000Z" })}))()`
+          ? "(async () => globalThis.__test.chat)()"
           : "(async () => ({ complete: false }))()",
     );
-    const fake = createFakeOpencli();
     const action = createActionForTest(rs.fn().mockResolvedValue("same"), {
       capabilityDiscovery: CDP_DISCOVERY,
       runOpencli: fake.run,

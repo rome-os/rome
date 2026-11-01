@@ -295,24 +295,25 @@ describe("chatgpt_image action", () => {
     // Discovery stays empty while ROME_ENABLE_CDP_AUTOMATION=false, the shipped default.
     const conversationUrl = "https://chatgpt.com/c/example-conversation";
     loadCachedScriptSourceMock.mockResolvedValue("// browser script");
-    buildBrowserScriptExpressionMock.mockImplementation(
-      ({ entrypointExpression }: { entrypointExpression: string }) => {
-        if (entrypointExpression.includes("generateChatGPTImage")) {
-          return `(async () => {
-            history.pushState(null, "", ${JSON.stringify(conversationUrl)});
-            return { prompt: "apple", conversationUrl: location.href };
-          })()`;
-        }
-        return `(async () => (${JSON.stringify({
-          imageUrl: "https://chatgpt.com/backend-api/estuary/content?id=file_apple",
-          mimeType: "image/png",
-          imageDataBase64: Buffer.from("fake image bytes").toString("base64"),
-          width: 1024,
-          height: 1024,
-        })}))()`;
-      },
-    );
     const fake = createFakeOpencli();
+    // The page scripts read their inputs and results from the page's globals.
+    fake.testGlobals.conversationUrl = conversationUrl;
+    fake.testGlobals.download = {
+      imageUrl: "https://chatgpt.com/backend-api/estuary/content?id=file_apple",
+      mimeType: "image/png",
+      imageDataBase64: Buffer.from("fake image bytes").toString("base64"),
+      width: 1024,
+      height: 1024,
+    };
+    buildBrowserScriptExpressionMock.mockImplementation(
+      ({ entrypointExpression }: { entrypointExpression: string }) =>
+        entrypointExpression.includes("generateChatGPTImage")
+          ? `(async () => {
+            history.pushState(null, "", globalThis.__test.conversationUrl);
+            return { prompt: "apple", conversationUrl: location.href };
+          })()`
+          : "(async () => globalThis.__test.download)()",
+    );
     const writeFileMock = rs.fn().mockResolvedValue(undefined);
     const action = createChatGPTImageAction(
       {

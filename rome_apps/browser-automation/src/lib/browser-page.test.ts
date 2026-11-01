@@ -153,6 +153,88 @@ describe("openAutomationPage over OpenCLI", () => {
     await expect(result).rejects.toThrow(/navigated away or reloaded/);
   });
 
+  it("reports lost input when a navigation lands between two staged chunks", async () => {
+    const fake = createFakeOpencli();
+    fake.testGlobals.gate = Promise.resolve();
+    let evalsBeforeScript = Number.POSITIVE_INFINITY;
+    // Staging is the first eval a script makes, so the navigation drops chunk 0.
+    const navigatingAfterFirstChunk: RunOpencli = async (args, options) => {
+      const result = await fake.run(args, options);
+      if (countEvals(fake.subcommands()) === evalsBeforeScript + 1) {
+        fake.navigate(PAGE_URL);
+      }
+      return result;
+    };
+    const page = await openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+      sessionPrefix: "rome-test",
+      runOpencli: navigatingAfterFirstChunk,
+    });
+    evalsBeforeScript = countEvals(fake.subcommands());
+
+    await expect(
+      page.runScript({
+        scriptUrl: GATED_ECHO_SCRIPT,
+        entrypointExpression: "gatedEcho",
+        args: [{ prompt: "Summarize this. ".repeat(6_000) }],
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow("The page reloaded before the browser script started");
+  });
+
+  it("returns a finished script's result when OpenCLI drops the poll that reported it", async () => {
+    const fake = createFakeOpencli();
+    fake.testGlobals.gate = Promise.resolve();
+    let dropped = false;
+    // The page runs the poll, and its output never reaches Rome.
+    const droppingFirstResult: RunOpencli = async (args, options) => {
+      const result = await fake.run(args, options);
+      if (!dropped && result.stdout.includes('"state":"done"')) {
+        dropped = true;
+        return { code: 1, stdout: "", stderr: "Browser Bridge connection reset" };
+      }
+      return result;
+    };
+    const page = await openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+      sessionPrefix: "rome-test",
+      runOpencli: droppingFirstResult,
+    });
+
+    await expect(
+      page.runScript({
+        scriptUrl: GATED_ECHO_SCRIPT,
+        entrypointExpression: "gatedEcho",
+        args: ["hello"],
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toEqual({ echoed: "hello", href: PAGE_URL });
+    expect(dropped).toBe(true);
+  });
+
+  it("fails at once when OpenCLI reports a script state it does not recognize", async () => {
+    const fake = createFakeOpencli({ maxPageTimerMs: 5 });
+    fake.testGlobals.gate = new Promise(() => {});
+    // A poll result that arrives JSON-encoded a second time parses to a string.
+    const doubleEncodingPolls: RunOpencli = async (args, options) => {
+      const result = await fake.run(args, options);
+      if (result.stdout.includes('"state"')) {
+        return { ...result, stdout: `${JSON.stringify(result.stdout.trim())}\n` };
+      }
+      return result;
+    };
+    const page = await openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+      sessionPrefix: "rome-test",
+      runOpencli: doubleEncodingPolls,
+    });
+
+    await expect(
+      page.runScript({
+        scriptUrl: GATED_ECHO_SCRIPT,
+        entrypointExpression: "gatedEcho",
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow("unexpected browser script state");
+  });
+
   it("waits for the reloaded document at the expected URL", async () => {
     const conversationUrl = "https://chatgpt.example/c/example-conversation";
     const fake = createFakeOpencli();
