@@ -229,8 +229,9 @@ The LinkedIn plugin replaces the built-in `connections` command. The built-in st
 page shorter than it requested and returned bare rows, so a partial list looked like the whole list.
 
 The command reads LinkedIn's connections API in pages of up to 40. A short page does not end the
-read. The read ends at `--limit` (1 to 500, default 20), at an empty page, or when the next offset
-reaches the total LinkedIn reports. Entries repeated across pages appear once.
+read. The read ends at `--limit` (1 to 500, default 20), at an empty page, or when `--offset` plus
+the connections returned reaches the total LinkedIn reports. Entries repeated across pages appear
+once.
 
 Rows follow LinkedIn's API order, and `rank` is the position in this result. That order is not
 guaranteed to match the connections page's "Recently added" sort. Sort by `connected_at`, the
@@ -238,8 +239,12 @@ connection time in epoch milliseconds, when recency matters.
 
 Every row carries the same coverage fields:
 
-- `total`: the connection count LinkedIn reports, or `null` when the response carries none.
-- `coverage`: `complete` when LinkedIn confirmed the end of the list. `limit` when the read stopped
+- `total`: the connection count LinkedIn reports, or `null` when the response carries none. A
+  total smaller than the connections LinkedIn has already returned is stale, so the command reports
+  `null` and stops trusting LinkedIn's totals for the rest of the read.
+- `coverage`: `complete` when `--offset` plus the connections returned equals LinkedIn's reported
+  total. `exhausted_unverified` when LinkedIn returned an empty page without a total to confirm the
+  end, so the list may be whole or LinkedIn may have stopped early. `limit` when the read stopped
   at `--limit` and more connections remain or may remain. `partial` when LinkedIn stopped returning
   connections before its reported total, or the read hit its request budget.
 - `next_offset`: the `--offset` that continues the read, or `null` when `coverage` is `complete`.

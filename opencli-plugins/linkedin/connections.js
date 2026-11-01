@@ -135,7 +135,9 @@ function readReportedTotal(json) {
 /**
  * Pages through the connections endpoint from `offset` until `limit` unique
  * rows are collected or LinkedIn signals the end. Returns the rows and their coverage:
- * - `complete`: LinkedIn returned an empty page, or the next offset reached its reported total.
+ * - `complete`: `offset` plus the distinct rows returned reached the total LinkedIn reports.
+ * - `exhausted_unverified`: LinkedIn returned an empty page without a total that confirms
+ *   the end. The list may be whole, or LinkedIn may have stopped early.
  * - `limit`: `limit` rows were collected and more connections remain or may remain.
  * - `partial`: LinkedIn stopped returning connections before its reported total,
  *   or the request budget ran out. Retrying from `next_offset` may return more.
@@ -147,6 +149,10 @@ async function collectConnections(page, csrf, { limit, offset }) {
   const seen = new Set();
   let start = offset;
   let total = null;
+  // Rest.li defaults an unset total to 0, so a total below the distinct
+  // connections LinkedIn has already returned is not evidence of the end.
+  // Once contradicted, no later total from this read is trusted either.
+  let totalContradicted = false;
   let coverage = null;
   // A short or overlapping page still advances `start`, so the budget only
   // binds when LinkedIn returns pages far smaller than requested.
@@ -178,13 +184,6 @@ async function collectConnections(page, csrf, { limit, offset }) {
         "LinkedIn connections API returned a malformed payload: missing elements array",
       );
     }
-    total = readReportedTotal(fetched.json) ?? total;
-
-    if (elements.length === 0) {
-      coverage = total !== null && start < total ? "partial" : "complete";
-      break;
-    }
-
     // LinkedIn can return fewer entries than requested while more remain, so a
     // short page is not the end. Advancing by the returned length rather than
     // `count` never skips an entry if LinkedIn left one out of the window, and
@@ -200,8 +199,18 @@ async function collectConnections(page, csrf, { limit, offset }) {
     }
     start += consumed;
 
-    if (total !== null && start >= total) coverage = "complete";
-    else if (rows.length >= limit) coverage = "limit";
+    // Positions before `offset` are taken on trust, the rest are distinct rows in hand.
+    const covered = offset + rows.length;
+    const reported = readReportedTotal(fetched.json);
+    if (reported !== null && !totalContradicted) {
+      totalContradicted = reported < covered;
+      total = totalContradicted ? null : reported;
+    }
+
+    if (total !== null && covered >= total) coverage = "complete";
+    else if (elements.length === 0) {
+      coverage = total === null ? "exhausted_unverified" : "partial";
+    } else if (rows.length >= limit) coverage = "limit";
   }
   coverage ??= "partial";
 
@@ -210,10 +219,12 @@ async function collectConnections(page, csrf, { limit, offset }) {
 
 function coverageNotice({ rows, total, coverage, nextOffset }) {
   const of = total === null ? "" : ` of ${total} reported`;
-  const reason =
-    coverage === "limit"
-      ? "--limit reached"
-      : "LinkedIn stopped returning connections before the end";
+  const reason = {
+    limit: "--limit reached",
+    exhausted_unverified:
+      "LinkedIn returned no more connections and no total that confirms the end",
+    partial: "LinkedIn stopped returning connections before the end",
+  }[coverage];
   return (
     `linkedin connections: returned ${rows.length}${of} connections (coverage=${coverage}: ${reason}). ` +
     `Continue with --offset ${nextOffset}.\n`

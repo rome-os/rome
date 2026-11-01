@@ -50,6 +50,14 @@ function requestedStarts(page) {
     .map((script) => Number(/connections\?start=(\d+)&count=\d+/.exec(script)[1]));
 }
 
+function coverageOf(rows) {
+  return new Set(
+    rows.map(({ total, coverage, next_offset }) =>
+      JSON.stringify({ total, coverage, next_offset }),
+    ),
+  );
+}
+
 async function run(page, kwargs) {
   const notices = [];
   const write = process.stderr.write;
@@ -106,11 +114,7 @@ test("a list LinkedIn stops returning before its reported total is labelled part
 
   assert.equal(rows.length, 199);
   assert.deepEqual(
-    new Set(
-      rows.map(({ total, coverage, next_offset }) =>
-        JSON.stringify({ total, coverage, next_offset }),
-      ),
-    ),
+    coverageOf(rows),
     new Set([JSON.stringify({ total: 250, coverage: "partial", next_offset: 199 })]),
   );
   assert.equal(notices.length, 1);
@@ -118,18 +122,85 @@ test("a list LinkedIn stops returning before its reported total is labelled part
   assert.match(notices[0], /--offset 199/);
 });
 
-test("without a reported total only an empty page confirms the end", async () => {
+test("without a reported total an empty page ends the read without confirming the end", async () => {
   const page = makePage([
     apiPage(range(0, 40)),
-    apiPage(range(40, 39)),
-    apiPage(range(79, 5)),
+    apiPage(range(40, 40)),
+    apiPage(range(80, 40)),
+    apiPage(range(120, 40)),
+    apiPage(range(160, 39)),
     apiPage([]),
   ]);
   const { rows, notices } = await run(page, { limit: 500 });
 
-  assert.equal(rows.length, 84);
-  assert.deepEqual(requestedStarts(page), [0, 40, 79, 84]);
+  assert.equal(rows.length, 199);
+  assert.deepEqual(requestedStarts(page), [0, 40, 80, 120, 160, 199]);
+  assert.deepEqual(
+    coverageOf(rows),
+    new Set([JSON.stringify({ total: null, coverage: "exhausted_unverified", next_offset: 199 })]),
+  );
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /returned 199 connections \(coverage=exhausted_unverified: /);
+  assert.match(notices[0], /--offset 199/);
+});
+
+test("a total of 0 alongside returned connections is ignored rather than ending the read", async () => {
+  const page = makePage([
+    apiPage(range(0, 40), { start: 0, count: 40, total: 0 }),
+    apiPage(range(40, 40), { start: 40, count: 40, total: 0 }),
+    apiPage(range(80, 7), { start: 80, count: 40, total: 0 }),
+    apiPage([], { start: 87, count: 40, total: 0 }),
+  ]);
+  const { rows, notices } = await run(page, { limit: 500 });
+
+  assert.equal(rows.length, 87);
+  assert.deepEqual(requestedStarts(page), [0, 40, 80, 87]);
+  assert.deepEqual(
+    coverageOf(rows),
+    new Set([JSON.stringify({ total: null, coverage: "exhausted_unverified", next_offset: 87 })]),
+  );
+  assert.equal(notices.length, 1);
+});
+
+test("a total smaller than the connections already returned is ignored", async () => {
+  const page = makePage([
+    apiPage(range(0, 40), { total: 30 }),
+    apiPage(range(40, 40), { total: 30 }),
+    apiPage([], { total: 30 }),
+  ]);
+  const { rows, notices } = await run(page, { limit: 500 });
+
+  assert.equal(rows.length, 80);
+  assert.deepEqual(requestedStarts(page), [0, 40, 80]);
   assert.equal(rows[0].total, null);
+  assert.equal(rows[0].coverage, "exhausted_unverified");
+  assert.equal(notices.length, 1);
+});
+
+test("a total that later drops below the connections already returned is not trusted", async () => {
+  const page = makePage([
+    apiPage(range(0, 40), { total: 250 }),
+    apiPage(range(40, 40), { total: 250 }),
+    apiPage([], { total: 60 }),
+  ]);
+  const { rows, notices } = await run(page, { limit: 500 });
+
+  assert.equal(rows.length, 80);
+  assert.equal(rows[0].total, null);
+  assert.equal(rows[0].coverage, "exhausted_unverified");
+  assert.equal(rows[0].next_offset, 80);
+  assert.equal(notices.length, 1);
+});
+
+test("a total that drops but still covers the connections returned is trusted", async () => {
+  const page = makePage([
+    apiPage(range(0, 40), { total: 250 }),
+    apiPage(range(40, 40), { total: 80 }),
+  ]);
+  const { rows, notices } = await run(page, { limit: 500 });
+
+  assert.equal(rows.length, 80);
+  assert.equal(rows[0].total, 80);
   assert.equal(rows[0].coverage, "complete");
   assert.equal(rows[0].next_offset, null);
   assert.deepEqual(notices, []);
@@ -184,6 +255,22 @@ test("entries repeated across overlapping pages appear once", async () => {
     rows.map((row) => row.rank),
     Array.from({ length: 80 }, (_, index) => index + 1),
   );
+});
+
+test("reaching the reported total with duplicates in place of entries is partial", async () => {
+  const page = makePage([
+    apiPage(range(0, 40), { total: 80 }),
+    apiPage([conn(39), ...range(40, 39)], { total: 80 }),
+    apiPage([], { total: 80 }),
+  ]);
+  const { rows, notices } = await run(page, { limit: 500 });
+
+  assert.equal(rows.length, 79);
+  assert.deepEqual(requestedStarts(page), [0, 40, 80]);
+  assert.equal(rows[0].total, 80);
+  assert.equal(rows[0].coverage, "partial");
+  assert.equal(rows[0].next_offset, 80);
+  assert.equal(notices.length, 1);
 });
 
 test("the request budget bounds pagination when LinkedIn returns tiny pages", async () => {
