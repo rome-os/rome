@@ -16,6 +16,7 @@ import { appPersonMapping } from "../people/app-person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatWiring } from "../chat-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
@@ -42,13 +43,6 @@ import {
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { ChatRepository } from "../chats/chat-repository.js";
-import { MessageRepository } from "../chats/message-repository.js";
-import { SeatReplies } from "../sessions/seat-replies.js";
-import { ChatReadModel } from "../webchat/chat-read-model.js";
-import { TurnLinks } from "../sessions/turn-links.js";
-import { ChatAddresses } from "../channels/chat-addresses.js";
-import { ChatAdapters } from "../chats/adapter.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -126,30 +120,24 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const webchatRepo = new WebChatRepository(db);
   // An action records the messages it hands over or sent, and links them to
   // its seat's turns.
-  const chatMessages = new MessageRepository(db);
-  const turnLinks = new TurnLinks(db);
-  const chatAdapters = new ChatAdapters({
+  const chat = chatWiring(db, {
     accountOf: (channel) => channelRecords.accountOf(channel),
     platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
-    addresses: new ChatAddresses(db),
     channelsOn: (platform) => channelRecords.namesOn(platform),
+    seats: webchatRepo,
   });
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db),
-    chatMessages,
-    adapters: chatAdapters,
+    chatRepo: chat.chats,
+    chatMessages: chat.messages,
+    adapters: chat.adapters,
     // `channelsService` is built further down; an action sends after boot.
     sendOn: (channel, address, message) => channelsService.send(channel, address, message),
-    links: turnLinks,
-    replies: new SeatReplies({
-      seats: webchatRepo,
-      adapters: chatAdapters,
-      messages: chatMessages,
-      links: turnLinks,
-    }),
-    reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
+    links: chat.links,
+    replies: chat.replies,
+    reads: chat.reads,
+    seatLines: chat.seatLines,
   });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);

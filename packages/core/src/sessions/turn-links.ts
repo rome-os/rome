@@ -435,7 +435,8 @@ function copyOf(message: SaidMessage): string {
   ].join("\n");
 }
 
-function contextOf(message: SaidMessage): ContextLine {
+/** `message` as a session reads it. */
+export function contextOf(message: SaidMessage): ContextLine {
   return {
     id: message.id,
     senderName: message.senderName ?? (message.direction === "fromRome" ? "Rome" : null),

@@ -260,6 +260,7 @@ export function createAction(config, deps) {
       sendOn: rs.fn(),
       links: {} as never,
       reads: {} as never,
+      seatLines: {} as never,
       adapters: {} as never,
     });
 

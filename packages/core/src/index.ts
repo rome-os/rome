@@ -122,6 +122,7 @@ import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
 import { WebChatRepository } from "./db/repositories/webchat.js";
+import { chatWiring } from "./chat-wiring.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
@@ -237,7 +238,6 @@ import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
 import { createAppRuntimeRepositories } from "./apps/repositories.js";
-import { ChatRepository } from "./chats/chat-repository.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
@@ -276,16 +276,9 @@ import {
 } from "./relay/settings.js";
 import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
-import { ChatEvents } from "./chats/events.js";
 import { inboundRecording } from "./chats/inbound.js";
 import { messagesSaid } from "./sessions/messages-said.js";
-import { ChatAdapters } from "./chats/adapter.js";
-import { MessageRepository } from "./chats/message-repository.js";
-import { SeatReplies } from "./sessions/seat-replies.js";
 import { recordedSends } from "./channels/recorded-sends.js";
-import { ChatAddresses } from "./channels/chat-addresses.js";
-import { ChatReadModel } from "./webchat/chat-read-model.js";
-import { TurnLinks } from "./sessions/turn-links.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -409,23 +402,20 @@ async function main() {
   }
   // Chats' places and what was said in them (docs/domains/chats.md), and
   // Agents' link from turns to those messages.
-  const chatRepo = new ChatRepository(db);
-  const chatEvents = new ChatEvents();
-  const chatMessages = new MessageRepository(db);
-  const turnLinks = new TurnLinks(db);
-  // The channels layer's address store, shared by every chat adapter.
-  // Every channel's chat adapter, over the one address store they share.
-  const chatAdapters = new ChatAdapters({
-    accountOf: (channel) => channelRecords.accountOf(channel),
-    platformOfChannel,
-    addresses: new ChatAddresses(db),
-    channelsOn: (platform) => channelRecords.namesOn(platform),
-  });
-  const seatReplies = new SeatReplies({
-    seats: webchatRepo,
-    adapters: chatAdapters,
+  const {
+    chats: chatRepo,
+    events: chatEvents,
     messages: chatMessages,
     links: turnLinks,
+    adapters: chatAdapters,
+    replies: seatReplies,
+    reads: chatReads,
+    seatLines,
+  } = chatWiring(db, {
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel,
+    channelsOn: (platform) => channelRecords.namesOn(platform),
+    seats: webchatRepo,
   });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
@@ -439,7 +429,8 @@ async function main() {
     sendOn: (channel, address, message) => channelsService.send(channel, address, message),
     links: turnLinks,
     replies: seatReplies,
-    reads: new ChatReadModel(db, { messages: chatMessages, links: turnLinks }),
+    reads: chatReads,
+    seatLines,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1101,6 +1092,7 @@ async function main() {
     agentTurnStreamRegistry,
     undefined,
     replyStreams,
+    seatLines,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1110,6 +1102,7 @@ async function main() {
     webchatRepo,
     agentTurnStreamRegistry,
     actionRegistry,
+    seatLines,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

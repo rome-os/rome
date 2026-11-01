@@ -16,6 +16,7 @@ import {
   sentLineId,
   type ChannelAdapterDeps,
   type ChannelChatAdapter,
+  type ChatAdapters,
   type Outbound,
 } from "../chats/adapter.js";
 import type { ChatRef } from "../chats/place.js";
@@ -50,6 +51,14 @@ export interface EmailChatAdapter extends ChannelChatAdapter {
 
 export function isEmailAdapter(adapter: ChannelChatAdapter): adapter is EmailChatAdapter {
   return "open" in adapter;
+}
+
+/** The email adapter over `channel`, which opens threads; throws for a
+ *  channel on another platform. */
+export function emailOf(adapters: Pick<ChatAdapters, "of">, channel: Channel): EmailChatAdapter {
+  const adapter = adapters.of(channel);
+  if (!isEmailAdapter(adapter)) throw new Error(`Channel "${channel.name}" sends no email`);
+  return adapter;
 }
 
 interface Opening {

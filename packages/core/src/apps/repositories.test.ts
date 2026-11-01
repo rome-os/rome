@@ -35,6 +35,7 @@ describe("app chat repository", () => {
       links: wiring.links,
       replies: wiring.replies,
       reads: wiring.reads,
+      seatLines: wiring.seatLines,
     }).chats!;
   };
 

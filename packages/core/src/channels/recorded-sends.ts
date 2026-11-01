@@ -14,7 +14,7 @@ import type { ChannelSend } from "./channel.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
 import { lineAt, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
-import type { EmailOutbound } from "./email-chat-adapter.js";
+import { emailOf, type EmailOutbound } from "./email-chat-adapter.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { startChannelChat } from "../chats/open-chat.js";
 import { placeIn } from "../chats/place.js";
@@ -23,7 +23,7 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 export interface RecordedSendsDeps {
   /** Each channel's chat adapter, which names the chat at an address and
    *  sends there. */
-  adapters: Pick<ChatAdapters, "of" | "emailOf" | "chatAt" | "accountOn" | "addressAt">;
+  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "addressAt">;
   chats: Pick<ChatRepository, "get" | "start">;
   webchatRepo: Pick<WebChatRepository, "seatIn" | "seatInThread" | "seatOf">;
   replies: Pick<SeatReplies, "send">;
@@ -162,7 +162,7 @@ async function openThread(
   out: EmailOutbound,
   email: OutgoingEmailMessage,
 ): Promise<MessageReceipt> {
-  const adapter = deps.adapters.emailOf(channel);
+  const adapter = emailOf(deps.adapters, channel);
   const subject = email.subject?.trim() || null;
   const chat = adapter.open(
     {

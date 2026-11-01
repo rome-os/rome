@@ -13,17 +13,15 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import type { ChannelSend } from "../../../channels/channel.js";
-import { ChatAddresses } from "../../../channels/chat-addresses.js";
 import { recordedSends } from "../../../channels/recorded-sends.js";
-import { ChatAdapters } from "../../../chats/adapter.js";
-import { ChatRepository } from "../../../chats/chat-repository.js";
-import { ChatEvents, type MessageSaid } from "../../../chats/events.js";
+import type { ChatAdapters } from "../../../chats/adapter.js";
+import type { ChatRepository } from "../../../chats/chat-repository.js";
+import type { MessageSaid } from "../../../chats/events.js";
 import { inboundRecording } from "../../../chats/inbound.js";
-import { MessageRepository } from "../../../chats/message-repository.js";
+import type { MessageRepository } from "../../../chats/message-repository.js";
 import { placeIn } from "../../../chats/place.js";
 import { WebChatRepository } from "../../../db/repositories/webchat.js";
-import { SeatReplies } from "../../../sessions/seat-replies.js";
-import { TurnLinks } from "../../../sessions/turn-links.js";
+import { chatWiring } from "../../../chat-wiring.js";
 import { createTestDb, type TestDb } from "../../helpers.js";
 import { deferred, type VisibleMessage } from "./peer.js";
 
@@ -124,23 +122,21 @@ export function describeAdapterConformance(
     beforeEach(async () => {
       testDb = createTestDb();
       peer = await start();
-      chats = new ChatRepository(testDb.db);
-      messages = new MessageRepository(testDb.db);
-      const events = new ChatEvents();
-      said = [];
-      events.subscribe(async (event) => {
-        if (event.type === "MessageSaid") said.push(event);
-      });
-      adapters = new ChatAdapters({
+      const webchatRepo = new WebChatRepository(testDb.db);
+      const wiring = chatWiring(testDb.db, {
         accountOf: (channel) => (channel === peer.channel.name ? peer.account : null),
         platformOfChannel: () => peer.account.platform,
-        addresses: new ChatAddresses(testDb.db),
         channelsOn: (platform) => (platform === peer.account.platform ? [peer.channel.name] : []),
+        seats: webchatRepo,
       });
-      stopRecording = inboundRecording({ chats, messages, events, adapters }, [
+      ({ chats, messages, adapters } = wiring);
+      said = [];
+      wiring.events.subscribe(async (event) => {
+        if (event.type === "MessageSaid") said.push(event);
+      });
+      stopRecording = inboundRecording({ chats, messages, events: wiring.events, adapters }, [
         peer.channel,
       ]).listen();
-      const webchatRepo = new WebChatRepository(testDb.db);
       refusal = null;
       // The platform refuses what it is told to, as a real one refuses a
       // message it cannot take.
@@ -158,12 +154,7 @@ export function describeAdapterConformance(
         adapters,
         chats,
         webchatRepo,
-        replies: new SeatReplies({
-          seats: webchatRepo,
-          adapters,
-          messages,
-          links: new TurnLinks(testDb.db),
-        }),
+        replies: wiring.replies,
         messages,
       });
       send = sending!.send as ChannelSend;

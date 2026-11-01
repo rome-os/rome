@@ -6,16 +6,12 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { Channel, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { ChatAdapters, chatAt } from "../chats/adapter.js";
-import { ChatRepository } from "../chats/chat-repository.js";
-import { MessageRepository } from "../chats/message-repository.js";
+import { chatAt } from "../chats/adapter.js";
+import { chatWiring } from "../chat-wiring.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { SeatReplies } from "../sessions/seat-replies.js";
-import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { seatFixture } from "../test/seats.js";
 import type { ChannelSend } from "./channel.js";
-import { ChatAddresses } from "./chat-addresses.js";
 import { recordedSends } from "./recorded-sends.js";
 
 const BOT = { platform: "telegram", id: "rome-bot" };
@@ -48,27 +44,15 @@ describe("recordedSends", () => {
       }) as unknown as Channel;
     const channels = [channel("telegram"), channel("email")];
     const accounts: Record<string, typeof BOT> = { telegram: BOT, email: MAILBOX };
-    const adapters = new ChatAdapters({
+    const webchatRepo = new WebChatRepository(testDb.db);
+    const wiring = chatWiring(testDb.db, {
       accountOf: (name) => accounts[name] ?? null,
       platformOfChannel: (name) => accounts[name]?.platform ?? name,
-      addresses: new ChatAddresses(testDb.db),
       channelsOn: (platform) =>
         Object.keys(accounts).filter((n) => accounts[n]!.platform === platform),
+      seats: webchatRepo,
     });
-    const messages = new MessageRepository(testDb.db);
-    const webchatRepo = new WebChatRepository(testDb.db);
-    const wrapped = recordedSends(channels, {
-      adapters,
-      chats: new ChatRepository(testDb.db),
-      webchatRepo,
-      replies: new SeatReplies({
-        seats: webchatRepo,
-        adapters,
-        messages,
-        links: new TurnLinks(testDb.db),
-      }),
-      messages,
-    });
+    const wrapped = recordedSends(channels, { ...wiring, webchatRepo });
     send = (name) => wrapped.find((c) => c.name === name)!.send as ChannelSend;
   });
   afterEach(() => testDb.close());

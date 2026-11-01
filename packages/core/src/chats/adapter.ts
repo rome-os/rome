@@ -36,12 +36,6 @@ import {
   type ChatKey,
 } from "../channels/chat-ids.js";
 import type { ChatRef, Place } from "./place.js";
-import {
-  EMAIL_PLATFORM,
-  emailChatAdapter,
-  isEmailAdapter,
-  type EmailChatAdapter,
-} from "../channels/email-chat-adapter.js";
 
 const log = createLogger("chat-adapter");
 
@@ -379,6 +373,12 @@ export function channelAdapter(
   };
 }
 
+/** A platform's own adapter over one of its channels. */
+export type PlatformAdapter = (
+  channel: Channel,
+  deps: Required<ChannelAdapterDeps>,
+) => ChannelChatAdapter;
+
 /**
  * Every channel's adapter, built once per channel when first asked for, over
  * one set of deps wired at startup. A channel a Connection mints again, as
@@ -391,6 +391,9 @@ export class ChatAdapters {
     private readonly deps: Required<ChannelAdapterDeps> & {
       /** The channels of Rome's accounts on `platform`. */
       channelsOn(platform: string): readonly string[];
+      /** The adapters of platforms that have their own, by platform. Any
+       *  other platform's channel gets the generic {@link channelAdapter}. */
+      platforms?: Readonly<Record<string, PlatformAdapter>>;
     },
   ) {}
 
@@ -398,10 +401,8 @@ export class ChatAdapters {
   of(channel: Channel): ChannelChatAdapter {
     let adapter = this.built.get(channel);
     if (!adapter) {
-      adapter =
-        this.deps.platformOfChannel(channel.name) === EMAIL_PLATFORM
-          ? emailChatAdapter(channel, this.deps)
-          : channelAdapter(channel, this.deps);
+      const own = this.deps.platforms?.[this.deps.platformOfChannel(channel.name)];
+      adapter = own ? own(channel, this.deps) : channelAdapter(channel, this.deps);
       this.built.set(channel, adapter);
     }
     return adapter;
@@ -458,14 +459,6 @@ export class ChatAdapters {
     if (bound !== null) return ChatIds.chat(chatKey(account.platform, bound as ChatId));
     if (kind === "group") return chatAt(account.platform, address);
     return chatAt(account.platform, address, { romeEnd: account.id });
-  }
-
-  /** The email adapter over `channel`, which opens threads; throws for a
-   *  channel on another platform. */
-  emailOf(channel: Channel): EmailChatAdapter {
-    const adapter = this.of(channel);
-    if (!isEmailAdapter(adapter)) throw new Error(`Channel "${channel.name}" sends no email`);
-    return adapter;
   }
 }
 

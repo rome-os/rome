@@ -11,6 +11,7 @@ import {
   type SpanHarness,
   type TestDb,
   createActionEngineRepos,
+  testChatWiring,
 } from "../test/helpers.js";
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
@@ -2067,7 +2068,9 @@ describe("AgentRunner", () => {
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
-    return new AgentRunner(manager, agentLoader);
+    // The lines a run names by the platform's ids, as Rome wires them.
+    const { seatLines } = testChatWiring(testDb.db);
+    return new AgentRunner(manager, agentLoader, undefined, undefined, undefined, seatLines);
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
@@ -4433,7 +4436,7 @@ describe("AgentRunner", () => {
       );
       // Nothing was recorded for the quote the provider supplied.
       expect(
-        await new WebChatRepository(testDb.db).seatLine(conversation.id, "wechat-server-42"),
+        await testChatWiring(testDb.db).seatLines.recorded(conversation.id, "wechat-server-42"),
       ).toBeNull();
       expect(unseen(conversation.id)).toEqual([]);
     });

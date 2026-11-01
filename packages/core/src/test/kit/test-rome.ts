@@ -329,6 +329,7 @@ async function buildHarness(
       links: wiring.links,
       replies: wiring.replies,
       reads: wiring.reads,
+      seatLines: wiring.seatLines,
     }).chats!,
     replies: wiring.replies,
   });

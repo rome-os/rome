@@ -338,6 +338,9 @@ export interface SendTurnOptions {
   romeSessionType?: RomeSessionType;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The line `replyTo` names, as Rome holds it where the turn's session
+   *  stands, or null when Rome holds none. */
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
 }
 
@@ -1986,6 +1989,7 @@ interface TurnSink {
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -3427,6 +3431,7 @@ class AgentSessionImpl implements AgentSession {
             ? "channel"
             : "action"),
       replyTo: options?.replyTo,
+      quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
@@ -3621,9 +3626,7 @@ class AgentSessionImpl implements AgentSession {
         // Rome's first line in a new thread quotes the line that started it,
         // said in the chat outside the thread.
         const threadStarter = unseen.find((line) => line.fromRome && line.quoted)?.quoted ?? null;
-        const quoted = sink.replyTo?.messageId
-          ? await this.deps.webchatRepo.seatLine(sink.romeSessionId, sink.replyTo.messageId)
-          : null;
+        const quoted = sink.quoted ?? null;
         const repliedTo = quoted
           ? contextLine(quoted)
           : sink.replyTo?.content

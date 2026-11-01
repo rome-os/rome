@@ -64,12 +64,7 @@ import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
 import { storedOn, type Channel, type Channels } from "../channels/channel.js";
 import { ChatEvents } from "../chats/events.js";
-import { MessageRepository } from "../chats/message-repository.js";
 import { ChatAdapters } from "../chats/adapter.js";
-import { ChatAddresses } from "../channels/chat-addresses.js";
-import { TurnLinks } from "../sessions/turn-links.js";
-import { SeatReplies } from "../sessions/seat-replies.js";
-import { ChatReadModel } from "../webchat/chat-read-model.js";
 import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
@@ -84,6 +79,7 @@ import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatWiring } from "../chat-wiring.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
@@ -177,18 +173,13 @@ export function testChatRepository(db: DrizzleDb): ChatRepository {
  */
 export function testChatWiring(db: DrizzleDb, webchatRepo = new WebChatRepository(db)) {
   const records = new ChannelRecordsRepository(db, testAccountLinkOf);
-  const chats = new ChatRepository(db);
-  const messages = new MessageRepository(db);
-  const links = new TurnLinks(db);
-  const adapters = new ChatAdapters({
+  const wiring = chatWiring(db, {
     accountOf: (channel) => records.accountOf(channel),
     platformOfChannel: (channel) => records.platformOfChannel(channel),
-    addresses: new ChatAddresses(db),
     channelsOn: (platform) => records.namesOn(platform),
+    seats: webchatRepo,
   });
-  const replies = new SeatReplies({ seats: webchatRepo, adapters, messages, links });
-  const reads = new ChatReadModel(db, { messages, links });
-  return { chats, messages, links, adapters, replies, reads, webchatRepo };
+  return { ...wiring, webchatRepo };
 }
 
 /**
@@ -219,6 +210,7 @@ export function appRepositoryDeps(
     links: wiring.links,
     replies: wiring.replies,
     reads: wiring.reads,
+    seatLines: wiring.seatLines,
   };
 }
 
@@ -686,6 +678,7 @@ export async function buildTestDeps(
     links: wiring.links,
     replies: wiring.replies,
     reads: wiring.reads,
+    seatLines: wiring.seatLines,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1257,6 +1250,7 @@ export async function createAppLifecycleHarness(
       links: wiring.links,
       replies: wiring.replies,
       reads: wiring.reads,
+      seatLines: wiring.seatLines,
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {

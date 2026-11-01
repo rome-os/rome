@@ -11,10 +11,9 @@ import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { ChatRepository } from "../chats/chat-repository.js";
+import { chatWiring } from "../chat-wiring.js";
 import { platformOf } from "@rome/api-types/platform";
-import { ChatAdapters, chatAt } from "../chats/adapter.js";
-import { ChatAddresses } from "../channels/chat-addresses.js";
+import { chatAt } from "../chats/adapter.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 
@@ -87,16 +86,16 @@ function openSeat(db: TestDb["db"], input: EnsureChannelChatInput) {
 /** The settings over `db`, with an adapter per channel the registry knows,
  *  each on the platform its kind names. */
 function settingsRepository(db: TestDb["db"], registry: ConnectionRegistry) {
-  return new ChatSettingsRepository(db, {
-    chats: new ChatRepository(db),
-    adapters: new ChatAdapters({
+  return new ChatSettingsRepository(
+    db,
+    chatWiring(db, {
       channelsOn: (platform) =>
         registry.registeredKinds().filter((kind) => platformOf(kind) === platform),
       accountOf: () => null,
       platformOfChannel: platformOf,
-      addresses: new ChatAddresses(db),
+      seats: new WebChatRepository(db),
     }),
-  });
+  );
 }
 
 describe("ChatSettingsService", () => {
@@ -708,8 +707,7 @@ describe("ChatSettingsService", () => {
     const support = await connectLive(registry, "wechat");
     const channelOf = (connection: { id: string }) =>
       connection.id === sales.id ? "feishu" : "feishu-2";
-    const chats = new ChatRepository(testDb.db);
-    const adapters = new ChatAdapters({
+    const { chats, adapters } = chatWiring(testDb.db, {
       channelsOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
       accountOf: (name) =>
         name === "feishu"
@@ -718,7 +716,7 @@ describe("ChatSettingsService", () => {
             ? { platform: "feishu", id: "ou_support" }
             : null,
       platformOfChannel: (name) => (name.startsWith("feishu") ? "feishu" : name),
-      addresses: new ChatAddresses(testDb.db),
+      seats: new WebChatRepository(testDb.db),
     });
     const service = new ChatSettingsService({
       repository: new ChatSettingsRepository(testDb.db, { chats, adapters }),

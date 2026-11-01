@@ -1,7 +1,7 @@
 import { platformOf } from "@rome/api-types/platform";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
   and,
@@ -57,7 +57,6 @@ import type {
   SessionTrace,
 } from "@rome-os/app-runtime";
 import { placeIn, type ChatRef, type Place } from "../../chats/place.js";
-import { lineAt } from "../../chats/adapter.js";
 import {
   seatLinesSaid,
   seatsSaidInSince,
@@ -66,7 +65,7 @@ import {
   sessionLineCount,
   sessionLines,
 } from "../../webchat/chat-read-model-sql.js";
-import { TurnLinks, type ContextLine } from "../../sessions/turn-links.js";
+import { TurnLinks } from "../../sessions/turn-links.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
 import { MessageRepository } from "../../chats/message-repository.js";
 import { partsText, type SaidBy } from "../../chats/message.js";
@@ -109,19 +108,6 @@ export interface Seat {
   readonly accountId: string;
   /** The agent that speaks through the seat. */
   readonly agent: string;
-}
-
-export interface StoredSaidMessage {
-  id: string;
-  channel: string;
-  turnId: string | null;
-  role: string;
-  content: string;
-  platformMessageId: string | null;
-  senderId: string | null;
-  senderName: string | null;
-  replyToPlatformMessageId: string | null;
-  createdAt: Date;
 }
 
 export interface StoredSharedChat {
@@ -431,21 +417,6 @@ const SESSION_DELETE_CHUNK_SIZE = 500;
 const SQL_LIKE_ESCAPE = "\\";
 
 export { channelChatId };
-
-/** The row id a recorded outbound message takes when the provider named it.
- *  Derived rather than random so a caller that knows the provider's id can
- *  predict the timeline `ref` the message will carry. */
-export function conversationPlatformMessageId(
-  sessionId: string,
-  platformMessageId: string,
-): string {
-  const digest = createHash("sha256")
-    .update(sessionId)
-    .update("\0")
-    .update(platformMessageId)
-    .digest("hex");
-  return `channel-message:${digest}`;
-}
 
 function escapeSqlLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `${SQL_LIKE_ESCAPE}${character}`);
@@ -1180,31 +1151,6 @@ export class WebChatRepository {
         .limit(1)
         .get()?.id ?? null
     );
-  }
-
-  /** The message said where session `sessionId` stands whose platform id is
-   *  `platformMessageId`, as the platform gave it, or null when none is. */
-  async seatMessageId(sessionId: string, platformMessageId: string): Promise<string | null> {
-    return (await this.seatLine(sessionId, platformMessageId))?.id ?? null;
-  }
-
-  /** The line said in session `sessionId`'s chat, in any of its threads,
-   *  whose platform id is `platformMessageId` as the platform gave it, or null
-   *  when Rome holds none. */
-  async seatLine(sessionId: string, platformMessageId: string): Promise<ContextLine | null> {
-    const seat = await this.seatOf(sessionId);
-    if (!seat) return null;
-    const [line] = this.lines
-      .byIds([lineAt(seat.place.chat, seat.accountId, platformMessageId)])
-      .filter((said) => said.place.chat.id === seat.place.chat.id);
-    if (!line) return null;
-    return {
-      id: line.id,
-      senderName:
-        line.direction === "fromRome" ? (line.senderName ?? "Rome") : (line.senderName ?? null),
-      text: line.body.text,
-      at: line.at,
-    };
   }
 
   /** Move session `sessionId`'s activity to `at` when `at` is later, as

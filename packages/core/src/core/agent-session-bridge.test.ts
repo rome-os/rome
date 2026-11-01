@@ -23,6 +23,8 @@ import { chatAt, lineAt } from "../chats/adapter.js";
 import { seatFixture } from "../test/seats.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createTestDb, testChatWiring } from "../test/helpers.js";
+import type { SeatLines } from "../channels/seat-lines.js";
+import type { SaidMessage } from "../chats/message.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -358,6 +360,7 @@ describe("AgentSessionBridge worker disconnect", () => {
     options: {
       beforeAcquire?: () => Promise<void>;
       webchatRepo?: WebChatRepository;
+      seatLines?: Pick<SeatLines, "recorded">;
       romeSessionId?: string;
     } = {},
   ) {
@@ -379,7 +382,15 @@ describe("AgentSessionBridge worker disconnect", () => {
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, options.webchatRepo, undefined, turns).attach(
+    new AgentSessionBridge(
+      manager,
+      options.webchatRepo,
+      undefined,
+      turns,
+      undefined,
+      undefined,
+      options.seatLines,
+    ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -511,13 +522,14 @@ describe("AgentSessionBridge worker disconnect", () => {
   it("interrupts a turn whose message assignment fails, and only once", async () => {
     const turn = controllableTurn("turn-1");
     const webchatRepo = {
-      seatMessageId: async () => "line-1",
       assignConversationMessageTurn: () => {
         throw new Error("db down");
       },
     } as unknown as WebChatRepository;
+    const seatLines = { recorded: async () => ({ id: "line-1" }) as SaidMessage };
     const { sent, requestTurn, response, workerGone } = setup([turn.handle], {
       webchatRepo,
+      seatLines,
       romeSessionId: "channel:discord:channel-1",
     });
 
@@ -623,7 +635,15 @@ describe("AgentSessionBridge reply streaming", () => {
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, own_.repo, undefined, turns, undefined, replies).attach(
+    new AgentSessionBridge(
+      manager,
+      own_.repo,
+      undefined,
+      turns,
+      undefined,
+      replies,
+      testChatWiring(own_.db, own_.repo).seatLines,
+    ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -925,7 +945,9 @@ describe("AgentSessionBridge reply streaming", () => {
       expect(written.map(([, text]) => text)).toEqual(["Looking.", "hi there"]);
       const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
       expect(await answers()).toEqual([shown]);
-      expect((await repo.seatLine("conversation-1", "m1"))?.text).toBe("Looking.\n\nhi there");
+      expect(
+        (await testChatWiring(db, repo).seatLines.recorded("conversation-1", "m1"))?.body.text,
+      ).toBe("Looking.\n\nhi there");
     } finally {
       close();
     }
@@ -943,8 +965,10 @@ describe("AgentSessionBridge reply streaming", () => {
       });
 
       await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect((await repo.seatLine("conversation-1", "m1"))?.text).toBe("Looking.\n\nhi there");
-      expect(await repo.seatLine("conversation-1", "m2")).toBeNull();
+      expect(
+        (await testChatWiring(db, repo).seatLines.recorded("conversation-1", "m1"))?.body.text,
+      ).toBe("Looking.\n\nhi there");
+      expect(await testChatWiring(db, repo).seatLines.recorded("conversation-1", "m2")).toBeNull();
     } finally {
       close();
     }
