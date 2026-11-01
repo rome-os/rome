@@ -23,6 +23,8 @@ export class EmailPeer {
   private readonly threads = new Map<string, RomeMailListItem[]>();
   private nextId = 1;
   private nextThread = 1;
+  /** The provider refuses the next send, when set. */
+  private refusal: string | null = null;
   /** Rome's mail adapter, wired to this provider. */
   readonly adapter: EmailAdapter;
 
@@ -39,6 +41,11 @@ export class EmailPeer {
       } as unknown as PeopleRepository,
       config: { address: EMAIL_MAILBOX, inboundSecret: SECRET },
     });
+  }
+
+  /** The provider refuses the next mail Rome's mailbox sends, in `words`. */
+  refuseNextSend(words = "Recipient address rejected"): void {
+    this.refusal = words;
   }
 
   /** What the person sees in thread `threadId`. */
@@ -91,6 +98,9 @@ export class EmailPeer {
     return {
       provision: async () => ({ address: EMAIL_MAILBOX, inboundSecret: SECRET }),
       send: async (mail) => {
+        const refused = this.refusal;
+        this.refusal = null;
+        if (refused) throw new Error(refused);
         // A reply stays on the thread of the message it answers; anything
         // else starts a thread.
         const answered = mail.inReplyToMessageId
@@ -103,6 +113,7 @@ export class EmailPeer {
           conversation: threadId,
           from: "rome",
           text: mail.text ?? "",
+          ...(answered ? { replyTo: answered.id } : {}),
         });
         this.list(threadId).push(item(sent.id, threadId, ["sent"]));
         return { messageId: sent.id, threadId };

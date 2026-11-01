@@ -68,6 +68,9 @@ export interface ConformanceChannel {
   };
   /** What a person in conversation `at` sees there. */
   visible(at: string): VisibleMessage[];
+  /** The platform refuses the next message Rome's account sends, as it
+   *  refuses one to a chat it does not know. */
+  refuseNextSend(): void;
   stop(): Promise<void>;
 }
 
@@ -164,8 +167,6 @@ export function describeAdapterConformance(
     let send: (address: string, message: OutgoingMessage) => Promise<void>;
     /** The second account's send, where the peer models one. */
     let secondSend: ((address: string, message: OutgoingMessage) => Promise<void>) | undefined;
-    /** The platform's refusal of the next send, when set. */
-    let refusal: Error | null;
     /** Every address a case named, where Rome may hold a chat. */
     let addresses: Set<string>;
 
@@ -198,28 +199,29 @@ export function describeAdapterConformance(
         { chats: rows, messages, events, platformOfChannel: () => platform },
         own.map((at) => at.channel),
       ).messagesSaid.subscribe(async () => undefined);
-      refusal = null;
       const appChats = createAppRuntimeRepositories({
         settingsRepo: new SettingsRepository(testDb.db),
         webchatRepo: rows,
         chatRepo: chats,
         chatMessages: messages,
       }).chats!;
+      // As the system app's `send_message` records a delivered message: under
+      // the conversation the channel says it delivered to, which a send to a
+      // person's own id can open, beneath the address it named.
       const sendOn =
-        (channel: Channel, refuses: boolean) =>
+        (channel: Channel) =>
         async (address: string, message: OutgoingMessage): Promise<void> => {
           addresses.add(address);
-          // The platform refuses what it is told to, as a real one refuses a
-          // message it cannot take.
-          const refused = refuses ? refusal : null;
-          refusal = null;
-          if (refused) throw refused;
           const receipt = await (channel.send as ChannelSend).send(address as ChatId, message);
+          const delivered = receipt.chatId || address;
+          const opened = delivered !== address;
+          addresses.add(delivered);
           const conversation = await appChats.ensureChannelChat({
             channel: channel.name,
-            threadId: address,
+            threadId: delivered,
+            ...(opened ? { parentThreadId: address } : {}),
             agentName: "main",
-            threadType: "private",
+            threadType: opened ? "group" : "private",
           });
           await appChats.recordOutboundMessage({
             sessionId: conversation.id,
@@ -233,8 +235,8 @@ export function describeAdapterConformance(
             knownToProvider: false,
           });
         };
-      send = sendOn(peer.channel, true);
-      secondSend = peer.second ? sendOn(peer.second.channel, false) : undefined;
+      send = sendOn(peer.channel);
+      secondSend = peer.second ? sendOn(peer.second.channel) : undefined;
     });
 
     afterEach(async () => {
@@ -370,6 +372,12 @@ export function describeAdapterConformance(
 
         await send(conversation().at, { text: "Tuesday", replyToMessageId: heard.platformId });
 
+        // The person sees the answer quote their message, and Rome's
+        // transcript links the two the same way.
+        expect(peer.visible(conversation().at).at(-1)).toMatchObject({
+          text: "Tuesday",
+          replyTo: heard.platformId,
+        });
         const [answer] = (await messages.recent(heard.message.place, 1)).messages;
         expect(answer?.body.text).toBe("Tuesday");
         expect(answer?.replyTo).toBe(heard.platformId);
@@ -377,12 +385,12 @@ export function describeAdapterConformance(
     );
 
     runs("refusal")(
-      "puts nothing on record when the platform refuses a send, and says why",
+      "puts nothing on record when the platform refuses a send, and fails the send",
       async () => {
         const heard = await personSays("hello Rome");
-        refusal = new Error("Bad Request: chat not found");
+        peer.refuseNextSend();
 
-        await expect(send(conversation().at, { text: "lost" })).rejects.toThrow("chat not found");
+        await expect(send(conversation().at, { text: "lost" })).rejects.toThrow();
 
         expect(await transcript(heard.message.place)).toEqual([
           { text: "hello Rome", fromRome: false },

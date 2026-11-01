@@ -6,6 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { channelOver, describeAdapterConformance } from "./adapter-conformance.js";
+import { exemplar, loadCapture } from "./capture.js";
+import wechatTextCapture from "./captures/wechat-text.capture.json" with { type: "json" };
 import {
   DISCORD_CHANNEL,
   DISCORD_DM,
@@ -25,14 +27,26 @@ import {
   FeishuPeer,
 } from "./feishu.js";
 import { EMAIL_MAILBOX, EmailPeer } from "./email.js";
-import { TELEGRAM_CHAT, TELEGRAM_GROUP, TELEGRAM_SECOND_TOKEN, TelegramPeer } from "./telegram.js";
+import {
+  TELEGRAM_CHAT,
+  TELEGRAM_GROUP,
+  TELEGRAM_SECOND_TOKEN,
+  TELEGRAM_TOKEN,
+  TelegramPeer,
+} from "./telegram.js";
 import { WECHAT_USER, WechatPeer } from "./wechat.js";
+
+const wechatCapture = loadCapture(wechatTextCapture);
 
 // What Rome fails today, as each platform's gaps list it.
 const DM_BY_ADDRESS =
   "Rome keys a direct message by the address a send names, so a send to the person's own id starts a second chat beside the one heard at the platform's DM address. Step 2 (the Chats tables and the address store) closes it.";
 const LINES_PER_ACCOUNT =
   "Rome keeps a group's lines once per account that hears them, so a message two accounts hear is recorded twice. Step 2 records it once under the platform's id.";
+const DISCORD_DM_QUOTE =
+  "Discord's adapter quotes a message only in a guild channel; a reply in a direct message goes out as a plain message.";
+const WECHAT_NO_QUOTE =
+  "iLink has no reply reference, so a reply cannot quote the message it answers.";
 const EMAIL_THREAD_IS_DM =
   "Rome records an email thread as a direct message, not a group chat. Step 2 marks email threads as groups.";
 
@@ -69,6 +83,16 @@ describeAdapterConformance(
         bothHear: (text) => peer.emitMessage(text, FEISHU_CHAT, { mentionsEveryBot: true }).id,
       },
       visible: (at) => peer.visible(at),
+      // Feishu refuses a post to a chat the bot is not in.
+      refuseNextSend: () =>
+        peer.server.once({
+          method: "POST",
+          path: "/open-apis/im/v1/messages",
+          respond: {
+            status: 400,
+            body: { code: 230002, msg: "Bot/User can NOT be out of the chat." },
+          },
+        }),
       stop: async () => {
         await second.stop();
         await adapter.stop();
@@ -124,6 +148,13 @@ describeAdapterConformance(
         bothHear: (text) => peer.emitMessage(text, DISCORD_CHANNEL, { mentionsEveryBot: true }).id,
       },
       visible: (at) => peer.visible(at),
+      // Discord refuses a message to a channel it does not know.
+      refuseNextSend: () =>
+        peer.server.once({
+          method: "POST",
+          path: `/api/v10/channels/${DISCORD_DM}/messages`,
+          respond: { status: 404, body: { message: "Unknown Channel", code: 10003 } },
+        }),
       stop: async () => {
         await second.stop();
         await adapter.stop();
@@ -137,6 +168,7 @@ describeAdapterConformance(
     replyToPerson: DM_BY_ADDRESS,
     romeWritesFirst: DM_BY_ADDRESS,
     twoAccounts: LINES_PER_ACCOUNT,
+    quote: DISCORD_DM_QUOTE,
   },
 );
 
@@ -169,6 +201,19 @@ describeAdapterConformance(
         bothHear: (text) => peer.emitMessage(text, TELEGRAM_GROUP).id,
       },
       visible: (at) => peer.visible(at),
+      // Telegram refuses a message to a chat it does not know. The adapter
+      // retries a refused HTML message once as plain text, so both refuse.
+      refuseNextSend: () => {
+        for (let i = 0; i < 2; i++)
+          peer.server.once({
+            method: "POST",
+            path: `/bot${TELEGRAM_TOKEN}/sendMessage`,
+            respond: {
+              status: 400,
+              body: { ok: false, error_code: 400, description: "Bad Request: chat not found" },
+            },
+          });
+      },
       stop: async () => {
         await second.stop();
         await adapter.stop();
@@ -203,6 +248,13 @@ describeAdapterConformance(
         personWrites: (text) => peer.emitMessage(text).id,
       },
       visible: (at) => peer.visible(at),
+      // iLink refuses a message to a recipient it cannot reach, as recorded.
+      refuseNextSend: () =>
+        peer.server.once({
+          method: "POST",
+          path: "/ilink/bot/sendmessage",
+          respond: { status: 200, body: exemplar(wechatCapture, "send-invalid-recipient") },
+        }),
       stop: async () => {
         await adapter.stop();
         await peer.close();
@@ -219,6 +271,7 @@ describeAdapterConformance(
     twoAccounts: false,
     threads: false,
   },
+  { quote: WECHAT_NO_QUOTE },
 );
 
 // Email: a thread is a group chat, and there are no direct messages. The
@@ -237,6 +290,7 @@ describeAdapterConformance(
       channel,
       group: { at: "thread-g", personWrites: (text) => peer.personWrites(text, "thread-g") },
       visible: (at) => peer.visible(at),
+      refuseNextSend: () => peer.refuseNextSend(),
       stop: () => peer.adapter.stop(),
     };
   },
