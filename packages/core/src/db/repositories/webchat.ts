@@ -6,7 +6,6 @@ import { posix as pathPosix } from "node:path";
 import {
   and,
   asc,
-  count,
   desc,
   eq,
   gt,
@@ -14,8 +13,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  like,
-  lt,
   or,
   sql,
   type SQL,
@@ -71,7 +68,6 @@ import { MessageRepository } from "../../chats/message-repository.js";
 import { partsText, type SaidBy } from "../../chats/message.js";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 
 export interface StoredTurnFeedback {
@@ -90,15 +86,6 @@ export interface StoredWebchatMessage {
   createdAt: Date;
 }
 
-export interface StoredConversationContextMessage {
-  id: string;
-  content: string;
-  senderName: string | null;
-  createdAt: Date;
-}
-
-/** A said message's row, as {@link WebChatRepository.saidMessagesAt} reads
- *  it, with the channel of the chat row that holds it. */
 /** One of Rome's seats in a place: the session an account's agent stands
  *  in it through. */
 export interface Seat {
@@ -325,21 +312,6 @@ interface TraceReadOptions {
   messageIds?: readonly string[];
 }
 
-/** Where a message page ends: the oldest turn group (or lone message) it holds. */
-export interface MessagePageCursor {
-  /** `created_at` (epoch seconds) of the group's earliest row. */
-  startedAt: number;
-  /** The group's `turn_id`, or the row id for a message without a turn. */
-  key: string;
-}
-
-export interface MessagePageOptions {
-  /** Turn groups per page. Rows without a turn each count as one group. */
-  limit: number;
-  /** Return only groups strictly older than this cursor. */
-  before?: MessagePageCursor | null;
-}
-
 function traceReadFields(archivedSessionIds: string[]) {
   const archived = archivedSessionIds.length
     ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${inArray(romeAgentMessages.sessionId, archivedSessionIds)}`.mapWith(
@@ -360,15 +332,6 @@ function traceContentResult(row: { id: string; content: string; traceArchived: b
     ...(row.traceArchived ? { traceArchived: true } : {}),
   };
 }
-
-const webchatMessageSelectFields = {
-  id: romeAgentMessages.id,
-  sessionId: romeAgentMessages.sessionId,
-  turnId: romeAgentMessages.turnId,
-  role: romeAgentMessages.role,
-  content: romeAgentMessages.content,
-  createdAt: romeAgentMessages.createdAt,
-};
 
 const sessionSelectFields = {
   id: romeSessions.id,

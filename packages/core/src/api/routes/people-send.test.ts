@@ -20,13 +20,7 @@ import {
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { directMessageSeat } from "../../test/seats.js";
-import {
-  channels as channelRows,
-  connectionGrants,
-  chatMessages,
-  romeAgentMessages,
-  romeSessions,
-} from "../../db/schema.js";
+import { channels as channelRows, connectionGrants, chatMessages } from "../../db/schema.js";
 import { channelList } from "../../channels/channel-list.js";
 import { channelChatId } from "../../db/session-kind.js";
 

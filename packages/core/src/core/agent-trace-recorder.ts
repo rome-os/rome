@@ -12,12 +12,10 @@ import type {
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import { createLogger, type Logger } from "../logger.js";
+import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
 import type { SessionConversation } from "./session-conversation.js";
-
-const log = createLogger("agent-trace-recorder");
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;

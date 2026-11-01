@@ -2,7 +2,6 @@
 // what it said back in each direct message, for every channel with no mirror
 // of its own.
 
-import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
 import type { Message } from "@rome/api-types/message";

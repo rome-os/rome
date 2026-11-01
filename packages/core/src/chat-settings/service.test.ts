@@ -365,7 +365,6 @@ describe("ChatSettingsService", () => {
 
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
-    const webchat = new WebChatRepository(testDb!.db);
     await openSeat(testDb!.db, {
       channel: "discord",
       threadId: "dm-1",

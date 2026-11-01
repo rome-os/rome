@@ -14,7 +14,7 @@
 // said as an agent's dashboard account and wakes the chat's agent, the way the
 // guardian's composer does.
 
-import type { Account, ChatId } from "@rome-os/app-runtime";
+import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, SentMessage } from "@rome/api-types/people";
 import { platformOf } from "@rome/api-types/platform";
 import {
@@ -25,7 +25,6 @@ import {
 } from "./channel.js";
 import { WEBCHAT_CHANNEL } from "./webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { isDirectMessage, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";

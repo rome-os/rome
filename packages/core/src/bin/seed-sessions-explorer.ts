@@ -67,16 +67,6 @@ for (let index = 0; index < 32; index += 1) {
   const id = `${DEMO_PREFIX}${String(index + 1).padStart(2, "0")}`;
   const daysAgo = index % 14;
   const activityAt = new Date(now.getTime() - daysAgo * 864e5 - (index % 5) * 36e5);
-  // The source a demo row reads as; a seat's channel now comes from its chat
-  // and account, so the seed stores only its address.
-  const source =
-    profile.type === "webchat"
-      ? "webchat"
-      : profile.type === "channel"
-        ? index % 2
-          ? "email"
-          : "feishu"
-        : null;
   const triggerName =
     profile.type === "action"
       ? index % 2

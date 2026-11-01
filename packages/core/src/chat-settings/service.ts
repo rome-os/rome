@@ -1,6 +1,5 @@
 import type {
   ChatDescriptor,
-  ChatId,
   ChatRef,
   ChatSettingField,
   ChatSettings,

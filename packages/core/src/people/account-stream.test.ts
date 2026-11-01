@@ -37,7 +37,6 @@ const TRIAGED = "tg-triaged";
 const TRANSCRIBED = "tg-transcribed";
 
 const at = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
-const line = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
 describe("readAccountStream", () => {
   let testDb: TestDb;

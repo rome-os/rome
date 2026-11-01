@@ -7,7 +7,6 @@ import {
   CONCIERGE_TASK_SUMMARY_MAX_LENGTH,
   type ConciergeTaskState,
 } from "@rome/api-types/concierge";
-import type { SaidMessage } from "../chats/message.js";
 import type { SendResult } from "../channels/send-into-place.js";
 import type {
   ConciergeTaskWithChat,

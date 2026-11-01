@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
+import type { ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";

@@ -22,7 +22,6 @@ import {
   type EmailOutbound,
   type EmailRecipients,
 } from "../channels/email-chat-adapter.js";
-import type { Seat } from "../sessions/seat-replies.js";
 import { partsText } from "../chats/message.js";
 import { placeIn } from "../chats/place.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";

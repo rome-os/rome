@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import type { Account, ChatId } from "@rome-os/app-runtime";
+import type { Account } from "@rome-os/app-runtime";
 import {
   compareAssistants,
   listsAsAssistant,

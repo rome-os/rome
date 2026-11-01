@@ -11,7 +11,6 @@ import { chatMessages, romeAgentMessages, romeSessions, romeAgentTraceBlocks } f
 import {
   INTERRUPTED_TURN_ERROR,
   WebChatRepository,
-  channelChatId,
   sessionLastTurnFailed,
   validateTurnRecapAudioUrl,
 } from "./webchat.js";

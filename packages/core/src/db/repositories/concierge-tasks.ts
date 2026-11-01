@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
 import { MessageRepository } from "../../chats/message-repository.js";
-import { conciergeTasks, romeAgentMessages, romeSessions } from "../schema.js";
+import { conciergeTasks, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];

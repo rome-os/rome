@@ -45,5 +45,3 @@ export function chatWiring(db: DrizzleDb, deps: ChatWiringDeps) {
   const seatLines = new SeatLines({ seats: deps.seats, messages });
   return { chats, events, messages, links, adapters, replies, reads, seatLines };
 }
-
-export type ChatWiring = ReturnType<typeof chatWiring>;

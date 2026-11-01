@@ -121,10 +121,7 @@ import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
-import type {
-  StoredConversationContextMessage,
-  WebChatRepository,
-} from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { PlatformOfChannel } from "../channels/channel.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
@@ -137,27 +134,6 @@ import {
 } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
-
-function conversationMessageText(content: string): string {
-  try {
-    const parts = JSON.parse(content) as unknown;
-    if (!Array.isArray(parts)) return content;
-    return parts
-      .flatMap((part) =>
-        part &&
-        typeof part === "object" &&
-        "type" in part &&
-        part.type === "text" &&
-        "content" in part &&
-        typeof part.content === "string"
-          ? [part.content]
-          : [],
-      )
-      .join("\n");
-  } catch {
-    return content;
-  }
-}
 
 /** One line of the context a turn's prompt opens with. */
 interface ConversationContextLine {

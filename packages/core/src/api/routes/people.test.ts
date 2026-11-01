@@ -26,7 +26,6 @@ const TG_THREAD = "tg-timeline";
 const GROUP_THREAD = "tg-group-timeline";
 
 const at = (iso: string) => new Date(iso);
-const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
 /** An account's naming, and only that. The assertions that use it are about
  *  which name a channel puts on an account; whether Rome can send there and
@@ -44,13 +43,12 @@ describe("People timeline API", () => {
   let testDb: TestDb;
   let deps: TestDeps;
   let app: Hono;
-  let baseline: BaselineIds;
   let personId: string;
   let telegramSay: ReturnType<typeof directMessageSeat>["say"];
 
   beforeEach(async () => {
     testDb = createTestDb();
-    baseline = await seedBaseline(testDb.db);
+    await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
     app = new Hono().route("/", peopleRoutes(deps));
 

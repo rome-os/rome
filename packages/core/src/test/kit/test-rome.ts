@@ -15,7 +15,6 @@ import {
   noAccounts,
   kindChannelOf,
   type TestConnections,
-  recordedConnectionKindOf,
   testChatWiring,
 } from "../helpers.js";
 import { createAppRuntimeRepositories } from "../../apps/repositories.js";
