@@ -894,6 +894,8 @@ export class WebChatRepository {
 
       // Same persistence contract as deleteSession(), but batched for project
       // deletion and all session kinds (top-level chats plus handoff children).
+      // The dashboard chats go in the same transaction.
+      const chatsInTx = new ChatRepository(tx as unknown as DrizzleDb);
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
@@ -907,8 +909,8 @@ export class WebChatRepository {
           .from(romeSessions)
           .where(inArray(romeSessions.id, chunk))
           .all()) {
-          const chat = chatId && this.chats.get({ platform: WEBCHAT_PLATFORM, id: chatId });
-          if (chat) this.chats.end(chat.ref);
+          const chat = chatId && chatsInTx.get({ platform: WEBCHAT_PLATFORM, id: chatId });
+          if (chat) chatsInTx.end(chat.ref);
         }
         tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
       }
@@ -2311,9 +2313,16 @@ export class WebChatRepository {
         FROM ancestors JOIN ${romeSessions} AS parent ON parent.id = ancestors.parent_id
       ),
       activity AS MATERIALIZED (
-        SELECT session_id, max(created_at) AS last_message_at FROM ${romeAgentMessages}
-        WHERE session_id IN (SELECT ancestor_id FROM ancestors)
-          AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
+        SELECT session_id, max(at) AS last_message_at FROM (
+          SELECT session_id, created_at AS at FROM ${romeAgentMessages}
+          WHERE session_id IN (SELECT ancestor_id FROM ancestors)
+            AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
+          UNION ALL
+          -- What is said in a seat's place is on record in Chats.
+          SELECT s.id, m.said_at FROM ${romeSessions} s
+          JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+          WHERE s.id IN (SELECT ancestor_id FROM ancestors)
+        )
         GROUP BY session_id
       )
       SELECT ancestors.session_id AS sessionId, max(activity.last_message_at) AS lastMessageAt

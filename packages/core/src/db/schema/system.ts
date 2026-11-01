@@ -599,6 +599,9 @@ export const chatMessages = sqliteTable(
     // were recorded in (rowid): a dashboard line's id is the client's, which
     // carries no time.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+    // A place's lines after a given one, by rowid, as the awaiting-guardian
+    // flag reads them.
+    index("idx_chat_messages_place").on(table.chatId, table.threadId),
   ],
 );
 

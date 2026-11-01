@@ -107,7 +107,8 @@ export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
  * chat). A line is the session's prompt or answer by its turn link; a line
  * with none is its agent's when its seat said it, the guardian's on the
  * dashboard, and a notification elsewhere. `line_order` puts a prompt before
- * the trace and answer of its turn within one second.
+ * the trace and answer of its turn within one second, and any line to Rome
+ * before Rome's own.
  */
 export function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
@@ -121,7 +122,10 @@ export function sessionLines(sessionIds: readonly string[]) {
            WHEN l.role = 'prompt' OR c.platform = 'webchat' THEN 'user'
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
-      m.sender_name, CASE WHEN l.role = 'prompt' THEN 0 ELSE 2 END AS line_order,
+      m.sender_name,
+      -- A line to Rome comes first in its second, as a prompt does.
+      CASE WHEN l.role = 'prompt' OR (l.role IS NULL AND m.sender_agent IS NULL) THEN 0 ELSE 2 END
+        AS line_order,
       m.rowid AS seq, m.sender_agent IS NOT NULL AS from_rome
     FROM rome_sessions s
     JOIN chats c ON c.id = s.chat_id
