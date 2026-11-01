@@ -192,6 +192,28 @@ test("a total that later drops below the connections already returned is not tru
   assert.equal(notices.length, 1);
 });
 
+for (const [label, laterPaging] of [
+  ["no", undefined],
+  ["a malformed", { total: "60" }],
+]) {
+  test(`an earlier total is dropped once the connections returned exceed it on a page with ${label} total`, async () => {
+    const page = makePage([
+      apiPage(range(0, 40), { total: 60 }),
+      apiPage(range(40, 40), laterPaging),
+      apiPage([], laterPaging),
+    ]);
+    const { rows, notices } = await run(page, { limit: 500 });
+
+    assert.equal(rows.length, 80);
+    assert.deepEqual(requestedStarts(page), [0, 40, 80]);
+    assert.deepEqual(
+      coverageOf(rows),
+      new Set([JSON.stringify({ total: null, coverage: "exhausted_unverified", next_offset: 80 })]),
+    );
+    assert.equal(notices.length, 1);
+  });
+}
+
 test("a total that drops but still covers the connections returned is trusted", async () => {
   const page = makePage([
     apiPage(range(0, 40), { total: 250 }),

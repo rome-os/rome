@@ -202,9 +202,12 @@ async function collectConnections(page, csrf, { limit, offset }) {
     // Positions before `offset` are taken on trust, the rest are distinct rows in hand.
     const covered = offset + rows.length;
     const reported = readReportedTotal(fetched.json);
-    if (reported !== null && !totalContradicted) {
-      totalContradicted = reported < covered;
-      total = totalContradicted ? null : reported;
+    if (reported !== null && !totalContradicted) total = reported;
+    // A total from an earlier page goes stale too when a page without one
+    // carries the rows past it, so check whichever total is held on every page.
+    if (total !== null && total < covered) {
+      totalContradicted = true;
+      total = null;
     }
 
     if (total !== null && covered >= total) coverage = "complete";
