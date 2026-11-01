@@ -28,6 +28,14 @@ import { EMAIL_MAILBOX, EmailPeer } from "./email.js";
 import { TELEGRAM_CHAT, TELEGRAM_GROUP, TELEGRAM_SECOND_TOKEN, TelegramPeer } from "./telegram.js";
 import { WECHAT_USER, WechatPeer } from "./wechat.js";
 
+// What Rome fails today, as each platform's gaps list it.
+const DM_BY_ADDRESS =
+  "Rome keys a direct message by the address a send names, so a send to the person's own id starts a second chat beside the one heard at the platform's DM address. Step 2 (the Chats tables and the address store) closes it.";
+const LINES_PER_ACCOUNT =
+  "Rome keeps a group's lines once per account that hears them, so a message two accounts hear is recorded twice. Step 2 records it once under the platform's id.";
+const EMAIL_THREAD_IS_DM =
+  "Rome records an email thread as a direct message, not a group chat. Step 2 marks email threads as groups.";
+
 // Feishu: the app hears a person in their p2p chat (`oc_…`), and reaches
 // them there or at their open id (`ou_…`).
 describeAdapterConformance(
@@ -70,6 +78,11 @@ describeAdapterConformance(
     };
   },
   { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: false },
+  {
+    replyToPerson: DM_BY_ADDRESS,
+    romeWritesFirst: DM_BY_ADDRESS,
+    twoAccounts: LINES_PER_ACCOUNT,
+  },
 );
 
 // Discord: the bot hears a person in their DM channel, and reaches them there
@@ -120,6 +133,11 @@ describeAdapterConformance(
     };
   },
   { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: true },
+  {
+    replyToPerson: DM_BY_ADDRESS,
+    romeWritesFirst: DM_BY_ADDRESS,
+    twoAccounts: LINES_PER_ACCOUNT,
+  },
 );
 
 // Telegram: the bot hears a person in their private chat, whose id is the
@@ -160,6 +178,9 @@ describeAdapterConformance(
     };
   },
   { directMessages: true, romeWritesFirst: true, groups: true, twoAccounts: true, threads: false },
+  {
+    twoAccounts: LINES_PER_ACCOUNT,
+  },
 );
 
 // WeChat: the bot hears a person by their user id and answers there, with the
@@ -225,5 +246,8 @@ describeAdapterConformance(
     groups: true,
     twoAccounts: false,
     threads: false,
+  },
+  {
+    group: EMAIL_THREAD_IS_DM,
   },
 );
