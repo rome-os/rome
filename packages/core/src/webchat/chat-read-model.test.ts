@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -215,19 +212,6 @@ describe("ChatReadModel", () => {
       });
       expect(older.lines.map((line) => line.id)).toEqual(["sp-0", "sa-0"]);
       expect(older.nextCursor).toBeNull();
-    });
-
-    it("draws a chat seat's own turns through the turn link", async () => {
-      await repo.createSession("chat-1", "Chat");
-      await seedDashboardTurn("chat-1", 0, 1_000);
-
-      const transcript = await reads.sessionTranscript("chat-1");
-
-      expect(transcript.lines.map((line) => [line.id, line.role, line.turnId])).toEqual([
-        ["u-0", "user", "turn-0"],
-        ["a-0", "assistant", "turn-0"],
-      ]);
-      expect(transcript.traces.map((trace) => trace.id)).toEqual(["t-0"]);
     });
   });
 

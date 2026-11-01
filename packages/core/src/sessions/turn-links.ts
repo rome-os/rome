@@ -188,19 +188,6 @@ export class TurnLinks {
     return links;
   }
 
-  /** The prompt and answer messages of turn `turnId` in session `sessionId`,
-   *  in the order they were linked. */
-  ofTurn(sessionId: string, turnId: string): TurnLink[] {
-    return this.db
-      .all<LinkRow>(sql`
-        SELECT message_id, session_id, turn_id, role, input_state
-        FROM agent_turn_messages
-        WHERE session_id = ${sessionId} AND turn_id = ${turnId} AND role IN ('prompt', 'answer')
-        ORDER BY rowid
-      `)
-      .map(toLink);
-  }
-
   /** Session `sessionId`'s link to message `messageId`, or null for none. */
   linkOf(sessionId: string, messageId: string): TurnLink | null {
     const row = this.db.all<LinkRow>(sql`
@@ -209,97 +196,6 @@ export class TurnLinks {
       WHERE session_id = ${sessionId} AND message_id = ${messageId}
     `)[0];
     return row ? toLink(row) : null;
-  }
-
-  /**
-   * Session `sessionId`'s turns, the newest `limit` before `before` (every
-   * turn without a limit), whole, oldest first, with the cursor of the turns
-   * before them: for a session in a chat the messages its turns took and gave,
-   * and for one with no chat (a subagent, a fork, a handoff) each turn's own
-   * prompt and answer, beside each turn's trace. A line outside any turn is a
-   * turn of its own. Turns order by their first line.
-   */
-  turns(
-    sessionId: string,
-    page: { before?: { at: number; id: string } | null; limit?: number } = {},
-  ): { lines: TurnLine[]; older: { at: number; id: string } | null } {
-    const { before, limit } = page;
-    const seat = this.seatOf(sessionId);
-    // The turn's own rows Agents keeps: its trace, and with no chat its
-    // prompt and answer.
-    const own = this.db
-      .all<OwnRow>(sql`
-        -- A session in no chat names a prompt's sender by its actor.
-        SELECT id, turn_id, role, content, json_extract(actor, '$.email') AS sender_name,
-          created_at AS at
-        FROM rome_agent_messages
-        WHERE session_id = ${sessionId}
-          AND (role = 'trace' OR ${seat === null ? 1 : 0})
-        ORDER BY created_at, rowid
-      `)
-      .map(
-        (row): TurnLine => ({
-          id: row.id,
-          turnId: row.turn_id,
-          role: row.role,
-          content: row.content,
-          inputState: null,
-          senderAccountId: null,
-          senderName: row.sender_name,
-          at: new Date(row.at * 1000),
-        }),
-      );
-    // In a chat, the messages its turns took and gave, read through Chats.
-    const links = new Map(
-      this.linksOf(sessionId)
-        .filter((link) => link.role === "prompt" || link.role === "answer")
-        .map((link) => [link.message_id, link]),
-    );
-    const said = this.messages.byIds([...links.keys()]).map((message): TurnLine => {
-      const link = links.get(message.id);
-      return {
-        id: message.id,
-        turnId: link?.turn_id ?? null,
-        role: message.direction === "fromRome" ? "assistant" : "user",
-        content: message.parts,
-        inputState: link?.input_state ?? null,
-        senderAccountId: message.saidBy?.account.id ?? null,
-        senderName: message.senderName ?? null,
-        at: message.at,
-      };
-    });
-    // A turn's lines go together, ordered by its first line; a line outside
-    // any turn is a turn of its own.
-    const all = [...own, ...said];
-    const keyOf = (line: TurnLine) => line.turnId ?? line.id;
-    const startedAt = new Map<string, number>();
-    for (const line of all) {
-      const at = Math.floor(line.at.getTime() / 1000);
-      const key = keyOf(line);
-      startedAt.set(key, Math.min(startedAt.get(key) ?? at, at));
-    }
-    const cmp = (a: [string, number], b: [string, number]) =>
-      a[1] - b[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-    let turns = [...startedAt].sort(cmp);
-    if (before) turns = turns.filter((turn) => cmp(turn, [before.id, before.at]) < 0);
-    const shown = limit === undefined ? turns : turns.slice(-limit);
-    const keep = new Set(shown.map(([key]) => key));
-    const order = new Map(shown.map(([key], i) => [key, i]));
-    const lines = all
-      .map((line, i) => ({ line, i }))
-      .filter(({ line }) => keep.has(keyOf(line)))
-      .sort(
-        (a, b) =>
-          (order.get(keyOf(a.line)) ?? 0) - (order.get(keyOf(b.line)) ?? 0) ||
-          a.line.at.getTime() - b.line.at.getTime() ||
-          a.i - b.i,
-      )
-      .map(({ line }) => line);
-    const oldest = shown[0];
-    return {
-      lines,
-      older: oldest && shown.length < turns.length ? { at: oldest[1], id: oldest[0] } : null,
-    };
   }
 
   /**
@@ -362,33 +258,6 @@ export class TurnLinks {
   wakeDecided(messageId: string): void {
     this.undecided.delete(messageId);
   }
-
-  isWakeUndecided(messageId: string): boolean {
-    return this.undecided.has(messageId);
-  }
-}
-
-/** One line of a session's turns: a message a turn took or gave, a line of
- *  a session with no chat, or a turn's trace. */
-export interface TurnLine {
-  readonly id: string;
-  readonly turnId: string | null;
-  readonly role: "user" | "assistant" | "notification" | "trace";
-  /** The line's parts as JSON; a trace's is its stub. */
-  readonly content: string;
-  readonly inputState: AgentInputState | null;
-  readonly senderAccountId: string | null;
-  readonly senderName: string | null;
-  readonly at: Date;
-}
-
-interface OwnRow {
-  id: string;
-  turn_id: string | null;
-  role: TurnLine["role"];
-  content: string;
-  sender_name: string | null;
-  at: number;
 }
 
 /** A line said where a session stands, as it would read it. */
