@@ -229,7 +229,9 @@ export class TurnLinks {
     // prompt and answer.
     const own = this.db
       .all<OwnRow>(sql`
-        SELECT id, turn_id, role, content, sender_name, created_at AS at
+        -- A session in no chat names a prompt's sender by its actor.
+        SELECT id, turn_id, role, content, json_extract(actor, '$.email') AS sender_name,
+          created_at AS at
         FROM rome_agent_messages
         WHERE session_id = ${sessionId}
           AND (role = 'trace' OR ${seat === null ? 1 : 0})

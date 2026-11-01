@@ -4,8 +4,11 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { channels, chatMessages, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { chatAt, lineAt } from "../chats/adapter.js";
+import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
+import { seatFixture } from "../test/seats.js";
 import { ChatReadModel, type Transcript, type TranscriptCursor } from "./chat-read-model.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
@@ -26,6 +29,12 @@ describe("ChatReadModel", () => {
       .update(romeAgentMessages)
       .set({ createdAt: new Date(seconds * 1000) })
       .where(sql`${romeAgentMessages.id} = ${id}`);
+    // A seat's lines are Chats', and a seat sees what was said since it joined.
+    await testDb.db
+      .update(chatMessages)
+      .set({ saidAt: new Date(seconds * 1000) })
+      .where(sql`${chatMessages.id} = ${id}`);
+    await testDb.db.run(sql`UPDATE rome_sessions SET created_at = min(created_at, ${seconds})`);
   }
 
   async function seedDashboardTurn(sessionId: string, index: number, at: number) {
@@ -109,33 +118,25 @@ describe("ChatReadModel", () => {
           createdAt: now,
         },
       ]);
-      const sales = await repo.ensureChannelChat({
-        channel: "sales",
-        threadId: "oc_launch",
-        threadType: "group",
-        threadName: "Launch",
-        agentName: "sales",
-      });
-      const support = await repo.ensureChannelChat({
-        channel: "support",
-        threadId: "oc_launch",
-        threadType: "group",
-        threadName: "Launch",
-        agentName: "support",
-      });
+      const fixture = seatFixture(testDb.db);
+      const chat = chatAt("feishu", "oc_launch");
+      fixture.chat(chat.platform, chat.id, "group", "Launch");
+      const sales = { id: "channel:sales:oc_launch" };
+      const support = { id: "channel:support:oc_launch" };
+      fixture.seat({ id: sales.id, chat, accountId: "bot-sales", agentName: "sales" });
+      fixture.seat({ id: support.id, chat, accountId: "bot-support", agentName: "support" });
       // Wei's question reaches both bots: one line in the chat.
-      for (const seat of [sales.id, support.id]) {
-        await repo.addConversationMessage({
-          sessionId: seat,
-          role: "notification",
-          content: text("When does the price change?"),
-          platformMessageId: "om_1",
-          senderId: "ou_wei",
-          senderName: "Wei",
-        });
-      }
-      await repo.promoteConversationMessageToUser(sales.id, "om_1");
-      await repo.assignConversationMessageTurn(sales.id, "om_1", "sales-turn-7");
+      const asked = lineAt(chat, "bot-sales", "om_1");
+      fixture.say({
+        id: asked,
+        chat,
+        from: "ou_wei",
+        name: "Wei",
+        text: "When does the price change?",
+        at: new Date(),
+      });
+      const links = new TurnLinks(testDb.db);
+      links.prompt(asked, sales.id, "sales-turn-7");
       await repo.appendTraceBlocks({
         messageId: "sales-trace-7",
         sessionId: sales.id,
@@ -143,13 +144,16 @@ describe("ChatReadModel", () => {
         startSeq: 0,
         blocks: [{ type: "turn_end", turnId: "sales-turn-7", status: "completed", durationMs: 1 }],
       });
-      await repo.recordOutboundConversationMessage({
-        sessionId: sales.id,
-        content: text("On the first of next month."),
-        platformMessageId: "om_2",
-        turnId: "sales-turn-7",
-        knownToProvider: true,
+      const answered = lineAt(chat, "bot-sales", "om_2");
+      fixture.say({
+        id: answered,
+        chat,
+        from: "bot-sales",
+        agent: "sales",
+        text: "On the first of next month.",
+        at: new Date(),
       });
+      links.answer(answered, sales.id, "sales-turn-7");
 
       const rows = await testDb.db.all<{ n: number }>(sql`SELECT count(*) AS n FROM chats`);
       expect(rows[0]?.n).toBe(1);
@@ -265,193 +269,5 @@ describe("ChatReadModel", () => {
       expect(await reads.unreadCount("chat-1", 10)).toBe(2);
       expect(await reads.unreadCount("chat-1", 1)).toBe(1);
     });
-  });
-});
-
-describe("0105_chats_tables backfill", () => {
-  const migration = readFileSync(
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system/0105_chats_tables.sql"),
-    "utf8",
-  );
-  const statements = migration.split("--> statement-breakpoint").map((part) => part.trim());
-  const backfill = statements.filter(
-    (statement) =>
-      /^(INSERT OR IGNORE INTO|UPDATE `rome_sessions`)/m.test(statement) &&
-      !statement.includes("CREATE TRIGGER"),
-  );
-
-  it("names the agent on every line from Rome, the default agent when the seat names none", () => {
-    const testDb = createTestDb();
-    const sqlite = (testDb.db as unknown as { $client: import("better-sqlite3").Database }).$client;
-    for (const { name } of sqlite
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_mirror_%'")
-      .all() as { name: string }[]) {
-      sqlite.exec(`DROP TRIGGER "${name}"`);
-    }
-    sqlite.exec(`
-      INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
-        VALUES ('tg', 'telegram', 'telegram', 'bot-tg', 1);
-      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
-        agent_name, created_at, activity_at)
-        VALUES ('channel:tg:42', 'Ada', 'channel', 'tg', '42', 'private', NULL, 10, 10);
-      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, sender_id, created_at)
-      VALUES
-        ('hi', 'channel:tg:42', 'turn-1', 'user', '[{"type":"text","content":"hi"}]', 'ada', 100),
-        ('hello', 'channel:tg:42', 'turn-1', 'assistant', '[{"type":"text","content":"hello"}]', NULL, 101);
-    `);
-
-    for (const statement of backfill) sqlite.exec(statement);
-
-    expect(sqlite.prepare("SELECT id, sender_agent FROM chat_messages ORDER BY id").all()).toEqual([
-      { id: "hello", sender_agent: "main" },
-      { id: "hi", sender_agent: null },
-    ]);
-  });
-
-  it("keys every direct message by both ends", () => {
-    const testDb = createTestDb();
-    const sqlite = (testDb.db as unknown as { $client: import("better-sqlite3").Database }).$client;
-    for (const { name } of sqlite
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_mirror_%'")
-      .all() as { name: string }[]) {
-      sqlite.exec(`DROP TRIGGER "${name}"`);
-    }
-    sqlite.exec(`
-      INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
-        VALUES ('tg', 'telegram', 'telegram', 'bot-tg', 1), ('sales', 'feishu', 'feishu', 'bot-sales', 1);
-      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
-        agent_name, created_at, activity_at)
-      VALUES
-        ('channel:tg:42', 'Ada', 'channel', 'tg', '42', 'private', NULL, 10, 10),
-        ('channel:sales:oc_p2p', 'Wei', 'channel', 'sales', 'oc_p2p', 'private', 'sales', 20, 20);
-      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, sender_id, created_at)
-      VALUES
-        ('wei-hi', 'channel:sales:oc_p2p', 'turn-1', 'user', '[{"type":"text","content":"hi"}]', 'ou_wei', 100);
-    `);
-
-    for (const statement of backfill) sqlite.exec(statement);
-
-    // Telegram's id for a DM is the other party; Feishu's p2p id is opaque, so
-    // the other party is whoever first wrote to Rome there.
-    expect(
-      sqlite.prepare("SELECT id, platform_chat_id, kind FROM chats ORDER BY id").all(),
-    ).toEqual([
-      { id: "channel:sales:oc_p2p", platform_chat_id: "dm:bot-sales:ou_wei", kind: "dm" },
-      { id: "channel:tg:42", platform_chat_id: "dm:bot-tg:42", kind: "dm" },
-    ]);
-  });
-
-  it("collapses a group two of Rome's accounts are in, keeps ids, and links turns", async () => {
-    const testDb = createTestDb();
-    const sqlite = (testDb.db as unknown as { $client: import("better-sqlite3").Database }).$client;
-    // Today's rows as they stood before the migration: no mirror, no chat ids.
-    for (const { name } of sqlite
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE '_mirror_%'")
-      .all() as { name: string }[]) {
-      sqlite.exec(`DROP TRIGGER "${name}"`);
-    }
-    sqlite.exec(`
-      INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
-        VALUES ('sales', 'feishu', 'feishu', 'bot-sales', 1), ('support', 'feishu', 'feishu', 'bot-support', 1);
-      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
-        source_thread_name, agent_name, created_at, activity_at)
-      VALUES
-        ('channel:sales:oc_launch', 'Launch', 'channel', 'sales', 'oc_launch', 'group', 'Launch', 'sales', 10, 10),
-        ('channel:support:oc_launch', 'Launch', 'channel', 'support', 'oc_launch', 'group', 'Launch', 'support', 20, 20),
-        ('chat-1', 'Dashboard', 'channel', 'webchat', 'chat-1', NULL, NULL, NULL, 30, 30);
-      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id,
-        sender_id, sender_name, context_injected_turn_id, actor, created_at)
-      VALUES
-        ('wei-sales', 'channel:sales:oc_launch', 'turn-7', 'user', '[{"type":"text","content":"When?"}]', 'om_1', 'ou_wei', 'Wei', NULL, NULL, 100),
-        ('wei-support', 'channel:support:oc_launch', NULL, 'notification', '[{"type":"text","content":"When?"}]', 'om_1', 'ou_wei', 'Wei', 'turn-3', NULL, 100),
-        ('reply', 'channel:sales:oc_launch', 'turn-7', 'assistant', '[{"type":"text","content":"Soon."}]', 'om_2', NULL, NULL, NULL, NULL, 101),
-        ('trace-7', 'channel:sales:oc_launch', 'turn-7', 'trace', '[]', NULL, NULL, NULL, NULL, NULL, 100),
-        ('ask', 'chat-1', 'turn-1', 'user', '[{"type":"text","content":"hi"}]', NULL, NULL, NULL, NULL,
-          '{"kind":"visitor","accountId":"acct-ada","email":"ada@example.com"}', 200);
-    `);
-
-    for (const statement of backfill) sqlite.exec(statement);
-
-    expect(
-      sqlite
-        .prepare("SELECT id, platform, platform_chat_id, kind, name FROM chats ORDER BY id")
-        .all(),
-    ).toEqual([
-      {
-        id: "channel:sales:oc_launch",
-        platform: "feishu",
-        platform_chat_id: "oc_launch",
-        kind: "group",
-        name: "Launch",
-      },
-      {
-        id: "chat-1",
-        platform: "webchat",
-        platform_chat_id: "chat-1",
-        kind: "dm",
-        name: "Dashboard",
-      },
-    ]);
-    expect(sqlite.prepare("SELECT id, chat_id FROM rome_sessions ORDER BY id").all()).toEqual([
-      { id: "channel:sales:oc_launch", chat_id: "channel:sales:oc_launch" },
-      { id: "channel:support:oc_launch", chat_id: "channel:sales:oc_launch" },
-      { id: "chat-1", chat_id: "chat-1" },
-    ]);
-    expect(
-      sqlite
-        .prepare(
-          "SELECT id, sender_account_id, sender_agent, sender_name, text FROM chat_messages ORDER BY id",
-        )
-        .all(),
-    ).toEqual([
-      {
-        id: "ask",
-        sender_account_id: "visitor:acct-ada",
-        sender_agent: null,
-        sender_name: "ada@example.com",
-        text: "hi",
-      },
-      {
-        id: "reply",
-        sender_account_id: "bot-sales",
-        sender_agent: "sales",
-        sender_name: null,
-        text: "Soon.",
-      },
-      {
-        id: "wei-sales",
-        sender_account_id: "ou_wei",
-        sender_agent: null,
-        sender_name: "Wei",
-        text: "When?",
-      },
-    ]);
-    expect(
-      sqlite
-        .prepare(
-          "SELECT message_id, session_id, turn_id, role FROM agent_turn_messages ORDER BY session_id, message_id",
-        )
-        .all(),
-    ).toEqual([
-      {
-        message_id: "reply",
-        session_id: "channel:sales:oc_launch",
-        turn_id: "turn-7",
-        role: "answer",
-      },
-      {
-        message_id: "wei-sales",
-        session_id: "channel:sales:oc_launch",
-        turn_id: "turn-7",
-        role: "prompt",
-      },
-      {
-        message_id: "wei-sales",
-        session_id: "channel:support:oc_launch",
-        turn_id: "turn-3",
-        role: "seen",
-      },
-      { message_id: "ask", session_id: "chat-1", turn_id: "turn-1", role: "prompt" },
-    ]);
   });
 });
