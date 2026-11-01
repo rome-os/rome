@@ -97,7 +97,7 @@ function typeFromHeading(heading, icon = "") {
   if (/^websites?$/.test(label) || /(?:^|-)link(?:-|$)/.test(iconId)) return "website";
   if (/^e-?mails?$/.test(label) || /envelope|email/.test(iconId)) return "email";
   if (/^phones?$/.test(label) || /phone/.test(iconId)) return "phone";
-  if (/^addresses?$/.test(label) || /address|location|map-pin/.test(iconId)) return "address";
+  if (/^address(?:es)?$/.test(label) || /address|location|map-pin/.test(iconId)) return "address";
   if (/^birthdays?$/.test(label) || /birthday|cake/.test(iconId)) return "birthday";
   if (/^connected$/.test(label) || /connection/.test(iconId)) return "connected";
   if (/^twitter$|^x \(twitter\)$/.test(label) || /twitter/.test(iconId)) return "twitter";
@@ -152,7 +152,9 @@ function typeFromHref(href, fallback) {
     if (/^(?:www\.)?linkedin\.com$/i.test(parsed.hostname) && /^\/in\//i.test(parsed.pathname)) {
       return "profile";
     }
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") return "website";
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return fallback === "twitter" ? "twitter" : "website";
+    }
   } catch {}
   return fallback;
 }
@@ -241,6 +243,166 @@ function normalizeSection(section, profile) {
   return rows;
 }
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function sentenceCase(value) {
+  const text = cleanText(value).toLowerCase().replace(/_/g, " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function apiSection(heading, entries) {
+  const kept = entries.filter((entry) => cleanText(entry.text));
+  if (kept.length === 0) return [];
+  return [
+    {
+      heading,
+      icon: "",
+      blocks: kept.map((entry) => entry.context || entry.text),
+      lines: [],
+      links: kept
+        .filter((entry) => entry.href)
+        .map((entry) => ({
+          text: entry.text,
+          href: entry.href,
+          context: entry.context || entry.text,
+        })),
+    },
+  ];
+}
+
+function withDetail(text, detail) {
+  const clean = cleanText(detail);
+  return clean ? `${cleanText(text)} (${clean})` : cleanText(text);
+}
+
+function websiteDetail(type) {
+  if (!type || typeof type !== "object") return "";
+  for (const [key, value] of Object.entries(type)) {
+    if (/StandardWebsite$/.test(key)) return sentenceCase(value?.category);
+    if (/CustomWebsite$/.test(key)) return cleanText(value?.label);
+  }
+  return "";
+}
+
+function websiteHref(url) {
+  const raw = cleanText(url);
+  if (!raw) return "";
+  return /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
+}
+
+function formatBirthday(value) {
+  const month = MONTHS[Number(value?.month) - 1];
+  const day = Number(value?.day);
+  if (!month || !Number.isInteger(day) || day < 1 || day > 31) return "";
+  return Number.isInteger(value?.year) ? `${month} ${day}, ${value.year}` : `${month} ${day}`;
+}
+
+function formatConnectedAt(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "";
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Converts LinkedIn's profileContactInfo record into the `sections` shape the page extraction
+ * returns, so both sources normalize alike. Like the Contact info section, the result opens with a
+ * profile row for `profileUrl`. Returns null when the record is not a contact-info object.
+ */
+export function contactSectionsFromApi(record, profileUrl) {
+  const source =
+    record && typeof record === "object" && record.data && typeof record.data === "object"
+      ? record.data
+      : record;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  const known = [
+    "emailAddress",
+    "phoneNumbers",
+    "websites",
+    "twitterHandles",
+    "ims",
+    "address",
+    "birthDateOn",
+    "connectedAt",
+  ];
+  if (!known.some((key) => key in source) && !/ContactInfo/.test(String(source.$type ?? ""))) {
+    return null;
+  }
+  const list = (value) => (Array.isArray(value) ? value : []);
+  const email = cleanText(source.emailAddress);
+  const profileHref = normalizeContactHref(profileUrl);
+  return [
+    ...apiSection(
+      "Profile",
+      profileHref
+        ? [
+            {
+              text: profileHref.replace(/^https:\/\/www\./, "").replace(/\/$/, ""),
+              href: profileHref,
+            },
+          ]
+        : [],
+    ),
+    ...apiSection("Email", email ? [{ text: email, href: `mailto:${email}` }] : []),
+    ...apiSection(
+      "Phone",
+      list(source.phoneNumbers).map((phone) => {
+        const number = cleanText(phone?.number);
+        const digits = number.replace(/[^\d+]/g, "");
+        return {
+          text: number,
+          href: digits ? `tel:${digits}` : "",
+          context: withDetail(number, sentenceCase(phone?.type)),
+        };
+      }),
+    ),
+    ...apiSection(
+      "Websites",
+      list(source.websites).map((website) => {
+        const url = cleanText(website?.url);
+        return {
+          text: url,
+          href: websiteHref(url),
+          context: withDetail(url, websiteDetail(website?.type) || cleanText(website?.label)),
+        };
+      }),
+    ),
+    ...apiSection(
+      "Twitter",
+      list(source.twitterHandles).map((handle) => {
+        const name = cleanText(handle?.name).replace(/^@/, "");
+        return { text: name, href: name ? `https://twitter.com/${encodeURIComponent(name)}` : "" };
+      }),
+    ),
+    ...apiSection(
+      "Instant messenger",
+      list(source.ims).map((im) => ({
+        text: cleanText(im?.id),
+        context: withDetail(im?.id, sentenceCase(im?.provider)),
+      })),
+    ),
+    ...apiSection("Address", [{ text: cleanText(source.address) }]),
+    ...apiSection("Birthday", [{ text: formatBirthday(source.birthDateOn) }]),
+    ...apiSection("Connected", [{ text: formatConnectedAt(source.connectedAt) }]),
+  ];
+}
+
 export function normalizeProfileProbe(payload, requestedProfile) {
   const probe = unwrapEvaluateResult(payload);
   if (!probe || typeof probe !== "object") {
@@ -288,7 +450,9 @@ export function normalizeContactPayload(payload, profile) {
         restricted ? "contact_info_restricted" : "contact_info_unavailable",
         restricted
           ? "LinkedIn does not allow the logged-in account to view this profile's contact information."
-          : "LinkedIn did not expose a contact information section for this profile.",
+          : contact.timed_out === true
+            ? "LinkedIn did not open the Contact info section before the command's time limit."
+            : "LinkedIn did not expose a contact information section for this profile.",
       ),
     ];
   }
