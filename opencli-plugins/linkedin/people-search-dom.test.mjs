@@ -556,6 +556,18 @@ const alexes = [
     "Toronto, Ontario, Canada",
   ],
 ];
+const camille = [
+  "camille-exemple",
+  "Camille Exemple",
+  "Architecte chez Exemple SA",
+  "Bordeaux, Nouvelle-Aquitaine, France",
+];
+const dominique = [
+  "dominique-test",
+  "Dominique Test",
+  "Comptable chez Exemple Conseil",
+  "Nantes, Pays de la Loire, France",
+];
 const jackLondon = [
   ["jack-london", "Jack London", "Engineer", "London"],
   ["blake-example", "Blake Example", "Designer", "Paris, France"],
@@ -572,6 +584,8 @@ const reviewPages = {
     ["blake-example", "Blake Example", "Designer", ""],
     ["casey-sample", "Casey Sample", "", ""],
   ],
+  "unknown-labels-view-profile-text": [camille, dominique],
+  "unknown-labels-presence-text": [camille, dominique],
   "unknown-labels-no-card": [
     [
       "camille-exemple",

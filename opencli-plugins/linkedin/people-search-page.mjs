@@ -141,7 +141,13 @@ export function readPeopleSearchPage() {
     }
     if (!startsByLine.has(start.line)) startsByLine.set(start.line, []);
     startsByLine.get(start.line).push({ col: start.col, handle: anchor.handle });
-    const ownChunks = chunks(first.lines, start, end).filter((chunk) => clean(chunk.text));
+    // Screen-reader text inside the link, such as "View Alex Rivera's profile" or presence status,
+    // can render on a line of its own when it is absolutely positioned. It is not the link's name
+    // or card text, so it leaves the link a one-line link that can share its line with a label.
+    const ownChunks = chunks(first.lines, start, end).filter((chunk) => {
+      const line = clean(chunk.text);
+      return line && !/^Status is\b/i.test(line) && !/^View .+['’]s profile$/i.test(line);
+    });
     const own = ownChunks.map((chunk) => clean(chunk.text));
     const aria = anchor.el.querySelector('span[aria-hidden="true"]');
     // A link wrapping the whole card can render its photo's presence text before the name.
