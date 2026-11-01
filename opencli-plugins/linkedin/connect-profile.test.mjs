@@ -124,6 +124,32 @@ test("a More control that opens no menu leaves the profile unverified", async ()
   assert.deepEqual(page.clicks, ["More"]);
 });
 
+test("#1491: a More menu whose items render late is read once they appear", async () => {
+  const { page, menu, verdict } = await classify(followPrimaryLayout(), {
+    menuItems: MENU_WITH_CONNECT,
+    menuItemsDelayMs: 400,
+  });
+  assert.equal(menu.connect, true);
+  assert.equal(menu.closed, true);
+  assert.equal(verdict.blockReason, "verified_via_more");
+  assert.deepEqual(page.clicks, ["More"]);
+});
+
+test("#1491: a More menu that stays empty is unreadable, not proof that Connect is absent", async () => {
+  const { page, menu, verdict } = await classify(followPrimaryLayout(), { menuItems: "" });
+  assert.deepEqual(menu, { ok: false, reason: "more_menu_empty" });
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.safety, "unsafe_block");
+  assert.equal(verdict.blockReason, "more_menu_empty");
+  assert.equal(page.menuOpen(), false);
+  assert.deepEqual(page.clicks, ["More"]);
+
+  const activate = profileDom(followPrimaryLayout(), { menuItems: "" });
+  assert.deepEqual(await run(activate, "activate"), { ok: false, reason: "more_menu_empty" });
+  assert.deepEqual(activate.clicks, ["More"]);
+  assert.equal(activate.menuOpen(), false);
+});
+
 test("Message beside the owner's own Connect stays connectable", async () => {
   const { page, probe, verdict } = await classify(messageAndConnectLayout);
   assert.equal(probe.degree, "2nd");

@@ -147,6 +147,7 @@ function labelOf(el) {
  * Builds a jsdom profile page. `clicks` records the label of every click, and no click reaches
  * a default action. With `menuItems`, the More control toggles a menu portaled to the body:
  * `menuMode: "escape"` also closes it on Escape, and `"toggle"` closes it only on a second click.
+ * With `menuItemsDelayMs`, the menu opens empty and its items render after that delay.
  */
 export function profileDom(
   body,
@@ -155,6 +156,7 @@ export function profileDom(
     title = `${OWNER_NAME} | LinkedIn`,
     menuItems = null,
     menuMode = "escape",
+    menuItemsDelayMs = 0,
   } = {},
 ) {
   const dom = new JSDOM(
@@ -181,7 +183,7 @@ export function profileDom(
     true,
   );
 
-  if (menuItems) {
+  if (menuItems !== null) {
     const more = Array.from(w.document.querySelectorAll("main section button")).find(
       (el) => labelOf(el) === "More",
     );
@@ -195,8 +197,15 @@ export function profileDom(
       if (menu) return closeMenu();
       menu = w.document.createElement("div");
       menu.setAttribute("role", "menu");
-      menu.innerHTML = menuItems;
       w.document.body.append(menu);
+      if (menuItemsDelayMs > 0) {
+        const opened = menu;
+        w.setTimeout(() => {
+          opened.innerHTML = menuItems;
+        }, menuItemsDelayMs);
+      } else {
+        menu.innerHTML = menuItems;
+      }
       more.setAttribute("aria-expanded", "true");
     });
     if (menuMode === "escape") {

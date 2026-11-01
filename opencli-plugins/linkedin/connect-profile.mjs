@@ -246,22 +246,42 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
   const MENU = '[role="menu"], .artdeco-dropdown__content';
   const openBefore = new Set(Array.from(document.querySelectorAll(MENU)).filter(visible));
   const wasExpanded = more.getAttribute("aria-expanded") === "true";
-  const findMenu = () => {
+  const menuCandidates = () => {
     const controlled = document.getElementById(more.getAttribute("aria-controls") || "");
-    if (controlled && visible(controlled)) return controlled;
     const local = more.closest(".artdeco-dropdown")?.querySelector(".artdeco-dropdown__content");
-    if (local && visible(local)) return local;
-    return (
-      Array.from(document.querySelectorAll(MENU))
-        .filter((el) => visible(el) && !openBefore.has(el))
-        .pop() || null
-    );
+    const opened = Array.from(document.querySelectorAll(MENU))
+      .filter((el) => !openBefore.has(el))
+      .reverse();
+    return Array.from(new Set([controlled, local, ...opened])).filter(visible);
+  };
+  const itemsOf = (candidate) => {
+    const owned = ownedBy(candidate);
+    return Array.from(
+      candidate.querySelectorAll(
+        '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="button"], button, a, li',
+      ),
+    ).filter((el) => visible(el) && owned(el) && labelOf(el));
   };
   if (!wasExpanded) more.click();
+  // LinkedIn can show the dropdown before its items render, so a menu counts only once it has
+  // items. A menu that stays empty is unreadable, never proof that Connect is absent.
   let menu = null;
+  let items = [];
+  let emptyMenu = null;
   for (let attempt = 0; attempt < 25 && !menu; attempt += 1) {
     await sleep(100);
-    menu = findMenu();
+    let pollEmpty = null;
+    for (const candidate of menuCandidates()) {
+      const candidateItems = itemsOf(candidate);
+      if (candidateItems.length > 0) {
+        menu = candidate;
+        items = candidateItems;
+        break;
+      }
+      pollEmpty ||= candidate;
+    }
+    // Keep the latest empty menu, since LinkedIn can replace the node while it loads.
+    if (pollEmpty) emptyMenu = pollEmpty;
   }
   const close = async () => {
     if (wasExpanded || !visible(menu)) return true;
@@ -276,16 +296,15 @@ export async function linkedInConnectPage({ mode, expectedName, ownerVanity }) {
     return !visible(menu);
   };
   if (!menu) {
+    if (emptyMenu) {
+      menu = emptyMenu;
+      await close();
+      return { ok: false, reason: "more_menu_empty" };
+    }
     if (!wasExpanded && more.getAttribute("aria-expanded") === "true") more.click();
     return { ok: false, reason: "more_menu_not_found" };
   }
 
-  const owned = ownedBy(menu);
-  const items = Array.from(
-    menu.querySelectorAll(
-      '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="button"], button, a, li',
-    ),
-  ).filter((el) => visible(el) && owned(el) && labelOf(el));
   // A menu item wraps its own label element, so act on the innermost match.
   const innermost = (matches) =>
     matches.find((el) => !matches.some((other) => other !== el && el.contains(other))) || null;
