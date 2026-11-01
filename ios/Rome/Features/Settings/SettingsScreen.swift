@@ -5,6 +5,8 @@ import SwiftUI
 struct PageHeader: View {
     let title: LocalizedStringKey
     var onClose: (() -> Void)? = nil
+    /// A drawer page shows the drawer button where a pushed page has Back.
+    var onMenu: (() -> Void)? = nil
     /// Pages in a sheet keep their buttons clear of its round top corners.
     var inSheet = false
     @Environment(\.dismiss) private var dismiss
@@ -16,6 +18,10 @@ struct PageHeader: View {
                     Spacer()
                     GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
                         Image(systemName: "xmark").romeFont(16, .semibold)
+                    }
+                } else if let onMenu {
+                    GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
+                        MenuGlyph()
                     }
                 } else {
                     GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {

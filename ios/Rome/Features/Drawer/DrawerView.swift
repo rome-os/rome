@@ -3,13 +3,13 @@ import SwiftUI
 /// Board 2: search, Chat and Routines, the coming-soon entries, and the account row.
 struct DrawerView: View {
     let workspace: Workspace
-    let onChat: () -> Void
-    let onRoute: (Route) -> Void
+    let section: MainSection
+    let onSection: (MainSection) -> Void
     let onSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { onRoute(.search) } label: {
+            Button { onSection(.search) } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").romeFont(16, .medium)
                     Text("Search").romeFont(17)
@@ -24,14 +24,11 @@ struct DrawerView: View {
             .buttonStyle(PressScaleStyle(scale: 0.98))
 
             VStack(spacing: 2) {
-                DrawerItem(title: "Chat", selected: true, action: onChat) {
+                DrawerItem(title: "Chat", selected: section == .chat, action: { onSection(.chat) }) {
                     Image(systemName: "bubble.left")
-                        .romeFont(18, .medium)
-                        .foregroundStyle(Palette.primaryIcon)
                 }
-                DrawerItem(title: "Routines", selected: false, action: { onRoute(.routines) }) {
+                DrawerItem(title: "Routines", selected: section == .routines, action: { onSection(.routines) }) {
                     Image(systemName: "calendar")
-                        .romeFont(18)
                 }
             }
             .padding(.top, 22)
@@ -88,7 +85,7 @@ struct DrawerView: View {
 }
 
 private struct DrawerItem<Icon: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     let selected: Bool
     let action: () -> Void
     @ViewBuilder let icon: () -> Icon
@@ -96,7 +93,10 @@ private struct DrawerItem<Icon: View>: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                icon().frame(width: 22)
+                icon()
+                    .romeFont(18, selected ? .medium : .regular)
+                    .foregroundStyle(selected ? Palette.primaryIcon : Palette.fg)
+                    .frame(width: 22)
                 Text(title)
                     .romeFont(17, selected ? .semibold : .regular)
                 Spacer()

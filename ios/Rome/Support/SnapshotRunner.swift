@@ -7,6 +7,8 @@ enum DebugCommand: Equatable {
     case drawer(Bool)
     case tasks(Bool)
     case route([Route])
+    /// One of the drawer's pages as the root, with nothing pushed.
+    case section(MainSection)
     /// The Settings sheet with these pages pushed in it; nil closes it.
     case settings([SettingsRoute]?)
 }
@@ -64,8 +66,8 @@ enum SnapshotRunner {
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
             model.debugCommand = .settings(nil)
-            await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .route([.routines]) }
-            await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .route([.search]) }
+            await capture("13-routines", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.routines) }
+            await capture("14-search", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.search) }
             await capture("15-task-answered", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
             }

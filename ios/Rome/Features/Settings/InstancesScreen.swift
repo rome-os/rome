@@ -136,9 +136,9 @@ private struct SkeletonRow: View {
 /// Search across Chat and the task chats.
 struct SearchScreen: View {
     let workspace: Workspace
+    let onMenu: () -> Void
     let onOpen: (SearchHit) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var hits: [SearchHit] = []
     @State private var searching = false
@@ -148,8 +148,8 @@ struct SearchScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
-                    Image(systemName: "chevron.left").romeFont(17, .semibold)
+                GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
+                    MenuGlyph()
                 }
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").romeFont(16, .medium).foregroundStyle(Palette.sub)
@@ -269,6 +269,7 @@ struct SearchScreen: View {
 
 /// The routines on this instance: what runs on its own, and when next.
 struct RoutinesScreen: View {
+    let onMenu: () -> Void
     @Environment(AppModel.self) private var model
     @State private var routines: [Routine]?
     @State private var failed = false
@@ -276,7 +277,7 @@ struct RoutinesScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHeader(title: "Routines")
+                PageHeader(title: "Routines", onMenu: onMenu)
                 Text("Work that runs on its own schedule. To add or change one, ask the Concierge in Chat.")
                     .romeFont(15)
                     .foregroundStyle(Palette.sub)
@@ -315,7 +316,6 @@ struct RoutinesScreen: View {
         }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
         .task { await load() }
     }
 

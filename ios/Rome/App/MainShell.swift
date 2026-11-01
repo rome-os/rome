@@ -3,8 +3,14 @@ import SwiftUI
 /// Screens pushed on the main stack.
 enum Route: Hashable {
     case taskChat(chatId: String, title: String)
-    case search
+}
+
+/// The pages the drawer switches between. Each is the root of the main stack,
+/// so picking one in the drawer shows it in place, never pushed over Chat.
+enum MainSection: Hashable {
+    case chat
     case routines
+    case search
 }
 
 /// Pages pushed inside the Settings sheet.
@@ -17,6 +23,7 @@ enum SettingsRoute: Hashable {
 struct MainShell: View {
     let workspace: Workspace
     @Environment(AppModel.self) private var model
+    @State private var section: MainSection = .chat
     @State private var path: [Route] = []
     @State private var drawerOpen = false
     /// The finger's pull on the drawer while a drag runs. It springs back to
@@ -44,14 +51,10 @@ struct MainShell: View {
 
                 DrawerView(
                     workspace: workspace,
-                    onChat: { closeDrawer(popToRoot: true) },
-                    onRoute: { route in
-                        // The page goes in place under the drawer with no push, so
-                        // closing the drawer shows it, not Chat and then a push.
-                        var instant = Transaction()
-                        instant.disablesAnimations = true
-                        withTransaction(instant) { path = [route] }
-                        closeDrawer(popToRoot: false)
+                    section: section,
+                    onSection: { picked in
+                        show(picked)
+                        closeDrawer()
                     },
                     // The sheet rises over the open drawer, and the drawer is still
                     // there when it closes: one motion each way, never two at once.
@@ -66,12 +69,7 @@ struct MainShell: View {
                 .allowsHitTesting(drawerOpen)
 
                 NavigationStack(path: $path) {
-                    ChatScreen(
-                        workspace: workspace,
-                        onMenu: { openDrawer() },
-                        onTasks: { showTasks = true },
-                        onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) }
-                    )
+                    root
                     .navigationDestination(for: Route.self) { route in
                         destination(route)
                     }
@@ -83,7 +81,7 @@ struct MainShell: View {
                         RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
                             .fill(Palette.drawerScrim.opacity(progress))
                             .contentShape(Rectangle())
-                            .onTapGesture { closeDrawer(popToRoot: false) }
+                            .onTapGesture { closeDrawer() }
                     }
                 }
                 .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
@@ -154,10 +152,13 @@ struct MainShell: View {
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in
             switch command {
-            case .drawer(let open): open ? openDrawer() : closeDrawer(popToRoot: false)
+            case .drawer(let open): open ? openDrawer() : closeDrawer()
             case .tasks(let show):
                 if SnapshotRunner.directory != nil { sheetPreview = show } else { showTasks = show }
-            case .route(let routes): path = routes
+            case .route(let routes):
+                show(.chat)
+                path = routes
+            case .section(let picked): show(picked)
             case .settings(let routes):
                 settingsPath = routes ?? []
                 if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
@@ -173,16 +174,40 @@ struct MainShell: View {
         case .taskChat(let chatId, let title):
             TaskChatScreen(workspace: workspace, chatId: chatId, initialTitle: title)
                 .id(chatId)
+        }
+    }
+
+    @ViewBuilder
+    private var root: some View {
+        switch section {
+        case .chat:
+            ChatScreen(
+                workspace: workspace,
+                onMenu: { openDrawer() },
+                onTasks: { showTasks = true },
+                onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) }
+            )
+        case .routines:
+            RoutinesScreen(onMenu: { openDrawer() })
         case .search:
-            SearchScreen(workspace: workspace) { hit in
+            SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
                 if hit.session.id == conciergeChatID {
-                    path = []
+                    show(.chat)
                 } else {
                     path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
                 }
             }
-        case .routines:
-            RoutinesScreen()
+        }
+    }
+
+    /// Swaps the stack's root with no motion of its own; the drawer's slide is
+    /// the only movement the guardian sees.
+    private func show(_ picked: MainSection) {
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            path = []
+            section = picked
         }
     }
 
@@ -200,7 +225,7 @@ struct MainShell: View {
                 case .instances:
                     InstancesScreen(onSwitched: {
                         showSettings = false
-                        path = []
+                        show(.chat)
                     })
                 }
             }
@@ -246,8 +271,7 @@ struct MainShell: View {
         withAnimation(Self.drawerSpring) { drawerOpen = true }
     }
 
-    private func closeDrawer(popToRoot: Bool) {
-        if popToRoot { path = [] }
+    private func closeDrawer() {
         withAnimation(Self.drawerSpring) { drawerOpen = false }
     }
 

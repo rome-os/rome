@@ -20,7 +20,7 @@ The native iOS app in `ios/`: Chat (Concierge) as the home screen, the Tasks she
 - [x] Install on the user's iPhone: installed and launched on Eric Liu's iPhone (iPhone 18 Pro, iOS 27.0.1), Debug build of 8d9450e2 (round 1 feel fixes), team B2U93L2LK4, bundle id `cc.romeos.mobile.dev`. Device steps are in `ios/README.md`.
 - [x] English as the default language, zh-Hans a translation: merged from `claude/epic-vaughan-1e52a1` after an independent review found no serious defects (result: [`mobile-app-mvp-english.md`](mobile-app-mvp-english.md))
 - [x] Reinstall the merged build on the user's iPhone (b72cb7d8, tests passed first)
-- [x] Routines and Search from the drawer open in place, no push over Chat (`0a41e6f4`, installed on the iPhone over Wi-Fi)
+- [x] Routines and Search from the drawer open in place, no push over Chat: they are root pages the drawer switches between, with the drawer button at top left (a no-animation push did not work on iOS 27)
 - [x] Try the app on the iPhone and list what feels off (first pass, 2026-10-31: see "Feel fixes, round 1")
 - [ ] OK to push `feat/ios-app` and open a PR to `main`
 
