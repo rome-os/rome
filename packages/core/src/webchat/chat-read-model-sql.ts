@@ -22,6 +22,14 @@ export const seatMessageCount = sql<number>`(SELECT count(*) FROM chat_messages 
   WHERE m.chat_id = ${romeSessions.chatId} AND m.thread_id IS ${romeSessions.threadId}
     AND m.said_at >= ${romeSessions.createdAt})`;
 
+/** When each of the sessions `sessionIds` names saw a line said where it
+ *  stands, one row per line, as `(session_id, at)`. */
+export function seatLinesSaid(sessionIds: SQL): SQL {
+  return sql`SELECT s.id AS session_id, m.said_at AS at FROM ${romeSessions} s
+    JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+    WHERE s.id IN ${sessionIds}`;
+}
+
 // Whether the session's chat waits on the guardian: a card (question,
 // connect-AI, app component) in a line from Rome after the guardian's last
 // line, or an approval still pending in this chat. Any answer to a card is

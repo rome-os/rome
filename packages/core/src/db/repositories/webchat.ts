@@ -59,6 +59,7 @@ import type {
 import { placeIn, type ChatRef, type Place } from "../../chats/place.js";
 import { lineAt } from "../../chats/adapter.js";
 import {
+  seatLinesSaid,
   seatsSaidInSince,
   type SeatSaidIn,
   sessionAwaitingGuardian,
@@ -2322,10 +2323,7 @@ export class WebChatRepository {
           WHERE session_id IN (SELECT ancestor_id FROM ancestors)
             AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
           UNION ALL
-          -- What is said in a seat's place is on record in Chats.
-          SELECT s.id, m.said_at FROM ${romeSessions} s
-          JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-          WHERE s.id IN (SELECT ancestor_id FROM ancestors)
+          ${seatLinesSaid(sql`(SELECT ancestor_id FROM ancestors)`)}
         )
         GROUP BY session_id
       )
