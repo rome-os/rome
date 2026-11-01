@@ -576,11 +576,9 @@ export class AgentRunner {
       },
     );
     if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
-      await this.webchatRepo.assignConversationMessageTurn(
-        romeSessionId,
-        params.platformMessageId,
-        handle.turnId,
-      );
+      const prompt = await this.webchatRepo.seatMessageId(romeSessionId, params.platformMessageId);
+      if (prompt)
+        this.webchatRepo.assignConversationMessageTurn(romeSessionId, prompt, handle.turnId);
     }
 
     const persistTrace = params.persistTrace ?? shouldPersistAgentTrace(threadContext);

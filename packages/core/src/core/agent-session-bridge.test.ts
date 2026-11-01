@@ -19,7 +19,7 @@ import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { chatAt } from "../chats/adapter.js";
+import { chatAt, lineAt } from "../chats/adapter.js";
 import { seatFixture } from "../test/seats.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createTestDb, testChatWiring } from "../test/helpers.js";
@@ -511,7 +511,8 @@ describe("AgentSessionBridge worker disconnect", () => {
   it("interrupts a turn whose message assignment fails, and only once", async () => {
     const turn = controllableTurn("turn-1");
     const webchatRepo = {
-      assignConversationMessageTurn: async () => {
+      seatMessageId: async () => "line-1",
+      assignConversationMessageTurn: () => {
         throw new Error("db down");
       },
     } as unknown as WebChatRepository;
@@ -897,6 +898,8 @@ describe("AgentSessionBridge reply streaming", () => {
     const chat = chatAt("telegram", "chat-1");
     fixture.chat(chat.platform, chat.id, "group");
     fixture.seat({ id: "conversation-1", chat, accountId: "telegram" });
+    // The message the run answers, on record before the run starts.
+    fixture.say({ id: lineAt(chat, "telegram", "msg-1"), chat, from: "user-1", at: new Date(0) });
     return { repo, db: testDb.db, close: () => testDb.close() };
   }
 

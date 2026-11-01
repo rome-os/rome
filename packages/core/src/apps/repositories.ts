@@ -15,7 +15,8 @@ import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
-import { lineAt, type ChatAdapters } from "../chats/adapter.js";
+import { lineAt, platformIdOfLine, sentLineId, type ChatAdapters } from "../chats/adapter.js";
+import type { Seat } from "../sessions/seat-replies.js";
 import { partsText } from "../chats/message.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
@@ -160,6 +161,8 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
     async send(input) {
       const channel = channelNamed(input.channel);
       const parts = input.parts?.length ? stripHostOnly(input.parts) : undefined;
+      // An app quotes by the platform's id, which names a line of its seat's chat.
+      const seat = input.replyToPlatformMessageId ? await repo.seatOf(input.sessionId) : null;
       const sent = await deps.replies.send(
         input.sessionId,
         channel,
@@ -167,12 +170,12 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
           text: input.text ?? "",
           ...(parts ? { parts } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+          ...(seat && input.replyToPlatformMessageId
+            ? { replyTo: lineAt(seat.place.chat, seat.accountId, input.replyToPlatformMessageId) }
+            : {}),
         },
         {
           ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
-          ...(input.replyToPlatformMessageId
-            ? { replyToPlatformMessageId: input.replyToPlatformMessageId }
-            : {}),
           ...(input.content
             ? {
                 recorded: JSON.parse(stripHostOnlyPartsFromContent(input.content)) as MessagePart[],
@@ -181,7 +184,8 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
         },
       );
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
-      return sent.platformMessageId ? { messageId: sent.platformMessageId } : {};
+      const messageId = platformIdOfSent(sent);
+      return messageId ? { messageId } : {};
     },
     async sendEmail(input) {
       const channel = channelNamed(input.channel);
@@ -206,7 +210,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
           ...(recorded ? { recorded } : {}),
         });
         if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
-        return { messageId: sent.platformMessageId, threadId: input.threadId };
+        return { messageId: platformIdOfSent(sent), threadId: input.threadId };
       }
       // A new thread has no address until the provider takes the email, so
       // it is recorded once the provider named it.
@@ -217,13 +221,18 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       await deps.replies.say(
         sessionId,
         recorded ?? parts ?? [{ type: "text", content: out.text }],
-        async () =>
-          opened.platformMessageId ? { platformMessageId: opened.platformMessageId } : {},
+        async (seat) =>
+          sentLineId(seat.place.chat, seat.accountId, opened.platformMessageId ?? undefined),
         turn,
       );
       return { messageId: opened.platformMessageId, threadId: opened.address };
     },
   };
+}
+
+/** The platform's id for what a seat sent, as an app reads it back. */
+function platformIdOfSent(sent: { sent: string; seat: Seat }): string | null {
+  return platformIdOfLine(sent.seat.place.chat, sent.seat.accountId, sent.sent);
 }
 
 /** `parts` with the parts only the host may author taken out, so a forged

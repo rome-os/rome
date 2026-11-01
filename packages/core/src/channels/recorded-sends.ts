@@ -26,7 +26,7 @@ export interface RecordedSendsDeps {
    *  sends there. */
   adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn">;
   chats: Pick<ChatRepository, "get" | "start">;
-  webchatRepo: Pick<WebChatRepository, "seatIn" | "seatInThread">;
+  webchatRepo: Pick<WebChatRepository, "seatIn" | "seatInThread" | "seatOf">;
   replies: Pick<SeatReplies, "send">;
   messages: Pick<MessageRepository, "send">;
 }
@@ -94,12 +94,19 @@ async function sayInSeat(
   out: Outbound,
   message: OutgoingMessage,
 ): Promise<string | null> {
-  const said = await deps.replies.send(sessionId, channel, out, {
-    ...(message.turnId ? { turnId: message.turnId } : {}),
-    ...(message.replyToMessageId ? { replyToPlatformMessageId: message.replyToMessageId } : {}),
-  });
+  const seat = await deps.webchatRepo.seatOf(sessionId);
+  if (!seat) throw new Error(`Session ${sessionId} stands in no chat to send in`);
+  const replyTo = message.replyToMessageId
+    ? lineAt(seat.place.chat, seat.accountId, message.replyToMessageId)
+    : undefined;
+  const said = await deps.replies.send(
+    sessionId,
+    channel,
+    { ...out, ...(replyTo ? { replyTo } : {}) },
+    message.turnId ? { turnId: message.turnId } : {},
+  );
   if (!said) throw new Error(`Session ${sessionId} stands in no chat to send in`);
-  return said.platformMessageId;
+  return platformIdOfLine(seat.place.chat, seat.accountId, said.sent);
 }
 
 /**

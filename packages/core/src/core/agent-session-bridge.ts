@@ -202,13 +202,14 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             reply?.stop();
           },
         );
-        if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
+        // The line the app named by its platform id, which the turn answers.
+        let prompt: string | null = null;
+        if (this.webchatRepo && req.platformMessageId) {
           try {
-            await this.webchatRepo.assignConversationMessageTurn(
-              romeSessionId,
-              req.platformMessageId,
-              handle.turnId,
-            );
+            prompt = await this.webchatRepo.seatMessageId(romeSessionId, req.platformMessageId);
+            if (prompt && conversation.promptPersisted) {
+              this.webchatRepo.assignConversationMessageTurn(romeSessionId, prompt, handle.turnId);
+            }
           } catch (err) {
             // The drain loop below never starts, so nothing would read this
             // turn's events and the worker never learns its turnId.
@@ -227,7 +228,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             const opened = await this.replyStreams?.open({
               channel: thread.channel,
               chatId: thread.threadId,
-              ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
+              ...(prompt ? { replyTo: prompt } : {}),
               // The transcript leaves the answer to the reply, so the reply
               // records it in the conversation the turn is recorded in.
               romeSessionId,

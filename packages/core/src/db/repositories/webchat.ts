@@ -1215,16 +1215,10 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, sessionId));
   }
 
-  /** Turn `turnId` of session `sessionId` runs for its prompt, the message
-   *  whose platform id is `platformMessageId`. Changes nothing when no such
-   *  message is its prompt. */
-  async assignConversationMessageTurn(
-    sessionId: string,
-    platformMessageId: string,
-    turnId: string,
-  ): Promise<void> {
-    const id = await this.seatMessageId(sessionId, platformMessageId);
-    if (id) this.links.promptRuns(sessionId, id, turnId);
+  /** Turn `turnId` of session `sessionId` runs for its prompt, line
+   *  `lineId`. Changes nothing when that line is not its prompt. */
+  assignConversationMessageTurn(sessionId: string, lineId: string, turnId: string): void {
+    this.links.promptRuns(sessionId, lineId, turnId);
   }
 
   /** Fill in a conversation's name when the row holds only its address, as
