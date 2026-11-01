@@ -290,9 +290,11 @@ export function normalizeContactPayload(payload, profile) {
         restricted ? "contact_info_restricted" : "contact_info_unavailable",
         restricted
           ? "LinkedIn does not allow the logged-in account to view this profile's contact information."
-          : contact.timed_out === true
-            ? "LinkedIn did not open the Contact info section before the command's time limit."
-            : "LinkedIn did not expose a contact information section for this profile.",
+          : contact.overlay_skipped === true
+            ? "LinkedIn did not open the Contact info section from the profile page, and the command had too little time left to load the Contact info page."
+            : contact.timed_out === true
+              ? "LinkedIn did not open the Contact info section before the command's time limit."
+              : "LinkedIn did not expose a contact information section for this profile.",
       ),
     ];
   }

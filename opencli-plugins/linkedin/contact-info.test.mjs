@@ -165,12 +165,12 @@ test("the opener stops before the overlay navigation when the deadline cannot fi
   const payload = await openLinkedInContactSection(page, CONTACT_URL, { deadline });
 
   assert.equal(payload.dialog_found, false);
-  assert.equal(payload.timed_out, true);
+  assert.equal(payload.overlay_skipped, true);
   assert.ok(Date.now() <= deadline);
   assert.equal(page.calls.filter(([name]) => name === "goto").length, 1);
   const [row] = normalizeContactPayload(payload, { identifier: "avery-example" });
   assert.equal(row.status, "contact_info_unavailable");
-  assert.match(row.message, /time limit/);
+  assert.match(row.message, /too little time left to load the Contact info page/);
 });
 
 test("a section already on the profile page is read without clicking or navigating", async (t) => {
@@ -221,7 +221,7 @@ test("the opener skips an overlay navigation that the CDP page's 31s navigation 
   const deadline = Date.now() + 34_000;
   const payload = await openLinkedInContactSection(page, CONTACT_URL, { deadline });
 
-  assert.equal(payload.timed_out, true);
+  assert.equal(payload.overlay_skipped, true);
   assert.ok(Date.now() <= deadline, `the opener ran ${Date.now() - deadline}ms past its deadline`);
   assert.equal(page.calls.filter(([name]) => name === "goto").length, 1);
 });
@@ -249,4 +249,16 @@ test("browser and transport failures during the click propagate instead of becom
     assert.equal(error.cause, unknownOutcome);
     return true;
   });
+});
+
+test("an unproductive click still falls back to the overlay after an ordinary profile load", async (t) => {
+  const page = linkedInPage(t, { panelOn: ["overlay"], gotoMs: 5_000 });
+  const rows = await command.func(page, { profile: "avery-example" });
+
+  assert.deepEqual(
+    rows.map(({ status, type, value }) => ({ status, type, value })),
+    [{ status: "available", type: "email", value: "avery@example.com" }],
+  );
+  assert.ok(page.calls.some(([name]) => name === "click"));
+  assert.ok(page.elapsed() < COMMAND_TIMEOUT_MS);
 });

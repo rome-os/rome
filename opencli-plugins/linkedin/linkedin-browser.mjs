@@ -2,6 +2,9 @@ import { unwrapEvaluateResult } from "./linkedin-helpers.mjs";
 
 const CONTACT_LINK_SELECTOR = 'a[href*="/overlay/contact-info"]';
 const CONTACT_PANEL_WAIT_MS = 8_000;
+// Short enough that a click that opens nothing still leaves room for the overlay navigation after an
+// ordinary profile load. The poll ends as soon as the section appears.
+const CONTACT_CLICK_WAIT_MS = 3_000;
 const CONTACT_SETTLE_MS = 3_000;
 const CONTACT_QUIET_MS = 1_000;
 // Time an extraction round trip needs beyond its in-page waits, including the row settle.
@@ -207,9 +210,10 @@ function isRecoverableClickError(error) {
  * extraction payload `normalizeContactPayload` accepts. It tries, in order: a section already on
  * the page, the profile's Contact info link, and a direct navigation to `contactUrl`. Every step is
  * skipped once `deadline` (epoch ms) leaves too little time for it, so the call settles before
- * OpenCLI's command timeout. When no section opens, the payload has `dialog_found: false`, and
- * `timed_out: true` if the deadline cut the attempts short. A click that cannot find or hit the link
- * falls through to navigation. Browser and transport errors propagate.
+ * OpenCLI's command timeout. When no section opens, the payload has `dialog_found: false`, with
+ * `overlay_skipped: true` if the deadline could not fit the navigation to `contactUrl`, or
+ * `timed_out: true` if it shortened the wait after that navigation. A click that cannot find or hit
+ * the link falls through to navigation. Browser and transport errors propagate.
  */
 export async function openLinkedInContactSection(
   page,
@@ -217,8 +221,8 @@ export async function openLinkedInContactSection(
   { deadline = Date.now() + 45_000, now = Date.now } = {},
 ) {
   const remaining = () => deadline - now();
-  const panelWait = () =>
-    Math.max(0, Math.min(CONTACT_PANEL_WAIT_MS, remaining() - EXTRACTION_RESERVE_MS));
+  const panelWait = (limit = CONTACT_PANEL_WAIT_MS) =>
+    Math.max(0, Math.min(limit, remaining() - EXTRACTION_RESERVE_MS));
 
   let payload = await extractLinkedInContactInfo(page);
   if (panelFound(payload)) return payload;
@@ -233,13 +237,15 @@ export async function openLinkedInContactSection(
       if (!isRecoverableClickError(error)) throw error;
     }
     if (clicked) {
-      payload = await extractLinkedInContactInfo(page, { waitMs: panelWait() });
+      payload = await extractLinkedInContactInfo(page, {
+        waitMs: panelWait(CONTACT_CLICK_WAIT_MS),
+      });
       if (panelFound(payload)) return payload;
     }
   }
 
   if (remaining() < NAVIGATION_RESERVE_MS + EXTRACTION_RESERVE_MS) {
-    return { ...unwrapEvaluateResult(payload), timed_out: true };
+    return { ...unwrapEvaluateResult(payload), overlay_skipped: true };
   }
   await page.goto(contactUrl);
   const waitMs = panelWait();
