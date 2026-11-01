@@ -209,7 +209,8 @@ export function readPeopleSearchPage() {
   });
 
   // The last span ends with the results list, not the page, so pagination and footer text never
-  // become its metadata. The list is the deepest node holding every result's name link.
+  // become its metadata. The list is the deepest node holding every result's name link. A lone
+  // result ends with its card, or with the list when no element wraps the card.
   let endContainer = null;
   if (primaries.length > 1) {
     const ancestors = (node) => {
@@ -223,7 +224,9 @@ export function readPeopleSearchPage() {
     endContainer =
       shared.find((node) => primaries.every((primary) => node.contains(primary.el))) || null;
   } else {
-    endContainer = primaries[0].el.closest('li, [role="listitem"], article');
+    endContainer =
+      primaries[0].el.closest('li, [role="listitem"], article') ||
+      primaries[0].el.closest('[role="list"], ul, ol');
   }
   const second = readMarked(endContainer);
   const listEnd = second.marks.get("end:e") || null;

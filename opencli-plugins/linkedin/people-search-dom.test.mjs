@@ -123,6 +123,19 @@ test("results without card wrappers stop at the next result and at the end of th
   ]);
 });
 
+test("a lone result without a card wrapper stops at the end of the list", () => {
+  const result = read(makeDom(fixture("flattened-single")));
+
+  assert.deepEqual(result.rows, [
+    {
+      name: "Casey Sample",
+      headline: "Recruiter at Example Talent",
+      location: "",
+      profile_url: profile("casey-sample"),
+    },
+  ]);
+});
+
 test("a name wrapped across lines resolves even when presence text renders first", () => {
   const result = read(makeDom(fixture("split-name")));
 
