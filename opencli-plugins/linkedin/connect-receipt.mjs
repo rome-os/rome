@@ -5,7 +5,7 @@ function normalizeWhitespace(value) {
     .trim();
 }
 
-function normalizeName(value) {
+export function normalizeName(value) {
   return normalizeWhitespace(value)
     .replace(/\s*[•·]\s*(?:1st|2nd|3rd\+?|degree connection).*$/i, "")
     .replace(/\s+LinkedIn.*$/i, "")
