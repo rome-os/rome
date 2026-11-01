@@ -176,6 +176,11 @@ function setup(
       ),
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
+      // Each chat here is a dashboard chat keyed by its session's id.
+      seatOf: async (id: string) =>
+        (await deps.webchatRepo.getSession(id)) || (await storedChats.getSession(id))
+          ? { place: { chat: { platform: "webchat", id } }, accountId: "concierge", agent: null }
+          : null,
     },
     tasks,
     approvals: {
@@ -185,12 +190,10 @@ function setup(
       },
     },
     messages: {
-      recent: async (place: Place, limit: number) => {
+      read: async (place: Place, page: { before?: { id: string } | null; limit: number }) => {
         const rows = messages.get(place.chat.id) ?? [];
-        return pageOf(rows, place, rows.length, limit);
+        return pageOf(rows, place, page.before ? Number(page.before.id) : rows.length, page.limit);
       },
-      before: async (place: Place, cursor: { id: string }, limit: number) =>
-        pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
     aiToolState: {
