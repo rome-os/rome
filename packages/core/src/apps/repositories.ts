@@ -16,7 +16,6 @@ import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
 import { lineAt, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
-import { ChatIds } from "../channels/chat-ids.js";
 import type { EmailOutbound, EmailRecipients } from "../channels/email-chat-adapter.js";
 import type { Seat } from "../sessions/seat-replies.js";
 import { partsText } from "../chats/message.js";
@@ -136,7 +135,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
         seat = (
           await open({
             channel: channel.name,
-            threadId: ChatIds.key(chat).externalId,
+            threadId: deps.adapters.addressAt(channel.name, placeIn(chat)),
             agentName: "main",
             threadType: "group",
             ...(subject ? { threadName: subject } : {}),
