@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
+import type { ChatDescriptor, ChatId, ChatRef, EnsureChannelChatInput } from "@rome-os/app-runtime";
+import { openChannelChat } from "../sessions/open-seat.js";
+import { seatFixture } from "../test/seats.js";
 import type { TalkDirectory } from "../connections/types.js";
-import { createTestDb, kindChannelOf, testChatRepository, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, testChatWiring, type TestDb } from "../test/helpers.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -10,7 +12,9 @@ import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ChatRepository } from "../chats/chat-repository.js";
-import { chatKey } from "../chats/place.js";
+import { platformOf } from "@rome/api-types/platform";
+import { ChatAdapters, chatAt } from "../chats/adapter.js";
+import { ChatAddresses } from "../channels/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 
@@ -73,6 +77,28 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
     });
 }
 
+/** Rome's seat at a channel address, in the chat the address keys, as an
+ *  inbound message opens it. */
+function openSeat(db: TestDb["db"], input: EnsureChannelChatInput) {
+  const webchatRepo = new WebChatRepository(db);
+  return openChannelChat({ ...testChatWiring(db, webchatRepo), webchatRepo }, input);
+}
+
+/** The settings over `db`, with an adapter per channel the registry knows,
+ *  each on the platform its kind names. */
+function settingsRepository(db: TestDb["db"], registry: ConnectionRegistry) {
+  return new ChatSettingsRepository(db, {
+    chats: new ChatRepository(db),
+    adapters: new ChatAdapters({
+      channelsOn: (platform) =>
+        registry.registeredKinds().filter((kind) => platformOf(kind) === platform),
+      accountOf: () => null,
+      platformOfChannel: platformOf,
+      addresses: new ChatAddresses(db),
+    }),
+  });
+}
+
 describe("ChatSettingsService", () => {
   let testDb: TestDb | undefined;
 
@@ -109,7 +135,7 @@ describe("ChatSettingsService", () => {
     const discord = await connectLive(registry, "discord");
     const feishu = await connectLive(registry, "feishu");
     const wechat = await connectLive(registry, "wechat");
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const repository = settingsRepository(testDb.db, registry);
     const service = new ChatSettingsService({
       repository,
       connections: registry,
@@ -268,7 +294,7 @@ describe("ChatSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "guardian-1" },
     });
-    await new WebChatRepository(testDb!.db).ensureChannelChat({
+    await openSeat(testDb!.db, {
       channel: "discord",
       threadId: "first-seen-topic",
       parentThreadId: "parent",
@@ -341,7 +367,7 @@ describe("ChatSettingsService", () => {
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
     const webchat = new WebChatRepository(testDb!.db);
-    await webchat.ensureChannelChat({
+    await openSeat(testDb!.db, {
       channel: "discord",
       threadId: "dm-1",
       threadName: "Ray",
@@ -393,18 +419,20 @@ describe("ChatSettingsService", () => {
     expect(reset.overrides).toEqual({});
 
     const row = repository.find("discord", "dm-1" as ChatId)!;
-    await webchat.addConversationMessage({
-      sessionId: row.id,
-      role: "user",
-      content: JSON.stringify([{ type: "text", content: "hello" }]),
-      platformMessageId: "dm-message-1",
+    // Something said there establishes the direct message.
+    seatFixture(testDb!.db).say({
+      id: "dm-message-1",
+      chat: { platform: "discord", id: row.chatId! },
+      from: "ray",
+      text: "hello",
+      at: new Date(),
     });
     expect(
       (await service.list()).items.map((item) => item.snapshot.conversation.ref.chatId),
     ).toContain("dm-1");
 
     expect(repository.find("discord", "dm-1" as ChatId)).toMatchObject({
-      sourceThreadType: "private",
+      kind: "dm",
       channelSettings: null,
     });
     expect(changed).toHaveBeenCalledTimes(2);
@@ -418,14 +446,14 @@ describe("ChatSettingsService", () => {
     registry.register(directoryDescriptor("agents", () => []));
     const agents = await connectLive(registry, "agents");
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db)),
+      repository: settingsRepository(testDb.db, registry),
       connections: registry,
       channelOf: kindChannelOf,
       channels: () => [],
       listAgents: () => [],
       onChanged: () => {},
     });
-    await new WebChatRepository(testDb.db).ensureChannelChat({
+    await openSeat(testDb.db, {
       channel: "agents",
       threadId: "dm-1",
       threadType: "private",
@@ -589,7 +617,7 @@ describe("ChatSettingsService", () => {
     });
     // discord has lost its channel record, as while `registry.remove` evicts it.
     const unrecorded = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb!.db, testChatRepository(testDb!.db)),
+      repository: settingsRepository(testDb!.db, registry),
       connections: registry,
       channelOf: (connection) => (connection.id === discord.id ? null : connection.connectionKind),
       channels: () => [],
@@ -680,8 +708,9 @@ describe("ChatSettingsService", () => {
     const support = await connectLive(registry, "wechat");
     const channelOf = (connection: { id: string }) =>
       connection.id === sales.id ? "feishu" : "feishu-2";
-    const chats = new ChatRepository(testDb.db, {
-      namesOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
+    const chats = new ChatRepository(testDb.db);
+    const adapters = new ChatAdapters({
+      channelsOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
       accountOf: (name) =>
         name === "feishu"
           ? { platform: "feishu", id: "ou_sales" }
@@ -689,9 +718,10 @@ describe("ChatSettingsService", () => {
             ? { platform: "feishu", id: "ou_support" }
             : null,
       platformOfChannel: (name) => (name.startsWith("feishu") ? "feishu" : name),
+      addresses: new ChatAddresses(testDb.db),
     });
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, chats),
+      repository: new ChatSettingsRepository(testDb.db, { chats, adapters }),
       connections: registry,
       channelOf,
       channels: () => [],
@@ -743,13 +773,9 @@ describe("ChatSettingsService", () => {
 
   it("keeps a group's rule when rows stored with no type join it", async () => {
     const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null, {
-      threadType: null,
-    });
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_support" }, null, {
-      threadType: null,
-    });
+    const key = chatAt("feishu", "oc_group");
+    chats.start(key, "group", null);
+    chats.start(key, "group", null);
 
     await service.update({
       ref: throughSales,
@@ -776,9 +802,9 @@ describe("ChatSettingsService", () => {
     const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([
       "pm-assistant",
     ]);
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_support" }, null);
+    const key = chatAt("feishu", "oc_group");
+    chats.start(key, "group", null);
+    chats.start(key, "group", null);
 
     await service.update({
       ref: throughSales,
@@ -798,31 +824,6 @@ describe("ChatSettingsService", () => {
     expect((await service.get(throughSupport)).overrides.routing).toEqual({
       agentName: "pm-assistant",
     });
-  });
-
-  it("keeps a row with no type apart from a group its platform never named it in", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    const support = { platform: "feishu", id: "ou_support" };
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    chats.startIfMissing(key, "group", support, null, { threadType: null });
-    await service.update({
-      ref: throughSales,
-      set: { enabled: false },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-
-    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    await service.update({
-      ref: throughSupport,
-      set: { routing: { agentName: "main" } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-    expect((await service.get(throughSupport)).effective.enabled).toBe(true);
-    expect((await service.get(throughSales)).effective.enabled).toBe(false);
-    expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
   });
 
   it("starts no group at an address neither a row nor its platform has named", async () => {
@@ -850,8 +851,8 @@ describe("ChatSettingsService", () => {
 
   it("reads no group's rule at an address an account has no row at and no kind for", async () => {
     const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
+    const key = chatAt("feishu", "oc_group");
+    chats.start(key, "group", null);
     await service.update({
       ref: throughSales,
       set: { enabled: false },
@@ -870,31 +871,6 @@ describe("ChatSettingsService", () => {
       session: { reset: { mode: "none" } },
     });
     expect((await service.get(throughSales)).effective.enabled).toBe(false);
-  });
-
-  it("leaves a row stored with no type apart when its edit is refused", async () => {
-    const { service, chats, throughSales, throughSupport } = await twoAccountsInOneGroup();
-    const key = chatKey("feishu", "oc_group" as ChatId);
-    const support = { platform: "feishu", id: "ou_support" };
-    chats.startIfMissing(key, "group", { platform: "feishu", id: "ou_sales" }, null);
-    chats.startIfMissing(key, "group", support, null, { threadType: null });
-    await service.update({
-      ref: throughSales,
-      set: { enabled: false },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-
-    await expect(
-      service.update({
-        ref: throughSupport,
-        set: { session: { reset: { mode: "idle", idleMinutes: 0 } as never } },
-        clear: [],
-        actor: { kind: "guardian" },
-      }),
-    ).rejects.toThrow("idleMinutes");
-
-    expect(chats.byKey(key, support)?.participants).toEqual([{ account: support, romes: true }]);
   });
 
   it("paginates beyond a bounded live directory first page", async () => {
@@ -918,7 +894,7 @@ describe("ChatSettingsService", () => {
     );
     await connectLive(registry, "discord");
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db)),
+      repository: settingsRepository(testDb.db, registry),
       connections: registry,
       channelOf: kindChannelOf,
       channels: channelsOver(registry),
@@ -948,7 +924,7 @@ describe("ChatSettingsService", () => {
     });
     registry.register(directoryDescriptor("discord", () => []));
     const discord = await connectLive(registry, "discord");
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const repository = settingsRepository(testDb.db, registry);
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {
         connectionId: discord.id,
@@ -999,7 +975,7 @@ describe("ChatSettingsService", () => {
   it("keeps guardian chats out of conversation settings", async () => {
     testDb = createTestDb();
     await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const repository = new ChatSettingsRepository(testDb.db, testChatWiring(testDb.db));
 
     expect(repository.find("webchat", "chat-1" as ChatId)).toBeNull();
     expect(() =>
