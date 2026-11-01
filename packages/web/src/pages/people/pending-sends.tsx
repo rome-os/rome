@@ -37,7 +37,7 @@ export function PendingSends({
         >
           <ChannelPill channel={send.channel} />
           <p
-            className={`min-w-0 break-words text-ui ${
+            className={`min-w-0 whitespace-pre-wrap break-words text-ui ${
               send.state === "failed" ? "text-foreground" : "text-muted-foreground"
             }`}
           >

@@ -147,7 +147,13 @@ export function PersonConversation({ person }: { person: PersonResource }) {
                   {entry.direction === "outbound" && (
                     <span className="text-subtle-foreground">{t("detail.outboundPrefix")} </span>
                   )}
-                  <span className={entry.direction === "outbound" ? "text-muted-foreground" : ""}>
+                  {/* Pre-wrap keeps a message's line breaks, so a link never runs into the
+                      line under it. */}
+                  <span
+                    className={`whitespace-pre-wrap break-words ${
+                      entry.direction === "outbound" ? "text-muted-foreground" : ""
+                    }`}
+                  >
                     {entry.body ?? t("row.noPreview")}
                   </span>
                 </p>
