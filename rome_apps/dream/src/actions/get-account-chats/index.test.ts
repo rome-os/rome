@@ -1,7 +1,17 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
-import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import type {
+  AppActionRuntimeDeps,
+  ChatLine,
+  ChatRepository,
+  RecentChat,
+} from "@rome-os/app-runtime";
+import {
+  createTestDb,
+  testAppRepositories,
+  type TestDb,
+} from "../../../../../packages/core/src/test/helpers.js";
+import { seatFixture } from "../../../../../packages/core/src/test/seats.js";
 import { createAction } from "./index.js";
 
 const actionConfig = {
@@ -14,19 +24,52 @@ const actionConfig = {
   sideEffects: "read-only",
 } as const;
 
-function makeDeps(rows: unknown[]): AppActionRuntimeDeps {
-  return {
-    appContext: {
-      db: {
-        connection: {
-          all: () => rows,
-        },
-      },
-    },
-  } as unknown as AppActionRuntimeDeps;
+type Row = ReturnType<typeof row>;
+
+/** An action over a chat repository holding `rows`, one per line, each
+ *  carrying its chat. */
+function makeDeps(rows: Row[]): AppActionRuntimeDeps {
+  const sessions = [...new Set(rows.map((r) => r.session_id))];
+  const linesOf = (sessionId: string) =>
+    rows
+      .filter((r) => r.session_id === sessionId)
+      .map(
+        (r, i): ChatLine => ({
+          id: `${sessionId}-${i}`,
+          turnId: null,
+          role: r.role as ChatLine["role"],
+          senderId: r.sender_id,
+          senderName: r.sender_name,
+          content: r.content,
+          createdAt: new Date(r.created_at * 1000),
+        }),
+      );
+  const chats = {
+    recentChats: async () =>
+      sessions.map((sessionId): RecentChat => {
+        const r = rows.find((candidate) => candidate.session_id === sessionId)!;
+        return {
+          sessionId,
+          chatId: sessionId,
+          threadId: null,
+          name: r.session_name,
+          threadName: r.thread_name,
+          ownerKey: "guardian",
+          archived: false,
+          platform: r.platform,
+          channel: { id: r.channel, kind: r.connection_kind },
+          agentName: r.agent_name,
+          projectName: null,
+          projectPath: null,
+          startedAt: new Date(0),
+        };
+      }),
+    transcript: async (sessionId: string) => linesOf(sessionId),
+  } as unknown as ChatRepository;
+  return { appContext: { repositories: { chats } } } as unknown as AppActionRuntimeDeps;
 }
 
-function row(overrides: Record<string, unknown>) {
+function row(overrides: Partial<Record<string, unknown>>) {
   return {
     session_id: "s1",
     session_name: "Chat",
@@ -41,7 +84,6 @@ function row(overrides: Record<string, unknown>) {
     sender_id: "100",
     content: "hello",
     created_at: 1700000000,
-    chat_total: 1,
     ...overrides,
   };
 }
@@ -49,14 +91,13 @@ function row(overrides: Record<string, unknown>) {
 describe("get_account_chats", () => {
   it("groups chats under the account that carried them, naming the platform", async () => {
     const rows = [
-      row({ session_id: "s1", thread_name: "Team group", content: "ship it", chat_total: 2 }),
+      row({ session_id: "s1", thread_name: "Team group", content: "ship it" }),
       row({
         session_id: "s1",
         thread_name: "Team group",
         role: "assistant",
         outbound: 1,
         content: "done",
-        chat_total: 2,
       }),
       row({
         session_id: "s2",
@@ -93,13 +134,16 @@ describe("get_account_chats", () => {
   });
 
   it("says how many earlier lines a chat left out, and cuts a long line", async () => {
-    const rows = [row({ chat_total: 80, content: "x".repeat(1500) })];
+    // Eighty lines in the window, of which a chat shows its newest fifty.
+    const rows = Array.from({ length: 80 }, (_, i) =>
+      row({ content: "x".repeat(1500), created_at: 1700000000 + i }),
+    );
 
     const result = await createAction(actionConfig, makeDeps(rows)).execute({});
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const content = (result.data as { content: string }).content;
-    expect(content).toContain("(79 earlier messages left out)");
+    expect(content).toContain("(30 earlier messages left out)");
     expect(content).toContain(`${"x".repeat(1000)}… (cut)`);
     expect(content).not.toContain("x".repeat(1001));
   });
@@ -134,7 +178,6 @@ describe("get_account_chats", () => {
         thread_name: "busy",
         content: `${i}${long}`,
         created_at: 1700000100 + i,
-        chat_total: 50,
       }),
     );
     const small = Array.from({ length: 20 }, (_, i) =>
@@ -143,7 +186,6 @@ describe("get_account_chats", () => {
         thread_name: "quiet",
         content: `q${i}${long}`,
         created_at: 1700000000 + i,
-        chat_total: 20,
       }),
     );
 
@@ -182,8 +224,8 @@ describe("get_account_chats", () => {
 
   it("does not count a line with no readable text as left out", async () => {
     const rows = [
-      row({ content: "[]", chat_total: 2, created_at: 1700000000 }),
-      row({ content: "said something", chat_total: 2, created_at: 1700000001 }),
+      row({ content: "[]", created_at: 1700000000 }),
+      row({ content: "said something", created_at: 1700000001 }),
     ];
 
     const result = await createAction(actionConfig, makeDeps(rows)).execute({});
@@ -204,17 +246,12 @@ describe("get_account_chats", () => {
   });
 
   it("returns an error when the query fails", async () => {
-    const deps = {
-      appContext: {
-        db: {
-          connection: {
-            all: () => {
-              throw new Error("db locked");
-            },
-          },
-        },
+    const chats = {
+      recentChats: async () => {
+        throw new Error("db locked");
       },
-    } as unknown as AppActionRuntimeDeps;
+    } as unknown as ChatRepository;
+    const deps = { appContext: { repositories: { chats } } } as unknown as AppActionRuntimeDeps;
 
     const result = await createAction(actionConfig, deps).execute({});
 
@@ -235,7 +272,9 @@ describe("get_account_chats against the system schema", () => {
   });
 
   function realDeps(): AppActionRuntimeDeps {
-    return { appContext: { db: { connection: testDb.db } } } as unknown as AppActionRuntimeDeps;
+    return {
+      appContext: { repositories: testAppRepositories(testDb.db) },
+    } as unknown as AppActionRuntimeDeps;
   }
 
   function seedChannel(id: string, kind: string, platform: string, agent?: string): void {
@@ -245,22 +284,49 @@ describe("get_account_chats against the system schema", () => {
     `);
   }
 
+  /** Where each seeded session stands, by its id. */
+  const seated = new Map<string, { chat: { platform: string; id: string }; account: string }>();
+
+  /** A seat of the account channel `channel` names, in a group named
+   *  `threadName`, or a background session in no chat when `channel` is
+   *  null. A webchat channel is a dashboard chat. */
   function seedSession(
     id: string,
     type: string,
-    sourceChannel: string | null,
+    channel: string | null,
     threadName: string | null,
     createdAt: number,
     agentName: string | null = null,
   ): void {
-    testDb.db.run(sql`
-      INSERT INTO rome_sessions
-        (id, name, type, source_channel, source_thread_id, source_thread_name, agent_name, created_at, activity_at)
-      VALUES
-        (${id}, ${id}, ${type}, ${sourceChannel}, ${id}, ${threadName}, ${agentName}, ${createdAt}, ${createdAt})
-    `);
+    if (channel === null) {
+      testDb.db.run(sql`
+        INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
+        VALUES (${id}, ${id}, ${type}, ${createdAt}, ${createdAt})
+      `);
+      return;
+    }
+    const platform =
+      testDb.db.get<{ platform: string } | undefined>(
+        sql`SELECT platform FROM channels WHERE id = ${channel}`,
+      )?.platform ?? channel;
+    const fixture = seatFixture(testDb.db);
+    const chat = fixture.chat(platform, `${platform}:${id}`, "group", threadName);
+    fixture.seat({
+      id,
+      chat,
+      accountId: channel,
+      // A channel seat is named after its chat.
+      name: threadName ?? id,
+      type,
+      agentName,
+      createdAt: new Date(createdAt * 1000),
+    });
+    seated.set(id, { chat, account: channel });
   }
 
+  /** A line said where session `sessionId` stands: Rome's when `role` is
+   *  `assistant` or its sender is `rome`, a person's otherwise. A trace, or
+   *  a line in a session in no chat, is the session's own row. */
   function seedMessage(
     id: string,
     sessionId: string,
@@ -270,10 +336,24 @@ describe("get_account_chats against the system schema", () => {
     senderName: string | null = null,
     senderId: string | null = null,
   ): void {
-    testDb.db.run(sql`
-      INSERT INTO rome_agent_messages (id, session_id, role, content, sender_name, sender_id, created_at)
-      VALUES (${id}, ${sessionId}, ${role}, ${JSON.stringify([{ type: "text", content: value }])}, ${senderName}, ${senderId}, ${createdAt})
-    `);
+    const seat = seated.get(sessionId);
+    if (!seat || role === "trace") {
+      testDb.db.run(sql`
+        INSERT INTO rome_agent_messages (id, session_id, role, content, created_at)
+        VALUES (${id}, ${sessionId}, ${role}, ${JSON.stringify([{ type: "text", content: value }])}, ${createdAt})
+      `);
+      return;
+    }
+    const fromRome = role === "assistant" || senderId === "rome";
+    seatFixture(testDb.db).say({
+      id,
+      chat: seat.chat,
+      from: fromRome ? seat.account : (senderId ?? senderName ?? "person"),
+      agent: fromRome ? "main" : null,
+      name: senderName,
+      text: value,
+      at: new Date(createdAt * 1000),
+    });
   }
 
   it("reads every account's chats, and not the dashboard's chats, the guardian's own accounts or background runs", async () => {

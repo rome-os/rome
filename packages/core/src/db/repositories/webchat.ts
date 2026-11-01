@@ -2190,9 +2190,14 @@ export class WebChatRepository {
     const scope =
       where === "dashboard"
         ? sql`c.platform = ${WEBCHAT_PLATFORM} AND s.type IN ('channel', 'webchat_handoff')`
-        : sql`s.type = 'channel' AND c.platform IN (SELECT value FROM json_each(${JSON.stringify([
+        : // A platform carries other kinds of account too, such as the
+          // guardian's own signed-in Telegram, so the seat's channel decides.
+          // A seat whose channel record is gone is read on its platform.
+          sql`s.type = 'channel' AND c.platform IN (SELECT value FROM json_each(${JSON.stringify([
             ...new Set(where.accountKinds.map((kind) => platformOf(kind))),
-          ])}))`;
+          ])})) AND (ch.connection_kind IS NULL OR ch.connection_kind IN (SELECT value FROM json_each(${JSON.stringify(
+            where.accountKinds,
+          )})))`;
     return this.db.all<SeatSaidIn>(seatsSaidInSince(scope, cutoff)).map((row) => ({
       sessionId: row.id,
       chatId: row.chat_id,
