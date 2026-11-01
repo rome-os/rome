@@ -33,9 +33,9 @@ A browser command can fail with `command_result_unknown`, for example `Browser e
 1. Do not repeat the command, and do not switch to another browser.
 2. Run `opencli --profile <name-or-id> browser <session> tab list`. It reads each tab's URL and title from the browser without running page JavaScript, so it usually answers while the page is stalled. `eval` and `state` run page JavaScript and wait on the same stalled page.
 3. If the command that timed out changes something, such as a submit or a send, check for its effect before closing the tab. Report an outcome you cannot confirm instead of retrying.
-4. If the session has other tabs you still need, close only the stuck one with `opencli --profile <name-or-id> browser <session> tab close <targetId>`. Take the target ID from `tab list`.
-5. Otherwise, run `opencli --profile <name-or-id> browser <session> close`. It releases every tab in the session. Other sessions on the same browser keep working.
-6. Open the page again in that session once. This is the one repeat that step 1 allows, because the stalled tab is gone. If it times out again, report the site as unavailable.
+4. If you attached the session to the user's tab with `browser <session> bind`, run `opencli --profile <name-or-id> browser <session> unbind` and stop. Tell the user that their tab is stalled and the command's outcome is unknown. `close` does not close a bound tab, and opening the page again would load it in a new tab instead of the user's.
+5. Otherwise, run `opencli --profile <name-or-id> browser <session> close`. It releases the session's tab lease, which holds the stalled page. Other sessions on the same browser keep working.
+6. Open the page again in that session once. This is the one repeat that step 1 allows, because `close` released the stalled page. If it times out again, report the site as unavailable.
 
 ## Authoring browser automation actions
 
