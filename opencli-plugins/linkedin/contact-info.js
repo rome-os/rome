@@ -1,4 +1,9 @@
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+import {
+  ArgumentError,
+  AuthRequiredError,
+  CliError,
+  CommandExecutionError,
+} from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 import {
   extractProfileProbe,
@@ -12,6 +17,17 @@ import {
   normalizeProfileProbe,
   unwrapEvaluateResult,
 } from "./linkedin-helpers.mjs";
+
+// OpenCLI abandons a browser command after OPENCLI_BROWSER_COMMAND_TIMEOUT seconds (default 60).
+// The contact reader stops opening the section this long before that, so it can still return a
+// status row.
+const COMMAND_RESERVE_MS = 12_000;
+
+function contactDeadline(startedAt) {
+  const seconds = Number.parseInt(process.env.OPENCLI_BROWSER_COMMAND_TIMEOUT ?? "", 10);
+  const timeoutMs = (Number.isFinite(seconds) && seconds > 0 ? seconds : 60) * 1000;
+  return startedAt + Math.max(timeoutMs - COMMAND_RESERVE_MS, timeoutMs / 2);
+}
 
 function requireAuthenticated(payload, context) {
   if (unwrapEvaluateResult(payload)?.auth_wall === true) {
@@ -54,6 +70,7 @@ cli({
   func: async (page, kwargs) => {
     if (!page)
       throw new CommandExecutionError("Browser session required for linkedin contact-info");
+    const deadline = contactDeadline(Date.now());
     let requested;
     try {
       requested = normalizeLinkedInProfile(kwargs.profile);
@@ -77,9 +94,18 @@ cli({
 
     let rawContact;
     try {
-      rawContact = await openLinkedInContactSection(page, contactInfoUrl(profile.profile_url));
+      rawContact = await openLinkedInContactSection(page, contactInfoUrl(profile.profile_url), {
+        deadline,
+      });
     } catch (error) {
-      throw new CommandExecutionError(error instanceof Error ? error.message : String(error));
+      // Browser and transport failures keep their OpenCLI type, and with it their exit code and
+      // the lease handling that reads the error's cause chain.
+      if (error instanceof CliError) throw error;
+      const wrapped = new CommandExecutionError(
+        error instanceof Error ? error.message : String(error),
+      );
+      wrapped.cause = error;
+      throw wrapped;
     }
     requireAuthenticated(rawContact, "LinkedIn contact-info");
     try {

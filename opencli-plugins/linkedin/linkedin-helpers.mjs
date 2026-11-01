@@ -97,7 +97,7 @@ function typeFromHeading(heading, icon = "") {
   if (/^websites?$/.test(label) || /(?:^|-)link(?:-|$)/.test(iconId)) return "website";
   if (/^e-?mails?$/.test(label) || /envelope|email/.test(iconId)) return "email";
   if (/^phones?$/.test(label) || /phone/.test(iconId)) return "phone";
-  if (/^addresses?$/.test(label) || /address|location|map-pin/.test(iconId)) return "address";
+  if (/^address(?:es)?$/.test(label) || /address|location|map-pin/.test(iconId)) return "address";
   if (/^birthdays?$/.test(label) || /birthday|cake/.test(iconId)) return "birthday";
   if (/^connected$/.test(label) || /connection/.test(iconId)) return "connected";
   if (/^twitter$|^x \(twitter\)$/.test(label) || /twitter/.test(iconId)) return "twitter";
@@ -152,7 +152,9 @@ function typeFromHref(href, fallback) {
     if (/^(?:www\.)?linkedin\.com$/i.test(parsed.hostname) && /^\/in\//i.test(parsed.pathname)) {
       return "profile";
     }
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") return "website";
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return fallback === "twitter" ? "twitter" : "website";
+    }
   } catch {}
   return fallback;
 }
@@ -288,7 +290,11 @@ export function normalizeContactPayload(payload, profile) {
         restricted ? "contact_info_restricted" : "contact_info_unavailable",
         restricted
           ? "LinkedIn does not allow the logged-in account to view this profile's contact information."
-          : "LinkedIn did not expose a contact information section for this profile.",
+          : contact.overlay_skipped === true
+            ? "LinkedIn did not open the Contact info section from the profile page, and the command had too little time left to load the Contact info page."
+            : contact.timed_out === true
+              ? "LinkedIn did not open the Contact info section before the command's time limit."
+              : "LinkedIn did not expose a contact information section for this profile.",
       ),
     ];
   }

@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  buildContactExtractionScript,
-  buildProfileProbeScript,
-  openLinkedInContactSection,
-} from "./linkedin-browser.mjs";
+import { buildContactExtractionScript, buildProfileProbeScript } from "./linkedin-browser.mjs";
 import {
   contactInfoUrl,
   normalizeContactHref,
@@ -222,6 +218,38 @@ test("visible contact sections become typed, deduplicated structured rows", () =
   assert.ok(rows.every((row) => row.name === "Alice Smith"));
 });
 
+test("an Address heading types as address and a Twitter link keeps the twitter type", () => {
+  const rows = normalizeContactPayload(
+    {
+      dialog_found: true,
+      sections: [
+        { heading: "Address", icon: "", blocks: ["Springfield, Example State"], links: [] },
+        {
+          heading: "Twitter",
+          icon: "",
+          blocks: ["averyexample"],
+          links: [
+            {
+              text: "averyexample",
+              href: "https://twitter.com/averyexample",
+              context: "averyexample",
+            },
+          ],
+        },
+      ],
+    },
+    { identifier: "avery-example", profile_url: "https://www.linkedin.com/in/avery-example/" },
+  );
+
+  assert.deepEqual(
+    rows.map(({ type, value }) => ({ type, value })),
+    [
+      { type: "address", value: "Springfield, Example State" },
+      { type: "twitter", value: "averyexample" },
+    ],
+  );
+});
+
 test("missing, private, and unavailable contact information return status rows", () => {
   const profile = {
     identifier: "alice",
@@ -252,39 +280,74 @@ test("missing, private, and unavailable contact information return status rows",
 test("browser extraction scripts are valid standalone page JavaScript", () => {
   assert.doesNotThrow(() => new Function(`return (${buildProfileProbeScript()})`));
   assert.doesNotThrow(() => new Function(`return (${buildContactExtractionScript()})`));
-});
-
-test("contact section opens through the profile link and falls back to direct navigation", async () => {
-  const clickCalls = [];
-  const clickPage = {
-    evaluate: async (source) =>
-      source.startsWith("Boolean") ? true : { dialog_found: true, sections: [] },
-    click: async (selector) => clickCalls.push(selector),
-    wait: async () => {},
-    goto: async () => assert.fail("direct navigation should not run after a successful click"),
-  };
-  const clicked = await openLinkedInContactSection(
-    clickPage,
-    "https://www.linkedin.com/in/alice/overlay/contact-info/",
+  assert.doesNotThrow(
+    () => new Function(`return (${buildContactExtractionScript({ waitMs: 8_000 })})`),
   );
-  assert.equal(clicked.dialog_found, true);
-  assert.deepEqual(clickCalls, ['a[href*="/overlay/contact-info"]']);
-
-  const gotoCalls = [];
-  const fallbackPage = {
-    evaluate: async (source) =>
-      source.startsWith("Boolean") ? false : { dialog_found: false, sections: [] },
-    click: async () => assert.fail("click should not run without a contact link"),
-    wait: async () => {},
-    goto: async (url) => gotoCalls.push(url),
-  };
-  const fallbackUrl = "https://www.linkedin.com/in/alice/overlay/contact-info/";
-  const fallback = await openLinkedInContactSection(fallbackPage, fallbackUrl);
-  assert.equal(fallback.dialog_found, false);
-  assert.deepEqual(gotoCalls, [fallbackUrl]);
 });
 
-test("contact extraction reads modern icon rows and ignores non-contact upsells", () => {
+function roleDialogDocument({ appearsOnRead = 1 } = {}) {
+  let reads = 0;
+  const heading = { innerText: "Email", textContent: "Email" };
+  const row = {
+    children: [{ tagName: "svg", id: "envelope-medium" }, {}],
+    innerText: "Email\navery@example.com",
+    textContent: "Email avery@example.com",
+    querySelector: (selector) => (selector.includes("p") ? heading : null),
+    querySelectorAll: (selector) =>
+      selector === "p, address"
+        ? [heading, { innerText: "avery@example.com", textContent: "avery@example.com" }]
+        : [],
+  };
+  const dialog = {
+    innerText: "Contact info Email avery@example.com",
+    textContent: "Contact info Email avery@example.com",
+    querySelector: (selector) =>
+      selector === "header h1, header h2, h1, h2"
+        ? { innerText: "Contact info", textContent: "Contact info" }
+        : null,
+    querySelectorAll: (selector) =>
+      selector === '[data-testid="lazy-column"]' ? [{ children: [row] }] : [],
+  };
+  return {
+    title: "Avery Example | LinkedIn",
+    body: { innerText: "Avery Example" },
+    querySelector: () => null,
+    querySelectorAll: (selector) => {
+      if (selector !== 'dialog, [role="dialog"]') return [];
+      reads += 1;
+      return reads >= appearsOnRead ? [dialog] : [];
+    },
+  };
+}
+
+function runExtraction(documentFixture, options) {
+  return new Function("document", "location", `return (${buildContactExtractionScript(options)})`)(
+    documentFixture,
+    { href: "https://www.linkedin.com/in/avery-example/" },
+  );
+}
+
+test("contact extraction waits for a section that renders after the click", async () => {
+  const payload = await runExtraction(roleDialogDocument({ appearsOnRead: 3 }), { waitMs: 5_000 });
+  assert.equal(payload.dialog_found, true);
+  assert.equal(payload.sections[0].heading, "Email");
+});
+
+test("contact extraction resolves a missing section after its wait instead of rejecting", async () => {
+  const startedAt = Date.now();
+  const payload = await runExtraction(roleDialogDocument({ appearsOnRead: Infinity }), {
+    waitMs: 300,
+  });
+  assert.equal(payload.dialog_found, false);
+  assert.ok(Date.now() - startedAt < 2_000);
+  assert.equal(
+    runExtraction(roleDialogDocument({ appearsOnRead: Infinity })).dialog_found,
+    false,
+    "without a wait the extraction returns synchronously",
+  );
+});
+
+test("contact extraction reads modern icon rows and ignores non-contact upsells", async () => {
   const source = buildContactExtractionScript();
   const link = {
     innerText: "alice@example.com",
@@ -328,11 +391,111 @@ test("contact extraction reads modern icon rows and ignores non-contact upsells"
     querySelector: (selector) => (selector === "section.pv-contact-info" ? null : null),
     querySelectorAll: (selector) => (selector === 'dialog, [role="dialog"]' ? [dialog] : []),
   };
-  const result = new Function("document", "location", `return (${source})`)(documentFixture, {
+  const result = await new Function("document", "location", `return (${source})`)(documentFixture, {
     href: "https://www.linkedin.com/in/alice/overlay/contact-info/",
   });
   assert.equal(result.dialog_found, true);
   assert.equal(result.sections.length, 1);
   assert.equal(result.sections[0].heading, "Email");
   assert.equal(result.sections[0].links[0].href, "mailto:alice@example.com");
+});
+
+/**
+ * A Contact info dialog whose rows change over time. `stages` lists `{ atMs, rows }` in order, and
+ * each read shows the rows of the last stage whose `atMs` has passed. A row is `{ heading, icon,
+ * value }`, and an empty `value` renders the heading alone.
+ */
+function stagedContactDocument(stages) {
+  const startedAt = Date.now();
+  const text = (value) => ({ innerText: value, textContent: value });
+  const contactRow = ({ heading, icon, value }) => {
+    const headingNode = text(heading);
+    const valueNode = value ? text(value) : null;
+    return {
+      children: [{ tagName: "svg", id: icon }, {}],
+      ...text(value ? `${heading}\n${value}` : heading),
+      querySelector: (selector) => (selector.includes("p") ? headingNode : null),
+      querySelectorAll: (selector) =>
+        selector === "p, address" ? [headingNode, ...(valueNode ? [valueNode] : [])] : [],
+    };
+  };
+  const currentRows = () => {
+    const elapsed = Date.now() - startedAt;
+    return stages.filter((stage) => stage.atMs <= elapsed).at(-1).rows;
+  };
+  const dialog = {
+    get innerText() {
+      return `Contact info ${currentRows()
+        .map((row) => `${row.heading} ${row.value}`)
+        .join(" ")}`;
+    },
+    get textContent() {
+      return this.innerText;
+    },
+    querySelector: (selector) =>
+      selector === "header h1, header h2, h1, h2" ? text("Contact info") : null,
+    querySelectorAll: (selector) =>
+      selector === '[data-testid="lazy-column"]'
+        ? [{ children: currentRows().map(contactRow) }]
+        : [],
+  };
+  return {
+    title: "Avery Example | LinkedIn",
+    body: text("Avery Example"),
+    querySelector: () => null,
+    querySelectorAll: (selector) => (selector === 'dialog, [role="dialog"]' ? [dialog] : []),
+  };
+}
+
+test("contact extraction waits for a value that renders after its heading", async () => {
+  const payload = await runExtraction(
+    stagedContactDocument([
+      { atMs: 0, rows: [{ heading: "Email", icon: "envelope-medium", value: "" }] },
+      {
+        atMs: 300,
+        rows: [{ heading: "Email", icon: "envelope-medium", value: "avery@example.com" }],
+      },
+    ]),
+  );
+
+  assert.deepEqual(payload.sections[0].blocks, ["avery@example.com"]);
+});
+
+test("contact extraction waits for rows that render after the first one", async () => {
+  const profileRow = {
+    heading: "Your profile",
+    icon: "linkedin-bug-medium",
+    value: "linkedin.com/in/avery-example",
+  };
+  const payload = await runExtraction(
+    stagedContactDocument([
+      { atMs: 0, rows: [profileRow] },
+      {
+        atMs: 500,
+        rows: [
+          profileRow,
+          { heading: "Email", icon: "envelope-medium", value: "avery@example.com" },
+        ],
+      },
+    ]),
+  );
+
+  assert.deepEqual(
+    payload.sections.map((section) => section.heading),
+    ["Your profile", "Email"],
+  );
+});
+
+test("contact extraction returns heading-only rows once the settle time passes", async () => {
+  const startedAt = Date.now();
+  const payload = await runExtraction(
+    stagedContactDocument([
+      { atMs: 0, rows: [{ heading: "Email", icon: "envelope-medium", value: "" }] },
+    ]),
+    { settleMs: 400 },
+  );
+
+  assert.equal(payload.dialog_found, true);
+  assert.deepEqual(payload.sections[0].blocks, []);
+  assert.ok(Date.now() - startedAt < 2_000);
 });

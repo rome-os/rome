@@ -111,7 +111,7 @@ The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Doc
   optional follow-back guard.
 - `opencli twitter follow-network <username> <followers|following> [--limit N]` — follows accounts
   directly from a user's followers or following page and returns only the accounts newly followed.
-- `opencli linkedin contact-info <profile>` — opens a LinkedIn profile's Contact info section and
+- `opencli linkedin contact-info <profile>` — reads a LinkedIn profile's Contact info section and
   returns every field visible to the signed-in account, including websites, email addresses,
   phone numbers, addresses, birthdays, connected dates, and other displayed contact fields.
 - `opencli linkedin thread-snapshot --thread-url URL [--limit N]` — returns the latest messages
@@ -208,13 +208,20 @@ opencli twitter follow-network @realYunfanYe following --limit 10
 
 The LinkedIn plugin adds a browser-backed, read-only contact reader for the signed-in LinkedIn
 account. It accepts a full `/in/` profile URL, `/in/` path, `@public-id`, bare public identifier, or
-`me`, then opens that profile's Contact info overlay. Each visible contact value is returned as a
+`me`, then reads that profile's contact details. Each visible contact value is returned as a
 typed row with its display label and safe link where one exists.
 
+The reader tries three sources in order and stops at the first that answers: a Contact info section
+already on the profile page, the profile's Contact info link, and the Contact info overlay URL. Each wait is bounded, and the reader stops trying once
+too little of OpenCLI's command timeout (`OPENCLI_BROWSER_COMMAND_TIMEOUT`, 60 seconds by default)
+remains, so a section that never opens returns a status row instead of `TIMEOUT`.
+
 LinkedIn controls which fields the signed-in account may see. A profile with no shared contact
-details, a private contact section, or a missing/restricted profile returns a status row instead of
-failing or pretending that hidden data is available. Authentication walls still produce the
-standard OpenCLI authentication error.
+details returns `no_visible_contact_info`. A private contact section returns
+`contact_info_restricted`. A section that never opens returns `contact_info_unavailable`, and its
+message says when the time limit cut the attempts short. A missing or restricted profile returns
+`profile_unavailable`. Authentication walls and browser connection failures still produce the
+standard OpenCLI errors.
 
 ```bash
 opencli linkedin contact-info satyanadella -f json
