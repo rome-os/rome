@@ -1,65 +1,64 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { ChatId } from "@rome-os/app-runtime";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { channelChatId } from "../db/session-kind.js";
-import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
-import type { ChatRepository } from "./chat-repository.js";
-import { openChannelChat } from "./open-chat.js";
-import { chatKey } from "./place.js";
+import { createTestDb, testChatWiring, type TestDb } from "../test/helpers.js";
+import { startChannelChat } from "./open-chat.js";
 
-describe("openChannelChat", () => {
+describe("startChannelChat", () => {
   let testDb: TestDb;
-  let deps: { chats: ChatRepository; webchatRepo: WebChatRepository };
+  let deps: ReturnType<typeof testChatWiring>;
 
   beforeEach(() => {
     testDb = createTestDb();
-    deps = { chats: testChatRepository(testDb.db), webchatRepo: new WebChatRepository(testDb.db) };
+    deps = testChatWiring(testDb.db);
   });
   afterEach(() => testDb.close());
 
-  it("starts the chat a first message reaches Rome in, and answers its row", async () => {
-    const record = await openChannelChat(deps, {
+  it("starts a group chat at its address, named, with Rome's account as its end", () => {
+    const started = startChannelChat(deps, {
+      channel: "telegram",
+      threadId: "-100",
+      threadType: "group",
+      threadName: "Launch",
+    });
+
+    expect(deps.chats.find(started.chatId)).toMatchObject({ kind: "group", name: "Launch" });
+    expect(started.romeEnd).toBe(deps.adapters.accountOn("telegram").id);
+  });
+
+  it("starts a direct message for a private address", () => {
+    const started = startChannelChat(deps, {
       channel: "telegram",
       threadId: "42",
       threadType: "private",
       threadName: "Alice",
-      agentName: "sales",
     });
 
-    expect(record).toEqual({ id: channelChatId("telegram", "42"), agentName: "sales" });
-    expect(deps.chats.byKey(chatKey("telegram", "42" as ChatId))?.state()).toMatchObject({
-      kind: "dm",
-      name: "Alice",
-      participants: [{ account: { platform: "telegram", id: "telegram" }, romes: true }],
-    });
+    expect(deps.chats.find(started.chatId)?.kind).toBe("dm");
   });
 
-  it("binds no agent to a chat main answers", async () => {
-    const record = await openChannelChat(deps, {
-      channel: "telegram",
-      threadId: "42",
-      agentName: "main",
-    });
-
-    expect(record.agentName).toBeNull();
-  });
-
-  it("starts a thread's chat, and the thread's own row under it", async () => {
-    const record = await openChannelChat(deps, {
+  it("starts a thread's parent chat, unnamed, and no chat for the thread", () => {
+    const started = startChannelChat(deps, {
       channel: "telegram",
       threadId: "-100:7",
       parentThreadId: "-100",
-      agentName: "main",
+      threadName: "Topic",
     });
 
-    expect(record.id).toBe(channelChatId("telegram", "-100:7"));
-    expect(deps.chats.byKey(chatKey("telegram", "-100" as ChatId))?.kind).toBe("group");
-    expect(deps.chats.byKey(chatKey("telegram", "-100:7" as ChatId))).toBeNull();
+    expect(deps.chats.find(started.chatId)).toMatchObject({ kind: "group", name: null });
+    expect(deps.chats.list(deps.adapters.accountOn("telegram").platform)).toHaveLength(1);
   });
 
-  it("starts no chat at a dashboard address", async () => {
-    await expect(
-      openChannelChat(deps, { channel: "webchat", threadId: "chat-9", agentName: "main" }),
-    ).rejects.toThrow("No chat at webchat address chat-9");
+  it("answers the same chat for the same address", () => {
+    const a = startChannelChat(deps, {
+      channel: "telegram",
+      threadId: "42",
+      threadType: "private",
+    });
+    const b = startChannelChat(deps, {
+      channel: "telegram",
+      threadId: "42",
+      threadType: "private",
+    });
+
+    expect(b.chatId).toBe(a.chatId);
   });
 });
