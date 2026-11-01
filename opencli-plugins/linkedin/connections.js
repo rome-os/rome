@@ -288,7 +288,12 @@ cli({
           `LinkedIn reported ${result.total} connections but returned none from offset ${offset}`,
         );
       }
-      throw new EmptyResultError("linkedin connections", "No LinkedIn connections were found.");
+      throw new EmptyResultError(
+        "linkedin connections",
+        offset > 0
+          ? `LinkedIn returned no connections at or after offset ${offset}; the previous read reached the end of what LinkedIn returns.`
+          : "No LinkedIn connections were found.",
+      );
     }
     if (result.coverage !== "complete") process.stderr.write(coverageNotice(result));
     return result.rows.map((row, index) => ({

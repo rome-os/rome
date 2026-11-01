@@ -251,7 +251,8 @@ Every row carries the same coverage fields:
 
 Any coverage other than `complete` also prints a one-line notice on stderr, leaving stdout as the
 rows. Authentication walls and failed or malformed responses fail the command instead of returning
-the rows read so far.
+the rows read so far. A read whose `--offset` is past the last connection LinkedIn returns fails
+with an empty result that names the offset.
 
 ```bash
 opencli linkedin connections --limit 500 -f json

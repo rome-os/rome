@@ -317,6 +317,16 @@ test("no connections at all is an empty result", async () => {
   await assert.rejects(run(page, { limit: 20 }), EmptyResultError);
 });
 
+test("an empty continuation read says the list ended at the offset, not that there are no connections", async () => {
+  const page = makePage([apiPage([])]);
+  await assert.rejects(run(page, { limit: 20, offset: 40 }), (error) => {
+    assert.ok(error instanceof EmptyResultError);
+    assert.match(error.hint, /at or after offset 40/);
+    assert.doesNotMatch(error.hint, /No LinkedIn connections were found/);
+    return true;
+  });
+});
+
 test("auth walls and auth failures fail closed", async () => {
   await assert.rejects(run(makePage([], { authWall: true }), { limit: 2 }), AuthRequiredError);
   await assert.rejects(run(makePage([], { cookies: [] }), { limit: 2 }), AuthRequiredError);
