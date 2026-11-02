@@ -304,6 +304,19 @@ export interface RomeAgentTranscriptMessageInput {
   content: string;
 }
 
+/** A batch of a turn's trace blocks, with the transcript lines it carries. */
+export interface TraceBatch {
+  messageId: string;
+  sessionId: string;
+  turnId: string | null;
+  /** 0-based index of the first block in `blocks` within the whole trace. */
+  startSeq: number;
+  /** Pre-shaped trace blocks (already passed through toTraceEvent). */
+  blocks: unknown[];
+  trigger?: RomeAgentTraceTriggerMetadata;
+  transcriptMessages?: RomeAgentTranscriptMessageInput[];
+}
+
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
@@ -2518,19 +2531,20 @@ export class WebChatRepository {
    * that *would* double-write trips the (message_id, seq) primary key and
    * fails loudly instead.
    */
-  async appendTraceBlocks(input: {
-    messageId: string;
-    sessionId: string;
-    turnId: string | null;
-    /** 0-based index of the first block in `blocks` within the whole trace. */
-    startSeq: number;
-    /** Pre-shaped trace blocks (already passed through toTraceEvent). */
-    blocks: unknown[];
-    trigger?: RomeAgentTraceTriggerMetadata;
-    transcriptMessages?: RomeAgentTranscriptMessageInput[];
-  }): Promise<void> {
+  async appendTraceBlocks(input: TraceBatch): Promise<void> {
     if (input.blocks.length === 0) return;
+    // `await` matters: better-sqlite3 transactions are synchronous, but the
+    // call must stay awaited so a future async driver can't turn this into a
+    // fire-and-forget write (same contract as deleteSession).
+    await this.writeTraceBatch(input);
+  }
 
+  /**
+   * Write a trace batch in one transaction, its transcript lines stamped
+   * against `now`. A subclass that writes more with the batch calls this
+   * inside its own transaction, so the batch commits with it or not at all.
+   */
+  protected writeTraceBatch(input: TraceBatch, now = new Date()): void {
     const totals = emptyTraceAccountingTotals();
     const blockRows = input.blocks.map((block, i) => {
       accumulateBlockAccounting(totals, block);
@@ -2543,11 +2557,7 @@ export class WebChatRepository {
     });
     const hasProjectionDelta = totals.hasAccounting;
 
-    // `await` matters: better-sqlite3 transactions are synchronous, but the
-    // call must stay awaited so a future async driver can't turn this into a
-    // fire-and-forget write (same contract as deleteSession).
-    await this.db.transaction((tx) => {
-      const now = new Date();
+    this.db.transaction((tx) => {
       const insertTranscriptMessages = (messages: RomeAgentTranscriptMessageInput[]) => {
         for (const message of messages) {
           const accounting = traceAccountingColumns(message.role, message.content);

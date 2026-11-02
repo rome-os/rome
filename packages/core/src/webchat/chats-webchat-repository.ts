@@ -26,6 +26,7 @@ import {
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
+  type TraceBatch,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
@@ -159,49 +160,32 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
-   * Append a turn's trace blocks. The prompt and answer they carry are said
-   * in the chat of a session that stands in one, such as a fork promoted
-   * while its turn ran, and the trace stays the session's own.
+   * Write a turn's trace batch. The prompt and answer it carries are said in
+   * the chat of a session that stands in one, such as a fork promoted while
+   * its turn ran, in the same transaction as the trace, which stays the
+   * session's own: a batch whose answer could not be said leaves nothing
+   * behind, so the recorder's place in the trace stays true.
    */
-  override async appendTraceBlocks(
-    input: Parameters<WebChatRepository["appendTraceBlocks"]>[0],
-  ): Promise<void> {
+  protected override writeTraceBatch(input: TraceBatch, now = new Date()): void {
     const said = input.transcriptMessages ?? [];
-    if (input.blocks.length === 0 || said.length === 0) return super.appendTraceBlocks(input);
     const inChat = said.flatMap((message) => {
       const standing = this.standingOf(message.sessionId);
       return standing ? [{ message, standing }] : [];
     });
-    if (inChat.length === 0) return super.appendTraceBlocks(input);
+    if (inChat.length === 0) return super.writeTraceBatch(input, now);
     const own = said.filter((message) => !inChat.some((line) => line.message === message));
-    // Prompt, trace, answer, in the order and at the times the base class
-    // writes them. Each step is safe to repeat, so a batch that failed part
-    // way is retried whole: saying a line again changes nothing, and a trace
-    // batch already appended is not appended again.
-    const sayAll = (role: "user" | "assistant", at: Date) =>
-      this.db.transaction(() => {
-        for (const { message, standing } of inChat) {
-          if (message.role !== role) continue;
-          this.say(standing, message.id, role, partsOf(message.content), message.turnId, at);
-        }
-      });
-    sayAll("user", new Date());
-    if (!this.appended(input.messageId, input.startSeq)) {
-      await super.appendTraceBlocks({ ...input, transcriptMessages: own });
-    }
-    // The base class stamps the trace a millisecond after its own clock
-    // reading, and an answer two: read after it returns, the answer is never
-    // in an earlier second than the trace.
-    sayAll("assistant", new Date(Date.now() + 2));
-  }
-
-  /** Whether trace `messageId`'s batch from block `startSeq` is on record. */
-  private appended(messageId: string, startSeq: number): boolean {
-    return (
-      this.db.all(sql`
-        SELECT 1 FROM rome_agent_trace_blocks WHERE message_id = ${messageId} AND seq = ${startSeq}
-      `).length > 0
-    );
+    // Prompt, trace, answer, at the times the base class gives them.
+    const sayAll = (role: "user" | "assistant", at: Date) => {
+      for (const { message, standing } of inChat) {
+        if (message.role !== role) continue;
+        this.say(standing, message.id, role, partsOf(message.content), message.turnId, at);
+      }
+    };
+    this.db.transaction(() => {
+      sayAll("user", now);
+      super.writeTraceBatch({ ...input, transcriptMessages: own }, now);
+      sayAll("assistant", new Date(now.getTime() + 2));
+    });
   }
 
   /**

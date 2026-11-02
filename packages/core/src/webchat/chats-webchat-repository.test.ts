@@ -206,7 +206,7 @@ describe("ChatsWebChatRepository", () => {
     expect(emitted).toEqual([]);
   });
 
-  it("finishes a trace batch on retry when its answer could not be said", async () => {
+  it("writes nothing of a trace batch whose answer could not be said, so a retry finishes it", async () => {
     let failures = 1;
     class Failing extends MessageRepository {
       override record(message: Message): RecordedMessage | null {
@@ -247,7 +247,8 @@ describe("ChatsWebChatRepository", () => {
     };
 
     await expect(failing.appendTraceBlocks(batch)).rejects.toThrow("disk full");
-    expect(ownRows("chat-1").map((row) => row.role)).toEqual(["trace"]);
+    expect(ownRows("chat-1")).toEqual([]);
+    expect(testDb.db.select().from(chatMessages).all()).toEqual([]);
     await failing.appendTraceBlocks(batch);
     expect(
       (await failing.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]),
