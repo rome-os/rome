@@ -90,7 +90,10 @@ export function recordedSends<C extends Channel>(
     Object.defineProperty(wrapped, "send", {
       value: async (address: ChatId, message: OutgoingMessage): Promise<MessageReceipt> => {
         const local = threadsStartedOn(deps, channel);
-        const email = message.kind === "email" ? message : undefined;
+        // Only an email channel reads a message's email fields; any other
+        // ignores them, as the SDK lets it.
+        const emails = deps.adapters.accountOn(channel.name).platform === EMAIL_PLATFORM;
+        const email = emails && message.kind === "email" ? message : undefined;
         const out: Out = {
           // The port reads a message without text by its parts.
           text: message.text ?? (message.parts ? partsText(message.parts) : ""),
@@ -277,7 +280,6 @@ async function sayInChat(
     threadOf !== null ||
     // Every email thread is a group, whether or not the message says email.
     account.platform === EMAIL_PLATFORM ||
-    message.kind === "email" ||
     kindAt(deps, channel.name, address) === "group";
   const { chat, key, romeEnd } = startChannelChat(deps, {
     channel: channel.name,

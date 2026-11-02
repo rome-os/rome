@@ -137,6 +137,18 @@ describe("recordedSends", () => {
     expect(lines().map((line) => line.chat)).toEqual([dm.externalId]);
   });
 
+  it("send an email-shaped message on a non-email channel as plain text, ignoring its email fields", async () => {
+    await send("telegram").send(
+      "4242" as ChatId,
+      { kind: "email", inReplyToMessageId: "<x@mail>", text: "Deploy done" } as OutgoingMessage,
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(lines().map((line) => line.chat)).toEqual([
+      chatAt("telegram", "4242", { romeEnd: BOT.id }).externalId,
+    ]);
+  });
+
   it("record a send to a Telegram group Rome has not heard in the group's own chat", async () => {
     await send("telegram").send("-300" as ChatId, { text: "Hello group" });
 
