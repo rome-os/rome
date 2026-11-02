@@ -18,8 +18,8 @@ import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
-import { chatKey, type Place, placeIn } from "../chats/storage/place.js";
-import type { DrizzleDb } from "../db/index.js";
+import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/place.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   type EnsureRomeSessionInput,
   type MessagePageCursor,
@@ -494,6 +494,54 @@ export class ChatsWebChatRepository extends WebChatRepository {
       })
       .where(eq(romeSessions.id, sessionId))
       .run();
+  }
+
+  /**
+   * Delete sessions `ids` with the dashboard chats they stand in, each with
+   * every line said in it. A chat is the session's alone when it is the
+   * dashboard chat keyed by that session; a channel chat goes on without it.
+   */
+  protected override deleteSessionRows(tx: DrizzleTx, ids: string[]): void {
+    const ended = ids.flatMap((id) => this.dashboardChatOf(id) ?? []);
+    super.deleteSessionRows(tx, ids);
+    for (const ref of ended) this.chats.end(ref);
+  }
+
+  /** Name session `id` and its dashboard chat `name` in one transaction. */
+  protected override async renameSession(
+    id: string,
+    name: string,
+    currentName?: string,
+  ): Promise<boolean> {
+    return this.db.transaction((tx) => {
+      const renamed =
+        tx
+          .update(romeSessions)
+          .set({ name })
+          .where(
+            and(
+              eq(romeSessions.id, id),
+              currentName === undefined ? undefined : eq(romeSessions.name, currentName),
+            ),
+          )
+          .returning({ id: romeSessions.id })
+          .all().length > 0;
+      const chat = renamed ? this.dashboardChatOf(id) : null;
+      if (chat) this.chats.rename(chat, name);
+      return renamed;
+    });
+  }
+
+  /** The dashboard chat keyed by session `sessionId`, or null when the
+   *  session stands in none. */
+  private dashboardChatOf(sessionId: string): ChatRef | null {
+    const row = this.db
+      .select({ chatId: romeSessions.chatId })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .get();
+    const chat = row?.chatId ? this.chats.find(row.chatId) : null;
+    return chat?.ref.platform === WEBCHAT_PLATFORM && chat.key === sessionId ? chat.ref : null;
   }
 
   /** Where session `sessionId` stands in Chats, or null for a session in no
