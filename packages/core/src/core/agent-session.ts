@@ -131,6 +131,7 @@ import { ChatEvents, type Via } from "../chats/events.js";
 import type { SaidMessage } from "../chats/message.js";
 import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
+import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
@@ -168,6 +169,15 @@ interface ConversationContextLine {
   sender: string | null;
   text: string;
   createdAt?: Date;
+}
+
+function contextLine(message: ContextLine): ConversationContextLine {
+  return {
+    id: String(message.id),
+    sender: message.senderName,
+    text: message.text,
+    createdAt: message.at,
+  };
 }
 
 function storedContextLine(
@@ -383,6 +393,9 @@ export interface SendTurnOptions {
   romeSessionType?: RomeSessionType;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The line `replyTo` names, as Rome holds it where the turn's session
+   *  stands, or null when Rome holds none. Read only with `turnLinks`. */
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
 }
 
@@ -467,6 +480,10 @@ interface ManagerDeps {
   /** What was said in each place, read for the agent's catch-up at a wake.
    *  Absent, the catch-up reads the woken channel's own record only. */
   chatMessages?: Pick<MessageRepository, "find">;
+  /** Each session's links to what was said where it stands. Given, a wake's
+   *  catch-up reads and marks them in place of `webchatRepo`'s rows. Nothing
+   *  passes it until the Chats switch. */
+  turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
   /** The platform a channel's accounts live on. Absent, a channel's name
    *  is its platform. */
   platformOfChannel?: PlatformOfChannel;
@@ -2031,6 +2048,7 @@ interface TurnSink {
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -3472,6 +3490,7 @@ class AgentSessionImpl implements AgentSession {
             ? "channel"
             : "action"),
       replyTo: options?.replyTo,
+      quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
@@ -3648,17 +3667,43 @@ class AgentSessionImpl implements AgentSession {
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       let pendingConversationMessageIds: string[] = [];
+      let unseenLineIds: number[] = [];
       // A channel conversation stores lines the agent never saw as turns. The
       // surface says whether this channel does; webchat, for one, does not.
       const channel = sink.threadContext?.channel;
-      if (
-        this.deps.webchatRepo &&
+      const catchesUp =
         sink.romeSessionType === "channel" &&
         sink.romeSessionId &&
         sink.threadContext &&
         channel &&
-        channelSurfaceOf(this.deps, channel).promptContext
-      ) {
+        channelSurfaceOf(this.deps, channel).promptContext;
+      if (catchesUp && this.deps.turnLinks) {
+        // The agent catches up on the lines said where its session stands
+        // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
+        const unseen = this.deps.turnLinks.unseen(sink.romeSessionId);
+        const shown = unseen.slice(-CATCH_UP_LIMIT);
+        // Rome's first line in a new thread quotes the line that started it,
+        // said in the chat outside the thread.
+        const threadStarter = unseen.find((line) => line.fromRome && line.quoted)?.quoted ?? null;
+        const repliedTo = sink.quoted
+          ? contextLine(sink.quoted)
+          : sink.replyTo?.content
+            ? {
+                id: `runtime-reply:${sink.replyTo.messageId}`,
+                sender: sink.replyTo.senderName ?? null,
+                text: sink.replyTo.content,
+              }
+            : null;
+        unseenLineIds = unseen.map((line) => line.id);
+        userPrompt = prependConversationContext(userPrompt, {
+          notifications: [
+            ...(threadStarter ? [contextLine(threadStarter)] : []),
+            ...shown.map(contextLine),
+          ],
+          omittedNotificationCount: unseen.length - shown.length,
+          repliedTo,
+        });
+      } else if (catchesUp && this.deps.webchatRepo && sink.threadContext && channel) {
         const storedContext = await this.deps.webchatRepo.loadConversationContext(
           sink.romeSessionId,
           sink.replyTo?.messageId,
@@ -3857,6 +3902,18 @@ class AgentSessionImpl implements AgentSession {
               injectedToolResult: input.injectedToolResult,
             });
             this.inputs.ready(turnId);
+            if (this.deps.turnLinks && unseenLineIds.length > 0) {
+              try {
+                this.deps.turnLinks.seen(unseenLineIds, sink.romeSessionId, sink.turnId);
+              } catch (err) {
+                // As below: the turn goes on, and a later turn retries.
+                log.warn("failed to mark conversation context seen", {
+                  romeSessionId: sink.romeSessionId,
+                  turnId: sink.turnId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
             if (this.deps.webchatRepo && pendingConversationMessageIds.length > 0) {
               try {
                 await this.deps.webchatRepo.markConversationContextInjected(

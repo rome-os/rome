@@ -78,6 +78,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { testChannelSurface } from "../test/channel-surface.js";
+import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -2049,6 +2050,7 @@ describe("AgentRunner", () => {
       keepAliveAcrossTurns?: boolean;
       appCatalog?: Pick<AppCatalog, "get">;
       resetPolicy?: ProviderSessionResetPolicy;
+      turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2061,6 +2063,7 @@ describe("AgentRunner", () => {
         ...(options.resetPolicy
           ? { resolveProviderSessionReset: async () => options.resetPolicy! }
           : {}),
+        ...(options.turnLinks ? { turnLinks: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
@@ -4267,6 +4270,68 @@ describe("AgentRunner", () => {
         threadStarter: null,
         repliedTo: null,
       });
+    });
+
+    it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
+      const webchatRepo = new WebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "discord",
+        threadId: "linked-context",
+        agentName: "main",
+      });
+      // A legacy row the turn links stand in for: it must not be read.
+      await webchatRepo.addConversationMessage({
+        sessionId: conversation.id,
+        role: "notification",
+        content: JSON.stringify([{ type: "text", content: "legacy update" }]),
+        platformMessageId: "legacy-message",
+        senderName: "Carol",
+      });
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const unseen: UnseenLine[] = [
+        { id: 7, senderName: "Bob", text: "ambient update", at, fromRome: false, quoted: null },
+        { id: 8, senderName: "Dana", text: "second update", at, fromRome: false, quoted: null },
+      ];
+      const seen: { ids: readonly number[]; sessionId: string; turnId: string }[] = [];
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: (sessionId) => (sessionId === conversation.id ? unseen : []),
+        seen: (ids, sessionId, turnId) => {
+          seen.push({ ids, sessionId, turnId });
+        },
+      };
+
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-linked-context",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      await collectMessages(
+        createRunner(provider, undefined, { turnLinks }).run({
+          agentName: "test-main",
+          prompt: "current message",
+          channelThreadKey: "discord:linked-context",
+          romeSessionId: conversation.id,
+          threadContext: {
+            channel: "discord",
+            threadId: "linked-context",
+            channelUserId: "guardian",
+            threadType: "group",
+          },
+        }),
+      );
+
+      const prompt = providerPrompts[0] ?? "";
+      expect(prompt).toContain("Bob: ambient update");
+      expect(prompt).toContain("Dana: second update");
+      expect(prompt).not.toContain("legacy update");
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.ids).toEqual([7, 8]);
+      expect(seen[0]?.sessionId).toBe(conversation.id);
     });
 
     it("injects a child thread's parent starter before Rome's first reply and the current message", async () => {
