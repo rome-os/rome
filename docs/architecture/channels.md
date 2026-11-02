@@ -157,5 +157,7 @@ Chats records each chat once, keyed by an integer, with the adapter's key beside
 - Every legacy chat row stands for exactly one chat line, and a group message heard on two of Rome's accounts is one line with a turn link per seat.
 - A seat gets its chat with its first line, so a direct message on a platform with opaque DM ids is keyed by the person who wrote first, as the backfill keys it.
 - A chat goes when its last seat goes, with its lines and turn links.
+- A seat whose kind is learned later, such as a place first met sending and then found to be a group, moves to the chat its key now names, with its lines.
+- What a line says, and who said it, changes only with what its rows say. A line Rome said stays Rome's, whichever account's row recorded it first.
 - A legacy row the copy cannot place is skipped. The copy never fails the write it follows.
 - While the triggers exist, a migration that rebuilds `rome_sessions` or `rome_agent_messages` must drop and recreate the 0105 views and triggers around the rebuild. SQLite refuses the rename otherwise.

@@ -75,6 +75,11 @@ ALTER TABLE `rome_sessions` ADD `account_id` text;
 --> statement-breakpoint
 CREATE INDEX `idx_rome_sessions_chat` ON `rome_sessions` (`chat_id`,`thread_id`);
 --> statement-breakpoint
+-- Finds the rows that quote a line, so a line copied after its quotes resolves
+-- them. Dropped with the triggers.
+CREATE INDEX `idx_rome_agent_messages_legacy_quote` ON `rome_agent_messages` (`session_id`,`reply_to_platform_message_id`)
+  WHERE `reply_to_platform_message_id` IS NOT NULL;
+--> statement-breakpoint
 -- Every legacy channel row as a seat of one of Rome's accounts in a chat: the
 -- chat's key, Rome's account there, and whether the row is a thread under a
 -- parent row. A dashboard chat is a webchat chat keyed by its own row's id. A
@@ -225,6 +230,17 @@ WHERE `reply_to_message_id` IS NULL AND `id` IN (
   SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
   WHERE v.`reply_key` IS NOT NULL AND 1);
 --> statement-breakpoint
+UPDATE OR IGNORE `chat_messages` SET
+  `sender_account_id` = (SELECT v.`sender_account_id` FROM `legacy_chat_line_ids` i
+    JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+    WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1),
+  `sender_agent` = (SELECT v.`sender_agent` FROM `legacy_chat_line_ids` i
+    JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+    WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1)
+WHERE `sender_agent` IS NULL AND `id` IN (
+  SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+  WHERE v.`sender_agent` IS NOT NULL AND 1);
+--> statement-breakpoint
 -- Until every writer records through Chats, a legacy row written, changed or
 -- deleted is copied to its chat line here, by the statements the backfill
 -- above ran. A seat gets its chat with its first line, when a direct message
@@ -280,11 +296,31 @@ BEGIN
   WHERE `reply_to_message_id` IS NULL AND `id` IN (
     SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
     WHERE v.`reply_key` IS NOT NULL AND v.`legacy_id` = NEW.`id`);
+  UPDATE OR IGNORE `chat_messages` SET
+    `sender_account_id` = (SELECT v.`sender_account_id` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1),
+    `sender_agent` = (SELECT v.`sender_agent` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1)
+  WHERE `sender_agent` IS NULL AND `id` IN (
+    SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+    WHERE v.`sender_agent` IS NOT NULL AND v.`legacy_id` = NEW.`id`);
+  UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
+    SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`)
+  WHERE `reply_to_message_id` IS NULL AND `id` IN (
+    SELECT q.`message_id` FROM `chat_messages` t
+    JOIN `rome_sessions` r ON r.`chat_id` = t.`chat_id`
+    JOIN `rome_agent_messages` m ON m.`session_id` = r.`id` AND m.`reply_to_platform_message_id` = t.`key`
+    JOIN `legacy_chat_line_ids` q ON q.`legacy_id` = m.`id`
+    WHERE t.`id` = (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`));
 END;
 --> statement-breakpoint
 -- A changed row keeps its line, renamed in place when its key changed, unless
 -- another line already holds the new key: then the row joins that line and
--- its old one goes, if no other row stands for it.
+-- its old one goes, if no other row stands for it. What the line says changes
+-- only with what the row says; a change to the seat's turn link alone leaves
+-- it.
 CREATE TRIGGER `legacy_chat_line_update` AFTER UPDATE OF `role`, `turn_id`, `input_state`, `actor`, `content`, `platform_message_id`, `sender_id`, `sender_name`, `reply_to_platform_message_id`, `context_injected_turn_id` ON `rome_agent_messages`
 WHEN NEW.`role` <> 'trace'
 BEGIN
@@ -345,6 +381,16 @@ BEGIN
     SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
     WHERE v.`reply_key` IS NOT NULL AND v.`legacy_id` = NEW.`id`);
   UPDATE OR IGNORE `chat_messages` SET
+    `sender_account_id` = (SELECT v.`sender_account_id` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1),
+    `sender_agent` = (SELECT v.`sender_agent` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1)
+  WHERE `sender_agent` IS NULL AND `id` IN (
+    SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+    WHERE v.`sender_agent` IS NOT NULL AND v.`legacy_id` = NEW.`id`);
+  UPDATE OR IGNORE `chat_messages` SET
     `thread_id` = (SELECT v.`thread_id` FROM `legacy_chat_line_rows` v WHERE v.`legacy_id` = NEW.`id`),
     `sender_account_id` = (SELECT v.`sender_account_id` FROM `legacy_chat_line_rows` v WHERE v.`legacy_id` = NEW.`id`),
     `sender_agent` = (SELECT v.`sender_agent` FROM `legacy_chat_line_rows` v WHERE v.`legacy_id` = NEW.`id`),
@@ -354,7 +400,17 @@ BEGIN
     `reply_to_message_id` = (SELECT q.`id` FROM `legacy_chat_line_rows` v
       JOIN `chat_messages` q ON q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`
       WHERE v.`legacy_id` = NEW.`id`)
-  WHERE `id` = (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`);
+  WHERE `id` = (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`) AND (OLD.`content` IS NOT NEW.`content` OR OLD.`role` IS NOT NEW.`role` OR OLD.`actor` IS NOT NEW.`actor` OR OLD.`sender_id` IS NOT NEW.`sender_id` OR OLD.`sender_name` IS NOT NEW.`sender_name` OR OLD.`platform_message_id` IS NOT NEW.`platform_message_id` OR OLD.`reply_to_platform_message_id` IS NOT NEW.`reply_to_platform_message_id`)
+    -- A seat's own row never takes a line from Rome away from Rome.
+    AND NOT (`sender_agent` IS NOT NULL AND (SELECT v.`sender_agent` FROM `legacy_chat_line_rows` v WHERE v.`legacy_id` = NEW.`id`) IS NULL);
+  UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
+    SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`)
+  WHERE `reply_to_message_id` IS NULL AND `id` IN (
+    SELECT q.`message_id` FROM `chat_messages` t
+    JOIN `rome_sessions` r ON r.`chat_id` = t.`chat_id`
+    JOIN `rome_agent_messages` m ON m.`session_id` = r.`id` AND m.`reply_to_platform_message_id` = t.`key`
+    JOIN `legacy_chat_line_ids` q ON q.`legacy_id` = m.`id`
+    WHERE t.`id` = (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`));
 END;
 --> statement-breakpoint
 -- A deleted row takes its seat's turn link with it, and its line once no
@@ -420,6 +476,94 @@ BEGIN
   WHERE `reply_to_message_id` IS NULL AND `id` IN (
     SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
     WHERE v.`reply_key` IS NOT NULL AND v.`session_id` = NEW.`id`);
+  UPDATE OR IGNORE `chat_messages` SET
+    `sender_account_id` = (SELECT v.`sender_account_id` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1),
+    `sender_agent` = (SELECT v.`sender_agent` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1)
+  WHERE `sender_agent` IS NULL AND `id` IN (
+    SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+    WHERE v.`sender_agent` IS NOT NULL AND v.`session_id` = NEW.`id`);
+END;
+--> statement-breakpoint
+-- A seat whose kind is learned later, such as a row first met sending and then
+-- found to be a group, moves to the chat its key now names, with its lines.
+CREATE TRIGGER `legacy_chat_seat_reclassify` AFTER UPDATE OF `source_thread_type` ON `rome_sessions`
+WHEN NEW.`chat_id` IS NOT NULL AND EXISTS (SELECT 1 FROM `legacy_chat_seats` s JOIN `chats` c ON c.`id` = NEW.`chat_id`
+  WHERE s.`session_id` = NEW.`id` AND NOT s.`is_thread` AND (s.`key` IS NOT c.`key` OR s.`kind` IS NOT c.`kind`))
+BEGIN
+  DELETE FROM `channel_addresses` WHERE `account_id` = NEW.`account_id` AND `thread_id` = ''
+    AND (`platform`, `chat_key`) IN (SELECT c.`platform`, c.`key` FROM `chats` c WHERE c.`id` = NEW.`chat_id`);
+  DELETE FROM `agent_turn_messages` WHERE `session_id` = NEW.`id`;
+  DELETE FROM `chat_messages` WHERE `id` IN (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` IN (SELECT m.`id` FROM `rome_agent_messages` m WHERE m.`session_id` = NEW.`id`))
+    AND NOT EXISTS (SELECT 1 FROM `legacy_chat_line_ids` o JOIN `rome_agent_messages` m ON m.`id` = o.`legacy_id`
+      WHERE o.`message_id` = `chat_messages`.`id` AND m.`session_id` <> NEW.`id`);
+  DELETE FROM `legacy_chat_line_ids` WHERE `legacy_id` IN (SELECT m.`id` FROM `rome_agent_messages` m WHERE m.`session_id` = NEW.`id`);
+  UPDATE `rome_sessions` SET `chat_id` = NULL, `chat_platform` = NULL, `account_id` = NULL WHERE `id` = NEW.`id`;
+  DELETE FROM `chat_messages` WHERE `chat_id` = NEW.`chat_id`
+    AND NOT EXISTS (SELECT 1 FROM `rome_sessions` r WHERE r.`chat_id` = NEW.`chat_id`);
+  DELETE FROM `chats` WHERE `id` = NEW.`chat_id`
+    AND NOT EXISTS (SELECT 1 FROM `rome_sessions` r WHERE r.`chat_id` = NEW.`chat_id`);
+  INSERT OR IGNORE INTO `chats` (`platform`, `key`, `kind`, `name`, `started_at`)
+  SELECT s.`platform`, s.`key`, s.`kind`, s.`name`, s.`created_at`
+  FROM `legacy_chat_seats` s WHERE NOT s.`is_thread` AND s.`session_id` IN (NEW.`id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`id`))
+    AND (SELECT r.`chat_id` FROM `rome_sessions` r WHERE r.`id` = s.`session_id`) IS NULL
+  ORDER BY s.`created_at`, s.`session_id`;
+  UPDATE `rome_sessions` SET
+    `chat_id` = (SELECT ch.`id` FROM `legacy_chat_seats` s
+      JOIN `chats` ch ON ch.`platform` = s.`platform` AND ch.`key` = s.`key`
+      WHERE s.`session_id` = `rome_sessions`.`id`),
+    `chat_platform` = (SELECT s.`platform` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`),
+    `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
+  WHERE `chat_id` IS NULL AND `id` IN (NEW.`id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`id`))
+    AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE NOT s.`is_thread`);
+  UPDATE `rome_sessions` SET
+    `chat_id` = (SELECT p.`chat_id` FROM `rome_sessions` p WHERE p.`id` = `rome_sessions`.`parent_session_id`),
+    `chat_platform` = (SELECT p.`chat_platform` FROM `rome_sessions` p WHERE p.`id` = `rome_sessions`.`parent_session_id`),
+    `thread_id` = `source_thread_id`,
+    `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
+  WHERE `chat_id` IS NULL AND `id` IN (NEW.`id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`id`))
+    AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
+  INSERT OR IGNORE INTO `channel_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
+  SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
+  FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
+  WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
+    AND (c.`kind` = 'dm' OR r.`thread_id` IS NOT NULL) AND r.`id` IN (SELECT `id` FROM `rome_sessions` WHERE `id` IN (NEW.`id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`id`)));
+  INSERT OR IGNORE INTO `chat_messages` (`chat_id`, `key`, `thread_id`, `sender_account_id`, `sender_agent`,
+    `sender_name`, `text`, `parts`, `reply_to_message_id`, `said_at`)
+  SELECT v.`chat_id`, v.`key`, v.`thread_id`, v.`sender_account_id`, v.`sender_agent`, v.`sender_name`,
+    v.`text`, v.`parts`, NULL, v.`said_at`
+  FROM `legacy_chat_line_rows` v WHERE v.`session_id` = NEW.`id`
+  ORDER BY v.`said_at`, v.`legacy_seq`;
+  INSERT OR REPLACE INTO `legacy_chat_line_ids` (`legacy_id`, `message_id`)
+  SELECT v.`legacy_id`, q.`id`
+  FROM `legacy_chat_line_rows` v JOIN `chat_messages` q ON q.`chat_id` = v.`chat_id` AND q.`key` = v.`key`
+  WHERE v.`session_id` = NEW.`id`;
+  INSERT OR REPLACE INTO `agent_turn_messages` (`message_id`, `session_id`, `turn_id`, `role`, `input_state`)
+  SELECT i.`message_id`, v.`session_id`, v.`link_turn_id`, v.`link_role`, v.`input_state`
+  FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+  WHERE v.`link_role` IS NOT NULL AND v.`session_id` = NEW.`id`
+  ORDER BY v.`said_at`, v.`legacy_seq`;
+  UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
+    SELECT q.`id` FROM `legacy_chat_line_ids` i
+    JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+    JOIN `chat_messages` q ON q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`
+    WHERE i.`message_id` = `chat_messages`.`id` LIMIT 1)
+  WHERE `reply_to_message_id` IS NULL AND `id` IN (
+    SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+    WHERE v.`reply_key` IS NOT NULL AND v.`session_id` = NEW.`id`);
+  UPDATE OR IGNORE `chat_messages` SET
+    `sender_account_id` = (SELECT v.`sender_account_id` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1),
+    `sender_agent` = (SELECT v.`sender_agent` FROM `legacy_chat_line_ids` i
+      JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
+      WHERE i.`message_id` = `chat_messages`.`id` AND v.`sender_agent` IS NOT NULL LIMIT 1)
+  WHERE `sender_agent` IS NULL AND `id` IN (
+    SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
+    WHERE v.`sender_agent` IS NOT NULL AND v.`session_id` = NEW.`id`);
 END;
 --> statement-breakpoint
 -- A renamed chat. A thread seat's name is its thread's, not the chat's.

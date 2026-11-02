@@ -304,4 +304,97 @@ describe("0105_chats_tables triggers", () => {
         .all(),
     ).toEqual([{ platform: "webchat", key: "fork-1", text: "what if", role: "prompt" }]);
   });
+
+  it("keep a line Rome said as Rome's when another account heard it first and catches up on it", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('price-heard', 'channel:support:oc_launch', 'notification', '[{"type":"text","content":"Price is 10."}]', 'om_4', 'bot-sales', 300);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('price', 'channel:sales:oc_launch', 'turn-8', 'assistant', '[{"type":"text","content":"Price is 10."}]', 'om_4', 300);
+      UPDATE rome_agent_messages SET context_injected_turn_id = 'turn-4' WHERE id = 'price-heard';
+    `);
+
+    expect(
+      sqlite
+        .prepare("SELECT sender_account_id, sender_agent FROM chat_messages WHERE key = 'om_4'")
+        .all(),
+    ).toEqual([{ sender_account_id: "bot-sales", sender_agent: "sales" }]);
+  });
+
+  it("resolve a quote recorded before the line it quotes had the platform's id", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, created_at)
+      VALUES ('later', 'channel:sales:oc_launch', 'turn-9', 'assistant', '[{"type":"text","content":"Shipped."}]', 400);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id,
+        reply_to_platform_message_id, created_at)
+      VALUES ('thanks', 'channel:sales:oc_launch', 'turn-10', 'user', '[{"type":"text","content":"Thanks!"}]', 'om_6', 'ou_wei', 'om_5', 401);
+      UPDATE rome_agent_messages SET platform_message_id = 'om_5' WHERE id = 'later';
+    `);
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT q.text FROM chat_messages m JOIN chat_messages q ON q.id = m.reply_to_message_id
+           WHERE m.key = 'om_6'`,
+        )
+        .all(),
+    ).toEqual([{ text: "Shipped." }]);
+  });
+
+  it("move a seat first met sending into the group it turns out to be in", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    // Support wrote first, before Rome knew the place was a group, and Sales
+    // heard it there.
+    sqlite.exec(`
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, agent_name, created_at, activity_at)
+      VALUES ('channel:support:oc_ops', 'oc_ops', 'channel', 'support', 'oc_ops', 'support', 50, 50);
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
+        source_thread_name, agent_name, created_at, activity_at)
+      VALUES ('channel:sales:oc_ops', 'Ops', 'channel', 'sales', 'oc_ops', 'group', 'Ops', 'sales', 50, 50);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('ops-hello', 'channel:support:oc_ops', 'turn-11', 'assistant', '[{"type":"text","content":"Hello ops"}]', 'om_7', 500);
+      INSERT INTO rome_agent_messages (id, session_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('ops-heard', 'channel:sales:oc_ops', 'notification', '[{"type":"text","content":"Hello ops"}]', 'om_7', 'bot-support', 500);
+    `);
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM chat_messages WHERE text = 'Hello ops'").get(),
+    ).toEqual({ n: 2 });
+
+    sqlite.exec(
+      "UPDATE rome_sessions SET source_thread_type = 'group' WHERE id = 'channel:support:oc_ops'",
+    );
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT s.id, c.key, c.kind FROM rome_sessions s JOIN chats c ON c.id = s.chat_id
+           WHERE s.source_thread_id = 'oc_ops' ORDER BY s.id`,
+        )
+        .all(),
+    ).toEqual([
+      { id: "channel:sales:oc_ops", key: "oc_ops", kind: "group" },
+      { id: "channel:support:oc_ops", key: "oc_ops", kind: "group" },
+    ]);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT sender_account_id, sender_agent FROM chat_messages WHERE text = 'Hello ops'",
+        )
+        .all(),
+    ).toEqual([{ sender_account_id: "bot-support", sender_agent: "support" }]);
+    expect(sqlite.prepare("SELECT count(*) AS n FROM chats WHERE kind = 'dm'").get()).toEqual({
+      n: 1,
+    });
+  });
 });
