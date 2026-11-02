@@ -204,6 +204,8 @@ export class TurnLinks {
    * wake is still undecided is left out, since it may yet become a turn's
    * prompt of its own. Each comes with the message it quotes, found anywhere
    * in its chat, so a thread's first line can carry the line that started it.
+   * A copy of a line it saw, held by another of Rome's accounts, is linked as
+   * seen on the way, with no turn.
    */
   unseen(sessionId: string): UnseenLine[] {
     const seat = this.seatOf(sessionId);
@@ -242,6 +244,19 @@ export class TurnLinks {
     const unread = new Set(fresh.map((row) => row.id));
     const copies = new Copies(seat.perAccount ? said : []);
     for (const message of said) if (!unread.has(message.id)) copies.take(message);
+    // A copy of a line the session saw is seen with it. Linking it so means
+    // the next catch-up does not read it again.
+    const seenCopies = said.filter(
+      (message) => unread.has(message.id) && copies.heardBefore(message),
+    );
+    if (seenCopies.length > 0) {
+      for (const message of seenCopies) unread.delete(message.id);
+      this.db.run(sql`
+        INSERT OR IGNORE INTO agent_turn_messages (message_id, session_id, turn_id, role, input_state)
+        SELECT value, ${sessionId}, NULL, 'seen', NULL
+        FROM json_each(${JSON.stringify(seenCopies.map((message) => message.id))})
+      `);
+    }
     const lines = said.filter((message) => {
       if (!unread.has(message.id)) return false;
       if (copies.heardBefore(message)) return false;

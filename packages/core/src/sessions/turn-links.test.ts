@@ -109,6 +109,8 @@ describe("TurnLinks", () => {
     expect(links.unseen("seat-1").map((line) => line.id)).toEqual([mine]);
     links.seen([theirs], "seat-1", "turn-1");
     expect(links.unseen("seat-1")).toEqual([]);
+    // The copy is linked as seen, so later catch-ups do not read it again.
+    expect(links.linkOf("seat-1", mine)).toMatchObject({ role: "seen", turnId: null });
   });
 
   it("read a second alike line as its own, once a copy of the first is seen", () => {
