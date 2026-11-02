@@ -535,7 +535,7 @@ export const romeSessions = sqliteTable(
     // The chat this row is one of Rome's seats in, and the platform's thread
     // id when the seat is in a thread. Null on rows that are not chats
     // (handoff, subagent, action runs). Vocabulary: docs/domains/chats.md.
-    chatId: text("chat_id"),
+    chatId: integer("chat_id"),
     // The platform of the chat at `chat_id`, so a seat holds the chat's whole
     // ref and the sidebar can index the dashboard's seats on their own.
     chatPlatform: text("chat_platform"),
@@ -563,19 +563,22 @@ export const romeSessions = sqliteTable(
 );
 
 // Chats' own record of a chat: one row per place, however many of Rome's
-// accounts are in it. A dashboard chat is a `webchat` chat whose platform id
-// is its own id. Vocabulary: docs/domains/chats.md#chat.
-export const chats = sqliteTable("chats", {
-  // The adapter's id for the chat. A platform's adapter passes the platform's
-  // key through, behind its platform: `<platform>:<group id>`, or
-  // `<platform>:dm:<Rome's account>:<other>` for a direct message. The
-  // dashboard gives its chats random ids.
-  id: text("id").primaryKey(),
-  platform: text("platform").notNull(),
-  kind: text("kind").notNull(), // 'dm' | 'group'
-  name: text("name"),
-  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-});
+// accounts are in it. Vocabulary: docs/domains/chats.md#chat.
+export const chats = sqliteTable(
+  "chats",
+  {
+    id: integer("id").primaryKey(),
+    platform: text("platform").notNull(),
+    // The adapter's key for the chat, unique on its platform: the platform's
+    // group id, or both ends of a direct message. The dashboard's adapter
+    // gives its chats random keys. Chats compares it and never reads it.
+    key: text("key").notNull(),
+    kind: text("kind").notNull(), // 'dm' | 'group'
+    name: text("name"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_chats_key").on(table.platform, table.key)],
+);
 
 // What was said in a chat, once, whoever heard it. Who said it is the
 // account, and for Rome's lines the agent that spoke. A message Rome sends is
@@ -584,15 +587,16 @@ export const chats = sqliteTable("chats", {
 export const chatMessages = sqliteTable(
   "chat_messages",
   {
-    // The adapter's id for the message: `<chat id>/<platform message id>`,
-    // with Rome's account in front of the platform's id where the platform
-    // numbers messages per receiving account. A redelivery, or a group
-    // message heard on two of Rome's accounts, finds its id on record. The
-    // dashboard gives its lines random ids.
-    id: text("id").primaryKey(),
-    chatId: text("chat_id")
+    id: integer("id").primaryKey(),
+    chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
+    // The adapter's key for the message, unique in its chat: the platform's
+    // message id, with Rome's account in front where the platform numbers
+    // messages per receiving account. A redelivery, or a group message heard
+    // on two of Rome's accounts, finds its key on record. The dashboard's
+    // adapter gives its lines random keys.
+    key: text("key").notNull(),
     // The platform's thread id; null in the open chat.
     threadId: text("thread_id"),
     senderAccountId: text("sender_account_id"),
@@ -602,15 +606,14 @@ export const chatMessages = sqliteTable(
     senderName: text("sender_name"),
     text: text("text").notNull(),
     parts: text("parts").notNull(), // JSON array of blocks, as composed
-    // The line this one quotes, by its id. A quote of a line Rome never
-    // recorded still names it.
-    replyToMessageId: text("reply_to_message_id"),
+    // The line this one quotes, when Rome holds it.
+    replyToMessageId: integer("reply_to_message_id"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
+    uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
     // A place's lines by time. Within one second lines keep the order they
-    // were recorded in (rowid): a dashboard line's id is the client's, which
-    // carries no time.
+    // were recorded in.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
     // A place's lines after a given one, by rowid, as the awaiting-guardian
     // flag reads them.
@@ -646,7 +649,7 @@ export const channelAddresses = sqliteTable(
 export const agentTurnMessages = sqliteTable(
   "agent_turn_messages",
   {
-    messageId: text("message_id")
+    messageId: integer("message_id")
       .notNull()
       .references(() => chatMessages.id, { onDelete: "cascade" }),
     sessionId: text("session_id").notNull(),
@@ -689,7 +692,7 @@ export const conciergeTasks = sqliteTable(
      * The Concierge chat message the row points back to. Not a foreign key: the
      * message may be gone, and the panel then offers no jump. The text is never copied.
      */
-    sourceMessageId: text("source_message_id"),
+    sourceMessageId: integer("source_message_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */

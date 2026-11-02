@@ -13,21 +13,21 @@ import type {
 import type { ChannelSend } from "./channel.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
-import { lineAt, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
+import { addressOf, lineAt, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
 import { emailOf, type EmailOutbound } from "./email-chat-adapter.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { startChannelChat } from "../chats/open-chat.js";
-import { placeIn } from "../chats/place.js";
+import { placeIn, type ChatRef } from "../chats/place.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 
 export interface RecordedSendsDeps {
   /** Each channel's chat adapter, which names the chat at an address and
    *  sends there. */
-  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "addressAt">;
-  chats: Pick<ChatRepository, "get" | "start">;
+  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "addressAt" | "keyOf">;
+  chats: Pick<ChatRepository, "byKey" | "start">;
   webchatRepo: Pick<WebChatRepository, "seatIn" | "seatInThread" | "seatOf">;
   replies: Pick<SeatReplies, "send">;
-  messages: Pick<MessageRepository, "send">;
+  messages: Pick<MessageRepository, "send" | "idOf">;
 }
 
 /**
@@ -48,7 +48,7 @@ export function recordedSends<C extends Channel>(
     Object.defineProperty(wrapped, "send", {
       value: async (address: ChatId, message: OutgoingMessage): Promise<MessageReceipt> => {
         const email = message.kind === "email" ? message : undefined;
-        const out: EmailOutbound = {
+        const out: Omit<EmailOutbound, "replyTo"> = {
           text: message.text ?? "",
           ...(message.parts?.length ? { parts: message.parts } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
@@ -76,8 +76,8 @@ export function recordedSends<C extends Channel>(
 function seatAt(deps: RecordedSendsDeps, channel: string, address: ChatId): string | null {
   const account = deps.adapters.accountOn(channel).id;
   for (const kind of ["group", "dm"] as const) {
-    const chat = deps.adapters.chatAt(channel, address, kind);
-    const seat = deps.webchatRepo.seatIn(chat.id, null, account);
+    const chat = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
+    const seat = chat && deps.webchatRepo.seatIn(chat.ref.id, null, account);
     if (seat) return seat;
   }
   return deps.webchatRepo.seatInThread(address, account);
@@ -90,21 +90,22 @@ async function sayInSeat(
   deps: RecordedSendsDeps,
   channel: Channel,
   sessionId: string,
-  out: EmailOutbound,
+  out: Omit<EmailOutbound, "replyTo">,
   message: OutgoingMessage,
   quoted: string | undefined,
 ): Promise<string | null> {
   const seat = await deps.webchatRepo.seatOf(sessionId);
   if (!seat) throw new Error(`Session ${sessionId} stands in no chat to send in`);
-  const replyTo = quoted ? lineAt(seat.place.chat, seat.accountId, quoted) : undefined;
+  const key = deps.adapters.keyOf(seat.place.chat);
+  const replyTo = quoted ? quoteIn(deps, seat.place.chat, lineAt(key, seat.accountId, quoted)) : {};
   const said = await deps.replies.send(
     sessionId,
     channel,
-    { ...out, ...(replyTo ? { replyTo } : {}) },
+    { ...out, ...replyTo },
     message.turnId ? { turnId: message.turnId } : {},
   );
   if (!said) throw new Error(`Session ${sessionId} stands in no chat to send in`);
-  return platformIdOfLine(seat.place.chat, seat.accountId, said.sent);
+  return platformIdOfLine(key, seat.accountId, said.sent);
 }
 
 /**
@@ -118,7 +119,7 @@ async function sayInChat(
   deps: RecordedSendsDeps,
   channel: Channel,
   address: ChatId,
-  out: EmailOutbound,
+  out: Omit<EmailOutbound, "replyTo">,
   message: OutgoingMessage,
   quoted: string | undefined,
 ): Promise<string | null> {
@@ -127,36 +128,47 @@ async function sayInChat(
   const adapter = deps.adapters.of(channel);
   // The port names a thread by its address alone; the adapter knows the
   // thread's chat once it has heard the thread.
-  const threadOf = adapter.threadAt(address)?.chat ?? null;
+  const threadOf = adapter.threadAt(address);
   const group =
     threadOf !== null ||
     message.kind === "email" ||
-    deps.chats.get(deps.adapters.chatAt(channel.name, address, "group"))?.kind === "group";
-  const { chat, romeEnd } = startChannelChat(deps, {
+    deps.chats.byKey(deps.adapters.chatAt(channel.name, address, "group"))?.kind === "group";
+  const { chat, key, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: address,
-    ...(threadOf
-      ? { parentThreadId: deps.adapters.addressAt(channel.name, placeIn(threadOf)) }
-      : {}),
+    ...(threadOf ? { parentThreadId: addressOf(threadOf) } : {}),
     threadType: group ? "group" : "private",
   });
   const thread = threadOf ? address : null;
-  const replyTo = quoted ? lineAt(chat, romeEnd, quoted) : undefined;
-  let lineId: string | null = null;
+  const replyTo = quoted ? quoteIn(deps, chat, lineAt(key, romeEnd, quoted)) : {};
+  let lineKey: string | null = null;
   await deps.messages.send(
     {
       direction: "fromRome",
       place: placeIn(chat, thread ?? undefined),
       saidBy: { account: { platform, id: romeEnd }, agent: "main" },
       parts: out.parts ?? [{ type: "text", content: out.text }],
-      ...(replyTo ? { replyTo } : {}),
+      ...replyTo,
     },
-    async () => {
-      lineId = await adapter.send(chat.id, thread, { ...out, ...(replyTo ? { replyTo } : {}) });
-      return { id: lineId };
+    async (target) => {
+      lineKey = await adapter.send(target.chat, thread, {
+        ...out,
+        ...(target.replyTo ? { replyTo: target.replyTo } : {}),
+      });
+      return { key: lineKey };
     },
   );
-  return lineId === null ? null : platformIdOfLine(chat, romeEnd, lineId);
+  return lineKey === null ? null : platformIdOfLine(key, romeEnd, lineKey);
+}
+
+/** The quote of the line keyed `key` in `chat`: by its id when Rome holds
+ *  it, else by its key, which the platform still shows as quoted. */
+function quoteIn(
+  deps: Pick<RecordedSendsDeps, "messages">,
+  chat: ChatRef,
+  key: string,
+): { replyTo: number | { key: string } } {
+  return { replyTo: deps.messages.idOf(chat, key) ?? { key } };
 }
 
 /**
@@ -167,12 +179,12 @@ async function sayInChat(
 async function openThread(
   deps: RecordedSendsDeps,
   channel: Channel,
-  out: EmailOutbound,
+  out: Omit<EmailOutbound, "replyTo">,
   email: OutgoingEmailMessage,
 ): Promise<MessageReceipt> {
   const adapter = emailOf(deps.adapters, channel);
   const subject = email.subject?.trim() || null;
-  const chat = adapter.open(
+  const key = adapter.open(
     {
       to: email.to ?? [],
       ...(email.cc ? { cc: email.cc } : {}),
@@ -180,9 +192,9 @@ async function openThread(
     },
     subject ?? "",
   );
-  deps.chats.start(chat, "group", subject);
+  const chat = deps.chats.start(key, "group", subject).ref;
   const romeEnd = adapter.account.id;
-  let lineId = "";
+  let lineKey = "";
   await deps.messages.send(
     {
       direction: "fromRome",
@@ -190,12 +202,12 @@ async function openThread(
       saidBy: { account: { platform: chat.platform, id: romeEnd }, agent: "main" },
       parts: out.parts ?? [{ type: "text", content: out.text }],
     },
-    async () => {
-      lineId = await adapter.send(chat.id, null, out);
-      return { id: lineId };
+    async (target) => {
+      lineKey = await adapter.send(target.chat, null, out);
+      return { key: lineKey };
     },
   );
-  const messageId = platformIdOfLine(chat, romeEnd, lineId);
+  const messageId = platformIdOfLine(key, romeEnd, lineKey);
   return {
     chatId: deps.adapters.addressAt(channel.name, placeIn(chat)),
     ...(messageId ? { messageId } : {}),

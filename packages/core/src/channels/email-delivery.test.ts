@@ -111,7 +111,7 @@ async function harness(overrides: Partial<MailProvider> = {}) {
   /** Rome's lines on record, oldest first, by the platform's id for each. */
   const recorded = () =>
     testDb.db
-      .all<{ id: string; text: string }>(sql`SELECT id, text FROM chat_messages ORDER BY rowid`)
+      .all<{ id: string; text: string }>(sql`SELECT key AS id, text FROM chat_messages ORDER BY id`)
       .map((line) => ({ ...line, platformMessageId: line.id.split("/").at(-1) ?? null }));
   /** The seats sends opened. */
   const seats = () => testDb.db.all<{ id: string }>(sql`SELECT id FROM rome_sessions`);

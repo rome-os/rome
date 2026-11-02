@@ -132,11 +132,21 @@ describe("a link on a platform Rome holds accounts on", () => {
         sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
         accountOf: (name: string) =>
           recorded && !vacated.has(name) ? { platform: "telegram", id: `${name}-account` } : null,
-        chats: { get: () => null, start: unused as never },
+        chats: {
+          get: () => null,
+          start: (key: { platform: string }) => ({
+            ref: { platform: key.platform, id: 1 },
+            key: "dm",
+            kind: "dm" as const,
+            name: null,
+            startedAt: new Date(0),
+          }),
+        },
         chatMessages: { send: unused },
         adapters: {
           of: unused as never,
           addressAt: unused as never,
+          keyOf: unused as never,
           directMessageReached: (_channel: string, other: string, address: string) =>
             chatAt("telegram", address, { romeEnd: "rome", other }),
         },

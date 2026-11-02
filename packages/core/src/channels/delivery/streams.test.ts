@@ -26,7 +26,7 @@ const target = {
   romeSessionId: "conversation-1",
   turnId: "turn-1",
 };
-const chat = chatAt("telegram", "chat-1");
+const key = chatAt("telegram", "chat-1");
 
 /**
  * Reply streams over `transport` on Telegram, said through Rome's seat
@@ -40,7 +40,7 @@ function streamsOver(
   const testDb = createTestDb();
   const repo = new WebChatRepository(testDb.db);
   const fixture = seatFixture(testDb.db);
-  fixture.chat(chat.platform, chat.id, "group");
+  const chat = fixture.chat(key.platform, key.externalId, "group");
   fixture.seat({ id: "conversation-1", chat, accountId: "telegram" });
   const lookup = rs.fn((name: string) =>
     name === "telegram"
@@ -60,12 +60,12 @@ function streamsOver(
   /** Rome's lines in the chat, with the platform id each went out as. */
   const recorded = () =>
     testDb.db
-      .all<{ id: string; text: string; sender_agent: string | null }>(
-        sql`SELECT id, text, sender_agent FROM chat_messages ORDER BY rowid`,
+      .all<{ key: string; text: string; sender_agent: string | null }>(
+        sql`SELECT key, text, sender_agent FROM chat_messages ORDER BY id`,
       )
       .map((line) => ({
         text: line.text,
-        platformMessageId: platformIdOfLine(chat, "telegram", line.id),
+        platformMessageId: platformIdOfLine(key, "telegram", line.key),
         byRome: line.sender_agent !== null,
       }));
   /** The seat's answer to turn-1, as the turn links it. */

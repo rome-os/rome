@@ -19,8 +19,7 @@ import {
   type ChatAdapters,
   type Outbound,
 } from "../chats/adapter.js";
-import type { ChatRef } from "../chats/place.js";
-import { ChatIds, chatKey } from "./chat-ids.js";
+import { chatKey, type ChatKey } from "./chat-ids.js";
 import type { ChatAddresses } from "./chat-addresses.js";
 
 export const EMAIL_PLATFORM = "email";
@@ -45,8 +44,8 @@ export interface EmailChatAdapter extends ChannelChatAdapter {
    * adapter keys now. Nothing is sent: the thread starts with the first
    * message sent into it.
    */
-  open(recipients: EmailRecipients, subject: string): ChatRef;
-  send(chatId: string, threadId: ChatId | null, out: EmailOutbound): Promise<string>;
+  open(recipients: EmailRecipients, subject: string): ChatKey;
+  send(chatKey: string, threadId: ChatId | null, out: EmailOutbound): Promise<string>;
 }
 
 export function isEmailAdapter(adapter: ChannelChatAdapter): adapter is EmailChatAdapter {
@@ -92,23 +91,22 @@ export function emailChatAdapter(
     get account() {
       return base.account;
     },
-    heard: (id) => base.heard(id),
+    heard: (chat, key) => base.heard(chat, key),
     threadAt: (address) => base.threadAt(address),
     start: (deliver, fault) => base.start(deliver, fault),
     stop: () => base.stop(),
-    stream: (chatId, threadId, out) => base.stream?.(chatId, threadId, out) ?? null,
+    stream: (chat, threadId, out) => base.stream?.(chat, threadId, out) ?? null,
 
     open(recipients, subject) {
       const own = account();
       const key = `rome-${uuidv7()}`;
       unsent.set(key, { recipients, subject });
-      return ChatIds.chat(chatKey(own.platform, key as ChatId));
+      return chatKey(own.platform, key as ChatId);
     },
 
-    async send(chatId, _threadId, out) {
+    async send(key, _threadId, out) {
       const own = account();
-      const ref: ChatRef = { platform: own.platform, id: chatId };
-      const key = ChatIds.key(ref).externalId;
+      const ref = chatKey(own.platform, key as ChatId);
       const body = {
         kind: "email" as const,
         text: out.text,

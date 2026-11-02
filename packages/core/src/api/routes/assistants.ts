@@ -154,7 +154,8 @@ function entryOf(message: SaidMessage, inbound: boolean): Message {
  *  names no message of Rome's transcript. */
 function positionOf(cursor: Message): MessageCursor | null {
   if (!cursor.ref.startsWith(REF_PREFIX)) return null;
-  return { at: new Date(cursor.timestamp * 1000), id: cursor.ref.slice(REF_PREFIX.length) };
+  const id = Number(cursor.ref.slice(REF_PREFIX.length));
+  return Number.isInteger(id) ? { at: new Date(cursor.timestamp * 1000), id } : null;
 }
 
 /** The assistant's chat read back from `before`, or from its newest message.
@@ -166,8 +167,9 @@ function messagesAt(
   limit: number,
   before?: MessageCursor | null,
 ): MessagePage {
-  const place = placeIn(chatAt(address.platform, address.id));
-  return deps.chatMessages.read(place, { before: before ?? null, limit });
+  const chat = deps.chats.byKey(chatAt(address.platform, address.id));
+  if (!chat) return { messages: [], older: null, newer: null };
+  return deps.chatMessages.read(placeIn(chat.ref), { before: before ?? null, limit });
 }
 
 /** The newest `limit` messages of the assistant's chat, newest first. */

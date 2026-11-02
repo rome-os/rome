@@ -177,7 +177,7 @@ describe("GET /concierge/tasks", () => {
         }
       ).tasks.find((task) => task.id === row.id)?.sourceMessageId;
     expect(await sourceOf()).toBe(id);
-    testDb.db.delete(chatMessages).where(eq(chatMessages.id, id)).run();
+    testDb.db.delete(chatMessages).where(eq(chatMessages.key, id)).run();
     expect(await sourceOf()).toBeNull();
   });
 

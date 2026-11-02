@@ -145,7 +145,7 @@ interface ConversationContextLine {
 
 function contextLine(message: ContextLine): ConversationContextLine {
   return {
-    id: message.id,
+    id: String(message.id),
     sender: message.senderName,
     text: message.text,
     createdAt: message.at,
@@ -3583,7 +3583,7 @@ class AgentSessionImpl implements AgentSession {
       // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
-      let pendingConversationMessageIds: string[] = [];
+      let pendingConversationMessageIds: number[] = [];
       // A channel conversation stores lines the agent never saw as turns. The
       // surface says whether this channel does; webchat, for one, does not.
       const channel = sink.threadContext?.channel;

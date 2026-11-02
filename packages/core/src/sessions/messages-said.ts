@@ -56,7 +56,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
         const seat = await seatOf(deps, event, heard);
         const recorded: SaidInboundEvent = {
           ...heard,
-          recorded: { chatRecordId: seat, messageId: event.message.id },
+          recorded: { chatRecordId: seat, messageId: String(event.message.id) },
         };
         await handler(recorded);
       });
@@ -69,7 +69,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
         unlisten();
       };
     },
-    decided: async (recorded) => deps.wakes.wakeDecided(recorded.messageId),
+    decided: async (recorded) => deps.wakes.wakeDecided(Number(recorded.messageId)),
   };
 }
 

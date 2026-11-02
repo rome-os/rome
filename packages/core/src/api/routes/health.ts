@@ -33,11 +33,11 @@ const REQUIRED_SCHEMA_PROBES: readonly SchemaProbe[] = [
   },
   {
     name: "chats",
-    query: sql`SELECT "id", "platform", "kind", "name", "started_at" FROM "chats" LIMIT 0`,
+    query: sql`SELECT "id", "platform", "key", "kind", "name", "started_at" FROM "chats" LIMIT 0`,
   },
   {
     name: "chat_messages",
-    query: sql`SELECT "id", "chat_id", "thread_id", "sender_account_id", "sender_agent", "parts", "reply_to_message_id", "said_at" FROM "chat_messages" LIMIT 0`,
+    query: sql`SELECT "id", "chat_id", "key", "thread_id", "sender_account_id", "sender_agent", "parts", "reply_to_message_id", "said_at" FROM "chat_messages" LIMIT 0`,
   },
   {
     name: "agent_turn_messages",

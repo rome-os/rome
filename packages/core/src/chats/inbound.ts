@@ -35,9 +35,9 @@ export interface InboundRecording {
    * while a hook stores messages itself.
    */
   listen(): () => void;
-  /** The platform's event message `id` arrived in on channel `channel`,
-   *  while it is being recorded and heard. */
-  heard(channel: string, id: string): InboundEvent | undefined;
+  /** The platform's event recorded message `id` arrived in on channel
+   *  `channel`, while it is being heard. */
+  heard(channel: string, id: number): InboundEvent | undefined;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
 }
@@ -58,15 +58,17 @@ export function inboundRecording(
    *  listens. */
   const recording = new Map<string, ChannelChatAdapter>();
   let listeners = 0;
+  /** The adapter's keys of each message being heard, by its recorded id. */
+  const hearing = new Map<number, { chat: string; key: string }>();
 
   /** The last recording queued in each chat, by chat. An adapter delivers a
    *  chat's messages one at a time, but a recording still running when
    *  recording stops outlives it, so the chat's next one, delivered once
    *  recording starts again, waits for it here. */
-  const tails = new Map<string, Promise<string | null>>();
+  const tails = new Map<string, Promise<number | null>>();
 
-  const deliver = (message: Inbound): Promise<string | null> => {
-    const key = `${message.via.channel}\0${message.chat.id}\0${message.thread?.id ?? ""}`;
+  const deliver = (message: Inbound): Promise<number | null> => {
+    const key = `${message.via.channel}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
     const recorded = (tails.get(key) ?? Promise.resolve(null)).then(() => recordOne(message));
     // A failed recording is the adapter's to report, and does not hold up the
     // chat's next message.
@@ -78,17 +80,17 @@ export function inboundRecording(
     return recorded;
   };
 
-  const recordOne = async (message: Inbound): Promise<string | null> => {
+  const recordOne = async (message: Inbound): Promise<number | null> => {
     const { via } = message;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) return null;
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
     // Recorded and raised in one step, with nothing run in between, so
     // MessageSaid's first listener acts before anything reads the message. A
-    // redelivery carries the same id, records nothing and raises nothing.
+    // redelivery carries the same key, records nothing and raises nothing.
     const recorded = deps.messages.record(
       messageToRome({
-        id: message.id,
+        key: message.key,
         place: placeIn(chat.ref, message.thread?.id),
         saidBy: {
           account: { platform: chat.ref.platform, id: message.sender.accountId },
@@ -100,11 +102,16 @@ export function inboundRecording(
       }),
     );
     if (!recorded) return null;
-    await deps.events.publish({
-      type: "MessageSaid",
-      message: recorded,
-      via: { channel: via.channel, account: via.account },
-    });
+    hearing.set(recorded.id, { chat: message.chat.externalId, key: message.key });
+    try {
+      await deps.events.publish({
+        type: "MessageSaid",
+        message: recorded,
+        via: { channel: via.channel, account: via.account },
+      });
+    } finally {
+      hearing.delete(recorded.id);
+    }
     return recorded.id;
   };
 
@@ -135,7 +142,10 @@ export function inboundRecording(
         recording.clear();
       };
     },
-    heard: (channel, id) => recording.get(channel)?.heard(id),
+    heard: (channel, id) => {
+      const keys = hearing.get(id);
+      return keys && recording.get(channel)?.heard(keys.chat, keys.key);
+    },
     addChannels(added) {
       known.push(...added);
       if (listeners > 0) for (const channel of added) subscribe(channel);

@@ -5,7 +5,7 @@
 import type { EnsureChannelChatInput } from "@rome-os/app-runtime";
 import type { ChatAdapters } from "./adapter.js";
 import type { ChatRepository } from "./chat-repository.js";
-import type { ChatRef } from "./place.js";
+import type { ChatKey, ChatRef } from "./place.js";
 
 export interface StartChannelChatDeps {
   chats: Pick<ChatRepository, "start">;
@@ -15,7 +15,8 @@ export interface StartChannelChatDeps {
 
 /**
  * The chat at a channel address, started when Rome holds none, with no seat
- * opened in it: its ref in Chats, and Rome's end, the channel's account.
+ * opened in it: its ref in Chats, its adapter's key, and Rome's end, the
+ * channel's account.
  */
 export function startChannelChat(
   deps: StartChannelChatDeps,
@@ -23,16 +24,13 @@ export function startChannelChat(
     EnsureChannelChatInput,
     "channel" | "threadId" | "parentThreadId" | "threadType" | "threadName"
   >,
-): { chat: ChatRef; romeEnd: string } {
+): { chat: ChatRef; key: ChatKey; romeEnd: string } {
   const parent =
     input.parentThreadId && input.parentThreadId !== input.threadId
       ? input.parentThreadId
       : undefined;
   const kind = parent || input.threadType !== "private" ? "group" : "dm";
-  const chat = deps.chats.start(
-    deps.adapters.chatAt(input.channel, parent ?? input.threadId, kind),
-    kind,
-    parent ? null : (input.threadName ?? null),
-  );
-  return { chat: chat.ref, romeEnd: deps.adapters.accountOn(input.channel).id };
+  const key = deps.adapters.chatAt(input.channel, parent ?? input.threadId, kind);
+  const chat = deps.chats.start(key, kind, parent ? null : (input.threadName ?? null));
+  return { chat: chat.ref, key, romeEnd: deps.adapters.accountOn(input.channel).id };
 }

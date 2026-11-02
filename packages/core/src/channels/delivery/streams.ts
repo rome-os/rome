@@ -23,8 +23,8 @@ const DEFAULT_POLICY: DeliveryPolicy = {
 export interface ReplyTarget {
   channel: string;
   chatId: string;
-  /** The line the reply answers. */
-  replyTo?: string;
+  /** The line the reply answers, by its id in Chats. */
+  replyTo?: number;
   /** The conversation the run's turn is recorded in. */
   romeSessionId: string;
   turnId: string;
@@ -74,7 +74,7 @@ export class ReplyStreams {
     if (!channel) return null;
     const reply = await this.deps.said.stream(target.romeSessionId, channel, {
       turnId: target.turnId,
-      ...(target.replyTo ? { replyTo: target.replyTo } : {}),
+      ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
       policy: this.deps.policy ?? DEFAULT_POLICY,
       clock: this.deps.clock,
     });

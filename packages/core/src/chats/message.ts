@@ -33,13 +33,13 @@ export interface Body {
 }
 
 /**
- * A message that reached Rome. `id` is its adapter's id for it, unique in its
- * chat, which makes recording it again a no-op. `replyTo` is the id of the
- * message it quotes in the same chat, when it quotes one.
+ * A message that reached Rome. `key` is its adapter's key for it, unique in
+ * its chat, which makes recording it again a no-op. `replyTo` is the key of
+ * the message it quotes in the same chat, when it quotes one.
  */
 export interface InboundMessage {
   readonly direction: "toRome";
-  readonly id: string;
+  readonly key: string;
   readonly place: Place;
   readonly saidBy: SaidBy;
   readonly body: Body;
@@ -53,46 +53,52 @@ export interface InboundMessage {
 /** A message for {@link MessageRepository.record}. */
 export type Message = InboundMessage;
 
+/** A message once it is on record: the id Chats gave it, and the id of the
+ *  line it quotes when Rome holds that line. */
+export type RecordedMessage = Omit<Message, "replyTo"> & {
+  readonly id: number;
+  readonly replyTo?: number;
+};
+
 /**
  * A message Rome says into a place. `saidBy` is the account it goes out as,
  * one of Rome's own or the guardian's, with the agent that said it when an
  * agent did. `parts` is the message as composed, which reads as plain text
  * the way any recorded message does. `replyTo` is the id of the message it
- * answers in the same chat.
+ * answers in the same chat, or, for one Rome never recorded, its adapter's
+ * key there, which the platform still shows as quoted.
  */
 export interface OutboundMessage {
   readonly direction: "fromRome";
   readonly place: Place;
   readonly saidBy: SaidBy;
   readonly parts: readonly MessagePart[];
-  readonly replyTo?: string;
+  readonly replyTo?: number | { readonly key: string };
 }
-
-/** A message once it is on record. */
-export type RecordedMessage = Message;
 
 /**
  * A message as a read of its place finds it, either way it went. It is from
  * Rome when `saidBy.agent` is set. `saidBy` is absent when the record kept no
  * account for it, as on some older lines. `senderName` is what the line
  * called its sender, kept even then. `parts` is the message as composed, as
- * JSON, for readers that draw its widgets.
+ * JSON, for readers that draw its widgets. `key` is its adapter's key for it.
  */
 export interface SaidMessage {
-  readonly id: string;
+  readonly id: number;
+  readonly key: string;
   readonly direction: Direction;
   readonly place: Place;
   readonly saidBy?: SaidBy;
   readonly senderName?: string;
   readonly body: Body;
   readonly parts: string;
-  readonly replyTo?: string;
+  readonly replyTo?: number;
   readonly at: Date;
 }
 
 /**
  * A message to Rome. Refuses a sender on another platform than the place,
- * since everyone in a chat is on its platform, and a message with no id,
+ * since everyone in a chat is on its platform, and a message with no key,
  * since nothing could tell a redelivery from a new message.
  */
 export function messageToRome(input: Omit<InboundMessage, "direction">): InboundMessage {
@@ -101,8 +107,8 @@ export function messageToRome(input: Omit<InboundMessage, "direction">): Inbound
       `A message in a ${input.place.chat.platform} chat cannot be said by a ${input.saidBy.account.platform} account`,
     );
   }
-  if (!input.id) {
-    throw new Error("A message to Rome needs its adapter's id");
+  if (!input.key) {
+    throw new Error("A message to Rome needs its adapter's key");
   }
   return { direction: "toRome", ...input };
 }

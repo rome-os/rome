@@ -14,7 +14,7 @@ import {
   testChatWiring,
 } from "../test/helpers.js";
 import { context, SpanStatusCode } from "@opentelemetry/api";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -3977,8 +3977,8 @@ describe("AgentRunner", () => {
      *  when the thread is a topic in one. Seated before any line is said. */
     function seatAt(platform: string, thread: string, parentThread?: string) {
       const fixture = seatFixture(testDb.db);
-      const chat = chatAt(platform, parentThread ?? thread);
-      fixture.chat(chat.platform, chat.id, "group");
+      const chatKey = chatAt(platform, parentThread ?? thread);
+      const chat = fixture.chat(chatKey.platform, chatKey.externalId, "group");
       const id = channelChatId(platform, thread);
       fixture.seat({
         id,
@@ -4002,7 +4002,7 @@ describe("AgentRunner", () => {
         testDb.db
           .insert(chatMessages)
           .values({
-            id: lineAt(chat, "rome-bot", platformId),
+            key: lineAt(chatKey, "rome-bot", platformId),
             chatId: chat.id,
             threadId: line.threadId === undefined ? (parentThread ? thread : null) : line.threadId,
             senderAccountId: line.fromRome ? "rome-bot" : `${line.name}-id`,
@@ -4010,7 +4010,11 @@ describe("AgentRunner", () => {
             senderName: line.name,
             text: line.text,
             parts: JSON.stringify([{ type: "text", content: line.text }]),
-            replyToMessageId: line.quotes ? lineAt(chat, "rome-bot", line.quotes) : null,
+            replyToMessageId: line.quotes
+              ? (testDb.db.all<{ id: number }>(
+                  sql`SELECT id FROM chat_messages WHERE chat_id = ${chat.id} AND key = ${lineAt(chatKey, "rome-bot", line.quotes)}`,
+                )[0]?.id ?? null)
+              : null,
             saidAt: line.at ?? new Date("2026-08-03T08:00:00.000Z"),
           })
           .run();

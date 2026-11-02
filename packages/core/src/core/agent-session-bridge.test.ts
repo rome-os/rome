@@ -526,7 +526,7 @@ describe("AgentSessionBridge worker disconnect", () => {
         throw new Error("db down");
       },
     } as unknown as WebChatRepository;
-    const seatLines = { recorded: async () => ({ id: "line-1" }) as SaidMessage };
+    const seatLines = { recorded: async () => ({ id: 1 }) as SaidMessage };
     const { sent, requestTurn, response, workerGone } = setup([turn.handle], {
       webchatRepo,
       seatLines,
@@ -915,11 +915,16 @@ describe("AgentSessionBridge reply streaming", () => {
     const testDb = createTestDb();
     const repo = new WebChatRepository(testDb.db);
     const fixture = seatFixture(testDb.db);
-    const chat = chatAt("telegram", "chat-1");
-    fixture.chat(chat.platform, chat.id, "group");
+    const chatKey = chatAt("telegram", "chat-1");
+    const chat = fixture.chat(chatKey.platform, chatKey.externalId, "group");
     fixture.seat({ id: "conversation-1", chat, accountId: "telegram" });
     // The message the run answers, on record before the run starts.
-    fixture.say({ id: lineAt(chat, "telegram", "msg-1"), chat, from: "user-1", at: new Date(0) });
+    fixture.say({
+      id: lineAt(chatKey, "telegram", "msg-1"),
+      chat,
+      from: "user-1",
+      at: new Date(0),
+    });
     return { repo, db: testDb.db, close: () => testDb.close() };
   }
 

@@ -70,7 +70,7 @@ describe("WebChatAdapter", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date("2030-01-01T00:00:00.000Z") })
-      .where(eq(chatMessages.id, "msg-old"));
+      .where(eq(chatMessages.key, "msg-old"));
 
     const messages = await readWebchatMessages(repo, "sess-1", hoursAgo(2));
 
@@ -119,11 +119,11 @@ describe("WebChatAdapter", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date("2030-01-01T11:00:00.000Z") })
-      .where(eq(chatMessages.id, "msg-a"));
+      .where(eq(chatMessages.key, "msg-a"));
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date("2030-01-01T11:30:00.000Z") })
-      .where(eq(chatMessages.id, "msg-b"));
+      .where(eq(chatMessages.key, "msg-b"));
 
     const messages = await readWebchatMessages(repo, null, hoursAgo(24));
 

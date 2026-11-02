@@ -6,11 +6,12 @@ import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
 import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
-import type { Account } from "@rome-os/app-runtime";
+import type { Account, ChatId } from "@rome-os/app-runtime";
 import { sqlMessages } from "./messages-sql.js";
 import { accountTranscript, accountTranscriptDetail } from "../webchat/chat-read-model-sql.js";
 import { directMessageAddress, directMessageAt } from "../chats/adapter.js";
 import { ChatAddresses } from "./chat-addresses.js";
+import { chatKey as chatKeyOf } from "./chat-ids.js";
 
 /**
  * Rome's own transcript of a channel conversation, read for accounts.
@@ -38,7 +39,12 @@ export function agentMessages(
       return accountTranscript(
         scope.keys.map(({ channel, key }) => {
           const account = accountOn(channel);
-          return { channel, account, key, chatId: directMessageAt(account, key, addresses).id };
+          return {
+            channel,
+            account,
+            key,
+            chatKey: directMessageAt(account, key, addresses).externalId,
+          };
         }),
       );
     },
@@ -65,13 +71,17 @@ function transcriptDetail(
   if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
     detail.sender = sender;
   }
-  const chatId = text(raw.chatId);
+  const chatKey = text(raw.chatKey);
   const platform = text(raw.platform);
   const accountId = text(raw.accountId);
-  if (chatId !== null && platform !== null && accountId !== null) {
+  if (chatKey !== null && platform !== null && accountId !== null) {
     const type = text(raw.threadType);
     detail.conversation = {
-      id: directMessageAddress({ platform, id: accountId }, { platform, id: chatId }, addresses),
+      id: directMessageAddress(
+        { platform, id: accountId },
+        chatKeyOf(platform, chatKey as ChatId),
+        addresses,
+      ),
       name: text(raw.threadName),
       kind: type === "private" ? "dm" : type === "group" || type === "topic" ? type : null,
     };

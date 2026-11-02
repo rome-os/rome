@@ -58,8 +58,9 @@ describe("recordedSends", () => {
   afterEach(() => testDb.close());
 
   const lines = () =>
-    testDb.db.all<{ chat_id: string; text: string; sender_agent: string | null }>(
-      sql`SELECT chat_id, text, sender_agent FROM chat_messages ORDER BY rowid`,
+    testDb.db.all<{ chat: string; text: string; sender_agent: string | null }>(
+      sql`SELECT c.key AS chat, m.text, m.sender_agent
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id ORDER BY m.id`,
     );
   const sessions = () => testDb.db.all(sql`SELECT id FROM rome_sessions`);
 
@@ -70,7 +71,7 @@ describe("recordedSends", () => {
     expect(sent).toHaveLength(1);
     expect(lines()).toEqual([
       {
-        chat_id: chatAt("telegram", "-100", { romeEnd: BOT.id }).id,
+        chat: chatAt("telegram", "-100", { romeEnd: BOT.id }).externalId,
         text: "Deploy done",
         sender_agent: "main",
       },
@@ -80,19 +81,20 @@ describe("recordedSends", () => {
 
   it("says a send through the seat that heard the address, in the seat's chat", async () => {
     const fixture = seatFixture(testDb.db);
-    const group = fixture.chat("telegram", chatAt("telegram", "-200").id, "group");
+    const group = fixture.chat("telegram", "-200", "group");
     fixture.seat({ id: "seat-1", chat: group, accountId: BOT.id, agentName: "pm" });
 
     await send("telegram").send("-200" as ChatId, { text: "Standup in 5" });
 
-    expect(lines()).toEqual([{ chat_id: group.id, text: "Standup in 5", sender_agent: "pm" }]);
+    expect(lines()).toEqual([{ chat: "-200", text: "Standup in 5", sender_agent: "pm" }]);
     expect(sessions()).toEqual([{ id: "seat-1" }]);
   });
 
   it("sends nothing when the seat stands in no chat, so nothing goes out unrecorded", async () => {
     const fixture = seatFixture(testDb.db);
-    const group = fixture.chat("telegram", chatAt("telegram", "-300").id, "group");
-    fixture.seat({ id: "seat-2", chat: group, accountId: BOT.id });
+    // A seat in a topic the address names, whose chat is gone.
+    const group = fixture.chat("telegram", "-3", "group");
+    fixture.seat({ id: "seat-2", chat: group, accountId: BOT.id, threadId: "-300" });
     testDb.db.run(sql`DELETE FROM chats WHERE id = ${group.id}`);
     testDb.db.run(sql`UPDATE rome_sessions SET chat_id = ${group.id} WHERE id = 'seat-2'`);
 
@@ -118,9 +120,7 @@ describe("recordedSends", () => {
         message: expect.objectContaining({ kind: "email", inReplyToMessageId: "in-1" }),
       },
     ]);
-    expect(lines()).toEqual([
-      { chat_id: chatAt("email", "thread-7").id, text: "Thanks, booked.", sender_agent: "main" },
-    ]);
+    expect(lines()).toEqual([{ chat: "thread-7", text: "Thanks, booked.", sender_agent: "main" }]);
     expect(sessions()).toEqual([]);
   });
 
@@ -145,14 +145,14 @@ describe("recordedSends", () => {
     ]);
     const [first] = lines();
     expect(first).toMatchObject({ text: "First note", sender_agent: "main" });
-    expect(testDb.db.all(sql`SELECT kind, name FROM chats WHERE id = ${first!.chat_id}`)).toEqual([
+    expect(testDb.db.all(sql`SELECT kind, name FROM chats WHERE key = ${first!.chat}`)).toEqual([
       { kind: "group", name: "Hello" },
     ]);
 
     // The provider named the thread, which is the same chat from then on.
     await send("email").send("thread-new" as ChatId, { text: "Second note" });
     expect(sent[1]).toMatchObject({ address: "thread-new" });
-    expect(lines().map((line) => line.chat_id)).toEqual([first!.chat_id, first!.chat_id]);
+    expect(lines().map((line) => line.chat)).toEqual([first!.chat, first!.chat]);
     expect(sessions()).toEqual([]);
   });
 });

@@ -25,7 +25,7 @@ import {
 } from "./channel.js";
 import { WEBCHAT_CHANNEL } from "./webchat-channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import { isDirectMessage, platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
+import { platformIdOfLine, type ChatAdapters } from "../chats/adapter.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
@@ -54,8 +54,8 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
 }
 
 export interface SendIntoPlaceDeps extends SendDeps {
-  /** Where the place's chat is found, or started on Rome's first message. */
-  chats: Pick<ChatRepository, "get" | "start">;
+  /** Where the place's chat is found. */
+  chats: Pick<ChatRepository, "get">;
   /** Where a sent message is put on record. */
   chatMessages: Pick<MessageRepository, "send">;
   /** Rome's own account on a channel, which a send names as `as`. Absent, no
@@ -66,7 +66,7 @@ export interface SendIntoPlaceDeps extends SendDeps {
   dashboard?: DashboardInbox;
   /** Each channel's chat adapter, which a send goes out through, and where
    *  each channel's account reaches a place. */
-  adapters: Pick<ChatAdapters, "of" | "addressAt">;
+  adapters: Pick<ChatAdapters, "of" | "addressAt" | "keyOf">;
 }
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
@@ -145,9 +145,8 @@ export async function send(
   if (!channel.send) return { ok: false, send: "unsupported" };
 
   const account = deps.accountOf?.(channel.name) ?? { platform, id: channel.name };
-  const chat =
-    deps.chats.get(place.chat) ??
-    deps.chats.start(place.chat, isDirectMessage(place.chat) ? "dm" : "group", null);
+  const chat = deps.chats.get(place.chat);
+  if (!chat) return { ok: false, invalid: "Rome holds no such chat" };
   const adapter = deps.adapters.of(channel);
   let sent: Awaited<ReturnType<MessageRepository["send"]>>;
   try {
@@ -159,8 +158,8 @@ export async function send(
         saidBy: { account },
         parts: [{ type: "text", content: body.text }],
       },
-      async () => ({
-        id: await adapter.send(chat.ref.id, place.threadId ?? null, { text: body.text }),
+      async (target) => ({
+        key: await adapter.send(target.chat, place.threadId ?? null, { text: body.text }),
       }),
     );
   } catch (error) {
@@ -173,7 +172,7 @@ export async function send(
   return {
     ok: true,
     sent: {
-      ref: `${deps.adapters.addressAt(channel.name, place)}:${platformIdOfLine(chat.ref, account.id, sent.id) ?? sent.id}`,
+      ref: `${deps.adapters.addressAt(channel.name, place)}:${platformIdOfLine(deps.adapters.keyOf(chat.ref), account.id, sent.key) ?? sent.key}`,
       timestamp: Math.floor(sent.at.getTime() / 1000),
     },
     at: sent.at,
@@ -201,12 +200,14 @@ async function sendOnDashboard(
     return { ok: false, invalid: "A dashboard chat has no threads" };
   }
   if (!deps.dashboard) return { ok: false, send: "unsupported" };
-  const posted = await deps.dashboard.post(place.chat.id, body, as);
+  const chat = deps.chats.get(place.chat);
+  if (!chat) return { ok: false, invalid: "Rome holds no such chat" };
+  const posted = await deps.dashboard.post(chat.key, body, as);
   if (!posted.ok) return { ok: false, error: posted.error, at: new Date() };
   return {
     ok: true,
     sent: {
-      ref: `${place.chat.id}:${posted.messageId}`,
+      ref: `${chat.key}:${posted.messageId}`,
       timestamp: Math.floor(posted.at.getTime() / 1000),
     },
     at: posted.at,

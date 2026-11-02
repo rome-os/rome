@@ -4,12 +4,23 @@
 import type { ChatId } from "@rome-os/app-runtime";
 
 /**
- * A chat as Chats names it: its platform and its id, which is its adapter's
- * and opaque to Chats. Every Chats operation takes and answers one.
+ * A chat as Chats names it: its platform and the id Chats gave it. Every
+ * Chats operation takes and answers one. The adapter's own key for the chat
+ * is on the {@link Chat}.
  */
 export interface ChatRef {
   readonly platform: string;
-  readonly id: string;
+  readonly id: number;
+}
+
+/**
+ * What an adapter calls a chat: its platform and the adapter's key for it,
+ * unique on that platform. A direct message's key names both its ends. Chats
+ * keeps it beside the chat's id, compares it and never reads it.
+ */
+export interface ChatKey {
+  readonly platform: string;
+  readonly externalId: ChatId;
 }
 
 /** A chat, or a thread in one. `threadId` is the platform's own id for the

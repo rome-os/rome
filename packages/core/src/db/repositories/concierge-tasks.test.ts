@@ -116,14 +116,14 @@ describe("ConciergeTasksRepository", () => {
       await chats.createSession("concierge", "Concierge");
       const messageId = await say("concierge");
       const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: messageId }]);
-      expect(row.sourceMessageId).toBe(messageId);
+      expect(row.sourceMessageId).toEqual(expect.any(Number));
       expect(await sourceOf(row.id)).toBe(messageId);
       expect((await repo.listForPanel(new Date(0)))[0].sourceMessageId).toBe(messageId);
 
-      testDb.db.delete(chatMessages).where(eq(chatMessages.id, messageId)).run();
+      testDb.db.delete(chatMessages).where(eq(chatMessages.key, messageId)).run();
       expect(await sourceOf(row.id)).toBeNull();
       // The row keeps the id it was given: nothing is copied or cleared.
-      expect((await repo.get(row.id))?.sourceMessageId).toBe(messageId);
+      expect((await repo.get(row.id))?.sourceMessageId).toBe(row.sourceMessageId);
     });
 
     it("counts only a user or assistant message of the Concierge chat", async () => {

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatRepository, chatIdsOfKind, chatIdsOn } from "./chat-repository.js";
 import { MessageRepository } from "./message-repository.js";
-import { placeIn } from "./place.js";
+import { placeIn, type ChatKey } from "./place.js";
 
 describe("ChatRepository", () => {
   let testDb: TestDb;
@@ -15,73 +16,87 @@ describe("ChatRepository", () => {
   });
   afterEach(() => testDb.close());
 
-  const GROUP = { platform: "feishu", id: "oc_group" };
-  const DM = { platform: "feishu", id: "dm:feishu:bot:ou_alice" };
+  const key = (platform: string, externalId: string): ChatKey => ({
+    platform,
+    externalId: externalId as ChatId,
+  });
+  const GROUP = key("feishu", "oc_group");
+  const DM = key("feishu", "dm:bot:ou_alice");
 
-  it("starts a chat once and answers it as stored after", () => {
+  it("starts a chat once, keyed by its adapter's key, and answers it as stored after", () => {
     const first = chats.start(GROUP, "group", "Launch");
     const again = chats.start(GROUP, "dm", "Renamed");
 
-    expect(first).toMatchObject({ ref: GROUP, kind: "group", name: "Launch" });
+    expect(first).toMatchObject({ key: "oc_group", kind: "group", name: "Launch" });
+    expect(first.ref).toEqual({ platform: "feishu", id: expect.any(Number) });
     expect(again).toEqual(first);
   });
 
-  it("finds a chat by ref only on its own platform", () => {
-    chats.start(GROUP, "group", null);
+  it("gives the same key on two platforms two chats", () => {
+    const feishu = chats.start(GROUP, "group", null);
+    const lark = chats.start(key("lark", "oc_group"), "group", null);
 
-    expect(chats.get(GROUP)?.kind).toBe("group");
-    expect(chats.get({ platform: "lark", id: GROUP.id })).toBeNull();
-    expect(chats.find(GROUP.id)?.ref).toEqual(GROUP);
-    expect(chats.find("missing")).toBeNull();
+    expect(lark.ref.id).not.toBe(feishu.ref.id);
+    expect(chats.byKey(key("lark", "oc_group"))?.ref).toEqual(lark.ref);
+  });
+
+  it("finds a chat by ref only on its own platform", () => {
+    const { ref } = chats.start(GROUP, "group", null);
+
+    expect(chats.get(ref)?.kind).toBe("group");
+    expect(chats.get({ platform: "lark", id: ref.id })).toBeNull();
+    expect(chats.find(ref.id)?.ref).toEqual(ref);
+    expect(chats.find(ref.id + 1)).toBeNull();
+    expect(chats.byKey(key("feishu", "missing"))).toBeNull();
   });
 
   it("lists a platform's chats", () => {
     chats.start(GROUP, "group", null);
     chats.start(DM, "dm", null);
-    chats.start({ platform: "telegram", id: "42" }, "dm", null);
+    chats.start(key("telegram", "42"), "dm", null);
 
     expect(
       chats
         .list("feishu")
-        .map((chat) => chat.ref.id)
+        .map((chat) => chat.key)
         .sort(),
-    ).toEqual([DM.id, GROUP.id]);
+    ).toEqual([DM.externalId, GROUP.externalId]);
   });
 
   it("renames a chat", () => {
-    chats.start(GROUP, "group", null);
-    chats.rename(GROUP, "Launch");
+    const { ref } = chats.start(GROUP, "group", null);
+    chats.rename(ref, "Launch");
 
-    expect(chats.get(GROUP)?.name).toBe("Launch");
+    expect(chats.get(ref)?.name).toBe("Launch");
   });
 
   it("ends a chat with every message said in it", () => {
-    chats.start(GROUP, "group", null);
+    const { ref } = chats.start(GROUP, "group", null);
     const messages = new MessageRepository(testDb.db);
     messages.record({
       direction: "toRome",
-      id: "om_1",
-      place: placeIn(GROUP),
+      key: "om_1",
+      place: placeIn(ref),
       saidBy: { account: { platform: "feishu", id: "ou_alice" } },
       body: { text: "hi" },
       at: new Date(),
     });
 
-    chats.end(GROUP);
+    chats.end(ref);
 
-    expect(chats.get(GROUP)).toBeNull();
-    expect(messages.read(placeIn(GROUP)).messages).toEqual([]);
+    expect(chats.get(ref)).toBeNull();
+    expect(messages.read(placeIn(ref)).messages).toEqual([]);
   });
 
   it("names a platform's and a kind's chats as subqueries", () => {
-    chats.start(GROUP, "group", null);
-    chats.start(DM, "dm", null);
+    const group = chats.start(GROUP, "group", null).ref.id;
+    const dm = chats.start(DM, "dm", null).ref.id;
 
     const ids = (where: ReturnType<typeof sql>) =>
       testDb.db
-        .all<{ id: string }>(sql`SELECT id FROM chats WHERE id IN ${where} ORDER BY id`)
+        .all<{ id: number }>(sql`SELECT id FROM chats WHERE id IN ${where} ORDER BY id`)
         .map((row) => row.id);
-    expect(ids(chatIdsOn("feishu"))).toEqual([DM.id, GROUP.id]);
-    expect(ids(chatIdsOfKind("dm"))).toEqual([DM.id]);
+    expect(ids(chatIdsOn("feishu"))).toEqual([group, dm]);
+    expect(ids(chatIdsOfKind("dm"))).toEqual([dm]);
   });
 });

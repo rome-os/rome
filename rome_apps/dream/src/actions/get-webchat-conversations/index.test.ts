@@ -310,7 +310,7 @@ describe("get_webchat_conversations against the system schema", () => {
     }
     if (role === "user" && seat) await repo.recordUserInput(id, sessionId, content, actor);
     else await repo.addMessage(id, sessionId, role, content, `turn-${id}`);
-    testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE id = ${id}`);
+    testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE key = ${id}`);
     testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${createdAt} WHERE id = ${id}`);
   }
 

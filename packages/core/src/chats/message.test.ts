@@ -2,9 +2,9 @@ import { describe, expect, it } from "@rstest/core";
 import { messageToRome, partsText, plainText } from "./message.js";
 import { placeIn } from "./place.js";
 
-const place = placeIn({ platform: "telegram", id: "chat-1" });
+const place = placeIn({ platform: "telegram", id: 1 });
 const said = {
-  id: "tg-1",
+  key: "tg-1",
   place,
   saidBy: { account: { platform: "telegram", id: "alice" } },
   body: { text: "Hello" },
@@ -18,8 +18,8 @@ describe("messageToRome", () => {
     ).toThrow("A message in a telegram chat cannot be said by a discord account");
   });
 
-  it("refuses a message with no adapter id", () => {
-    expect(() => messageToRome({ ...said, id: "" })).toThrow("needs its adapter's id");
+  it("refuses a message with no adapter key", () => {
+    expect(() => messageToRome({ ...said, key: "" })).toThrow("needs its adapter's key");
   });
 
   it("answers the message going to Rome", () => {

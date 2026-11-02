@@ -73,7 +73,7 @@ async function seedSession(id: string, type: string, createdAt: number, name = i
   } else {
     await repo.ensureRomeSession({ id, name, type: type as "action", agentName: null });
   }
-  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE id = ${`${id}-line`}`);
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE key = ${`${id}-line`}`);
   testDb.db.run(
     sql`UPDATE rome_sessions SET created_at = ${createdAt}, activity_at = ${createdAt} WHERE id = ${id}`,
   );

@@ -81,7 +81,7 @@ async function message(
 ) {
   if (role === "user") await repo.recordUserInput(id, session, content, actor);
   else await repo.addMessage(id, session, "assistant", content, `turn-${id}`);
-  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${sec(hoursAgo)} WHERE id = ${id}`);
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${sec(hoursAgo)} WHERE key = ${id}`);
 }
 
 function appContext(profile: ActionResult = { status: "error", error: "unavailable" }) {

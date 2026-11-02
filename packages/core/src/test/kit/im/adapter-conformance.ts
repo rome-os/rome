@@ -216,7 +216,7 @@ export function describeAdapterConformance(
     }
 
     /** What Rome's transcript of the chat holds, oldest first. */
-    const transcript = (chatId: string) =>
+    const transcript = (chatId: number) =>
       messages
         .read(placeIn({ platform: peer.account.platform, id: chatId }), { limit: 50 })
         .messages.map((message) => ({

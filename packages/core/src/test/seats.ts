@@ -2,6 +2,7 @@
 // Agents store them, for tests that read those tables. Vocabulary:
 // docs/domains/chats.md.
 
+import { and, eq } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import { chatMessages, chats, romeSessions } from "../db/schema/system.js";
 import type { ChatKind } from "../chats/chat.js";
@@ -21,6 +22,7 @@ export interface SeedSeat
 }
 
 export interface SeedLine {
+  /** The line's key in its chat. */
   id: string;
   chat: ChatRef;
   threadId?: string | null;
@@ -37,13 +39,19 @@ export interface SeedLine {
 /** A fixture over `db` that seeds chats, seats and lines directly. */
 export function seatFixture(db: DrizzleDb) {
   return {
-    /** The chat `id` on `platform`, started when absent. */
-    chat(platform: string, id: string, kind: ChatKind, name: string | null = null): ChatRef {
+    /** The chat keyed `key` on `platform`, started when absent. */
+    chat(platform: string, key: string, kind: ChatKind, name: string | null = null): ChatRef {
       db.insert(chats)
-        .values({ id, platform, kind, name, startedAt: new Date(0) })
+        .values({ key, platform, kind, name, startedAt: new Date(0) })
         .onConflictDoNothing()
         .run();
-      return { platform, id };
+      const row = db
+        .select({ id: chats.id })
+        .from(chats)
+        .where(and(eq(chats.platform, platform), eq(chats.key, key)))
+        .get();
+      if (!row) throw new Error(`Chat ${platform}:${key} was not stored`);
+      return { platform, id: row.id };
     },
 
     /** A seat of Rome's account `accountId` in `chat`. */
@@ -66,12 +74,13 @@ export function seatFixture(db: DrizzleDb) {
       return id;
     },
 
-    /** A line said in `chat`, or in its topic `threadId`. */
-    say(line: SeedLine): string {
+    /** A line said in `chat`, or in its topic `threadId`, by its id. */
+    say(line: SeedLine): number {
       const text = line.text ?? line.id;
-      db.insert(chatMessages)
+      const [row] = db
+        .insert(chatMessages)
         .values({
-          id: line.id,
+          key: line.id,
           chatId: line.chat.id,
           threadId: line.threadId ?? null,
           senderAccountId: line.from,
@@ -81,8 +90,10 @@ export function seatFixture(db: DrizzleDb) {
           parts: JSON.stringify(line.parts ?? [{ type: "text", content: text }]),
           saidAt: line.at,
         })
-        .run();
-      return line.id;
+        .returning({ id: chatMessages.id })
+        .all();
+      if (!row) throw new Error(`Line ${line.id} was not stored`);
+      return row.id;
     },
   };
 }
@@ -98,8 +109,8 @@ export function directMessageSeat(
 ) {
   const fixture = seatFixture(db);
   const account = adapters.accountOn(input.channel);
-  const chat = adapters.chatAt(input.channel, input.person, "dm");
-  fixture.chat(chat.platform, chat.id, "dm");
+  const key = adapters.chatAt(input.channel, input.person, "dm");
+  const chat = fixture.chat(key.platform, key.externalId, "dm");
   fixture.seat({ id: input.id, chat, accountId: account.id });
   return {
     chat,

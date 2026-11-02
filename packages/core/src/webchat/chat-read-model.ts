@@ -32,6 +32,8 @@ import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 export type TranscriptRole = "user" | "assistant" | "notification";
 
 export interface TranscriptLine {
+  /** The line's id outside Rome: a chat line's adapter key, unique in its
+   *  chat, or the session's own line id. */
   id: string;
   /** The agent session the line's turn ran in, or the opened session when the
    *  line belongs to no turn. */
@@ -103,13 +105,13 @@ const lineRole = sql.raw(`CASE
   ELSE 'notification' END`);
 
 export class ChatReadModel {
-  private readonly messages: Pick<MessageRepository, "read">;
+  private readonly messages: Pick<MessageRepository, "read" | "idOf">;
   private readonly links: Pick<TurnLinks, "turnsOf">;
 
   constructor(
     private readonly db: DrizzleDb,
     deps: {
-      messages?: Pick<MessageRepository, "read">;
+      messages?: Pick<MessageRepository, "read" | "idOf">;
       links?: Pick<TurnLinks, "turnsOf">;
     } = {},
   ) {
@@ -139,11 +141,12 @@ export class ChatReadModel {
     }
     // Chats reads by message, newest first. Read back in batches until the
     // page holds one turn more than asked, so the oldest turn shown is whole.
-    let before: MessageCursor | null = page.before
-      ? { at: new Date(page.before.at * 1000), id: page.before.id }
-      : null;
+    // A cursor names its line by key, as every line goes out.
+    const from = page.before ? this.messages.idOf(place.chat, page.before.id) : null;
+    let before: MessageCursor | null =
+      page.before && from !== null ? { at: new Date(page.before.at * 1000), id: from } : null;
     let messages: SaidMessage[] = [];
-    const links = new Map<string, TurnLink>();
+    const links = new Map<number, TurnLink>();
     let exhausted = false;
     for (;;) {
       const read = await this.messages.read(place, { before, limit: page.limit * 4 });
@@ -176,7 +179,7 @@ export class ChatReadModel {
     return this.transcriptOf(
       sessionId,
       shown,
-      more && oldest ? { at: oldest.at.getTime() / 1000, id: oldest.id } : null,
+      more && oldest ? { at: oldest.at.getTime() / 1000, id: oldest.key } : null,
       links,
     );
   }
@@ -185,7 +188,7 @@ export class ChatReadModel {
     sessionId: string,
     messages: readonly SaidMessage[],
     nextCursor: TranscriptCursor | null,
-    known?: Map<string, TurnLink>,
+    known?: Map<number, TurnLink>,
   ): Promise<Transcript> {
     const links = known ?? this.links.turnsOf(messages.map((message) => message.id));
     const lines = messages.map((message) => chatLine(message, links.get(message.id), sessionId));
@@ -264,7 +267,7 @@ export class ChatReadModel {
   private async seatOf(sessionId: string): Promise<{ place: Place; since: Date } | null> {
     const [row] = await this.db.all<{
       platform: string;
-      chat_id: string;
+      chat_id: number;
       thread_id: string | null;
       created_at: number;
     }>(sql`
@@ -338,7 +341,7 @@ export class ChatReadModel {
       text: string;
       said_at: number;
     }>(sql`
-      SELECT m.id, s.id AS chat_id, ${lineRole} AS role, m.text, m.said_at
+      SELECT m.key AS id, s.id AS chat_id, ${lineRole} AS role, m.text, m.said_at
       FROM ${CHAT_LINES} m
       JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
       JOIN rome_sessions s ON s.chat_id = c.id
@@ -386,13 +389,13 @@ export class ChatReadModel {
 }
 
 /** The turn a message is drawn under: its link's turn, or itself. */
-function turnKey(message: SaidMessage, links: ReadonlyMap<string, TurnLink>): string {
-  return links.get(message.id)?.turnId ?? message.id;
+function turnKey(message: SaidMessage, links: ReadonlyMap<number, TurnLink>): string {
+  return links.get(message.id)?.turnId ?? `line:${message.id}`;
 }
 
 function turnKeys(
   messages: readonly SaidMessage[],
-  links: ReadonlyMap<string, TurnLink>,
+  links: ReadonlyMap<number, TurnLink>,
 ): Set<string> {
   return new Set(messages.map((message) => turnKey(message, links)));
 }
@@ -403,7 +406,7 @@ function chatLine(
   openedSessionId: string,
 ): TranscriptLine {
   return {
-    id: message.id,
+    id: message.key,
     sessionId: link?.sessionId ?? openedSessionId,
     turnId: link?.turnId ?? null,
     inputState: link?.inputState ?? null,

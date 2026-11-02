@@ -102,7 +102,7 @@ async function seedMessage(input: {
     });
     await repo.addMessage(lineId, sessionId, input.role, '"hi"');
   }
-  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${saidAt} WHERE id = ${lineId}`);
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${saidAt} WHERE key = ${lineId}`);
   testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${saidAt} WHERE id = ${lineId}`);
   testDb.db.run(sql`UPDATE rome_sessions SET created_at = 0 WHERE id = ${sessionId}`);
 }

@@ -121,9 +121,9 @@ export interface ApiDeps {
   /** What was said in each place (docs/domains/chats.md#message). */
   chatMessages: Pick<MessageRepository, "read" | "send">;
   /** The chats Rome holds (docs/domains/chats.md#chat). */
-  chats: Pick<ChatRepository, "get" | "start">;
+  chats: Pick<ChatRepository, "get" | "start" | "byKey">;
   /** Each channel's chat adapter, which a send goes out through. */
-  adapters: Pick<ChatAdapters, "of" | "addressAt" | "directMessageReached">;
+  adapters: Pick<ChatAdapters, "of" | "addressAt" | "directMessageReached" | "keyOf">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

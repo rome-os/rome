@@ -73,7 +73,7 @@ const ANSWERING_AGENT = sql`CASE WHEN ch.agent IS NOT NULL THEN CASE
 export interface SeatSaidIn {
   id: string;
   name: string;
-  chat_id: string;
+  chat_id: number;
   thread_id: string | null;
   thread_name: string | null;
   owner_key: string | null;
@@ -105,7 +105,7 @@ export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
     JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id
-    ORDER BY max(m.said_at) DESC
+    ORDER BY max(m.said_at) DESC, max(m.id) DESC
   `;
 }
 
@@ -122,7 +122,7 @@ export function seatsSaidInSince(scope: SQL, cutoff: number): SQL {
 export function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
   return sql`(
-    SELECT m.id, s.id AS session_id,
+    SELECT m.key AS id, s.id AS session_id,
       -- A line the turn only caught up on is no part of the turn.
       CASE WHEN l.role IN ('prompt', 'answer') THEN l.turn_id END AS turn_id, l.input_state,
       CASE WHEN l.role = 'answer'
@@ -168,12 +168,12 @@ export function sessionLines(sessionIds: readonly string[]) {
  * to Rome, so neither is read.
  */
 export function accountTranscript(
-  scope: readonly { channel: string; account: Account; key: string; chatId: string }[],
+  scope: readonly { channel: string; account: Account; key: string; chatKey: string }[],
 ): SQL {
   const rows = sql.join(
     scope.map(
-      ({ channel, account, key, chatId }) =>
-        sql`(${channel}, ${account.platform}, ${account.id}, ${key}, ${chatId})`,
+      ({ channel, account, key, chatKey }) =>
+        sql`(${channel}, ${account.platform}, ${account.id}, ${key}, ${chatKey})`,
     ),
     sql`, `,
   );
@@ -191,7 +191,7 @@ export function accountTranscript(
       -- The line, and Rome's account at its end of the direct message.
       json_array(m.id, v.account) AS detail_key
     FROM v
-    JOIN ${CHATS} c ON c.id = v.chat AND c.platform = v.platform
+    JOIN ${CHATS} c ON c.key = v.chat AND c.platform = v.platform
     JOIN ${CHAT_LINES} m ON m.chat_id = c.id AND m.thread_id IS NULL
     WHERE c.kind = 'dm' AND c.platform <> 'webchat'`;
 }
@@ -202,7 +202,7 @@ export function accountTranscriptDetail(key: SQL): SQL {
     SELECT json_object(
       'senderId', m.sender_account_id,
       'senderName', m.sender_name,
-      'chatId', c.id,
+      'chatKey', c.key,
       'platform', c.platform,
       'accountId', json_extract(${key}, '$[1]'),
       'threadName', c.name,

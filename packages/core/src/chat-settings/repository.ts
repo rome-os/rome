@@ -4,7 +4,7 @@ import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { ChatRepository, chatIdsOn } from "../chats/chat-repository.js";
 import type { ChatAdapters } from "../chats/adapter.js";
 import { MessageRepository } from "../chats/message-repository.js";
-import { placeIn, type ChatRef } from "../chats/place.js";
+import { placeIn, type ChatKey, type ChatRef } from "../chats/place.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -35,7 +35,7 @@ export interface ChatSettingsRepositoryDeps {
 export class ChatSettingsRepository {
   /** Chats, read to tell whether anything was said where a seat stands. */
   private readonly messages: {
-    chats: Pick<ChatRepository, "find">;
+    chats: Pick<ChatRepository, "find" | "byKey">;
     lines: Pick<MessageRepository, "read">;
   };
 
@@ -51,9 +51,16 @@ export class ChatSettingsRepository {
     return this.deps.adapters.accountOn(channel);
   }
 
-  /** The chat at address `chatId` as `channel`'s account sees it. */
-  private chatOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatRef {
+  /** The adapter's key for the chat at address `chatId` as `channel`'s
+   *  account sees it. */
+  private keyOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatKey {
     return this.deps.adapters.chatAt(channel, chatId, kind === "dm" ? "dm" : "group");
+  }
+
+  /** The chat at address `chatId` as `channel`'s account sees it, or null
+   *  when Rome holds none there. */
+  private chatOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatRef | null {
+    return this.messages.chats.byKey(this.keyOf(channel, chatId, kind))?.ref ?? null;
   }
 
   /**
@@ -76,8 +83,8 @@ export class ChatSettingsRepository {
         .limit(1)
         .get();
     for (const kind of ["group", "dm"] as const) {
-      const chat = this.deps.adapters.chatAt(channel, address, kind);
-      const row = first(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId));
+      const chat = this.chatOf(channel, address, kind);
+      const row = chat && first(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId));
       if (row) return row;
     }
     return first(eq(romeSessions.threadId, address));
@@ -156,6 +163,7 @@ export class ChatSettingsRepository {
     }
     // Another of Rome's seats in the group may have set the group's rule.
     const chat = this.chatOf(channel, chatId, "group");
+    if (!chat) return own?.channelSettings ?? null;
     const shared = this.db
       .select({ settings: romeSessions.channelSettings })
       .from(romeSessions)
@@ -238,9 +246,9 @@ export class ChatSettingsRepository {
       (tx) => {
         const kindKnown = input.kindKnown ?? true;
         const via = this.accountOn(channel);
-        const place = this.chatOf(channel, descriptor.ref.chatId, descriptor.kind);
+        const key = this.keyOf(channel, descriptor.ref.chatId, descriptor.kind);
         const chat = this.deps.chats.start(
-          place,
+          key,
           descriptor.kind === "dm" ? "dm" : "group",
           descriptor.displayName,
         );

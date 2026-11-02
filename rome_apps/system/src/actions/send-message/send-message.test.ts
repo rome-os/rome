@@ -41,7 +41,7 @@ function hostOver(channels: ChannelsService) {
     /** Rome's lines on record, oldest first. */
     lines: () =>
       testDb.db.all<{ id: string; text: string; sender_agent: string | null }>(
-        sql`SELECT id, text, sender_agent FROM chat_messages ORDER BY rowid`,
+        sql`SELECT key AS id, text, sender_agent FROM chat_messages ORDER BY id`,
       ),
     /** The lines a turn links as its answer. */
     answers: () =>

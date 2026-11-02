@@ -30,7 +30,7 @@ describe("ChatReadModel", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date(seconds * 1000) })
-      .where(sql`${chatMessages.id} = ${id}`);
+      .where(sql`${chatMessages.key} = ${id}`);
     await testDb.db.run(sql`UPDATE rome_sessions SET created_at = min(created_at, ${seconds})`);
   }
 
@@ -116,16 +116,16 @@ describe("ChatReadModel", () => {
         },
       ]);
       const fixture = seatFixture(testDb.db);
-      const chat = chatAt("feishu", "oc_launch");
-      fixture.chat(chat.platform, chat.id, "group", "Launch");
+      const chatKey = chatAt("feishu", "oc_launch");
+      const chat = fixture.chat(chatKey.platform, chatKey.externalId, "group", "Launch");
       const sales = { id: "channel:sales:oc_launch" };
       const support = { id: "channel:support:oc_launch" };
       fixture.seat({ id: sales.id, chat, accountId: "bot-sales", agentName: "sales" });
       fixture.seat({ id: support.id, chat, accountId: "bot-support", agentName: "support" });
       // Wei's question reaches both bots: one line in the chat.
-      const asked = lineAt(chat, "bot-sales", "om_1");
-      fixture.say({
-        id: asked,
+      const askedKey = lineAt(chatKey, "bot-sales", "om_1");
+      const asked = fixture.say({
+        id: askedKey,
         chat,
         from: "ou_wei",
         name: "Wei",
@@ -141,9 +141,9 @@ describe("ChatReadModel", () => {
         startSeq: 0,
         blocks: [{ type: "turn_end", turnId: "sales-turn-7", status: "completed", durationMs: 1 }],
       });
-      const answered = lineAt(chat, "bot-sales", "om_2");
-      fixture.say({
-        id: answered,
+      const answeredKey = lineAt(chatKey, "bot-sales", "om_2");
+      const answered = fixture.say({
+        id: answeredKey,
         chat,
         from: "bot-sales",
         agent: "sales",

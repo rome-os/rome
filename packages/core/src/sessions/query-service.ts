@@ -462,7 +462,7 @@ export class SessionQueryService {
       agentName,
       type: session.type as RomeSessionType,
       channel: session.seatChannel,
-      chatId: session.chatId,
+      chatId: session.chatId === null ? null : String(session.chatId),
       threadId: session.threadId,
       threadName: session.threadName,
       seatKind: session.seatKind,

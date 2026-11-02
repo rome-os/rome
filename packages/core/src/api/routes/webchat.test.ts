@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { eq, sql } from "drizzle-orm";
 import { TurnLinks } from "../../sessions/turn-links.js";
+import { ChatRepository } from "../../chats/chat-repository.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import {
@@ -77,7 +78,7 @@ describe("Webchat API", () => {
     db.run(sql`UPDATE rome_agent_messages SET created_at = ${secs} WHERE ${agentRows}`);
     const lines =
       where.id !== undefined
-        ? sql`id = ${where.id}`
+        ? sql`key = ${where.id}`
         : where.sessionId !== undefined
           ? sql`EXISTS (SELECT 1 FROM rome_sessions s WHERE s.id = ${where.sessionId}
               AND s.chat_id = chat_messages.chat_id AND s.thread_id IS chat_messages.thread_id)`
@@ -414,7 +415,9 @@ describe("Webchat API", () => {
     const concierge = { platform: "webchat", id: "core:concierge" };
     const id = await runtime.startChat({});
     // A send names the chat, which the chat's session stands in.
-    const chat = (await deps.webchatRepo.seatOf(id))!.place.chat.id;
+    const chat = new ChatRepository(testDb.db).get(
+      (await deps.webchatRepo.seatOf(id))!.place.chat,
+    )!.key;
     try {
       const posted = await runtime.post(chat, { text: "Find flights" }, concierge);
       expect(posted).toMatchObject({ ok: true });
@@ -423,7 +426,9 @@ describe("Webchat API", () => {
       const inputs = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
       expect(inputs).toHaveLength(1);
       expect(
-        testDb.db.all(sql`SELECT sender_account_id FROM chat_messages WHERE id = ${inputs[0]!.id}`),
+        testDb.db.all(
+          sql`SELECT sender_account_id FROM chat_messages WHERE key = ${inputs[0]!.id}`,
+        ),
       ).toEqual([{ sender_account_id: "core:concierge" }]);
       expect(runtime.isRunning(id)).toBe(true);
       expect(runtime.activeTurns(id)).toEqual(["task-1"]);
@@ -3655,7 +3660,11 @@ describe("Webchat API", () => {
         childSessionId,
         JSON.stringify([{ type: "text", content: "Plan it" }]),
       );
-      new TurnLinks(testDb.db).promptRuns(childSessionId, "handoff-child-prompt", "child-turn");
+      new TurnLinks(testDb.db).promptRuns(
+        childSessionId,
+        (await deps.webchatRepo.lineIn(childSessionId, "handoff-child-prompt"))!,
+        "child-turn",
+      );
       await deps.webchatRepo.appendTraceBlocks({
         messageId: "handoff-child-trace",
         sessionId: childSessionId,

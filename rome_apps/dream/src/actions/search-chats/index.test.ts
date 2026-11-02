@@ -95,7 +95,7 @@ async function seedMessage(
   }
   if (role === "user" && chat) await repo.recordUserInput(id, sessionId, body, actor ?? undefined);
   else await repo.addMessage(id, sessionId, role, body, `turn-${id}`);
-  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE id = ${id}`);
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE key = ${id}`);
   testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${createdAt} WHERE id = ${id}`);
 }
 

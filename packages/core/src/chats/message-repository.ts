@@ -19,7 +19,7 @@ import {
   type SaidMessage,
 } from "./message.js";
 import type { ChatId } from "@rome-os/app-runtime";
-import { placeIn, type Place } from "./place.js";
+import { placeIn, type ChatRef, type Place } from "./place.js";
 
 const log = createLogger("chat-messages");
 
@@ -27,7 +27,7 @@ const log = createLogger("chat-messages");
  *  callers, which hand back the one a page answered. */
 export interface MessageCursor {
   readonly at: Date;
-  readonly id: string;
+  readonly id: number;
 }
 
 /** Some of a place's messages, oldest first, and where the messages before
@@ -39,18 +39,25 @@ export interface MessagePage {
   readonly newer: MessageCursor | null;
 }
 
-/**
- * Delivers a message to its platform and answers the id the channels layer
- * records it under. Throws when the platform refused it. Chats mints no id:
- * on the dashboard, where Rome is the platform, the dashboard adapter answers
- * the id it gave the line.
- */
-export type Deliver = () => Promise<{ id: string }>;
+/** Where a send goes, by its adapter's keys: the chat's, and the quoted
+ *  line's when the send quotes one. */
+export interface SendTarget {
+  readonly chat: string;
+  readonly replyTo?: string;
+}
 
-/** A sent message: its adapter's id, and whether Rome recorded it, which it
- *  failed to when the platform took it but the record did not land. */
+/**
+ * Delivers a message to its platform at `target` and answers the key the
+ * adapter gives it. Throws when the platform refused it. On the dashboard,
+ * where Rome is the platform, the dashboard adapter mints the key.
+ */
+export type Deliver = (target: SendTarget) => Promise<{ key: string }>;
+
+/** A sent message: its adapter's key, and the id Rome recorded it under, or
+ *  null when the platform took it but the record did not land. */
 export interface Sent {
-  readonly id: string;
+  readonly id: number | null;
+  readonly key: string;
   readonly recorded: boolean;
   readonly at: Date;
 }
@@ -59,18 +66,19 @@ export class MessageRepository {
   constructor(private readonly db: DrizzleDb) {}
 
   /**
-   * Put `message` on record in its place, and answer it, or null when its id
-   * is already on record in that chat: recording again changes nothing. The place's chat must already exist: a
-   * message never starts its chat. Throws when it does not.
+   * Put `message` on record in its place, and answer it with its id, or null
+   * when its key is already on record in that chat: recording again changes
+   * nothing. A quote of a line Rome does not hold quotes nothing. The place's
+   * chat must already exist: a message never starts its chat. Throws when it
+   * does not.
    */
   record(message: Message): RecordedMessage | null {
-    const chatId = this.chatIdOf(message.place);
-    const id = message.id;
+    const chatId = this.chatOf(message.place).id;
     const inserted = this.db
       .insert(chatMessages)
       .values({
-        id,
         chatId,
+        key: message.key,
         threadId: message.place.threadId ?? null,
         senderAccountId: message.saidBy.account.id,
         senderAgent: message.saidBy.agent ?? null,
@@ -79,13 +87,16 @@ export class MessageRepository {
         parts: JSON.stringify(
           message.parts ?? [{ type: "text", content: plainText(message.body) }],
         ),
-        replyToMessageId: message.replyTo ?? null,
+        replyToMessageId: message.replyTo === undefined ? null : this.idIn(chatId, message.replyTo),
         saidAt: message.at,
       })
       .onConflictDoNothing()
-      .returning({ id: chatMessages.id })
+      .returning({ id: chatMessages.id, replyTo: chatMessages.replyToMessageId })
       .all();
-    return inserted.length === 0 ? null : message;
+    const row = inserted[0];
+    if (!row) return null;
+    const { replyTo: _quoted, ...rest } = message;
+    return { ...rest, id: row.id, ...(row.replyTo === null ? {} : { replyTo: row.replyTo }) };
   }
 
   /**
@@ -96,35 +107,41 @@ export class MessageRepository {
    * invites a second real one. The place's chat must already exist.
    */
   async send(message: OutboundMessage, deliver: Deliver): Promise<Sent> {
-    const chatId = this.chatIdOf(message.place);
-    const delivered = await deliver();
-    const id = delivered.id;
+    const chat = this.chatOf(message.place);
+    const quoted =
+      message.replyTo === undefined
+        ? null
+        : typeof message.replyTo === "number"
+          ? this.keyOf(message.replyTo)
+          : message.replyTo.key;
+    const { key } = await deliver({ chat: chat.key, ...(quoted ? { replyTo: quoted } : {}) });
     const at = new Date();
     try {
+      // The platform answered a key already on record: the same message.
       this.db
         .insert(chatMessages)
         .values({
-          id,
-          chatId,
+          chatId: chat.id,
+          key,
           threadId: message.place.threadId ?? null,
           senderAccountId: message.saidBy.account.id,
           senderAgent: message.saidBy.agent ?? null,
           senderName: message.saidBy.name ?? null,
           text: partsText(message.parts),
           parts: JSON.stringify(message.parts),
-          replyToMessageId: message.replyTo ?? null,
+          replyToMessageId:
+            typeof message.replyTo === "number" && quoted !== null ? message.replyTo : null,
           saidAt: at,
         })
-        // The platform answered an id already on record: the same message.
         .onConflictDoNothing()
         .run();
-      return { id, recorded: true, at };
+      return { id: this.idIn(chat.id, key), key, recorded: true, at };
     } catch (error) {
       log.warn("message delivered but recording failed", {
-        chatId,
+        chatId: chat.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      return { id, recorded: false, at };
+      return { id: null, key, recorded: false, at };
     }
   }
 
@@ -150,12 +167,11 @@ export class MessageRepository {
     if (after) return this.readAfter(place, after, limit);
     // One more than asked says whether any are older.
     const rows = this.db.all<MessageRow>(sql`
-      SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
-             m.reply_to_message_id, m.said_at
+      SELECT ${MESSAGE_COLUMNS}
       FROM chat_messages m
       WHERE m.chat_id = ${place.chat.id} AND m.thread_id IS ${place.threadId ?? null}
-        ${before ? sql`AND (m.said_at, m.rowid) < (${seconds(before.at)}, (SELECT rowid FROM chat_messages WHERE id = ${before.id}))` : sql``}
-      ORDER BY m.said_at DESC, m.rowid DESC
+        ${before ? sql`AND (m.said_at, m.id) < (${seconds(before.at)}, ${before.id})` : sql``}
+      ORDER BY m.said_at DESC, m.id DESC
       ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
     `);
     const shown = limit === undefined ? rows : rows.slice(0, limit);
@@ -177,15 +193,14 @@ export class MessageRepository {
   ): MessagePage {
     const bound =
       "id" in after
-        ? sql`(m.said_at, m.rowid) > (${seconds(after.at)}, (SELECT rowid FROM chat_messages WHERE id = ${after.id}))`
+        ? sql`(m.said_at, m.id) > (${seconds(after.at)}, ${after.id})`
         : sql`m.said_at > ${seconds(after.at)}`;
     // One more than asked says whether any are newer.
     const rows = this.db.all<MessageRow>(sql`
-      SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
-             m.reply_to_message_id, m.said_at
+      SELECT ${MESSAGE_COLUMNS}
       FROM chat_messages m
       WHERE m.chat_id = ${place.chat.id} AND m.thread_id IS ${place.threadId ?? null} AND ${bound}
-      ORDER BY m.said_at, m.rowid
+      ORDER BY m.said_at, m.id
       ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
     `);
     const shown = limit === undefined ? rows : rows.slice(0, limit);
@@ -202,46 +217,81 @@ export class MessageRepository {
 
   /** The messages `ids` name that are on record, wherever they were said, in
    *  the order they were said. */
-  byIds(ids: readonly string[]): SaidMessage[] {
+  byIds(ids: readonly number[]): SaidMessage[] {
     if (ids.length === 0) return [];
     return this.db
       .all<MessageRow & PlaceRow>(sql`
-        SELECT m.id, m.sender_account_id, m.sender_agent, m.sender_name, m.text, m.parts,
-               m.reply_to_message_id, m.said_at, c.platform, m.chat_id, m.thread_id
+        SELECT ${MESSAGE_COLUMNS}, c.platform, m.chat_id, m.thread_id
         FROM chat_messages m JOIN chats c ON c.id = m.chat_id
         WHERE m.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
-        ORDER BY m.said_at, m.rowid
+        ORDER BY m.said_at, m.id
       `)
       .map((row) => said(placeOf(row), row));
   }
 
+  /** The parts of a line its adapter keys `key`, in whichever chat: the
+   *  oldest such line. A dashboard line's key is unique on its own. */
+  partsKeyed(key: string): string | null {
+    return (
+      this.db.all<{ parts: string }>(sql`
+        SELECT parts FROM chat_messages WHERE key = ${key} ORDER BY id LIMIT 1
+      `)[0]?.parts ?? null
+    );
+  }
+
+  /** The id of the line its adapter keys `key` in `chat`, or null when Rome
+   *  holds none. */
+  idOf(chat: ChatRef, key: string): number | null {
+    return this.idIn(chat.id, key);
+  }
+
+  private idIn(chatId: number, key: string): number | null {
+    return (
+      this.db.all<{ id: number }>(sql`
+        SELECT id FROM chat_messages WHERE chat_id = ${chatId} AND key = ${key}
+      `)[0]?.id ?? null
+    );
+  }
+
+  /** The adapter's key for message `id`, or null when Rome holds none. */
+  keyOf(id: number): string | null {
+    return (
+      this.db.all<{ key: string }>(sql`SELECT key FROM chat_messages WHERE id = ${id}`)[0]?.key ??
+      null
+    );
+  }
+
   /** The chat `place` is in, which must already exist: a message never
    *  starts its chat. */
-  private chatIdOf(place: Place): string {
-    const row = this.db.all<{ id: string }>(sql`
-      SELECT id FROM ${chats} WHERE id = ${place.chat.id}
+  private chatOf(place: Place): { id: number; key: string } {
+    const row = this.db.all<{ id: number; key: string }>(sql`
+      SELECT id, key FROM ${chats} WHERE id = ${place.chat.id}
     `)[0];
     if (!row) {
       throw new Error(`No chat at ${place.chat.platform}:${place.chat.id} to record a message in`);
     }
-    return row.id;
+    return row;
   }
 }
 
+const MESSAGE_COLUMNS = sql.raw(`m.id, m.key, m.sender_account_id, m.sender_agent, m.sender_name,
+  m.text, m.parts, m.reply_to_message_id, m.said_at`);
+
 interface MessageRow {
-  id: string;
+  id: number;
+  key: string;
   sender_account_id: string | null;
   sender_agent: string | null;
   sender_name: string | null;
   text: string;
   parts: string;
-  reply_to_message_id: string | null;
+  reply_to_message_id: number | null;
   said_at: number;
 }
 
 interface PlaceRow {
   platform: string;
-  chat_id: string;
+  chat_id: number;
   thread_id: string | null;
 }
 
@@ -263,6 +313,7 @@ function said(place: Place, row: MessageRow): SaidMessage {
         };
   return {
     id: row.id,
+    key: row.key,
     direction: row.sender_agent === null ? "toRome" : "fromRome",
     place,
     ...(saidBy ? { saidBy } : {}),

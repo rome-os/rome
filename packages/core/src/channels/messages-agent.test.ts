@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { Account } from "@rome-os/app-runtime";
 import { chatAt, directMessageAt } from "../chats/adapter.js";
@@ -37,7 +38,24 @@ const ACCOUNTS: Record<string, Account> = {
 };
 const accountOn = (channel: string): Account =>
   ACCOUNTS[channel] ?? { platform: channel, id: channel };
-const read = (db: DrizzleDb) => agentMessages(db, accountOn);
+/** The store, with each entry's ref naming its line by the key the fixture
+ *  gave it rather than the id Chats did. */
+const read = (db: DrizzleDb) => {
+  const store = agentMessages(db, accountOn);
+  const named = <M extends { ref: string } | null>(entry: M): M => {
+    if (!entry) return entry;
+    const id = Number(entry.ref.slice("agent:".length));
+    const key = db.all<{ key: string }>(sql`SELECT key FROM chat_messages WHERE id = ${id}`)[0];
+    return { ...entry, ref: key ? `agent:${key.key}` : entry.ref };
+  };
+  return {
+    read: async (request: Parameters<typeof store.read>[0]) =>
+      (await store.read(request)).map(named),
+    latest: async (accounts: Parameters<typeof store.latest>[0]) =>
+      named(await store.latest(accounts)),
+    count: (accounts: Parameters<typeof store.count>[0]) => store.count(accounts),
+  };
+};
 
 /** Where each fixture seat stands, by seat id. */
 const seats = new Map<string, { chat: ChatRef; account: Account; person: string }>();
@@ -50,11 +68,11 @@ function session(
   const fixture = seatFixture(db);
   const account = accountOn(fields.channel ?? CHANNEL);
   const kind = fields.kind ?? "dm";
-  const chat =
+  const key =
     kind === "dm"
       ? directMessageAt(account, fields.threadId, new ChatAddresses(db))
       : chatAt(account.platform, fields.threadId);
-  fixture.chat(chat.platform, chat.id, kind);
+  const chat = fixture.chat(key.platform, key.externalId, kind);
   fixture.seat({ id, chat, accountId: account.id, createdAt: new Date(0) });
   seats.set(id, { chat, account, person: fields.threadId });
 }
@@ -77,7 +95,7 @@ function message(
   const parts = fields.content ?? JSON.stringify([{ type: "text", content: id }]);
   db.insert(chatMessages)
     .values({
-      id,
+      key: id,
       chatId: seat.chat.id,
       threadId: null,
       senderAccountId: fields.senderId ?? (fromRome ? seat.account.id : seat.person),

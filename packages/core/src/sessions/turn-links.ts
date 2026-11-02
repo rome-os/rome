@@ -22,7 +22,7 @@ export type TurnLinkRole = "prompt" | "answer" | "seen";
 /** One message's link to one session. `turnId` is null for a prompt still
  *  queued. `inputState` is set on a prompt alone. */
 export interface TurnLink {
-  readonly messageId: string;
+  readonly messageId: number;
   readonly sessionId: string;
   readonly turnId: string | null;
   readonly role: TurnLinkRole;
@@ -35,7 +35,7 @@ export class TurnLinks {
    * restart forgets it, which decides every wake in flight, since the
    * decision died with the process.
    */
-  private readonly undecided = new Set<string>();
+  private readonly undecided = new Set<number>();
 
   /** Chats' reads, which every line a session reads goes through. */
   private readonly messages: Pick<MessageRepository, "read" | "byIds">;
@@ -54,7 +54,7 @@ export class TurnLinks {
   /** Where session `sessionId` stands, from its own row, or null for a
    *  session in no chat. */
   private seatOf(sessionId: string): {
-    chatId: string;
+    chatId: number;
     platform: string;
     threadId: string | null;
     since: Date;
@@ -109,7 +109,7 @@ export class TurnLinks {
    * up on becomes its prompt. Safe to call again.
    */
   prompt(
-    messageId: string,
+    messageId: number,
     sessionId: string,
     turnId: string | null = null,
     inputState: AgentInputState | null = null,
@@ -128,7 +128,7 @@ export class TurnLinks {
    *  the input stands. Changes nothing when the message is not its prompt. */
   promptRuns(
     sessionId: string,
-    messageId: string,
+    messageId: number,
     turnId: string | null,
     inputState?: AgentInputState,
   ): void {
@@ -151,7 +151,7 @@ export class TurnLinks {
 
   /** Make message `messageId` turn `turnId`'s answer in session `sessionId`.
    *  Safe to call again. */
-  answer(messageId: string, sessionId: string, turnId: string): void {
+  answer(messageId: number, sessionId: string, turnId: string): void {
     this.db.run(sql`
       INSERT INTO agent_turn_messages (message_id, session_id, turn_id, role, input_state)
       VALUES (${messageId}, ${sessionId}, ${turnId}, 'answer', NULL)
@@ -161,7 +161,7 @@ export class TurnLinks {
 
   /** Mark `messageIds` caught up on by turn `turnId` of session `sessionId`.
    *  A message the session already linked keeps its link. */
-  seen(messageIds: readonly string[], sessionId: string, turnId: string): void {
+  seen(messageIds: readonly number[], sessionId: string, turnId: string): void {
     // Only messages Chats holds: one gone since is nothing to link.
     const held = this.messages.byIds(messageIds).map((message) => message.id);
     if (held.length === 0) return;
@@ -174,7 +174,7 @@ export class TurnLinks {
 
   /** Each of `messageIds`' prompt or answer link, the first written when
    *  several sessions linked it. A message no turn took or gave is left out. */
-  turnsOf(messageIds: readonly string[]): Map<string, TurnLink> {
+  turnsOf(messageIds: readonly number[]): Map<number, TurnLink> {
     if (messageIds.length === 0) return new Map();
     const rows = this.db.all<LinkRow>(sql`
       SELECT message_id, session_id, turn_id, role, input_state
@@ -183,13 +183,13 @@ export class TurnLinks {
         AND role IN ('prompt', 'answer')
       ORDER BY rowid
     `);
-    const links = new Map<string, TurnLink>();
+    const links = new Map<number, TurnLink>();
     for (const row of rows) if (!links.has(row.message_id)) links.set(row.message_id, toLink(row));
     return links;
   }
 
   /** Session `sessionId`'s link to message `messageId`, or null for none. */
-  linkOf(sessionId: string, messageId: string): TurnLink | null {
+  linkOf(sessionId: string, messageId: number): TurnLink | null {
     const row = this.db.all<LinkRow>(sql`
       SELECT message_id, session_id, turn_id, role, input_state
       FROM agent_turn_messages
@@ -250,19 +250,19 @@ export class TurnLinks {
 
   /** Hold message `messageId` out of every catch-up until its wake is
    *  decided. */
-  wakeUndecided(messageId: string): void {
+  wakeUndecided(messageId: number): void {
     this.undecided.add(messageId);
   }
 
   /** Note that whether message `messageId` wakes an agent is decided. */
-  wakeDecided(messageId: string): void {
+  wakeDecided(messageId: number): void {
     this.undecided.delete(messageId);
   }
 }
 
 /** A line said where a session stands, as it would read it. */
 export interface ContextLine {
-  readonly id: string;
+  readonly id: number;
   readonly senderName: string | null;
   readonly text: string;
   readonly at: Date;
@@ -275,7 +275,7 @@ export interface UnseenLine extends ContextLine {
 }
 
 interface LinkRow {
-  message_id: string;
+  message_id: number;
   session_id: string;
   turn_id: string | null;
   role: TurnLinkRole;

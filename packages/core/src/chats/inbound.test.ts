@@ -54,9 +54,9 @@ function fakeChannel(name: string) {
   return { channel, deliver, handlers };
 }
 
-/** The platform's own id in a recorded message id, which the adapter scopes
- *  by chat and account. */
-const platformId = (id: string) => id.split(":").at(-1);
+/** The platform's own id in a recorded message key, which the adapter scopes
+ *  by account in a Telegram basic group. */
+const platformId = (key: string) => key.split(":").at(-1);
 
 describe("inboundRecording", () => {
   let testDb: TestDb;
@@ -87,11 +87,16 @@ describe("inboundRecording", () => {
       channels,
     );
 
-  const chatOf = (address: string) => wiring.adapters.chatAt("telegram", address, "group");
-  const transcript = (address: string, threadId?: string) =>
-    wiring.messages
-      .read(placeIn(chatOf(address), threadId as ChatId | undefined))
-      .messages.map((m) => [platformId(m.id), m.body.text, m.saidBy?.name]);
+  const chatOf = (address: string) =>
+    wiring.chats.byKey(wiring.adapters.chatAt("telegram", address, "group"));
+  const transcript = (address: string, threadId?: string) => {
+    const chat = chatOf(address);
+    return chat
+      ? wiring.messages
+          .read(placeIn(chat.ref, threadId as ChatId | undefined))
+          .messages.map((m) => [platformId(m.key), m.body.text, m.saidBy?.name])
+      : [];
+  };
 
   it("records a message in its chat before a listener hears it", async () => {
     const telegram = fakeChannel("telegram");
@@ -104,10 +109,10 @@ describe("inboundRecording", () => {
     await telegram.deliver(message());
 
     expect(onRecordWhenHeard).toEqual([["tg-1", "Hello", "Alice"]]);
-    expect(wiring.chats.get(chatOf(GROUP))).toMatchObject({ kind: "group", name: "Team" });
+    expect(chatOf(GROUP)).toMatchObject({ key: "-100", kind: "group", name: "Team" });
     expect(said).toHaveLength(1);
     expect(said[0]).toMatchObject({
-      message: { id: "telegram:-100/rome-bot:tg-1", direction: "toRome" },
+      message: { id: expect.any(Number), key: "rome-bot:tg-1", direction: "toRome" },
       via: { channel: "telegram" },
     });
   });
@@ -119,7 +124,7 @@ describe("inboundRecording", () => {
     await telegram.deliver(message());
 
     expect(telegram.handlers).toHaveLength(0);
-    expect(wiring.chats.get(chatOf(GROUP))).toBeNull();
+    expect(chatOf(GROUP)).toBeNull();
   });
 
   it("records a redelivery once, and it is heard once", async () => {
@@ -142,7 +147,7 @@ describe("inboundRecording", () => {
     );
 
     expect(transcript(GROUP)).toEqual([]);
-    expect(said[0]?.message.place.chat).toEqual(chatOf(GROUP));
+    expect(said[0]?.message.place.chat).toEqual(chatOf(GROUP)?.ref);
     expect(said[0]?.message.place.threadId).toBeDefined();
   });
 
@@ -152,7 +157,7 @@ describe("inboundRecording", () => {
 
     await telegram.deliver(message());
 
-    expect(wiring.chats.get(chatOf(GROUP))).toBeNull();
+    expect(chatOf(GROUP)).toBeNull();
     expect(said).toEqual([]);
   });
 
@@ -190,6 +195,6 @@ describe("inboundRecording", () => {
       telegram.deliver(message({ messageId: "tg-2", text: "two" })),
     ]);
 
-    expect(said.map((event) => platformId(event.message.id))).toEqual(["tg-1", "tg-2"]);
+    expect(said.map((event) => platformId(event.message.key))).toEqual(["tg-1", "tg-2"]);
   });
 });

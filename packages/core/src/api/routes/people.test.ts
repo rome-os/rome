@@ -336,8 +336,8 @@ describe("People timeline API", () => {
       links: [{ platform: "telegram", id: "tg-in-group" }],
     });
     const fixture = seatFixture(testDb.db);
-    const group = deps.adapters.chatAt("telegram", GROUP_THREAD, "group");
-    fixture.chat(group.platform, group.id, "group");
+    const groupKey = deps.adapters.chatAt("telegram", GROUP_THREAD, "group");
+    const group = fixture.chat(groupKey.platform, groupKey.externalId, "group");
     fixture.seat({
       id: channelChatId("telegram", GROUP_THREAD),
       chat: group,

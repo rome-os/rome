@@ -64,6 +64,7 @@ import {
 } from "../../webchat/chat-read-model-sql.js";
 import { TurnLinks } from "../../sessions/turn-links.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
+import { chatKey } from "../../channels/chat-ids.js";
 import { MessageRepository } from "../../chats/message-repository.js";
 import { partsText, type SaidBy } from "../../chats/message.js";
 import type { MessagePart } from "../../types.js";
@@ -646,7 +647,7 @@ export class WebChatRepository {
     if (!row || row.chatId) return;
     // The dashboard is its own adapter and gives its chats random ids.
     const chat = this.chats.start(
-      { platform: WEBCHAT_PLATFORM, id: randomUUID().replaceAll("-", "") },
+      chatKey(WEBCHAT_PLATFORM, randomUUID().replaceAll("-", "") as ChatId),
       "dm",
       name,
     );
@@ -1076,8 +1077,9 @@ export class WebChatRepository {
   /** The session that stands in the dashboard chat keyed `key`, or null
    *  when Rome holds no dashboard chat there. */
   async dashboardSessionAt(key: string): Promise<string | null> {
-    if (!this.chats.get({ platform: WEBCHAT_PLATFORM, id: key })) return null;
-    return this.firstSeat(eq(romeSessions.chatId, key));
+    const chat = this.chats.byKey(chatKey(WEBCHAT_PLATFORM, key as ChatId));
+    if (!chat) return null;
+    return this.firstSeat(eq(romeSessions.chatId, chat.ref.id));
   }
 
   /**
@@ -1085,7 +1087,7 @@ export class WebChatRepository {
    * `threadId` or the open chat when null, by its session's id, or null when
    * it holds none there.
    */
-  seatIn(chatId: string, threadId: string | null, accountId: string): string | null {
+  seatIn(chatId: number, threadId: string | null, accountId: string): string | null {
     return this.firstSeat(
       and(
         eq(romeSessions.chatId, chatId),
@@ -1127,7 +1129,7 @@ export class WebChatRepository {
 
   /** Turn `turnId` of session `sessionId` runs for its prompt, line
    *  `lineId`. Changes nothing when that line is not its prompt. */
-  assignConversationMessageTurn(sessionId: string, lineId: string, turnId: string): void {
+  assignConversationMessageTurn(sessionId: string, lineId: number, turnId: string): void {
     this.links.promptRuns(sessionId, lineId, turnId);
   }
 
@@ -1494,18 +1496,18 @@ export class WebChatRepository {
       const sender = fromAgent
         ? { account: { platform: WEBCHAT_PLATFORM, id: seat.accountId }, agent: seat.agent }
         : dashboardSender(line.actor ?? undefined);
-      await this.lines.record({
+      const recorded = await this.lines.record({
         direction: "toRome",
-        id: line.id,
+        key: line.id,
         place: seat.place,
         saidBy: sender,
         body: { text: partsText(parts) },
         parts,
         at: line.createdAt,
       });
-      if (line.turnId === null) continue;
-      if (fromAgent) this.links.answer(line.id, id, line.turnId);
-      else this.links.prompt(line.id, id, line.turnId);
+      if (line.turnId === null || !recorded) continue;
+      if (fromAgent) this.links.answer(recorded.id, id, line.turnId);
+      else this.links.prompt(recorded.id, id, line.turnId);
     }
     this.db
       .delete(romeAgentMessages)
@@ -1593,7 +1595,7 @@ export class WebChatRepository {
     const parts = partsOf(content);
     const recorded = await this.lines.record({
       direction: "toRome",
-      id,
+      key: id,
       place: seat.place,
       saidBy: saidBy ? { account: saidBy } : dashboardSender(actor),
       body: { text: partsText(parts) },
@@ -1601,7 +1603,7 @@ export class WebChatRepository {
       at: new Date(),
     });
     if (!recorded) return false;
-    this.links.prompt(id, sessionId, null, "queued");
+    this.links.prompt(recorded.id, sessionId, null, "queued");
     await this.advanceActivity(sessionId, recorded.at);
     return true;
   }
@@ -1726,8 +1728,16 @@ export class WebChatRepository {
     return ended;
   }
 
+  /** The id of the line keyed `key` in session `sessionId`'s chat, or null
+   *  when Rome holds none there. A dashboard line's key is the client's id. */
+  async lineIn(sessionId: string, key: string): Promise<number | null> {
+    const seat = await this.seatOf(sessionId);
+    return seat ? this.lines.idOf(seat.place.chat, key) : null;
+  }
+
   async getUserInput(sessionId: string, inputId: string) {
-    const link = this.links.linkOf(sessionId, inputId);
+    const line = await this.lineIn(sessionId, inputId);
+    const link = line === null ? null : this.links.linkOf(sessionId, line);
     return link?.role === "prompt"
       ? { turnId: link.turnId, inputState: link.inputState }
       : undefined;
@@ -1737,7 +1747,8 @@ export class WebChatRepository {
     sessionId: string,
     status: import("@rome-os/app-runtime").InputStatusEvent,
   ): Promise<void> {
-    this.links.promptRuns(sessionId, status.inputId, status.turnId ?? null, status.state);
+    const line = await this.lineIn(sessionId, status.inputId);
+    if (line !== null) this.links.promptRuns(sessionId, line, status.turnId ?? null, status.state);
   }
 
   /**
@@ -1796,16 +1807,16 @@ export class WebChatRepository {
   ): Promise<Date> {
     const at = new Date();
     if (role === "user") {
-      await this.lines.record({
+      const recorded = await this.lines.record({
         direction: "toRome",
-        id,
+        key: id,
         place: seat.place,
         saidBy: dashboardSender(undefined),
         body: { text: partsText(parts) },
         parts,
         at,
       });
-      if (turnId) this.links.prompt(id, seat.sessionId, turnId);
+      if (recorded && turnId) this.links.prompt(recorded.id, seat.sessionId, turnId);
     } else {
       const sent = await this.lines.send(
         {
@@ -1817,11 +1828,11 @@ export class WebChatRepository {
           },
           parts,
         },
-        // The dashboard adapter names its line, and the client knows it by
-        // that id already.
-        async () => ({ id }),
+        // The dashboard adapter keys its line, and the client knows it by
+        // that key already.
+        async () => ({ key: id }),
       );
-      if (sent.id && turnId) this.links.answer(sent.id, seat.sessionId, turnId);
+      if (sent.id !== null && turnId) this.links.answer(sent.id, seat.sessionId, turnId);
     }
     await this.advanceActivity(seat.sessionId, at);
     return at;
@@ -2109,7 +2120,7 @@ export class WebChatRepository {
           )})))`;
     return this.db.all<SeatSaidIn>(seatsSaidInSince(scope, cutoff)).map((row) => ({
       sessionId: row.id,
-      chatId: row.chat_id,
+      chatId: String(row.chat_id),
       threadId: row.thread_id,
       name: row.name,
       threadName: row.thread_name,
@@ -2655,8 +2666,8 @@ export class WebChatRepository {
 
   async getMessageContentForDisplay(id: string, options: TraceReadOptions = {}) {
     // A chat line is the chat's, whichever session reads it.
-    const [line] = this.lines.byIds([id]);
-    if (line) return { id, content: line.parts };
+    const parts = this.lines.partsKeyed(id);
+    if (parts !== null) return { id, content: parts };
     if (options.sessionActivityCutoff) {
       const [message] = await this.db
         .select({ sessionId: romeAgentMessages.sessionId, role: romeAgentMessages.role })

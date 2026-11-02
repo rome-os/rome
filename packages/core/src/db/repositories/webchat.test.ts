@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { ChatId } from "@rome-os/app-runtime";
+import type { ChatRef } from "../../chats/place.js";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb, testChatWiring, type TestDb } from "../../test/helpers.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
@@ -138,7 +140,7 @@ describe("WebChatRepository", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date(lastMessageAt) })
-      .where(eq(chatMessages.id, "latest"));
+      .where(eq(chatMessages.key, "latest"));
 
     const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
     const traces = await repo.getTraceContents("retention", options);
@@ -195,7 +197,7 @@ describe("WebChatRepository", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date("2026-10-18T12:00:00Z") })
-      .where(eq(chatMessages.id, "new-message"));
+      .where(eq(chatMessages.key, "new-message"));
     expect(await repo.getTraceArchivedSessionIds(["idle"], options.sessionActivityCutoff)).toEqual(
       [],
     );
@@ -228,7 +230,7 @@ describe("WebChatRepository", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date("2026-10-18T12:00:00Z") })
-      .where(eq(chatMessages.id, "active-reply"));
+      .where(eq(chatMessages.key, "active-reply"));
     await repo.updateSessionName("idle", "Renamed");
     await repo.markSessionRead("idle");
     await testDb.db.update(romeSessions).set({
@@ -290,7 +292,7 @@ describe("WebChatRepository", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date(lastMessageAt) })
-      .where(eq(chatMessages.id, "root-latest"));
+      .where(eq(chatMessages.key, "root-latest"));
     await repo.addMessage("unrelated-latest", "unrelated", "user", "Continue");
     const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
     const options = { sessionActivityCutoff: cutoff };
@@ -365,7 +367,7 @@ describe("WebChatRepository", () => {
     await testDb.db
       .update(chatMessages)
       .set({ saidAt: new Date("2026-10-23T12:00:00Z") })
-      .where(eq(chatMessages.id, "branch-latest"));
+      .where(eq(chatMessages.key, "branch-latest"));
     expect((await repo.getTraceArchivedSessionIds(ids, cutoff)).sort()).toEqual([
       "root",
       "sibling",
@@ -505,7 +507,7 @@ describe("WebChatRepository", () => {
       testDb.db
         .select({ account: chatMessages.senderAccountId, name: chatMessages.senderName })
         .from(chatMessages)
-        .where(eq(chatMessages.id, id))
+        .where(eq(chatMessages.key, id))
         .get();
     expect(sender("input")).toEqual({ account: "visitor:a", name: "a@example.com" });
     const guardian = {
@@ -812,10 +814,11 @@ describe("WebChatRepository", () => {
 
   describe("seats in channel chats", () => {
     const chats = () => new ChatRepository(testDb.db);
-    const GROUP = { platform: "feishu", id: "oc_chat" };
+    const KEY = { platform: "feishu", externalId: "oc_chat" as ChatId };
+    let GROUP: ChatRef;
 
     it("opens one seat for an account in a chat, and finds it by chat and account", async () => {
-      chats().start(GROUP, "group", "Design");
+      GROUP = chats().start(KEY, "group", "Design").ref;
       const address = {
         channel: "feishu",
         threadId: "oc_chat",
@@ -861,7 +864,7 @@ describe("WebChatRepository", () => {
     });
 
     it("opens a topic's seat under its chat's, named after the topic", async () => {
-      chats().start(GROUP, "group", "Design");
+      GROUP = chats().start(KEY, "group", "Design").ref;
       const seat = await repo.ensureChannelChat({
         channel: "feishu",
         threadId: "omt_topic",
@@ -2207,7 +2210,7 @@ describe("WebChatRepository", () => {
       await testDb.db
         .update(chatMessages)
         .set({ saidAt: new Date("2030-02-02T12:00:00.000Z") })
-        .where(eq(chatMessages.id, id));
+        .where(eq(chatMessages.key, id));
     }
 
     const totals = await repo.getUsageTotals({

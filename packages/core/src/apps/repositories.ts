@@ -16,7 +16,7 @@ import { messageContentText } from "../channels/messages-agent.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import { openChannelChat, type OpenChannelChatDeps } from "../sessions/open-seat.js";
 import type { ChatAdapters } from "../chats/adapter.js";
-import type { SeatLines } from "../channels/seat-lines.js";
+import type { SeatAt, SeatLines } from "../channels/seat-lines.js";
 import {
   emailOf,
   type EmailOutbound,
@@ -48,7 +48,7 @@ export interface CreateAppRuntimeRepositoriesDeps {
   reads: Pick<ChatReadModel, "chatTranscript" | "sessionTranscript">;
   adapters: OpenChannelChatDeps["adapters"] & Pick<ChatAdapters, "of" | "addressAt">;
   /** The lines an app names by the platform's ids. */
-  seatLines: Pick<SeatLines, "idIn" | "platformIdIn" | "recorded">;
+  seatLines: Pick<SeatLines, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -120,13 +120,13 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
     channel: Channel,
     recipients: EmailRecipients,
     subject: string,
-    out: EmailOutbound,
+    out: Omit<EmailOutbound, "replyTo">,
     recordedParts: readonly MessagePart[],
     turnId: string | undefined,
   ) => {
     const adapter = emailOf(deps.adapters, channel);
-    const chat = adapter.open(recipients, subject);
-    deps.chatRepo.start(chat, "group", subject || null);
+    const key = adapter.open(recipients, subject);
+    const chat = deps.chatRepo.start(key, "group", subject || null).ref;
     const romeEnd = adapter.account.id;
     let seat = "";
     const sent = await deps.chatMessages.send(
@@ -136,8 +136,8 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
         saidBy: { account: { platform: chat.platform, id: romeEnd }, agent: "main" },
         parts: recordedParts,
       },
-      async () => {
-        const id = await adapter.send(chat.id, null, out);
+      async (target) => {
+        const sentKey = await adapter.send(target.chat, null, out);
         seat = (
           await open({
             channel: channel.name,
@@ -147,12 +147,15 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
             ...(subject ? { threadName: subject } : {}),
           })
         ).id;
-        return { id };
+        return { key: sentKey };
       },
     );
-    if (sent.recorded && turnId) deps.links.answer(sent.id, seat, turnId);
+    if (sent.id !== null && turnId) deps.links.answer(sent.id, seat, turnId);
     return {
-      messageId: deps.seatLines.platformIdIn({ place: placeIn(chat), accountId: romeEnd }, sent.id),
+      messageId: deps.seatLines.platformIdIn(
+        { place: placeIn(chat), accountId: romeEnd },
+        sent.key,
+      ),
       threadId: deps.adapters.addressAt(channel.name, placeIn(chat)),
     };
   };
@@ -182,10 +185,10 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
     addMessage: async (input) => {
       const seat = await repo.seatOf(input.sessionId);
       if (!seat) throw new Error(`No chat for session ${input.sessionId}`);
-      const idOf = (platformMessageId: string) => deps.seatLines.idIn(seat, platformMessageId);
+      const keyOf = (platformMessageId: string) => deps.seatLines.keyIn(seat, platformMessageId);
       const recorded = await deps.chatMessages.record({
         direction: "toRome",
-        id: idOf(input.platformMessageId),
+        key: keyOf(input.platformMessageId),
         place: seat.place,
         saidBy: {
           account: { platform: seat.place.chat.platform, id: input.senderId ?? "" },
@@ -194,7 +197,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
         body: { text: messageContentText(input.content) ?? "" },
         ...(input.replyToPlatformMessageId === undefined
           ? {}
-          : { replyTo: idOf(input.replyToPlatformMessageId) }),
+          : { replyTo: keyOf(input.replyToPlatformMessageId) }),
         at: input.createdAt ?? new Date(),
       });
       if (!recorded) return { inserted: false };
@@ -222,9 +225,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
           text: input.text ?? "",
           ...(parts ? { parts } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-          ...(seat && input.replyToPlatformMessageId
-            ? { replyTo: deps.seatLines.idIn(seat, input.replyToPlatformMessageId) }
-            : {}),
+          ...replyToIn(deps, seat, input.replyToPlatformMessageId),
         },
         {
           ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
@@ -251,7 +252,11 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       }
       // An email's body is its text, else the text of its parts.
       const text = input.text ?? (parts ? partsText(parts) : "");
-      const out: EmailOutbound = { text, ...(parts ? { parts } : {}), ...(html ? { html } : {}) };
+      const out: Omit<EmailOutbound, "replyTo"> = {
+        text,
+        ...(parts ? { parts } : {}),
+        ...(html ? { html } : {}),
+      };
       const turnId = input.knownToProvider ? input.turnId : undefined;
       if (!input.threadId && !input.sessionId) {
         return await startThread(
@@ -280,9 +285,7 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
         channel,
         {
           ...out,
-          ...(seat && inReplyToMessageId
-            ? { replyTo: deps.seatLines.idIn(seat, inReplyToMessageId) }
-            : {}),
+          ...replyToIn(deps, seat, inReplyToMessageId),
         },
         { ...(turnId ? { turnId } : {}), ...(recorded ? { recorded } : {}) },
       );
@@ -293,6 +296,18 @@ function createChatRepository(deps: CreateAppRuntimeRepositoriesDeps): ChatRepos
       };
     },
   };
+}
+
+/** The quote of the line the platform calls `platformMessageId` where `seat`
+ *  stands: by its id when Rome holds it, else by its key. */
+function replyToIn(
+  deps: Pick<CreateAppRuntimeRepositoriesDeps, "seatLines">,
+  seat: SeatAt | null,
+  platformMessageId: string | undefined,
+): { replyTo?: number | { key: string } } {
+  if (!seat || !platformMessageId) return {};
+  const id = deps.seatLines.idIn(seat, platformMessageId);
+  return { replyTo: id ?? { key: deps.seatLines.keyIn(seat, platformMessageId) } };
 }
 
 /** `parts` with the parts only the host may author taken out, so a forged

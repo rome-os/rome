@@ -78,7 +78,7 @@ async function seedSession(id: string, type: string, at: number): Promise<void> 
   );
   if (type === "channel" || type === "action") return;
   await repo.recordUserInput(`${id}-user`, id, text(`${id} question`));
-  new TurnLinks(testDb.db).promptRuns(id, `${id}-user`, `${id}-turn`);
+  new TurnLinks(testDb.db).promptRuns(id, (await repo.lineIn(id, `${id}-user`))!, `${id}-turn`);
   await repo.addMessage(`${id}-trace`, id, "trace", "[]", `${id}-turn`);
   await repo.addMessage(`${id}-assistant`, id, "assistant", text(`${id} answer`), `${id}-turn`);
   testDb.db.run(sql`
