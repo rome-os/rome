@@ -289,13 +289,20 @@ export class TurnLinks {
       this.messages
         .byIds(lines.flatMap((message) => (message.replyTo ? [message.replyTo] : [])))
         .filter((message) => message.at > speaker.joined)
-        .map((message) => [message.id, contextOf(message)]),
+        .map((message) => [message.id, message]),
     );
-    return lines.map((message) => ({
-      ...contextOf(message),
-      fromRome: message.direction === "fromRome",
-      quoted: (message.replyTo && quoted.get(message.replyTo)) || null,
-    }));
+    return lines.map((message) => {
+      const quote = (message.replyTo && quoted.get(message.replyTo)) || null;
+      return {
+        ...contextOf(message),
+        fromRome: message.direction === "fromRome",
+        quoted: quote && contextOf(quote),
+        quotesOutside:
+          quote !== null &&
+          speaker.threadId !== null &&
+          (quote.place.threadId ?? null) !== speaker.threadId,
+      };
+    });
   }
 
   /** Hold message `messageId` out of every catch-up until its wake is
@@ -325,6 +332,9 @@ export interface ContextLine {
 export interface UnseenLine extends ContextLine {
   readonly fromRome: boolean;
   readonly quoted: ContextLine | null;
+  /** Whether the quoted line was said outside the session's thread, in the
+   *  open chat, as the line that started the thread is. */
+  readonly quotesOutside: boolean;
 }
 
 interface LinkRow {

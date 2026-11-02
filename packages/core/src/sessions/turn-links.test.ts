@@ -205,6 +205,26 @@ describe("TurnLinks", () => {
     expect(links.unseen("speaker-1")).toEqual([]);
   });
 
+  it("tell a thread's starter, quoted from the open chat, from a quote inside the thread", () => {
+    speaker("speaker-t", "topic-1");
+    const starter = heard("start", 2);
+    const inThread = (key: string, seconds: number, extra: Partial<InboundMessage> = {}) =>
+      heard(key, seconds, { place: placeIn(chat, "topic-1" as ChatId), ...extra });
+    inThread("first", 3, { replyTo: "start", saidBy: { account: ROME, agent: "main" } });
+    inThread("question", 4);
+    inThread("answer", 5, { replyTo: "question", saidBy: { account: ROME, agent: "main" } });
+
+    const unseen = links.unseen("speaker-t");
+    expect(unseen.map((line) => [line.text, line.quotesOutside])).toEqual([
+      ["first", true],
+      ["question", false],
+      ["answer", false],
+    ]);
+    expect(unseen[0]?.quoted?.id).toBe(starter);
+    // In the open chat, no quote is from outside it.
+    expect(links.unseen("speaker-1").every((line) => !line.quotesOutside)).toBe(true);
+  });
+
   it("read a line of Rome's that kept no name as Rome's", () => {
     heard("m1", 5, { saidBy: { account: ROME, agent: "main" } });
 
