@@ -748,7 +748,7 @@ export class WebChatRepository {
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
 
-  constructor(private db: DrizzleDb) {}
+  constructor(protected readonly db: DrizzleDb) {}
 
   /** Set by {@link leaveOutOfCatchUp}. */
   private wakeUndecided: (messageId: string) => boolean = () => false;
@@ -760,7 +760,7 @@ export class WebChatRepository {
     };
   }
 
-  private emitMessageInserted(message: StoredWebchatMessage): void {
+  protected emitMessageInserted(message: StoredWebchatMessage): void {
     for (const listener of this.messageInsertedListeners) {
       listener(message);
     }
@@ -2381,7 +2381,7 @@ export class WebChatRepository {
    * Callers own how the message is constructed (the parts); this owns the
    * shared persist-and-notify tail.
    */
-  private async insertBackendMessage(
+  protected async insertBackendMessage(
     sessionId: string,
     turnId: string | null,
     role: string,
