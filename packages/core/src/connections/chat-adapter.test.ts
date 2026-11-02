@@ -339,10 +339,26 @@ describe("channelAdapter", () => {
     const dm = delivered[0]!;
     expect(dm.chatKind).toBe("dm");
 
-    const key = await adapter.send(dm.chat.externalId, null, { text: "hello", replyTo: dm.key });
+    const landed = await adapter.send(dm.chat.externalId, null, {
+      text: "hello",
+      replyTo: dm.key,
+    });
 
     expect(sent).toEqual([{ to: "alice", message: { text: "hello", replyToMessageId: "3" } }]);
-    expect(key).toBe("p1");
+    expect(landed).toEqual({ key: "p1", threadId: null });
+  });
+
+  it("answer the thread a sent message landed in when the platform placed it elsewhere", async () => {
+    const { channel } = fakeChannel();
+    (channel.send as { send: unknown }).send = async () => ({
+      messageId: "m9",
+      chatId: "thread-7",
+    });
+    const adapter = channelAdapter(channel, deps());
+
+    const landed = await adapter.send("-1001234567890123", null, { text: "on it" });
+
+    expect(landed).toEqual({ key: "m9", threadId: "thread-7" });
   });
 
   it("stop delivering once stopped, and refuse a second start while receiving", async () => {
@@ -396,7 +412,26 @@ describe("channelAdapter", () => {
     const settled = await reply.settle(false);
 
     expect(created).toEqual(["All done."]);
-    expect(settled).toMatchObject({ text: "All done.", key: "rome_bot:s1" });
+    expect(settled).toMatchObject({ text: "All done.", key: "rome_bot:s1", threadId: null });
+  });
+
+  it("settle a streamed reply to the thread its first message landed in", async () => {
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async () => ({ messageId: "s1", chatId: "thread-8" }),
+    };
+    const { channel } = fakeChannel(transport);
+    const adapter = channelAdapter(channel, deps());
+    const reply = adapter.stream?.("-1001234567890123", null, {
+      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      clock: systemClock,
+    });
+    if (!reply) throw new Error("expected a stream");
+
+    reply.accept({ type: "text", content: "All done." });
+
+    expect(await reply.settle(false)).toMatchObject({ key: "s1", threadId: "thread-8" });
   });
 });
 

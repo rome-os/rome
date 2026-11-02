@@ -116,11 +116,11 @@ export interface ChatAdapter {
   stop(): Promise<void>;
   /**
    * Post `out` as one message in the chat keyed `chatKey`, in thread
-   * `threadId` or the open chat when null, and answer the adapter's key for
-   * it once the platform took it. A refusal rejects with the platform's
-   * words. No retry.
+   * `threadId` or the open chat when null, and answer where it landed once
+   * the platform took it. A refusal rejects with the platform's words. No
+   * retry.
    */
-  send(chatKey: string, threadId: ChatId | null, out: Outbound): Promise<string>;
+  send(chatKey: string, threadId: ChatId | null, out: Outbound): Promise<Sent>;
   /**
    * Open a reply in the chat keyed `chatKey` that is written as the agent's
    * run goes, or null where the channel cannot stream. It is sent as the
@@ -136,17 +136,30 @@ export interface ChatAdapter {
   ): StreamedReply | null;
 }
 
+/**
+ * A message the platform took: the adapter's key for it, and the thread it
+ * landed in, or null for the open chat. A platform may place a message in
+ * another thread than the one it was sent to, as Discord does when it opens
+ * a thread for a reply in a channel.
+ */
+export interface Sent {
+  readonly key: string;
+  readonly threadId: ChatId | null;
+}
+
 /** A reply {@link ChatAdapter.stream} is writing. */
 export interface StreamedReply {
   accept(event: StreamAgentEvent): void;
   /** Stop writing at once. */
   stop(): void;
   /** Finish the reply, or stop it when the run was stopped, and answer what
-   *  the user was shown. */
+   *  the user was shown, and the thread its first message landed in, as
+   *  {@link Sent} names it. */
   settle(stopped: boolean): Promise<{
     readonly outcome: ReplyOutcome;
     readonly text: string;
     readonly key: string | null;
+    readonly threadId: ChatId | null;
   }>;
 }
 
@@ -232,6 +245,16 @@ export function sentLineId(
     return `rome:${uuidv7()}`;
   }
   return ownedBy(chat, romeEnd, platformMessageId);
+}
+
+/** The thread a message sent to platform address `address`, for thread
+ *  `threadId`, landed in, by the address the platform answered it at. */
+function landedIn(
+  address: ChatId,
+  threadId: ChatId | null,
+  answered: string | undefined,
+): ChatId | null {
+  return answered && answered !== address ? (answered as ChatId) : threadId;
 }
 
 /** The adapter over one of today's channels, which also hands the platform's
@@ -395,11 +418,12 @@ export function channelAdapter(
       const own = account();
       const ref = chatKey(own.platform, chat as ChatId);
       const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
-      const receipt = await send.send(
-        addressIn(ref, threadId),
-        outgoing(out, replyTo || undefined),
-      );
-      return sentLineId(ref, own.id, receipt.messageId || undefined);
+      const address = addressIn(ref, threadId);
+      const receipt = await send.send(address, outgoing(out, replyTo || undefined));
+      return {
+        key: sentLineId(ref, own.id, receipt.messageId || undefined),
+        threadId: landedIn(address, threadId, receipt.chatId),
+      };
     },
 
     stream(chat, threadId, out) {
@@ -408,11 +432,12 @@ export function channelAdapter(
       const own = account();
       const ref = chatKey(own.platform, chat as ChatId);
       const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
+      const address = addressIn(ref, threadId);
       const delivery = new ReplyDelivery({
         transport: replies.transport,
         pacer: replies.pacer,
         policy: out.policy,
-        conversation: addressIn(ref, threadId),
+        conversation: address,
         ...(replyTo ? { replyTo } : {}),
         clock: out.clock,
       });
@@ -431,12 +456,17 @@ export function channelAdapter(
                 (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source,
             )
             .join("");
-          if (shown.length === 0) return { outcome, text, key: null };
+          if (shown.length === 0) return { outcome, text, key: null, threadId };
           // A reply the platform split settles to its first message's key. A
           // message whose create is unknown has no id, so the first one with
           // an id stands in.
-          const first = shown.find((part) => part.receipt)?.receipt?.messageId;
-          return { outcome, text, key: sentLineId(ref, own.id, first || undefined) };
+          const first = shown.find((part) => part.receipt)?.receipt;
+          return {
+            outcome,
+            text,
+            key: sentLineId(ref, own.id, first?.messageId || undefined),
+            threadId: landedIn(address, threadId, first?.chatId),
+          };
         },
       };
     },
