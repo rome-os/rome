@@ -9,7 +9,7 @@ import {
   SUPERSEDED_INTERRUPT_REASON,
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
-import { v4 as uuidv4 } from "uuid";
+import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
@@ -644,7 +644,7 @@ export function createAgentSessionManager(
           const replacement = await deps.sessionsRepo.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
-            newSessionId: uuidv4(),
+            newSessionId: uuidv7(),
             chatId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
@@ -1030,7 +1030,7 @@ async function openSession(
       const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
-        newSessionId: uuidv4(),
+        newSessionId: uuidv7(),
         chatId: requestedRomeSessionId,
       });
       preparedSessionId = replacement.id;
@@ -1039,7 +1039,7 @@ async function openSession(
     }
   }
 
-  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv4();
+  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv7();
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
   // A caller that names no conversation still serves the one the row recorded.
@@ -3128,9 +3128,9 @@ class AgentSessionImpl implements AgentSession {
     // is synthesized: that re-emission is an ordinary-turn compatibility
     // shim slated for removal (step 2 of the stream-shape cleanup), and
     // forked-stream consumers read identity off turn_start.
-    const forkSessionId = uuidv4();
+    const forkSessionId = uuidv7();
     this.activeForkSessionIds.add(forkSessionId);
-    const turnId = uuidv4();
+    const turnId = uuidv7();
     const startMs = Date.now();
 
     // Bracketing invariant: once turn_start is out, the stream must end
@@ -3447,7 +3447,7 @@ class AgentSessionImpl implements AgentSession {
     // stack, and threaded back to every consumer (route, tracing, IPC stream
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
-    const turnId = uuidv4();
+    const turnId = uuidv7();
     const sink: TurnSink = {
       turnId,
       userPrompt: input.prompt,
