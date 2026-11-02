@@ -30,7 +30,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 
 ### Adapter keys
 
-Chats will record a chat and its messages under integer ids of its own, and keep beside each the key its adapter gave it: unique on its platform for a chat, and in its chat for a message. Chats never reads a key. The rules for making one live in one place in the channels layer, [`channels/chat-ids.ts`](../../packages/core/src/channels/chat-ids.ts). Nothing records under them yet: today's storage still keys a chat by its channel and address. The rules land first so the Chats tables' migration and the adapters compute the same keys.
+Chats will record a chat and its messages under integer ids of its own, and keep beside each the key its adapter gave it: unique on its platform for a chat, and in its chat for a message. Chats never reads a key. The rules for making one live in one place in the adapter layer, [`connections/chat-ids.ts`](../../packages/core/src/connections/chat-ids.ts). Nothing records under them yet: today's storage still keys a chat by its channel and address. The rules land first so the Chats tables' migration and the adapters compute the same keys.
 
 - A chat's key is the platform's own id for it, and a message's key is the platform's id for the message. The dashboard gives its chats and messages random keys.
 - A direct message's key names its two ends, `dm:<Rome's account>:<other account>` ([Chat](../domains/chats.md#chat)). Where the platform addresses a direct message by the other party (Telegram, WhatsApp), the other end is that address. Email and Rome Cloud chats keep their own ids.
@@ -39,7 +39,7 @@ Chats will record a chat and its messages under integer ids of its own, and keep
 
 A channel's `send` takes the other party's account id as a direct message's address where the platform has one: Discord opens or finds its DM channel with the user, and Feishu sends to the user's open id. Discord also hears a person's first DM before any DM with them was opened, which discord.js alone drops.
 
-The adapter conformance suite ([`test/kit/im/adapter-conformance.ts`](../../packages/core/src/test/kit/im/adapter-conformance.ts)) is what every adapter owes Chats. It runs each adapter against its platform's peer through Rome's inbound recording and an app's send path, and checks only what a person sees on the peer and what Rome's transcript holds. A case Rome fails today on a platform is listed as a gap beside that platform, with why, and skipped.
+The adapter conformance suite ([`connections/adapter-conformance.ts`](../../packages/core/src/connections/adapter-conformance.ts)) is what every adapter owes Chats. It runs each adapter against its platform's peer through Rome's inbound recording and an app's send path, and checks only what a person sees on the peer and what Rome's transcript holds. A case Rome fails today on a platform is listed as a gap beside that platform, with why, and skipped.
 
 ### Channels for app actions
 

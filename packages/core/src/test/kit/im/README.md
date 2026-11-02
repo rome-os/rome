@@ -33,7 +33,7 @@ The Discord peer's `MESSAGE_CREATE` frames are synthetic. discord.js 14.26.2 bui
 
 ## Conformance
 
-`adapter-conformance.ts` is what every chat adapter owes Chats, written once and run against each peer by `adapter-conformance.integration.test.ts`. A case drives Rome's production inbound recording and an app's send path over the adapter, and checks only what a person sees on the peer and what Rome's transcript holds: a direct message is recorded once in one chat, a reply reaches where the person sees it whether Rome names the person or the address it heard them at, and a direct message Rome opened is the chat the person's answer lands in.
+[`connections/adapter-conformance.ts`](../../../connections/adapter-conformance.ts) is what every chat adapter owes Chats, written once and run against each peer by `adapter-conformance.integration.test.ts` beside it. A case drives Rome's production inbound recording and an app's send path over the adapter, and checks only what a person sees on the peer and what Rome's transcript holds: a direct message is recorded once in one chat, a reply reaches where the person sees it whether Rome names the person or the address it heard them at, and a direct message Rome opened is the chat the person's answer lands in.
 
 A case Rome fails today on a platform is listed in that platform's `gaps`, with why, and skipped, so the report shows it. The step of the Chats migration that closes a gap removes its entry.
 

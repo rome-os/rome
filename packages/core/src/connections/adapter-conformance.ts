@@ -12,17 +12,17 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { createAppRuntimeRepositories } from "../../../apps/repositories.js";
-import type { ChannelSend } from "../../../channels/channel.js";
-import { ChatRepository } from "../../../chats/chat-repository.js";
-import { ChatEvents, type MessageSaid } from "../../../chats/events.js";
-import { inboundRecording } from "../../../chats/inbound.js";
-import { StoredMessages } from "../../../chats/message-repository.js";
-import { chatKey, type Place, placeIn } from "../../../chats/place.js";
-import { SettingsRepository } from "../../../db/repositories/settings.js";
-import { WebChatRepository } from "../../../db/repositories/webchat.js";
-import { createTestDb, type TestDb } from "../../helpers.js";
-import { deferred, type VisibleMessage } from "./peer.js";
+import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import type { ChannelSend } from "../channels/channel.js";
+import { ChatRepository } from "../chats/chat-repository.js";
+import { ChatEvents, type MessageSaid } from "../chats/events.js";
+import { inboundRecording } from "../chats/inbound.js";
+import { StoredMessages } from "../chats/message-repository.js";
+import { chatKey, type Place, placeIn } from "../chats/place.js";
+import { SettingsRepository } from "../db/repositories/settings.js";
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import { deferred, type VisibleMessage } from "../test/kit/im/peer.js";
 
 /** A production adapter running against its platform's peer, with a person
  *  Rome's account can reach directly. */
