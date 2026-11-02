@@ -40,9 +40,16 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
   /** Each raise still held, with the hooks that have yet to decide it. */
   const owed = new Map<MessageSaid, Set<symbol>>();
   /** The raises handed to a hook and not yet decided, by message and
-   *  session, as the hook names them back, each with the hooks it was handed
-   *  to in turn. */
-  const handed = new Map<string, { event: MessageSaid; hearer: symbol }[]>();
+   *  session, each with the hook it was handed to and the record it was
+   *  handed as. A hook names a raise back by that record, each hook its own;
+   *  one that comes back as a copy, as across a process boundary, settles
+   *  the oldest. */
+  type Handed = {
+    event: MessageSaid;
+    hearer: symbol;
+    recorded: SaidInboundEvent["recorded"];
+  };
+  const handed = new Map<string, Handed[]>();
 
   /** Hook `hearer` is done with `event`: once every hook is, its wake is
    *  decided. */
@@ -90,7 +97,10 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },
         };
         const key = handedKey(recorded.recorded);
-        handed.set(key, [...(handed.get(key) ?? []), { event, hearer }]);
+        handed.set(key, [
+          ...(handed.get(key) ?? []),
+          { event, hearer, recorded: recorded.recorded },
+        ]);
         await handler(recorded);
       });
       let left = false;
@@ -111,11 +121,13 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
     },
     decided: async (recorded) => {
       const key = handedKey(recorded);
-      const [first, ...rest] = handed.get(key) ?? [];
-      if (!first) return;
+      const raises = handed.get(key) ?? [];
+      const raise = raises.find((each) => each.recorded === recorded) ?? raises[0];
+      if (!raise) return;
+      const rest = raises.filter((each) => each !== raise);
       if (rest.length > 0) handed.set(key, rest);
       else handed.delete(key);
-      settle(first.event, first.hearer);
+      settle(raise.event, raise.hearer);
     },
   };
 }
