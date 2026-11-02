@@ -18,6 +18,7 @@ import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
+import { createLogger } from "../logger.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { MessagePart } from "../types.js";
 import type { Seats } from "../sessions/seats.js";
@@ -27,6 +28,7 @@ import {
   lineAt,
   kindNamedBy,
   platformIdOfLine,
+  sentLineId,
   type ChatAdapters,
 } from "./chat-adapter.js";
 import {
@@ -45,6 +47,8 @@ export interface RecordedSendsDeps {
   replies: Pick<SeatReplies, "send">;
   messages: Pick<MessageRepository, "send" | "idOf" | "chatHolding">;
 }
+
+const log = createLogger("recorded-sends");
 
 type Out = Omit<EmailOutbound, "replyTo">;
 
@@ -115,7 +119,9 @@ export function recordedSends<C extends Channel>(
           throw new Error("Email replyToMessageId must not be blank. No email was sent.");
         }
         // The port quotes by the platform's id, an email by the provider's.
-        const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
+        // The email port quotes only the email a reply names, and reads no
+        // chat's quote hint.
+        const quoted = emails ? email?.inReplyToMessageId : message.replyToMessageId;
         let at = address;
         if (!email && namesNewEmail(local, channel.name, address)) {
           // The email port takes a plain message to an address, or to the
@@ -130,11 +136,14 @@ export function recordedSends<C extends Channel>(
           // The provider sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there. An
           // email Rome does not hold, as one fetched from the mailbox
-          // directly, sits in a thread Rome cannot know until the provider
-          // answers: the port sends the reply as it always has, and it is
-          // not recorded rather than recorded in a thread it may not be in.
+          // directly, sits in a thread Rome learns only from the provider's
+          // receipt: the port sends the reply, and it is recorded there.
           const answered = threadOf(local, channel.name, email.inReplyToMessageId);
-          if (!answered) return await send.send(address, message);
+          if (!answered) {
+            const receipt = await send.send(address, message);
+            await recordDelivered(local, channel.name, receipt, out, email.inReplyToMessageId);
+            return receipt;
+          }
           at = answered;
         } else if (email && !address.trim()) {
           return await openThread(local, channel, out, email);
@@ -178,6 +187,42 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
         adapters.chatAt(name, address, kind),
     },
   };
+}
+
+/**
+ * Record `out`, which the port on channel `channel` already delivered, in the
+ * chat its receipt names, as Rome's main agent, quoting the email the
+ * platform calls `quoted`. A failure to record is logged, not thrown: the
+ * message went out, and reporting it as failed invites a second one.
+ */
+async function recordDelivered(
+  deps: RecordedSendsDeps,
+  channel: string,
+  receipt: MessageReceipt,
+  out: Out,
+  quoted: string,
+): Promise<void> {
+  try {
+    const account = deps.adapters.accountOn(channel);
+    const { chat, key, romeEnd } = startChannelChat(deps, {
+      channel,
+      threadId: receipt.chatId,
+      threadType: "group",
+    });
+    await deps.messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: { platform: account.platform, id: romeEnd }, agent: "main" },
+        parts: recordedParts(out),
+        replyTo: { key: lineAt(key, romeEnd, quoted) },
+      },
+      // Delivered already: the receipt keys the line.
+      async () => ({ key: sentLineId(key, romeEnd, receipt.messageId?.trim() || undefined) }),
+    );
+  } catch (error) {
+    log.warn("could not record a delivered reply", { channel, error: String(error) });
+  }
 }
 
 /** Whether `address` on channel `channel` names whom a new email goes to:

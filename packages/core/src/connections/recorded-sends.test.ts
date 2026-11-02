@@ -315,7 +315,7 @@ describe("recordedSends", () => {
     expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
   });
 
-  it("hand a reply to an email Rome does not hold to the port, which places it, and record nothing", async () => {
+  it("record a reply to an email Rome does not hold in the thread the provider's receipt names", async () => {
     landsAt["thread-9"] = "thread-real";
     const receipt = await send("email").send(
       "thread-9" as ChatId,
@@ -330,7 +330,19 @@ describe("recordedSends", () => {
         message: expect.objectContaining({ inReplyToMessageId: "unknown" }),
       },
     ]);
-    expect(lines()).toEqual([]);
+    expect(lines()).toMatchObject([
+      { chat: chatAt("email", "thread-real").externalId, text: "Thanks", sender_agent: "main" },
+    ]);
+  });
+
+  it("quote on an email channel only the email a reply names, not a chat's quote hint", async () => {
+    await send("email").send(
+      "thread-7" as ChatId,
+      { kind: "email", text: "Hi", replyToMessageId: "other-thread-mail" } as OutgoingMessage,
+    );
+
+    expect(sent[0]?.message).not.toHaveProperty("inReplyToMessageId");
+    expect(lines().map((line) => line.chat)).toEqual([chatAt("email", "thread-7").externalId]);
   });
 
   it("record an HTML-only email by its text with its links, and an attachment by a note", async () => {
