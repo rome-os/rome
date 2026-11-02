@@ -43,8 +43,9 @@ export interface SeatSent {
 }
 
 /** A message a seat sends: what its adapter takes, quoting a line by its id
- *  in Chats, or by its adapter's key for one Rome never recorded. */
-export type SeatOutbound = Omit<Outbound, "replyTo"> & {
+ *  in Chats, or by its adapter's key for one Rome never recorded. The turn
+ *  it answers is named once, in the send's options. */
+export type SeatOutbound = Omit<Outbound, "replyTo" | "turnId"> & {
   readonly replyTo?: OutboundMessage["replyTo"];
 };
 
@@ -200,8 +201,18 @@ export class SeatReplies {
     }
   }
 
+  /** The seat's account and `channel`'s adapter. Throws when the channel is
+   *  another account's, so a message is never sent as one account and
+   *  recorded as another's. */
   private adapterOf(seat: Seat, channel: Channel) {
     const account = { platform: seat.place.chat.platform, id: seat.accountId };
-    return { account, adapter: this.deps.adapters.of(channel) };
+    const adapter = this.deps.adapters.of(channel);
+    if (adapter.account.platform !== account.platform || adapter.account.id !== account.id) {
+      throw new Error(
+        `Channel "${channel.name}" is ${adapter.account.platform}:${adapter.account.id}, ` +
+          `not the account seat ${seat.sessionId} speaks as`,
+      );
+    }
+    return { account, adapter };
   }
 }

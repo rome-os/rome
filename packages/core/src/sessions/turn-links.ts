@@ -95,7 +95,7 @@ export class TurnLinks {
       threadId: row.threadId,
       since: row.createdAt,
       joined: first?.at ?? row.createdAt,
-      perAccount: ownedBy(chatKey(chat.ref.platform, chat.key as ChatId), "_", "") !== "",
+      perAccount: perAccountChat(chat.ref.platform, chat.key),
     };
   }
 
@@ -351,20 +351,12 @@ function toLink(row: LinkRow): TurnLink {
  */
 class Copies {
   /** Each per-account line's message, as its holder's nth line alike. */
-  private readonly occurrence = new Map<number, string>();
+  private readonly occurrence: ReadonlyMap<number, string>;
   private readonly taken = new Set<string>();
 
   /** The copies among `said`, in the order said. */
   constructor(said: readonly SaidMessage[]) {
-    const seen = new Map<string, number>();
-    for (const message of said) {
-      const holder = holderOf(message);
-      if (holder === null) continue;
-      const copy = copyOf(message);
-      const nth = seen.get(`${holder}\n${copy}`) ?? 0;
-      seen.set(`${holder}\n${copy}`, nth + 1);
-      this.occurrence.set(message.id, `${nth}\n${copy}`);
-    }
+    this.occurrence = occurrencesOf(said);
   }
 
   /** Note that the session reads, or has read, `message`. */
@@ -380,6 +372,32 @@ class Copies {
     const occurrence = this.occurrence.get(message.id);
     return occurrence !== undefined && this.taken.has(occurrence);
   }
+}
+
+/** Whether the chat keyed `key` on `platform` numbers its messages per
+ *  member account, so each of Rome's accounts there holds its own copy of a
+ *  message. */
+export function perAccountChat(platform: string, key: string): boolean {
+  return ownedBy(chatKey(platform, key as ChatId), "_", "") !== "";
+}
+
+/**
+ * The message each per-account line among `said` (in the order said) is a
+ * copy of, by line id: lines of the same message share it, as {@link Copies}
+ * reads them. A line keyed by no account is a copy of nothing and is absent.
+ */
+export function occurrencesOf(said: readonly SaidMessage[]): Map<number, string> {
+  const occurrence = new Map<number, string>();
+  const seen = new Map<string, number>();
+  for (const message of said) {
+    const holder = holderOf(message);
+    if (holder === null) continue;
+    const copy = copyOf(message);
+    const nth = seen.get(`${holder}\n${copy}`) ?? 0;
+    seen.set(`${holder}\n${copy}`, nth + 1);
+    occurrence.set(message.id, `${nth}\n${copy}`);
+  }
+  return occurrence;
 }
 
 /** The account a per-account key names in front, or null for any other key. */
