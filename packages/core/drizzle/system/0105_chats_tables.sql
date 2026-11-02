@@ -123,7 +123,10 @@ SELECT
   r.`source_thread_id` AS `source_thread_id`,
   CASE WHEN r.`source_channel` = 'webchat' THEN 'agent:' || coalesce(r.`agent_name`, 'main')
        ELSE coalesce(c.`platform_account_id`, r.`source_channel`) END AS `account_id`,
-  coalesce(r.`agent_name`, 'main') AS `agent`,
+  -- The agent that answers in the chat: the chat's own override, else the
+  -- agent linked to the account. Legacy rows keep no agent per line.
+  coalesce(r.`agent_name`, (SELECT ca.`agent` FROM `connected_accounts` ca WHERE ca.`connection_id` = c.`connection_id`),
+    'main') AS `agent`,
   -- A Telegram basic group: `-<id>` below 10^12 (https://core.telegram.org/api/bots/ids).
   coalesce(c.`platform`, r.`source_channel`) = 'telegram'
     AND r.`source_thread_id` GLOB '-[1-9]*' AND NOT substr(r.`source_thread_id`, 2) GLOB '*[^0-9]*'
@@ -163,7 +166,12 @@ SELECT
          WHERE CASE WHEN b.`type` = 'object' THEN json_extract(b.`value`, '$.type') END = 'text'), '')
        END AS `text`,
   m.`content` AS `parts`,
-  coalesce(m.`platform_message_id`, m.`id`) AS `key`,
+  -- A later part of a reply Rome sent in several messages is the reply's line.
+  coalesce((SELECT h.`platform_message_id` FROM `rome_sessions` hr
+      JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = hr.`id` AND a.`platform_message_id` = m.`platform_message_id`
+      JOIN `rome_agent_messages` h ON h.`id` = a.`message_id`
+      WHERE hr.`chat_id` = r.`chat_id` AND h.`platform_message_id` IS NOT NULL LIMIT 1),
+    m.`platform_message_id`, m.`id`) AS `key`,
   m.`reply_to_platform_message_id` AS `reply_key`,
   m.`created_at` AS `said_at`,
   CASE m.`role` WHEN 'user' THEN 'prompt' WHEN 'assistant' THEN 'answer'
@@ -539,9 +547,11 @@ END;
 -- its lines and the thread seats under it.
 CREATE TRIGGER `legacy_chat_seat_reclassify` AFTER UPDATE OF `source_thread_type` ON `rome_sessions`
 WHEN NEW.`chat_id` IS NOT NULL AND EXISTS (SELECT 1 FROM `legacy_chat_seats` s JOIN `chats` c ON c.`id` = NEW.`chat_id`
-  WHERE s.`session_id` = NEW.`id` AND NOT s.`is_thread`
-    AND (s.`platform` IS NOT c.`platform` OR s.`key` IS NOT c.`key` OR s.`kind` IS NOT c.`kind`
-      OR s.`account_id` IS NOT NEW.`account_id`))
+  WHERE s.`session_id` = NEW.`id` AND CASE WHEN s.`is_thread`
+    THEN NEW.`chat_id` IS NOT (SELECT p.`chat_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`parent_session_id`)
+      OR NEW.`thread_id` IS NOT NEW.`source_thread_id`
+    ELSE s.`platform` IS NOT c.`platform` OR s.`key` IS NOT c.`key` OR s.`kind` IS NOT c.`kind`
+      OR s.`account_id` IS NOT NEW.`account_id` OR NEW.`thread_id` IS NOT NULL END)
 BEGIN
   DELETE FROM `chat_addresses` WHERE `account_id` = NEW.`account_id`
     AND (`platform`, `chat_key`) IN (SELECT c.`platform`, c.`key` FROM `chats` c WHERE c.`id` = NEW.`chat_id`);
@@ -558,7 +568,7 @@ BEGIN
     AND NOT EXISTS (SELECT 1 FROM `rome_sessions` r WHERE r.`chat_id` = NEW.`chat_id`);
   INSERT OR IGNORE INTO `chats` (`platform`, `key`, `kind`, `name`, `started_at`)
   SELECT s.`platform`, s.`key`, s.`kind`, s.`name`, s.`created_at`
-  FROM `legacy_chat_seats` s WHERE NOT s.`is_thread` AND (s.`session_id` = NEW.`id` OR s.`parent_session_id` = NEW.`id`)
+  FROM `legacy_chat_seats` s WHERE NOT s.`is_thread` AND (s.`session_id` IN (NEW.`id`, NEW.`parent_session_id`) OR s.`parent_session_id` = NEW.`id`)
     AND (SELECT r.`chat_id` FROM `rome_sessions` r WHERE r.`id` = s.`session_id`) IS NULL
   ORDER BY s.`created_at`, s.`session_id`;
   UPDATE `rome_sessions` SET
@@ -567,20 +577,20 @@ BEGIN
       WHERE s.`session_id` = `rome_sessions`.`id`),
     `chat_platform` = (SELECT s.`platform` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`),
     `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
-  WHERE `chat_id` IS NULL AND (`id` = NEW.`id` OR `parent_session_id` = NEW.`id`)
+  WHERE `chat_id` IS NULL AND (`id` IN (NEW.`id`, NEW.`parent_session_id`) OR `parent_session_id` = NEW.`id`)
     AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE NOT s.`is_thread`);
   UPDATE `rome_sessions` SET
     `chat_id` = (SELECT p.`chat_id` FROM `rome_sessions` p WHERE p.`id` = `rome_sessions`.`parent_session_id`),
     `chat_platform` = (SELECT p.`chat_platform` FROM `rome_sessions` p WHERE p.`id` = `rome_sessions`.`parent_session_id`),
     `thread_id` = `source_thread_id`,
     `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
-  WHERE `chat_id` IS NULL AND (`id` = NEW.`id` OR `parent_session_id` = NEW.`id`)
+  WHERE `chat_id` IS NULL AND (`id` IN (NEW.`id`, NEW.`parent_session_id`) OR `parent_session_id` = NEW.`id`)
     AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
   INSERT OR IGNORE INTO `chat_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
   SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
   FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
   WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
-    AND (c.`kind` = 'dm' OR r.`thread_id` IS NOT NULL) AND r.`id` IN (SELECT `id` FROM `rome_sessions` WHERE (`id` = NEW.`id` OR `parent_session_id` = NEW.`id`));
+    AND (c.`kind` = 'dm' OR r.`thread_id` IS NOT NULL) AND r.`id` IN (SELECT `id` FROM `rome_sessions` WHERE (`id` IN (NEW.`id`, NEW.`parent_session_id`) OR `parent_session_id` = NEW.`id`));
   INSERT OR IGNORE INTO `chat_messages` (`chat_id`, `key`, `thread_id`, `sender_account_id`, `sender_agent`,
     `sender_name`, `text`, `parts`, `reply_to_message_id`, `said_at`)
   SELECT v.`chat_id`, v.`key`, v.`thread_id`, v.`sender_account_id`, v.`sender_agent`, v.`sender_name`,
@@ -638,6 +648,13 @@ BEGIN
         WHERE v.`reply_key` IS NOT NULL AND v.`chat_id` = (SELECT r.`chat_id` FROM `rome_sessions` r WHERE r.`id` = NEW.`id`));
 END;
 --> statement-breakpoint
+-- A seat found to be a thread under another, or no longer one, moves with it.
+CREATE TRIGGER `legacy_chat_seat_reparent` AFTER UPDATE OF `parent_session_id` ON `rome_sessions`
+WHEN NEW.`chat_id` IS NOT NULL AND OLD.`parent_session_id` IS NOT NEW.`parent_session_id`
+BEGIN
+  UPDATE `rome_sessions` SET `source_thread_type` = `source_thread_type` WHERE `id` = NEW.`id`;
+END;
+--> statement-breakpoint
 -- A channel whose platform or account Rome learns after the upgrade, as boot
 -- records them after the migrations run: its seats move to the chats their
 -- real identity names.
@@ -672,10 +689,15 @@ BEGIN
   UPDATE `rome_sessions` SET `source_thread_type` = `source_thread_type` WHERE `id` = NEW.`session_id`;
 END;
 --> statement-breakpoint
--- A later part of a reply, recorded once Rome holds the reply, resolves the
--- quotes of it recorded before.
+-- A later part of a reply, recorded once Rome holds the reply, joins the reply's
+-- line wherever another account heard it, and resolves the quotes of it
+-- recorded before.
 CREATE TRIGGER `legacy_chat_line_alias` AFTER INSERT ON `rome_agent_message_platform_ids`
 BEGIN
+  UPDATE `rome_agent_messages` SET `platform_message_id` = `platform_message_id`
+  WHERE `platform_message_id` = NEW.`platform_message_id` AND `id` <> NEW.`message_id`
+    AND `session_id` IN (SELECT r.`id` FROM `rome_sessions` r
+      WHERE r.`chat_id` = (SELECT s.`chat_id` FROM `rome_sessions` s WHERE s.`id` = NEW.`session_id`));
   UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
     SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`message_id`)
   WHERE `reply_to_message_id` IS NULL AND `id` IN (
@@ -683,6 +705,14 @@ BEGIN
     JOIN `rome_agent_messages` m ON m.`session_id` = r.`id` AND m.`reply_to_platform_message_id` = NEW.`platform_message_id`
     JOIN `legacy_chat_line_ids` q ON q.`legacy_id` = m.`id`
     WHERE r.`chat_id` = (SELECT s.`chat_id` FROM `rome_sessions` s WHERE s.`id` = NEW.`session_id`));
+END;
+--> statement-breakpoint
+-- A line that goes takes the quotes of it with it, so an id SQLite hands out
+-- again never answers an old quote.
+CREATE TRIGGER `legacy_chat_line_unquote` AFTER DELETE ON `chat_messages`
+BEGIN
+  UPDATE `chat_messages` SET `reply_to_message_id` = NULL
+  WHERE `chat_id` = OLD.`chat_id` AND `reply_to_message_id` = OLD.`id`;
 END;
 --> statement-breakpoint
 -- A renamed chat. A thread seat's name is its thread's, not the chat's.
