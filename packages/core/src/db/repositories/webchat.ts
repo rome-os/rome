@@ -1061,9 +1061,15 @@ export class WebChatRepository {
     if (speaker) {
       const thread =
         input.parentThreadId && input.parentThreadId !== input.threadId ? input.threadId : null;
+      // A session first standing in its chat starts just before the line
+      // that opened it, so a catch-up, which reads what was said after the
+      // session's second, reads that line too once it wakes no agent.
+      const heardSecond = Math.floor(speaker.at.getTime() / 1000);
       await this.db
         .update(romeSessions)
         .set({
+          createdAt: sql`CASE WHEN ${romeSessions.chatId} IS NULL AND ${romeSessions.createdAt} >= ${heardSecond}
+            THEN ${heardSecond - 1} ELSE ${romeSessions.createdAt} END`,
           chatId: speaker.chat.id,
           chatPlatform: speaker.chat.platform,
           threadId: thread,

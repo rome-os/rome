@@ -451,4 +451,20 @@ describe("messagesSaid", () => {
     await said.decided(heardFirst.recorded);
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
   });
+  it("lets a session catch up on the line that opened it, once that line woke no agent", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    // Said a moment before the session opens, as every first line is.
+    await telegram.deliver(message({ timestamp: new Date() }));
+    await settled();
+    const [event] = heard;
+    if (!event) throw new Error("not heard");
+
+    await said.decided(event.recorded);
+    expect(wiring.links.unseen(event.recorded.chatRecordId).map((line) => line.text)).toEqual([
+      "Hello",
+    ]);
+  });
 });
