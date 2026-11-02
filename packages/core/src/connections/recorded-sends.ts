@@ -135,14 +135,13 @@ export function recordedSends<C extends Channel>(
 }
 
 /** Whether `address` on channel `channel` names whom a new email goes to:
- *  an email address or the guardian, where Rome holds no thread. */
+ *  an email address, bare or with a display name, or the guardian, where
+ *  Rome holds no thread. The email port reads an address the same way. */
 function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string): boolean {
   if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
-  const named = address.trim().toLowerCase() === "guardian" || EMAIL_ADDRESS.test(address.trim());
+  const named = address.trim().toLowerCase() === "guardian" || address.includes("@");
   return named && !deps.chats.byKey(deps.adapters.chatAt(channel, address, "group"));
 }
-
-const EMAIL_ADDRESS = /^[^\s@<>]+@[^\s@<>]+$/;
 
 /** The address of the email thread that holds the email the provider calls
  *  `messageId`, or null when Rome holds no such email. */

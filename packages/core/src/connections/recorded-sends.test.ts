@@ -145,6 +145,15 @@ describe("recordedSends", () => {
   });
 
   it("send an email reply through the adapter, recorded once in its thread's chat", async () => {
+    const fixture = seatFixture(testDb.db);
+    const thread = fixture.chat("email", "thread-7", "group");
+    fixture.say({
+      id: "in-1",
+      chat: thread,
+      from: "wei@example.com",
+      text: "Book it?",
+      at: new Date(),
+    });
     const reply = {
       kind: "email",
       text: "Thanks, booked.",
@@ -161,7 +170,10 @@ describe("recordedSends", () => {
         message: expect.objectContaining({ kind: "email", inReplyToMessageId: "in-1" }),
       },
     ]);
-    expect(lines()).toEqual([{ chat: "thread-7", text: "Thanks, booked.", sender_agent: "main" }]);
+    expect(lines()).toEqual([
+      { chat: "thread-7", text: "Book it?", sender_agent: null },
+      { chat: "thread-7", text: "Thanks, booked.", sender_agent: "main" },
+    ]);
     expect(sessions()).toEqual([]);
   });
 
@@ -315,6 +327,14 @@ describe("recordedSends", () => {
     expect(testDb.db.all(sql`SELECT kind FROM chats`)).toEqual([
       { kind: "group" },
       { kind: "group" },
+    ]);
+  });
+
+  it("send a plain message to an address with a display name as a new email", async () => {
+    await send("email").send("Alice <alice@example.com>" as ChatId, { text: "Hi" });
+
+    expect(sent).toMatchObject([
+      { address: "", message: { kind: "email", to: "Alice <alice@example.com>" } },
     ]);
   });
 
