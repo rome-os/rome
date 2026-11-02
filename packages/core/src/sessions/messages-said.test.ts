@@ -514,4 +514,26 @@ describe("messagesSaid", () => {
 
     expect(heard).toHaveLength(0);
   });
+  it("ignores a late decision from a hook that already left", async () => {
+    const first: SaidInboundEvent[] = [];
+    const other: SaidInboundEvent[] = [];
+    const leaveFirst = said.subscribe(async (event) => {
+      first.push(event);
+    });
+    said.subscribe(async (event) => {
+      other.push(event);
+    });
+    await telegram.deliver(message({ timestamp: new Date(Date.now() + 60_000) }));
+    await settled();
+    const [heardFirst] = first;
+    const [heardOther] = other;
+    if (!heardFirst || !heardOther) throw new Error("not heard by both hooks");
+    const session = heardFirst.recorded.chatRecordId;
+
+    leaveFirst();
+    await said.decided(heardFirst.recorded);
+    expect(wiring.links.unseen(session)).toHaveLength(0);
+    await said.decided(heardOther.recorded);
+    expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
+  });
 });

@@ -50,6 +50,9 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
     recorded: SaidInboundEvent["recorded"];
   };
   const handed = new Map<string, Handed[]>();
+  /** The records handed to hooks that have left, whose late decisions
+   *  settle nothing: leaving settled them already. */
+  const departed = new WeakSet<SaidInboundEvent["recorded"]>();
 
   /** Hook `hearer` is done with `event`: once every hook is, its wake is
    *  decided. */
@@ -114,6 +117,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
         unlisten();
         // What it never decided, nobody will.
         for (const [key, raises] of handed) {
+          for (const raise of raises) if (raise.hearer === hearer) departed.add(raise.recorded);
           const kept = raises.filter((raise) => raise.hearer !== hearer);
           if (kept.length > 0) handed.set(key, kept);
           else handed.delete(key);
@@ -122,6 +126,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
       };
     },
     decided: async (recorded) => {
+      if (departed.has(recorded)) return;
       const key = handedKey(recorded);
       const raises = handed.get(key) ?? [];
       const raise = raises.find((each) => each.recorded === recorded) ?? raises[0];
