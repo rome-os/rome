@@ -167,6 +167,10 @@ chrome_args=(
   --force-webrtc-ip-handling-policy=disable_non_proxied_udp
   --enforce-webrtc-ip-permission-check
   --remote-allow-origins=*
+  # OpenCLI 2 refuses clicks and key presses on a page whose visibilityState is
+  # hidden, and Chrome hides a page whose window another window covers. OpenCLI
+  # opens adapter windows unfocused, so the Browser view covers them.
+  --disable-backgrounding-occluded-windows
   # OpenCLI's bridge sends the same tabs.update twice when it opens a fresh tab
   # lease. Chrome 153+ drops the second as a duplicate while the first is still
   # loading, which fails the command with "Navigation rejected."
