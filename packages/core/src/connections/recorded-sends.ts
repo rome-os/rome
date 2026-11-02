@@ -173,9 +173,11 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
 }
 
 /** Whether `message` is a plain message the email port on channel
- *  `channel` sends nothing for: one with no text in it. */
+ *  `channel` sends nothing for: one with no text and no attachment. */
 function sendsNoEmail(deps: RecordedSendsDeps, channel: string, message: OutgoingMessage): boolean {
   if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
+  // The port refuses an attachment before it reads the body.
+  if (message.attachments?.length) return false;
   const text =
     message.text ??
     (message.parts ?? []).flatMap((part) => (part.type === "text" ? [part.content] : [])).join("");

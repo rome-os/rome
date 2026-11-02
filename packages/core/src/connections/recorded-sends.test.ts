@@ -386,6 +386,18 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([]);
   });
 
+  it("hand an attachment-only plain message on an email channel to the port, which refuses it", async () => {
+    await send("email").send(
+      "thread-1" as ChatId,
+      {
+        attachments: [{ type: "document", source: "/tmp/r.pdf" }],
+      } as OutgoingMessage,
+    );
+
+    // The port, not the wrapper, answers: the real one throws for attachments.
+    expect(sent).toHaveLength(1);
+  });
+
   it("send nothing and record nothing when the platform refuses", async () => {
     const [refusing] = recordedSends(
       [
