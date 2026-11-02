@@ -103,10 +103,11 @@ export function recordedSends<C extends Channel>(
           ...(email?.cc?.length ? { cc: email.cc } : {}),
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
-        if (!email && sendsNoEmail(deps, channel.name, message)) {
-          // The email port sends nothing for a plain message with no text,
-          // such as an approval card, which has no email rendering.
-          return { chatId: address };
+        if (!out.text.trim() && !out.html?.trim() && !out.attachments?.length) {
+          // A message with nothing to show, such as an approval card, which
+          // no platform renders: the port skips it, or refuses it, as it
+          // always has. Nothing is said, so nothing is recorded.
+          return await send.send(address, message);
         }
         if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
           // As the port does, rather than read a blank id as no reply.
@@ -127,14 +128,16 @@ export function recordedSends<C extends Channel>(
         if (email?.inReplyToMessageId) {
           // The provider sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there.
-          // Rome must know that email to know the thread.
+          // An email Rome does not hold, as one fetched from the mailbox
+          // directly, is answered in the thread the caller names; with no
+          // thread named, Rome cannot know where the reply lands.
           const answered = threadOf(local, channel.name, email.inReplyToMessageId);
-          if (!answered) {
+          if (!answered && !address.trim()) {
             throw new Error(
-              `Rome holds no email ${email.inReplyToMessageId} to reply to. No email was sent.`,
+              `Rome holds no email ${email.inReplyToMessageId} to reply to, and no thread was named. No email was sent.`,
             );
           }
-          at = answered;
+          at = answered ?? address;
         } else if (email && !address.trim()) {
           return await openThread(local, channel, out, email);
         }
@@ -177,18 +180,6 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
         adapters.chatAt(name, address, kind),
     },
   };
-}
-
-/** Whether `message` is a plain message the email port on channel
- *  `channel` sends nothing for: one with no text and no attachment. */
-function sendsNoEmail(deps: RecordedSendsDeps, channel: string, message: OutgoingMessage): boolean {
-  if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
-  // The port refuses an attachment before it reads the body.
-  if (message.attachments?.length) return false;
-  const text =
-    message.text ??
-    (message.parts ?? []).flatMap((part) => (part.type === "text" ? [part.content] : [])).join("");
-  return !text.trim();
 }
 
 /** Whether `address` on channel `channel` names whom a new email goes to:

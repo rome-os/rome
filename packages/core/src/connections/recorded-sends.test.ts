@@ -326,14 +326,20 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([]);
   });
 
-  it("send no reply to an email Rome does not hold, even in a named thread", async () => {
-    await expect(
-      send("email").send(
-        "thread-9" as ChatId,
-        { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
-      ),
-    ).rejects.toThrow("Rome holds no email unknown");
-    expect(sent).toEqual([]);
+  it("reply to an email Rome does not hold in the thread the caller names, quoting it by its id", async () => {
+    await send("email").send(
+      "thread-9" as ChatId,
+      { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
+    );
+
+    expect(sent).toEqual([
+      {
+        channel: "email",
+        address: "thread-9",
+        message: expect.objectContaining({ inReplyToMessageId: "unknown" }),
+      },
+    ]);
+    expect(lines().map((line) => line.chat)).toEqual([chatAt("email", "thread-9").externalId]);
   });
 
   it("record an HTML-only email by its text, and an attachment by a note", async () => {
@@ -405,25 +411,26 @@ describe("recordedSends", () => {
     ]);
   });
 
-  it("send and record nothing for a plain email-channel message with no text, as the port does", async () => {
-    const blank = await send("email").send("thread-1" as ChatId, { text: "  " });
-    const card = await send("email").send(
-      "thread-1" as ChatId,
-      {
-        parts: [
-          {
-            type: "approval_card",
-            approvalId: "a-1",
-            actionName: "deploy",
-            preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
-            status: "pending",
-          },
-        ],
-      } as OutgoingMessage,
-    );
+  it("hand a message with nothing to show to the port as it is, and record nothing", async () => {
+    const card = {
+      parts: [
+        {
+          type: "approval_card",
+          approvalId: "a-1",
+          actionName: "deploy",
+          preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+          status: "pending",
+        },
+      ],
+    } as OutgoingMessage;
+    await send("email").send("thread-1" as ChatId, { text: "  " });
+    await send("telegram").send("4242" as ChatId, card);
 
-    expect([blank, card]).toEqual([{ chatId: "thread-1" }, { chatId: "thread-1" }]);
-    expect(sent).toEqual([]);
+    // The port decides: Feishu, Slack and email skip it; nothing is said.
+    expect(sent).toEqual([
+      { channel: "email", address: "thread-1", message: { text: "  " } },
+      { channel: "telegram", address: "4242", message: card },
+    ]);
     expect(lines()).toEqual([]);
   });
 
