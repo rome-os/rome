@@ -309,7 +309,16 @@ export function channelAdapter(
   ): ChatId | null => {
     if (!answered || answered === address) return threadId;
     if (isDirectMessage(key)) {
-      deps.addresses?.bind(account(), key.externalId, answered);
+      // The message went out either way. A failed write only means the next
+      // send opens the conversation by the other end again.
+      try {
+        deps.addresses?.bind(account(), key.externalId, answered);
+      } catch (error) {
+        log.warn("could not keep a direct message's address", {
+          chat: key.externalId,
+          error: String(error),
+        });
+      }
       return threadId;
     }
     return answered as ChatId;

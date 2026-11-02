@@ -427,6 +427,40 @@ describe("channelAdapter", () => {
     expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-77");
   });
 
+  it("answer a sent direct message even when its new address cannot be kept", async () => {
+    const { channel } = fakeChannel();
+    (channel.send as { send: unknown }).send = async () => ({ messageId: "m1", chatId: "dm-77" });
+    const broken = {
+      ...deps(),
+      addresses: Object.assign(Object.create(addresses), {
+        bind: () => {
+          throw new Error("disk full");
+        },
+      }),
+    };
+    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
+
+    const sentTo = await channelAdapter(channel, broken).send(dm.externalId, null, { text: "hi" });
+    expect(sentTo).toEqual({ key: "m1", threadId: null });
+
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async () => ({ messageId: "s1", chatId: "dm-78" }),
+    };
+    const reply = channelAdapter(fakeChannel(transport).channel, broken).stream?.(
+      dm.externalId,
+      null,
+      {
+        policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        clock: systemClock,
+      },
+    );
+    if (!reply) throw new Error("expected a stream");
+    reply.accept({ type: "text", content: "hi" });
+    expect(await reply.settle(false)).toMatchObject({ key: "s1", threadId: null });
+  });
+
   it("settle a first streamed direct message to no thread, and reach the chat where it opened", async () => {
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
