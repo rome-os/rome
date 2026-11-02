@@ -131,6 +131,33 @@ describe("recordedSends", () => {
     ]);
   });
 
+  it("record a send to a Discord DM channel bound to a person as that direct message, before Rome holds it", async () => {
+    const dm = chatAt("discord", "bob", { romeEnd: DISCORD.id });
+    addresses.bind(DISCORD, dm.externalId, "554433");
+
+    await send("discord").send("554433" as ChatId, { text: "Hi Bob" });
+
+    expect(lines().map((line) => line.chat)).toEqual([dm.externalId]);
+    expect(testDb.db.all(sql`SELECT kind FROM chats WHERE key = ${dm.externalId}`)).toEqual([
+      { kind: "dm" },
+    ]);
+  });
+
+  it("put no part only Rome's host makes on record from an app's send", async () => {
+    await send("telegram").send(
+      "-100" as ChatId,
+      {
+        parts: [
+          { type: "text", content: "Here" },
+          { type: "routine_draft_card", draft: {} },
+        ],
+      } as unknown as OutgoingMessage,
+    );
+
+    const [row] = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
+    expect(JSON.parse(row?.parts ?? "[]")).toEqual([{ type: "text", content: "Here" }]);
+  });
+
   it("record a send to a Discord DM channel Rome bound to a person in that direct message", async () => {
     const dm = chatAt("discord", "alice", { romeEnd: DISCORD.id });
     new ChatRepository(testDb.db).start(dm, "dm", null);
