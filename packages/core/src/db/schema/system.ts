@@ -624,6 +624,21 @@ export const chatMessages = sqliteTable(
   ],
 );
 
+// Which of Rome's accounts each line reached, one row per line per account.
+// A line Rome records once can reach two of its accounts in one group; a
+// redelivery to an account it already reached, even after a restart, is
+// heard no more.
+export const chatMessageDeliveries = sqliteTable(
+  "chat_message_deliveries",
+  {
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.messageId, table.accountId] })],
+);
+
 // Agents' link from a turn to a chat message: the message prompted the turn,
 // was its answer, or was caught up on by it. One row per message per speaker, so
 // two of Rome's agents in one group each keep their own.
