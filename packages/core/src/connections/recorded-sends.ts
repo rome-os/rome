@@ -38,7 +38,7 @@ export interface RecordedSendsDeps {
   chats: Pick<ChatRepository, "byKey" | "start">;
   seats: Pick<Seats, "seatOf" | "seatIn" | "seatInThread">;
   replies: Pick<SeatReplies, "send">;
-  messages: Pick<MessageRepository, "send" | "idOf" | "byIds" | "chatHolding">;
+  messages: Pick<MessageRepository, "send" | "idOf" | "chatHolding">;
 }
 
 type Out = Omit<EmailOutbound, "replyTo">;
@@ -55,11 +55,15 @@ interface Landed {
  * its HTML, with a note for each attachment, which Chats keeps no file of.
  */
 function recordedParts(out: Out): MessagePart[] {
-  if (out.parts?.length) return [...out.parts];
-  const text = out.text.trim() || (out.html ? htmlToMarkdown(out.html).trim() : "");
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
+  if (out.parts?.length) {
+    return notes.length
+      ? [...out.parts, { type: "text", content: notes.join("\n") }]
+      : [...out.parts];
+  }
+  const text = out.text.trim() || (out.html ? htmlToMarkdown(out.html).trim() : "");
   return [{ type: "text", content: [text, ...notes].filter(Boolean).join("\n") }];
 }
 
@@ -185,10 +189,12 @@ async function sayInSeat(
     { recorded: recordedParts(out), ...(message.turnId ? { turnId: message.turnId } : {}) },
   );
   if (!said) throw new Error(`Session ${sessionId} stands in no chat to send in`);
-  // The line was recorded where the platform placed it.
-  const line = said.id === null ? undefined : deps.messages.byIds([said.id])[0];
   return {
-    address: deps.adapters.addressAt(channel.name, line?.place ?? seat.place),
+    // Where the platform placed it, whether or not the record landed.
+    address: deps.adapters.addressAt(
+      channel.name,
+      placeIn(seat.place.chat, said.landedIn ?? undefined),
+    ),
     messageId: platformIdOfLine(key, seat.accountId, said.sent),
   };
 }

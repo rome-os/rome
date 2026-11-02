@@ -88,7 +88,8 @@ export class SeatReplies {
    * adapter on `channel`, record it as the seat's, and make it turn
    * `turnId`'s answer when one is named. `recorded` is the line as it goes on
    * record, when it says more than the platform shows. Answers the seat it
-   * was said through and the adapter's key for what went out as `sent`.
+   * was said through, the adapter's key for what went out as `sent`, and
+   * the thread it landed in, or null for the open chat.
    * Throws the platform's refusal, and records nothing
    * then. A session that stands in no chat sends nothing and answers null.
    */
@@ -97,12 +98,13 @@ export class SeatReplies {
     channel: Channel,
     out: SeatOutbound,
     options: { turnId?: string; recorded?: readonly MessagePart[] } = {},
-  ): Promise<(SeatSent & { sent: string; seat: Seat }) | null> {
+  ): Promise<(SeatSent & { sent: string; seat: Seat; landedIn: ChatId | null }) | null> {
     const seat = this.deps.seats.seatOf(sessionId);
     if (!seat) return null;
     const { account, adapter } = this.adapterOf(seat, channel);
     const { replyTo, ...rest } = out;
     let lineKey = "";
+    let landedIn: ChatId | null = seat.place.threadId ?? null;
     const sent = await this.deps.messages.send(
       {
         direction: "fromRome",
@@ -118,12 +120,13 @@ export class SeatReplies {
           ...(options.turnId ? { turnId: options.turnId } : {}),
         });
         lineKey = out.key;
+        landedIn = out.threadId;
         return { key: lineKey, ...landed(seat, out.threadId) };
       },
     );
-    if (sent.id === null) return { id: null, at: sent.at, sent: lineKey, seat };
+    if (sent.id === null) return { id: null, at: sent.at, sent: lineKey, seat, landedIn };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
-    return { id: sent.id, at: sent.at, sent: lineKey, seat };
+    return { id: sent.id, at: sent.at, sent: lineKey, seat, landedIn };
   }
 
   /**

@@ -256,9 +256,15 @@ describe("recordedSends", () => {
       attachments: [{ type: "image", source: "/tmp/a.png", caption: "sunset" }],
     });
 
-    const [html, image] = lines().map((line) => line.text);
+    await send("telegram").send("-100" as ChatId, {
+      parts: [{ type: "text", content: "Look" }],
+      attachments: [{ type: "document", source: "/tmp/r.pdf" }],
+    });
+
+    const [html, image, both] = lines().map((line) => line.text);
     expect(html).toMatch(/See .*you/);
     expect(image).toBe("[image: sunset]");
+    expect(both).toBe("Look\n[document]");
   });
 
   it("send an email's reply recipients, and its text from its parts when it has none", async () => {

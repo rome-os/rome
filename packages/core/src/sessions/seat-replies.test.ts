@@ -104,6 +104,7 @@ describe("SeatReplies", () => {
 
     const sent = await replies().send("seat-1", CHANNEL, { text: "hi" });
 
+    expect(sent?.landedIn).toBe("topic-7");
     expect(messages.byIds([sent!.id!])[0]?.place.threadId).toBe("topic-7");
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
