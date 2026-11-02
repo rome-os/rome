@@ -8,12 +8,12 @@
 // Agents' catch-up and turn writes onto it.
 
 import { and, eq, isNull, min, sql } from "drizzle-orm";
-import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
+import type { AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { romeSessions } from "../db/schema/system.js";
-import { chatKey, ownedBy } from "../connections/chat-ids.js";
+import { perAccountChat } from "../connections/chat-adapter.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a line
@@ -372,13 +372,6 @@ class Copies {
     const occurrence = this.occurrence.get(message.id);
     return occurrence !== undefined && this.taken.has(occurrence);
   }
-}
-
-/** Whether the chat keyed `key` on `platform` numbers its messages per
- *  member account, so each of Rome's accounts there holds its own copy of a
- *  message. */
-export function perAccountChat(platform: string, key: string): boolean {
-  return ownedBy(chatKey(platform, key as ChatId), "_", "") !== "";
 }
 
 /**

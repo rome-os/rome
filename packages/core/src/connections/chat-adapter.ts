@@ -217,6 +217,13 @@ export function namesGroup(platform: string, address: string): boolean {
   return false;
 }
 
+/** Whether the chat keyed `key` on `platform` numbers its messages per
+ *  member account, so each of Rome's accounts there holds its own copy of a
+ *  message. */
+export function perAccountChat(platform: string, key: string): boolean {
+  return ownedBy(chatKey(platform, key as ChatId), "_", "") !== "";
+}
+
 /** Whether the chat keyed `key` is a direct message, which its key says. */
 export function isDirectMessage(key: ChatKey): boolean {
   return otherEndOf(key) !== null;

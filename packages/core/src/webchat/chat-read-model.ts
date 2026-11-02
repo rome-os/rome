@@ -27,7 +27,8 @@ import type { SaidMessage } from "../chats/storage/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
-import { occurrencesOf, perAccountChat, TurnLinks, type TurnLink } from "../sessions/turn-links.js";
+import { perAccountChat } from "../connections/chat-adapter.js";
+import { occurrencesOf, TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
  *  it; a line that prompted a turn is the guardian's (or a visitor's) input;
