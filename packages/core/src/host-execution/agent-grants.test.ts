@@ -5,7 +5,7 @@ import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { ActionConfigSchema } from "../apps/packaging/artifact-config.js";
+import { ActionConfigSchema, AgentConfigSchema } from "../apps/packaging/artifact-config.js";
 
 // Root-on-host actions must reach only the main agent. A wildcard allow-list
 // (`actions: ["*"]`) is held by triage, validation and exploration agents,
@@ -74,5 +74,20 @@ describe("host root action grants", () => {
         .map((action) => action.config.name)
         .sort(),
     ).toEqual(["system:execute_root_script", "system:manage_root_script"]);
+  });
+});
+
+describe("inbox sentinel grants", () => {
+  // The sentinel reads untrusted sender text, and its REPLY reaches that sender
+  // unreviewed. On Codex any of Read, Glob, or Grep is a writable shell
+  // (docs/concepts/agents.md#builtin-tools), and on Claude Read reaches any
+  // file, so a declared builtin lets prompt injection run commands or leak
+  // files to the sender.
+  it("holds no builtin tools and no actions", async () => {
+    const path = join(REPO, "rome_apps/inbox/src/agents/sentinel.yaml");
+    const config = AgentConfigSchema.parse(parseYaml(await readFile(path, "utf-8")));
+
+    expect(config.tools).toEqual([]);
+    expect(config.actions).toEqual([]);
   });
 });
