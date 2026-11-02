@@ -478,18 +478,35 @@ export class ChatReadModel {
    * How many lines from Rome the chat got since the guardian last read it,
    * counting at most `cap`. A chat never marked read has none. Times have
    * one-second precision, so a line in the same second as the mark is read.
+   * A message each of Rome's accounts holds a copy of counts once, as the
+   * transcript draws it.
    */
   async unreadCount(sessionId: string, cap: number): Promise<number> {
-    const [row] = await this.db.all<{ count: number }>(sql`
-      SELECT count(*) AS count FROM (
-        SELECT 1 FROM rome_sessions r
-        JOIN ${CHAT_LINES} m ON m.chat_id = r.chat_id AND m.thread_id IS r.thread_id
-        WHERE r.id = ${sessionId} AND r.last_seen_activity_at IS NOT NULL
-          AND m.sender_agent IS NOT NULL
-          AND m.said_at > r.last_seen_activity_at
-        LIMIT ${cap}
-      )`);
-    return Number(row?.count ?? 0);
+    const seat = await this.seatOf(sessionId);
+    const [mark] = await this.db.all<{ at: number | null }>(sql`
+      SELECT last_seen_activity_at AS at FROM rome_sessions WHERE id = ${sessionId}
+    `);
+    if (!seat || mark?.at == null) return 0;
+    const { place } = seat;
+    const fromRome = sql`chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
+      AND sender_agent IS NOT NULL AND said_at > ${mark.at}`;
+    if (!seat.perAccount) {
+      const [row] = await this.db.all<{ count: number }>(sql`
+        SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_LINES} WHERE ${fromRome} LIMIT ${cap})
+      `);
+      return Number(row?.count ?? 0);
+    }
+    // Copies share their second, and each second holds at least one message,
+    // so the first `cap` seconds with a line from Rome hold enough to count.
+    const lines = await this.db.all<{ id: number }>(sql`
+      SELECT id FROM ${CHAT_LINES} WHERE ${fromRome} AND said_at IN (
+        SELECT DISTINCT said_at FROM ${CHAT_LINES} WHERE ${fromRome} ORDER BY said_at LIMIT ${cap}
+      )
+    `);
+    const said = this.messages.byIds(lines.map((line) => line.id));
+    const occurrence = occurrencesOf(said);
+    const messages = new Set(said.map((line) => occurrence.get(line.id) ?? `line:${line.id}`));
+    return Math.min(messages.size, cap);
   }
 }
 

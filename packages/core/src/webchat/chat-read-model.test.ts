@@ -429,5 +429,30 @@ describe("ChatReadModel", () => {
       expect(await reads.unreadCount("chat-1", 10)).toBe(2);
       expect(await reads.unreadCount("chat-1", 1)).toBe(1);
     });
+
+    it("counts a line from Rome each of Rome's accounts holds a copy of once", async () => {
+      const chat = fixture.chat("telegram", "-42", "group");
+      fixture.seat({
+        id: "sales",
+        chat,
+        accountId: "bot-sales",
+        lastSeenActivityAt: new Date(1_000_000),
+      });
+      const said = (id: string, seconds: number) =>
+        fixture.say({
+          id,
+          chat,
+          from: "bot-sales",
+          agent: "main",
+          text: `reply ${seconds}`,
+          at: new Date(seconds * 1000),
+        });
+      said("bot-sales:5", 2_000);
+      said("bot-support:9", 2_000);
+      said("bot-sales:6", 2_001);
+
+      expect(await reads.unreadCount("sales", 10)).toBe(2);
+      expect(await reads.unreadCount("sales", 1)).toBe(1);
+    });
   });
 });
