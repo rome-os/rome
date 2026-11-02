@@ -62,18 +62,20 @@ export function inboundRecording(
   channels: readonly Channel[],
 ): InboundRecording {
   const known: Channel[] = [...channels];
-  /** Each recording channel's adapter, by channel name. Empty while no one
-   *  listens. */
-  const recording = new Map<string, ChannelChatAdapter>();
+  /** Each recording channel's subscription, by channel name. Empty while no
+   *  one listens. A subscription is replaced when recording starts again, so
+   *  what the old one still delivers is not recorded under the new one. */
+  const recording = new Map<string, { readonly adapter: ChannelChatAdapter }>();
   let listeners = 0;
   /** The adapter's keys of each message being heard, by channel and recorded
    *  id. */
   const hearing = new Map<string, { chat: string; key: string }>();
 
-  /** The last recording queued in each place, by channel, chat and thread.
-   *  An adapter delivers a place's messages one at a time, but a recording
-   *  still running when recording stops outlives it, so the place's next one,
-   *  delivered once recording starts again, waits for it here. */
+  /** The last recording queued in each place, by platform, chat and thread.
+   *  Each of Rome's accounts in a place delivers its messages through its own
+   *  channel, and a recording still running when recording stops outlives
+   *  it, so the place's next message, from any account or subscription,
+   *  waits for it here. */
   const tails = new Map<string, Promise<number | null>>();
 
   /**
@@ -82,7 +84,9 @@ export function inboundRecording(
    * messages once for everyone, two of Rome's accounts there hear the same
    * line: it is recorded once and raised for each, while a redelivery to the
    * same account raises nothing. Kept in memory, like the wakes in flight: a
-   * restart forgets it.
+   * restart forgets it, and a redelivery after one is raised again, for
+   * Agents to find the line its session already took
+   * (sessions/messages-said.ts).
    */
   const raised = new Set<string>();
   const raise = (account: string, id: number): boolean => {
@@ -96,11 +100,15 @@ export function inboundRecording(
     return true;
   };
 
-  const recordOne = async (message: Inbound): Promise<number | null> => {
+  const recordOne = async (
+    message: Inbound,
+    subscription: { readonly adapter: ChannelChatAdapter },
+  ): Promise<number | null> => {
     const { via } = message;
     // A message still queued when the last listener left is dropped, as it
-    // is for any hook swap: nobody is there to hear it.
-    if (recording.get(via.channel) === undefined) return null;
+    // is for any hook swap: nobody is there to hear it, even once a new
+    // hook listens again.
+    if (recording.get(via.channel) !== subscription) return null;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) return null;
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
@@ -140,9 +148,14 @@ export function inboundRecording(
     return recorded.id;
   };
 
-  const deliver = (message: Inbound): Promise<number | null> => {
-    const key = `${message.via.channel}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
-    const recorded = (tails.get(key) ?? Promise.resolve(null)).then(() => recordOne(message));
+  const deliver = (
+    message: Inbound,
+    subscription: { readonly adapter: ChannelChatAdapter },
+  ): Promise<number | null> => {
+    const key = `${message.chat.platform}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
+    const recorded = (tails.get(key) ?? Promise.resolve(null)).then(() =>
+      recordOne(message, subscription),
+    );
     // A failed recording is the adapter's to report, and does not hold up the
     // place's next message.
     const tail = recorded.catch(() => null);
@@ -155,14 +168,17 @@ export function inboundRecording(
 
   const subscribe = (channel: Channel): void => {
     if (!channel.inbound || recording.has(channel.name)) return;
-    const adapter = deps.adapters.of(channel);
-    recording.set(channel.name, adapter);
-    adapter.start(deliver, (error) => {
-      log.error("failed to record an inbound message", {
-        channel: channel.name,
-        error: error.message,
-      });
-    });
+    const subscription = { adapter: deps.adapters.of(channel) };
+    recording.set(channel.name, subscription);
+    subscription.adapter.start(
+      (message) => deliver(message, subscription),
+      (error) => {
+        log.error("failed to record an inbound message", {
+          channel: channel.name,
+          error: error.message,
+        });
+      },
+    );
   };
 
   return {
@@ -179,13 +195,13 @@ export function inboundRecording(
         // only one storing them. Messages still waiting on a channel are
         // dropped, as they are for any hook swap.
         if (listeners > 0) return;
-        for (const adapter of recording.values()) void adapter.stop();
+        for (const { adapter } of recording.values()) void adapter.stop();
         recording.clear();
       };
     },
     heard(channel, id) {
       const keys = hearing.get(`${channel}\0${id}`);
-      return keys && recording.get(channel)?.heard(keys.chat, keys.key);
+      return keys && recording.get(channel)?.adapter.heard(keys.chat, keys.key);
     },
     addChannels(added) {
       known.push(...added);

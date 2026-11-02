@@ -23,6 +23,9 @@ export interface MessagesSaidDeps {
   events: ChatEvents;
   /** Holds a message out of every catch-up until its wake is decided. */
   wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
+  /** What each session already took a message as, which outlives a
+   *  restart. */
+  links: Pick<TurnLinks, "linkOf">;
 }
 
 /**
@@ -60,6 +63,13 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           // Never handed over, so nothing else will decide its wake.
           deps.wakes.wakeDecided(event.message.id);
           throw error;
+        }
+        // A session that already took the line, as a prompt or as seen, heard
+        // it before: this is a redelivery, such as one a restart brings,
+        // and its wake was decided then.
+        if (deps.links.linkOf(speaker, event.message.id)) {
+          deps.wakes.wakeDecided(event.message.id);
+          return;
         }
         const recorded: SaidInboundEvent = {
           ...heard,

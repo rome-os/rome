@@ -112,7 +112,8 @@ export interface ChatAdapter {
    * reports a message the adapter could not hand over.
    */
   start(deliver: (message: Inbound) => Promise<number | null>, fault: (error: Error) => void): void;
-  /** Stop receiving. `deliver` is not called once it resolves. */
+  /** Stop receiving. What is still waiting to be handed over is dropped, and
+   *  `deliver` is not called once it resolves. */
   stop(): Promise<void>;
   /**
    * Post `out` as one message in the chat keyed `chatKey`, in thread
@@ -418,7 +419,9 @@ export function channelAdapter(
             fault(error instanceof Error ? error : new Error(String(error)));
           }
         }
-        queues.delete(chat);
+        // Stopping lets go of the queue, and a later start may queue the
+        // chat afresh.
+        if (queues.get(chat) === queue) queues.delete(chat);
       };
       unsubscribe = channel.inbound.subscribe(async (event) => {
         // The port orders each platform address's events and holds the next
@@ -460,6 +463,11 @@ export function channelAdapter(
       unsubscribe?.();
       unsubscribe = null;
       started = false;
+      // What is still waiting was heard for the receiver that stopped, so it
+      // is dropped rather than handed to the next one. The message being
+      // handed over finishes.
+      for (const queue of queues.values()) queue.length = 0;
+      queues.clear();
       await Promise.allSettled([...inFlight]);
     },
 

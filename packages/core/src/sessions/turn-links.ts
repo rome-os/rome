@@ -32,11 +32,12 @@ export interface TurnLink {
 
 export class TurnLinks {
   /**
-   * The messages whose wake is still being decided. Kept in memory: a
-   * restart forgets it, which decides every wake in flight, since the
-   * decision died with the process.
+   * The messages whose wake is still being decided, each with how many of
+   * Rome's accounts are deciding it: a line two accounts hear is held until
+   * both have decided. Kept in memory: a restart forgets it, which decides
+   * every wake in flight, since the decision died with the process.
    */
-  private readonly undecided = new Set<number>();
+  private readonly undecided = new Map<number, number>();
 
   /** Chats' reads, which every line a session reads goes through. */
   private readonly messages: Pick<MessageRepository, "read" | "byIds">;
@@ -298,14 +299,17 @@ export class TurnLinks {
   }
 
   /** Hold message `messageId` out of every catch-up until its wake is
-   *  decided. */
+   *  decided, once for each account that heard it. */
   wakeUndecided(messageId: number): void {
-    this.undecided.add(messageId);
+    this.undecided.set(messageId, (this.undecided.get(messageId) ?? 0) + 1);
   }
 
-  /** Note that whether message `messageId` wakes an agent is decided. */
+  /** Note that one account decided whether message `messageId` wakes an
+   *  agent. It is let go once every account that heard it has. */
   wakeDecided(messageId: number): void {
-    this.undecided.delete(messageId);
+    const deciding = this.undecided.get(messageId) ?? 0;
+    if (deciding > 1) this.undecided.set(messageId, deciding - 1);
+    else this.undecided.delete(messageId);
   }
 }
 

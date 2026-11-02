@@ -20,9 +20,10 @@ import type { TurnLinks } from "./turn-links.js";
 // Recording what reaches Rome in Chats' tables, then Agents hearing it. What
 // these pin: a message is on record in its chat before the hook hears it, the
 // hook hears it through the session of the account that heard it, a
-// redelivery is neither recorded nor heard twice, a message is held out of
-// catch-up until its wake is decided, and nothing is recorded until a hook
-// subscribes.
+// redelivery is neither recorded nor heard twice, even after a restart, a
+// message is held out of catch-up until every account that heard it decided
+// its wake, a place's messages are heard one at a time whichever account
+// heard them, and nothing is recorded until a hook subscribes.
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
 const SECOND: Account = { platform: "telegram", id: "rome-bot-2" };
@@ -43,6 +44,15 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     thread: { kind: "group", name: "Team" },
     ...overrides,
   };
+}
+
+/** A promise the test resolves, and a function that resolves it. */
+function gate(): { opened: Promise<void>; open: () => void } {
+  let open = () => {};
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open };
 }
 
 /** A channel whose deliveries the test drives. */
@@ -95,6 +105,7 @@ describe("messagesSaid", () => {
       recording,
       events,
       wakes: overrides.wakes ?? wiring.links,
+      links: wiring.links,
     });
   }
 
@@ -249,5 +260,104 @@ describe("messagesSaid", () => {
     leave();
     await telegram.deliver(message());
     expect(lines()).toHaveLength(0);
+  });
+  it("does not hear a redelivery after a restart, once the session took the line", async () => {
+    const heard: SaidInboundEvent[] = [];
+    const leave = said.subscribe(async (event) => {
+      heard.push(event);
+      wiring.links.prompt(Number(event.recorded.messageId), event.recorded.chatRecordId);
+    });
+    await telegram.deliver(message());
+    await settled();
+    leave();
+
+    // A new process: nothing it remembers, over the same database.
+    const restarted = build();
+    const heardAgain: SaidInboundEvent[] = [];
+    restarted.subscribe(async (event) => {
+      heardAgain.push(event);
+    });
+    await telegram.deliver(message());
+    await settled();
+
+    expect(heard).toHaveLength(1);
+    expect(heardAgain).toHaveLength(0);
+    expect(lines()).toHaveLength(1);
+  });
+
+  it("holds a line two accounts heard until both have decided its wake", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const supergroup = {
+      chatId: "-1001234567890" as ChatId,
+      timestamp: new Date(Date.now() + 60_000),
+    };
+    await telegram.deliver(message(supergroup));
+    await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
+    await settled();
+    const [first, other] = heard;
+    if (!first || !other) throw new Error("not heard by both");
+
+    await said.decided(first.recorded);
+    expect(wiring.links.unseen(first.recorded.chatRecordId)).toHaveLength(0);
+    await said.decided(other.recorded);
+    expect(wiring.links.unseen(first.recorded.chatRecordId).map((line) => line.text)).toEqual([
+      "Hello",
+    ]);
+  });
+
+  it("hears a place's messages one at a time, whichever account heard them", async () => {
+    const blocked = gate();
+    const firstHeard = gate();
+    const heard: string[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+      if (event.message.messageId === "tg-1") {
+        firstHeard.open();
+        await blocked.opened;
+      }
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    await telegram.deliver(message({ ...supergroup, messageId: "tg-1" }));
+    await firstHeard.opened;
+    await second.deliver(
+      message({ ...supergroup, messageId: "tg-2", account: SECOND, channel: "telegram-2" }),
+    );
+    // Let anything not waiting on the first line run.
+    for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+    expect(heard).toEqual(["tg-1"]);
+
+    blocked.open();
+    await settled();
+    expect(heard).toEqual(["tg-1", "tg-2"]);
+  });
+
+  it("drops what was queued for a hook that left, even when a new one subscribes at once", async () => {
+    const blocked = gate();
+    const firstHeard = gate();
+    const heard: string[] = [];
+    const leave = said.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+      firstHeard.open();
+      await blocked.opened;
+    });
+    await telegram.deliver(message({ messageId: "tg-1" }));
+    await telegram.deliver(message({ messageId: "tg-2" }));
+    await firstHeard.opened;
+    leave();
+    const reloaded: string[] = [];
+    said.subscribe(async (event) => {
+      reloaded.push(event.message.messageId);
+    });
+    blocked.open();
+    await settled();
+    await telegram.deliver(message({ messageId: "tg-3" }));
+    await settled();
+
+    expect(heard).toEqual(["tg-1"]);
+    expect(reloaded).toEqual(["tg-3"]);
+    expect(lines()).toHaveLength(2);
   });
 });
