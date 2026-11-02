@@ -219,6 +219,34 @@ describe("channelAdapter", () => {
     ]);
   });
 
+  it("hold at most a port's worth of a chat's messages while one is delivered, dropping the oldest", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    adapter.start(
+      async (message) => {
+        delivered.push(message.key);
+        if (message.key === "1") await held;
+        return 1;
+      },
+      () => {},
+    );
+
+    for (let id = 1; id <= 151; id += 1) {
+      await hear({ chatId: "-1001234567890123", messageId: String(id) });
+    }
+    release();
+    await adapter.settled();
+
+    expect(delivered).toHaveLength(101);
+    expect(delivered.slice(0, 3)).toEqual(["1", "52", "53"]);
+    expect(delivered.at(-1)).toBe("151");
+  });
+
   it("hold no event for a message whose address could not be kept", async () => {
     const { channel, hear } = fakeChannel();
     const failing = {

@@ -22,6 +22,7 @@ import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { ChatKind } from "../chats/storage/chat.js";
 import type { ChannelSend } from "../channels/channel.js";
+import { CONVERSATION_BUFFER_DEFAULTS } from "../channels/conversation-buffer.js";
 import type { ChatAddresses } from "./chat-addresses.js";
 import { ReplyDelivery, type ReplyOutcome } from "../channels/delivery/reply.js";
 import type { DeliveryPolicy } from "../channels/delivery/types.js";
@@ -39,6 +40,13 @@ import type { ChatRef, Place } from "../chats/storage/place.js";
 export type { ChatKey };
 
 const log = createLogger("chat-adapter");
+
+/** Most messages a chat may hold waiting for `deliver`, as the channel
+ *  port's buffer holds per address. Past it the oldest is dropped, which a
+ *  live, at-most-once port allows. */
+const QUEUE_CAPACITY = CONVERSATION_BUFFER_DEFAULTS.capacity;
+/** Waiting messages at which a chat is reported as backing up. */
+const QUEUE_WARNING = CONVERSATION_BUFFER_DEFAULTS.depthWarning;
 
 /** A message said in a chat of the adapter's account by someone else. */
 export interface Inbound {
@@ -266,9 +274,9 @@ export function channelAdapter(
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
   const delivering = new Map<string, InboundEvent>();
-  /** Each chat's last message on its way to `deliver`, which the next waits
-   *  on. */
-  const queues = new Map<string, Promise<void>>();
+  /** Each chat's messages waiting for the one being handed over, by the
+   *  chat's key. A chat is here while its queue drains. */
+  const queues = new Map<string, InboundEvent[]>();
 
   /** Where the platform takes a message for the chat keyed `key`: the
    *  thread's id, else where the account reaches the chat when that is not
@@ -295,63 +303,78 @@ export function channelAdapter(
       if (started) throw new Error(`Adapter for ${channel.name} is already receiving`);
       started = true;
       if (!channel.inbound) return;
+      const handOver = async (event: InboundEvent) => {
+        if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
+        const saved = await materialized(channel, event);
+        const inbound = toInbound(channel.name, saved.message.account ?? account(), saved, keying);
+        // A direct message is reached where it was heard, which on some
+        // platforms is an id of its own rather than the other end.
+        if (inbound.chatKind === "dm" && inbound.thread === null) {
+          deps.addresses?.bind(inbound.via.account, inbound.chat.externalId, saved.message.chatId);
+        }
+        // A thread is reached at its own address, which names no chat:
+        // noted for today's ports, which send to that address alone.
+        if (inbound.thread !== null) {
+          deps.addresses?.bindThread(
+            inbound.via.account,
+            inbound.thread.id,
+            inbound.chat.externalId,
+          );
+        }
+        const heardAs = `${inbound.chat.externalId}\0${inbound.key}`;
+        delivering.set(heardAs, {
+          ...saved,
+          message: { ...saved.message, channel: channel.name },
+        });
+        try {
+          await deliver(inbound);
+        } finally {
+          delivering.delete(heardAs);
+        }
+      };
+      const drain = async (chat: string, queue: InboundEvent[]) => {
+        for (let event = queue.shift(); event !== undefined; event = queue.shift()) {
+          try {
+            await handOver(event);
+          } catch (error) {
+            fault(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+        queues.delete(chat);
+      };
       unsubscribe = channel.inbound.subscribe(async (event) => {
         // The port orders each platform address's events and holds the next
         // until this handler returns, but a chat's threads are addresses of
-        // their own. So the handler only queues the event, in the order the
-        // port hands it over, and returns: the adapter orders a chat's
-        // messages itself, and none waits behind another thread's.
+        // their own. So the handler only queues the event on its chat, in the
+        // order the port hands it over, and returns: the adapter hands a
+        // chat's messages over one at a time, and none waits behind another
+        // thread's at the port. The queue is bounded as the port's is.
         const chat = keying(event.message.account ?? account(), event.message).key.externalId;
-        const handed = (queues.get(chat) ?? Promise.resolve()).then(async () => {
-          if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
-          const saved = await materialized(channel, event);
-          const inbound = toInbound(
-            channel.name,
-            saved.message.account ?? account(),
-            saved,
-            keying,
-          );
-          // A direct message is reached where it was heard, which on some
-          // platforms is an id of its own rather than the other end.
-          if (inbound.chatKind === "dm" && inbound.thread === null) {
-            deps.addresses?.bind(
-              inbound.via.account,
-              inbound.chat.externalId,
-              saved.message.chatId,
-            );
+        const waiting = queues.get(chat);
+        if (waiting) {
+          if (waiting.length >= QUEUE_CAPACITY) {
+            const dropped = waiting.shift();
+            log.warn("inbound message dropped: chat queue full", {
+              channel: channel.name,
+              chat,
+              capacity: QUEUE_CAPACITY,
+              messageId: dropped?.message.messageId,
+            });
           }
-          // A thread is reached at its own address, which names no chat:
-          // noted for today's ports, which send to that address alone.
-          if (inbound.thread !== null) {
-            deps.addresses?.bindThread(
-              inbound.via.account,
-              inbound.thread.id,
-              inbound.chat.externalId,
-            );
+          waiting.push(event);
+          if (waiting.length === QUEUE_WARNING) {
+            log.warn("inbound chat backing up", {
+              channel: channel.name,
+              chat,
+              waiting: waiting.length,
+            });
           }
-          const heardAs = `${inbound.chat.externalId}\0${inbound.key}`;
-          delivering.set(heardAs, {
-            ...saved,
-            message: { ...saved.message, channel: channel.name },
-          });
-          try {
-            await deliver(inbound);
-          } finally {
-            delivering.delete(heardAs);
-          }
-        });
-        const settled = handed.then(
-          () => {},
-          () => {},
-        );
-        queues.set(chat, settled);
-        const tracked = handed
-          .catch((error) => fault(error instanceof Error ? error : new Error(String(error))))
-          .finally(() => {
-            inFlight.delete(tracked);
-            if (queues.get(chat) === settled) queues.delete(chat);
-          });
-        inFlight.add(tracked);
+          return;
+        }
+        const queue = [event];
+        queues.set(chat, queue);
+        const draining = drain(chat, queue).finally(() => inFlight.delete(draining));
+        inFlight.add(draining);
       });
     },
 
