@@ -21,6 +21,7 @@ import {
   type Inbound,
   isDirectMessage,
   lineAt,
+  kindNamedBy,
   platformIdOfLine,
   sentLineId,
 } from "./chat-adapter.js";
@@ -359,6 +360,8 @@ describe("channelAdapter", () => {
     const landed = await adapter.send("-1001234567890123", null, { text: "on it" });
 
     expect(landed).toEqual({ key: "m9", threadId: "thread-7" });
+    // A send to the thread finds its chat before anything is heard there.
+    expect(adapter.threadAt("thread-7")?.externalId).toBe("-1001234567890123");
   });
 
   it("stop delivering once stopped, and refuse a second start while receiving", async () => {
@@ -546,5 +549,16 @@ describe("ChatAdapters", () => {
     expect(adapters.chatAt("telegram", "bob", "dm")).toEqual(
       chatAt("telegram", "bob", { romeEnd: "rome_bot" }),
     );
+  });
+});
+
+describe("kindNamedBy", () => {
+  it("read a group from the address where the platform's ids say so, and nowhere else", () => {
+    expect(kindNamedBy("telegram", "-100")).toBe("group");
+    expect(kindNamedBy("telegram", "4242")).toBe("dm");
+    expect(kindNamedBy("telegram", "@public_channel")).toBeNull();
+    expect(kindNamedBy("whatsapp", "120363@g.us")).toBe("group");
+    expect(kindNamedBy("whatsapp", "4479@s.whatsapp.net")).toBe("dm");
+    expect(kindNamedBy("discord", "1234567890")).toBeNull();
   });
 });

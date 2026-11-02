@@ -275,6 +275,18 @@ export class MessageRepository {
     );
   }
 
+  /** The chat on `platform` that holds a line its adapter keys `key`, the
+   *  oldest such line's, or null when Rome holds none. For platforms whose
+   *  keys are unique across chats, as an email's message id is. */
+  chatHolding(platform: string, key: string): ChatRef | null {
+    const row = this.db.all<{ id: number }>(sql`
+      SELECT c.id FROM chat_messages m JOIN chats c ON c.id = m.chat_id
+      WHERE c.platform = ${platform} AND m.key = ${key}
+      ORDER BY m.id LIMIT 1
+    `)[0];
+    return row ? { platform, id: row.id } : null;
+  }
+
   private idIn(chatId: number, key: string): number | null {
     return (
       this.db.all<{ id: number }>(sql`

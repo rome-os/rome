@@ -7,7 +7,7 @@
 // switch moves seat lookups here.
 
 import type { ChatId } from "@rome-os/app-runtime";
-import { eq } from "drizzle-orm";
+import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -56,5 +56,45 @@ export class Seats {
       accountId: row.accountId ?? chat.ref.platform,
       agent: row.agentName ?? "main",
     };
+  }
+
+  /**
+   * The seat Rome's account `accountId` holds in chat `chatId`, in thread
+   * `threadId` or the open chat when null, by its session's id, or null when
+   * it holds none there.
+   */
+  seatIn(chatId: number, threadId: string | null, accountId: string): string | null {
+    return this.firstSeat(
+      and(
+        eq(romeSessions.chatId, chatId),
+        threadId === null ? isNull(romeSessions.threadId) : eq(romeSessions.threadId, threadId),
+        eq(romeSessions.accountId, accountId),
+      ),
+    );
+  }
+
+  /** The seat Rome's account `account` holds in the thread its platform
+   *  calls `threadId`, in whichever chat there, or null when it holds none. */
+  seatInThread(threadId: string, account: { platform: string; id: string }): string | null {
+    return this.firstSeat(
+      and(
+        eq(romeSessions.threadId, threadId),
+        eq(romeSessions.chatPlatform, account.platform),
+        eq(romeSessions.accountId, account.id),
+      ),
+    );
+  }
+
+  /** The oldest session `where` names, by id. */
+  private firstSeat(where: SQL | undefined): string | null {
+    return (
+      this.db
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(where)
+        .orderBy(asc(romeSessions.createdAt))
+        .limit(1)
+        .get()?.id ?? null
+    );
   }
 }

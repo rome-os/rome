@@ -36,10 +36,13 @@ export interface EmailRecipients {
   readonly bcc?: readonly string[];
 }
 
-/** A message in an email chat: what every message carries, and an HTML body,
- *  which the provider shows in place of the text. */
+/** A message in an email chat: what every message carries, an HTML body,
+ *  which the provider shows in place of the text, and who else a reply goes
+ *  to. A thread's first message goes to the recipients it was opened for. */
 export interface EmailOutbound extends Outbound {
   readonly html?: string;
+  readonly cc?: readonly string[];
+  readonly bcc?: readonly string[];
 }
 
 /** The email adapter, which also opens threads. */
@@ -50,6 +53,13 @@ export interface EmailChatAdapter extends ChannelChatAdapter {
    * message sent into it.
    */
   open(recipients: EmailRecipients, subject: string): ChatKey;
+  /** The provider's id for the thread keyed `chatKey`, once a message
+   *  started it, else the key. Kept even when storing it failed. */
+  threadAddress(chatKey: string): ChatId;
+  /** The chat of the thread Rome started that the provider calls
+   *  `address`, or null when Rome started none there. Kept even when
+   *  storing the address failed. */
+  chatStartedAt(address: string): ChatKey | null;
   /** As any chat adapter's `send`. A thread is a chat of its own, so a
    *  message never lands in a thread of one. */
   send(chatKey: string, threadId: ChatId | null, out: EmailOutbound): Promise<Sent>;
@@ -114,6 +124,15 @@ export function emailChatAdapter(
     start: (deliver, fault) => base.start(deliver, fault),
     stop: () => base.stop(),
     stream: (chat, threadId, out) => base.stream?.(chat, threadId, out) ?? null,
+
+    threadAddress(key) {
+      return (started.get(key) ?? addresses.addressOf(account(), key) ?? key) as ChatId;
+    },
+
+    chatStartedAt(address) {
+      const key = startedAt.get(address) ?? addresses.keyAt(account(), address);
+      return key === null ? null : chatKey(account().platform, key as ChatId);
+    },
 
     open(recipients, subject) {
       const own = account();
@@ -184,6 +203,8 @@ export function emailChatAdapter(
       const at = started.get(key) ?? addresses.addressOf(own, key) ?? key;
       const receipt = await port().send(at as ChatId, {
         ...body,
+        ...(out.cc?.length ? { cc: [...out.cc] } : {}),
+        ...(out.bcc?.length ? { bcc: [...out.bcc] } : {}),
         ...(replyTo ? { inReplyToMessageId: replyTo } : {}),
       });
       return { key: sentLineId(ref, own.id, receipt.messageId || undefined), threadId: null };
