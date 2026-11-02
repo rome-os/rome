@@ -5,7 +5,7 @@
 -- triggers at the end keep them in step with the legacy rows; the contract
 -- migration drops all three, and the legacy columns, a release later.
 CREATE TABLE `chats` (
-	`id` integer PRIMARY KEY NOT NULL,
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`platform` text NOT NULL,
 	`key` text NOT NULL,
 	`kind` text NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE `chats` (
 CREATE UNIQUE INDEX `idx_chats_key` ON `chats` (`platform`,`key`);
 --> statement-breakpoint
 CREATE TABLE `chat_messages` (
-	`id` integer PRIMARY KEY NOT NULL,
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`chat_id` integer NOT NULL,
 	`key` text NOT NULL,
 	`thread_id` text,
@@ -233,11 +233,11 @@ ORDER BY v.`said_at`, v.`legacy_seq`;
 --> statement-breakpoint
 UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
       SELECT coalesce(
-    (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
     (SELECT i.`message_id` FROM `rome_sessions` r
       JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
       JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-      WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_ids` i
+      WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+    (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_ids` i
       JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
       WHERE i.`message_id` = `chat_messages`.`id` AND v.`reply_key` IS NOT NULL LIMIT 1)
     WHERE `reply_to_message_id` IS NULL AND `id` IN (
@@ -310,11 +310,11 @@ BEGIN
   ORDER BY v.`said_at`, v.`legacy_seq`;
   UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
         SELECT coalesce(
-      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
       (SELECT i.`message_id` FROM `rome_sessions` r
         JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
         JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-        WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_ids` i
+        WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_ids` i
         JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
         WHERE i.`message_id` = `chat_messages`.`id` AND v.`reply_key` IS NOT NULL LIMIT 1)
       WHERE `reply_to_message_id` IS NULL AND `id` IN (
@@ -404,11 +404,11 @@ BEGIN
   ORDER BY v.`said_at`, v.`legacy_seq`;
   UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
         SELECT coalesce(
-      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
       (SELECT i.`message_id` FROM `rome_sessions` r
         JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
         JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-        WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_ids` i
+        WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_ids` i
         JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
         WHERE i.`message_id` = `chat_messages`.`id` AND v.`reply_key` IS NOT NULL LIMIT 1)
       WHERE `reply_to_message_id` IS NULL AND `id` IN (
@@ -438,11 +438,11 @@ BEGIN
     `text` = (SELECT v.`text` FROM `legacy_chat_line_rows` v WHERE v.`legacy_id` = NEW.`id`),
     `parts` = (SELECT v.`parts` FROM `legacy_chat_line_rows` v WHERE v.`legacy_id` = NEW.`id`),
     `reply_to_message_id` = (SELECT coalesce(
-      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
       (SELECT i.`message_id` FROM `rome_sessions` r
         JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
         JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-        WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_rows` v
+        WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_rows` v
       WHERE v.`legacy_id` = NEW.`id`)
   WHERE `id` = (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` = NEW.`id`) AND (OLD.`content` IS NOT NEW.`content` OR OLD.`role` IS NOT NEW.`role` OR OLD.`actor` IS NOT NEW.`actor` OR OLD.`sender_id` IS NOT NEW.`sender_id` OR OLD.`sender_name` IS NOT NEW.`sender_name` OR OLD.`platform_message_id` IS NOT NEW.`platform_message_id` OR OLD.`reply_to_platform_message_id` IS NOT NEW.`reply_to_platform_message_id`)
     -- A seat's own row never takes a line from Rome away from Rome.
@@ -514,11 +514,11 @@ BEGIN
   ORDER BY v.`said_at`, v.`legacy_seq`;
   UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
         SELECT coalesce(
-      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
       (SELECT i.`message_id` FROM `rome_sessions` r
         JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
         JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-        WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_ids` i
+        WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_ids` i
         JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
         WHERE i.`message_id` = `chat_messages`.`id` AND v.`reply_key` IS NOT NULL LIMIT 1)
       WHERE `reply_to_message_id` IS NULL AND `id` IN (
@@ -608,11 +608,11 @@ BEGIN
   ORDER BY v.`said_at`, v.`legacy_seq`;
   UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
         SELECT coalesce(
-      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
       (SELECT i.`message_id` FROM `rome_sessions` r
         JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
         JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-        WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_ids` i
+        WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_ids` i
         JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
         WHERE i.`message_id` = `chat_messages`.`id` AND v.`reply_key` IS NOT NULL LIMIT 1)
       WHERE `reply_to_message_id` IS NULL AND `id` IN (
@@ -636,11 +636,11 @@ BEGIN
     WHERE v.`sender_agent` IS NOT NULL AND (v.`session_id` = NEW.`id` OR v.`session_id` IN (SELECT o.`id` FROM `rome_sessions` o WHERE o.`parent_session_id` = NEW.`id`)));
   UPDATE OR IGNORE `chat_messages` SET `reply_to_message_id` = (
         SELECT coalesce(
-      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`),
       (SELECT i.`message_id` FROM `rome_sessions` r
         JOIN `rome_agent_message_platform_ids` a ON a.`session_id` = r.`id` AND a.`platform_message_id` = v.`reply_key`
         JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = a.`message_id`
-        WHERE r.`chat_id` = v.`chat_id` LIMIT 1)) FROM `legacy_chat_line_ids` i
+        WHERE r.`chat_id` = v.`chat_id` LIMIT 1),
+      (SELECT q.`id` FROM `chat_messages` q WHERE q.`chat_id` = v.`chat_id` AND q.`key` = v.`reply_key`)) FROM `legacy_chat_line_ids` i
         JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
         WHERE i.`message_id` = `chat_messages`.`id` AND v.`reply_key` IS NOT NULL LIMIT 1)
       WHERE `reply_to_message_id` IS NULL AND `id` IN (

@@ -909,7 +909,7 @@
           "type": "integer",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": true
         },
         "chat_id": {
           "name": "chat_id",
@@ -1029,7 +1029,7 @@
           "type": "integer",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": true
         },
         "platform": {
           "name": "platform",

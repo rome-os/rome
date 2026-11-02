@@ -664,4 +664,70 @@ describe("0105_chats_tables triggers", () => {
         .get(),
     ).toEqual({ sender_account_id: "bot-ops", sender_agent: "ops" });
   });
+
+  it("keep a quote on its line when the quoted seat's account is learned later, and never hand its id out again", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    sqlite.exec(`
+      INSERT INTO channels (id, connection_kind, platform, created_at) VALUES ('ops', 'feishu', 'feishu', 1);
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type, created_at, activity_at)
+      VALUES ('channel:ops:oc_launch', 'Launch', 'channel', 'ops', 'oc_launch', 'group', 70, 70);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('ops-heard', 'channel:ops:oc_launch', 'turn-1', 'user', '[{"type":"text","content":"Late news"}]', 'om_late', 'ou_wei', 700);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id, reply_to_platform_message_id, created_at)
+      VALUES ('sales-re', 'channel:sales:oc_launch', 'turn-9', 'user', '[{"type":"text","content":"Re news"}]', 'om_11', 'ou_li', 'om_late', 701);
+      UPDATE channels SET platform_account_id = 'bot-ops' WHERE id = 'ops';
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('ops-next', 'channel:ops:oc_launch', 'turn-2', 'user', '[{"type":"text","content":"Next"}]', 'om_12', 'ou_wei', 702);
+    `);
+
+    expect(
+      sqlite
+        .prepare(
+          "SELECT q.key, q.text FROM chat_messages m LEFT JOIN chat_messages q ON q.id = m.reply_to_message_id WHERE m.key = 'om_11'",
+        )
+        .get(),
+    ).toEqual({ key: "om_late", text: "Late news" });
+    expect(sqlite.prepare("SELECT key FROM chat_messages ORDER BY id").all()).toEqual([
+      { key: "om_1" },
+      { key: "om_2" },
+      { key: "ask" },
+      { key: "om_11" },
+      { key: "om_late" },
+      { key: "om_12" },
+    ]);
+  });
+
+  it("move a quote from a part another account kept on its own to the whole reply once the part is known", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('part-heard', 'channel:support:oc_launch', 'notification', '[{"type":"text","content":"Part two."}]', 'om_5', 'bot-sales', 300);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('long', 'channel:sales:oc_launch', 'turn-8', 'assistant', '[{"type":"text","content":"Part one. Part two."}]', 'om_4', 300);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id, reply_to_platform_message_id, created_at)
+      VALUES ('re-part', 'channel:support:oc_launch', 'turn-9', 'user', '[{"type":"text","content":"Re part two"}]', 'om_7', 'ou_wei', 'om_5', 301);
+    `);
+    const quote = sqlite.prepare(
+      "SELECT q.text FROM chat_messages m LEFT JOIN chat_messages q ON q.id = m.reply_to_message_id WHERE m.key = 'om_7'",
+    );
+    expect(quote.get()).toEqual({ text: "Part two." });
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_message_platform_ids (session_id, platform_message_id, message_id)
+      VALUES ('channel:sales:oc_launch', 'om_5', 'long');
+    `);
+
+    expect(quote.get()).toEqual({ text: "Part one. Part two." });
+    expect(sqlite.prepare("SELECT key FROM chat_messages WHERE id > 2 ORDER BY id").all()).toEqual([
+      { key: "om_2" },
+      { key: "ask" },
+      { key: "om_4" },
+      { key: "om_7" },
+    ]);
+  });
 });

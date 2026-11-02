@@ -578,7 +578,8 @@ export const romeSessions = sqliteTable(
 export const chats = sqliteTable(
   "chats",
   {
-    id: integer("id").primaryKey(),
+    // AUTOINCREMENT, so a deleted chat's id is never handed out again.
+    id: integer("id").primaryKey({ autoIncrement: true }),
     platform: text("platform").notNull(),
     // The adapter's key for the chat, unique on its platform: the platform's
     // group id, or both ends of a direct message (connections/chat-ids.ts). The
@@ -597,7 +598,9 @@ export const chats = sqliteTable(
 export const chatMessages = sqliteTable(
   "chat_messages",
   {
-    id: integer("id").primaryKey(),
+    // AUTOINCREMENT, so a quote can never come to name a later line that took
+    // a deleted line's id.
+    id: integer("id").primaryKey({ autoIncrement: true }),
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
