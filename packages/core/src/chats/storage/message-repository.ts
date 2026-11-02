@@ -48,10 +48,14 @@ export interface SendTarget {
 
 /**
  * Delivers a message to its platform at `target` and answers the key the
- * adapter gives it. Throws when the platform refused it. On the dashboard,
- * where Rome is the platform, the dashboard adapter mints the key.
+ * adapter gives it, and the thread it landed in when the platform placed it
+ * in another than the one it was sent to (null for the open chat). Throws
+ * when the platform refused it. On the dashboard, where Rome is the
+ * platform, the dashboard adapter mints the key.
  */
-export type Deliver = (target: SendTarget) => Promise<{ key: string }>;
+export type Deliver = (
+  target: SendTarget,
+) => Promise<{ key: string; landedIn?: { threadId: ChatId | null } }>;
 
 /** A sent message: its adapter's key, and the id Rome recorded it under, or
  *  null when the platform took it but the record did not land. */
@@ -104,7 +108,8 @@ export class MessageRepository {
    * delivery that throws records nothing and the error reaches the caller.
    * Once the platform took the message, a failure to record it is logged and
    * the send still answers, with no id: reporting a sent message as failed
-   * invites a second real one. The place's chat must already exist.
+   * invites a second real one. It is recorded in the thread the platform
+   * placed it in. The place's chat must already exist.
    */
   async send(message: OutboundMessage, deliver: Deliver): Promise<Sent> {
     if (!message.saidBy.agent) {
@@ -124,7 +129,12 @@ export class MessageRepository {
         : typeof message.replyTo === "number"
           ? this.keyIn(chat.id, message.replyTo)
           : message.replyTo.key;
-    const { key } = await deliver({ chat: chat.key, ...(quoted ? { replyTo: quoted } : {}) });
+    const { key, landedIn } = await deliver({
+      chat: chat.key,
+      ...(quoted ? { replyTo: quoted } : {}),
+    });
+    // The line is on record where the platform put it.
+    const threadId = landedIn ? landedIn.threadId : (message.place.threadId ?? null);
     const at = new Date();
     try {
       // The platform answered a key already on record: the same message.
@@ -133,7 +143,7 @@ export class MessageRepository {
         .values({
           chatId: chat.id,
           key,
-          threadId: message.place.threadId ?? null,
+          threadId,
           senderAccountId: message.saidBy.account.id,
           senderAgent: message.saidBy.agent ?? null,
           senderName: message.saidBy.name ?? null,
