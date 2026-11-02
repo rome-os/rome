@@ -84,7 +84,7 @@ CREATE INDEX `idx_rome_agent_messages_legacy_quote` ON `rome_agent_messages` (`s
 -- chat's key, Rome's account there, and whether the row is a thread under a
 -- parent row. A dashboard chat is a webchat chat keyed by its own row's id. A
 -- fork is a session, not a chat, until it is promoted. A direct message is
--- keyed by both ends, as the adapters key it (channels/chat-ids.ts).
+-- keyed by both ends, as the adapters key it (connections/chat-ids.ts).
 CREATE VIEW `legacy_chat_seats` AS
 SELECT
   r.`id` AS `session_id`,

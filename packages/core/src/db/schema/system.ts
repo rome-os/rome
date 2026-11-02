@@ -581,7 +581,7 @@ export const chats = sqliteTable(
     id: integer("id").primaryKey(),
     platform: text("platform").notNull(),
     // The adapter's key for the chat, unique on its platform: the platform's
-    // group id, or both ends of a direct message (channels/chat-ids.ts). The
+    // group id, or both ends of a direct message (connections/chat-ids.ts). The
     // dashboard keys a chat by its first seat's id. Chats compares it and
     // never reads it.
     key: text("key").notNull(),
