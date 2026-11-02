@@ -287,7 +287,7 @@ describe("channelAdapter", () => {
     ).toBeNull();
   });
 
-  it("settle a streamed reply to the text shown and its first message's key", async () => {
+  it("settle a streamed reply to the text shown and its first message's key, as the account holds it", async () => {
     const created: string[] = [];
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
@@ -309,7 +309,7 @@ describe("channelAdapter", () => {
     const settled = await reply.settle(false);
 
     expect(created).toEqual(["All done."]);
-    expect(settled).toMatchObject({ text: "All done.", key: "s1" });
+    expect(settled).toMatchObject({ text: "All done.", key: "rome_bot:s1" });
   });
 });
 
