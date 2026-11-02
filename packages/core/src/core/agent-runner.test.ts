@@ -4334,6 +4334,79 @@ describe("AgentRunner", () => {
       expect(seen[0]?.sessionId).toBe(conversation.id);
     });
 
+    async function linkedPrompt(
+      unseen: UnseenLine[],
+      threadContext: { threadId: string; parentThreadId?: string },
+    ): Promise<string> {
+      const webchatRepo = new WebChatRepository(testDb.db);
+      if (threadContext.parentThreadId) {
+        await webchatRepo.ensureChannelChat({
+          channel: "discord",
+          threadId: threadContext.parentThreadId,
+          agentName: "main",
+        });
+      }
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "discord",
+        threadId: threadContext.threadId,
+        ...(threadContext.parentThreadId ? { parentThreadId: threadContext.parentThreadId } : {}),
+        agentName: "main",
+      });
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: () => unseen,
+        seen: () => undefined,
+      };
+      const prompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-linked-starter",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          prompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      await collectMessages(
+        createRunner(provider, undefined, { turnLinks }).run({
+          agentName: "test-main",
+          prompt: "current message",
+          channelThreadKey: `discord:${threadContext.threadId}`,
+          romeSessionId: conversation.id,
+          threadContext: {
+            channel: "discord",
+            ...threadContext,
+            channelUserId: "guardian",
+            threadType: "group",
+          },
+        }),
+      );
+      return prompts[0] ?? "";
+    }
+
+    it("leaves the line an ordinary reply quotes out of the catch-up", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const target = { id: 1, senderName: "Bob", text: "the question", at };
+      const prompt = await linkedPrompt(
+        [
+          { ...target, fromRome: false, quoted: null },
+          { id: 2, senderName: "Rome", text: "the answer", at, fromRome: true, quoted: target },
+        ],
+        { threadId: "open-chat" },
+      );
+      expect(prompt.split("Bob: the question")).toHaveLength(2);
+    });
+
+    it("carries the line that started a thread before Rome's first line in it", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const starter = { id: 1, senderName: "Bob", text: "start here", at };
+      const prompt = await linkedPrompt(
+        [{ id: 2, senderName: "Rome", text: "on it", at, fromRome: true, quoted: starter }],
+        { threadId: "thread-1", parentThreadId: "parent-chat" },
+      );
+      expect(prompt).toContain("Bob: start here");
+      expect(prompt.indexOf("Bob: start here")).toBeLessThan(prompt.indexOf("Rome: on it"));
+    });
+
     it("injects a child thread's parent starter before Rome's first reply and the current message", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
       const parent = await webchatRepo.ensureChannelChat({

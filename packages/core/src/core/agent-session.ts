@@ -3682,9 +3682,15 @@ class AgentSessionImpl implements AgentSession {
         // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
         const unseen = this.deps.turnLinks.unseen(sink.romeSessionId);
         const shown = unseen.slice(-CATCH_UP_LIMIT);
-        // Rome's first line in a new thread quotes the line that started it,
-        // said in the chat outside the thread.
-        const threadStarter = unseen.find((line) => line.fromRome && line.quoted)?.quoted ?? null;
+        // Rome's first line in a thread quotes the line that started it, said
+        // in the chat outside the thread, so only a session in a thread
+        // carries it, and only when the catch-up does not already show it.
+        const inThread = sink.threadContext?.parentThreadId !== undefined;
+        const starter = inThread
+          ? (unseen.find((line) => line.fromRome && line.quoted)?.quoted ?? null)
+          : null;
+        const threadStarter =
+          starter && !shown.some((line) => line.id === starter.id) ? starter : null;
         const repliedTo = sink.quoted
           ? contextLine(sink.quoted)
           : sink.replyTo?.content
