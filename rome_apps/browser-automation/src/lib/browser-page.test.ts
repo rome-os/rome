@@ -40,12 +40,13 @@ describe("openAutomationPage over OpenCLI", () => {
     expect(page.browser).toBe("opencli");
     expect(fake.calls[0]).toEqual([
       "browser",
-      expect.stringMatching(/^rome-test-[0-9a-f-]{36}$/),
       "open",
       PAGE_URL,
+      "--session",
+      expect.stringMatching(/^rome-test-[0-9a-f-]{36}$/),
     ]);
-    const session = fake.calls[0][1];
-    expect(fake.calls.every((args) => args[0] === "browser" && args[1] === session)).toBe(true);
+    const session = fake.sessions()[0];
+    expect(fake.sessions().every((each) => each === session)).toBe(true);
 
     await page.close();
     expect(fake.subcommands().at(-1)).toBe("close");
@@ -133,6 +134,28 @@ describe("openAutomationPage over OpenCLI", () => {
     ).rejects.toThrow("notThere is not defined");
   });
 
+  it("names the first line of an eval error envelope without the page stack", async () => {
+    const fake = createFakeOpencli();
+    const error = { code: "UNKNOWN", message: "Error: boom\n    at <anonymous>:1:16", exitCode: 1 };
+    let failEvals = false;
+    const page = await openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+      sessionPrefix: "rome-test",
+      runOpencli: async (args, options) =>
+        failEvals && args.includes("eval")
+          ? { code: 1, stdout: `${JSON.stringify({ ok: false, error })}\n`, stderr: "" }
+          : fake.run(args, options),
+    });
+    failEvals = true;
+
+    await expect(
+      page.runScript({
+        scriptUrl: GATED_ECHO_SCRIPT,
+        entrypointExpression: "gatedEcho",
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow(/could not run a script in the page: Error: boom \(UNKNOWN\)$/);
+  });
+
   it("rejects when a navigation discards a running script", async () => {
     const fake = createFakeOpencli({ maxPageTimerMs: 5 });
     fake.testGlobals.gate = new Promise(() => {});
@@ -188,7 +211,7 @@ describe("openAutomationPage over OpenCLI", () => {
     // The page runs the poll, and its output never reaches Rome.
     const droppingFirstResult: RunOpencli = async (args, options) => {
       const result = await fake.run(args, options);
-      if (!dropped && result.stdout.includes('"state":"done"')) {
+      if (!dropped && /state\\?":\\?"done/.test(result.stdout)) {
         dropped = true;
         return { code: 1, stdout: "", stderr: "Browser Bridge connection reset" };
       }
@@ -216,8 +239,10 @@ describe("openAutomationPage over OpenCLI", () => {
     // A poll result that arrives JSON-encoded a second time parses to a string.
     const doubleEncodingPolls: RunOpencli = async (args, options) => {
       const result = await fake.run(args, options);
-      if (result.stdout.includes('"state"')) {
-        return { ...result, stdout: `${JSON.stringify(result.stdout.trim())}\n` };
+      const envelope = JSON.parse(result.stdout) as { ok: boolean; data?: unknown };
+      if (typeof envelope.data === "string" && envelope.data.includes('"state"')) {
+        const data = JSON.stringify(envelope.data);
+        return { ...result, stdout: `${JSON.stringify({ ok: true, data })}\n` };
       }
       return result;
     };
@@ -305,6 +330,82 @@ describe("openAutomationPage over OpenCLI", () => {
     expect(message).not.toContain("\u001b[");
     expect(message).not.toContain("No discovered browser endpoints");
     expect(fake.subcommands()).toEqual(["open"]);
+  });
+
+  it("names OpenCLI's error message and hint when open fails", async () => {
+    const envelope = {
+      ok: false,
+      error: {
+        code: "BROWSER_CONNECT",
+        message: "Browser Bridge extension not connected",
+        hint: "Make sure Chrome/Chromium is open and the OpenCLI extension is enabled.",
+        exitCode: 69,
+      },
+    };
+    const fake = createFakeOpencli({
+      openResult: { code: 69, stdout: `${JSON.stringify(envelope)}\n`, stderr: "" },
+    });
+
+    const error = await openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+      sessionPrefix: "rome-test",
+      runOpencli: fake.run,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain(
+      "Browser Bridge extension not connected (BROWSER_CONNECT). Make sure Chrome/Chromium is open and the OpenCLI extension is enabled. Run `opencli profile list`",
+    );
+    expect(message).not.toContain('"ok"');
+    expect(fake.subcommands()).toEqual(["open"]);
+  });
+
+  it("releases the tab when OpenCLI reports that the page never finished loading", async () => {
+    const stalled = {
+      ok: true,
+      data: {
+        url: PAGE_URL,
+        requestedUrl: PAGE_URL,
+        navigation: "timed_out",
+        hint: "Check it with opencli browser tab list --session rome-test.",
+      },
+    };
+    const fake = createFakeOpencli({
+      openResult: { code: 0, stdout: `${JSON.stringify(stalled)}\n`, stderr: "" },
+    });
+
+    await expect(
+      openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+        sessionPrefix: "rome-test",
+        runOpencli: fake.run,
+      }),
+    ).rejects.toThrow("did not finish loading, so its tab was released");
+    expect(fake.subcommands()).toEqual(["open", "close"]);
+  });
+
+  it("reads OpenCLI 1.8's bare script results and text errors", async () => {
+    const fake = createFakeOpencli({ legacyOutput: true });
+    fake.testGlobals.gate = Promise.resolve();
+    const page = await openAutomationPage(NO_CDP_ENDPOINTS, PAGE_URL, {
+      sessionPrefix: "rome-test",
+      runOpencli: fake.run,
+    });
+
+    await expect(
+      page.runScript({
+        scriptUrl: GATED_ECHO_SCRIPT,
+        entrypointExpression: "gatedEcho",
+        args: ["hello"],
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toEqual({ echoed: "hello", href: PAGE_URL });
+    await expect(
+      page.runScript({
+        scriptUrl: FAILING_SCRIPT,
+        entrypointExpression: "notThere",
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow("notThere is not defined");
   });
 
   it("routes an explicit profile through OpenCLI even when CDP discovery found a browser", async () => {

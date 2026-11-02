@@ -373,9 +373,10 @@ describe("chatgpt_image action", () => {
     );
     expect(fake.calls[0]).toEqual([
       "browser",
-      expect.stringMatching(/^rome-chatgpt-image-/),
       "open",
       "https://chatgpt.com/",
+      "--session",
+      expect.stringMatching(/^rome-chatgpt-image-/),
     ]);
     expect(fake.subcommands().at(-1)).toBe("close");
   });

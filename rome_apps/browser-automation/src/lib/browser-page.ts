@@ -7,7 +7,7 @@
  * so a discovered endpoint is used when one exists and the Browser Bridge
  * otherwise.
  *
- * Each OpenCLI call is a separate `opencli browser <session> ...` process, and
+ * Each OpenCLI call is a separate `opencli browser <command> --session <session>` process, and
  * the daemon caps one call at two minutes. A ChatGPT script runs for up to
  * thirty, so an OpenCLI script call runs as a job in the page: one call
  * starts it, and later calls wait on it in slices shorter than the cap.
@@ -217,6 +217,14 @@ class OpencliAutomationPage implements AutomationPage {
           "Settings > Advanced > Computer Use shows each browser connection.",
       );
     }
+    if (openTimedOut(result.stdout)) {
+      // Every later step runs page JavaScript, which a stalled page holds
+      // until the daemon's two-minute cap. Closing releases the stalled tab.
+      await this.close();
+      throw new Error(
+        `OpenCLI opened ${url}, but the page did not finish loading, so its tab was released. Try again later.`,
+      );
+    }
 
     try {
       await waitForPageReady(() => this.evalJson<PageReadyProbe>(probeExpression()), {
@@ -323,8 +331,9 @@ class OpencliAutomationPage implements AutomationPage {
     const args = [
       ...(this.profile ? ["--profile", this.profile] : []),
       "browser",
-      this.session,
       ...subcommand,
+      "--session",
+      this.session,
     ];
     return this.run(args, { timeoutMs: OPENCLI_COMMAND_TIMEOUT_MS });
   }
@@ -455,23 +464,92 @@ function waitJobExpression(jobId: string, waitMs: number): string {
 }
 
 /**
- * `opencli browser eval` prints a string result as is, and every expression
- * here returns single-line JSON text. The result is read from the last line
- * that parses, so a notice OpenCLI prints around it cannot hide it.
+ * Every expression here returns single-line JSON text. OpenCLI 2 prints it as
+ * the `data` string of a `{"ok":true,"data":...}` line, and OpenCLI 1.8 prints
+ * the text as is. Both are read, so a mismatched binary still works.
  */
 function parseEvalOutput<T>(stdout: string): T {
+  const value = lastJsonLine(stdout);
+  if (value === undefined) {
+    throw new Error(`OpenCLI returned unreadable script output: ${stdout.trim().slice(0, 200)}`);
+  }
+  if (!isEnvelope(value)) {
+    return value as T;
+  }
+  if (!value.ok) {
+    throw new Error(`OpenCLI could not run a script in the page: ${envelopeErrorDetail(value)}`);
+  }
+  if (typeof value.data !== "string") {
+    return value.data as T;
+  }
+  try {
+    return JSON.parse(value.data) as T;
+  } catch {
+    throw new Error(`OpenCLI returned unreadable script output: ${value.data.slice(0, 200)}`);
+  }
+}
+
+/** True when `browser open` reports that the page never finished loading. */
+function openTimedOut(stdout: string): boolean {
+  const value = lastJsonLine(stdout);
+  if (!isEnvelope(value) || !value.ok || !value.data || typeof value.data !== "object") {
+    return false;
+  }
+  return (value.data as { navigation?: unknown }).navigation === "timed_out";
+}
+
+/** The `{ok, data}` or `{ok, error}` line OpenCLI 2 prints for every command. */
+type OpencliEnvelope =
+  | { ok: true; data: unknown }
+  | { ok: false; error: { code?: unknown; message?: unknown; hint?: unknown } };
+
+function isEnvelope(value: unknown): value is OpencliEnvelope {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.ok === true) {
+    return "data" in record;
+  }
+  return record.ok === false && !!record.error && typeof record.error === "object";
+}
+
+function envelopeErrorDetail(envelope: Extract<OpencliEnvelope, { ok: false }>): string {
+  const { code, message, hint } = envelope.error;
+  // A script that throws in the page reports its stack after the first line.
+  const firstLine = typeof message === "string" ? (message.trim().split("\n")[0] ?? "") : "";
+  const parts = [
+    firstLine.trim().replace(/\.+$/, ""),
+    typeof code === "string" && code ? `(${code})` : "",
+  ].filter(Boolean);
+  const detail = parts.join(" ") || "OpenCLI reported an error without a message";
+  return typeof hint === "string" && hint.trim()
+    ? `${detail}. ${hint.trim().replace(/\.+$/, "")}`
+    : detail;
+}
+
+/**
+ * The value of the last stdout line that parses as JSON, so a notice OpenCLI
+ * prints around the result cannot hide it. Undefined when no line parses.
+ */
+function lastJsonLine(stdout: string): unknown {
   const lines = stdout.trim().split("\n");
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     try {
-      return JSON.parse(lines[index]) as T;
+      return JSON.parse(lines[index]);
     } catch {
       // Not the result line.
     }
   }
-  throw new Error(`OpenCLI returned unreadable script output: ${stdout.trim().slice(0, 200)}`);
+  return undefined;
 }
 
 function failureDetail(result: OpencliResult): string {
+  // OpenCLI 2 reports a failure as an error envelope on stdout.
+  const value = lastJsonLine(result.stdout);
+  if (isEnvelope(value) && !value.ok) {
+    return envelopeErrorDetail(value);
+  }
   // OpenCLI colors its errors, marks each line with a "✖" glyph, and ends its
   // hint with a period. The message this detail lands in supplies its own.
   const text = `${result.stderr}\n${result.stdout}`.replace(/\u001b\[[0-9;]*m/g, "");
