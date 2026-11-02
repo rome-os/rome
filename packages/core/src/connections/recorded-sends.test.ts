@@ -21,6 +21,7 @@ import { recordedSends } from "./recorded-sends.js";
 
 const BOT = { platform: "telegram", id: "rome-bot" };
 const MAILBOX = { platform: "email", id: "rome@example.com" };
+const DISCORD = { platform: "discord", id: "rome-discord" };
 
 describe("recordedSends", () => {
   let testDb: TestDb;
@@ -51,7 +52,11 @@ describe("recordedSends", () => {
           },
         },
       }) as unknown as Channel;
-    const accounts: Record<string, typeof BOT> = { telegram: BOT, email: MAILBOX };
+    const accounts: Record<string, typeof BOT> = {
+      telegram: BOT,
+      email: MAILBOX,
+      discord: DISCORD,
+    };
     const chats = new ChatRepository(testDb.db);
     const messages = new MessageRepository(testDb.db);
     const seats = new Seats(testDb.db, chats);
@@ -75,7 +80,7 @@ describe("recordedSends", () => {
       messages,
       links: new TurnLinks(testDb.db, messages),
     });
-    const wrapped = recordedSends([channel("telegram"), channel("email")], {
+    const wrapped = recordedSends([channel("telegram"), channel("email"), channel("discord")], {
       adapters,
       chats,
       seats,
@@ -110,6 +115,26 @@ describe("recordedSends", () => {
       },
     ]);
     expect(sessions()).toEqual([]);
+  });
+
+  it("record a send to a Discord address Rome holds nothing at in a group keyed by the address", async () => {
+    await send("discord").send("1192837465" as ChatId, { text: "Daily report ready" });
+
+    const [line] = lines();
+    expect(line?.chat).toBe(chatAt("discord", "1192837465").externalId);
+    expect(testDb.db.all(sql`SELECT kind FROM chats WHERE key = ${line?.chat}`)).toEqual([
+      { kind: "group" },
+    ]);
+  });
+
+  it("record a send to a Discord DM channel Rome bound to a person in that direct message", async () => {
+    const dm = chatAt("discord", "alice", { romeEnd: DISCORD.id });
+    new ChatRepository(testDb.db).start(dm, "dm", null);
+    addresses.bind(DISCORD, dm.externalId, "998877");
+
+    await send("discord").send("998877" as ChatId, { text: "Hi Alice" });
+
+    expect(lines().map((line) => line.chat)).toEqual([dm.externalId]);
   });
 
   it("record a send to a Telegram group Rome has not heard in the group's own chat", async () => {

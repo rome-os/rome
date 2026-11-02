@@ -207,14 +207,15 @@ export function chatAt(
     : chatKey(platform, address as ChatId);
 }
 
-/** Whether platform address `address` names a group by itself, before Rome
- *  has heard the chat: on Telegram a group's id is negative and a person's
- *  positive (https://core.telegram.org/api/bots/ids), and on WhatsApp a
- *  group's JID ends in `@g.us`. Elsewhere an address does not say. */
-export function namesGroup(platform: string, address: string): boolean {
-  if (platform === "telegram") return /^-[1-9]\d*$/.test(address);
-  if (platform === "whatsapp") return address.endsWith("@g.us");
-  return false;
+/** The kind of chat platform address `address` names by itself, before Rome
+ *  has heard the chat, or null where the address does not say. On Telegram a
+ *  group's id is negative and a person's positive
+ *  (https://core.telegram.org/api/bots/ids), and on WhatsApp a group's JID
+ *  ends in `@g.us`. */
+export function kindNamedBy(platform: string, address: string): "group" | "dm" | null {
+  if (platform === "telegram") return /^-[1-9]\d*$/.test(address) ? "group" : "dm";
+  if (platform === "whatsapp") return address.endsWith("@g.us") ? "group" : "dm";
+  return null;
 }
 
 /** Whether the chat keyed `key` on `platform` numbers its messages per

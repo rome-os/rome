@@ -25,7 +25,7 @@ import { startChannelChat } from "./channel-chat.js";
 import {
   addressOf,
   lineAt,
-  namesGroup,
+  kindNamedBy,
   platformIdOfLine,
   type ChatAdapters,
 } from "./chat-adapter.js";
@@ -255,9 +255,10 @@ async function sayInSeat(
 /**
  * Say `out` at an address no seat of the account heard: in the chat Rome
  * holds there, started when it holds none, as Rome's main agent. No session
- * opens, since no agent is in the chat until a message there wakes one. A
- * group Rome holds is named by its address; anything else at an address is a
- * direct message.
+ * opens, since no agent is in the chat until a message there wakes one. The
+ * chat is the one Rome holds at the address, else the kind the address names,
+ * else a group: a direct message's address is bound when Rome reaches or
+ * hears the person, so an address Rome holds nothing at is a channel's.
  */
 async function sayInChat(
   deps: RecordedSendsDeps,
@@ -277,8 +278,7 @@ async function sayInChat(
     // Every email thread is a group, whether or not the message says email.
     account.platform === EMAIL_PLATFORM ||
     message.kind === "email" ||
-    namesGroup(account.platform, address) ||
-    deps.chats.byKey(deps.adapters.chatAt(channel.name, address, "group"))?.kind === "group";
+    kindAt(deps, channel.name, address) === "group";
   const { chat, key, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
     threadId: address,
@@ -316,6 +316,17 @@ async function sayInChat(
     address: deps.adapters.addressAt(channel.name, landedIn),
     messageId: lineKey === null ? null : platformIdOfLine(key, romeEnd, lineKey),
   };
+}
+
+/** The kind of chat channel `channel`'s account reaches at `address`: the
+ *  kind of the chat Rome holds there, else the kind the address names, else
+ *  a group. */
+function kindAt(deps: RecordedSendsDeps, channel: string, address: string): "group" | "dm" {
+  for (const kind of ["group", "dm"] as const) {
+    const held = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
+    if (held) return held.kind;
+  }
+  return kindNamedBy(deps.adapters.accountOn(channel).platform, address) ?? "group";
 }
 
 /** The quote of the line keyed `key` in `chat`: by its id when Rome holds
