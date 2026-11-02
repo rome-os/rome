@@ -123,6 +123,16 @@ describe("TurnLinks", () => {
     expect(links.unseen("seat-1").map((line) => line.id)).toEqual([again]);
   });
 
+  it("hold every copy of an undecided line out of catch-up, and read one once it is decided", () => {
+    const mine = heard("rome_bot:5", 5, { body: { text: "ok" } });
+    heard("other_bot:9", 5, { body: { text: "ok" } });
+    links.wakeUndecided(mine);
+
+    expect(links.unseen("seat-1")).toEqual([]);
+    links.wakeDecided(mine);
+    expect(links.unseen("seat-1").map((line) => line.id)).toEqual([mine]);
+  });
+
   it("read one copy of a photo two accounts saved under their own names and places", () => {
     const photo = (key: string, fileName: string, path: string) =>
       heard(key, 5, {

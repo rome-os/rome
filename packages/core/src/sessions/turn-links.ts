@@ -205,7 +205,7 @@ export class TurnLinks {
    * prompt of its own. Each comes with the message it quotes, found anywhere
    * in its chat, so a thread's first line can carry the line that started it.
    * A copy of a line it saw, held by another of Rome's accounts, is linked as
-   * seen on the way, with no turn.
+   * seen on the way, with no turn. A copy of an undecided line waits with it.
    */
   unseen(sessionId: string): UnseenLine[] {
     const seat = this.seatOf(sessionId);
@@ -242,8 +242,25 @@ export class TurnLinks {
         .map((row) => row.id),
     );
     const unread = new Set(fresh.map((row) => row.id));
+    // Only a line the session has a link to is one it saw. A line out of
+    // `fresh` may instead be undecided, and then every copy of it waits with
+    // it, unlinked, until its wake is decided.
+    const linked = new Set(
+      this.db
+        .all<{ message_id: number }>(sql`
+          SELECT message_id FROM agent_turn_messages
+          WHERE session_id = ${sessionId}
+            AND message_id IN (SELECT value FROM json_each(${JSON.stringify(said.map((m) => m.id))}))
+        `)
+        .map((row) => row.message_id),
+    );
     const copies = new Copies(seat.perAccount ? said : []);
-    for (const message of said) if (!unread.has(message.id)) copies.take(message);
+    const waiting = new Copies(seat.perAccount ? said : []);
+    for (const message of said) {
+      if (linked.has(message.id)) copies.take(message);
+      else if (this.undecided.has(message.id)) waiting.take(message);
+    }
+    for (const message of said) if (waiting.heardBefore(message)) unread.delete(message.id);
     // A copy of a line the session saw is seen with it. Linking it so means
     // the next catch-up does not read it again.
     const seenCopies = said.filter(
