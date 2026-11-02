@@ -273,6 +273,34 @@ describe("ChatReadModel", () => {
       expect(older?.nextCursor).toBeNull();
     });
 
+    it("pages a turn by the lines it draws, not a copy it leaves to another turn", async () => {
+      const chat = fixture.chat("telegram", "-42", "group");
+      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      const heard = (id: string, seconds: number, text: string) =>
+        fixture.say({ id, chat, from: "wei", text, at: new Date(seconds * 1000) });
+      links.prompt(heard("bot-sales:1", 1_000, "earlier"), "sales", "turn-s");
+      const theirs = heard("bot-support:2", 1_010, "hi");
+      const mine = heard("bot-sales:3", 1_010, "hi");
+      links.prompt(theirs, "support", "turn-p");
+      links.prompt(mine, "sales", "turn-s");
+
+      const whole = await reads.chatTranscript("sales");
+      expect(whole?.lines.map((l) => [l.id, l.turnId])).toEqual([
+        ["bot-sales:1", "turn-s"],
+        ["bot-support:2", "turn-p"],
+      ]);
+
+      const newest = await reads.chatTranscript("sales", { limit: 1 });
+      expect(newest?.lines.map((l) => l.id)).toEqual(["bot-support:2"]);
+      const older = await reads.chatTranscript("sales", {
+        limit: 1,
+        before: newest?.nextCursor ?? null,
+      });
+      expect(older?.lines.map((l) => l.id)).toEqual(["bot-sales:1"]);
+      expect(older?.nextCursor).toBeNull();
+    });
+
     it("draws a line no turn took as a notification, and leaves out what was said before the seat", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
       fixture.seat({

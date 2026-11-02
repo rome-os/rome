@@ -170,7 +170,9 @@ export class ChatReadModel {
       for (const message of [...drawn(shown)].reverse()) {
         const key = turnKey(message, links);
         if (kept.has(key) || passed.has(key)) continue;
-        const lines = await this.linesOfTurn(place, message, links.get(message.id));
+        // The turn is placed by the newest line it draws, so a copy it
+        // leaves to another turn never moves it.
+        const lines = drawn(seen(await this.linesOfTurn(place, message, links.get(message.id))));
         const newest = lines.at(-1) ?? message;
         // A turn whose newest line is newer than the cursor was shown before.
         if (!older(newest)) {
@@ -181,7 +183,7 @@ export class ChatReadModel {
           more = true;
           break scan;
         }
-        kept.set(key, drawn(seen(lines)));
+        kept.set(key, lines);
         next = newest;
       }
       if (!read.older || shown.length < read.messages.length) break;
