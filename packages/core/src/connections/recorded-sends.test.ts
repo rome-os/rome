@@ -335,6 +335,20 @@ describe("recordedSends", () => {
     ]);
   });
 
+  it("record an unheld email reply as the agent whose seat holds the thread it landed in", async () => {
+    const fixture = seatFixture(testDb.db);
+    const thread = fixture.chat("email", "thread-real", "group");
+    fixture.seat({ id: "seat-9", chat: thread, accountId: MAILBOX.id, agentName: "sales" });
+    landsAt["thread-9"] = "thread-real";
+
+    await send("email").send(
+      "thread-9" as ChatId,
+      { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
+    );
+
+    expect(lines()).toEqual([{ chat: "thread-real", text: "Thanks", sender_agent: "sales" }]);
+  });
+
   it("quote on an email channel only the email a reply names, not a chat's quote hint", async () => {
     await send("email").send(
       "thread-7" as ChatId,

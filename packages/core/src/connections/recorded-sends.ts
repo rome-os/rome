@@ -191,7 +191,8 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
 
 /**
  * Record `out`, which the port on channel `channel` already delivered, in the
- * chat its receipt names, as Rome's main agent, quoting the email the
+ * chat its receipt names, as the agent whose seat holds that chat, else
+ * Rome's main agent, quoting the email the
  * platform calls `quoted`. A failure to record is logged, not thrown: the
  * message went out, and reporting it as failed invites a second one.
  */
@@ -209,11 +210,14 @@ async function recordDelivered(
       threadId: receipt.chatId,
       threadType: "group",
     });
+    // The agent whose seat holds the thread said it, else Rome's main agent.
+    const seat = seatAt(deps, channel, receipt.chatId);
+    const agent = (seat && deps.seats.seatOf(seat)?.agent) || "main";
     await deps.messages.send(
       {
         direction: "fromRome",
         place: placeIn(chat),
-        saidBy: { account: { platform: account.platform, id: romeEnd }, agent: "main" },
+        saidBy: { account: { platform: account.platform, id: romeEnd }, agent },
         parts: recordedParts(out),
         replyTo: { key: lineAt(key, romeEnd, quoted) },
       },

@@ -556,6 +556,7 @@ describe("kindNamedBy", () => {
   it("read a group from the address where the platform's ids say so, and nowhere else", () => {
     expect(kindNamedBy("telegram", "-100")).toBe("group");
     expect(kindNamedBy("telegram", "4242")).toBe("dm");
+    expect(kindNamedBy("telegram", "@public_channel")).toBeNull();
     expect(kindNamedBy("whatsapp", "120363@g.us")).toBe("group");
     expect(kindNamedBy("whatsapp", "4479@s.whatsapp.net")).toBe("dm");
     expect(kindNamedBy("discord", "1234567890")).toBeNull();
