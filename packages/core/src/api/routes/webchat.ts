@@ -66,6 +66,8 @@ import {
   resolveWebchatLargeModelSelection,
   type WebchatLargeModelSelection,
 } from "../../core/model-selector.js";
+import { quotaSwitchTarget } from "../../core/quota-switch.js";
+import { isConciergeAgent } from "../../concierge/service.js";
 import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
@@ -2617,6 +2619,49 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     return c.json(toWebchatSessionResponse(session, messageCount));
+  });
+
+  const quotaSwitchFor = async (session: StoredWebchatSession) => {
+    if (session.parentSessionId) return null;
+    const agentName = session.agentName ?? "main";
+    let config;
+    try {
+      config = deps.agentLoader.get(agentName);
+    } catch {
+      return null;
+    }
+    if (config.providerId || config.modelId) return null;
+    const provider =
+      resolveWebchatLargeModelSelection(session.largeModelSelection)?.providerId ??
+      (await deps.sessionManager.findReusableSession(webchatSessionKey(session.id), agentName))
+        ?.provider;
+    if (provider !== "openai" && provider !== "anthropic") return null;
+    return quotaSwitchTarget(
+      deps.aiToolState.get(),
+      provider,
+      config.tier ?? "large",
+      isConciergeAgent(agentName),
+    );
+  };
+
+  app.get("/chat/sessions/:id/quota-switch", async (c) => {
+    const lookup = await getTopLevelWebchatSession(c, c.req.param("id"));
+    if ("response" in lookup) return lookup.response;
+    return c.json({ target: await quotaSwitchFor(lookup.session) });
+  });
+
+  app.post("/chat/sessions/:id/quota-switch", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const target = await quotaSwitchFor(lookup.session);
+    if (!target) return c.json({ error: "No quota switch available" }, 409);
+    await deps.webchatRepo.updateSessionLargeModelSelection(sessionId, target.selectionId);
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    return c.json(
+      toWebchatSessionResponse(session, await deps.webchatRepo.getMessageCount(sessionId)),
+    );
   });
 
   // The model picker of an open chat. The pick is stored on the chat and the

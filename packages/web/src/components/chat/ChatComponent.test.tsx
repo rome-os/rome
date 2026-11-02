@@ -166,6 +166,12 @@ function renderChatComponent(
   homeData?: {
     sessions: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
+    quota?: {
+      failure: Record<string, unknown>;
+      refused?: boolean;
+      side?: boolean;
+      streamError?: boolean;
+    };
     newsFeed?: unknown;
     createSession?: () => Response | Promise<Response>;
     postTurn?: () => Response;
@@ -183,12 +189,31 @@ function renderChatComponent(
     },
   });
 
+  let sentTurns = 0;
   let conciergeExists = !homeData?.conciergeCreated;
   const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
+    if (homeData?.quota) {
+      if (url.endsWith("/quota-switch"))
+        return init?.method === "POST"
+          ? homeData.quota.refused
+            ? Response.json({ error: "No quota switch available" }, { status: 409 })
+            : Response.json({ id: props.sessionId, largeModelSelection: "gpt-6-luna" })
+          : Response.json({ target: { provider: "openai", selectionId: "gpt-6-luna" } });
+      if (url === `/api/chat/sessions/${props.sessionId}`)
+        return Response.json({
+          id: props.sessionId,
+          parentSessionId: homeData.quota.side ? "parent" : null,
+        });
+      if (/\/api\/chat\/turns\/[^/]+\/stream/.test(url))
+        return new Response(
+          `event: ${homeData.quota.streamError ? "stream_error" : "done"}\ndata: ${JSON.stringify(sentTurns === 1 ? { success: false, error: "Quota failure", ...homeData.quota.failure } : { success: true })}\n\n`,
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+    }
     if (url === "/api/settings") {
       return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
     }
@@ -218,6 +243,7 @@ function renderChatComponent(
         : Response.json([]);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
+      if (init?.method === "POST") sentTurns += 1;
       return init?.method === "POST"
         ? (homeData?.postTurn?.() ?? Response.json({ turnId: "turn-1" }))
         : Response.json([]);
@@ -799,5 +825,98 @@ describe("New chat draft boundaries", () => {
       ).toBe(true),
     );
     expect(loadNewChatDraft()).toBeNull();
+  });
+});
+
+describe("quota switch in a chat", () => {
+  const failure = {
+    code: "model_provider_unavailable",
+    reason: "quota_exhausted",
+    provider: "anthropic",
+  };
+  const posts = (fetch: ReturnType<typeof renderChatComponent>["fetchSpy"]) =>
+    fetch.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/turns") && init?.method === "POST",
+    );
+  it.each([
+    "default",
+    "concierge",
+  ])("offers %s one continuation, not a replay, with the selector off", async (variant) => {
+    const id = variant === "concierge" ? "concierge" : "quota-chat";
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: id },
+      {
+        sessions: [],
+        projects: [],
+        settings: { experimentalConcierge: variant === "concierge", enableModelSelector: false },
+        quota: { failure },
+      },
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByRole("textbox"), "Original task{Enter}");
+    const button = await screen.findByRole("button", { name: "Switch to Codex and continue" });
+    expect(posts(fetchSpy)).toHaveLength(1);
+    await user.click(button);
+    await waitFor(() => expect(posts(fetchSpy)).toHaveLength(2));
+    const texts = posts(fetchSpy).map(([, init]) => (init?.body as FormData).get("text"));
+    expect(texts[0]).toBe("Original task");
+    expect(texts[1]).toBe(i18n.t("quotaSwitch.continue", { ns: "chat", provider: "Claude" }));
+    expect(texts[1]).toContain("actual state");
+    expect(texts[1]).not.toContain("Original task");
+  });
+  it.each([
+    { code: "usage_limit", provider: "anthropic" },
+    { code: "usage_limit", provider: "openai" },
+  ])("offers a mid-turn quota failure $provider", async (failure) => {
+    renderChatComponent(
+      { sessionId: "quota-chat" },
+      { sessions: [], projects: [], quota: { failure, streamError: true } },
+    );
+    await userEvent.setup().type(await screen.findByRole("textbox"), "Task{Enter}");
+    expect(
+      await screen.findByRole("button", { name: "Switch to Codex and continue" }),
+    ).toBeTruthy();
+  });
+  it.each([
+    { code: "rate_limit", provider: "anthropic" },
+    { code: "auth_revoked", provider: "anthropic" },
+    { code: "credits_used_up", provider: "openai" },
+    { code: "no_model_provider_available", reason: "quota_exhausted" },
+    { error: "Network failed" },
+    { ...failure, reason: "not_logged_in" },
+  ])("does not offer a switch for $code", async (failure) => {
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "quota-chat" },
+      { sessions: [], projects: [], quota: { failure } },
+    );
+    await userEvent.setup().type(await screen.findByRole("textbox"), "Task{Enter}");
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/stream"))).toBe(true),
+    );
+    expect(screen.queryByRole("button", { name: "Switch to Codex and continue" })).toBeNull();
+  });
+  it("keeps a refusal off the send path", async () => {
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "quota-chat" },
+      { sessions: [], projects: [], quota: { failure, refused: true } },
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByRole("textbox"), "Task{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Switch to Codex and continue" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Switch to Codex and continue" })).toBeNull(),
+    );
+    expect(posts(fetchSpy)).toHaveLength(1);
+  });
+  it("does not offer a switch for a promoted side chat", async () => {
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "quota-chat" },
+      { sessions: [], projects: [], quota: { failure, side: true } },
+    );
+    await userEvent.setup().type(await screen.findByRole("textbox"), "Task{Enter}");
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/stream"))).toBe(true),
+    );
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).endsWith("/quota-switch"))).toBe(false);
   });
 });

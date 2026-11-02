@@ -29,6 +29,7 @@ import type {
   SendTurnOptions,
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
+import { readWebchatMessages } from "../../channels/webchat.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
 import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
@@ -74,6 +75,102 @@ describe("Webchat API", () => {
     } else {
       process.env.ROME_PROJECTS_ROOT = originalProjectsRoot;
     }
+  });
+
+  describe("quota switch", () => {
+    const raw = () => ({
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      claude: { loggedIn: true, quotaExhausted: true },
+    });
+    beforeEach(() => {
+      rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+        name: "main",
+        tier: "medium",
+      } as ReturnType<typeof deps.agentLoader.get>);
+    });
+    it("offers but never selects until clicked, even with the selector off, and ignores client provider", async () => {
+      rs.spyOn(deps.aiToolState, "get").mockReturnValue(raw());
+      await deps.settingsRepo.set("enableModelSelector", false);
+      await deps.webchatRepo.createSession("quota", "Quota");
+      await deps.webchatRepo.updateSessionLargeModelSelection("quota", "claude-sonnet");
+      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue({
+        provider: "openai",
+      } as never);
+      const app = createWebchatRuntime(deps).routes;
+      const path = "/chat/sessions/quota/quota-switch";
+      await expect((await app.request(path)).json()).resolves.toEqual({
+        target: { provider: "openai", selectionId: "gpt-6-1-sol" },
+      });
+      expect((await deps.webchatRepo.getSession("quota"))?.largeModelSelection).toBe(
+        "claude-sonnet",
+      );
+      const result = await app.request(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "anthropic", selectionId: "claude-opus" }),
+      });
+      expect(result.status).toBe(200);
+      await expect(result.json()).resolves.toMatchObject({ largeModelSelection: "gpt-6-1-sol" });
+      expect((await app.request(path, { method: "POST" })).status).toBe(409);
+      expect(await deps.webchatRepo.getMessageCount("quota")).toBe(0);
+    });
+    it.each([
+      "not exhausted",
+      "target logged out",
+      "side chat",
+      "provider restriction",
+      "exact model",
+      "unknown provider",
+    ])("refuses %s without a write or send", async (reason) => {
+      const state = raw();
+      rs.spyOn(deps.aiToolState, "get").mockImplementation(() => state);
+      await deps.webchatRepo.createSession("quota", "Quota");
+      if (reason !== "unknown provider")
+        await deps.webchatRepo.updateSessionLargeModelSelection("quota", "claude-sonnet");
+      const app = createWebchatRuntime(deps).routes;
+      const path = "/chat/sessions/quota/quota-switch";
+      const offer = await (await app.request(path)).json();
+      if (reason !== "unknown provider") expect(offer).toHaveProperty("target.provider", "openai");
+      if (reason === "not exhausted") state.claude.quotaExhausted = false;
+      if (reason === "target logged out") state.codex.loggedIn = false;
+      if (reason === "side chat") {
+        await deps.webchatRepo.ensureRomeSession({
+          id: "quota-side",
+          parentSessionId: "quota",
+          type: "fork",
+          name: "Side",
+          agentName: "main",
+        });
+        await deps.webchatRepo.promoteForkToChat("quota-side");
+        await deps.webchatRepo.updateSessionLargeModelSelection("quota-side", "claude-sonnet");
+      }
+      if (reason === "provider restriction" || reason === "exact model")
+        rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+          name: "main",
+          tier: "medium",
+          ...(reason === "exact model" ? { modelId: "pinned" } : { providerId: "anthropic" }),
+        } as ReturnType<typeof deps.agentLoader.get>);
+      const selectedPath = reason === "side chat" ? "/chat/sessions/quota-side/quota-switch" : path;
+      await expect((await app.request(selectedPath)).json()).resolves.toEqual({ target: null });
+      expect((await app.request(selectedPath, { method: "POST" })).status).toBe(409);
+      expect(
+        (await deps.webchatRepo.getSession(reason === "side chat" ? "quota-side" : "quota"))
+          ?.largeModelSelection,
+      ).toBe(reason === "unknown provider" ? null : "claude-sonnet");
+      expect(await deps.webchatRepo.getMessageCount("quota")).toBe(0);
+    });
+    it("derives an unselected chat's provider from its agent-scoped runtime row", async () => {
+      rs.spyOn(deps.aiToolState, "get").mockReturnValue(raw());
+      await deps.webchatRepo.createSession("quota", "Quota");
+      const find = rs
+        .spyOn(deps.sessionManager, "findReusableSession")
+        .mockResolvedValue({ provider: "anthropic" } as never);
+      const app = createWebchatRuntime(deps).routes;
+      expect(
+        (await app.request("/chat/sessions/quota/quota-switch", { method: "POST" })).status,
+      ).toBe(200);
+      expect(find).toHaveBeenCalledWith("webchat:quota", "main");
+    });
   });
 
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {
@@ -2214,13 +2311,16 @@ describe("Webchat API", () => {
     });
   });
 
-  it("accepts a logged-out provider as a persisted failed turn", async () => {
+  it.each([
+    "not_logged_in",
+    "quota_exhausted",
+  ] as const)("accepts %s as a persisted failed turn readable from history", async (reason) => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
-          reason: "not_logged_in",
+          reason,
         });
       }),
       peek: () => undefined,
@@ -2244,6 +2344,10 @@ describe("Webchat API", () => {
     const turn = (await sendRes.json()) as { turnId: string; sessionId: string };
     expect(turn).toMatchObject({ sessionId: session.id, turnId: expect.any(String) });
 
+    const history = await readWebchatMessages(deps.webchatRepo, session.id, new Date(0));
+    expect(
+      history.some((message) => message.direction === "inbound" && message.text === "hello"),
+    ).toBe(true);
     const messages = await deps.webchatRepo.getMessages(session.id);
     expect(messages).toEqual(
       expect.arrayContaining([
@@ -2261,7 +2365,7 @@ describe("Webchat API", () => {
               error: "Selected model provider is unavailable: Codex",
               code: "model_provider_unavailable",
               provider: "openai",
-              reason: "not_logged_in",
+              reason,
             },
           ]),
         }),
@@ -2277,7 +2381,7 @@ describe("Webchat API", () => {
           type: "error",
           code: "model_provider_unavailable",
           provider: "openai",
-          reason: "not_logged_in",
+          reason,
         }),
         expect.objectContaining({ type: "turn_end", status: "error", turnId: turn.turnId }),
       ]);

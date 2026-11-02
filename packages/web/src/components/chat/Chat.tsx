@@ -103,6 +103,7 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import { QuotaSwitchCard } from "@/components/chat/QuotaSwitchCard";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
@@ -113,7 +114,7 @@ import type {
   CreateTurnResponse,
   DoneEventData,
 } from "@/lib/chat-types";
-import { buildOptimisticUserText } from "@/lib/chat-helpers";
+import { buildOptimisticUserText, isReasoningEffort } from "@/lib/chat-helpers";
 import {
   parseSSEEvents,
   STREAM_STALL_TIMEOUT_MS,
@@ -149,7 +150,7 @@ import {
 } from "@/pages/free/workspace-context";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
-import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
+import { DEFAULT_LARGE_MODEL_SELECTION, DEFAULT_REASONING_EFFORT } from "@/lib/chat-constants";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -275,6 +276,18 @@ function isModelResolutionErrorCode(code: DoneEventData["code"]): boolean {
     code === "model_unavailable" ||
     code === "no_model_provider_available"
   );
+}
+
+/** The provider a failed turn names as out of subscription quota, if any. */
+function quotaFailureProvider(payload: Partial<DoneEventData>): "openai" | "anthropic" | null {
+  if (payload.success === true) return null;
+  if (payload.provider !== "openai" && payload.provider !== "anthropic") return null;
+  const outOfQuota =
+    payload.code === "usage_limit" ||
+    (payload.code !== undefined &&
+      isModelResolutionErrorCode(payload.code) &&
+      payload.reason === "quota_exhausted");
+  return outOfQuota ? payload.provider : null;
 }
 
 export interface SessionMessage {
@@ -416,6 +429,10 @@ export function Chat({
     adoptAgentTurn: adoptSessionAgentTurn,
     end: endSessionStream,
   } = useStreamingSessions();
+  const [quotaFailure, setQuotaFailure] = useState<{
+    sessionId: string;
+    provider: "openai" | "anthropic";
+  } | null>(null);
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
   // Turns in this chat the server reported finished (a terminal stream event).
   // A dropped connection ends the local stream but not the turn, so it never
@@ -1115,6 +1132,10 @@ export function Chat({
           if (evt.event === "done") {
             try {
               const payload = JSON.parse(evt.data) as DoneEventData;
+              const quotaProvider = quotaFailureProvider(payload);
+              if (quotaProvider && sessionId === floorSessionIdRef.current) {
+                setQuotaFailure({ sessionId, provider: quotaProvider });
+              }
               // Model-resolution failures are persisted as assistant error
               // messages, so they render once in the conversation rather than
               // being duplicated above the composer.
@@ -1143,6 +1164,10 @@ export function Chat({
           if (evt.event === "stream_error") {
             try {
               const payload = JSON.parse(evt.data) as Partial<DoneEventData>;
+              const quotaProvider = quotaFailureProvider(payload);
+              if (quotaProvider && sessionId === floorSessionIdRef.current) {
+                setQuotaFailure({ sessionId, provider: quotaProvider });
+              }
               if (
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
@@ -1400,6 +1425,7 @@ export function Chat({
         adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
       }
       setStreamError(null);
+      setQuotaFailure(null);
       // Not cancelled with the poll: followTurn ends with its turn (or on
       // unmount), and the entry it holds pauses the poll meanwhile.
       await followTurn(reattachSessionId, target.turnId);
@@ -1451,6 +1477,7 @@ export function Chat({
       immediateInputId?: string,
     ): Promise<void> => {
       setStreamError(null);
+      setQuotaFailure(null);
       // Sending re-engages stickiness so the user follows their own message and
       // the reply, even if they'd scrolled up to read history.
       scrollToBottom("auto");
@@ -2419,6 +2446,43 @@ export function Chat({
                       />
                     </div>
                   )}
+                  {quotaFailure &&
+                    quotaFailure.sessionId === mainSessionId &&
+                    chatModelPickable &&
+                    !displayedStreaming &&
+                    !isArchived &&
+                    !shareMode && (
+                      <QuotaSwitchCard
+                        key={quotaFailure.sessionId}
+                        sessionId={quotaFailure.sessionId}
+                        onRefused={() => setQuotaFailure(null)}
+                        onSwitched={async (session) => {
+                          if (
+                            mainSessionIdRef.current !== session.id ||
+                            floorSessionIdRef.current !== session.id
+                          )
+                            return;
+                          setPickedModel({
+                            sessionId: session.id,
+                            value: session.largeModelSelection ?? "auto",
+                          });
+                          setQuotaFailure(null);
+                          await handleComposerSend(
+                            {
+                              text: t("quotaSwitch.continue", {
+                                provider: quotaFailure.provider === "openai" ? "Codex" : "Claude",
+                              }),
+                              uploads: [],
+                              projectPath: "",
+                              reasoningEffort: isReasoningEffort(reasoningEffort)
+                                ? reasoningEffort
+                                : DEFAULT_REASONING_EFFORT,
+                            },
+                            { onUploadProgress: () => {}, signal: new AbortController().signal },
+                          );
+                        }}
+                      />
+                    )}
                   {shareMode && mainSessionId ? (
                     <ShareBar
                       sessionId={mainSessionId}

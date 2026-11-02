@@ -1,4 +1,10 @@
 {
+  "quotaSwitch": {
+    "description": "{{from}} 的订阅额度已用完。你可以用 {{to}} 订阅继续这个聊天。",
+    "toCodex": "切换到 Codex 并继续",
+    "toClaude": "切换到 Claude 并继续",
+    "continue": "继续：上一轮因 {{provider}} 的额度用完而停止。请先查看这个聊天的历史记录和工作的实际状态，不要重复已完成的工作，只做剩下的部分。"
+  },
   "markdown": {
     "code": "代码",
     "mermaid": "Mermaid 图表"

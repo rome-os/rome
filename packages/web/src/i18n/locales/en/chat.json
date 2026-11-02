@@ -1,4 +1,10 @@
 {
+  "quotaSwitch": {
+    "description": "{{from}}’s subscription quota ran out. You can continue this chat on your {{to}} subscription.",
+    "toCodex": "Switch to Codex and continue",
+    "toClaude": "Switch to Claude and continue",
+    "continue": "Continue: the previous turn stopped because {{provider}} ran out of quota. First check this chat’s history and the actual state of any work. Do not redo finished work. Do only what remains."
+  },
   "markdown": {
     "code": "Code",
     "mermaid": "Mermaid diagram"

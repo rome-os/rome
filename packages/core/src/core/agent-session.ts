@@ -2560,6 +2560,14 @@ class AgentSessionImpl implements AgentSession {
           }
         }
 
+        if (
+          outbound.type === "error" &&
+          outbound.code === "usage_limit" &&
+          (session.providerId === "openai" || session.providerId === "anthropic")
+        ) {
+          outbound = { ...outbound, provider: session.providerId };
+        }
+
         this.publishOutbound(sink, outbound);
 
         if (isTerminalEvent(outbound)) {

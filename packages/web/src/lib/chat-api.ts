@@ -150,6 +150,28 @@ export async function updateSessionModel(
   return jsonOrThrow<ChatSession>(res);
 }
 
+export interface QuotaSwitchTarget {
+  provider: "openai" | "anthropic";
+  selectionId: string;
+}
+
+/** What a click would switch this chat to, or null when no switch is on offer. */
+export async function getQuotaSwitchTarget(sessionId: string): Promise<QuotaSwitchTarget | null> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/quota-switch`, {
+    credentials: "include",
+  });
+  return (await jsonOrThrow<{ target: QuotaSwitchTarget | null }>(res)).target;
+}
+
+/** Move the chat to the other provider. The server checks again and may refuse. */
+export async function switchChatQuotaProvider(sessionId: string): Promise<ChatSession> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/quota-switch`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return jsonOrThrow<ChatSession>(res);
+}
+
 const inFlightReads = new Map<string, Promise<unknown>>();
 
 /**

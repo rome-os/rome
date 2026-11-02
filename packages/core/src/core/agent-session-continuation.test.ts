@@ -60,7 +60,7 @@ function createProvider(id: ProviderId) {
         calls.push(input);
         if (failing.next > 0) {
           failing.next -= 1;
-          yield { type: "error", error: "quota exhausted" };
+          yield { type: "error", code: "usage_limit", error: "quota exhausted" };
           return;
         }
         yield { type: "result", content: "done" };
@@ -334,6 +334,31 @@ describe("continuation notice through AgentSessionManager", () => {
     const session = await acquire(createManager(), "claude-sonnet");
     await chatTurn(session, "first");
     expect(continuationOf(anthropic.calls[0]?.prompt)).toBeNull();
+  });
+
+  it("carries the quota provider and continues a stored cross-provider selection with a new pin", async () => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    anthropic.failing.next = 1;
+    const failed = session.sendTurn(
+      { prompt: "work" },
+      { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
+    );
+    const events: AgentEvent[] = [];
+    for await (const event of failed.events) events.push(event);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "error", code: "usage_limit", provider: "anthropic" }),
+    );
+    await webchatRepo.updateSessionLargeModelSelection(CHAT, "gpt-6-luna");
+    const stored = await webchatRepo.getSession(CHAT);
+    await acquire(manager, stored?.largeModelSelection as ModelSelectionId);
+    await chatTurn(session, "check history and continue unfinished work");
+    expect(continuationOf(openai.calls[0]?.prompt)).toContain('previous_model="claude-sonnet-5-5"');
+    expect(await sessionManager.findReusableSession(key.channelThreadKey, AGENT)).toMatchObject({
+      provider: "openai",
+      model: "gpt-6-luna",
+    });
   });
 
   it("clears an open chat's selection with null and keeps it with undefined", async () => {
