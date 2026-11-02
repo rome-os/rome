@@ -96,7 +96,7 @@ async function renderTaskEvents(
     if (row.sessionId && wantsReply) {
       const [latest] = await latestSaid(
         messages,
-        taskChatPlace(row.sessionId),
+        await taskChatPlace(service.deps.webchatRepo, row.sessionId),
         1,
         (message) => message.direction === "fromRome" && hasText(message),
       );

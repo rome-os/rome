@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { MessagePage } from "../chats/message-repository.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
-import type { Body, SendResult } from "../chats/send.js";
+import type { Body, SendResult } from "../channels/send-into-place.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -53,15 +53,18 @@ const textOf = (content: string): string => {
 function pageOf(rows: Row[], place: Place, end: number, limit: number): MessagePage {
   const start = Math.max(0, end - limit);
   const messages: SaidMessage[] = rows.slice(start, end).map((row, index) => ({
-    id: row.id ?? `row-${start + index}`,
+    id: start + index,
+    key: row.id ?? `row-${start + index}`,
     direction: row.role === "assistant" ? "fromRome" : "toRome",
     place,
     body: { text: textOf(row.content) },
+    parts: row.content,
     at: new Date(Date.UTC(2026, 9, 29, 0, 0, start + index)),
   }));
   return {
     messages,
-    older: start > 0 ? { at: messages[0].at, id: String(start) } : null,
+    older: start > 0 ? { at: messages[0].at, id: start } : null,
+    newer: null,
   };
 }
 
@@ -84,7 +87,16 @@ function setup(
 ) {
   const testDb = createTestDb();
   opened.push(testDb);
-  const taskRepo = new ConciergeTasksRepository(testDb.db);
+  // The Concierge chat's lines, numbered as Chats would number them.
+  const sourceKeys: string[] = [];
+  const taskRepo = new ConciergeTasksRepository(testDb.db, {
+    idOf: (key) => {
+      if (!sourceKeys.includes(key)) sourceKeys.push(key);
+      return sourceKeys.indexOf(key) + 1;
+    },
+    keysOf: (ids) =>
+      new Map(ids.flatMap((id) => (sourceKeys[id - 1] ? [[id, sourceKeys[id - 1]!]] : []))),
+  });
   const tasks = new ConciergeTasks(taskRepo);
   /** The real chat rows the task rows link to. */
   const storedChats = new WebChatRepository(testDb.db);
@@ -95,6 +107,13 @@ function setup(
     [CONCIERGE_CHAT, { id: CONCIERGE_CHAT, name: "Concierge", triggerKind: null }],
   ]);
   const messages = new Map<string, Row[]>();
+  // Each chat here is a dashboard chat, numbered by the session that stands in it.
+  const sessionsByChat: string[] = [];
+  const chatOfSession = (sessionId: string) => {
+    if (!sessionsByChat.includes(sessionId)) sessionsByChat.push(sessionId);
+    return sessionsByChat.indexOf(sessionId) + 1;
+  };
+  const sessionOfChat = (chatId: number) => sessionsByChat[chatId - 1] ?? "";
   /** Every input posted to a task chat, by id, in order. */
   const posted: string[] = [];
   /** What the next send answers when it is refused. */
@@ -118,7 +137,7 @@ function setup(
     if (refuseWith) return refuseWith;
     order.push("post");
     const id = `input-${posted.length + 1}`;
-    const list = messages.get(place.chat.id) ?? [];
+    const list = messages.get(sessionOfChat(place.chat.id)) ?? [];
     list.push({
       id,
       role: "user",
@@ -126,12 +145,12 @@ function setup(
       senderId: as.id,
       turnId: "task-turn-1",
     });
-    messages.set(place.chat.id, list);
+    messages.set(sessionOfChat(place.chat.id), list);
     posted.push(id);
     return {
       ok: true,
-      sent: { ref: `${place.chat.id}:${id}`, timestamp: 0 },
-      delivery: { state: "sent", at: new Date(0) },
+      sent: { ref: `${sessionOfChat(place.chat.id)}:${id}`, timestamp: 0 },
+      at: new Date(0),
     };
   });
   const deps = {
@@ -176,6 +195,15 @@ function setup(
       ),
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
+      // Each chat here is a dashboard chat keyed by its session's id.
+      seatOf: async (id: string) =>
+        (await deps.webchatRepo.getSession(id)) || (await storedChats.getSession(id))
+          ? {
+              place: { chat: { platform: "webchat", id: chatOfSession(id) } },
+              accountId: "concierge",
+              agent: null,
+            }
+          : null,
     },
     tasks,
     approvals: {
@@ -185,12 +213,10 @@ function setup(
       },
     },
     messages: {
-      recent: async (place: Place, limit: number) => {
-        const rows = messages.get(place.chat.id) ?? [];
-        return pageOf(rows, place, rows.length, limit);
+      read: async (place: Place, page: { before?: { id: number } | null; limit: number }) => {
+        const rows = messages.get(sessionOfChat(place.chat.id)) ?? [];
+        return pageOf(rows, place, page.before ? page.before.id : rows.length, page.limit);
       },
-      before: async (place: Place, cursor: { id: string }, limit: number) =>
-        pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
     aiToolState: {
@@ -349,7 +375,7 @@ describe("Concierge tools", () => {
     });
     expect(s.order).toEqual(["trigger", "post", "rename"]);
     expect(s.send).toHaveBeenCalledWith(
-      { chat: { platform: "webchat", id: "task-1" } },
+      { chat: { platform: "webchat", id: expect.any(Number) } },
       { text: "Find flights" },
       CONCIERGE_ACCOUNT,
     );
@@ -423,7 +449,7 @@ describe("Concierge tools", () => {
     const result = await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     expect(result.isError).toBeFalsy();
     expect(s.send).toHaveBeenLastCalledWith(
-      { chat: { platform: "webchat", id: "task-1" } },
+      { chat: { platform: "webchat", id: expect.any(Number) } },
       { text: "Trains too" },
       CONCIERGE_ACCOUNT,
     );
@@ -433,7 +459,7 @@ describe("Concierge tools", () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     const error = "This chat is archived and read-only";
-    s.refuseSends({ ok: false, error, delivery: { state: "failed", error, at: new Date(0) } });
+    s.refuseSends({ ok: false, error, at: new Date(0) });
     const result = await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("This chat is archived and read-only");
@@ -738,7 +764,7 @@ describe("Concierge task list tools", () => {
 describe("Concierge task anchors", () => {
   const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
   const anchorOf = async (s: ReturnType<typeof setup>, taskId: string) =>
-    (await s.taskRepo.get(taskId))?.sourceMessageId;
+    (await s.taskRepo.getWithChat(taskId))?.sourceMessageId;
   const created = async (s: ReturnType<typeof setup>, entry: Record<string, unknown>) =>
     text(await s.tool("task_upsert", { tasks: [{ title: "Pay rent", ...entry }] })).tasks[0].id;
 

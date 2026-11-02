@@ -7,6 +7,8 @@ Who said what, where, and as whom. Chats follows the definitions in [Connections
 A place where people and agents talk: a group, a direct message, the chat built into the dashboard. The code and the dashboard call it a conversation, a deprecated alias for the same thing.
 
 - A chat is known by its platform and the platform's own id for it. Whether it is a group or a direct message is something about the chat, not part of what it is known by.
+- Rome records a chat and its messages under ids its channel gives them, unique across platforms, and makes none of its own. A platform's channel uses the platform's ids with the platform in front, so a message heard again, or heard by two of Rome's accounts in one group, is recorded once. The dashboard gives its chats and messages ids of their own.
+- A Telegram basic group numbers messages per member account, so a message there is recorded once for each of Rome's accounts that heard it. An agent's catch-up reads one copy, and none once its turn took any.
 - A group is named by the platform's own id for it, so one group is one chat however many of Rome's accounts are in it.
 - A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two. Where the platform gives a direct message no id of its own across Rome's accounts, Rome derives one from the two ends.
 - A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
@@ -84,9 +86,11 @@ One thing a participant said or did in a chat.
 
 ## Delivery
 
-How a message Rome sends stands with its platform: pending, sent or failed. Only a message from Rome has one.
+How a message Rome sends stands with its platform: sent or failed. Only a send from Rome has one. It is the send's answer to whoever sent, and never part of the chat: it is not stored, and it has no pending state. A chat records a message Rome sends once the platform took it, with the platform's id for it, and nothing for one it refused.
 
 - The platform's answer settles it: sent once the platform took the message, failed with the platform's own words when it refused.
+- Every message on record carries its platform's id inside its own, and a reply names the message it quotes the same way. On the dashboard, where Rome is the platform, a message's id is its own.
+- A reply the platform split into several messages is recorded once, under the first one's id.
 - Once the platform has taken a message, it is sent, even when Rome fails to write that down. Reporting it failed would invite a second real message.
 - A failed message reads as never said, to the guardian and to the agent. Sending the text again is a new message.
 
@@ -177,6 +181,6 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.
 - **Sending to an account.** A person's account is reached in a chat, and a group or a thread has no account to address. One destination, the place, serves a direct message, a group and a thread alike.
-- **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
+- **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A chat records a message once the platform took it, so there is no pending send to keep.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
 - **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.

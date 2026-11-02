@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import type { Account, ChatId } from "@rome-os/app-runtime";
+import type { Account } from "@rome-os/app-runtime";
 import {
   compareAssistants,
   listsAsAssistant,
@@ -14,8 +14,9 @@ import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import type { SaidMessage } from "../../chats/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/message-repository.js";
-import { chatKey, placeIn } from "../../chats/place.js";
-import { send } from "../../chats/send.js";
+import { chatAt } from "../../chats/adapter.js";
+import { placeIn } from "../../chats/place.js";
+import { send } from "../../channels/send-into-place.js";
 import { directPlace } from "../../people/send.js";
 import type { ApiDeps } from "../deps.js";
 import { respondToSend } from "./people.js";
@@ -81,7 +82,7 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
     const page = await messagesAt(deps, address, timelinePageLimit(c.req.query("limit")), before);
-    const entries = page.messages.map(timelineEntry).reverse();
+    const entries = page.messages.map(timelineEntry(address)).reverse();
     const oldest = entries.at(-1);
     return c.json({
       entries,
@@ -123,9 +124,15 @@ function unknownAssistant(c: Context) {
  *  ref the People timeline gave it. */
 const REF_PREFIX = "agent:";
 
-/** A message as the timeline wire shows it. */
-function timelineEntry(message: SaidMessage): Message {
-  const inbound = message.direction === "toRome";
+/** A message of the chat with `assistant` as the timeline wire shows it.
+ *  The chat is a direct message, so only the assistant's own lines come in:
+ *  the guardian's, said through Rome's account with no agent, go out. */
+const timelineEntry =
+  (assistant: Account) =>
+  (message: SaidMessage): Message =>
+    entryOf(message, message.saidBy?.account.id === assistant.id);
+
+function entryOf(message: SaidMessage, inbound: boolean): Message {
   return {
     source: message.place.chat.platform,
     timestamp: Math.floor(message.at.getTime() / 1000),
@@ -147,7 +154,8 @@ function timelineEntry(message: SaidMessage): Message {
  *  names no message of Rome's transcript. */
 function positionOf(cursor: Message): MessageCursor | null {
   if (!cursor.ref.startsWith(REF_PREFIX)) return null;
-  return { at: new Date(cursor.timestamp * 1000), id: cursor.ref.slice(REF_PREFIX.length) };
+  const id = Number(cursor.ref.slice(REF_PREFIX.length));
+  return Number.isInteger(id) ? { at: new Date(cursor.timestamp * 1000), id } : null;
 }
 
 /** The assistant's chat read back from `before`, or from its newest message.
@@ -158,15 +166,14 @@ function messagesAt(
   address: Account,
   limit: number,
   before?: MessageCursor | null,
-): Promise<MessagePage> {
-  const place = placeIn(chatKey(address.platform, address.id as ChatId));
-  return before
-    ? deps.chatMessages.before(place, before, limit)
-    : deps.chatMessages.recent(place, limit);
+): MessagePage {
+  const chat = deps.chats.byKey(chatAt(address.platform, address.id));
+  if (!chat) return { messages: [], older: null, newer: null };
+  return deps.chatMessages.read(placeIn(chat.ref), { before: before ?? null, limit });
 }
 
 /** The newest `limit` messages of the assistant's chat, newest first. */
 async function newest(deps: ApiDeps, address: Account, limit: number): Promise<Message[]> {
   const page = await messagesAt(deps, address, limit);
-  return page.messages.map(timelineEntry).reverse();
+  return page.messages.map(timelineEntry(address)).reverse();
 }

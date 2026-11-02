@@ -1,39 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { Account, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
-import { eq } from "drizzle-orm";
-import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { channelChatId } from "../db/session-kind.js";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createTestDb, createTestDbFile, type TestDb } from "../test/helpers.js";
-import { ChatRefusal } from "./chat.js";
-import { ChatRepository, type ChatChannels } from "./chat-repository.js";
-import { chatKey } from "./place.js";
-
-// Chats over today's channel rows. What these pin: a chat is one row per one
-// of Rome's accounts in it, read as one chat; a write reaches every row; and
-// the rows stay what the legacy readers expect.
-
-const SALES: Account = { platform: "feishu", id: "ou_sales" };
-const SUPPORT: Account = { platform: "feishu", id: "ou_support" };
-const ALICE: Account = { platform: "feishu", id: "ou_alice" };
-const GROUP = chatKey("feishu", "oc_group" as ChatId);
-
-const RULE: StoredChatSettings = {
-  schemaVersion: 1,
-  overrides: { activation: { mode: "all" } },
-  updatedAt: "2026-10-29T00:00:00.000Z",
-  updatedBy: { kind: "guardian" },
-};
-
-/** Two recorded Feishu channels, and a Telegram one no record holds. */
-const channels: ChatChannels = {
-  namesOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
-  accountOf: (name) => (name === "feishu" ? SALES : name === "feishu-2" ? SUPPORT : null),
-  platformOfChannel: (name) => (name.startsWith("feishu") ? "feishu" : name),
-};
+import type { ChatId } from "@rome-os/app-runtime";
+import { sql } from "drizzle-orm";
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import { ChatRepository, chatIdsOfKind, chatIdsOn } from "./chat-repository.js";
+import { MessageRepository } from "./message-repository.js";
+import { placeIn, type ChatKey } from "./place.js";
 
 describe("ChatRepository", () => {
   let testDb: TestDb;
@@ -41,323 +12,105 @@ describe("ChatRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    chats = new ChatRepository(testDb.db, channels);
+    chats = new ChatRepository(testDb.db);
   });
   afterEach(() => testDb.close());
 
-  const row = (channel: string, id: string) =>
-    testDb.db
-      .select()
-      .from(romeSessions)
-      .where(eq(romeSessions.id, channelChatId(channel, id)))
-      .get();
+  const key = (platform: string, externalId: string): ChatKey => ({
+    platform,
+    externalId: externalId as ChatId,
+  });
+  const GROUP = key("feishu", "oc_group");
+  const DM = key("feishu", "dm:bot:ou_alice");
 
-  it("starts a chat as the row of the channel it reached Rome through", () => {
-    const chat = chats.startIfMissing(GROUP, "group", SALES, "Launch", { agentName: "sales" });
+  it("starts a chat once, keyed by its adapter's key, and answers it as stored after", () => {
+    const first = chats.start(GROUP, "group", "Launch");
+    const again = chats.start(GROUP, "dm", "Renamed");
 
-    expect(chat.participants).toEqual([{ account: SALES, romes: true }]);
-    expect(row("feishu", "oc_group")).toMatchObject({
-      type: "channel",
-      sourceChannel: "feishu",
-      sourceThreadId: "oc_group",
-      sourceThreadName: "Launch",
-      name: "Launch",
-      agentName: "sales",
-    });
-    expect(chats.byKey(GROUP)?.state()).toMatchObject({ kind: "group", name: "Launch" });
+    expect(first).toMatchObject({ key: "oc_group", kind: "group", name: "Launch" });
+    expect(first.ref).toEqual({ platform: "feishu", id: expect.any(Number) });
+    expect(again).toEqual(first);
   });
 
-  it("returns the chat it already holds without writing again", () => {
-    chats.startIfMissing(GROUP, "group", SALES, "Launch");
-    chats.startIfMissing(GROUP, "dm", SALES, "Other", { agentName: "x" });
+  it("gives the same key on two platforms two chats", () => {
+    const feishu = chats.start(GROUP, "group", null);
+    const lark = chats.start(key("lark", "oc_group"), "group", null);
 
-    expect(row("feishu", "oc_group")).toMatchObject({
-      sourceThreadName: "Launch",
-      agentName: null,
-    });
+    expect(lark.ref.id).not.toBe(feishu.ref.id);
+    expect(chats.byKey(key("lark", "oc_group"))?.ref).toEqual(lark.ref);
   });
 
-  it("reads a group two of Rome's accounts are in as one chat", () => {
-    chats.startIfMissing(GROUP, "group", SALES, "Launch");
-    const chat = chats.startIfMissing(GROUP, "group", SUPPORT, "Launch");
+  it("finds a chat by ref only on its own platform", () => {
+    const { ref } = chats.start(GROUP, "group", null);
 
-    expect(chat.participants).toEqual([
-      { account: SALES, romes: true },
-      { account: SUPPORT, romes: true },
-    ]);
-    expect(row("feishu-2", "oc_group")).toBeDefined();
-    expect(chats.byKey(GROUP)?.participants).toHaveLength(2);
+    expect(chats.get(ref)?.kind).toBe("group");
+    expect(chats.get({ platform: "lark", id: ref.id })).toBeNull();
+    expect(chats.find(ref.id)?.ref).toEqual(ref);
+    expect(chats.find(ref.id + 1)).toBeNull();
+    expect(chats.byKey(key("feishu", "missing"))).toBeNull();
   });
 
-  it("writes the reply rule to every row of the chat", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    chats.startIfMissing(GROUP, "group", SUPPORT, null);
+  it("lists a platform's chats", () => {
+    chats.start(GROUP, "group", null);
+    chats.start(DM, "dm", null);
+    chats.start(key("telegram", "42"), "dm", null);
 
-    chats.update(GROUP, (chat) => chat.setReplyRule(SUPPORT, RULE));
-
-    expect(row("feishu", "oc_group")?.channelSettings).toEqual(RULE);
-    expect(row("feishu-2", "oc_group")?.channelSettings).toEqual(RULE);
-    expect(chats.byKey(GROUP)?.replyRule).toEqual(RULE);
-  });
-
-  it("stores nothing when the change is refused", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-
-    expect(() =>
-      chats.update(GROUP, (chat) => {
-        chat.rename("Renamed");
-        chat.setReplyRule(ALICE, RULE);
-      }),
-    ).toThrow(ChatRefusal);
-    expect(row("feishu", "oc_group")).toMatchObject({
-      sourceThreadName: null,
-      channelSettings: null,
-    });
-  });
-
-  it("keeps Rome's accounts as its rows and no one else, over today's rows", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-
-    chats.update(GROUP, (chat) =>
-      chat.setParticipants([
-        { account: SALES, romes: true },
-        { account: ALICE, romes: false },
-      ]),
-    );
-
-    expect(chats.byKey(GROUP)?.participants).toEqual([{ account: SALES, romes: true }]);
-  });
-
-  it("gives one of Rome's accounts that joins a row of its own", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-
-    chats.update(GROUP, (chat) =>
-      chat.setParticipants([
-        { account: SALES, romes: true },
-        { account: SUPPORT, romes: true },
-      ]),
-    );
-
-    expect(row("feishu-2", "oc_group")).toMatchObject({ sourceChannel: "feishu-2" });
-  });
-
-  it("takes the chat's rows and messages when the last of Rome's accounts leaves", async () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    const id = channelChatId("feishu", "oc_group");
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({ id: "m1", sessionId: id, role: "user", content: "hi", createdAt: new Date() })
-      .run();
-
-    chats.update(GROUP, (chat) => chat.setParticipants([{ account: ALICE, romes: false }]));
-
-    expect(chats.byKey(GROUP)).toBeNull();
     expect(
-      testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all(),
-    ).toEqual([]);
+      chats
+        .list("feishu")
+        .map((chat) => chat.key)
+        .sort(),
+    ).toEqual([DM.externalId, GROUP.externalId]);
   });
 
-  it("completes the agent sessions of an ended chat, so starting it again resumes none", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    const now = new Date();
-    const session = (id: string, values: { channelThreadKey?: string; chatId?: string }) => ({
-      id,
-      agentName: "main",
-      status: "active" as const,
-      createdAt: now,
-      lastActiveAt: now,
-      ...values,
-    });
-    testDb.db
-      .insert(sessions)
-      .values([
-        session("by-key", { channelThreadKey: "feishu:oc_group" }),
-        session("by-chat", { chatId: channelChatId("feishu", "oc_group") }),
-        session("elsewhere", { channelThreadKey: "feishu:oc_other" }),
-      ])
-      .run();
+  it("renames a chat", () => {
+    const { ref } = chats.start(GROUP, "group", null);
+    chats.rename(ref, "Launch");
 
-    chats.update(GROUP, (chat) => chat.end());
-    chats.startIfMissing(GROUP, "group", SALES, null);
-
-    const status = (id: string) =>
-      testDb.db.select().from(sessions).where(eq(sessions.id, id)).get()?.status;
-    expect(status("by-key")).toBe("completed");
-    expect(status("by-chat")).toBe("completed");
-    expect(status("elsewhere")).toBe("active");
+    expect(chats.get(ref)?.name).toBe("Launch");
   });
 
-  it("refuses one of Rome's accounts leaving a live chat, and keeps its row", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    chats.startIfMissing(GROUP, "group", SUPPORT, null);
-
-    expect(() =>
-      chats.update(GROUP, (chat) => chat.setParticipants([{ account: SUPPORT, romes: true }])),
-    ).toThrow(ChatRefusal);
-    expect(row("feishu", "oc_group")).toBeDefined();
-    expect(chats.byKey(GROUP)?.participants).toHaveLength(2);
-  });
-
-  it("reads the same peer id on two of Rome's accounts as two direct messages", () => {
-    const peer = chatKey("feishu", "ou_alice" as ChatId);
-    chats.startIfMissing(peer, "dm", SALES, "Alice");
-    chats.startIfMissing(peer, "dm", SUPPORT, "Alice");
-
-    chats.update(peer, (chat) => chat.setReplyRule(SALES, RULE), SALES);
-
-    expect(chats.byKey(peer, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
-    expect(chats.byKey(peer, SUPPORT)?.replyRule).toBeNull();
-    expect(row("feishu-2", "ou_alice")?.channelSettings).toBeNull();
-    expect(() => chats.byKey(peer)).toThrow("name the account");
-  });
-
-  it("never joins a row of unknown type or a direct message to a group", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null, { threadType: null });
-    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
-
-    expect(chats.byKey(GROUP, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
-    expect(chats.byKey(GROUP, SUPPORT)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
-  });
-
-  it("starts a chat of its own for an untyped or private row beside a typed group", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE));
-
-    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
-
-    expect(row("feishu-2", "oc_group")).toMatchObject({
-      sourceThreadType: null,
-      channelSettings: null,
-    });
-    expect(chats.byKey(GROUP, SUPPORT)?.participants).toEqual([{ account: SUPPORT, romes: true }]);
-    expect(chats.byKey(GROUP, SALES)?.participants).toEqual([{ account: SALES, romes: true }]);
-
-    const dm = chatKey("feishu", "ou_alice" as ChatId);
-    chats.startIfMissing(dm, "group", SALES, null);
-    chats.startIfMissing(dm, "dm", SUPPORT, null);
-    expect(row("feishu-2", "ou_alice")).toMatchObject({ sourceThreadType: "private" });
-    expect(chats.byKey(dm, SALES)?.participants).toHaveLength(1);
-  });
-
-  it("joins a row stored with no type to the group once a message names its type", () => {
-    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE), SALES);
-
-    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: "group" });
-
-    expect(row("feishu-2", "oc_group")).toMatchObject({
-      sourceThreadType: "group",
-      channelSettings: RULE,
-    });
-    expect(chats.byKey(GROUP)?.participants).toHaveLength(2);
-
-    const dm = chatKey("feishu", "ou_alice" as ChatId);
-    chats.startIfMissing(dm, "dm", SUPPORT, null, { threadType: null });
-    chats.startIfMissing(dm, "dm", SUPPORT, null, { threadType: "private" });
-    expect(row("feishu-2", "ou_alice")?.sourceThreadType).toBeNull();
-  });
-
-  it("reads an untyped row with the group when asked to", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    chats.update(GROUP, (chat) => chat.setReplyRule(SALES, RULE));
-    chats.startIfMissing(GROUP, "group", SUPPORT, null, { threadType: null });
-
-    expect(chats.byKey(GROUP, SUPPORT, true)?.replyRule).toEqual(RULE);
-    expect(chats.byKey(GROUP, SUPPORT)?.replyRule).toBeNull();
-  });
-
-  it("stands a channel no record holds for an account by its own name", () => {
-    const via = chats.accountOn("telegram");
-    expect(via).toEqual({ platform: "telegram", id: "telegram" });
-
-    chats.startIfMissing(chatKey("telegram", "-100" as ChatId), "dm", via, null);
-
-    expect(row("telegram", "-100")).toMatchObject({ sourceThreadType: "private" });
-  });
-
-  it("refuses to start through an account Rome does not hold", () => {
-    expect(() => chats.startIfMissing(GROUP, "group", ALICE, null)).toThrow(ChatRefusal);
-  });
-
-  it("reads no thread row as a chat", () => {
-    chats.startIfMissing(GROUP, "group", SALES, null);
-    testDb.db
-      .update(romeSessions)
-      .set({ parentSessionId: "some-parent" })
-      .where(eq(romeSessions.id, channelChatId("feishu", "oc_group")))
-      .run();
-
-    expect(chats.byKey(GROUP)).toBeNull();
-  });
-
-  it("names the place a chat's row stands for, and the channel that keeps it", () => {
-    chats.startIfMissing(GROUP, "group", SUPPORT, null);
-
-    expect(chats.placeOfRecord(channelChatId("feishu-2", "oc_group"))).toEqual({
-      place: { chat: GROUP },
-      channel: "feishu-2",
-    });
-  });
-
-  it("names a thread's row as the thread in its parent's chat", async () => {
-    await new WebChatRepository(testDb.db).ensureChannelChat({
-      channel: "feishu",
-      threadId: "om_thread",
-      parentThreadId: "oc_group",
-      agentName: "main",
+  it("ends a chat with every message said in it", () => {
+    const { ref } = chats.start(GROUP, "group", null);
+    const messages = new MessageRepository(testDb.db);
+    messages.record({
+      direction: "toRome",
+      key: "om_1",
+      place: placeIn(ref),
+      saidBy: { account: { platform: "feishu", id: "ou_alice" } },
+      body: { text: "hi" },
+      at: new Date(),
     });
 
-    expect(chats.placeOfRecord(channelChatId("feishu", "om_thread"))).toEqual({
-      place: { chat: GROUP, threadId: "om_thread" },
-      channel: "feishu",
-    });
+    chats.end(ref);
+
+    expect(chats.get(ref)).toBeNull();
+    expect(messages.read(placeIn(ref)).messages).toEqual([]);
   });
 
-  it("names no place for a row that is no conversation on a messaging channel", async () => {
-    await new WebChatRepository(testDb.db).createSession("chat-1", "A dashboard chat");
+  it("ends a chat with Rome's seats in it, so no seat points at a chat that is gone", () => {
+    const { ref } = chats.start(GROUP, "group", null);
+    testDb.db.run(
+      sql`INSERT INTO rome_sessions (id, name, type, chat_id, chat_platform, account_id, created_at, activity_at)
+          VALUES ('seat-1', 'Seat', 'channel', ${ref.id}, 'feishu', 'bot', 0, 0),
+                 ('run-1', 'Run', 'subagent', NULL, NULL, NULL, 0, 0)`,
+    );
 
-    expect(chats.placeOfRecord("chat-1")).toBeNull();
-    expect(chats.placeOfRecord("no-such-row")).toBeNull();
+    chats.end(ref);
+
+    const left = testDb.db.all<{ id: string }>(sql`SELECT id FROM rome_sessions ORDER BY id`);
+    expect(left.map((row) => row.id)).toEqual(["run-1"]);
   });
 
-  it("takes the write lock before it reads, so another connection's commit fails no join", () => {
-    const dir = mkdtempSync(join(tmpdir(), "chat-repository-"));
-    const open = createTestDbFile(join(dir, "rome.db"));
-    const main = open();
-    const worker = open();
-    worker.sqlite.pragma("busy_timeout = 0");
-    try {
-      new ChatRepository(main.db, channels).startIfMissing(GROUP, "group", SALES, null);
-      let otherWrite: unknown = null;
-      // Reached after the join has read the group's rows and before it writes.
-      const racing: ChatChannels = {
-        ...channels,
-        accountOf: (name) => {
-          if (otherWrite === null) {
-            try {
-              worker.db
-                .update(romeSessions)
-                .set({ name: "elsewhere" })
-                .where(eq(romeSessions.id, channelChatId("feishu", "oc_group")))
-                .run();
-              otherWrite = "committed";
-            } catch (err) {
-              otherWrite = err;
-            }
-          }
-          return channels.accountOf(name);
-        },
-      };
+  it("names a platform's and a kind's chats as subqueries", () => {
+    const group = chats.start(GROUP, "group", null).ref.id;
+    const dm = chats.start(DM, "dm", null).ref.id;
 
-      new ChatRepository(main.db, racing).startIfMissing(GROUP, "group", SUPPORT, null);
-
-      expect(String(otherWrite)).toContain("database is locked");
-      expect(new ChatRepository(main.db, channels).byKey(GROUP)?.participants).toHaveLength(2);
-    } finally {
-      main.close();
-      worker.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const ids = (where: ReturnType<typeof sql>) =>
+      testDb.db
+        .all<{ id: number }>(sql`SELECT id FROM chats WHERE id IN ${where} ORDER BY id`)
+        .map((row) => row.id);
+    expect(ids(chatIdsOn("feishu"))).toEqual([group, dm]);
+    expect(ids(chatIdsOfKind("dm"))).toEqual([dm]);
   });
 });

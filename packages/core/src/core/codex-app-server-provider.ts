@@ -1412,7 +1412,7 @@ export class CodexAppServerProvider implements ModelProvider {
             return await createBorrowedExactForkSession({
               providerId: this.id,
               forkSessionId: forkParams.sessionId,
-              sourceThreadId: source,
+              forkedThreadId: source,
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
               runTurn: async (input, runtime) => await runOne([input], runtime),

@@ -137,18 +137,26 @@ describe("GET /chat/sessions/:id/messages paging", () => {
     expect(pages.flat().map((m) => m.id)).toEqual(full.map((m) => m.id));
   });
 
-  it("keeps a group intact when its rows span several seconds", async () => {
+  it("shows every row when a turn's rows interleave with a later turn's", async () => {
     await seedTurn(0, BASE_SECONDS);
     await seedTurn(1, BASE_SECONDS + 10);
-    // The earlier turn's reply lands after the later turn started.
+    // The earlier turn's reply lands after the later turn started. Chats reads
+    // newest first, so the late reply comes on the first page and the rest of
+    // its turn on a later one; the dashboard groups them by turn.
     await setCreatedAt("a-0", BASE_SECONDS + 15);
 
-    const page = await getPage("?limit=1");
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const page: WirePage = await getPage(
+        `?limit=1${cursor ? `&before=${encodeURIComponent(cursor)}` : ""}`,
+      );
+      expect(page.messages.length).toBeGreaterThan(0);
+      for (const message of page.messages) seen.add(message.id);
+      cursor = page.nextCursor;
+    } while (cursor);
 
-    expect(page.messages.map((m) => m.id)).toEqual(["u-1", "t-1", "a-1"]);
-    const older = await getPage(`?limit=1&before=${encodeURIComponent(page.nextCursor ?? "")}`);
-    expect(older.messages.map((m) => m.id)).toEqual(["u-0", "t-0", "a-0"]);
-    expect(older.nextCursor).toBeNull();
+    expect([...seen].sort()).toEqual(["a-0", "a-1", "t-0", "t-1", "u-0", "u-1"]);
   });
 
   it("counts a row without a turn as its own group", async () => {

@@ -8,7 +8,9 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { TurnLinks } from "../../sessions/turn-links.js";
+import { ChatRepository } from "../../chats/chat-repository.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import {
@@ -30,7 +32,7 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { guardianAuth, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -53,6 +55,40 @@ async function readSseUntil(
 describe("Webchat API", () => {
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
   let testDb: TestDb;
+
+  /**
+   * Moves what `where` names, every row when it names nothing, back to `at`:
+   * the agent's own rows and the chat lines alike. A seat sees what was said
+   * since it sat down, so a seat that sat down later is moved back with them.
+   */
+  /** The stored content of message `id`, as the history read shows it. */
+  async function messageContent(id: string): Promise<string | undefined> {
+    return (await deps.webchatRepo.getMessageContentForDisplay(id))?.content;
+  }
+
+  function backdate(where: { id?: string; sessionId?: string }, at: Date): void {
+    const secs = Math.floor(at.getTime() / 1000);
+    const db = testDb.db;
+    const agentRows =
+      where.id !== undefined
+        ? sql`id = ${where.id}`
+        : where.sessionId !== undefined
+          ? sql`session_id = ${where.sessionId}`
+          : sql`1`;
+    db.run(sql`UPDATE rome_agent_messages SET created_at = ${secs} WHERE ${agentRows}`);
+    const lines =
+      where.id !== undefined
+        ? sql`key = ${where.id}`
+        : where.sessionId !== undefined
+          ? sql`EXISTS (SELECT 1 FROM rome_sessions s WHERE s.id = ${where.sessionId}
+              AND s.chat_id = chat_messages.chat_id AND s.thread_id IS chat_messages.thread_id)`
+          : sql`1`;
+    db.run(sql`UPDATE chat_messages SET said_at = ${secs} WHERE ${lines}`);
+    db.run(sql`UPDATE rome_sessions SET created_at = min(created_at, ${secs})
+      WHERE chat_id IN (SELECT chat_id FROM chat_messages WHERE said_at = ${secs})
+        OR id = ${where.sessionId ?? null}`);
+  }
+
   let deps: TestDeps;
   let baseline: BaselineIds;
   let projectsRoot: string;
@@ -167,7 +203,9 @@ describe("Webchat API", () => {
         name: "lin@example.com",
         avatarUrl: null,
       },
-      unattributed: undefined,
+      // Chats records a dashboard line with no recorded sender as the
+      // guardian's (Chats storage design, data migration).
+      unattributed: { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
     });
   });
 
@@ -258,11 +296,12 @@ describe("Webchat API", () => {
         (message) => message.role === "user",
       );
       expect(inputs).toHaveLength(2);
-      const stored = await testDb.db
-        .select({ actor: romeAgentMessages.actor })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id));
-      expect(stored).toEqual([{ actor }, { actor }]);
+      // The visitor is the sender of each line, by their account and email.
+      const stored = testDb.db.all<{ sender_account_id: string; sender_name: string }>(
+        sql`SELECT sender_account_id, sender_name FROM chat_messages ORDER BY rowid`,
+      );
+      const sender = { sender_account_id: "visitor:sender", sender_name: "sender@example.com" };
+      expect(stored).toEqual([sender, sender]);
       expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
       expect(inputs.find((message) => message.id === b)).toMatchObject({
         inputState: "consumed",
@@ -375,38 +414,44 @@ describe("Webchat API", () => {
     const { runtime } = createWebchatRuntime(deps);
     const concierge = { platform: "webchat", id: "core:concierge" };
     const id = await runtime.startChat({});
+    // A send names the chat, which the chat's session stands in.
+    const chat = new ChatRepository(testDb.db).get(
+      (await deps.webchatRepo.seatOf(id))!.place.chat,
+    )!.key;
     try {
-      const posted = await runtime.post(id, { text: "Find flights" }, concierge);
-
+      const posted = await runtime.post(chat, { text: "Find flights" }, concierge);
       expect(posted).toMatchObject({ ok: true });
       expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
-      const stored = await testDb.db
-        .select({ role: romeAgentMessages.role, senderId: romeAgentMessages.senderId })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id));
-      expect(stored).toEqual([{ role: "user", senderId: "core:concierge" }]);
+      // Said as the agent's dashboard account, which wakes the chat's agent.
+      const inputs = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      expect(inputs).toHaveLength(1);
+      expect(
+        testDb.db.all(
+          sql`SELECT sender_account_id FROM chat_messages WHERE key = ${inputs[0]!.id}`,
+        ),
+      ).toEqual([{ sender_account_id: "core:concierge" }]);
       expect(runtime.isRunning(id)).toBe(true);
       expect(runtime.activeTurns(id)).toEqual(["task-1"]);
       await runtime.interruptTurn("task-1");
       expect(interrupt).toHaveBeenCalledWith("user-stop", "task-1");
       await runtime.interruptTurn("no-such-turn");
 
-      expect(await runtime.post(id, { text: "hi" }, { platform: "webchat", id: "nobody" })).toEqual(
-        {
-          ok: false,
-          error: "No agent nobody to say it as",
-        },
-      );
+      expect(
+        await runtime.post(chat, { text: "hi" }, { platform: "webchat", id: "nobody" }),
+      ).toEqual({
+        ok: false,
+        error: "No agent nobody to say it as",
+      });
       expect(await runtime.post("no-such-chat", { text: "hi" }, concierge)).toEqual({
         ok: false,
-        error: "Session not found",
+        error: "No dashboard chat no-such-chat",
       });
 
       // Recorded before the agent failed to wake: said, so not answered failed.
       deps.agentSessionManager.acquire = rs.fn(async () => {
         throw new Error("session store unavailable");
       });
-      expect(await runtime.post(id, { text: "Trains too" }, concierge)).toMatchObject({
+      expect(await runtime.post(chat, { text: "Trains too" }, concierge)).toMatchObject({
         ok: true,
       });
       expect(
@@ -481,10 +526,7 @@ describe("Webchat API", () => {
     const sessionId = `retention-${variant}`;
     await deps.webchatRepo.createSession("idle-source", "Idle source");
     await deps.webchatRepo.addMessage("source-message", "idle-source", "user", "Old source");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-10T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "source-message"));
+    backdate({ id: "source-message" }, new Date("2026-10-10T12:00:00Z"));
     await deps.webchatRepo.ensureRomeSession({
       id: sessionId,
       parentSessionId: "idle-source",
@@ -514,7 +556,7 @@ describe("Webchat API", () => {
         `${sessionId}-${turnId}-user`,
         sessionId,
         "user",
-        "My question",
+        JSON.stringify([{ type: "text", content: "My question" }]),
         turnId,
       );
       await deps.webchatRepo.appendTraceBlocks({
@@ -538,10 +580,7 @@ describe("Webchat API", () => {
         turnId,
       );
     }
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
-      .where(eq(romeAgentMessages.sessionId, sessionId));
+    backdate({ sessionId: sessionId }, new Date("2026-09-24T12:00:00Z"));
     await deps.webchatRepo.addMessage(
       `${sessionId}-latest`,
       sessionId,
@@ -556,10 +595,7 @@ describe("Webchat API", () => {
       ["2026-10-17T12:00:00Z", true],
       ["2026-10-17T12:00:01Z", false],
     ] as const) {
-      await testDb.db
-        .update(romeAgentMessages)
-        .set({ createdAt: new Date(lastMessageAt) })
-        .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+      backdate({ id: `${sessionId}-latest` }, new Date(lastMessageAt));
       const activityQuery = rs.spyOn(deps.webchatRepo, "getTraceArchivedSessionIds");
       const response = await app.request(`/sessions/${sessionId}/messages`);
       expect(activityQuery).toHaveBeenCalledTimes(1);
@@ -577,7 +613,9 @@ describe("Webchat API", () => {
         expect(Boolean(trace?.traceSummary)).toBe(!archived);
       }
       expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
-      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
+      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe(
+        JSON.stringify([{ type: "text", content: "My question" }]),
+      );
       for (const endpoint of [
         `/sessions/messages/${sessionId}-old/content`,
         `/chat/messages/${sessionId}-old/content`,
@@ -591,18 +629,13 @@ describe("Webchat API", () => {
         if (archived) expect(payload).toEqual({ trace: null, traceArchived: true });
         else expect(JSON.stringify(payload)).toContain("Heavy output");
       }
-      expect(await deps.webchatRepo.getMessageContent(`${sessionId}-old`)).toContain(
-        "Heavy output",
-      );
+      expect(await messageContent(`${sessionId}-old`)).toContain("Heavy output");
       if (isWebchat)
         expect(await (await app.request(`/chat/sessions/${sessionId}/messages`)).json()).toEqual(
           messages,
         );
     }
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+    backdate({ id: `${sessionId}-latest` }, new Date("2026-10-16T12:00:00Z"));
     expect(await (await app.request(`/chat/messages/${sessionId}-old/content`)).json()).toEqual({
       trace: null,
       traceArchived: true,
@@ -730,12 +763,18 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    // The turn's prompt, so the turn is in the chat: the transcript lists the
+    // turns lines were said in, and reads their traces apart.
+    await deps.webchatRepo.addMessage(
+      "parent-summary-ask",
+      parentSessionId,
+      "user",
+      "Plan and research it",
+      parentTurnId,
+    );
+    backdate({}, new Date("2026-09-24T12:00:00Z"));
     await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    backdate({ id: "root-latest" }, new Date("2026-10-23T12:00:00Z"));
     const app = createWebchatRuntime(deps).routes;
     const getTraceContentsByTurns = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
     const getTraceContentByTurn = rs.spyOn(deps.webchatRepo, "getTraceContentByTurn");
@@ -769,13 +808,8 @@ describe("Webchat API", () => {
       { sessionActivityCutoff: expect.any(Date) },
     );
     expect(getTraceContentByTurn).not.toHaveBeenCalled();
-    expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(
-      "traceSummary",
-    );
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    expect(await messageContent("parent-summary-trace")).not.toContain("traceSummary");
+    backdate({ id: "root-latest" }, new Date("2026-10-16T12:00:00Z"));
     for (const sessionId of [parentSessionId, childSessionId, secondChildSessionId]) {
       const history = (await (
         await app.request(`/sessions/${sessionId}/messages`)
@@ -901,12 +935,9 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    backdate({}, new Date("2026-09-24T12:00:00Z"));
     await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    backdate({ id: "root-latest" }, new Date("2026-10-23T12:00:00Z"));
     const app = createWebchatRuntime(deps).routes;
     const readAccounting = async (path: string) => {
       const response = await app.request(path);
@@ -976,12 +1007,8 @@ describe("Webchat API", () => {
       (await readAccounting("/chat/messages/parent-usage-trace/content?includeSubagentUsage=false"))
         ?.usage,
     ).not.toHaveProperty("reasoningTokens");
-    expect(await deps.webchatRepo.getMessageContent("parent-usage-trace")).not.toContain(
-      "includedSubagentCount",
-    );
-    expect(await deps.webchatRepo.getMessageContent("parent-usage-trace")).not.toContain(
-      "usageByModel",
-    );
+    expect(await messageContent("parent-usage-trace")).not.toContain("includedSubagentCount");
+    expect(await messageContent("parent-usage-trace")).not.toContain("usageByModel");
   });
 
   describe("chat locations", () => {
@@ -3627,6 +3654,17 @@ describe("Webchat API", () => {
         parentSessionId: null,
         agentName: "workflow-studio:workflow-planner",
       });
+      // The child's own turn: a prompt said in its chat, and that turn's trace.
+      await deps.webchatRepo.recordUserInput(
+        "handoff-child-prompt",
+        childSessionId,
+        JSON.stringify([{ type: "text", content: "Plan it" }]),
+      );
+      new TurnLinks(testDb.db).promptRuns(
+        childSessionId,
+        (await deps.webchatRepo.lineIn(childSessionId, "handoff-child-prompt"))!,
+        "child-turn",
+      );
       await deps.webchatRepo.appendTraceBlocks({
         messageId: "handoff-child-trace",
         sessionId: childSessionId,
@@ -3634,10 +3672,7 @@ describe("Webchat API", () => {
         startSeq: 0,
         blocks: [{ type: "thinking", content: "Child-only trace payload" }],
       });
-      await testDb.db
-        .update(romeAgentMessages)
-        .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
-        .where(eq(romeAgentMessages.sessionId, childSessionId));
+      backdate({ sessionId: childSessionId }, new Date("2026-09-24T12:00:00Z"));
 
       const traceReads = rs.spyOn(deps.webchatRepo, "getTraceContents");
       const descendantReads = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");

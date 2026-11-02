@@ -78,52 +78,92 @@ function outboundContent(input: SendMessageInput): string {
   return JSON.stringify(parts);
 }
 
-async function recordDeliveredConversationMessage(
-  deps: SendMessageRuntimeDeps,
+/**
+ * Say `input` at `threadId` through the seat it belongs to: the session the
+ * caller names, the run's own when it sends where the run was asked, else
+ * the main agent's seat at that address, opened when Rome holds none.
+ */
+async function sendThroughSeat(
+  chats: ChatRepository,
+  send: NonNullable<ChatRepository["send"]>,
   input: SendMessageInput,
   threadId: string,
-  delivery: MessageReceipt,
-): Promise<void> {
-  if (!deps.chats || !threadId) return;
-  // The webchat channel writes the line into the chat itself. Recording it
-  // again would leave a second copy under a separate channel row.
-  if (input.channel === "webchat") return;
+): Promise<{ messageId?: string }> {
   const current = getCurrentActionContext();
-  const requestedThreadId = input.threadId;
-  const deliveryCreatedThread = !!requestedThreadId && requestedThreadId !== threadId;
   const sameAmbientConversation =
     current?.channelContext?.channel === input.channel &&
     current.channelContext.threadId === threadId;
-  const explicitRomeSessionId = deliveryCreatedThread ? undefined : input.romeSessionId;
-  const ambientRomeSessionId = sameAmbientConversation
-    ? current?.channelContext?.romeSessionId
-    : undefined;
-  const boundRomeSessionId = explicitRomeSessionId ?? ambientRomeSessionId;
-  const conversation = boundRomeSessionId
-    ? { id: boundRomeSessionId, agentName: null }
-    : await ensureChannelChat(deps.chats, {
+  const boundRomeSessionId =
+    input.romeSessionId ??
+    (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined);
+  const sessionId =
+    boundRomeSessionId ??
+    (
+      await ensureChannelChat(chats, {
         channel: input.channel,
         threadId,
-        parentThreadId: deliveryCreatedThread ? requestedThreadId : undefined,
-        // A delivery must not implicitly bind an unclaimed conversation to
-        // whichever background/sentinel agent happened to send first.
+        // A send must not bind an unclaimed conversation to whichever
+        // background or sentinel agent happened to send first.
         agentName: "main",
-        threadType: deliveryCreatedThread ? "group" : "private",
-      });
-  const knownToProvider =
-    !deliveryCreatedThread &&
-    (input.knownToProvider ??
-      Boolean(input.turnId || (sameAmbientConversation && current?.turnId)));
-  await deps.chats.recordOutboundMessage({
-    sessionId: conversation.id,
+        threadType: "private",
+      })
+    ).id;
+  const turnId = input.turnId ?? current?.turnId;
+  return send({
+    sessionId,
+    channel: input.channel,
+    ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.parts?.length ? { parts: [...input.parts] } : {}),
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     content: outboundContent(input),
-    platformMessageId: delivery?.messageId,
-    senderId: "rome",
-    senderName: "Rome",
-    replyToPlatformMessageId: input.replyToMessageId,
-    turnId: input.turnId ?? current?.turnId,
-    knownToProvider,
+    ...(input.replyToMessageId ? { replyToPlatformMessageId: input.replyToMessageId } : {}),
+    ...(turnId ? { turnId } : {}),
+    knownToProvider:
+      input.knownToProvider ??
+      Boolean(input.turnId || (sameAmbientConversation && current?.turnId)),
   });
+}
+
+/**
+ * Send email `input` as its seat's: on its thread, as the session the caller
+ * names or the run's own when it answers where the run was asked, else as
+ * main's seat there; on a new thread when it names none.
+ */
+async function emailThroughSeat(
+  chats: ChatRepository,
+  input: SendMessageInput,
+  email: Parameters<ChatRepository["sendEmail"]>[0]["email"],
+): Promise<{ messageId: string | null; threadId: string }> {
+  const current = getCurrentActionContext();
+  const threadId = input.threadId;
+  const sameAmbientConversation =
+    !!threadId &&
+    current?.channelContext?.channel === input.channel &&
+    current.channelContext.threadId === threadId;
+  const sessionId =
+    input.romeSessionId ??
+    (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined);
+  const turnId = input.turnId ?? current?.turnId;
+  return chats.sendEmail({
+    channel: input.channel,
+    ...(threadId ? { threadId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.parts?.length ? { parts: [...input.parts] } : {}),
+    content: outboundContent(input),
+    email,
+    ...(turnId ? { turnId } : {}),
+    knownToProvider:
+      !!threadId &&
+      (input.knownToProvider ??
+        Boolean(input.turnId || (sameAmbientConversation && current?.turnId))),
+  });
+}
+
+/** The chat repository Rome handed this app. */
+function chatsOf(deps: SendMessageRuntimeDeps): ChatRepository {
+  if (!deps.chats) throw new Error("Rome handed this app no chat repository to send through");
+  return deps.chats;
 }
 
 /** Opens the chat for a channel thread, or finds the one already open. A host
@@ -135,26 +175,6 @@ function ensureChannelChat(
   return typeof repository.ensureChannelChat === "function"
     ? repository.ensureChannelChat(input)
     : repository.ensureChannelConversation(input);
-}
-
-async function recordDeliveredConversationMessageBestEffort(
-  deps: SendMessageRuntimeDeps,
-  input: SendMessageInput,
-  threadId: string,
-  delivery: MessageReceipt,
-): Promise<void> {
-  try {
-    await recordDeliveredConversationMessage(deps, input, threadId, delivery);
-  } catch (err) {
-    // Transport delivery already succeeded. Do not convert a transcript-write
-    // failure into a retryable send error that could duplicate the message.
-    log.warn("message delivered but conversation recording failed", {
-      channel: input.channel,
-      threadId,
-      messageId: delivery?.messageId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
 }
 
 function readEnvPath(name: string): string | undefined {
@@ -414,41 +434,23 @@ export async function executeSendMessage(
       throw new Error("Email needs a `threadId`/`replyToMessageId` to reply, or a `to` recipient");
     }
 
-    const threadId = email.threadId ?? "";
     log.info("sending email", {
-      threadId: threadId || null,
+      threadId: email.threadId ?? null,
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await channels.send(account, threadId as ChatId, {
-      kind: "email",
-      text,
-      parts,
-      attachments: safeInput.attachments,
-      turnId,
-      to: email.to,
-      cc: email.cc,
-      bcc: email.bcc,
-      subject: email.subject,
-      html: email.html,
-      inReplyToMessageId: replyTarget,
-    });
-    // Checked here, not only at the mail provider: the receipt crosses the
-    // channel RPC, where `messageId` is optional for every channel.
-    if (
-      typeof delivery?.messageId !== "string" ||
-      !delivery.messageId.trim() ||
-      typeof delivery.chatId !== "string" ||
-      !delivery.chatId.trim()
-    ) {
-      throw new Error(
-        "Email delivery is unconfirmed: the channel did not return valid message and thread IDs. " +
-          "Check email history before retrying to avoid sending a duplicate.",
-      );
-    }
-    const deliveredThreadId = delivery.chatId;
-    await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
-    return { status: "ok", data: { messageId: delivery.messageId, threadId: deliveredThreadId } };
+    const fields = {
+      ...(email.to !== undefined ? { to: email.to } : {}),
+      ...(email.cc !== undefined ? { cc: email.cc } : {}),
+      ...(email.bcc !== undefined ? { bcc: email.bcc } : {}),
+      ...(email.subject !== undefined ? { subject: email.subject } : {}),
+      ...(email.html !== undefined ? { html: email.html } : {}),
+      ...(replyTarget !== undefined ? { inReplyToMessageId: replyTarget } : {}),
+    };
+    // The account's chat adapter sends the email and Rome records it once, in
+    // the thread's chat.
+    const sent = await emailThroughSeat(chatsOf(deps), safeInput, fields);
+    return { status: "ok", data: { messageId: sent.messageId, threadId: sent.threadId } };
   }
 
   const chat = input as SendMessageChatInput;
@@ -464,6 +466,15 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
+  // The dashboard writes its own lines. Every other send is said through
+  // the seat's chat adapter, which sends and records it as one step.
+  if (channel !== "webchat") {
+    const chats = chatsOf(deps);
+    const said = await sendThroughSeat(chats, chats.send.bind(chats), safeInput, threadId);
+    return said.messageId
+      ? { status: "ok", data: { messageId: said.messageId } }
+      : { status: "ok" };
+  }
   const delivery = await channels.send(account, threadId as ChatId, {
     text,
     parts,
@@ -471,7 +482,6 @@ export async function executeSendMessage(
     replyToMessageId: chat.replyToMessageId,
     turnId,
   });
-  await recordDeliveredConversationMessageBestEffort(deps, input, delivery.chatId, delivery);
   return delivery.messageId
     ? { status: "ok", data: { messageId: delivery.messageId } }
     : { status: "ok" };

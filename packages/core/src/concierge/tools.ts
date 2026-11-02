@@ -7,8 +7,7 @@ import {
   CONCIERGE_TASK_SUMMARY_MAX_LENGTH,
   type ConciergeTaskState,
 } from "@rome/api-types/concierge";
-import type { SaidMessage } from "../chats/message.js";
-import type { SendResult } from "../chats/send.js";
+import type { SendResult } from "../channels/send-into-place.js";
 import type {
   ConciergeTaskWithChat,
   ConciergeTaskWrite,
@@ -120,7 +119,11 @@ export async function buildConciergeTools(
   // Said as Concierge's account, so the task event reads who asked off the
   // message.
   const sendInput = async (chatId: string, text: string) => {
-    const sent = await service.dashboard.send(taskChatPlace(chatId), { text }, CONCIERGE_ACCOUNT);
+    const sent = await service.dashboard.send(
+      await taskChatPlace(webchatRepo, chatId),
+      { text },
+      CONCIERGE_ACCOUNT,
+    );
     if (!sent.ok) throw new Error(refusal(sent));
   };
 
@@ -364,6 +367,9 @@ export async function buildConciergeTools(
             writes.push(await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`));
           }
           const rows = await tasks.repo.upsertMany(writes);
+          const anchors = await Promise.all(
+            rows.map(async (row) => (await tasks.repo.getWithChat(row.id))?.sourceMessageId),
+          );
           // Says which message each row points to, and flags the ones that kept an
           // earlier message because the entry passed none.
           return {
@@ -371,7 +377,7 @@ export async function buildConciergeTools(
               id: row.id,
               title: row.title,
               state: row.state,
-              ...(row.sourceMessageId ? { anchor: row.sourceMessageId } : {}),
+              ...(anchors[index] ? { anchor: anchors[index] } : {}),
               ...(writes[index].sourceMessageId === undefined ? { anchorKept: true } : {}),
             })),
           };
@@ -542,7 +548,12 @@ export async function buildConciergeTools(
             typeof args.last === "number"
               ? Math.min(MAX_READ_LIMIT, Math.max(1, Math.floor(args.last)))
               : DEFAULT_READ_LIMIT;
-          const said = await latestSaid(messages, taskChatPlace(chatId), limit, hasText);
+          const said = await latestSaid(
+            messages,
+            await taskChatPlace(webchatRepo, chatId),
+            limit,
+            hasText,
+          );
           return {
             chatId,
             title: chat.name,
@@ -617,7 +628,7 @@ export async function buildConciergeTools(
           const chat = await requireTaskChat(chatId);
           const [latest] = await latestSaid(
             messages,
-            taskChatPlace(chatId),
+            await taskChatPlace(webchatRepo, chatId),
             1,
             (message) => message.direction === "fromRome" && hasText(message),
           );

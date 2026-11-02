@@ -6,6 +6,7 @@ import {
   uniqueIndex,
   real,
   primaryKey,
+  type AnySQLiteColumn,
   type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -470,15 +471,12 @@ export const projectSyncLinks = sqliteTable("project_sync_links", {
 });
 
 /**
- * Whether a `rome_sessions` row is a guardian chat: a channel row on the
- * webchat channel. The chat indexes below use it as their WHERE, and
- * `isWebchatChat` in `db/session-kind.ts` is the same text, which is what lets
- * SQLite page the sidebar off them. That needs the constants inlined rather
- * than bound, and the unary `+` keeps SQLite off the `source_channel` indexes,
- * which would find the chats but then sort them all.
+ * Whether a `rome_sessions` row is a seat in a dashboard chat: a guardian
+ * chat. The sidebar's partial indexes use this exact text, so the query's
+ * WHERE must too: SQLite picks a partial index only for a literal match.
  */
-export function webchatChatWhere(table: { type: SQLiteColumn; sourceChannel: SQLiteColumn }) {
-  return sql`(${table.type} = 'channel' and +${table.sourceChannel} = 'webchat')`;
+export function dashboardSeatWhere(table: { type: SQLiteColumn; chatPlatform: SQLiteColumn }) {
+  return sql`(${table.type} = 'channel' and ${table.chatPlatform} = 'webchat')`;
 }
 
 export const romeSessions = sqliteTable(
@@ -500,10 +498,9 @@ export const romeSessions = sqliteTable(
     // Distinguishes top-level webchat, handoff child sessions, first-class
     // subagent sessions, external channels, and action/background agent runs.
     type: text("type").notNull().default("webchat"),
-    sourceChannel: text("source_channel"),
-    sourceThreadId: text("source_thread_id"),
-    sourceThreadName: text("source_thread_name"),
-    sourceThreadType: text("source_thread_type"),
+    // A topic seat's name, as the platform calls the topic. Null elsewhere: a
+    // chat's name is the chat's.
+    threadName: text("thread_name"),
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
     channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
@@ -536,25 +533,136 @@ export const romeSessions = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     activityAt: integer("activity_at", { mode: "timestamp" }).notNull(),
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
+    // The chat this row is one of Rome's seats in, and the platform's thread
+    // id when the seat is in a thread. Null on rows that are not chats
+    // (handoff, subagent, action runs). A seat belongs to its chat and ends
+    // with it. Vocabulary: docs/domains/chats.md.
+    chatId: integer("chat_id").references((): AnySQLiteColumn => chats.id, { onDelete: "cascade" }),
+    // The platform of the chat at `chat_id`, so a seat holds the chat's whole
+    // ref and the sidebar can index the dashboard's seats on their own.
+    chatPlatform: text("chat_platform"),
+    threadId: text("thread_id"),
+    // The one of Rome's accounts this seat speaks as: the channel's platform
+    // account, else the channel's name, and `agent:<name>` on the dashboard.
+    accountId: text("account_id"),
   },
   (table) => [
+    index("idx_rome_sessions_chat").on(table.chatId, table.threadId),
     index("idx_rome_sessions_owner_key").on(table.ownerKey),
     index("idx_rome_sessions_project_path").on(table.projectPath),
-    // Sidebar paging for guardian chats. See `webchatChatWhere`.
-    index("idx_rome_sessions_chat_activity")
+    index("idx_rome_sessions_activity").on(table.activityAt, table.createdAt, table.id),
+    // Sidebar paging for guardian chats, newest activity first. See
+    // `dashboardSeatWhere`.
+    index("idx_rome_sessions_dashboard_activity")
       .on(table.activityAt, table.createdAt, table.id)
-      .where(webchatChatWhere(table)),
-    index("idx_rome_sessions_chat_project_activity")
+      .where(dashboardSeatWhere(table)),
+    index("idx_rome_sessions_dashboard_project_activity")
       .on(table.projectPath, table.activityAt, table.createdAt, table.id)
-      .where(webchatChatWhere(table)),
-    index("idx_rome_sessions_source_channel").on(table.sourceChannel),
-    index("idx_rome_sessions_source_thread").on(table.sourceChannel, table.sourceThreadId),
-    index("idx_rome_sessions_channel_address")
-      .on(table.sourceChannel, table.sourceThreadId)
-      .where(
-        sql`${table.type} = 'channel' AND ${table.sourceChannel} IS NOT NULL AND ${table.sourceThreadId} IS NOT NULL`,
-      ),
+      .where(dashboardSeatWhere(table)),
+    index("idx_rome_sessions_account").on(table.accountId),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
+  ],
+);
+
+// Chats' own record of a chat: one row per place, however many of Rome's
+// accounts are in it. Vocabulary: docs/domains/chats.md#chat.
+export const chats = sqliteTable(
+  "chats",
+  {
+    id: integer("id").primaryKey(),
+    platform: text("platform").notNull(),
+    // The adapter's key for the chat, unique on its platform: the platform's
+    // group id, or both ends of a direct message. The dashboard's adapter
+    // gives its chats random keys. Chats compares it and never reads it.
+    key: text("key").notNull(),
+    kind: text("kind").notNull(), // 'dm' | 'group'
+    name: text("name"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_chats_key").on(table.platform, table.key)],
+);
+
+// What was said in a chat, once, whoever heard it. Who said it is the
+// account, and for Rome's lines the agent that spoke. A message Rome sends is
+// recorded once the platform took it; a send the platform refused was never
+// said, so it is the sender's error and never a line here.
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: integer("id").primaryKey(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    // The adapter's key for the message, unique in its chat: the platform's
+    // message id, with Rome's account in front where the platform numbers
+    // messages per receiving account. A redelivery, or a group message heard
+    // on two of Rome's accounts, finds its key on record. The dashboard's
+    // adapter gives its lines random keys.
+    key: text("key").notNull(),
+    // The platform's thread id; null in the open chat.
+    threadId: text("thread_id"),
+    senderAccountId: text("sender_account_id"),
+    // The agent that said the line. Set on exactly the lines from Rome, so it
+    // is what tells them apart.
+    senderAgent: text("sender_agent"),
+    senderName: text("sender_name"),
+    text: text("text").notNull(),
+    parts: text("parts").notNull(), // JSON array of blocks, as composed
+    // The line this one quotes, when Rome holds it.
+    replyToMessageId: integer("reply_to_message_id"),
+    saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A place's lines by time. Within one second lines keep the order they
+    // were recorded in.
+    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+    // A place's lines after a given one, by rowid, as the awaiting-guardian
+    // flag reads them.
+    index("idx_chat_messages_place").on(table.chatId, table.threadId),
+  ],
+);
+
+// The channels layer's address store: where one of Rome's accounts reaches a
+// chat whose key is not its address, as on a platform that gives a direct
+// message an id of its own (Feishu's p2p chat, Discord's DM channel). Shared
+// by every adapter. Chats never reads it.
+export const channelAddresses = sqliteTable(
+  "channel_addresses",
+  {
+    platform: text("platform").notNull(),
+    // Rome's account, by its platform id.
+    accountId: text("account_id").notNull(),
+    // The adapter's key for the chat, with no platform prefix.
+    chatKey: text("chat_key").notNull(),
+    // The thread of the chat the address reaches, or '' for the chat itself.
+    threadId: text("thread_id").notNull().default(""),
+    address: text("address").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId, table.chatKey, table.threadId] }),
+    index("idx_channel_addresses_address").on(table.platform, table.accountId, table.address),
+  ],
+);
+
+// Agents' link from a turn to a chat message: the message prompted the turn,
+// was its answer, or was caught up on by it. One row per message per agent
+// seat, so two of Rome's agents in one group each keep their own.
+export const agentTurnMessages = sqliteTable(
+  "agent_turn_messages",
+  {
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    // Null for a prompt still queued.
+    turnId: text("turn_id"),
+    role: text("role").notNull(), // 'prompt' | 'answer' | 'seen'
+    inputState: text("input_state").$type<AgentInputState>(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.sessionId] }),
+    index("idx_agent_turn_messages_turn").on(table.sessionId, table.turnId),
   ],
 );
 
@@ -586,7 +694,7 @@ export const conciergeTasks = sqliteTable(
      * The Concierge chat message the row points back to. Not a foreign key: the
      * message may be gone, and the panel then offers no jump. The text is never copied.
      */
-    sourceMessageId: text("source_message_id"),
+    sourceMessageId: integer("source_message_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */
@@ -736,15 +844,11 @@ export const romeAgentMessages = sqliteTable(
     id: text("id").primaryKey(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
-    inputState: text("input_state").$type<AgentInputState>(),
+    // Set on a fork's or subagent's own prompt. What was said in a chat is
+    // Chats' (`chat_messages`), linked to its turn in `agent_turn_messages`.
     actor: text("actor", { mode: "json" }).$type<SessionActor>(),
-    role: text("role").notNull(), // 'user' | 'assistant' | 'notification' | 'trace'
+    role: text("role").notNull(), // 'user' | 'assistant' | 'trace' | ...
     content: text("content").notNull(), // JSON array of blocks
-    platformMessageId: text("platform_message_id"),
-    senderId: text("sender_id"),
-    senderName: text("sender_name"),
-    replyToPlatformMessageId: text("reply_to_platform_message_id"),
-    contextInjectedTurnId: text("context_injected_turn_id"),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),
@@ -767,25 +871,7 @@ export const romeAgentMessages = sqliteTable(
     index("idx_rome_agent_messages_session_trace")
       .on(table.sessionId, table.createdAt)
       .where(sql`${table.role} = 'trace'`),
-    index("idx_rome_agent_messages_platform_message")
-      .on(table.sessionId, table.platformMessageId)
-      .where(sql`${table.platformMessageId} IS NOT NULL`),
   ],
-);
-
-// The platform messages a message row stands for besides its own
-// platform_message_id. A reply the platform shows as several messages is one
-// row, and a quote of any of them reaches it. Not a FK, as with the trace
-// blocks below: session-scoped deletes remove these rows explicitly.
-export const romeAgentMessagePlatformIds = sqliteTable(
-  "rome_agent_message_platform_ids",
-  {
-    sessionId: text("session_id").notNull(),
-    platformMessageId: text("platform_message_id").notNull(),
-    // The rome_agent_messages row the platform message belongs to.
-    messageId: text("message_id").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
 );
 
 // Append-only storage for trace content, avoiding the O(N²) cost of storing

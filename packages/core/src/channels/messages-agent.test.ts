@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import type { Account } from "@rome-os/app-runtime";
+import { chatAt, directMessageAt } from "../chats/adapter.js";
+import type { ChatRef } from "../chats/place.js";
+import { chatMessages, romeAgentMessages } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
+import { seatFixture } from "../test/seats.js";
+import { ChatAddresses } from "./chat-addresses.js";
 import {
   testAccountMessagesContract,
   WHOLE_HISTORY,
@@ -24,81 +29,122 @@ const OTHER_CHANNEL = "discord";
 const account = { channel: CHANNEL, addresses: [DIRECT, DIRECT_ALT] };
 const silent = [{ channel: CHANNEL, addresses: ["tg-nobody"] }];
 
-const text = (line: string) => JSON.stringify([{ type: "text", content: line }]);
+/** Rome's account on each channel the fixtures name. */
+const ACCOUNTS: Record<string, Account> = {
+  [CHANNEL]: { platform: "telegram", id: "rome-bot" },
+  "tg-opaque": { platform: "telegram", id: "rome-opaque-bot" },
+  [OTHER_CHANNEL]: { platform: "discord", id: "rome-discord" },
+  webchat: { platform: "webchat", id: "agent:main" },
+};
+const accountOn = (channel: string): Account =>
+  ACCOUNTS[channel] ?? { platform: channel, id: channel };
+/** The store, with each entry's ref naming its line by the key the fixture
+ *  gave it rather than the id Chats did. */
+const read = (db: DrizzleDb) => {
+  const store = agentMessages(db, accountOn);
+  const named = <M extends { ref: string } | null>(entry: M): M => {
+    if (!entry) return entry;
+    const id = Number(entry.ref.slice("agent:".length));
+    const key = db.all<{ key: string }>(sql`SELECT key FROM chat_messages WHERE id = ${id}`)[0];
+    return { ...entry, ref: key ? `agent:${key.key}` : entry.ref };
+  };
+  return {
+    read: async (request: Parameters<typeof store.read>[0]) =>
+      (await store.read(request)).map(named),
+    latest: async (accounts: Parameters<typeof store.latest>[0]) =>
+      named(await store.latest(accounts)),
+    count: (accounts: Parameters<typeof store.count>[0]) => store.count(accounts),
+  };
+};
+
+/** Where each fixture seat stands, by seat id. */
+const seats = new Map<string, { chat: ChatRef; account: Account; person: string }>();
 
 function session(
   db: DrizzleDb,
   id: string,
-  fields: {
-    type?: string;
-    threadId: string | null;
-    threadType?: string | null;
-    channel?: string;
-  },
+  fields: { threadId: string; kind?: "dm" | "group"; channel?: string },
 ) {
-  const now = new Date(0);
-  return db.insert(romeSessions).values({
-    id,
-    name: id,
-    type: fields.type ?? "channel",
-    sourceChannel: fields.channel ?? CHANNEL,
-    sourceThreadId: fields.threadId,
-    sourceThreadType: fields.threadType ?? "private",
-    createdAt: now,
-    activityAt: now,
-  });
+  const fixture = seatFixture(db);
+  const account = accountOn(fields.channel ?? CHANNEL);
+  const kind = fields.kind ?? "dm";
+  const key =
+    kind === "dm"
+      ? directMessageAt(account, fields.threadId, new ChatAddresses(db))
+      : chatAt(account.platform, fields.threadId);
+  const chat = fixture.chat(key.platform, key.externalId, kind);
+  fixture.seat({ id, chat, accountId: account.id, createdAt: new Date(0) });
+  seats.set(id, { chat, account, person: fields.threadId });
 }
 
+/** A line said where seat `sessionId` stands: by the person, or by Rome
+ *  when `role` is `assistant`. */
 function message(
   db: DrizzleDb,
   id: string,
-  fields: { sessionId: string; role: string; at: number; content?: string; senderId?: string },
+  fields: {
+    sessionId: string;
+    role: "user" | "assistant" | "notification";
+    at: number;
+    content?: string;
+    senderId?: string;
+  },
 ) {
-  return db.insert(romeAgentMessages).values({
-    id,
-    sessionId: fields.sessionId,
-    role: fields.role,
-    content: fields.content ?? text(id),
-    senderId: fields.senderId ?? null,
-    createdAt: new Date(fields.at * 1000),
-  });
+  const seat = seats.get(fields.sessionId)!;
+  const fromRome = fields.role === "assistant";
+  const parts = fields.content ?? JSON.stringify([{ type: "text", content: id }]);
+  db.insert(chatMessages)
+    .values({
+      key: id,
+      chatId: seat.chat.id,
+      threadId: null,
+      senderAccountId: fields.senderId ?? (fromRome ? seat.account.id : seat.person),
+      senderAgent: fromRome ? "main" : null,
+      senderName: null,
+      text: id,
+      parts,
+      saidAt: new Date(fields.at * 1000),
+    })
+    .run();
 }
 
 async function seed(db: DrizzleDb) {
-  await session(db, "s-direct", { threadId: DIRECT });
-  await session(db, "s-direct-alt", { threadId: DIRECT_ALT });
-  await session(db, "s-group", { threadId: GROUP, threadType: "group" });
-  await session(db, "s-webchat", { type: "webchat", threadId: null, threadType: null });
+  session(db, "s-direct", { threadId: DIRECT });
+  session(db, "s-direct-alt", { threadId: DIRECT_ALT });
+  session(db, "s-group", { threadId: GROUP, kind: "group" });
+  session(db, "s-webchat", { threadId: "chat-1", channel: "webchat" });
   // Another channel spelling a thread id exactly as Telegram spells this
-  // account's. The store holds every channel side by side, so nothing but the
-  // pair keeps the two conversations apart.
-  await session(db, "s-elsewhere", { threadId: DIRECT, channel: OTHER_CHANNEL });
+  // account's. Nothing but the pair keeps the two conversations apart.
+  session(db, "s-elsewhere", { threadId: DIRECT, channel: OTHER_CHANNEL });
 
   // The same second twice, so the ordering and the cursor have a tie to settle.
-  await message(db, "m-hello", { sessionId: "s-direct", role: "user", at: 100 });
-  await message(db, "m-reply", { sessionId: "s-direct", role: "assistant", at: 100 });
+  message(db, "m-hello", { sessionId: "s-direct", role: "user", at: 100 });
+  message(db, "m-reply", { sessionId: "s-direct", role: "assistant", at: 100 });
   // A message that did not wake the agent is still something the person said.
-  await message(db, "m-note", { sessionId: "s-direct", role: "notification", at: 200 });
-  await message(db, "m-later", { sessionId: "s-direct", role: "user", at: 300 });
+  message(db, "m-note", { sessionId: "s-direct", role: "notification", at: 200 });
+  message(db, "m-later", { sessionId: "s-direct", role: "user", at: 300 });
   // The account's other address: one history, not two halves of one.
-  await message(db, "m-alt", { sessionId: "s-direct-alt", role: "user", at: 250 });
+  message(db, "m-alt", { sessionId: "s-direct-alt", role: "user", at: 250 });
 
   // Out of every account's scope, each for its own reason.
-  await message(db, "m-trace", { sessionId: "s-direct", role: "trace", at: 400 });
-  // The group's own session, which no account addresses. The first line was
-  // sent by the account, and is still the group's: a line the account wrote
-  // into a group belongs to the group's thread.
-  await message(db, "m-group", {
-    sessionId: "s-group",
-    role: "user",
-    at: 500,
-    senderId: DIRECT,
-  });
-  await message(db, "m-group-reply", { sessionId: "s-group", role: "assistant", at: 500 });
-  await message(db, "m-group-note", { sessionId: "s-group", role: "notification", at: 520 });
-  await message(db, "m-group-later", { sessionId: "s-group", role: "user", at: 540 });
-  await message(db, "m-webchat", { sessionId: "s-webchat", role: "user", at: 600 });
-  await message(db, "m-elsewhere", { sessionId: "s-elsewhere", role: "user", at: 550 });
+  // A trace belongs to no conversation.
+  db.insert(romeAgentMessages)
+    .values({
+      id: "m-trace",
+      sessionId: "s-direct",
+      role: "trace",
+      content: "[]",
+      createdAt: new Date(400_000),
+    })
+    .run();
+  // The group, which no account addresses. The first line was sent by the
+  // account, and is still the group's.
+  message(db, "m-group", { sessionId: "s-group", role: "user", at: 500, senderId: DIRECT });
+  message(db, "m-group-reply", { sessionId: "s-group", role: "assistant", at: 500 });
+  message(db, "m-group-note", { sessionId: "s-group", role: "notification", at: 520 });
+  message(db, "m-group-later", { sessionId: "s-group", role: "user", at: 540 });
+  message(db, "m-webchat", { sessionId: "s-webchat", role: "user", at: 600 });
+  message(db, "m-elsewhere", { sessionId: "s-elsewhere", role: "user", at: 550 });
 }
 
 describe("agentMessages", () => {
@@ -115,9 +161,7 @@ describe("agentMessages", () => {
   afterEach(() => close());
 
   const refs = async () =>
-    (await agentMessages(db).read({ accounts: [account], limit: WHOLE_HISTORY })).map(
-      (entry) => entry.ref,
-    );
+    (await read(db).read({ accounts: [account], limit: WHOLE_HISTORY })).map((entry) => entry.ref);
 
   // Exact, so it also pins what stays out: the trace row, which belongs to no
   // conversation; the group session, whoever sent into it; and the webchat
@@ -133,9 +177,9 @@ describe("agentMessages", () => {
   });
 
   it("answers nothing from a guardian chat, even stored as a channel row", async () => {
-    await session(db, "chat-1", { channel: "webchat", threadId: "chat-1" });
-    await message(db, "m-chat", { sessionId: "chat-1", role: "user", at: 700 });
-    const page = await agentMessages(db).read({
+    session(db, "chat-1", { channel: "webchat", threadId: "chat-1" });
+    message(db, "m-chat", { sessionId: "chat-1", role: "user", at: 700 });
+    const page = await read(db).read({
       accounts: [{ channel: "webchat", addresses: ["chat-1"] }],
       limit: WHOLE_HISTORY,
     });
@@ -143,7 +187,7 @@ describe("agentMessages", () => {
   });
 
   it("answers nothing to a group's own address, which is no account", async () => {
-    const asGroup = await agentMessages(db).read({
+    const asGroup = await read(db).read({
       accounts: [{ channel: CHANNEL, addresses: [GROUP] }],
       limit: WHOLE_HISTORY,
     });
@@ -151,14 +195,14 @@ describe("agentMessages", () => {
   });
 
   it("names the sender and the conversation the transcript recorded", async () => {
-    const page = await agentMessages(db).read({ accounts: [account], limit: WHOLE_HISTORY });
+    const page = await read(db).read({ accounts: [account], limit: WHOLE_HISTORY });
     const byRef = new Map(page.map((entry) => [entry.ref, entry]));
     expect(byRef.get("agent:m-later")?.conversation).toEqual({
       id: DIRECT,
       name: null,
       kind: "dm",
     });
-    expect(byRef.get("agent:m-later")?.sender).toBeUndefined();
+    expect(byRef.get("agent:m-later")?.sender).toEqual({ id: DIRECT, name: null });
   });
 
   it("names the person as the sender and leaves Rome's own lines unattributed", async () => {
@@ -166,7 +210,7 @@ describe("agentMessages", () => {
       sessionId: "s-direct",
       role: "notification",
       at: 350,
-      senderId: "rome",
+      senderId: "rome-bot",
     });
     await message(db, "m-person", {
       sessionId: "s-direct",
@@ -174,7 +218,7 @@ describe("agentMessages", () => {
       at: 360,
       senderId: DIRECT,
     });
-    const page = await agentMessages(db).read({ accounts: [account], limit: WHOLE_HISTORY });
+    const page = await read(db).read({ accounts: [account], limit: WHOLE_HISTORY });
     const byRef = new Map(page.map((entry) => [entry.ref, entry]));
     // The sentinel log reads Rome's replies the same way.
     expect(byRef.get("agent:m-rome")).toMatchObject({ direction: "outbound" });
@@ -183,7 +227,7 @@ describe("agentMessages", () => {
   });
 
   it("names the channel as the source and the direction by the role", async () => {
-    const page = await agentMessages(db).read({ accounts: [account], limit: WHOLE_HISTORY });
+    const page = await read(db).read({ accounts: [account], limit: WHOLE_HISTORY });
     expect(page.every((entry) => entry.source === CHANNEL)).toBe(true);
     const byRef = new Map(page.map((entry) => [entry.ref, entry]));
     expect(byRef.get("agent:m-reply")?.direction).toBe("outbound");
@@ -191,65 +235,32 @@ describe("agentMessages", () => {
     expect(byRef.get("agent:m-note")?.direction).toBe("inbound");
   });
 
-  // The role cannot settle a notification's direction on its own: the writer
-  // stores an undelivered *outbound* message under it too. Both sides of that
-  // are written here through the repository that stores them, so the fixture
-  // is the row the persistence layer really produces rather than one this test
-  // believes it produces.
-  describe("a notification, which the writer stores in both directions", () => {
-    let repo: WebChatRepository;
-
-    beforeEach(() => {
-      repo = new WebChatRepository(db);
-    });
-
-    it("reads one Rome sent out of band as outbound", async () => {
-      await repo.recordOutboundConversationMessage({
-        sessionId: "s-direct",
-        content: text("delivered without a turn"),
-        platformMessageId: "pm-out-of-band",
-        senderId: "rome",
-        senderName: "Rome",
-        knownToProvider: false,
-      });
-      expect(await agentMessages(db).latest([account])).toMatchObject({
-        direction: "outbound",
-        body: "delivered without a turn",
-      });
-    });
-
-    // `sender_id` is a provider's own opaque string, so a channel is free to
-    // hand out one that reads as Rome's marker. Only the role that cannot say
-    // which way it went asks the sender, so the collision decides nothing
-    // where the role already answers.
-    it("leaves a role that already answers alone, whatever the sender is called", async () => {
-      await repo.addConversationMessage({
-        sessionId: "s-direct",
-        role: "user",
-        content: text("a provider that names its people 'rome'"),
-        platformMessageId: "pm-collision",
-        senderId: "rome",
-        senderName: "Ada",
-      });
-      expect(await agentMessages(db).latest([account])).toMatchObject({
-        direction: "inbound",
-        body: "a provider that names its people 'rome'",
-      });
-    });
-
-    it("reads one the person sent as inbound", async () => {
-      await repo.addConversationMessage({
+  // A line's direction is who said it: Rome's when one of its agents did, or
+  // when it went out as Rome's own account, else the person's.
+  describe("a line said without a turn", () => {
+    it("reads one Rome's account sent out of band as outbound", async () => {
+      message(db, "m-out-of-band", {
         sessionId: "s-direct",
         role: "notification",
-        content: text("said while Rome slept"),
-        platformMessageId: "pm-unwoken",
-        senderId: DIRECT,
-        senderName: "Ada",
+        at: 950,
+        senderId: "rome-bot",
       });
-      expect(await agentMessages(db).latest([account])).toMatchObject({
-        direction: "inbound",
-        body: "said while Rome slept",
+      expect(await read(db).latest([account])).toMatchObject({
+        direction: "outbound",
+        ref: "agent:m-out-of-band",
       });
+    });
+
+    // A sender id is a provider's own opaque string, so a person may be called
+    // anything, Rome's name included.
+    it("reads a person whose id reads as Rome's as inbound", async () => {
+      message(db, "m-collision", {
+        sessionId: "s-direct",
+        role: "user",
+        at: 950,
+        senderId: "rome",
+      });
+      expect(await read(db).latest([account])).toMatchObject({ direction: "inbound" });
     });
   });
 
@@ -264,7 +275,7 @@ describe("agentMessages", () => {
         { type: "text", content: "second" },
       ]),
     });
-    expect(await agentMessages(db).latest([account])).toMatchObject({
+    expect(await read(db).latest([account])).toMatchObject({
       ref: "agent:m-parts",
       body: "first\nsecond",
     });
@@ -278,7 +289,7 @@ describe("agentMessages", () => {
       content: JSON.stringify([{ type: "card", payload: {} }]),
     });
     await message(db, "m-broken", { sessionId: "s-direct", role: "user", at: 900, content: "{" });
-    const page = await agentMessages(db).read({ accounts: [account], limit: 2 });
+    const page = await read(db).read({ accounts: [account], limit: 2 });
     expect(page.map((entry) => [entry.ref, entry.body])).toEqual([
       ["agent:m-broken", null],
       ["agent:m-card", null],
@@ -287,7 +298,7 @@ describe("agentMessages", () => {
 
   it("scopes an address to its own channel", async () => {
     expect(await refs()).not.toContain("agent:m-elsewhere");
-    const elsewhere = await agentMessages(db).read({
+    const elsewhere = await read(db).read({
       accounts: [{ channel: OTHER_CHANNEL, addresses: [DIRECT] }],
       limit: WHOLE_HISTORY,
     });
@@ -298,7 +309,7 @@ describe("agentMessages", () => {
   // address on two channels are answered from one pass without either taking
   // the other's rows. A store bound to a single channel cannot be asked this.
   it("keeps two channels apart inside one batch", async () => {
-    const messages = agentMessages(db);
+    const messages = read(db);
     const [here, there] = await Promise.all([
       messages.read({ accounts: [account], limit: WHOLE_HISTORY }),
       messages.read({
@@ -313,17 +324,17 @@ describe("agentMessages", () => {
   // A link keyed by a service names the service, and the transcript keys a
   // conversation by the account's own channel id, which may be opaque.
   it("reads an account under the channel it is stored under, and under none", async () => {
-    await session(db, "s-opaque", { threadId: DIRECT, channel: "tg-opaque" });
-    await message(db, "m-opaque", { sessionId: "s-opaque", role: "user", at: 450 });
+    session(db, "s-opaque", { threadId: DIRECT, channel: "tg-opaque" });
+    message(db, "m-opaque", { sessionId: "s-opaque", role: "user", at: 450 });
 
     expect(await refs()).not.toContain("agent:m-opaque");
-    const opaque = await agentMessages(db).read({
+    const opaque = await read(db).read({
       accounts: [{ ...account, storedUnder: ["tg-opaque"] }],
       limit: WHOLE_HISTORY,
     });
     // Named by the account's own channel, the link's platform, as a reader asked.
     expect(opaque.map((entry) => [entry.ref, entry.source])).toEqual([["agent:m-opaque", CHANNEL]]);
-    const none = await agentMessages(db).read({
+    const none = await read(db).read({
       accounts: [{ ...account, storedUnder: [] }],
       limit: WHOLE_HISTORY,
     });
@@ -340,7 +351,7 @@ testAccountMessagesContract("agentMessages", () => {
     const { db } = createTestDb();
     await seed(db);
     return {
-      messages: agentMessages(db),
+      messages: read(db),
       accounts: [account],
       silent,
     };

@@ -67,14 +67,6 @@ for (let index = 0; index < 32; index += 1) {
   const id = `${DEMO_PREFIX}${String(index + 1).padStart(2, "0")}`;
   const daysAgo = index % 14;
   const activityAt = new Date(now.getTime() - daysAgo * 864e5 - (index % 5) * 36e5);
-  const sourceChannel =
-    profile.type === "webchat"
-      ? "webchat"
-      : profile.type === "channel"
-        ? index % 2
-          ? "email"
-          : "feishu"
-        : null;
   const triggerName =
     profile.type === "action"
       ? index % 2
@@ -98,10 +90,6 @@ for (let index = 0; index < 32; index += 1) {
     agentName: profile.agent === "main" ? null : profile.agent,
     projectName: index % 2 ? "rome" : "default",
     projectPath: index % 2 ? "rome" : "default",
-    sourceChannel,
-    sourceThreadId: sourceChannel ? `thread-${index + 1}` : null,
-    sourceThreadName: sourceChannel ? `Release planning · ${index + 1}` : null,
-    sourceThreadType: sourceChannel ? "group" : null,
     trigger: triggerName
       ? {
           triggerKind: "action",

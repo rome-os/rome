@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import type { EnsureChannelChatInput } from "@rome-os/app-runtime";
+import { createTestDb, testChatWiring, type TestDb } from "../test/helpers.js";
+import { openChannelChat } from "./open-seat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -16,6 +18,10 @@ describe("SessionQueryService", () => {
     feishu: "core:main",
     discord: null,
   };
+
+  /** Rome's seat at a channel address, in the chat the address keys. */
+  const openSeat = (input: EnsureChannelChatInput) =>
+    openChannelChat({ ...testChatWiring(testDb.db, webchat), webchatRepo: webchat }, input);
 
   beforeEach(() => {
     rs.useFakeTimers();
@@ -37,7 +43,14 @@ describe("SessionQueryService", () => {
       ["code-review-agent", codeReviewAgent] as const,
     ]);
     service = new SessionQueryService({
-      repository: new SessionQueryRepository(testDb.db),
+      // Rome's account on each channel names the channel a seat speaks through.
+      repository: new SessionQueryRepository(testDb.db, () => {
+        const { adapters } = testChatWiring(testDb.db, webchat);
+        return ["telegram", "feishu", "discord", "email"].map((channel) => ({
+          channel,
+          account: adapters.accountOn(channel),
+        }));
+      }),
       agentLoader: {
         getRecord: (name) => {
           const record = resolvableRecords.get(name);
@@ -557,7 +570,7 @@ describe("SessionQueryService", () => {
       "code-review-agent",
     ],
   ] as const)("labels a channel conversation by the agent that answers it: %s", async (_label, channel, threadType, stored, pinnedMain, expected) => {
-    const { id } = await webchat.ensureChannelChat({
+    const { id } = await openSeat({
       channel,
       threadId: "thread-1",
       threadType,
@@ -614,13 +627,13 @@ describe("SessionQueryService", () => {
   });
 
   it("finds a channel conversation by the name of the agent that answers it", async () => {
-    const follows = await webchat.ensureChannelChat({
+    const follows = await openSeat({
       channel: "telegram",
       threadId: "thread-1",
       threadType: "group",
       agentName: "main",
     });
-    const keeps = await webchat.ensureChannelChat({
+    const keeps = await openSeat({
       channel: "telegram",
       threadId: "thread-2",
       threadType: "group",

@@ -1,0 +1,1 @@
+CREATE INDEX `idx_chat_messages_place` ON `chat_messages` (`chat_id`,`thread_id`);

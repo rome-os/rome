@@ -1,7 +1,13 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ActionResult, RomeAppContext } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
+import { WebChatRepository } from "../../../../packages/core/src/db/repositories/webchat.js";
+import type { SessionActor } from "../../../../packages/core/src/lib/session-actor.js";
+import {
+  createTestDb,
+  testAppRepositories,
+  type TestDb,
+} from "../../../../packages/core/src/test/helpers.js";
 import { gatherGuardianContext } from "./guardian-context.js";
 
 const now = Date.UTC(2026, 9, 23, 18, 0, 0);
@@ -48,31 +54,40 @@ beforeEach(() => {
 });
 afterEach(() => testDb.close());
 
-function chat(id: string, name: string, extra: { owner?: string; archived?: boolean } = {}) {
+let repo: WebChatRepository;
+beforeEach(() => {
+  repo = new WebChatRepository(testDb.db);
+});
+
+/** A dashboard chat, the guardian's unless `owner` names someone else. */
+async function chat(id: string, name: string, extra: { owner?: string; archived?: boolean } = {}) {
+  await repo.createSession(id, name);
   testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, owner_key, archived_at, created_at, activity_at)
-    VALUES (${id}, ${name}, 'channel', 'webchat', ${id}, ${extra.owner ?? null},
-      ${extra.archived ? sec(1) : null}, ${sec(100)}, ${sec(1)})
+    UPDATE rome_sessions SET owner_key = ${extra.owner ?? null},
+      archived_at = ${extra.archived ? sec(1) : null}, created_at = ${sec(100)}
+    WHERE id = ${id}
   `);
 }
 
-function message(
+/** A line said in dashboard chat `session` `hoursAgo` hours before now, by
+ *  `actor` (the guardian when absent) or, as `assistant`, by Rome. */
+async function message(
   id: string,
   session: string,
-  role: string,
+  role: "user" | "assistant",
   content: string,
   hoursAgo: number,
-  actor?: object,
+  actor?: SessionActor,
 ) {
-  testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, created_at, actor)
-    VALUES (${id}, ${session}, ${role}, ${content}, ${sec(hoursAgo)}, ${actor ? JSON.stringify(actor) : null})
-  `);
+  if (role === "user") await repo.recordUserInput(id, session, content, actor);
+  else await repo.addMessage(id, session, "assistant", content, `turn-${id}`);
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${sec(hoursAgo)} WHERE key = ${id}`);
 }
 
 function appContext(profile: ActionResult = { status: "error", error: "unavailable" }) {
   return {
     db: { connection: testDb.db },
+    repositories: testAppRepositories(testDb.db, repo),
     runAction: async (name: string) => {
       expect(name).toBe("get_guardian_cloud_profile");
       return profile;
@@ -82,19 +97,19 @@ function appContext(profile: ActionResult = { status: "error", error: "unavailab
 
 describe("gatherGuardianContext", () => {
   it("reads only the guardian's own recent words in their own chats", async () => {
-    const guardian = { kind: "guardian", userId: "g" };
-    const visitor = { kind: "visitor", accountId: "v", email: "v@example.com" };
-    chat("mine", "Bakery orders");
-    chat("visited", "Shared demo");
-    chat("theirs", "Visitor chat", { owner: "visitor:v" });
-    chat("old", "Archived", { archived: true });
-    message("m1", "mine", "user", text("Can you track pickup orders?"), 2, guardian);
-    message("m2", "mine", "assistant", text("AGENT REPLY"), 2);
-    message("m3", "mine", "user", text("too old"), 60);
-    message("m4", "visited", "user", text("guardian start"), 3);
-    message("m5", "visited", "user", text("visitor request"), 3, visitor);
-    message("m6", "theirs", "user", text("owner request"), 3);
-    message("m7", "old", "user", text("archived note"), 3);
+    const guardian: SessionActor = { kind: "guardian", userId: "g", via: "cookie" };
+    const visitor: SessionActor = { kind: "visitor", accountId: "v", email: "v@example.com" };
+    await chat("mine", "Bakery orders");
+    await chat("visited", "Shared demo");
+    await chat("theirs", "Visitor chat", { owner: "visitor:v" });
+    await chat("old", "Archived", { archived: true });
+    await message("m1", "mine", "user", text("Can you track pickup orders?"), 2, guardian);
+    await message("m2", "mine", "assistant", text("AGENT REPLY"), 2);
+    await message("m3", "mine", "user", text("too old"), 60);
+    await message("m4", "visited", "user", text("guardian start"), 3);
+    await message("m5", "visited", "user", text("visitor request"), 3, visitor);
+    await message("m6", "theirs", "user", text("owner request"), 3);
+    await message("m7", "old", "user", text("archived note"), 3);
 
     const { chats } = await gatherGuardianContext(appContext(), "UTC", now);
 
@@ -113,13 +128,13 @@ describe("gatherGuardianContext", () => {
   });
 
   it("clips long messages and has no chats when nothing qualifies", async () => {
-    chat("mine", "Long");
-    message("m1", "mine", "user", text("x".repeat(1000)), 1);
+    await chat("mine", "Long");
+    await message("m1", "mine", "user", text("x".repeat(1000)), 1);
     const { chats } = await gatherGuardianContext(appContext(), "UTC", now);
     expect(chats).toContain(`${"x".repeat(400)}…`);
     expect(chats).not.toContain("x".repeat(401));
 
-    testDb.db.run(sql`DELETE FROM rome_agent_messages`);
+    testDb.db.run(sql`DELETE FROM chat_messages`);
     expect((await gatherGuardianContext(appContext(), "UTC", now)).chats).toBeNull();
   });
 

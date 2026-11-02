@@ -6,6 +6,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
+import { chatIdsOfKind } from "../chats/chat-repository.js";
 
 /**
  * What the sentinel logged, one row read as the two lines it records: what the
@@ -33,10 +34,10 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
         ${addressed}
         AND NOT EXISTS (
           SELECT 1 FROM rome_sessions s
-          WHERE s.type = 'channel'
-            AND s.source_channel = l.channel
-            AND s.source_thread_id = l.thread_id
-            AND s.source_thread_type = 'group'
+          -- The seat at the thread's address, by the id channelChatId gives it.
+          WHERE s.id = 'channel:' || l.channel || ':' || l.thread_id
+            AND s.type = 'channel'
+            AND (s.chat_id IN ${chatIdsOfKind("group")} OR s.thread_id IS NOT NULL)
         )`;
       return sql`
         SELECT

@@ -32,8 +32,10 @@ describe("isWebchatChat", () => {
   }
 
   // The sidebar reads one page of chats newest first. A plan that sorts would
-  // read every chat to serve each page.
-  it("pages the sidebar off the chat index without sorting", () => {
+  // read every chat to serve each page, and one off an index over every
+  // session would walk past subagent and action runs to find them. The
+  // partial index holds the dashboard's seats alone.
+  it("pages the sidebar off the dashboard's own index without sorting", () => {
     const details = plan(
       testDb.db
         .select({ id: romeSessions.id })
@@ -43,11 +45,11 @@ describe("isWebchatChat", () => {
         .limit(51),
     );
 
-    expect(details).toContain("idx_rome_sessions_chat_activity");
+    expect(details).toContain("idx_rome_sessions_dashboard_activity");
     expect(details).not.toContain("TEMP B-TREE");
   });
 
-  it("pages a project's chats off the project chat index without sorting", () => {
+  it("pages a project's chats off the dashboard's project index without sorting", () => {
     const details = plan(
       testDb.db
         .select({ id: romeSessions.id })
@@ -57,7 +59,7 @@ describe("isWebchatChat", () => {
         .limit(51),
     );
 
-    expect(details).toContain("idx_rome_sessions_chat_project_activity");
+    expect(details).toContain("idx_rome_sessions_dashboard_project_activity");
     expect(details).not.toContain("TEMP B-TREE");
   });
 });

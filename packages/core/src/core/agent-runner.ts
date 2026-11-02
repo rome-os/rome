@@ -19,6 +19,7 @@ import {
 import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
+import { runLines, type SeatLines } from "../channels/seat-lines.js";
 
 const log = createLogger("agent-runner");
 
@@ -488,6 +489,8 @@ export class AgentRunner {
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
     private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
+    /** The lines a run names by the platform's ids. */
+    private seatLines?: Pick<SeatLines, "recorded">,
   ) {}
 
   /**
@@ -561,6 +564,7 @@ export class AgentRunner {
       threadContext,
     });
     const { romeSessionId, romeSessionType } = conversation;
+    const lines = await runLines(this.seatLines, romeSessionId, params);
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
@@ -572,15 +576,12 @@ export class AgentRunner {
         romeSessionId,
         romeSessionType,
         replyTo: params.replyTo,
+        quoted: lines.quoted,
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
-    if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
-      await this.webchatRepo.assignConversationMessageTurn(
-        romeSessionId,
-        params.platformMessageId,
-        handle.turnId,
-      );
+    if (this.webchatRepo && conversation.promptPersisted && lines.prompt) {
+      this.webchatRepo.assignConversationMessageTurn(romeSessionId, lines.prompt, handle.turnId);
     }
 
     const persistTrace = params.persistTrace ?? shouldPersistAgentTrace(threadContext);
@@ -753,10 +754,6 @@ export class AgentRunner {
         projectPath: thread?.projectPath,
         // Later turns of the side chat read the folder from this row.
         deviceFolder: thread?.deviceFolder ?? null,
-        sourceChannel: thread?.channel ?? null,
-        sourceThreadId: thread?.threadId ?? null,
-        sourceThreadName: thread?.threadName ?? null,
-        sourceThreadType: thread?.threadType ?? null,
         trigger,
         parentSessionId: parent ? parentSessionId : null,
         parentTurnId: parent ? (params.parentTurnId ?? null) : null,

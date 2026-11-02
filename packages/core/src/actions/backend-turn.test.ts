@@ -1,12 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
+import type { ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
-import { chatKey, placeIn } from "../chats/place.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 describe("backend turn delivery", () => {
-  it("records the provider delivery id for a messaging-channel continuation", async () => {
+  it("says a messaging-channel continuation through the agent's seat", async () => {
     const agentRunner = createMockAgentRunner([
       [
         {
@@ -35,17 +34,14 @@ describe("backend turn delivery", () => {
       agentName: null,
     }));
     const chats = { ensureChannelChat } as unknown as ChatRepository;
-    const recordSent = rs.fn(async () => {});
-    const place = placeIn(chatKey("wechat", "wechat-thread-1" as ChatId));
+    const replies = {
+      send: rs.fn(async () => ({ id: "line-1", platformMessageId: "wechat-message-1" })),
+    };
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "wechat" ? wechat : null),
       chats,
-      messages: { recordSent },
-      places: {
-        placeOfRecord: (id) =>
-          id === "channel:wechat:wechat-thread-1" ? { place, channel: "wechat" } : null,
-      },
+      replies: replies as never,
     });
 
     await runner.runAndDeliver({
@@ -57,25 +53,18 @@ describe("backend turn delivery", () => {
       prompt: "⏰ Time's up: check deployment",
     });
 
-    expect(send).toHaveBeenCalledWith("wechat-thread-1", {
-      text: "The deferred check is complete.",
-      turnId: "turn-1",
-    });
     expect(ensureChannelChat).toHaveBeenCalledWith({
       channel: "wechat",
       threadId: "wechat-thread-1",
       agentName: "main",
     });
-    expect(recordSent).toHaveBeenCalledWith(
-      {
-        direction: "fromRome",
-        place,
-        parts: [{ type: "text", content: "The deferred check is complete." }],
-        platformMessageId: "wechat-message-1",
-        turnId: "turn-1",
-        turnAnswer: true,
-      },
-      { channel: "wechat" },
+    // The reply is said through the agent's seat, which sends it on the
+    // channel and records it as the turn's answer.
+    expect(replies.send).toHaveBeenCalledWith(
+      "channel:wechat:wechat-thread-1",
+      wechat,
+      { text: "The deferred check is complete." },
+      { turnId: "turn-1" },
     );
   });
   it("delivers a webchat continuation on the send port after showing it on the session stream", async () => {
@@ -102,6 +91,9 @@ describe("backend turn delivery", () => {
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "webchat" ? webchat : null),
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     runner.setWebchatRuntime({
       enqueueSessionTask: async (_sessionId, task) => {
@@ -153,6 +145,9 @@ describe("backend turn delivery", () => {
       const runner = createBackendTurnRunner({
         agentRunner,
         channel: (name) => (name === "webchat" ? webchat : null),
+        // No messaging-channel reply is said here, so no seat is wired.
+        chats: {} as never,
+        replies: {} as never,
       });
       const seen: unknown[] = [];
       runner.setWebchatRuntime({
@@ -186,6 +181,9 @@ describe("backend turn delivery", () => {
       agentRunner,
       channel: (name) => (name === "webchat" ? webchat : null),
       isTextPrivate: (agentName) => agentName === "core:concierge",
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     runner.setWebchatRuntime({
       enqueueSessionTask: async (_sessionId, task) => {
@@ -216,6 +214,9 @@ describe("backend turn delivery", () => {
           send: { send: rs.fn(), direct: null, activity: null },
         }) as unknown as Channel,
       resolveDeviceFolder,
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
     runner.setWebchatRuntime({
       enqueueSessionTask: async (_sessionId, task) => {
@@ -251,6 +252,9 @@ describe("backend turn delivery", () => {
         messages: null,
         directory: null,
       }),
+      // No messaging-channel reply is said here, so no seat is wired.
+      chats: {} as never,
+      replies: {} as never,
     });
 
     await expect(

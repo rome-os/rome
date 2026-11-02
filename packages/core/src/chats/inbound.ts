@@ -1,29 +1,26 @@
-// Recording what reaches Rome on its channels, and hearing it once recorded.
-// Vocabulary: docs/domains/chats.md#message and
-// docs/domains/participation.md#wake.
+// Recording what reaches Rome on its channels. Vocabulary:
+// docs/domains/chats.md#message.
 //
 // Every answerable message a channel delivers is recorded in its chat before
-// anything acts on it, whether or not an agent answers it. Participation hears
-// it from MessageSaid and decides the wake there.
+// anything acts on it, whether or not an agent answers it, and raises
+// MessageSaid. Agents hears it there and decides the wake
+// (sessions/messages-said.ts).
 
-import type { Channel, InboundEvent, SaidInboundEvent, MessagesSaid } from "@rome-os/app-runtime";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { createLogger } from "../logger.js";
+import type { Channel, InboundEvent } from "@rome-os/app-runtime";
+import type { ChatAdapters, ChannelChatAdapter, Inbound } from "./adapter.js";
+import type { ChatRepository } from "./chat-repository.js";
 import type { ChatEvents } from "./events.js";
 import type { MessageRepository } from "./message-repository.js";
 import { messageToRome } from "./message.js";
-import { chatKey, placeIn } from "./place.js";
-
-const log = createLogger("chats-inbound");
+import { placeIn } from "./place.js";
 
 export interface InboundRecordingDeps {
-  /** Opens the chat a message is said in, or finds it. */
-  chats: Pick<WebChatRepository, "ensureChannelChat">;
-  messages: Pick<MessageRepository, "record" | "wakeDecided" | "isWakeUndecided">;
+  /** Starts the chat a message is said in, or finds it. */
+  chats: Pick<ChatRepository, "start">;
+  messages: Pick<MessageRepository, "record">;
   events: ChatEvents;
-  /** The platform a channel's accounts are on, for a message that names no
-   *  account it arrived on. */
-  platformOfChannel: (channel: string) => string;
+  /** Each channel's chat adapter, which hands over what the channel hears. */
+  adapters: Pick<ChatAdapters, "of">;
   /** Whether Rome listens to the account behind connection `connectionId`,
    *  as its inbound port reads it. An account linked to an agent that is not
    *  loaded is still listened to, so what it receives is recorded and
@@ -32,10 +29,15 @@ export interface InboundRecordingDeps {
 }
 
 export interface InboundRecording {
-  /** Hearing each message once recorded. Recording runs only while someone
-   *  subscribes here, so nothing is stored twice while a hook stores messages
-   *  itself. */
-  readonly messagesSaid: MessagesSaid;
+  /**
+   * Record what the channels hear until the answered function is called.
+   * Recording runs only while someone listens, so nothing is stored twice
+   * while a hook stores messages itself.
+   */
+  listen(): () => void;
+  /** The platform's event recorded message `id` arrived in on channel
+   *  `channel`, while it is being heard. */
+  heard(channel: string, id: number): InboundEvent | undefined;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
 }
@@ -43,35 +45,34 @@ export interface InboundRecording {
 /**
  * Records what arrives on `channels` and on any channel added later. Each
  * channel is subscribed once, so a chat's messages are recorded one at a time
- * in arrival order (R4 of `ChannelInbound`), and each is heard by every
- * {@link MessagesSaid} subscriber before the chat's next one is recorded.
- * A subscriber that is slow therefore holds up its chat's later messages, both
- * their recording and every subscriber's hearing them.
+ * in arrival order (R4 of `ChannelInbound`), and each one's MessageSaid is
+ * heard by every listener before the chat's next one is recorded. A listener
+ * that is slow therefore holds up its chat's later messages.
  */
 export function inboundRecording(
   deps: InboundRecordingDeps,
   channels: readonly Channel[],
 ): InboundRecording {
   const known: Channel[] = [...channels];
-  /** Each recorded channel's unsubscribe, by channel name. Empty while no
-   *  one hears recorded messages. */
-  const recording = new Map<string, () => void>();
-  let hearers = 0;
-  /** The ids of recorded messages a subscriber was handed. */
-  const delivered = new Set<string>();
+  /** Each recording channel's adapter, by channel name. Empty while no one
+   *  listens. */
+  const recording = new Map<string, ChannelChatAdapter>();
+  let listeners = 0;
+  /** The adapter's keys of each message being heard, by its recorded id. */
+  const hearing = new Map<number, { chat: string; key: string }>();
 
-  /** The last recording queued in each chat, by channel and chat. A channel
-   *  delivers a chat's messages one at a time, but a recording still running
-   *  when recording stops outlives its subscription, so the chat's next one,
-   *  delivered to a later subscription, waits for it here. */
-  const tails = new Map<string, Promise<void>>();
+  /** The last recording queued in each chat, by chat. An adapter delivers a
+   *  chat's messages one at a time, but a recording still running when
+   *  recording stops outlives it, so the chat's next one, delivered once
+   *  recording starts again, waits for it here. */
+  const tails = new Map<string, Promise<number | null>>();
 
-  const record = (channel: Channel) => (event: InboundEvent) => {
-    const key = `${channel.name}\0${event.message.chatId}`;
-    const recorded = (tails.get(key) ?? Promise.resolve()).then(() => recordOne(channel, event));
-    // A failed recording is the channel's to report, and does not hold up the
+  const deliver = (message: Inbound): Promise<number | null> => {
+    const key = `${message.via.channel}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
+    const recorded = (tails.get(key) ?? Promise.resolve(null)).then(() => recordOne(message));
+    // A failed recording is the adapter's to report, and does not hold up the
     // chat's next message.
-    const tail = recorded.catch(() => undefined);
+    const tail = recorded.catch(() => null);
     tails.set(key, tail);
     void tail.then(() => {
       if (tails.get(key) === tail) tails.delete(key);
@@ -79,110 +80,75 @@ export function inboundRecording(
     return recorded;
   };
 
-  const recordOne = async (channel: Channel, event: InboundEvent) => {
-    if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
+  const recordOne = async (message: Inbound): Promise<number | null> => {
+    const { via } = message;
     // What reaches an account Rome does not listen to never forms a chat.
-    if (deps.listens?.(event.ref.connectionId) === false) return;
-    const saved = await materialized(channel, event);
-    // Named by the channel it was recorded on, which a subscriber finds the
-    // channel by to answer it.
-    const heard = { ...saved, message: { ...saved.message, channel: channel.name } };
-    const { message } = heard;
-    const threadType = message.thread?.kind === "dm" ? "private" : "group";
-    await deps.chats.ensureChannelChat({
-      channel: channel.name,
-      threadId: message.chatId,
-      ...(message.parentChatId === undefined ? {} : { parentThreadId: message.parentChatId }),
-      ...(message.thread?.name === undefined ? {} : { threadName: message.thread.name }),
-      threadType,
-      // A chat starts answered by main. Its own agent, when it has one, was
-      // set through its settings, which start the chat's row themselves.
-      agentName: "main",
-    });
-    const platform = message.account?.platform ?? deps.platformOfChannel(channel.name);
-    const replyTo = message.replyTo?.messageId.trim();
-    const recorded = await deps.messages.record(
+    if (deps.listens?.(via.connectionId) === false) return null;
+    const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
+    // Recorded and raised in one step, with nothing run in between, so
+    // MessageSaid's first listener acts before anything reads the message. A
+    // redelivery carries the same key, records nothing and raises nothing.
+    const recorded = deps.messages.record(
       messageToRome({
-        place: placeIn(
-          chatKey(platform, message.parentChatId ?? message.chatId),
-          message.parentChatId === undefined ? undefined : message.chatId,
-        ),
+        key: message.key,
+        place: placeIn(chat.ref, message.thread?.id),
         saidBy: {
-          account: { platform, id: message.senderId },
-          name: message.senderDisplayName ?? message.senderId,
+          account: { platform: chat.ref.platform, id: message.sender.accountId },
+          ...(message.sender.name === undefined ? {} : { name: message.sender.name }),
         },
-        body: { text: message.text ?? "", attachments: message.attachments },
-        platformMessageId: message.messageId,
-        ...(replyTo ? { replyTo } : {}),
-        at: message.timestamp,
+        body: { text: message.text, attachments: [...message.attachments] },
+        ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+        at: message.saidAt,
       }),
-      { channel: channel.name, heard },
     );
-    if (!recorded) return;
-    // Handed to nobody, as while a hook is being swapped, nothing will decide
-    // its wake, so it stands decided as a message no agent answered.
-    if (!delivered.delete(recorded.id)) await deps.messages.wakeDecided(recorded.id);
+    if (!recorded) return null;
+    hearing.set(recorded.id, { chat: message.chat.externalId, key: message.key });
+    try {
+      await deps.events.publish({
+        type: "MessageSaid",
+        message: recorded,
+        via: { channel: via.channel, account: via.account },
+      });
+    } finally {
+      hearing.delete(recorded.id);
+    }
+    return recorded.id;
   };
 
   const subscribe = (channel: Channel): void => {
     if (!channel.inbound || recording.has(channel.name)) return;
-    recording.set(channel.name, channel.inbound.subscribe(record(channel)));
+    const adapter = deps.adapters.of(channel);
+    recording.set(channel.name, adapter);
+    adapter.start(deliver, () => {
+      // The adapter's channel reports a failed recording itself.
+    });
   };
 
-  const messagesSaid: MessagesSaid = {
-    subscribe(handler) {
-      const unsubscribe = deps.events.subscribe(async (event) => {
-        if (event.type !== "MessageSaid" || !event.via.heard) return;
-        const recorded: SaidInboundEvent = {
-          ...event.via.heard,
-          recorded: { chatRecordId: event.chatRecordId, messageId: event.message.id },
-        };
-        delivered.add(event.message.id);
-        await handler(recorded);
-      });
-      hearers += 1;
+  return {
+    listen() {
+      listeners += 1;
       for (const channel of known) subscribe(channel);
       let left = false;
       return () => {
         if (left) return;
         left = true;
-        hearers -= 1;
-        unsubscribe();
-        // With nobody hearing, recording stops, so a hook that stores messages
-        // itself, such as an older one a reload brings back, is the only one
-        // storing them. Messages still waiting on a channel are dropped (R3),
-        // as they are for any hook swap.
-        if (hearers > 0) return;
-        for (const leave of recording.values()) leave();
+        listeners -= 1;
+        // With nobody listening, recording stops, so a hook that stores
+        // messages itself, such as an older one a reload brings back, is the
+        // only one storing them. Messages still waiting on a channel are
+        // dropped (R3), as they are for any hook swap.
+        if (listeners > 0) return;
+        for (const adapter of recording.values()) void adapter.stop();
         recording.clear();
       };
     },
-    decided: (recorded) => deps.messages.wakeDecided(recorded.messageId),
-  };
-
-  return {
-    messagesSaid,
+    heard: (channel, id) => {
+      const keys = hearing.get(id);
+      return keys && recording.get(channel)?.heard(keys.chat, keys.key);
+    },
     addChannels(added) {
       known.push(...added);
-      if (hearers > 0) for (const channel of added) subscribe(channel);
+      if (listeners > 0) for (const channel of added) subscribe(channel);
     },
   };
-}
-
-/** `event` with its attachments saved where the channel can save them now.
- *  A channel that cannot, or fails to, leaves them as delivered. */
-async function materialized(channel: Channel, event: InboundEvent): Promise<InboundEvent> {
-  const media = channel.inbound?.media ?? null;
-  if (!media || event.message.attachments.length === 0) return event;
-  try {
-    const attachments = await media.materialize(event.message);
-    return { ...event, message: { ...event.message, attachments } };
-  } catch (error) {
-    log.error("failed to materialize incoming attachments", {
-      channel: channel.name,
-      messageId: event.message.messageId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return event;
-  }
 }

@@ -6,7 +6,13 @@ import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { WebChatRepository } from "../../../../../packages/core/src/db/repositories/webchat.js";
+import {
+  createTestDb,
+  testAppRepositories,
+  type TestDb,
+} from "../../../../../packages/core/src/test/helpers.js";
+import { seatFixture } from "../../../../../packages/core/src/test/seats.js";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 import { resolveProjectWorkingDirWithinRoot } from "../../../../../packages/core/src/webchat/projects.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
@@ -51,11 +57,26 @@ const appDb = () => ({
   tableName: (name: string) => `dream__${name}`,
 });
 
-function seedSession(id: string, type: string, createdAt: number, name = id): void {
-  testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-    VALUES (${id}, ${name}, ${type}, ${createdAt}, ${createdAt})
-  `);
+/** A session of `type` with one line said in it at `createdAt`: a dashboard
+ *  chat for `webchat`, a Telegram group Rome's account is in for `channel`,
+ *  and a background session in no chat otherwise. */
+async function seedSession(id: string, type: string, createdAt: number, name = id): Promise<void> {
+  const repo = new WebChatRepository(testDb.db);
+  if (type === "webchat") {
+    await repo.createSession(id, name);
+    await repo.recordUserInput(`${id}-line`, id, JSON.stringify([{ type: "text", content: "hi" }]));
+  } else if (type === "channel") {
+    const fixture = seatFixture(testDb.db);
+    const chat = fixture.chat("telegram", `telegram:${id}`, "group");
+    fixture.seat({ id, chat, accountId: "telegram-bot", name });
+    fixture.say({ id: `${id}-line`, chat, from: "person", at: new Date(createdAt * 1000) });
+  } else {
+    await repo.ensureRomeSession({ id, name, type: type as "action", agentName: null });
+  }
+  testDb.db.run(sql`UPDATE chat_messages SET said_at = ${createdAt} WHERE key = ${`${id}-line`}`);
+  testDb.db.run(
+    sql`UPDATE rome_sessions SET created_at = ${createdAt}, activity_at = ${createdAt} WHERE id = ${id}`,
+  );
 }
 
 function makeDeps(
@@ -76,6 +97,7 @@ function makeDeps(
     } as unknown as AgentRunner,
     appContext: {
       db: appDb(),
+      repositories: testAppRepositories(testDb.db),
       async runAction(name: string, args: Record<string, unknown>) {
         installCalls.push({ name, ...args });
         return installResult;
@@ -110,7 +132,7 @@ function writeSkill(
 
 describe("skill_review", () => {
   it("returns agent result on success", async () => {
-    seedSession("webchat-session-1", "webchat", 1700000000);
+    await seedSession("webchat-session-1", "webchat", 1700000000);
     const deps = makeDeps([
       { type: "session_init", sessionId: "agent-session-1" },
       { type: "result", content: "Nothing to update." },
@@ -124,7 +146,7 @@ describe("skill_review", () => {
   });
 
   it("returns failure when agent emits an error", async () => {
-    seedSession("webchat-session-1", "webchat", 1700000000);
+    await seedSession("webchat-session-1", "webchat", 1700000000);
     const deps = makeDeps([{ type: "error", error: "Model API failure" }]);
 
     const result = await createAction(actionConfig, deps).execute({});
@@ -136,7 +158,7 @@ describe("skill_review", () => {
   });
 
   it("marks the run interrupted when the agent turn is stopped", async () => {
-    seedSession("webchat-session-1", "webchat", 1700000000);
+    await seedSession("webchat-session-1", "webchat", 1700000000);
     const deps = makeDeps([
       { type: "result", content: "" },
       { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 },
@@ -149,7 +171,7 @@ describe("skill_review", () => {
   });
 
   it("records an error followed by an interrupted turn as interrupted", async () => {
-    seedSession("webchat-session-1", "webchat", 1700000000);
+    await seedSession("webchat-session-1", "webchat", 1700000000);
     const deps = makeDeps([
       { type: "error", error: "aborted" },
       { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 },
@@ -171,8 +193,8 @@ describe("skill_review", () => {
   });
 
   it("uses explicit sessionId when provided", async () => {
-    seedSession("newer-session", "webchat", 1700000100);
-    seedSession("explicit-session-42", "webchat", 1700000000, "Fix the deploy script");
+    await seedSession("newer-session", "webchat", 1700000100);
+    await seedSession("explicit-session-42", "webchat", 1700000000, "Fix the deploy script");
     const runCalls: Array<{ prompt: string }> = [];
 
     await createAction(
@@ -192,10 +214,10 @@ describe("skill_review", () => {
   });
 
   it("reviews the newest webchat session, not a newer channel or background run", async () => {
-    seedSession("older-web", "webchat", 1700000000);
-    seedSession("newest-web", "webchat", 1700000100);
-    seedSession("group-chat", "channel", 1700000200);
-    seedSession("dream-run", "action", 1700000300);
+    await seedSession("older-web", "webchat", 1700000000);
+    await seedSession("newest-web", "webchat", 1700000100);
+    await seedSession("group-chat", "channel", 1700000200);
+    await seedSession("dream-run", "action", 1700000300);
     const runCalls: Array<{ prompt: string }> = [];
 
     const result = await createAction(
@@ -209,7 +231,7 @@ describe("skill_review", () => {
   });
 
   it("runs the agent on a staging copy of a scaffolded carrier", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     mkdirSync(join(carrierDir, "skills", "existing"), { recursive: true });
     writeFileSync(join(carrierDir, "skills", "existing", "SKILL.md"), "---\nname: existing\n---\n");
     const runCalls: Array<{ prompt: string; workingDir?: string }> = [];
@@ -232,7 +254,7 @@ describe("skill_review", () => {
   });
 
   it("stages where core accepts the working dir of a carrier inside the projects root", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const projectsRoot = dirname(carrierDir);
     let accepted = "";
 
@@ -248,7 +270,7 @@ describe("skill_review", () => {
   });
 
   it("leaves a skill imported into the carrier mid-review alone when its install fails", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     installResult = { status: "error", error: "BUILD_FAILED" };
     const skill = writeSkill("reviewed");
 
@@ -271,7 +293,7 @@ describe("skill_review", () => {
   });
 
   it("registers and installs a skill saved in the carrier", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const skill = writeSkill("deploy-preview");
 
     const result = await createAction(
@@ -294,7 +316,7 @@ describe("skill_review", () => {
   });
 
   it("fails the run and rolls the carrier back when the install fails", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     installResult = { status: "error", error: "BUILD_FAILED" };
     const skill = writeSkill("deploy-preview");
 
@@ -319,7 +341,7 @@ describe("skill_review", () => {
   });
 
   it("installs a skill written through a Codex-shaped edit event", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const skill = writeSkill("codex-skill");
 
     const result = await createAction(
@@ -346,7 +368,7 @@ describe("skill_review", () => {
   });
 
   it("keeps both skills when two reviews overlap", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const a = writeSkill("alpha");
     const b = writeSkill("beta");
     const listedAtInstall: string[] = [];
@@ -373,7 +395,7 @@ describe("skill_review", () => {
   });
 
   it("rolls back a failed agent's writes so an identical retry installs", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const skill = writeSkill("half-done");
 
     const failed = await createAction(
@@ -391,7 +413,7 @@ describe("skill_review", () => {
   });
 
   it("does not install what a stopped review left behind", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const skill = writeSkill("stopped");
 
     await createAction(
@@ -408,7 +430,7 @@ describe("skill_review", () => {
   });
 
   it("a failed install never rolls back an overlapping review's skill", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const good = writeSkill("alpha");
     const bad = writeSkill("beta");
     const deps = (skill: typeof good, ok: boolean) => {
@@ -435,7 +457,7 @@ describe("skill_review", () => {
   });
 
   it("refuses to overwrite a skill changed in the carrier during the review", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const path = join(carrierDir, "skills", "shared", "SKILL.md");
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, "---\nname: shared\n---\nv1\n");
@@ -456,7 +478,7 @@ describe("skill_review", () => {
   });
 
   it("does not install for writes outside the carrier", async () => {
-    seedSession("web", "webchat", 1700000000);
+    await seedSession("web", "webchat", 1700000000);
     const outside = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";
 
     await createAction(

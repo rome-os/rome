@@ -2324,7 +2324,86 @@ export interface EnsureChannelChatInput {
   projectPath?: string;
 }
 
+/** A chat a session stands in that had a line said in a window, as Dream's
+ *  review lists them: the session, and the chat and thread it stands in. */
+export interface RecentChat {
+  sessionId: string;
+  /** Rome's id for the chat, and the thread in it, or null for the chat. */
+  chatId: string;
+  threadId: string | null;
+  /** The session's name, as the dashboard lists it. */
+  name: string;
+  /** The topic's name when the session stands in one, else null. */
+  threadName: string | null;
+  /** Who a dashboard chat belongs to: `guardian`, or `visitor:<id>`. */
+  ownerKey: string;
+  archived: boolean;
+  /** The platform the chat is on: `webchat` for the dashboard. */
+  platform: string;
+  /** The connection that is the seat's account on that platform, with its
+   *  kind, or null when Rome holds no record of it. */
+  channel: { id: string; kind: string } | null;
+  /** The agent that answers in the seat, or null when none does. */
+  agentName: string | null;
+  projectName: string | null;
+  projectPath: string | null;
+  /** When the session took its seat. */
+  startedAt: Date;
+}
+
+/** One of a session's traces: what its agent did in a turn, as blocks, and
+ *  what the turn used. */
+export interface SessionTrace {
+  id: string;
+  turnId: string | null;
+  /** The trace's blocks as a JSON array. */
+  content: string;
+  createdAt: Date;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  costUsd: number | null;
+}
+
+/**
+ * A line said where a session stands, as that session reads it: its prompt
+ * (`user`), its answer (`assistant`), or something else said there
+ * (`notification`). Traces are not lines.
+ */
+export interface ChatLine {
+  id: string;
+  /** The turn the line prompted or answered, or null. */
+  turnId: string | null;
+  role: "user" | "assistant" | "notification";
+  /** The sender's account id: a platform account, or on the dashboard
+   *  `guardian`, `visitor:<id>` or `agent:<name>`. */
+  senderId: string | null;
+  senderName: string | null;
+  /** The line's parts as JSON. */
+  content: string;
+  createdAt: Date;
+}
+
 export interface ChatRepository {
+  /**
+   * The chats with a line said at or after `since`: the guardian's dashboard
+   * chats, or chats on Rome's accounts of the connection kinds named. Most
+   * recently active first.
+   */
+  recentChats(input: {
+    since: Date;
+    where: "dashboard" | { accountKinds: readonly string[] };
+  }): Promise<RecentChat[]>;
+  /**
+   * Session `sessionId`'s lines at or after `since` (every line without it),
+   * oldest first, as the dashboard draws them: for a session in a chat what
+   * was said there since it joined, and for one in no chat its turns' prompts
+   * and answers.
+   */
+  transcript(sessionId: string, input?: { since?: Date }): Promise<ChatLine[]>;
+  /** Session `sessionId`'s traces, oldest first. */
+  traces(sessionId: string): Promise<SessionTrace[]>;
   ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
   /** @deprecated Use `ensureChannelChat`, which does the same. */
   ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;
@@ -2339,16 +2418,50 @@ export interface ChatRepository {
     createdAt?: Date;
   }): Promise<{ inserted: boolean }>;
   promoteMessageToUser(sessionId: string, platformMessageId: string): Promise<void>;
-  recordOutboundMessage(input: {
+  /**
+   * Say a message where seat `sessionId` stands, as its account on `channel`:
+   * the host sends it through the chat's adapter, records it once the
+   * platform took it, and makes it turn `turnId`'s answer when the turn knows
+   * it (`knownToProvider`). `content` is the line as it goes on record, as
+   * JSON parts, when it says more than the platform shows. Throws the
+   * platform's refusal, and records nothing then. Answers the platform's id
+   * for the message, when it gave one.
+   */
+  send(input: {
     sessionId: string;
-    content: string;
-    platformMessageId?: string;
-    senderId?: string;
-    senderName?: string;
+    channel: string;
+    text?: string;
+    parts?: MessagePart[];
+    attachments?: OutgoingAttachment[];
+    content?: string;
     replyToPlatformMessageId?: string;
     turnId?: string;
     knownToProvider: boolean;
-  }): Promise<void>;
+  }): Promise<{ messageId?: string }>;
+  /**
+   * Send an email as Rome's account on `channel`, on thread `threadId`, or
+   * on a new thread when none is named, through the account's chat adapter,
+   * and record it once in the thread's chat: as seat `sessionId`'s when one
+   * is named, else main's seat there, opened when Rome holds none. It is
+   * turn `turnId`'s answer when the turn knows it (`knownToProvider`).
+   * Throws the provider's refusal, and records nothing then. Answers the
+   * provider's ids for the message and its thread.
+   */
+  sendEmail(input: {
+    channel: string;
+    threadId?: string;
+    sessionId?: string;
+    text?: string;
+    parts?: MessagePart[];
+    /** The line as it goes on record, as JSON parts. */
+    content?: string;
+    email: Omit<
+      OutgoingEmailMessage,
+      "kind" | "text" | "parts" | "attachments" | "replyToMessageId" | "turnId"
+    >;
+    turnId?: string;
+    knownToProvider: boolean;
+  }): Promise<{ messageId: string | null; threadId: string }>;
 }
 
 export interface WebChatRecapSession {

@@ -16,6 +16,7 @@ import { appPersonMapping } from "../people/app-person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatWiring } from "../chat-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
@@ -42,9 +43,6 @@ import {
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { ChatRepository } from "../chats/chat-repository.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -120,14 +118,26 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   );
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  // An action records the messages it sent. Nothing in the worker reads a
-  // place's history or hears what was said, so it keeps no channels to read
-  // under and its events go nowhere.
+  // An action records the messages it hands over or sent, and links them to
+  // its seat's turns.
+  const chat = chatWiring(db, {
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel: (channel) => channelRecords.platformOfChannel(channel),
+    channelsOn: (platform) => channelRecords.namesOn(platform),
+    seats: webchatRepo,
+  });
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+    chatRepo: chat.chats,
+    chatMessages: chat.messages,
+    adapters: chat.adapters,
+    // `channelsService` is built further down; an action sends after boot.
+    sendOn: (channel, address, message) => channelsService.send(channel, address, message),
+    links: chat.links,
+    replies: chat.replies,
+    reads: chat.reads,
+    seatLines: chat.seatLines,
   });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);

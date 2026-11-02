@@ -62,9 +62,8 @@ import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
-import { storedOn, type Channel, type Channels } from "../channels/channel.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
+import type { Channel, Channels } from "../channels/channel.js";
+import { ChatAdapters } from "../chats/adapter.js";
 import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
@@ -79,6 +78,7 @@ import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatWiring } from "../chat-wiring.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
@@ -94,7 +94,10 @@ import {
 import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
-import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import {
+  createAppRuntimeRepositories,
+  type CreateAppRuntimeRepositoriesDeps,
+} from "../apps/repositories.js";
 import { ChatRepository } from "../chats/chat-repository.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -157,9 +160,57 @@ export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
 /** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
 export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
 
-/** The chats by key over `db`, reading the channel records `db` holds. */
+/** The chats over `db`. */
 export function testChatRepository(db: DrizzleDb): ChatRepository {
-  return new ChatRepository(db, new ChannelRecordsRepository(db, testAccountLinkOf));
+  return new ChatRepository(db);
+}
+
+/**
+ * Chats, Agents' seat links and replies, and the chat adapters over `db`, as
+ * Rome wires them: an adapter per channel, whose accounts the channel
+ * records `db` holds name.
+ */
+export function testChatWiring(db: DrizzleDb, webchatRepo = new WebChatRepository(db)) {
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
+  const wiring = chatWiring(db, {
+    accountOf: (channel) => records.accountOf(channel),
+    platformOfChannel: (channel) => records.platformOfChannel(channel),
+    channelsOn: (platform) => records.namesOn(platform),
+    seats: webchatRepo,
+  });
+  return { ...wiring, webchatRepo };
+}
+
+/**
+ * The repositories an app reads Rome through, over `db`, as the action worker
+ * builds them: what an app test hands its action as `repositories`. A send
+ * fails, since no channel is connected.
+ */
+export function testAppRepositories(db: DrizzleDb, webchatRepo = new WebChatRepository(db)) {
+  return createAppRuntimeRepositories(appRepositoryDeps(db, webchatRepo));
+}
+
+/** What {@link testAppRepositories} builds the repositories from, for a test
+ *  that sends on a channel of its own through `sendOn`. */
+export function appRepositoryDeps(
+  db: DrizzleDb,
+  webchatRepo = new WebChatRepository(db),
+): CreateAppRuntimeRepositoriesDeps {
+  const wiring = testChatWiring(db, webchatRepo);
+  return {
+    settingsRepo: new SettingsRepository(db),
+    webchatRepo,
+    chatRepo: wiring.chats,
+    chatMessages: wiring.messages,
+    adapters: wiring.adapters,
+    sendOn: async () => {
+      throw new Error("No channel is connected in this test");
+    },
+    links: wiring.links,
+    replies: wiring.replies,
+    reads: wiring.reads,
+    seatLines: wiring.seatLines,
+  };
 }
 
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
@@ -497,6 +548,8 @@ export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig 
 
 export interface TestDeps extends ApiDeps {
   // Test-owned extras not part of the ApiDeps surface.
+  /** The chat adapters in full, so a test can key chats as they do. */
+  adapters: ChatAdapters;
   /** The LinkedIn inbox mirror. No route reads it — the poller fills it and
    *  the person timeline reads through it — so a test that wants LinkedIn
    *  history seeds it here rather than through the API's own dependencies. */
@@ -605,11 +658,26 @@ export async function buildTestDeps(
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
+  const wiring = testChatWiring(db, webchatRepo);
+  // `channels` is built further down; an app sends after setup.
+  let sendOn: (
+    channel: string,
+    address: ChatId,
+    message: OutgoingMessage,
+  ) => Promise<MessageReceipt> = async () => {
+    throw new Error("No channel can send yet");
+  };
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+    chatRepo: wiring.chats,
+    chatMessages: wiring.messages,
+    adapters: wiring.adapters,
+    sendOn: (channel, address, message) => sendOn(channel, address, message),
+    links: wiring.links,
+    replies: wiring.replies,
+    reads: wiring.reads,
+    seatLines: wiring.seatLines,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -724,6 +792,8 @@ export async function buildTestDeps(
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    chats: appRuntimeRepositories.chats!,
+    replies: wiring.replies,
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -762,6 +832,7 @@ export async function buildTestDeps(
     registry: connections,
     channelOf: kindChannelOf,
   });
+  sendOn = (channel, address, message) => channelsService.send(channel, address, message);
 
   return {
     connections,
@@ -798,16 +869,9 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), {
-      channelsOn: (platform) =>
-        storedOn(
-          channels,
-          (name) => channelRecords.platformOfChannel(name),
-          platform,
-          (name) => channelRecords.namesOn(name),
-        ),
-      accountOf: (channel) => channelRecords.accountOf(channel),
-    }),
+    chatMessages: wiring.messages,
+    chats: wiring.chats,
+    adapters: wiring.adapters,
     actionExecutionsRepo,
     executionJournalRepo,
     webhookInvocationsRepo,
@@ -1172,11 +1236,20 @@ export async function createAppLifecycleHarness(
     });
     const settingsRepo = new SettingsRepository(db);
     const webchatRepo = new WebChatRepository(db);
+    const wiring = testChatWiring(db, webchatRepo);
     const appRuntimeRepositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
-      chatRepo: testChatRepository(db),
-      chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+      chatRepo: wiring.chats,
+      chatMessages: wiring.messages,
+      adapters: wiring.adapters,
+      sendOn: async () => {
+        throw new Error("The test worker sends on no channel");
+      },
+      links: wiring.links,
+      replies: wiring.replies,
+      reads: wiring.reads,
+      seatLines: wiring.seatLines,
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {

@@ -1,5 +1,5 @@
 /**
- * The readable text of a stored `rome_agent_messages.content`, or "" when it
+ * The readable text of a stored line's content, or "" when it
  * holds none. Tool calls and tool results are dropped. Content that is not
  * JSON is returned as it is, trimmed.
  */

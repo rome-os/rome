@@ -4,37 +4,38 @@
 import type { ChatId } from "@rome-os/app-runtime";
 
 /**
- * A chat's identity: the platform and the platform's own id for the chat. Two
- * keys name one chat when both fields are equal. Whether the chat is a group
- * or a direct message is not part of it.
- *
- * Over today's storage the id is the address a channel hands out for the chat,
- * so a group two of Rome's accounts are in can still carry two ids until the
- * storage moves.
+ * A chat as Chats names it: its platform and the id Chats gave it. Every
+ * Chats operation takes and answers one. The adapter's own key for the chat
+ * is on the {@link Chat}.
+ */
+export interface ChatRef {
+  readonly platform: string;
+  readonly id: number;
+}
+
+/**
+ * What an adapter calls a chat: its platform and the adapter's key for it,
+ * unique on that platform. A direct message's key names both its ends. Chats
+ * keeps it beside the chat's id, compares it and never reads it.
  */
 export interface ChatKey {
   readonly platform: string;
-  readonly id: ChatId;
+  readonly externalId: ChatId;
+}
+
+/** The key `externalId` on `platform`. */
+export function chatKey(platform: string, externalId: ChatId): ChatKey {
+  return { platform, externalId };
 }
 
 /** A chat, or a thread in one. `threadId` is the platform's own id for the
  *  thread, which a channel hands out as an address of its own. */
 export interface Place {
-  readonly chat: ChatKey;
+  readonly chat: ChatRef;
   readonly threadId?: ChatId;
 }
 
-export function chatKey(platform: string, id: ChatId): ChatKey {
-  return { platform, id };
-}
-
 /** The chat itself, or the thread `threadId` names in it. */
-export function placeIn(chat: ChatKey, threadId?: ChatId): Place {
+export function placeIn(chat: ChatRef, threadId?: ChatId): Place {
   return threadId === undefined ? { chat } : { chat, threadId };
-}
-
-/** The address a channel sends to for this place: the thread's when it names
- *  one, else the chat's. */
-export function addressOf(place: Place): ChatId {
-  return place.threadId ?? place.chat.id;
 }

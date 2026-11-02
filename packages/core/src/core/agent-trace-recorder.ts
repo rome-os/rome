@@ -12,12 +12,10 @@ import type {
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import { createLogger, type Logger } from "../logger.js";
+import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
 import type { SessionConversation } from "./session-conversation.js";
-
-const log = createLogger("agent-trace-recorder");
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -184,23 +182,19 @@ export class AgentTraceRecorder {
     }
     const thread = this.input.threadContext;
     const type = this.sessionType();
-    const sourceThreadName = thread?.threadName ?? null;
+    const threadName = thread?.threadName ?? null;
     const trigger = this.triggerMetadata();
     await this.input.webchatRepo.ensureRomeSession({
       id: this.romeSessionId(),
       type,
       name:
-        sourceThreadName ??
+        threadName ??
         (thread
           ? `${thread.channel}:${thread.threadId}`
           : (this.input.channelThreadKey ?? this.input.agentName)),
       agentName: isCoreMainAgentId(this.input.agentName) ? null : this.input.agentName,
       projectName: thread?.projectName,
       projectPath: thread?.projectPath,
-      sourceChannel: thread?.channel ?? null,
-      sourceThreadId: thread?.threadId ?? null,
-      sourceThreadName,
-      sourceThreadType: thread?.threadType ?? null,
       trigger: type === "action" ? trigger : undefined,
     });
     this.ensured = true;

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../index.js";
-import { conciergeTasks, romeAgentMessages, romeSessions } from "../schema.js";
+import type { ChatRef } from "../../chats/place.js";
+import { MessageRepository } from "../../chats/message-repository.js";
+import { conciergeTasks, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];
@@ -28,7 +30,8 @@ export interface ConciergeTaskWrite {
   dueAt?: Date | null;
   rank?: number | null;
   sessionId?: string | null;
-  /** A message of the Concierge chat; the caller has checked it. */
+  /** A message of the Concierge chat, by its key there; the caller has
+   *  checked it. */
   sourceMessageId?: string | null;
   archived?: boolean;
 }
@@ -48,7 +51,16 @@ const isFinished = (state: ConciergeTaskState) => state === "done" || state === 
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
 
-  constructor(private db: DrizzleDb) {}
+  /** Where a task's source message is looked up: the Concierge chat's
+   *  lines in Chats. */
+  private readonly sources: TaskSources;
+
+  constructor(
+    private db: DrizzleDb,
+    sources?: TaskSources,
+  ) {
+    this.sources = sources ?? conciergeChatSources(db);
+  }
 
   onChange(listener: ChangeListener): () => void {
     this.listeners.add(listener);
@@ -166,7 +178,9 @@ export class ConciergeTasksRepository {
             write.sessionId !== undefined ? write.sessionId : (existing?.sessionId ?? null),
           sourceMessageId:
             write.sourceMessageId !== undefined
-              ? write.sourceMessageId
+              ? write.sourceMessageId === null
+                ? null
+                : this.sources.idOf(write.sourceMessageId)
               : (existing?.sourceMessageId ?? null),
           updatedAt: now,
           completedAt,
@@ -209,24 +223,58 @@ export class ConciergeTasksRepository {
 
   private async withChat(where: SQL | undefined): Promise<ConciergeTaskWithChat[]> {
     const rows = await this.db
-      .select({ task: conciergeTasks, chatName: romeSessions.name, sourceId: romeAgentMessages.id })
+      .select({
+        task: conciergeTasks,
+        chatName: romeSessions.name,
+      })
       .from(conciergeTasks)
       .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
-      // Only a message the Concierge chat still holds counts as a source.
-      .leftJoin(
-        romeAgentMessages,
-        and(
-          eq(romeAgentMessages.id, conciergeTasks.sourceMessageId),
-          eq(romeAgentMessages.sessionId, CONCIERGE_CHAT_ID),
-          inArray(romeAgentMessages.role, ["user", "assistant"]),
-        ),
-      )
       .where(where)
       .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
-    return rows.map(({ task, chatName, sourceId }) => ({
+    // Only a message the Concierge chat still holds counts as a source.
+    const sources = this.sources.keysOf(
+      rows.flatMap(({ task }) => (task.sourceMessageId ? [task.sourceMessageId] : [])),
+    );
+    return rows.map(({ task, chatName }) => ({
       row: task,
       chat: task.sessionId && chatName !== null ? { id: task.sessionId, name: chatName } : null,
-      sourceMessageId: sourceId,
+      sourceMessageId: (task.sourceMessageId && sources.get(task.sourceMessageId)) || null,
     }));
   }
+}
+
+/** The Concierge chat's messages by their key there, and back. */
+export interface TaskSources {
+  /** The id of the message keyed `key`, or null when the chat holds none. */
+  idOf(key: string): number | null;
+  /** The key of each of `ids` the chat still holds. */
+  keysOf(ids: readonly number[]): Map<number, string>;
+}
+
+/** The Concierge chat's messages as Chats holds them. */
+function conciergeChatSources(db: DrizzleDb): TaskSources {
+  const messages = new MessageRepository(db);
+  const chat = (): ChatRef | null => {
+    const row = db
+      .select({ chatId: romeSessions.chatId, platform: romeSessions.chatPlatform })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, CONCIERGE_CHAT_ID))
+      .get();
+    return row?.chatId && row.platform ? { platform: row.platform, id: row.chatId } : null;
+  };
+  return {
+    idOf(key) {
+      const at = chat();
+      return at ? messages.idOf(at, key) : null;
+    },
+    keysOf(ids) {
+      const at = chat();
+      return new Map(
+        messages
+          .byIds(ids)
+          .filter((message) => message.place.chat.id === at?.id)
+          .map((message) => [message.id, message.key]),
+      );
+    },
+  };
 }

@@ -1,39 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { ChatId } from "@rome-os/app-runtime";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
-import { chatKey, placeIn } from "../chats/place.js";
+import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import { sql } from "drizzle-orm";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
+import { createTestDb, testChatWiring, type TestDb } from "../test/helpers.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 
-// An app's chats. What these pin: a message an app sent into the conversation
-// it opened is on record in that conversation's place, as Rome's.
+// An app's chats. What these pin: a message an app's seat sends goes out on
+// the channel and is on record once in the chat the seat stands in, as Rome's.
 
 describe("app chat repository", () => {
   let testDb: TestDb;
-  let messages: StoredMessages;
+  let sent: Array<{ channel: string; address: ChatId; message: OutgoingMessage }>;
 
   beforeEach(() => {
     testDb = createTestDb();
-    messages = new StoredMessages(new WebChatRepository(testDb.db), new ChatEvents(), {
-      channelsOn: (platform) => (platform === "telegram" ? ["telegram"] : []),
-    });
+    sent = [];
   });
   afterEach(() => testDb.close());
 
-  const chats = () =>
-    createAppRuntimeRepositories({
+  const chats = () => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    const wiring = testChatWiring(testDb.db, webchatRepo);
+    return createAppRuntimeRepositories({
       settingsRepo: new SettingsRepository(testDb.db),
-      webchatRepo: new WebChatRepository(testDb.db),
-      chatRepo: testChatRepository(testDb.db),
-      chatMessages: messages,
+      webchatRepo,
+      chatRepo: wiring.chats,
+      chatMessages: wiring.messages,
+      adapters: wiring.adapters,
+      sendOn: async (channel, address, message): Promise<MessageReceipt> => {
+        sent.push({ channel, address, message });
+        return { messageId: "m-9", chatId: address };
+      },
+      links: wiring.links,
+      replies: wiring.replies,
+      reads: wiring.reads,
+      seatLines: wiring.seatLines,
     }).chats!;
+  };
 
-  it("records a sent message in the place of the conversation it names", async () => {
+  it("sends a seat's message on its channel and records it once in the seat's chat", async () => {
     const repository = chats();
-    const thread = await repository.ensureChannelChat({
+    const seat = await repository.ensureChannelChat({
       channel: "telegram",
       threadId: "topic-7",
       parentThreadId: "group-1",
@@ -41,34 +49,34 @@ describe("app chat repository", () => {
       agentName: "main",
     });
 
-    await repository.recordOutboundMessage({
-      sessionId: thread.id,
-      content: JSON.stringify([{ type: "text", content: "on it" }]),
-      platformMessageId: "m-9",
-      senderId: "rome",
-      senderName: "Rome",
-      turnId: "turn-1",
-      knownToProvider: true,
+    await repository.send({
+      sessionId: seat.id,
+      channel: "telegram",
+      text: "on it",
+      knownToProvider: false,
     });
 
-    const place = placeIn(chatKey("telegram", "group-1" as ChatId), "topic-7" as ChatId);
-    expect((await messages.recent(place, 10)).messages).toMatchObject([
-      {
-        direction: "fromRome",
-        body: { text: "on it" },
-        platformMessageId: "m-9",
-        turnId: "turn-1",
-      },
-    ]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ channel: "telegram", message: { text: "on it" } });
+    const lines = testDb.db.all<{
+      thread_id: string | null;
+      sender_agent: string | null;
+      text: string;
+    }>(sql`SELECT thread_id, sender_agent, text FROM chat_messages`);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ thread_id: "topic-7", text: "on it" });
+    expect(lines[0]!.sender_agent).not.toBeNull();
   });
 
-  it("refuses a conversation that is no chat on a messaging channel", async () => {
+  it("refuses a seat that stands in no chat, and sends nothing", async () => {
     await expect(
-      chats().recordOutboundMessage({
+      chats().send({
         sessionId: "no-such-row",
-        content: JSON.stringify([{ type: "text", content: "on it" }]),
+        channel: "telegram",
+        text: "on it",
         knownToProvider: false,
       }),
-    ).rejects.toThrow("No place for conversation no-such-row");
+    ).rejects.toThrow();
+    expect(sent).toHaveLength(0);
   });
 });

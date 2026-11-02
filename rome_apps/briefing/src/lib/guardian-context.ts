@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 import { unwrap } from "./action-result.js";
 
@@ -31,30 +30,43 @@ export async function gatherGuardianContext(
   tz: string,
   now = Date.now(),
 ): Promise<GuardianContext> {
-  return { chats: readRecentChats(appContext, tz, now), profile: await readProfile(appContext) };
+  return {
+    chats: await readRecentChats(appContext, tz, now),
+    profile: await readProfile(appContext),
+  };
 }
 
-function readRecentChats(appContext: RomeAppContext, tz: string, now: number): string | null {
-  const cutoff = Math.floor((now - WINDOW_HOURS * 60 * 60 * 1000) / 1000);
+async function readRecentChats(
+  appContext: RomeAppContext,
+  tz: string,
+  now: number,
+): Promise<string | null> {
+  const since = new Date(now - WINDOW_HOURS * 60 * 60 * 1000);
   let rows: MessageRow[];
   try {
-    rows = appContext.db.connection.all(sql`
-      SELECT s.name AS chat, m.content, m.created_at
-      FROM rome_agent_messages m
-      JOIN rome_sessions s ON s.id = m.session_id
-      WHERE (s.type IN ('webchat', 'webchat_handoff')
-          OR (s.type = 'channel' AND s.source_channel = 'webchat' AND s.source_thread_id = s.id))
-        AND coalesce(s.owner_key, 'guardian') = 'guardian'
-        AND s.id NOT IN (
-          SELECT session_id FROM rome_agent_messages
-          WHERE role = 'user' AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
-        )
-        AND s.archived_at IS NULL
-        AND m.role = 'user'
-        AND m.created_at >= ${cutoff}
-      ORDER BY m.created_at DESC
-      LIMIT ${MAX_MESSAGES}
-    `) as MessageRow[];
+    const chats = appContext.repositories.chats;
+    if (!chats) return null;
+    // The guardian's own dashboard chats, through the chat repository.
+    const recent = (await chats.recentChats({ since, where: "dashboard" })).filter(
+      (chat) => chat.ownerKey === "guardian" && !chat.archived,
+    );
+    if (recent.length === 0) return null;
+    rows = [];
+    for (const { sessionId, name } of recent) {
+      const lines = await chats.transcript(sessionId);
+      const asked = lines.filter((line) => line.role === "user");
+      if (asked.some((line) => line.senderId?.startsWith("visitor:"))) continue;
+      for (const line of asked) {
+        if (line.createdAt < since) continue;
+        rows.push({
+          chat: name,
+          content: line.content,
+          created_at: Math.floor(line.createdAt.getTime() / 1000),
+        });
+      }
+    }
+    rows.sort((a, b) => b.created_at - a.created_at);
+    rows = rows.slice(0, MAX_MESSAGES);
   } catch {
     return null;
   }

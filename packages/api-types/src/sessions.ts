@@ -101,10 +101,16 @@ export interface RomeSessionExplorerRecord {
   projectPath: string | null;
   agentName: string | null;
   type: RomeSessionType;
-  sourceChannel: string | null;
-  sourceThreadId: string | null;
-  sourceThreadName: string | null;
-  sourceThreadType: string | null;
+  /** The channel the session's seat speaks through, `webchat` for a
+   *  guardian chat, or null for a session with no seat. */
+  channel: string | null;
+  /** The chat the seat stands in, and the thread in it, or null. */
+  chatId: string | null;
+  threadId: string | null;
+  /** The topic's name when the seat stands in one. */
+  threadName: string | null;
+  /** The kind of place the seat stands in: a topic when it is in a thread. */
+  seatKind: "dm" | "group" | "topic" | null;
   triggerKind: string | null;
   triggerName: string | null;
   triggerActionName: string | null;
@@ -128,7 +134,7 @@ export interface RomeSessionsPageResult {
   nextOffset: number | null;
   facets: {
     types: { value: string | null; count: number }[];
-    sourceChannels: { value: string | null; count: number }[];
+    channels: { value: string | null; count: number }[];
   };
 }
 

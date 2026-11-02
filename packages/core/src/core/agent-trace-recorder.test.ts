@@ -108,10 +108,6 @@ describe("AgentTraceRecorder", () => {
       .where(eq(romeSessions.id, "channel:telegram:thread-1"));
     expect(sessionRows[0]).toMatchObject({
       type: "channel",
-      sourceChannel: "telegram",
-      sourceThreadId: "thread-1",
-      sourceThreadName: "Ops",
-      sourceThreadType: "group",
       projectName: "alpha",
       projectPath: "alpha",
       agentName: "sentinel",
@@ -194,8 +190,6 @@ describe("AgentTraceRecorder", () => {
       .where(eq(romeSessions.id, "channel:telegram:thread-retry"));
     expect(sessionRows[0]).toMatchObject({
       type: "channel",
-      sourceChannel: "telegram",
-      sourceThreadId: "thread-retry",
     });
   });
 
@@ -235,10 +229,6 @@ describe("AgentTraceRecorder", () => {
       .where(eq(romeSessions.id, "channel:telegram:thread-1"));
     expect(sessionRows[0]).toMatchObject({
       type: "channel",
-      sourceChannel: "telegram",
-      sourceThreadId: "thread-1",
-      sourceThreadName: "Ops",
-      sourceThreadType: "group",
       projectName: "alpha",
       projectPath: "alpha",
       agentName: "sentinel",
@@ -306,8 +296,6 @@ describe("AgentTraceRecorder", () => {
       .where(eq(romeSessions.id, "action:exec-action-only:sentinel"));
     expect(sessionRows[0]).toMatchObject({
       type: "action",
-      sourceChannel: null,
-      sourceThreadId: null,
       agentName: "sentinel",
       triggerKind: "action",
       triggerName: "summon",

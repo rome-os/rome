@@ -111,6 +111,9 @@ function buildHarness() {
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: () => null,
+    // No messaging-channel reply is said here, so no seat is wired.
+    chats: {} as never,
+    replies: {} as never,
   });
   const handler = new ApprovalHandler(
     approvalsRepo,

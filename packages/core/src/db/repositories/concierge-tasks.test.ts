@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { romeAgentMessages } from "../schema.js";
+import { chatMessages } from "../schema.js";
 import { WebChatRepository } from "./webchat.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 
@@ -116,14 +116,14 @@ describe("ConciergeTasksRepository", () => {
       await chats.createSession("concierge", "Concierge");
       const messageId = await say("concierge");
       const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: messageId }]);
-      expect(row.sourceMessageId).toBe(messageId);
+      expect(row.sourceMessageId).toEqual(expect.any(Number));
       expect(await sourceOf(row.id)).toBe(messageId);
       expect((await repo.listForPanel(new Date(0)))[0].sourceMessageId).toBe(messageId);
 
-      testDb.db.delete(romeAgentMessages).where(eq(romeAgentMessages.id, messageId)).run();
+      testDb.db.delete(chatMessages).where(eq(chatMessages.key, messageId)).run();
       expect(await sourceOf(row.id)).toBeNull();
       // The row keeps the id it was given: nothing is copied or cleared.
-      expect((await repo.get(row.id))?.sourceMessageId).toBe(messageId);
+      expect((await repo.get(row.id))?.sourceMessageId).toBe(row.sourceMessageId);
     });
 
     it("counts only a user or assistant message of the Concierge chat", async () => {
@@ -133,12 +133,9 @@ describe("ConciergeTasksRepository", () => {
       const [row] = await repo.upsertMany([{ title: "A", sourceMessageId: foreign }]);
       expect(await sourceOf(row.id)).toBeNull();
 
-      const trace = await say("concierge");
-      testDb.db
-        .update(romeAgentMessages)
-        .set({ role: "trace" })
-        .where(eq(romeAgentMessages.id, trace))
-        .run();
+      // A trace is the agent's own row, never a line of the chat.
+      const trace = "trace-1";
+      await chats.addMessage(trace, "concierge", "trace", "[]", "turn-1");
       await repo.upsertMany([{ id: row.id, sourceMessageId: trace }]);
       expect(await sourceOf(row.id)).toBeNull();
     });

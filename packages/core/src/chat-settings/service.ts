@@ -1,6 +1,5 @@
 import type {
   ChatDescriptor,
-  ChatId,
   ChatRef,
   ChatSettingField,
   ChatSettings,
@@ -281,11 +280,11 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Native threads inherit from their parent. Persisted DMs are included
       // only after message history exists or an explicit reset override was
       // written; live directory contacts never enter through this path.
-      if (row.parentSessionId || row.sourceThreadType === "topic") {
+      if (row.parentSessionId || row.kind === "topic") {
         continue;
       }
       if (
-        row.sourceThreadType === "private" &&
+        row.kind === "dm" &&
         row.channelSettings === null &&
         !this.deps.repository.hasMessageHistory(row.id)
       )
@@ -293,10 +292,11 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Removing a Connection hides its persisted conversations from settings.
       // Keep the rows intact so reconnecting the same account can recover them,
       // but do not let one orphaned row abort the cross-provider list.
-      if (row.sourceChannel && this.connectionsOf(row.sourceChannel).length === 0) {
+      const rowChannel = this.deps.repository.channelOf(row);
+      if (rowChannel && this.connectionsOf(rowChannel).length === 0) {
         log.debug("conversation_settings.removed_connection_hidden", {
-          channel: row.sourceChannel,
-          chatId: row.sourceThreadId,
+          channel: rowChannel,
+          chatId: row.address,
         });
         continue;
       }
@@ -521,7 +521,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     stored: StoredChatSettings | null,
   ): ChatSettingsOverrides {
     const overrides = normalizeOverrides(stored?.overrides ?? {});
-    if (row?.agentName && row.sourceThreadType !== "private") {
+    if (row?.agentName && row.kind !== "dm") {
       (overrides.routing ??= {}).agentName = row.agentName;
     }
     return overrides;
@@ -534,7 +534,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): StoredChatSettings | null {
-    let channel = row?.sourceChannel ?? null;
+    let channel = row ? this.deps.repository.channelOf(row) : null;
     if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
       channel = this.channelName(ref);
     }
@@ -566,7 +566,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): ChatDescriptor["kind"] | null {
-    if (row !== null && row.sourceThreadType !== null) return descriptor.kind;
+    if (row !== null) return descriptor.kind;
     return this.describedKinds.get(this.key(ref)) ?? null;
   }
 
@@ -607,18 +607,21 @@ export class ChatSettingsService implements ChatSettingsControl {
   }
 
   private descriptorFromRow(row: StoredChatRow): ChatDescriptor {
-    if (!row.sourceThreadId || !row.sourceChannel) {
+    // The seat's connection is the one behind its account on its chat's
+    // platform.
+    const channel = this.deps.repository.channelOf(row);
+    if (!row.address || !channel) {
       throw new Error(`Channel conversation "${row.id}" has no channel address`);
     }
-    const connections = this.connectionsOf(row.sourceChannel);
+    const connections = this.connectionsOf(channel);
     if (connections.length !== 1) {
       throw new Error(
-        `Channel conversation "${row.id}" requires exactly one ${row.sourceChannel} connection; found ${connections.length}`,
+        `Channel conversation "${row.id}" requires exactly one ${channel} connection; found ${connections.length}`,
       );
     }
     const ref = {
       connectionId: connections[0]!.id,
-      chatId: row.sourceThreadId as ChatId,
+      chatId: row.address,
     };
     const remembered = this.descriptors.get(this.key(ref));
     const descriptor: ChatDescriptor = {
@@ -626,24 +629,17 @@ export class ChatSettingsService implements ChatSettingsControl {
       ref,
       connectionKind: connections[0]!.connectionKind,
       service: connections[0]!.connectionKind,
-      kind:
-        row.sourceThreadType === "private"
-          ? "dm"
-          : row.sourceThreadType === "topic"
-            ? "topic"
-            : row.sourceThreadType === "group"
-              ? "group"
-              : "channel",
-      displayName: row.sourceThreadName ?? remembered?.displayName ?? row.name,
+      kind: row.kind,
+      displayName: row.threadName ?? remembered?.displayName ?? row.name,
     };
     if (row.parentSessionId) {
       const parent = this.deps.repository
-        .listKnown({ channel: row.sourceChannel })
+        .listKnown({ channel })
         .find((candidate) => candidate.id === row.parentSessionId);
-      if (parent?.sourceThreadId) {
+      if (parent?.address) {
         descriptor.parent = {
           connectionId: connections[0]!.id,
-          chatId: parent.sourceThreadId as ChatId,
+          chatId: parent.address,
         };
       }
     }
@@ -693,7 +689,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): readonly ChatSettingField[] {
-    if (descriptor.kind === "dm" || row?.sourceThreadType === "private") {
+    if (descriptor.kind === "dm" || row?.kind === "dm") {
       return CORE_CONVERSATION_SETTING_FIELDS;
     }
     return (
@@ -717,7 +713,7 @@ export class ChatSettingsService implements ChatSettingsControl {
   }
 
   private assertSettingsOwner(descriptor: ChatDescriptor, row: StoredChatRow | null): void {
-    if (row?.sourceThreadType === "private" || descriptor.kind === "dm") return;
+    if (row?.kind === "dm" || descriptor.kind === "dm") return;
     if (!this.isThread(descriptor)) return;
     if (!descriptor.parent) {
       throw new Error(

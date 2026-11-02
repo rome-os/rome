@@ -76,7 +76,7 @@ describe("createBorrowedExactForkSession", () => {
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
       forkSessionId: "fork-session",
-      sourceThreadId: "source-thread",
+      forkedThreadId: "source-thread",
       openParams: openParams(),
       runExclusive: async (work) => await work(),
       runTurn: async (_input, runtime) => {
@@ -114,7 +114,7 @@ describe("createBorrowedExactForkSession", () => {
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
       forkSessionId: "fork-session",
-      sourceThreadId: "source-thread",
+      forkedThreadId: "source-thread",
       openParams: openParams({
         supportsInteractiveSurface: true,
         interactiveSurfaceDetached: true,
@@ -163,7 +163,7 @@ describe("createBorrowedExactForkSession", () => {
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
       forkSessionId: "fork-session",
-      sourceThreadId: "source-thread",
+      forkedThreadId: "source-thread",
       openParams: openParams(),
       runExclusive: async (work) => {
         await queued;
