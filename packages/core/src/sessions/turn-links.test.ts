@@ -81,6 +81,36 @@ describe("TurnLinks", () => {
     expect(links.linkOf("seat-1", line)).toMatchObject({ role: "prompt", turnId: "turn-2" });
   });
 
+  it("queue a line caught up on as a prompt without the turn that caught up on it", () => {
+    const line = heard("m1", 5);
+    links.seen([line], "seat-1", "turn-1");
+    links.prompt(line, "seat-1", null, "queued");
+
+    expect(links.linkOf("seat-1", line)).toMatchObject({
+      role: "prompt",
+      turnId: null,
+      inputState: "queued",
+    });
+  });
+
+  it("read two alike lines with their own keys as two lines", () => {
+    const first = heard("m1", 5, { body: { text: "ok" } });
+    const second = heard("m2", 5, { body: { text: "ok" } });
+
+    expect(links.unseen("seat-1").map((line) => line.id)).toEqual([first, second]);
+    links.seen([first], "seat-1", "turn-1");
+    expect(links.unseen("seat-1").map((line) => line.id)).toEqual([second]);
+  });
+
+  it("read one copy of a line two of Rome's accounts each hold, and none once one is seen", () => {
+    const mine = heard("rome_bot:5", 5, { body: { text: "ok" } });
+    const theirs = heard("other_bot:9", 5, { body: { text: "ok" } });
+
+    expect(links.unseen("seat-1").map((line) => line.id)).toEqual([mine]);
+    links.seen([theirs], "seat-1", "turn-1");
+    expect(links.unseen("seat-1")).toEqual([]);
+  });
+
   it("answer each message's prompt or answer turn, leaving out lines only caught up on", () => {
     const ask = heard("m1", 5);
     const reply = heard("m2", 6, { saidBy: { account: ROME, agent: "main" } });

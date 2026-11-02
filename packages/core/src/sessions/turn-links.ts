@@ -120,7 +120,11 @@ export class TurnLinks {
       VALUES (${messageId}, ${sessionId}, ${turnId}, 'prompt', ${inputState})
       ON CONFLICT (message_id, session_id) DO UPDATE SET
         role = 'prompt',
-        turn_id = coalesce(excluded.turn_id, agent_turn_messages.turn_id),
+        -- A line only caught up on becomes a prompt of its own turn, queued
+        -- when it names none; a prompt keeps the turn it already runs.
+        turn_id = CASE WHEN agent_turn_messages.role = 'prompt'
+          THEN coalesce(excluded.turn_id, agent_turn_messages.turn_id)
+          ELSE excluded.turn_id END,
         input_state = coalesce(excluded.input_state, agent_turn_messages.input_state)
     `);
   }
@@ -223,15 +227,14 @@ export class TurnLinks {
     // message for each of Rome's accounts that heard it. The session has
     // seen every copy of a message it has seen one of, and reads one copy of
     // the rest.
-    const seen = new Set(
-      said
-        .filter((message) => linked.has(message.id) || this.undecided.has(message.id))
-        .map(copyOf),
-    );
+    const copies = new Copies();
+    for (const message of said) {
+      if (linked.has(message.id) || this.undecided.has(message.id)) copies.take(message);
+    }
     const lines = said.filter((message) => {
-      const copy = copyOf(message);
-      if (seen.has(copy)) return false;
-      seen.add(copy);
+      if (linked.has(message.id) || this.undecided.has(message.id)) return false;
+      if (copies.heardBefore(message)) return false;
+      copies.take(message);
       return true;
     });
     // A quoted line said before Rome's account was in the chat stays out of
@@ -293,8 +296,43 @@ function toLink(row: LinkRow): TurnLink {
   };
 }
 
-/** What the copies of one message heard on two of Rome's accounts share:
- *  its sender, its time and its words. */
+/**
+ * The copies of one message that two of Rome's accounts heard in a chat that
+ * numbers messages per member account (a Telegram basic group). There each
+ * key carries the account that holds it in front (`<account>:<id>`), and
+ * copies share their sender, time and words. Two lines held by the same
+ * account, or keyed by no account, are never copies, however alike.
+ */
+class Copies {
+  private readonly holders = new Map<string, Set<string>>();
+
+  /** Note that the session reads, or has read, `message`. */
+  take(message: SaidMessage): void {
+    const holder = holderOf(message);
+    if (holder === null) return;
+    const copy = copyOf(message);
+    const held = this.holders.get(copy) ?? new Set<string>();
+    held.add(holder);
+    this.holders.set(copy, held);
+  }
+
+  /** Whether the session already took a copy of `message` another account
+   *  holds. */
+  heardBefore(message: SaidMessage): boolean {
+    const holder = holderOf(message);
+    if (holder === null) return false;
+    const held = this.holders.get(copyOf(message));
+    return held !== undefined && [...held].some((other) => other !== holder);
+  }
+}
+
+/** The account a per-account key names in front, or null for any other key. */
+function holderOf(message: SaidMessage): string | null {
+  const at = message.key.indexOf(":");
+  return at > 0 ? message.key.slice(0, at) : null;
+}
+
+/** What the copies of one message share: its sender, its time and its words. */
 function copyOf(message: SaidMessage): string {
   return [
     message.saidBy?.account.id ?? message.saidBy?.agent ?? "",
