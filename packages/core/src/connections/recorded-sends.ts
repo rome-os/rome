@@ -100,6 +100,11 @@ export function recordedSends<C extends Channel>(
           ...(email?.cc?.length ? { cc: email.cc } : {}),
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
+        if (!email && sendsNoEmail(deps, channel.name, message)) {
+          // The email port sends nothing for a plain message with no text,
+          // such as an approval card, which has no email rendering.
+          return { chatId: address };
+        }
         // The port quotes by the platform's id, an email by the provider's.
         const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
         let at = address;
@@ -165,6 +170,16 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
         adapters.chatAt(name, address, kind),
     },
   };
+}
+
+/** Whether `message` is a plain message the email port on channel
+ *  `channel` sends nothing for: one with no text in it. */
+function sendsNoEmail(deps: RecordedSendsDeps, channel: string, message: OutgoingMessage): boolean {
+  if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
+  const text =
+    message.text ??
+    (message.parts ?? []).flatMap((part) => (part.type === "text" ? [part.content] : [])).join("");
+  return !text.trim();
 }
 
 /** Whether `address` on channel `channel` names whom a new email goes to:

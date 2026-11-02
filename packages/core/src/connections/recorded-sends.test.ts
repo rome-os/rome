@@ -364,6 +364,28 @@ describe("recordedSends", () => {
     ]);
   });
 
+  it("send and record nothing for a plain email-channel message with no text, as the port does", async () => {
+    const blank = await send("email").send("thread-1" as ChatId, { text: "  " });
+    const card = await send("email").send(
+      "thread-1" as ChatId,
+      {
+        parts: [
+          {
+            type: "approval_card",
+            approvalId: "a-1",
+            actionName: "deploy",
+            preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+            status: "pending",
+          },
+        ],
+      } as OutgoingMessage,
+    );
+
+    expect([blank, card]).toEqual([{ chatId: "thread-1" }, { chatId: "thread-1" }]);
+    expect(sent).toEqual([]);
+    expect(lines()).toEqual([]);
+  });
+
   it("send nothing and record nothing when the platform refuses", async () => {
     const [refusing] = recordedSends(
       [
