@@ -53,7 +53,9 @@ function fakeChannel(transport?: DeliveryTransport) {
       media: null,
     },
   } as unknown as Channel;
-  const hear = (message: Partial<ChannelMessage> & { chatId: string; messageId: string }) => {
+  const hear = (
+    message: Partial<Omit<ChannelMessage, "chatId">> & { chatId: string; messageId: string },
+  ) => {
     if (!handler) throw new Error("nothing is listening");
     return handler({
       kind: "message",
