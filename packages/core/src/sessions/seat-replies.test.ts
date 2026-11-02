@@ -32,6 +32,7 @@ describe("SeatReplies", () => {
   let streamed: { text: string; key: string | null; threadId: ChatId | null };
 
   const adapter = {
+    account: { platform: "telegram", id: "rome_bot" },
     async send(chatKey: string, threadId: ChatId | null, out: Outbound) {
       if (refuse) throw new Error("refused");
       sends.push({ chat: chatKey, threadId, out });
@@ -111,6 +112,23 @@ describe("SeatReplies", () => {
     refuse = true;
 
     await expect(replies().send("seat-1", CHANNEL, { text: "hi" })).rejects.toThrow("refused");
+    expect(messages.read(placeIn(chat)).messages).toEqual([]);
+  });
+
+  it("send nothing through a channel of another of Rome's accounts", async () => {
+    const other = { ...adapter, account: { platform: "telegram", id: "other_bot" } };
+    const wrong = new SeatReplies({
+      seats,
+      adapters: {
+        of: () => other as ChannelChatAdapter,
+        keyOf: () => chatKey("telegram", "-1" as ChatId),
+      },
+      messages,
+      links,
+    });
+
+    await expect(wrong.send("seat-1", CHANNEL, { text: "hi" })).rejects.toThrow("other_bot");
+    expect(sends).toEqual([]);
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
 
