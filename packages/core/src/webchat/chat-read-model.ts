@@ -149,7 +149,7 @@ export class ChatReadModel {
     const cursor: MessageCursor | null =
       page.before && from !== null ? { at: new Date(page.before.at * 1000), id: from } : null;
     const older = (message: SaidMessage) => cursor === null || before(message, cursor);
-    const kept = new Map<string, SaidMessage[]>();
+    const kept = new Map<string, readonly SaidMessage[]>();
     const passed = new Set<string>();
     let more = false;
     let next: SaidMessage | null = null;
