@@ -14,6 +14,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { ChannelSend } from "../channels/channel.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
+import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
@@ -22,7 +23,7 @@ import type { MessagePart } from "../types.js";
 import type { Seats } from "../sessions/seats.js";
 import { startChannelChat } from "./channel-chat.js";
 import { addressOf, lineAt, platformIdOfLine, type ChatAdapters } from "./chat-adapter.js";
-import { emailOf, type EmailOutbound } from "./email-chat-adapter.js";
+import { EMAIL_PLATFORM, emailOf, type EmailOutbound } from "./email-chat-adapter.js";
 
 export interface RecordedSendsDeps {
   /** Each channel's chat adapter, which names the chat at an address and
@@ -75,10 +76,13 @@ export function recordedSends<C extends Channel>(
       value: async (address: ChatId, message: OutgoingMessage): Promise<MessageReceipt> => {
         const email = message.kind === "email" ? message : undefined;
         const out: Out = {
-          text: message.text ?? "",
+          // The port reads a message without text by its parts.
+          text: message.text ?? (message.parts ? partsText(message.parts) : ""),
           ...(message.parts?.length ? { parts: message.parts } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
           ...(email?.html ? { html: email.html } : {}),
+          ...(email?.cc?.length ? { cc: email.cc } : {}),
+          ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
         // The port quotes by the platform's id, an email by the provider's.
         const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
@@ -179,6 +183,8 @@ async function sayInChat(
   const threadOf = adapter.threadAt(address);
   const group =
     threadOf !== null ||
+    // Every email thread is a group, whether or not the message says email.
+    account.platform === EMAIL_PLATFORM ||
     message.kind === "email" ||
     deps.chats.byKey(deps.adapters.chatAt(channel.name, address, "group"))?.kind === "group";
   const { chat, key, romeEnd } = startChannelChat(deps, {

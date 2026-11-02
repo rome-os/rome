@@ -241,6 +241,32 @@ describe("recordedSends", () => {
     expect(image).toBe("[image: sunset]");
   });
 
+  it("send an email's reply recipients, and its text from its parts when it has none", async () => {
+    await send("email").send(
+      "thread-7" as ChatId,
+      {
+        kind: "email",
+        parts: [{ type: "text", content: "From parts" }],
+        cc: ["ann@example.com"],
+        bcc: ["log@example.com"],
+      } as OutgoingMessage,
+    );
+
+    expect(sent[0]?.message).toMatchObject({
+      text: "From parts",
+      cc: ["ann@example.com"],
+      bcc: ["log@example.com"],
+    });
+  });
+
+  it("keep a thread a plain message reaches on an email channel as a group", async () => {
+    await send("email").send("thread-8" as ChatId, { text: "Plain" });
+
+    expect(testDb.db.all(sql`SELECT key, kind FROM chats`)).toEqual([
+      { key: "thread-8", kind: "group" },
+    ]);
+  });
+
   it("send nothing and record nothing when the platform refuses", async () => {
     const [refusing] = recordedSends(
       [

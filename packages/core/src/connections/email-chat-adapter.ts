@@ -36,10 +36,13 @@ export interface EmailRecipients {
   readonly bcc?: readonly string[];
 }
 
-/** A message in an email chat: what every message carries, and an HTML body,
- *  which the provider shows in place of the text. */
+/** A message in an email chat: what every message carries, an HTML body,
+ *  which the provider shows in place of the text, and who else a reply goes
+ *  to. A thread's first message goes to the recipients it was opened for. */
 export interface EmailOutbound extends Outbound {
   readonly html?: string;
+  readonly cc?: readonly string[];
+  readonly bcc?: readonly string[];
 }
 
 /** The email adapter, which also opens threads. */
@@ -184,6 +187,8 @@ export function emailChatAdapter(
       const at = started.get(key) ?? addresses.addressOf(own, key) ?? key;
       const receipt = await port().send(at as ChatId, {
         ...body,
+        ...(out.cc?.length ? { cc: [...out.cc] } : {}),
+        ...(out.bcc?.length ? { bcc: [...out.bcc] } : {}),
         ...(replyTo ? { inReplyToMessageId: replyTo } : {}),
       });
       return { key: sentLineId(ref, own.id, receipt.messageId || undefined), threadId: null };
