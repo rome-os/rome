@@ -491,4 +491,83 @@ describe("0105_chats_tables triggers", () => {
         .get(),
     ).toEqual({ sender_account_id: "core:concierge" });
   });
+  it("move a send-first seat's thread seats with it, and resolve quotes another seat recorded of its lines", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+    sqlite.exec(`
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, agent_name, created_at, activity_at)
+      VALUES ('channel:support:oc_ops', 'oc_ops', 'channel', 'support', 'oc_ops', 'support', 50, 50);
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type, parent_session_id,
+        agent_name, created_at, activity_at)
+      VALUES ('channel:support:omt_1', 'Topic', 'channel', 'support', 'omt_1', 'thread', 'channel:support:oc_ops', 'support', 51, 51);
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type, source_thread_name,
+        agent_name, created_at, activity_at)
+      VALUES ('channel:sales:oc_ops', 'Ops', 'channel', 'sales', 'oc_ops', 'group', 'Ops', 'sales', 52, 52);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('ops-hello', 'channel:support:oc_ops', 'turn-11', 'assistant', '[{"type":"text","content":"Hello ops"}]', 'om_7', 500),
+             ('topic-hello', 'channel:support:omt_1', 'turn-12', 'assistant', '[{"type":"text","content":"In the topic"}]', 'om_8', 501);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id,
+        reply_to_platform_message_id, created_at)
+      VALUES ('ops-reply', 'channel:sales:oc_ops', 'turn-13', 'user', '[{"type":"text","content":"Hi support"}]', 'om_9', 'ou_wei', 'om_7', 502);
+    `);
+
+    sqlite.exec(
+      "UPDATE rome_sessions SET source_thread_type = 'group' WHERE id = 'channel:support:oc_ops'",
+    );
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT s.id, c.key, s.thread_id FROM rome_sessions s JOIN chats c ON c.id = s.chat_id
+           WHERE s.id IN ('channel:support:oc_ops', 'channel:support:omt_1', 'channel:sales:oc_ops') ORDER BY s.id`,
+        )
+        .all(),
+    ).toEqual([
+      { id: "channel:sales:oc_ops", key: "oc_ops", thread_id: null },
+      { id: "channel:support:oc_ops", key: "oc_ops", thread_id: null },
+      { id: "channel:support:omt_1", key: "oc_ops", thread_id: "omt_1" },
+    ]);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT q.text FROM chat_messages m JOIN chat_messages q ON q.id = m.reply_to_message_id
+           WHERE m.key = 'om_9'`,
+        )
+        .all(),
+    ).toEqual([{ text: "Hello ops" }]);
+    // Only the dashboard chat is left a direct message.
+    expect(sqlite.prepare("SELECT count(*) AS n FROM chats WHERE kind = 'dm'").get()).toEqual({
+      n: 1,
+    });
+  });
+
+  it("move a channel's seats to its real platform and account once boot records them", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    // An install from before channels were recorded: the upgrade finds no
+    // channel row and falls back to the channel's name.
+    sqlite.exec(`
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type, created_at, activity_at)
+      VALUES ('channel:telegram_user:4242', 'Ada', 'channel', 'telegram_user', '4242', 'private', 10, 10);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('ada-hi', 'channel:telegram_user:4242', 'turn-1', 'user', '[{"type":"text","content":"hi"}]', '5', '4242', 100);
+    `);
+    expect(sqlite.prepare("SELECT platform, key FROM chats").all()).toEqual([
+      { platform: "telegram_user", key: "dm:telegram_user:4242" },
+    ]);
+
+    sqlite.exec(`
+      INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+        VALUES ('telegram_user', 'user', 'telegram', '777', 1);
+    `);
+
+    expect(sqlite.prepare("SELECT platform, key FROM chats").all()).toEqual([
+      { platform: "telegram", key: "dm:777:4242" },
+    ]);
+    expect(sqlite.prepare("SELECT chat_platform, account_id FROM rome_sessions").all()).toEqual([
+      { chat_platform: "telegram", account_id: "777" },
+    ]);
+    expect(sqlite.prepare("SELECT count(*) AS n FROM chat_messages").get()).toEqual({ n: 1 });
+  });
 });
