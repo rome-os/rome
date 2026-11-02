@@ -30,11 +30,14 @@ describe("recordedSends", () => {
   /** Where the port says a send to an address landed, when not there. */
   let landsAt: Record<string, string>;
   let addresses: ChatAddresses;
+  /** Runs once the port has taken a send. */
+  let afterSend: () => void;
 
   beforeEach(() => {
     testDb = createTestDb();
     sent = [];
     landsAt = {};
+    afterSend = () => {};
     let next = 0;
     /** A channel whose send port answers each message with the next id, at
      *  the address it names, or at a new email thread when it names none. */
@@ -45,6 +48,7 @@ describe("recordedSends", () => {
         send: {
           send: async (address: ChatId, message: OutgoingMessage) => {
             sent.push({ channel: name, address, message });
+            afterSend();
             return {
               chatId: (landsAt[address] ?? (address || "thread-new")) as ChatId,
               messageId: `m-${++next}`,
@@ -449,6 +453,18 @@ describe("recordedSends", () => {
     ).rejects.toThrow("Email replyToMessageId must not be blank. No email was sent.");
     expect(sent).toEqual([]);
     expect(lines()).toEqual([]);
+  });
+
+  it("answer a send the platform took even when its address cannot be read back", async () => {
+    afterSend = () => {
+      addresses.addressOf = () => {
+        throw new Error("database is locked");
+      };
+    };
+
+    const receipt = await send("telegram").send("4242" as ChatId, { text: "Deploy done" });
+
+    expect(receipt).toEqual({ chatId: "4242", messageId: "m-1" });
   });
 
   it("send nothing and record nothing when the platform refuses", async () => {

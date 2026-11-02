@@ -140,7 +140,7 @@ export function recordedSends<C extends Channel>(
         }
         const seat = seatAt(local, channel.name, at);
         const landed = seat
-          ? await sayInSeat(local, channel, seat, out, message, quoted)
+          ? await sayInSeat(local, channel, seat, at, out, message, quoted)
           : await sayInChat(local, channel, at, out, message, quoted);
         return {
           chatId: landed.address,
@@ -230,6 +230,7 @@ async function sayInSeat(
   deps: RecordedSendsDeps,
   channel: Channel,
   sessionId: string,
+  address: ChatId,
   out: Out,
   message: OutgoingMessage,
   quoted: string | undefined,
@@ -247,9 +248,11 @@ async function sayInSeat(
   if (!said) throw new Error(`Session ${sessionId} stands in no chat to send in`);
   return {
     // Where the platform placed it, whether or not the record landed.
-    address: deps.adapters.addressAt(
+    address: landedAt(
+      deps,
       channel.name,
       placeIn(seat.place.chat, said.landedIn ?? undefined),
+      address,
     ),
     messageId: platformIdOfLine(key, seat.accountId, said.sent),
   };
@@ -315,9 +318,23 @@ async function sayInChat(
   );
   return {
     // The adapter keeps the address a direct message landed at.
-    address: deps.adapters.addressAt(channel.name, landedIn),
+    address: landedAt(deps, channel.name, landedIn, address),
     messageId: lineKey === null ? null : platformIdOfLine(key, romeEnd, lineKey),
   };
+}
+
+/**
+ * The address `place` is at on channel `channel`, for the receipt of a send
+ * the platform already took. When it cannot be read, as when storage fails,
+ * the receipt names the thread the send landed in, else the address it was
+ * sent to, rather than failing a send that went out.
+ */
+function landedAt(deps: RecordedSendsDeps, channel: string, place: Place, sentTo: ChatId): ChatId {
+  try {
+    return deps.adapters.addressAt(channel, place);
+  } catch {
+    return place.threadId ?? sentTo;
+  }
 }
 
 /** The kind of chat channel `channel`'s account reaches at `address`: the
