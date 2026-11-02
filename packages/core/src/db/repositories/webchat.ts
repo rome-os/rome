@@ -2148,35 +2148,32 @@ export class WebChatRepository {
   }
 
   async updateSessionName(id: string, name: string) {
-    if (this.renameSession(id, name)) this.emitSessionNameChanged(id, name);
+    if (await this.renameSession(id, name)) this.emitSessionNameChanged(id, name);
   }
 
   async updateSessionNameIfCurrent(id: string, currentName: string, name: string) {
-    const renamed = this.renameSession(id, name, currentName);
+    const renamed = await this.renameSession(id, name, currentName);
     if (renamed) this.emitSessionNameChanged(id, name);
     return renamed;
   }
 
   /**
    * Name session `id` `name`, when it is named `currentName` if that is
-   * given, in one transaction. A subclass that keeps the name elsewhere too
-   * renames it here. Returns whether the session was renamed.
+   * given. A subclass that keeps the name elsewhere too renames it here.
+   * Returns whether the session was renamed.
    */
-  protected renameSession(id: string, name: string, currentName?: string): boolean {
-    return this.db.transaction(
-      (tx) =>
-        tx
-          .update(romeSessions)
-          .set({ name })
-          .where(
-            and(
-              eq(romeSessions.id, id),
-              currentName === undefined ? undefined : eq(romeSessions.name, currentName),
-            ),
-          )
-          .returning({ id: romeSessions.id })
-          .all().length > 0,
-    );
+  protected async renameSession(id: string, name: string, currentName?: string): Promise<boolean> {
+    const rows = await this.db
+      .update(romeSessions)
+      .set({ name })
+      .where(
+        and(
+          eq(romeSessions.id, id),
+          currentName === undefined ? undefined : eq(romeSessions.name, currentName),
+        ),
+      )
+      .returning({ id: romeSessions.id });
+    return rows.length > 0;
   }
 
   async updateSessionProject(

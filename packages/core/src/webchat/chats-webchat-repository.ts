@@ -507,10 +507,25 @@ export class ChatsWebChatRepository extends WebChatRepository {
     for (const ref of ended) this.chats.end(ref);
   }
 
-  /** Name session `id` and its dashboard chat `name` together. */
-  protected override renameSession(id: string, name: string, currentName?: string): boolean {
-    return this.db.transaction(() => {
-      const renamed = super.renameSession(id, name, currentName);
+  /** Name session `id` and its dashboard chat `name` in one transaction. */
+  protected override async renameSession(
+    id: string,
+    name: string,
+    currentName?: string,
+  ): Promise<boolean> {
+    return this.db.transaction((tx) => {
+      const renamed =
+        tx
+          .update(romeSessions)
+          .set({ name })
+          .where(
+            and(
+              eq(romeSessions.id, id),
+              currentName === undefined ? undefined : eq(romeSessions.name, currentName),
+            ),
+          )
+          .returning({ id: romeSessions.id })
+          .all().length > 0;
       const chat = renamed ? this.dashboardChatOf(id) : null;
       if (chat) this.chats.rename(chat, name);
       return renamed;
