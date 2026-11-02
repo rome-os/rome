@@ -108,13 +108,13 @@ const lineRole = sql.raw(`CASE
   ELSE 'notification' END`);
 
 export class ChatReadModel {
-  private readonly messages: Pick<MessageRepository, "read" | "idOf">;
+  private readonly messages: Pick<MessageRepository, "read" | "idOf" | "byIds">;
   private readonly links: Pick<TurnLinks, "turnsOf">;
 
   constructor(
     private readonly db: DrizzleDb,
     deps: {
-      messages?: Pick<MessageRepository, "read" | "idOf">;
+      messages?: Pick<MessageRepository, "read" | "idOf" | "byIds">;
       links?: Pick<TurnLinks, "turnsOf">;
     } = {},
   ) {
@@ -128,8 +128,10 @@ export class ChatReadModel {
    * answered, or with a page the newest `page.limit` turns before
    * `page.before`. A message two of Rome's agents both took a turn on is
    * drawn under the first link, so it is never drawn twice. A message outside
-   * any turn counts as a turn of its own. Null when the session stands in no
-   * chat.
+   * any turn counts as a turn of its own. A turn is placed by its newest
+   * line and shown whole, with all its lines, even where other turns' lines
+   * fall between them, so pages never split or repeat a turn. Null when the
+   * session stands in no chat.
    */
   async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
     const seat = await this.seatOf(sessionId);
@@ -142,60 +144,106 @@ export class ChatReadModel {
       const read = await this.messages.read(place);
       return this.transcriptOf(sessionId, seen(read.messages), null);
     }
-    // Chats reads by message, newest first. Read back in batches until the
-    // page holds one turn more than asked, so the oldest turn shown is whole.
-    // A cursor names its line by key, as every line goes out.
+    // A cursor names the newest line of the oldest turn already shown, by
+    // its key, as every line goes out. This page holds turns whose newest
+    // line is older.
     const from = page.before ? this.messages.idOf(place.chat, page.before.id) : null;
-    let before: MessageCursor | null =
+    const cursor: MessageCursor | null =
       page.before && from !== null ? { at: new Date(page.before.at * 1000), id: from } : null;
-    let messages: SaidMessage[] = [];
-    const links = new Map<number, TurnLink>();
-    let exhausted = false;
-    for (;;) {
-      const read = await this.messages.read(place, { before, limit: page.limit * 4 });
+    const older = (message: SaidMessage) => cursor === null || before(message, cursor);
+    const kept = new Map<string, SaidMessage[]>();
+    const passed = new Set<string>();
+    let more = false;
+    let next: SaidMessage | null = null;
+    // Chats reads by message, newest first: walk back in batches, meeting
+    // each turn first at its newest line.
+    let batch: MessageCursor | null = cursor;
+    scan: for (;;) {
+      const read = await this.messages.read(place, { before: batch, limit: page.limit * 4 });
       const shown = seen(read.messages);
-      for (const [id, link] of this.links.turnsOf(shown.map((m) => m.id))) {
-        links.set(id, link);
-      }
-      messages = [...shown, ...messages];
-      if (!read.older || shown.length < read.messages.length) exhausted = true;
-      before = read.older;
-      if (exhausted || turnKeys(messages, links).size > page.limit) break;
-    }
-    // Keep the newest `limit` turns: walking back from the newest message,
-    // stop at the first message of a turn past the limit.
-    const kept = new Set<string>();
-    let cut = 0;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const key = turnKey(messages[index] as SaidMessage, links);
-      if (!kept.has(key)) {
-        if (kept.size === page.limit) {
-          cut = index + 1;
-          break;
+      const links = this.links.turnsOf(shown.map((message) => message.id));
+      for (const message of [...shown].reverse()) {
+        const key = turnKey(message, links);
+        if (kept.has(key) || passed.has(key)) continue;
+        const lines = await this.linesOfTurn(place, message, links.get(message.id));
+        const newest = lines.at(-1) ?? message;
+        // A turn whose newest line is newer than the cursor was shown before.
+        if (!older(newest)) {
+          passed.add(key);
+          continue;
         }
-        kept.add(key);
+        if (kept.size === page.limit) {
+          more = true;
+          break scan;
+        }
+        kept.set(key, seen(lines));
+        next = newest;
       }
+      if (!read.older || shown.length < read.messages.length) break;
+      batch = read.older;
     }
-    const shown = messages.slice(cut).filter((message) => kept.has(turnKey(message, links)));
-    const oldest = shown[0];
-    const more = cut > 0 || !exhausted;
+    const lines = [...new Map([...kept.values()].flat().map((m) => [m.id, m])).values()].sort(
+      (a, b) => (before(a, b) ? -1 : before(b, a) ? 1 : 0),
+    );
     return this.transcriptOf(
       sessionId,
-      shown,
-      more && oldest ? { at: oldest.at.getTime() / 1000, id: oldest.key } : null,
-      links,
+      lines,
+      more && next ? { at: next.at.getTime() / 1000, id: next.key } : null,
     );
+  }
+
+  /** Every line drawn under the turn `link` names, `message` among them,
+   *  oldest first: the turn's prompts and answers in `place` whose first link
+   *  is this turn's. A message no turn took is a turn of its own. */
+  private async linesOfTurn(
+    place: Place,
+    message: SaidMessage,
+    link: TurnLink | undefined,
+  ): Promise<SaidMessage[]> {
+    if (!link?.turnId) return [message];
+    const ids = (
+      await this.db.all<{ message_id: number }>(sql`
+        SELECT message_id FROM agent_turn_messages
+        WHERE session_id = ${link.sessionId} AND turn_id = ${link.turnId}
+          AND role IN ('prompt', 'answer')
+      `)
+    ).map((row) => row.message_id);
+    const drawn = this.links.turnsOf(ids);
+    return this.messages
+      .byIds(
+        ids.filter((id) => {
+          const first = drawn.get(id);
+          return first?.sessionId === link.sessionId && first.turnId === link.turnId;
+        }),
+      )
+      .filter(
+        (line) => line.place.chat.id === place.chat.id && line.place.threadId === place.threadId,
+      );
   }
 
   private async transcriptOf(
     sessionId: string,
     messages: readonly SaidMessage[],
     nextCursor: TranscriptCursor | null,
-    known?: Map<number, TurnLink>,
   ): Promise<Transcript> {
-    const links = known ?? this.links.turnsOf(messages.map((message) => message.id));
+    const ids = messages.map((message) => message.id);
+    const links = this.links.turnsOf(ids);
     const lines = messages.map((message) => chatLine(message, links.get(message.id), sessionId));
-    return { lines, traces: await this.tracesOf(lines), nextCursor };
+    // Every turn a shown line prompted or answered has its trace shown, also
+    // one whose lines are drawn under another agent's turn.
+    return { lines, traces: await this.tracesOf(await this.turnsAt(ids)), nextCursor };
+  }
+
+  /** Every turn that prompted on or answered with one of `messageIds`. */
+  private async turnsAt(messageIds: readonly number[]): Promise<TurnRef[]> {
+    if (messageIds.length === 0) return [];
+    return (
+      await this.db.all<{ session_id: string; turn_id: string }>(sql`
+        SELECT DISTINCT session_id, turn_id FROM agent_turn_messages
+        WHERE message_id IN (SELECT value FROM json_each(${JSON.stringify(messageIds)}))
+          AND role IN ('prompt', 'answer') AND turn_id IS NOT NULL
+      `)
+    ).map((row) => ({ sessionId: row.session_id, turnId: row.turn_id }));
   }
 
   /**
@@ -210,6 +258,7 @@ export class ChatReadModel {
     const rows = await this.db.all<{
       id: string;
       turn_id: string | null;
+      input_state: AgentInputState | null;
       role: TranscriptRole | "trace";
       content: string;
       sender_name: string | null;
@@ -218,7 +267,8 @@ export class ChatReadModel {
       turn_at: number;
     }>(sql`
       WITH line AS (
-        SELECT id, turn_id, role, content, json_extract(actor, '$.email') AS sender_name,
+        SELECT id, turn_id, input_state, role, content,
+          json_extract(actor, '$.email') AS sender_name,
           created_at AS at, rowid AS seq, coalesce(turn_id, id) AS turn
         FROM rome_agent_messages WHERE session_id = ${sessionId}
       ),
@@ -246,7 +296,7 @@ export class ChatReadModel {
           id: row.id,
           sessionId,
           turnId: row.turn_id,
-          inputState: null,
+          inputState: row.input_state,
           role: row.role,
           content: row.content,
           senderAccountId: null,
@@ -288,17 +338,10 @@ export class ChatReadModel {
     };
   }
 
-  /** The trace of each turn `lines` belong to that has one. */
-  private async tracesOf(lines: readonly TranscriptLine[]): Promise<TurnTrace[]> {
+  /** The trace of each of `refs` that has one. */
+  private async tracesOf(refs: readonly TurnRef[]): Promise<TurnTrace[]> {
     const turns = new Map<string, TurnRef>();
-    for (const line of lines) {
-      if (line.turnId) {
-        turns.set(JSON.stringify([line.sessionId, line.turnId]), {
-          sessionId: line.sessionId,
-          turnId: line.turnId,
-        });
-      }
-    }
+    for (const ref of refs) turns.set(JSON.stringify([ref.sessionId, ref.turnId]), ref);
     if (turns.size === 0) return [];
     const wanted = sql.join(
       [...turns.values()].map((turn) => sql`(${turn.sessionId}, ${turn.turnId})`),
@@ -393,14 +436,15 @@ export class ChatReadModel {
 
 /** The turn a message is drawn under: its link's turn, or itself. */
 function turnKey(message: SaidMessage, links: ReadonlyMap<number, TurnLink>): string {
-  return links.get(message.id)?.turnId ?? `line:${message.id}`;
+  const link = links.get(message.id);
+  return link?.turnId ? `turn:${link.sessionId}\0${link.turnId}` : `line:${message.id}`;
 }
 
-function turnKeys(
-  messages: readonly SaidMessage[],
-  links: ReadonlyMap<number, TurnLink>,
-): Set<string> {
-  return new Set(messages.map((message) => turnKey(message, links)));
+/** Whether `message` was said before the position `cursor` names. */
+function before(message: SaidMessage, cursor: { at: Date; id: number }): boolean {
+  const at = Math.floor(message.at.getTime() / 1000);
+  const bound = Math.floor(cursor.at.getTime() / 1000);
+  return at < bound || (at === bound && message.id < cursor.id);
 }
 
 function chatLine(

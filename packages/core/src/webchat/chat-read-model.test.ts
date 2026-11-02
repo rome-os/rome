@@ -184,6 +184,50 @@ describe("ChatReadModel", () => {
       );
     });
 
+    it("pages whole turns even when two agents' turns interleave, and shows each once", async () => {
+      const chat = fixture.chat("telegram", "-1001234567890123", "group");
+      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      const line = (id: string, seconds: number, agent?: string) =>
+        fixture.say({
+          id,
+          chat,
+          from: agent ? `bot-${agent}` : "wei",
+          agent: agent ?? null,
+          at: new Date(seconds * 1000),
+        });
+      links.prompt(line("prompt-a", 1_000), "sales", "turn-a");
+      links.prompt(line("prompt-b", 1_001), "support", "turn-b");
+      links.answer(line("answer-a", 1_002, "sales"), "sales", "turn-a");
+      links.answer(line("answer-b", 1_003, "support"), "support", "turn-b");
+
+      const newest = await reads.chatTranscript("sales", { limit: 1 });
+      expect(newest?.lines.map((l) => l.id)).toEqual(["prompt-b", "answer-b"]);
+      const older = await reads.chatTranscript("sales", {
+        limit: 1,
+        before: newest?.nextCursor ?? null,
+      });
+      expect(older?.lines.map((l) => l.id)).toEqual(["prompt-a", "answer-a"]);
+      expect(older?.nextCursor).toBeNull();
+    });
+
+    it("shows the trace of every turn a shown line prompted, also one drawn under another's", async () => {
+      const chat = fixture.chat("telegram", "-1001234567890123", "group");
+      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      const asked = fixture.say({ id: "q", chat, from: "wei", at: new Date(1_000_000) });
+      links.prompt(asked, "sales", "turn-s");
+      links.prompt(asked, "support", "turn-p");
+      await traceAt("sales", "trace-s", "turn-s", 1_001);
+      // Support's turn ended without a word in the chat.
+      await traceAt("support", "trace-p", "turn-p", 1_002);
+
+      const transcript = await reads.chatTranscript("sales");
+
+      expect(transcript?.lines.map((l) => [l.id, l.turnId])).toEqual([["q", "turn-s"]]);
+      expect(transcript?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
+    });
+
     it("draws a line no turn took as a notification, and leaves out what was said before the seat", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
       fixture.seat({
@@ -240,6 +284,21 @@ describe("ChatReadModel", () => {
       expect(older.lines.map((line) => line.id)).toEqual(["sp-0", "sa-0"]);
       expect(older.nextCursor).toBeNull();
     });
+  });
+
+  it("keeps the state of a session's own input", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", name: "Fork", type: "subagent" } as never);
+    await repo.addMessage("fp-1", "fork-1", "user", text("try again"), "fork-turn-1");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ inputState: "queued" })
+      .where(sql`${romeAgentMessages.id} = 'fp-1'`);
+
+    const transcript = await reads.sessionTranscript("fork-1");
+
+    expect(transcript.lines.map((line) => [line.id, line.inputState])).toEqual([
+      ["fp-1", "queued"],
+    ]);
   });
 
   describe("search", () => {
