@@ -54,6 +54,7 @@ import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
 import { agentMessageOutbound } from "../../channels/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
+import type { ChatRef } from "../../chats/storage/place.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -1049,6 +1050,41 @@ export class WebChatRepository {
     agentName: string;
     projectName?: string;
     projectPath?: string;
+    /** Where the session stands in Chats, set on its row when given: the
+     *  chat, the one of Rome's accounts that heard it, and when, which the
+     *  session's activity moves up to. Only Chats' own recording passes it,
+     *  from the Chats switch on. */
+    speaker?: { chat: ChatRef; accountId: string; at: Date };
+  }): Promise<{ id: string; agentName: string | null }> {
+    const opened = await this.openChannelChat(input);
+    const { speaker } = input;
+    if (speaker) {
+      const thread =
+        input.parentThreadId && input.parentThreadId !== input.threadId ? input.threadId : null;
+      await this.db
+        .update(romeSessions)
+        .set({
+          chatId: speaker.chat.id,
+          chatPlatform: speaker.chat.platform,
+          threadId: thread,
+          accountId: speaker.accountId,
+          ...advanceSessionActivitySet(speaker.at),
+        })
+        .where(eq(romeSessions.id, opened.id));
+    }
+    return opened;
+  }
+
+  private async openChannelChat(input: {
+    channel: string;
+    threadId: string;
+    parentThreadId?: string;
+    threadName?: string;
+    threadType?: "private" | "group";
+    agentName: string;
+    projectName?: string;
+    projectPath?: string;
+    speaker?: { chat: ChatRef; accountId: string; at: Date };
   }): Promise<{ id: string; agentName: string | null }> {
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
