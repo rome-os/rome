@@ -21,7 +21,7 @@ export interface SeatRepliesDeps {
   seats: Pick<Seats, "seatOf">;
   /** Each channel's chat adapter, which the seat says its messages through. */
   adapters: Pick<ChatAdapters, "of" | "keyOf">;
-  messages: Pick<MessageRepository, "send" | "keyOf">;
+  messages: Pick<MessageRepository, "send" | "byIds">;
   links: Pick<TurnLinks, "answer">;
 }
 
@@ -78,7 +78,7 @@ export class SeatReplies {
       async (target) => ({ key: await deliver(seat, target.chat) }),
     );
     if (sent.id === null) return { id: null, at: sent.at };
-    if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);
+    if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
     return { id: sent.id, at: sent.at };
   }
 
@@ -121,7 +121,7 @@ export class SeatReplies {
       },
     );
     if (sent.id === null) return { id: null, at: sent.at, sent: lineKey, seat };
-    if (options.turnId !== undefined) this.deps.links.answer(sent.id, sessionId, options.turnId);
+    if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
     return { id: sent.id, at: sent.at, sent: lineKey, seat };
   }
 
@@ -142,7 +142,9 @@ export class SeatReplies {
     const { account, adapter } = this.adapterOf(seat, channel);
     const replyTo = options.replyTo;
     const chat = this.deps.adapters.keyOf(seat.place.chat);
-    const quoted = replyTo === undefined ? null : this.deps.messages.keyOf(replyTo);
+    // A key names a line only in its own chat.
+    const line = replyTo === undefined ? undefined : this.deps.messages.byIds([replyTo])[0];
+    const quoted = line?.place.chat.id === seat.place.chat.id ? line.key : null;
     const reply = adapter.stream?.(chat.externalId, seat.place.threadId ?? null, {
       ...(quoted === null ? {} : { replyTo: quoted }),
       policy: options.policy,
@@ -168,7 +170,7 @@ export class SeatReplies {
             },
             async () => ({ key, ...landed(seat, threadId) }),
           );
-          if (sent.id !== null) this.deps.links.answer(sent.id, sessionId, options.turnId);
+          if (sent.id !== null) this.answered(sent.id, sessionId, options.turnId);
         } catch (error) {
           // The messages are already on the platform. A failed record must
           // not make anything send them again.
@@ -181,6 +183,21 @@ export class SeatReplies {
         return settled;
       },
     };
+  }
+
+  /** Make message `messageId` turn `turnId`'s answer. The message is out
+   *  and on record already, so a failed link is logged: failing the send
+   *  would invite a second real message. */
+  private answered(messageId: number, sessionId: string, turnId: string): void {
+    try {
+      this.deps.links.answer(messageId, sessionId, turnId);
+    } catch (error) {
+      log.warn("reply recorded but its turn link failed", {
+        sessionId,
+        turnId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private adapterOf(seat: Seat, channel: Channel) {

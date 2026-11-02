@@ -157,6 +157,66 @@ describe("SeatReplies", () => {
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
 
+  it("answer a delivered reply even when its turn link fails", async () => {
+    const broken = new SeatReplies({
+      seats,
+      adapters: { of: () => adapter, keyOf: (ref) => chatKey(ref.platform, "x" as ChatId) },
+      messages,
+      links: {
+        answer: () => {
+          throw new Error("disk full");
+        },
+      },
+    });
+
+    const sent = await broken.send("seat-1", CHANNEL, { text: "hi" }, { turnId: "turn-1" });
+    const said = await broken.say("seat-1", [{ type: "text", content: "yo" }], async () => "k9", {
+      turnId: "turn-1",
+    });
+
+    expect(sent).toMatchObject({ id: expect.any(Number), sent: "k1" });
+    expect(said).toMatchObject({ id: expect.any(Number) });
+  });
+
+  it("quote in a streamed reply only a line of the seat's own chat", async () => {
+    const quotes: Array<string | undefined> = [];
+    const quoting = {
+      ...adapter,
+      stream: (_chat: string, _thread: ChatId | null, out: { replyTo?: string }) => {
+        quotes.push(out.replyTo);
+        return adapter.stream?.(_chat, _thread, out as never) ?? null;
+      },
+    } as unknown as ChannelChatAdapter;
+    const elsewhere = new ChatRepository(testDb.db).start(
+      { platform: "telegram", externalId: "-1009999999999999" as ChatId },
+      "group",
+      null,
+    ).ref;
+    const heard = (ref: ChatRef) =>
+      messages.record({
+        direction: "toRome",
+        key: "7",
+        place: placeIn(ref),
+        saidBy: { account: { platform: "telegram", id: "wei" } },
+        body: { text: "q" },
+        at: new Date(),
+      })!.id;
+    const here = heard(chat);
+    const there = heard(elsewhere);
+    const quotingReplies = new SeatReplies({
+      seats,
+      adapters: { of: () => quoting, keyOf: (ref) => chatKey(ref.platform, "x" as ChatId) },
+      messages,
+      links,
+    });
+    const options = { turnId: "turn-4", policy: POLICY, clock: systemClock };
+
+    await quotingReplies.stream("seat-1", CHANNEL, { ...options, replyTo: here });
+    await quotingReplies.stream("seat-1", CHANNEL, { ...options, replyTo: there });
+
+    expect(quotes).toEqual(["7", undefined]);
+  });
+
   it("send nothing for a session in no chat", async () => {
     testDb.db.run(sql`
       INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
