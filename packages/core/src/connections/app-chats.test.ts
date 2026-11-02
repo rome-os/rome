@@ -187,6 +187,18 @@ describe("appChats", () => {
       expect(sent.map((send) => send.channel)).toEqual(["telegram-2"]);
     });
 
+    it("answers a direct message whose end has disconnected as not connected", async () => {
+      const dm = fixture.chat(
+        "telegram",
+        chatAt("telegram", "42", { romeEnd: BOT.id }).externalId,
+        "dm",
+      );
+      delete accounts.telegram;
+
+      expect(await refusal(chats.send(dm, { text: "x" }))).toBe("not_connected");
+      expect(sent).toEqual([]);
+    });
+
     it("refuses to send a direct message as an account that is not its end", async () => {
       accounts["telegram-2"] = SECOND_BOT;
       const dm = fixture.chat(
@@ -326,6 +338,9 @@ describe("appChats", () => {
         ),
       ).toBe("unsupported");
       expect(await refusal(chats.send(group, { text: "  " }))).toBe("unsupported");
+      expect(await refusal(chats.send(group, { parts: [{ type: "text", content: " " }] }))).toBe(
+        "unsupported",
+      );
       expect(sent).toEqual([]);
       expect(lines()).toEqual([]);
     });

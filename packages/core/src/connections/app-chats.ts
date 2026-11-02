@@ -94,7 +94,8 @@ async function send(
   const parts = recordedParts(out, given);
   const text = out.text ?? partsText(parts);
   // Some platforms answer an empty send with a receipt and post nothing.
-  if (!text.trim() && !given.length && !out.attachments?.length) {
+  const says = given.some((part) => part.type !== "text" || part.content.trim() !== "");
+  if (!text.trim() && !says && !out.attachments?.length) {
     throw new SendError("unsupported", "A message with nothing to say is not sent");
   }
   const outbound = {
@@ -238,12 +239,12 @@ function senderIn(deps: AppChatsDeps, chat: Chat, at: Place, as: Account | undef
     return senderAs(deps, as);
   }
   const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
-  if (romeEnd !== null) return senderAs(deps, { platform, id: romeEnd });
+  if (romeEnd !== null) return senderAs(deps, { platform, id: romeEnd }, { inferred: true });
   const speaking = accounts.filter(
     (account) => deps.speakers.speakerIn(chat.ref.id, at.threadId ?? null, account.id) !== null,
   );
   const [only] = speaking.length === 1 ? speaking : accounts.length === 1 ? accounts : [];
-  if (only) return senderAs(deps, only);
+  if (only) return senderAs(deps, only, { inferred: true });
   if (accounts.length === 0) {
     throw new SendError("not_connected", `Rome holds no account on ${platform}`);
   }
@@ -261,10 +262,15 @@ function romeEndOf(deps: AppChatsDeps, chat: Chat): string | null {
   return match?.[1] ?? null;
 }
 
-/** Rome's account `account`, with the channel it speaks through now. */
-function senderAs(deps: AppChatsDeps, account: Account): Sender {
+/** Rome's account `account`, with the channel it speaks through now. An
+ *  `inferred` account is the chat's own, so one no channel holds is not
+ *  connected rather than a wrong pick. */
+function senderAs(deps: AppChatsDeps, account: Account, opts?: { inferred: boolean }): Sender {
   const name = deps.adapters.channelOf(account);
   if (name === null) {
+    if (opts?.inferred) {
+      throw new SendError("not_connected", `No Connection reaches ${describe(account)}`);
+    }
     throw new SendError("sender_not_in_chat", `Rome holds no account ${describe(account)}`);
   }
   const channel = deps.channels().find((candidate) => candidate.name === name);
@@ -365,7 +371,7 @@ function soleSender(deps: AppChatsDeps, platform: string, as: Account | undefine
       `Rome holds ${accounts.length} accounts on ${platform}; name one as \`as\``,
     );
   }
-  return senderAs(deps, only);
+  return senderAs(deps, only, { inferred: true });
 }
 
 /**
