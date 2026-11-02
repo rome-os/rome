@@ -101,6 +101,52 @@ describe("emailChatAdapter", () => {
     });
   });
 
+  it("start a thread once when two messages go into it together", async () => {
+    const { channel, sent } = fakeMail();
+    let release = () => {};
+    const send = (channel.send as { send: (to: ChatId, m: OutgoingMessage) => Promise<unknown> })
+      .send;
+    (channel.send as { send: unknown }).send = async (to: ChatId, message: OutgoingMessage) => {
+      if (to === "") await new Promise<void>((resolve) => (release = resolve));
+      return send(to, message);
+    };
+    const adapter = emailChatAdapter(channel, deps());
+    const chat = adapter.open({ to: "wei@example.com" }, "Plans");
+
+    const one = adapter.send(chat.externalId, null, { text: "one" });
+    const two = adapter.send(chat.externalId, null, { text: "two" });
+    await Promise.resolve();
+    release();
+    await Promise.all([one, two]);
+
+    expect(sent.map((s) => [s.to, s.message.text])).toEqual([
+      ["", "one"],
+      ["thread-1", "two"],
+    ]);
+  });
+
+  it("answer a first message that went out even when its thread cannot be kept, and reply there", async () => {
+    const { channel, sent } = fakeMail();
+    const broken = {
+      ...deps(),
+      addresses: Object.assign(Object.create(addresses), {
+        bind: () => {
+          throw new Error("disk full");
+        },
+      }),
+    };
+    const adapter = emailChatAdapter(channel, broken);
+    const chat = adapter.open({ to: "wei@example.com" }, "Plans");
+
+    expect(await adapter.send(chat.externalId, null, { text: "one" })).toEqual({
+      key: "m1",
+      threadId: null,
+    });
+    await adapter.send(chat.externalId, null, { text: "two" });
+
+    expect(sent.map((s) => s.to)).toEqual(["", "thread-1"]);
+  });
+
   it("refuse a first message the provider named no thread for, and keep the thread unsent", async () => {
     const { channel, sent } = fakeMail({ messageId: "m1", chatId: " " });
     const adapter = emailChatAdapter(channel, deps());
