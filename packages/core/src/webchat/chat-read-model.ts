@@ -449,7 +449,10 @@ export class ChatReadModel {
       SELECT m.key AS id, s.id AS chat_id, ${lineRole} AS role, m.text, m.said_at
       FROM ${CHAT_LINES} m
       JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
-      JOIN rome_sessions s ON s.chat_id = c.id
+      -- A seat finds what its transcript draws: its own thread, from when it
+      -- joined.
+      JOIN rome_sessions s ON s.chat_id = c.id AND m.thread_id IS s.thread_id
+        AND m.said_at >= s.created_at
       LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       WHERE ${matchesEveryTerm}
       ORDER BY m.said_at DESC, m.id DESC

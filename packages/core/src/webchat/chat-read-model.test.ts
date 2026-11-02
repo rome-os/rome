@@ -402,6 +402,31 @@ describe("ChatReadModel", () => {
         ["chat-1", "m-2", "assistant", "Launch plan is ready"],
       ]);
     });
+
+    it("finds a line only for a seat whose transcript draws it", async () => {
+      const chat = fixture.chat("webchat", "chat-3", "group", "Three");
+      fixture.seat({ id: "open", chat, accountId: "guardian", createdAt: new Date(0) });
+      fixture.seat({
+        id: "topic",
+        chat,
+        accountId: "guardian",
+        threadId: "topic-1",
+        createdAt: new Date(0),
+      });
+      fixture.seat({ id: "late", chat, accountId: "agent:late", createdAt: new Date(2_000_000) });
+      fixture.say({
+        id: "m-1",
+        chat,
+        from: "guardian",
+        text: "plan alpha",
+        at: new Date(1_000_000),
+      });
+
+      const hits = await reads.search("alpha", 10);
+
+      expect(hits.map((hit) => hit.chatId)).toEqual(["open"]);
+      expect((await reads.chatTranscript("open"))?.lines.map((l) => l.id)).toEqual(["m-1"]);
+    });
   });
 
   describe("unreadCount", () => {
