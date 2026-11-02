@@ -23,6 +23,11 @@ export interface ChatKey {
   readonly externalId: ChatId;
 }
 
+/** The key `externalId` on `platform`. */
+export function chatKey(platform: string, externalId: ChatId): ChatKey {
+  return { platform, externalId };
+}
+
 /** A chat, or a thread in one. `threadId` is the platform's own id for the
  *  thread, which a channel hands out as an address of its own. */
 export interface Place {

@@ -6,13 +6,9 @@
 // and reads no part of either.
 
 import type { ChatId } from "@rome-os/app-runtime";
-import type { ChatKey } from "../chats/place.js";
+import { chatKey, type ChatKey } from "../chats/place.js";
 
-export type { ChatKey };
-
-export function chatKey(platform: string, externalId: ChatId): ChatKey {
-  return { platform, externalId };
-}
+export { chatKey, type ChatKey };
 
 /** The other end of the direct message `key` names, or null when it names
  *  no direct message. */

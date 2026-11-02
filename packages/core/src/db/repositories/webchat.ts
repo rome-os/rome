@@ -64,7 +64,7 @@ import {
 } from "../../webchat/chat-read-model-sql.js";
 import { TurnLinks } from "../../sessions/turn-links.js";
 import { ChatRepository } from "../../chats/chat-repository.js";
-import { chatKey } from "../../channels/chat-ids.js";
+import { chatKey } from "../../chats/place.js";
 import { MessageRepository } from "../../chats/message-repository.js";
 import { partsText, type SaidBy } from "../../chats/message.js";
 import type { MessagePart } from "../../types.js";

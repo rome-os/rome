@@ -9,7 +9,7 @@ import { ChatRepository } from "./chats/chat-repository.js";
 import { ChatEvents } from "./chats/events.js";
 import { MessageRepository } from "./chats/message-repository.js";
 import { ChatAddresses } from "./channels/chat-addresses.js";
-import { chatKey } from "./channels/chat-ids.js";
+import { chatKey } from "./chats/place.js";
 import { EMAIL_PLATFORM, emailChatAdapter } from "./channels/email-chat-adapter.js";
 import { SeatLines } from "./channels/seat-lines.js";
 import type { DrizzleDb } from "./db/index.js";
