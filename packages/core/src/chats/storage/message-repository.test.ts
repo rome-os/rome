@@ -122,6 +122,62 @@ describe("MessageRepository", () => {
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
 
+  it("refuses a send no agent said, before it goes out", async () => {
+    let delivered = false;
+    const send = messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME } as never,
+        parts: [{ type: "text", content: "x" }],
+      },
+      async () => {
+        delivered = true;
+        return { key: "tg-9" };
+      },
+    );
+
+    await expect(send).rejects.toThrow("needs the agent");
+    expect(delivered).toBe(false);
+  });
+
+  it("quotes nothing on a send whose quoted line is in another chat", async () => {
+    const other = new ChatRepository(testDb.db).start(
+      { platform: "telegram", externalId: "chat-2" as ChatId },
+      "group",
+      null,
+    ).ref;
+    const elsewhere = messages.record({ ...heard("m0", new Date()), place: placeIn(other) })!;
+    let target: unknown;
+    const sent = await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "hi" }],
+        replyTo: elsewhere.id,
+      },
+      async (to) => {
+        target = to;
+        return { key: "tg-9" };
+      },
+    );
+
+    expect(target).toEqual({ chat: "chat-1" });
+    expect(messages.byIds([sent.id!])[0]?.replyTo).toBeUndefined();
+  });
+
+  it("names no chat by a ref on another platform than the chat's", () => {
+    messages.record(heard("m1", new Date()));
+    const wrong = { platform: "discord", id: chat.id };
+
+    expect(() => messages.record({ ...heard("m2", new Date()), place: placeIn(wrong) })).toThrow(
+      "No chat at discord",
+    );
+    expect(messages.read(placeIn(wrong)).messages).toEqual([]);
+    expect(messages.idOf(wrong, "m1")).toBeNull();
+  });
+
   it("reads a chat and a thread in it apart", () => {
     messages.record(heard("m1", new Date("2026-10-29T01:00:00Z")));
     messages.record(heard("t1", new Date("2026-10-29T01:00:01Z"), "t1", "topic-1"));

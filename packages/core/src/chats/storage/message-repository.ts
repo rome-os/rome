@@ -107,12 +107,16 @@ export class MessageRepository {
    * invites a second real one. The place's chat must already exist.
    */
   async send(message: OutboundMessage, deliver: Deliver): Promise<Sent> {
+    if (!message.saidBy.agent) {
+      throw new Error("A message Rome sends needs the agent that said it");
+    }
     const chat = this.chatOf(message.place);
+    // A quote names a line in the same chat: a key is unique only there.
     const quoted =
       message.replyTo === undefined
         ? null
         : typeof message.replyTo === "number"
-          ? this.keyOf(message.replyTo)
+          ? this.keyIn(chat.id, message.replyTo)
           : message.replyTo.key;
     const { key } = await deliver({ chat: chat.key, ...(quoted ? { replyTo: quoted } : {}) });
     const at = new Date();
@@ -169,7 +173,7 @@ export class MessageRepository {
     const rows = this.db.all<MessageRow>(sql`
       SELECT ${MESSAGE_COLUMNS}
       FROM chat_messages m
-      WHERE m.chat_id = ${place.chat.id} AND m.thread_id IS ${place.threadId ?? null}
+      WHERE m.chat_id = ${chatIdOf(place.chat)} AND m.thread_id IS ${place.threadId ?? null}
         ${before ? sql`AND (m.said_at, m.id) < (${seconds(before.at)}, ${before.id})` : sql``}
       ORDER BY m.said_at DESC, m.id DESC
       ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
@@ -199,7 +203,7 @@ export class MessageRepository {
     const rows = this.db.all<MessageRow>(sql`
       SELECT ${MESSAGE_COLUMNS}
       FROM chat_messages m
-      WHERE m.chat_id = ${place.chat.id} AND m.thread_id IS ${place.threadId ?? null} AND ${bound}
+      WHERE m.chat_id = ${chatIdOf(place.chat)} AND m.thread_id IS ${place.threadId ?? null} AND ${bound}
       ORDER BY m.said_at, m.id
       ${limit === undefined ? sql`` : sql`LIMIT ${limit + 1}`}
     `);
@@ -242,7 +246,11 @@ export class MessageRepository {
   /** The id of the line its adapter keys `key` in `chat`, or null when Rome
    *  holds none. */
   idOf(chat: ChatRef, key: string): number | null {
-    return this.idIn(chat.id, key);
+    return (
+      this.db.all<{ id: number }>(sql`
+        SELECT id FROM chat_messages WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
+      `)[0]?.id ?? null
+    );
   }
 
   private idIn(chatId: number, key: string): number | null {
@@ -250,6 +258,16 @@ export class MessageRepository {
       this.db.all<{ id: number }>(sql`
         SELECT id FROM chat_messages WHERE chat_id = ${chatId} AND key = ${key}
       `)[0]?.id ?? null
+    );
+  }
+
+  /** The adapter's key for message `id` in chat `chatId`, or null when Rome
+   *  holds none there. */
+  private keyIn(chatId: number, id: number): string | null {
+    return (
+      this.db.all<{ key: string }>(
+        sql`SELECT key FROM chat_messages WHERE id = ${id} AND chat_id = ${chatId}`,
+      )[0]?.key ?? null
     );
   }
 
@@ -265,13 +283,19 @@ export class MessageRepository {
    *  starts its chat. */
   private chatOf(place: Place): { id: number; key: string } {
     const row = this.db.all<{ id: number; key: string }>(sql`
-      SELECT id, key FROM ${chats} WHERE id = ${place.chat.id}
+      SELECT id, key FROM ${chats} WHERE id = ${place.chat.id} AND platform = ${place.chat.platform}
     `)[0];
     if (!row) {
       throw new Error(`No chat at ${place.chat.platform}:${place.chat.id} to record a message in`);
     }
     return row;
   }
+}
+
+/** The id `ref` names, when Rome holds that chat on `ref`'s platform: a
+ *  ref on another platform names no chat. */
+function chatIdOf(ref: ChatRef) {
+  return sql`(SELECT id FROM chats WHERE id = ${ref.id} AND platform = ${ref.platform})`;
 }
 
 const MESSAGE_COLUMNS = sql.raw(`m.id, m.key, m.sender_account_id, m.sender_agent, m.sender_name,

@@ -62,8 +62,8 @@ export type RecordedMessage = Omit<Message, "replyTo"> & {
 
 /**
  * A message Rome says into a place. `saidBy` is the account it goes out as,
- * one of Rome's own or the guardian's, with the agent that said it when an
- * agent did. `parts` is the message as composed, which reads as plain text
+ * one of Rome's own or the guardian's, and the agent that said it: every
+ * message Rome sends is an agent's, so it reads back as from Rome. `parts` is the message as composed, which reads as plain text
  * the way any recorded message does. `replyTo` is the id of the message it
  * answers in the same chat, or, for one Rome never recorded, its adapter's
  * key there, which the platform still shows as quoted.
@@ -71,7 +71,7 @@ export type RecordedMessage = Omit<Message, "replyTo"> & {
 export interface OutboundMessage {
   readonly direction: "fromRome";
   readonly place: Place;
-  readonly saidBy: SaidBy;
+  readonly saidBy: SaidBy & { readonly agent: string };
   readonly parts: readonly MessagePart[];
   readonly replyTo?: number | { readonly key: string };
 }

@@ -88,6 +88,16 @@ describe("ChatRepository", () => {
     expect(messages.read(placeIn(ref)).messages).toEqual([]);
   });
 
+  it("renames and ends a chat only by a ref on its own platform", () => {
+    const { ref } = chats.start(GROUP, "group", "Launch");
+    const wrong = { platform: "lark", id: ref.id };
+
+    chats.rename(wrong, "Other");
+    chats.end(wrong);
+
+    expect(chats.get(ref)?.name).toBe("Launch");
+  });
+
   it("names a platform's and a kind's chats as subqueries", () => {
     const group = chats.start(GROUP, "group", null).ref.id;
     const dm = chats.start(DM, "dm", null).ref.id;

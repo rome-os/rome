@@ -80,17 +80,22 @@ export class ChatRepository {
   }
 
   /** Take `name` as the chat's name. Changes nothing when Rome holds no chat
-   *  by that id. */
+   *  by that ref. */
   rename(ref: ChatRef, name: string): void {
-    this.db.update(chats).set({ name }).where(eq(chats.id, ref.id)).run();
+    this.db.update(chats).set({ name }).where(refers(ref)).run();
   }
 
   /** End the chat `ref` names: it goes, with every message said in it. The
    *  seats in it are Agents' to remove first. Changes nothing when Rome holds
-   *  no chat by that id. */
+   *  no chat by that ref. */
   end(ref: ChatRef): void {
-    this.db.delete(chats).where(eq(chats.id, ref.id)).run();
+    this.db.delete(chats).where(refers(ref)).run();
   }
+}
+
+/** The chat `ref` names: its id, on its platform. */
+function refers(ref: ChatRef): SQL | undefined {
+  return and(eq(chats.id, ref.id), eq(chats.platform, ref.platform));
 }
 
 function toChat(row: Row): Chat {
