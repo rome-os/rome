@@ -96,7 +96,9 @@ export interface ChatAdapter {
   /**
    * Begin receiving. `deliver` is called once for every message said in a
    * chat of this account by someone else, live, a chat's messages one at a
-   * time in the platform's order, and awaited before the chat's next one. It
+   * time, and awaited before the chat's next one. Each platform address's
+   * messages come in the platform's order; a chat's threads are addresses of
+   * their own and keep only their own order. It
    * answers the id Chats recorded the message under, or null when it was on
    * record already. Rome's own lines never come through here. `fault`
    * reports a message the adapter could not hand over.

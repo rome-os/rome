@@ -7,6 +7,7 @@ import type {
   InboundEvent,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { ChatBuffers } from "../channels/conversation-buffer.js";
 import { Pacer } from "../channels/delivery/pacer.js";
 import { type DeliveryTransport, plainText } from "../channels/delivery/types.js";
 import { systemClock } from "../lib/clock.js";
@@ -158,7 +159,7 @@ describe("channelAdapter", () => {
     expect(adapter.heard("-42", "rome_bot:7")).toBeUndefined();
   });
 
-  it("hand a chat's messages over one at a time in the order heard, its threads' too", async () => {
+  it("hand a chat's messages over one at a time, its threads' too, holding none at the port", async () => {
     const { channel, hear } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
     const order: string[] = [];
@@ -180,35 +181,41 @@ describe("channelAdapter", () => {
       },
       () => {},
     );
+    // The port buffers each platform address and holds its next event until
+    // the handler returns, as connection ports do.
+    const port = new ChatBuffers<{ chatId: string; messageId: string; parentChatId?: ChatId }>(
+      (message) =>
+        hear({
+          ...message,
+          ...(message.parentChatId ? { thread: { kind: "topic" as const } } : {}),
+        }),
+      { log: { warn: () => {}, error: () => {} }, describe: () => ({}) },
+    );
     const thread = (chatId: string, messageId: string) =>
-      hear({
-        chatId,
-        parentChatId: "-1001234567890123" as ChatId,
-        messageId,
-        thread: { kind: "topic" },
-      });
+      port.push(chatId, { chatId, parentChatId: "-1001234567890123" as ChatId, messageId });
 
-    // As the port hands them over: 1 and 2 in one thread, 3 in a sibling
-    // thread, 4 in another chat. The port holds an address's next event
-    // until the handler returns, so no handler may wait on 1.
-    await thread("topic-1", "1");
-    await thread("topic-1", "2");
-    await thread("topic-2", "3");
-    await hear({ chatId: "-1009999999999999", messageId: "4" });
+    // 1 and 2 in one thread, 3 in a sibling thread, 4 in another chat. The
+    // adapter takes each from the port at once, so while 1 is being
+    // delivered nothing waits at the port, 2 and 3 wait their turn in the
+    // chat, and 4 goes ahead.
+    thread("topic-1", "1");
+    thread("topic-1", "2");
+    thread("topic-2", "3");
+    port.push("-1009999999999999", { chatId: "-1009999999999999", messageId: "4" });
     await otherChat;
+    // Whatever the port could hand over by now, it has.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(port.size).toBe(0);
     expect(order).toEqual(["start 1", "start 4", "end 4"]);
 
     release();
     await adapter.settled();
-    expect(order).toEqual([
-      "start 1",
-      "start 4",
-      "end 4",
-      "end 1",
-      "start 2",
-      "end 2",
-      "start 3",
-      "end 3",
+    const rest = order.slice(3);
+    expect(rest[0]).toBe("end 1");
+    // One at a time, each thread's in the order heard.
+    expect([rest.slice(1, 3), rest.slice(3, 5)].sort()).toEqual([
+      ["start 2", "end 2"],
+      ["start 3", "end 3"],
     ]);
   });
 
