@@ -273,6 +273,22 @@ describe("ChatReadModel", () => {
       expect(older?.nextCursor).toBeNull();
     });
 
+    it("draws a copy queued as a prompt over a copy no turn took", async () => {
+      const chat = fixture.chat("telegram", "-42", "group");
+      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      const heard = (id: string) =>
+        fixture.say({ id, chat, from: "wei", text: "hi", at: new Date(1_000_000) });
+      heard("bot-sales:5");
+      links.prompt(heard("bot-support:9"), "support", null, "queued");
+
+      const expected = [["bot-support:9", "user", "queued"]];
+      const draw = (transcript: Awaited<ReturnType<typeof reads.chatTranscript>>) =>
+        transcript?.lines.map((l) => [l.id, l.role, l.inputState]);
+      expect(draw(await reads.chatTranscript("sales"))).toEqual(expected);
+      expect(draw(await reads.chatTranscript("sales", { limit: 5 }))).toEqual(expected);
+    });
+
     it("pages a turn by the lines it draws, not a copy it leaves to another turn", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
       fixture.seat({ id: "sales", chat, accountId: "bot-sales" });

@@ -202,8 +202,8 @@ export class ChatReadModel {
 
   /**
    * `said` with one line of each message the accounts in `place` each hold a
-   * copy of: the first copy said that a turn took, or the first one
-   * recorded when no turn took any. Records in `copies` every copy of each line kept. Copies
+   * copy of: the first copy said that a turn took or queued as a prompt,
+   * or the first one recorded when none was. Records in `copies` every copy of each line kept. Copies
    * share their second, so the lines said in those seconds hold them all,
    * and a message reads the same however a page splits it.
    */
@@ -230,8 +230,7 @@ export class ChatReadModel {
       const of = occurrence.get(line.id);
       if (of !== undefined) message.set(of, [...(message.get(of) ?? []), line.id]);
     }
-    const drawnAs = (ids: readonly number[]) =>
-      ids.find((id) => links.get(id)?.turnId) ?? Math.min(...ids);
+    const drawnAs = (ids: readonly number[]) => ids.find((id) => links.has(id)) ?? Math.min(...ids);
     return said.filter((line) => {
       const of = occurrence.get(line.id);
       const all = of === undefined ? undefined : message.get(of);
