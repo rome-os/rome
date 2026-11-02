@@ -115,6 +115,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
           role: romeAgentMessages.role,
           content: romeAgentMessages.content,
           actor: romeAgentMessages.actor,
+          inputState: romeAgentMessages.inputState,
           createdAt: romeAgentMessages.createdAt,
         })
         .from(romeAgentMessages)
@@ -138,9 +139,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
           parts,
           at: line.createdAt,
         });
-        if (line.turnId === null || !recorded) continue;
-        if (fromAgent) this.links.answer(recorded.id, id, line.turnId);
-        else this.links.prompt(recorded.id, id, line.turnId);
+        const lineId = recorded?.id ?? this.lines.idOf(standing.place.chat, line.id);
+        if (lineId === null) throw new Error(`Line ${line.id} could not be moved`);
+        // Every input stays one the session can admit, queued or run, with
+        // where it stands.
+        if (!fromAgent) this.links.prompt(lineId, id, line.turnId, line.inputState);
+        else if (line.turnId !== null) this.links.answer(lineId, id, line.turnId);
       }
       this.db
         .delete(romeAgentMessages)
@@ -174,18 +178,21 @@ export class ChatsWebChatRepository extends WebChatRepository {
     // writes them. Each step is safe to repeat, so a batch that failed part
     // way is retried whole: saying a line again changes nothing, and a trace
     // batch already appended is not appended again.
-    const sayAll = (role: "user" | "assistant") =>
+    const sayAll = (role: "user" | "assistant", at: Date) =>
       this.db.transaction(() => {
         for (const { message, standing } of inChat) {
           if (message.role !== role) continue;
-          this.say(standing, message.id, role, partsOf(message.content), message.turnId);
+          this.say(standing, message.id, role, partsOf(message.content), message.turnId, at);
         }
       });
-    sayAll("user");
+    sayAll("user", new Date());
     if (!this.appended(input.messageId, input.startSeq)) {
       await super.appendTraceBlocks({ ...input, transcriptMessages: own });
     }
-    sayAll("assistant");
+    // The base class stamps the trace a millisecond after its own clock
+    // reading, and an answer two: read after it returns, the answer is never
+    // in an earlier second than the trace.
+    sayAll("assistant", new Date(Date.now() + 2));
   }
 
   /** Whether trace `messageId`'s batch from block `startSeq` is on record. */
@@ -255,8 +262,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
         direction: "toRome",
         key: id,
         place: standing.place,
+        // An agent saying it into the chat says it as its dashboard account.
         saidBy: saidBy
-          ? { account: { platform: standing.place.chat.platform, id: saidBy.id } }
+          ? {
+              account: { platform: WEBCHAT_PLATFORM, id: dashboardAccountId(saidBy.id) },
+              agent: saidBy.id,
+            }
           : dashboardSender(actor),
         body: { text: partsText(parts) },
         parts,
@@ -554,8 +565,8 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: "user" | "assistant",
     parts: MessagePart[],
     turnId: string | null,
+    at: Date = new Date(),
   ): Date {
-    const at = new Date();
     this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",

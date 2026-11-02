@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
@@ -367,5 +367,72 @@ describe("ChatsWebChatRepository", () => {
       "card-1",
       "in-2",
     ]);
+  });
+  it("keeps a promoted fork's inputs where they stand, queued or run", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.recordUserInput("in-1", "fork-1", text("Run"));
+    await repo.updateUserInput("fork-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.recordUserInput("in-2", "fork-1", text("Then this"));
+
+    await repo.promoteForkToChat("fork-1");
+
+    expect(await repo.getUserInput("fork-1", "in-1")).toEqual({
+      turnId: "turn-1",
+      inputState: "accepted",
+    });
+    expect(await repo.getUserInput("fork-1", "in-2")).toEqual({
+      turnId: null,
+      inputState: "queued",
+    });
+  });
+
+  it("records an input an agent said into a chat as that agent's", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Status?"), undefined, {
+      platform: "webchat",
+      id: "concierge",
+    });
+
+    const line = testDb.db.select().from(chatMessages).get();
+    expect(line?.senderAgent).toBe("concierge");
+    expect(line?.senderAccountId).toBe("agent:concierge");
+  });
+
+  it("reads a trace batch's prompt, trace and answer in order across a second's edge", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2030-01-01T12:00:00.999Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.appendTraceBlocks({
+        messageId: "trace-1",
+        sessionId: "chat-1",
+        turnId: "turn-1",
+        startSeq: 0,
+        blocks: [{ type: "text", content: "thinking" }],
+        transcriptMessages: [
+          { id: "in-1", sessionId: "chat-1", turnId: "turn-1", role: "user", content: text("Hi") },
+          {
+            id: "out-1",
+            sessionId: "chat-1",
+            turnId: "turn-1",
+            role: "assistant",
+            content: text("Hello"),
+          },
+        ],
+      });
+
+      expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+        "in-1",
+        "trace-1",
+        "out-1",
+      ]);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 });
