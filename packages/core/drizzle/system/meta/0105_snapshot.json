@@ -1602,52 +1602,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "legacy_chat_line_ids": {
-      "name": "legacy_chat_line_ids",
-      "columns": {
-        "legacy_id": {
-          "name": "legacy_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_id": {
-          "name": "message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_legacy_chat_line_ids_message": {
-          "name": "idx_legacy_chat_line_ids_message",
-          "columns": [
-            "message_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "legacy_chat_line_ids_message_id_chat_messages_id_fk": {
-          "name": "legacy_chat_line_ids_message_id_chat_messages_id_fk",
-          "tableFrom": "legacy_chat_line_ids",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "linkedin_messages": {
       "name": "linkedin_messages",
       "columns": {

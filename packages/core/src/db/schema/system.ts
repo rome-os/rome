@@ -481,9 +481,6 @@ export function webchatChatWhere(table: { type: SQLiteColumn; sourceChannel: SQL
   return sql`(${table.type} = 'channel' and +${table.sourceChannel} = 'webchat')`;
 }
 
-// Until the Chats contract migration, the 0105 migration's views and triggers
-// read this table and `rome_agent_messages`. A migration that rebuilds either
-// must drop and recreate them around the rebuild (docs/architecture/channels.md#chats-storage).
 export const romeSessions = sqliteTable(
   "rome_sessions",
   {
@@ -542,8 +539,7 @@ export const romeSessions = sqliteTable(
     // The chat this row is one of Rome's seats in, its platform, and the
     // platform's thread id when the seat is in a thread. Null on rows that are
     // not chats (subagent, fork, action runs). Vocabulary: docs/domains/chats.md.
-    // Written by the 0105 migration's triggers until writers record through
-    // Chats; nothing reads them yet.
+    // Nothing writes or reads them until the Chats switch.
     chatId: integer("chat_id"),
     chatPlatform: text("chat_platform"),
     threadId: text("thread_id"),
@@ -668,20 +664,6 @@ export const chatAddresses = sqliteTable(
     primaryKey({ columns: [table.platform, table.accountId, table.chatKey, table.threadId] }),
     index("idx_chat_addresses_address").on(table.platform, table.accountId, table.address),
   ],
-);
-
-// Which chat line each legacy `rome_agent_messages` row was copied to, so the
-// 0105 triggers can follow a row's later changes and deletes. Dropped with the
-// legacy columns in the contract migration.
-export const legacyChatLineIds = sqliteTable(
-  "legacy_chat_line_ids",
-  {
-    legacyId: text("legacy_id").primaryKey(),
-    messageId: integer("message_id")
-      .notNull()
-      .references(() => chatMessages.id, { onDelete: "cascade" }),
-  },
-  (table) => [index("idx_legacy_chat_line_ids_message").on(table.messageId)],
 );
 
 /**
