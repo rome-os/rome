@@ -2631,10 +2631,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
     if (config.providerId || config.modelId) return null;
+    const channelThreadKey = webchatSessionKey(session.id);
+    // Only a successful turn records the provider, so an unpinned chat whose
+    // first turn failed names it only through its open session.
     const provider =
       resolveWebchatLargeModelSelection(session.largeModelSelection)?.providerId ??
-      (await deps.sessionManager.findReusableSession(webchatSessionKey(session.id), agentName))
-        ?.provider;
+      (await deps.sessionManager.findReusableSession(channelThreadKey, agentName))?.provider ??
+      deps.agentSessionManager.peek({ agentName, channelThreadKey })?.providerId;
     if (provider !== "openai" && provider !== "anthropic") return null;
     return quotaSwitchTarget(
       deps.aiToolState.get(),

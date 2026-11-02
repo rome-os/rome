@@ -171,6 +171,17 @@ describe("Webchat API", () => {
       ).toBe(200);
       expect(find).toHaveBeenCalledWith("webchat:quota", "main");
     });
+    it("derives the provider from the open session when the first turn failed", async () => {
+      rs.spyOn(deps.aiToolState, "get").mockReturnValue(raw());
+      await deps.webchatRepo.createSession("quota", "Quota");
+      deps.agentSessionManager = {
+        peek: rs.fn(() => ({ providerId: "anthropic" })),
+      } as unknown as typeof deps.agentSessionManager;
+      const app = createWebchatRuntime(deps).routes;
+      const response = await app.request("/chat/sessions/quota/quota-switch", { method: "POST" });
+      expect(response.status).toBe(200);
+      expect((await deps.webchatRepo.getSession("quota"))?.largeModelSelection).toBe("gpt-6-1-sol");
+    });
   });
 
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {

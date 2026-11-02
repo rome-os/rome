@@ -422,6 +422,8 @@ export interface AgentSession {
   readonly conversation?: SessionConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
+  /** The provider of the open model session, known before a successful turn pins it. */
+  readonly providerId?: ProviderId;
   /**
    * Synchronously allocate a turn and return its handle. The caller can read
    * `turnId` immediately and start consuming `events` (which yields once the

@@ -361,6 +361,21 @@ describe("continuation notice through AgentSessionManager", () => {
     });
   });
 
+  it("names the provider through the open session when the first turn hits its quota", async () => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    anthropic.failing.next = 1;
+    const failed = session.sendTurn(
+      { prompt: "first" },
+      { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
+    );
+    for await (const _event of failed.events);
+    expect(
+      (await sessionManager.findReusableSession(key.channelThreadKey, AGENT))?.provider ?? null,
+    ).toBeNull();
+    expect(manager.peek(key)?.providerId).toBe("anthropic");
+  });
+
   it("clears an open chat's selection with null and keeps it with undefined", async () => {
     const manager = createManager();
     const session = await acquire(manager, "claude-sonnet");
