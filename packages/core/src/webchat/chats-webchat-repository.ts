@@ -484,7 +484,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         id: row.id,
         role: row.role,
         content: row.content,
-        senderId: row.sender_id,
+        senderId: row.turn_sender_id,
       }));
   }
 
@@ -663,6 +663,9 @@ interface LineRow {
   created_at: number;
   sender_id: string | null;
   sender_name: string | null;
+  /** Who said it, as WebChatRepository names the sender of a turn's line:
+   *  the agent for a line an agent said. */
+  turn_sender_id: string | null;
   line_order: number;
   seq: number;
 }
@@ -705,13 +708,13 @@ export function sessionLines(sessionIds: readonly string[]) {
            WHEN l.role = 'prompt' OR c.platform = ${WEBCHAT_PLATFORM} THEN 'user'
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
-      m.sender_name,
+      m.sender_name, COALESCE(m.sender_agent, m.sender_account_id) AS turn_sender_id,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
-      CASE WHEN l.role = 'prompt' AND m.id = (
+      CASE WHEN l.role = 'prompt' AND l.turn_id IS NOT NULL AND m.id = (
           SELECT min(f.message_id) FROM agent_turn_messages f
-          WHERE f.session_id = s.id AND f.turn_id IS l.turn_id AND f.role = 'prompt'
+          WHERE f.session_id = s.id AND f.turn_id = l.turn_id AND f.role = 'prompt'
         ) THEN 0 ELSE 2 END AS line_order,
       m.seq AS seq
     FROM rome_sessions s
@@ -730,7 +733,7 @@ export function sessionLines(sessionIds: readonly string[]) {
       r.created_at,
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
-      json_extract(r.actor, '$.email') AS sender_name,
+      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id,
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,

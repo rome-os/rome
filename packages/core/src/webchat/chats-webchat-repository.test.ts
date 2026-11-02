@@ -401,6 +401,31 @@ describe("ChatsWebChatRepository", () => {
     const line = testDb.db.select().from(chatMessages).get();
     expect(line?.senderAgent).toBe("concierge");
     expect(line?.senderAccountId).toBe("agent:concierge");
+
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    expect(await repo.getTurnChatMessages("chat-1", "turn-1")).toEqual([
+      { id: "in-1", role: "user", content: text("Status?"), senderId: "concierge" },
+    ]);
+  });
+
+  it("reads an input still queued after the line said before it in the same second", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2030-01-01T12:00:00.100Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.addMessage("out-0", "chat-1", "assistant", text("Reminder"));
+      rs.setSystemTime(new Date("2030-01-01T12:00:00.500Z"));
+      await repo.recordUserInput("in-1", "chat-1", text("Thanks"));
+
+      expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual(["out-0", "in-1"]);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("reads a trace batch's prompt, trace and answer in order across a second's edge", async () => {
