@@ -137,6 +137,24 @@ describe("TurnLinks", () => {
     expect(links.unseen("seat-1")).toEqual([]);
   });
 
+  it("read alike lines whose keys only look per-account as their own outside a basic group", () => {
+    chat = new ChatRepository(testDb.db).start(
+      { platform: "telegram", externalId: "-1001234567890123" as ChatId },
+      "group",
+      null,
+    ).ref;
+    testDb.db.run(sql`
+      INSERT INTO rome_sessions (id, name, type, chat_id, chat_platform, account_id, created_at, activity_at)
+      VALUES ('seat-2', 'Seat', 'channel', ${chat.id}, 'telegram', 'rome_bot',
+        ${SEAT_STARTED.getTime() / 1000}, ${SEAT_STARTED.getTime() / 1000})
+    `);
+    const first = heard("rome:a", 5, { body: { text: "ok" } });
+    const second = heard("other:b", 5, { body: { text: "ok" } });
+    links.seen([first], "seat-2", "turn-1");
+
+    expect(links.unseen("seat-2").map((line) => line.id)).toEqual([second]);
+  });
+
   it("answer each message's prompt or answer turn, leaving out lines only caught up on", () => {
     const ask = heard("m1", 5);
     const reply = heard("m2", 6, { saidBy: { account: ROME, agent: "main" } });

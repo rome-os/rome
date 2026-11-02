@@ -8,11 +8,12 @@
 // Agents' catch-up and turn writes onto it.
 
 import { and, eq, isNull, min, sql } from "drizzle-orm";
-import type { AgentInputState } from "@rome-os/app-runtime";
+import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { romeSessions } from "../db/schema/system.js";
+import { chatKey, ownedBy } from "../connections/chat-ids.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a line
@@ -59,6 +60,9 @@ export class TurnLinks {
     threadId: string | null;
     since: Date;
     joined: Date;
+    /** Whether the chat numbers its messages per member account, so each of
+     *  Rome's accounts there holds its own copy of a message. */
+    perAccount: boolean;
   } | null {
     const row = this.db
       .select({
@@ -91,6 +95,7 @@ export class TurnLinks {
       threadId: row.threadId,
       since: row.createdAt,
       joined: first?.at ?? row.createdAt,
+      perAccount: ownedBy(chatKey(chat.ref.platform, chat.key as ChatId), "_", "") !== "",
     };
   }
 
@@ -220,7 +225,8 @@ export class TurnLinks {
       .filter((row) => !this.undecided.has(row.id));
     if (fresh.length === 0) return [];
     // A chat that numbers messages per member account holds one copy of a
-    // message for each of Rome's accounts that heard it. The session has
+    // message for each of Rome's accounts that heard it; no other chat holds
+    // copies. The session has
     // seen every copy of a message it has seen one of, and reads one copy of
     // the rest. Copies share their second, so the lines said in the seconds
     // of the fresh ones are every copy any of them can have.
@@ -234,7 +240,7 @@ export class TurnLinks {
         .map((row) => row.id),
     );
     const unread = new Set(fresh.map((row) => row.id));
-    const copies = new Copies(said);
+    const copies = new Copies(seat.perAccount ? said : []);
     for (const message of said) if (!unread.has(message.id)) copies.take(message);
     const lines = said.filter((message) => {
       if (!unread.has(message.id)) return false;
