@@ -224,6 +224,18 @@ describe("recordedSends", () => {
     expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
   });
 
+  it("record an email reply in the thread of the email it answers, whatever thread it names", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    const receipt = await send("email").send(
+      "thread-9" as ChatId,
+      { kind: "email", text: "Thanks", inReplyToMessageId: "m-1" } as OutgoingMessage,
+    );
+
+    expect(receipt.chatId).toBe("thread-7");
+    expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
+  });
+
   it("send no reply to an email Rome does not hold", async () => {
     await expect(
       send("email").send(

@@ -359,6 +359,8 @@ describe("channelAdapter", () => {
     const landed = await adapter.send("-1001234567890123", null, { text: "on it" });
 
     expect(landed).toEqual({ key: "m9", threadId: "thread-7" });
+    // A send to the thread finds its chat before anything is heard there.
+    expect(adapter.threadAt("thread-7")?.externalId).toBe("-1001234567890123");
   });
 
   it("stop delivering once stopped, and refuse a second start while receiving", async () => {

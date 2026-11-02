@@ -102,11 +102,19 @@ export function recordedSends<C extends Channel>(
             to: address,
           } as OutgoingEmailMessage);
         }
-        if (email && !address.trim()) {
-          if (!email.inReplyToMessageId) return await openThread(deps, channel, out, email);
-          // A reply that names no thread is in the thread of the email it
-          // answers, never a new one.
-          at = threadOf(deps, channel.name, email.inReplyToMessageId);
+        if (email?.inReplyToMessageId) {
+          // The provider sends a reply into the thread of the email it
+          // answers, whatever address it names, so it is recorded there.
+          // One that names no thread needs Rome to know that email.
+          const answered = threadOf(deps, channel.name, email.inReplyToMessageId);
+          if (answered) at = answered;
+          else if (!address.trim()) {
+            throw new Error(
+              `Rome holds no email ${email.inReplyToMessageId} to reply to. No email was sent.`,
+            );
+          }
+        } else if (email && !address.trim()) {
+          return await openThread(deps, channel, out, email);
         }
         const seat = seatAt(deps, channel.name, at);
         const landed = seat
@@ -133,12 +141,11 @@ function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string
 const EMAIL_ADDRESS = /^[^\s@<>]+@[^\s@<>]+$/;
 
 /** The address of the email thread that holds the email the provider calls
- *  `messageId`. Throws when Rome holds no such email, rather than guess. */
-function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): ChatId {
+ *  `messageId`, or null when Rome holds no such email. */
+function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): ChatId | null {
   const account = deps.adapters.accountOn(channel);
   const chat = deps.messages.chatHolding(account.platform, messageId);
-  if (!chat) throw new Error(`Rome holds no email ${messageId} to reply to. No email was sent.`);
-  return deps.adapters.addressAt(channel, placeIn(chat));
+  return chat ? deps.adapters.addressAt(channel, placeIn(chat)) : null;
 }
 
 /**

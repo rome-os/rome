@@ -329,6 +329,17 @@ export function channelAdapter(
       }
       return threadId;
     }
+    // The platform opened a thread for it, as Discord does for a reply in a
+    // channel: keep the thread's chat, so a send there finds it before
+    // anything is heard in it.
+    try {
+      deps.addresses?.bindThread(account(), answered, key.externalId);
+    } catch (error) {
+      log.warn("could not keep a thread's chat", {
+        chat: key.externalId,
+        error: String(error),
+      });
+    }
     return answered as ChatId;
   };
 
