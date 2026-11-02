@@ -160,3 +160,7 @@ The account's history is encrypted at rest with a key the client derives only at
 - A signed-out account and a client that is merely not running are different answers. Only the first invalidates the connection.
 - One bridge process reads the client's store at a time. A history read never waits behind People's lookups for every contact. Those background lookups hold only a couple of places in the bridge's line, and a history read takes its turn between them.
 - A connect ceremony asks for the confirmations the client demands and no more. Retrying a login the client has already remembered invalidates it, which costs the guardian the whole ceremony again.
+
+## Chats storage
+
+Chats records each chat once, keyed by an integer, with the adapter's key beside it (see [Chats](../domains/chats.md#chat)). The chats, their messages, the turn links that tie a message to an agent's turn, and the adapters' addresses (`chat_addresses`) each have a table of their own. The 0105 migration adds them empty, along with the seat columns on `rome_sessions`. The legacy chat rows stay the only record until the switch release, which fills the new tables from them in one migration and moves every reader and writer onto Chats together.

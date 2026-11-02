@@ -536,8 +536,19 @@ export const romeSessions = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     activityAt: integer("activity_at", { mode: "timestamp" }).notNull(),
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
+    // The chat this row is one of Rome's seats in, its platform, and the
+    // platform's thread id when the seat is in a thread. Null on rows that are
+    // not chats (subagent, fork, action runs). Vocabulary: docs/domains/chats.md.
+    // Nothing writes or reads them until the Chats switch.
+    chatId: integer("chat_id"),
+    chatPlatform: text("chat_platform"),
+    threadId: text("thread_id"),
+    // The one of Rome's accounts this seat speaks as: the channel's platform
+    // account, else the channel's name, and `agent:<name>` on the dashboard.
+    accountId: text("account_id"),
   },
   (table) => [
+    index("idx_rome_sessions_chat").on(table.chatId, table.threadId),
     index("idx_rome_sessions_owner_key").on(table.ownerKey),
     index("idx_rome_sessions_project_path").on(table.projectPath),
     // Sidebar paging for guardian chats. See `webchatChatWhere`.
@@ -555,6 +566,103 @@ export const romeSessions = sqliteTable(
         sql`${table.type} = 'channel' AND ${table.sourceChannel} IS NOT NULL AND ${table.sourceThreadId} IS NOT NULL`,
       ),
     index("idx_rome_sessions_parent_session").on(table.parentSessionId),
+  ],
+);
+
+// Chats' record of a chat: one row per place, however many of Rome's accounts
+// are in it. Vocabulary: docs/domains/chats.md#chat.
+export const chats = sqliteTable(
+  "chats",
+  {
+    // AUTOINCREMENT, so a deleted chat's id is never handed out again.
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    platform: text("platform").notNull(),
+    // The adapter's key for the chat, unique on its platform: the platform's
+    // group id, or both ends of a direct message (connections/chat-ids.ts). The
+    // dashboard keys a chat by its first seat's id. Chats compares it and
+    // never reads it.
+    key: text("key").notNull(),
+    kind: text("kind").notNull(), // 'dm' | 'group'
+    name: text("name"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_chats_key").on(table.platform, table.key)],
+);
+
+// What was said in a chat, once, whoever heard it. The sender is an account,
+// and for Rome's lines also the agent that spoke.
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    // AUTOINCREMENT, so a quote can never come to name a later line that took
+    // a deleted line's id.
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    // The adapter's key for the message, unique in its chat: the platform's
+    // message id. A redelivery, or a group message heard on two of Rome's
+    // accounts, finds its key on record. A dashboard line is keyed by its id.
+    key: text("key").notNull(),
+    // The platform's thread id; null in the open chat.
+    threadId: text("thread_id"),
+    senderAccountId: text("sender_account_id"),
+    // The agent that said the line. Set on exactly the lines from Rome.
+    senderAgent: text("sender_agent"),
+    senderName: text("sender_name"),
+    text: text("text").notNull(),
+    parts: text("parts").notNull(), // JSON array of blocks, as composed
+    // The line this one quotes, when Rome holds it.
+    replyToMessageId: integer("reply_to_message_id"),
+    saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A place's lines by time. Within one second lines keep the order they
+    // were recorded in.
+    index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
+  ],
+);
+
+// Agents' link from a turn to a chat message: the message prompted the turn,
+// was its answer, or was caught up on by it. One row per message per seat, so
+// two of Rome's agents in one group each keep their own.
+export const agentTurnMessages = sqliteTable(
+  "agent_turn_messages",
+  {
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    // Null for a prompt still queued.
+    turnId: text("turn_id"),
+    role: text("role").notNull(), // 'prompt' | 'answer' | 'seen'
+    inputState: text("input_state").$type<AgentInputState>(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.sessionId] }),
+    index("idx_agent_turn_messages_turn").on(table.sessionId, table.turnId),
+  ],
+);
+
+// The adapters' address store: where one of Rome's accounts reaches a
+// chat, or a thread in it, when the chat's key is not its address, as on a
+// platform that gives a direct message an id of its own (Feishu's p2p chat,
+// Discord's DM channel). Chats never reads it.
+export const chatAddresses = sqliteTable(
+  "chat_addresses",
+  {
+    platform: text("platform").notNull(),
+    // Rome's account, by its platform id.
+    accountId: text("account_id").notNull(),
+    chatKey: text("chat_key").notNull(),
+    // The thread the address reaches, or '' for the chat itself.
+    threadId: text("thread_id").notNull().default(""),
+    address: text("address").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.platform, table.accountId, table.chatKey, table.threadId] }),
+    index("idx_chat_addresses_address").on(table.platform, table.accountId, table.address),
   ],
 );
 
