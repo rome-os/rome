@@ -408,8 +408,11 @@ export class ChatReadModel {
         SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(${wanted})
       )
       SELECT t.id, t.session_id, t.turn_id, t.created_at
+      -- CROSS JOIN keeps the wanted turns outside, so each finds its trace
+      -- by turn id. Left to choose, SQLite walks every trace in the database
+      -- and scans the wanted list for each.
       FROM wanted w
-      JOIN rome_agent_messages t
+      CROSS JOIN rome_agent_messages t
         ON t.session_id = w.session_id AND t.turn_id = w.turn_id AND t.role = 'trace'
       ORDER BY t.created_at, t.rowid
     `);
@@ -443,11 +446,14 @@ export class ChatReadModel {
     }>(sql`
       SELECT m.id AS line, m.key AS id, s.id AS chat_id,
         m.sender_agent IS NOT NULL AS from_rome, m.text, m.said_at
+      -- CROSS JOIN keeps the lines outside: one pass over them, which the
+      -- match needs anyway, and the joins only for the lines that match.
+      -- Left to choose, SQLite reaches every line through each chat's index.
       FROM ${CHAT_LINES} m
-      JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
+      CROSS JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
       -- A speaker finds what its transcript draws: its own thread, from when it
       -- joined.
-      JOIN rome_sessions s ON s.chat_id = c.id AND m.thread_id IS s.thread_id
+      CROSS JOIN rome_sessions s ON s.chat_id = c.id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at
       WHERE ${matchesEveryTerm}
       ORDER BY m.said_at DESC, m.id DESC
