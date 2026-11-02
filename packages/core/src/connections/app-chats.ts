@@ -76,11 +76,19 @@ async function send(
 ): Promise<SdkSent> {
   const chat = heldChat(deps, chatOf(place));
   const { at, anchor } = placeOf(deps, chat, place);
-  const replyTo = replyOf(chat, out, anchor);
+  const replyTo = replyOf(chat, out, anchor?.id);
   const sender = senderIn(deps, chat, at, opts?.as);
   // Read before delivery: nothing after the platform took the message may
   // fail the send.
   const key = deps.adapters.keyOf(chat.ref);
+  if (anchor && platformIdOfLine(key, sender.account.id, anchor.key) === null) {
+    // The adapter drops a quote it cannot address, which would post to the
+    // open chat instead of the thread asked for.
+    throw new SendError(
+      "unsupported",
+      `${describe(sender.account)} cannot answer message ${anchor.id}, so it cannot open its thread`,
+    );
+  }
   const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
   const parts = recordedParts(out, given);
   const text = out.text ?? partsText(parts);
@@ -172,14 +180,18 @@ function heldChat(deps: AppChatsDeps, ref: SdkChatRef): Chat {
  * it, which the send opens by answering it where the platform threads its
  * answers.
  */
-function placeOf(deps: AppChatsDeps, chat: Chat, place: SdkPlace): { at: Place; anchor?: number } {
+function placeOf(
+  deps: AppChatsDeps,
+  chat: Chat,
+  place: SdkPlace,
+): { at: Place; anchor?: { id: number; key: string } } {
   if (!isThreadRef(place)) return { at: placeIn(chat.ref) };
   const [message] = deps.messages.byIds([place.id]);
   if (!message || message.place.chat.id !== chat.ref.id) {
     throw new SendError("chat_not_found", `No message ${place.id} in that chat to thread off`);
   }
   if (message.place.threadId !== undefined) return { at: message.place };
-  return { at: placeIn(chat.ref), anchor: message.id };
+  return { at: placeIn(chat.ref), anchor: { id: message.id, key: message.key } };
 }
 
 /**
@@ -317,6 +329,11 @@ async function dm(
   }
   if (address === null) {
     throw new SendError("no_dm", `${account.platform} opened no direct message with ${account.id}`);
+  }
+  // The channel may have reconnected as another account while the platform
+  // answered, and the address is the first account's.
+  if (deps.adapters.accountOn(sender.channel.name).id !== sender.account.id) {
+    throw new SendError("not_connected", `${describe(sender.account)} is no longer connected`);
   }
   const key = deps.adapters.directMessageReached(sender.channel.name, account.id, address);
   return deps.chats.start(key, "dm", null).ref;

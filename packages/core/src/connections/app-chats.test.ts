@@ -52,6 +52,8 @@ describe("appChats", () => {
   /** The Discord DM channel the platform opens for each person. */
   let opened: Record<string, string | null>;
   let opens: string[];
+  /** Runs while the platform opens a direct message. */
+  let duringOpen: () => void;
   let accounts: Record<string, Account>;
   let chats: ChatsPort;
 
@@ -64,6 +66,7 @@ describe("appChats", () => {
     duringSend = () => {};
     opened = { bob: "dm-chan-bob", carol: null };
     opens = [];
+    duringOpen = () => {};
     accounts = { telegram: BOT, discord: DISCORD };
     let next = 0;
     const channel = (name: string): Channel =>
@@ -83,6 +86,7 @@ describe("appChats", () => {
           direct: {
             chatFor: async (id: string) => {
               opens.push(id);
+              duringOpen();
               return (opened[id] ?? null) as ChatId | null;
             },
           },
@@ -254,6 +258,21 @@ describe("appChats", () => {
       expect(sent).toEqual([]);
     });
 
+    it("refuses to open a thread off a message the sender has no platform id for, and sends nothing", async () => {
+      const group = fixture.chat("discord", "guild-chan", "group");
+      const unanswerable = fixture.say({
+        id: "rome:local-1",
+        chat: group,
+        from: "bob",
+        at: new Date(0),
+      });
+
+      expect(await refusal(chats.send({ chat: group, id: unanswerable }, { text: "x" }))).toBe(
+        "unsupported",
+      );
+      expect(sent).toEqual([]);
+    });
+
     it("sends as the one account that speaks in the thread, though none speaks in the open chat", async () => {
       accounts["telegram-2"] = SECOND_BOT;
       const group = fixture.chat("telegram", "-100", "group");
@@ -321,6 +340,18 @@ describe("appChats", () => {
       expect(sent).toEqual([
         { channel: "discord", address: "dm-chan-bob", message: { text: "Brief ready." } },
       ]);
+    });
+
+    it("keeps no direct message when the channel reconnects as another account meanwhile", async () => {
+      duringOpen = () => {
+        accounts.discord = { platform: "discord", id: "another-bot" };
+      };
+
+      expect(await refusal(chats.dm(BOB))).toBe("not_connected");
+
+      duringOpen = () => {};
+      await chats.dm(BOB);
+      expect(opens).toEqual(["bob", "bob"]);
     });
 
     it("refuses when the platform opens no direct message", async () => {
