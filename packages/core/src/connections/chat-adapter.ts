@@ -247,16 +247,6 @@ export function sentLineId(
   return ownedBy(chat, romeEnd, platformMessageId);
 }
 
-/** The thread a message sent to platform address `address`, for thread
- *  `threadId`, landed in, by the address the platform answered it at. */
-function landedIn(
-  address: ChatId,
-  threadId: ChatId | null,
-  answered: string | undefined,
-): ChatId | null {
-  return answered && answered !== address ? (answered as ChatId) : threadId;
-}
-
 /** The adapter over one of today's channels, which also hands the platform's
  *  event for a message it is delivering to what still reads it. */
 export interface ChannelChatAdapter extends ChatAdapter {
@@ -304,6 +294,27 @@ export function channelAdapter(
   /** Where the platform takes a message for the chat keyed `key`: the
    *  thread's id, else where the account reaches the chat when that is not
    *  its key, else the chat's own address. */
+  /**
+   * The thread a message sent to platform address `address` in the chat keyed
+   * `key`, for thread `threadId`, landed in, by the address the platform
+   * answered it at. A direct message has no threads: a new address there is
+   * where the platform reaches the chat, as when a first message to someone
+   * opens the conversation, and the account reaches the chat there after.
+   */
+  const landedIn = (
+    key: ChatKey,
+    address: ChatId,
+    threadId: ChatId | null,
+    answered: string | undefined,
+  ): ChatId | null => {
+    if (!answered || answered === address) return threadId;
+    if (isDirectMessage(key)) {
+      deps.addresses?.bind(account(), key.externalId, answered);
+      return threadId;
+    }
+    return answered as ChatId;
+  };
+
   const addressIn = (key: ChatKey, threadId: ChatId | null): ChatId => {
     if (threadId !== null) return threadId;
     const bound = deps.addresses?.addressOf(account(), key.externalId) ?? null;
@@ -422,7 +433,7 @@ export function channelAdapter(
       const receipt = await send.send(address, outgoing(out, replyTo || undefined));
       return {
         key: sentLineId(ref, own.id, receipt.messageId || undefined),
-        threadId: landedIn(address, threadId, receipt.chatId),
+        threadId: landedIn(ref, address, threadId, receipt.chatId),
       };
     },
 
@@ -465,7 +476,7 @@ export function channelAdapter(
             outcome,
             text,
             key: sentLineId(ref, own.id, first?.messageId || undefined),
-            threadId: landedIn(address, threadId, first?.chatId),
+            threadId: landedIn(ref, address, threadId, first?.chatId),
           };
         },
       };

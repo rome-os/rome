@@ -415,6 +415,39 @@ describe("channelAdapter", () => {
     expect(settled).toMatchObject({ text: "All done.", key: "rome_bot:s1", threadId: null });
   });
 
+  it("open no thread with a first direct message, and reach the chat where it opened", async () => {
+    const { channel } = fakeChannel();
+    (channel.send as { send: unknown }).send = async () => ({ messageId: "m1", chatId: "dm-77" });
+    const adapter = channelAdapter(channel, deps());
+    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
+
+    const landed = await adapter.send(dm.externalId, null, { text: "hi" });
+
+    expect(landed.threadId).toBeNull();
+    expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-77");
+  });
+
+  it("settle a first streamed direct message to no thread, and reach the chat where it opened", async () => {
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async () => ({ messageId: "s1", chatId: "dm-78" }),
+    };
+    const { channel } = fakeChannel(transport);
+    const adapter = channelAdapter(channel, deps());
+    const dm = chatAt("telegram", "alice", { romeEnd: "rome_bot" });
+    const reply = adapter.stream?.(dm.externalId, null, {
+      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      clock: systemClock,
+    });
+    if (!reply) throw new Error("expected a stream");
+
+    reply.accept({ type: "text", content: "hi" });
+
+    expect(await reply.settle(false)).toMatchObject({ threadId: null });
+    expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-78");
+  });
+
   it("settle a streamed reply to the thread its first message landed in", async () => {
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
