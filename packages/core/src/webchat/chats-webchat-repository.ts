@@ -720,7 +720,9 @@ export function sessionLines(sessionIds: readonly string[]) {
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
       json_extract(r.actor, '$.email') AS sender_name,
-      CASE WHEN r.role = 'user' THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
+      -- A session in no chat keeps its rows in the order they were written;
+      -- beside a chat's lines, a trace goes after its turn's first prompt.
+      CASE WHEN s.chat_id IS NULL THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,
       r.rowid AS seq
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))

@@ -356,4 +356,16 @@ describe("ChatsWebChatRepository", () => {
     await repo.addMessage("in-1", "chat-1", "user", text("Back again"), "turn-2");
     expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual([]);
   });
+  it("reads a session in no chat in the order its rows were written", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.addMessage("in-1", "fork-1", "user", text("Plan a trip"), "turn-1");
+    await repo.addMessage("card-1", "fork-1", "assistant", text("Which city?"), "turn-1");
+    await repo.addMessage("in-2", "fork-1", "user", text("Lisbon"), "turn-1");
+
+    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual([
+      "in-1",
+      "card-1",
+      "in-2",
+    ]);
+  });
 });
