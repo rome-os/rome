@@ -147,3 +147,15 @@ The account's history is encrypted at rest with a key the client derives only at
 - A signed-out account and a client that is merely not running are different answers. Only the first invalidates the connection.
 - One bridge process reads the client's store at a time. A history read never waits behind People's lookups for every contact. Those background lookups hold only a couple of places in the bridge's line, and a history read takes its turn between them.
 - A connect ceremony asks for the confirmations the client demands and no more. Retrying a login the client has already remembered invalidates it, which costs the guardian the whole ceremony again.
+
+## Chats storage
+
+Chats records each chat once, keyed by an integer, with the adapter's key beside it (see [Chats](../domains/chats.md#chat)). The chats, their messages, the turn links that tie a message to an agent's turn, and the channels layer's addresses each have a table of their own. Until every writer records through Chats, the legacy chat rows stay the source and the 0105 migration's triggers copy each change into the new tables.
+
+### Invariants
+
+- Every legacy chat row stands for exactly one chat line, and a group message heard on two of Rome's accounts is one line with a turn link per seat.
+- A seat gets its chat with its first line, so a direct message on a platform with opaque DM ids is keyed by the person who wrote first, as the backfill keys it.
+- A chat goes when its last seat goes, with its lines and turn links.
+- A legacy row the copy cannot place is skipped. The copy never fails the write it follows.
+- While the triggers exist, a migration that rebuilds `rome_sessions` or `rome_agent_messages` must drop and recreate the 0105 views and triggers around the rebuild. SQLite refuses the rename otherwise.
