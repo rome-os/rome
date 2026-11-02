@@ -140,6 +140,7 @@ describe("channelAdapter", () => {
     );
 
     await hear({ chatId: "-42", messageId: "7", replyTo: { messageId: "6" } });
+    await adapter.settled();
 
     expect(delivered).toEqual([
       expect.objectContaining({
@@ -157,7 +158,7 @@ describe("channelAdapter", () => {
     expect(adapter.heard("-42", "rome_bot:7")).toBeUndefined();
   });
 
-  it("hand a chat's messages over one at a time, its threads' too", async () => {
+  it("hand a chat's messages over one at a time in the order heard, its threads' too", async () => {
     const { channel, hear } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
     const order: string[] = [];
@@ -165,11 +166,16 @@ describe("channelAdapter", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let otherChatDone!: () => void;
+    const otherChat = new Promise<void>((resolve) => {
+      otherChatDone = resolve;
+    });
     adapter.start(
       async (message) => {
         order.push(`start ${message.key}`);
         if (message.key === "1") await held;
         order.push(`end ${message.key}`);
+        if (message.key === "4") otherChatDone();
         return 1;
       },
       () => {},
@@ -182,15 +188,28 @@ describe("channelAdapter", () => {
         thread: { kind: "topic" },
       });
 
-    const first = thread("topic-1", "1");
-    const second = thread("topic-2", "2");
-    const elsewhere = hear({ chatId: "-1009999999999999", messageId: "3" });
-    await elsewhere;
-    expect(order).toEqual(["start 1", "start 3", "end 3"]);
+    // As the port hands them over: 1 and 2 in one thread, 3 in a sibling
+    // thread, 4 in another chat. The port holds an address's next event
+    // until the handler returns, so no handler may wait on 1.
+    await thread("topic-1", "1");
+    await thread("topic-1", "2");
+    await thread("topic-2", "3");
+    await hear({ chatId: "-1009999999999999", messageId: "4" });
+    await otherChat;
+    expect(order).toEqual(["start 1", "start 4", "end 4"]);
 
     release();
-    await Promise.all([first, second]);
-    expect(order).toEqual(["start 1", "start 3", "end 3", "end 1", "start 2", "end 2"]);
+    await adapter.settled();
+    expect(order).toEqual([
+      "start 1",
+      "start 4",
+      "end 4",
+      "end 1",
+      "start 2",
+      "end 2",
+      "start 3",
+      "end 3",
+    ]);
   });
 
   it("hold no event for a message whose address could not be kept", async () => {
@@ -215,9 +234,8 @@ describe("channelAdapter", () => {
       (error) => faults.push(error),
     );
 
-    await expect(hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } })).rejects.toThrow(
-      "store down",
-    );
+    await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
     expect(faults.map((error) => error.message)).toEqual(["store down"]);
     expect(adapter.heard("dm:rome_bot:alice", "3")).toBeUndefined();
   });
@@ -235,6 +253,7 @@ describe("channelAdapter", () => {
     );
 
     await hear({ chatId: "-42", messageId: "7", text: "  " });
+    await adapter.settled();
     expect(delivered).toEqual([]);
   });
 
@@ -256,6 +275,7 @@ describe("channelAdapter", () => {
       messageId: "9",
       thread: { kind: "topic", name: "Plans" },
     });
+    await adapter.settled();
 
     expect(delivered[0]).toMatchObject({
       chat: { externalId: "-1001234567890123" },
@@ -278,6 +298,7 @@ describe("channelAdapter", () => {
       () => {},
     );
     await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
     const dm = delivered[0]!;
     expect(dm.chatKind).toBe("dm");
 

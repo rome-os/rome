@@ -238,6 +238,9 @@ export interface ChannelChatAdapter extends ChatAdapter {
    * that holds a place sends to its chat and thread.
    */
   threadAt(address: string): ChatKey | null;
+  /** Resolves once every message heard so far has been handed to `deliver`
+   *  or reported to `fault`. */
+  settled(): Promise<void>;
 }
 
 /**
@@ -291,9 +294,11 @@ export function channelAdapter(
       started = true;
       if (!channel.inbound) return;
       unsubscribe = channel.inbound.subscribe(async (event) => {
-        // The port orders each platform address's events, but a chat's
-        // threads are addresses of their own, so the adapter orders a chat's
-        // messages itself.
+        // The port orders each platform address's events and holds the next
+        // until this handler returns, but a chat's threads are addresses of
+        // their own. So the handler only queues the event, in the order the
+        // port hands it over, and returns: the adapter orders a chat's
+        // messages itself, and none waits behind another thread's.
         const chat = keying(event.message.account ?? account(), event.message).key.externalId;
         const handed = (queues.get(chat) ?? Promise.resolve()).then(async () => {
           if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
@@ -338,16 +343,13 @@ export function channelAdapter(
           () => {},
         );
         queues.set(chat, settled);
-        inFlight.add(handed);
-        try {
-          await handed;
-        } catch (error) {
-          fault(error instanceof Error ? error : new Error(String(error)));
-          throw error;
-        } finally {
-          inFlight.delete(handed);
-          if (queues.get(chat) === settled) queues.delete(chat);
-        }
+        const tracked = handed
+          .catch((error) => fault(error instanceof Error ? error : new Error(String(error))))
+          .finally(() => {
+            inFlight.delete(tracked);
+            if (queues.get(chat) === settled) queues.delete(chat);
+          });
+        inFlight.add(tracked);
       });
     },
 
@@ -356,6 +358,10 @@ export function channelAdapter(
       unsubscribe = null;
       started = false;
       await Promise.allSettled([...inFlight]);
+    },
+
+    async settled() {
+      while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
     },
 
     async send(chat, threadId, out) {
