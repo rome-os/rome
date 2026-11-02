@@ -24,12 +24,18 @@ A case no capture covers yet answers with `source: "synthetic"`, and the peer's 
 |---|---|---|---|
 | `TelegramPeer` | grammy 1.40.0 | send, edit, reply, edit of a missing message | `getMe`, `getUpdates`, `deleteWebhook`, `sendChatAction`; every HTML send and edit, parsed as Telegram parses it; send to an unknown chat; empty or too-long text; reply to a missing message; edit with unchanged text; edit of a user's message |
 | `WechatPeer` | Rome's iLink adapter | send, send with a substituted context token, send to an unknown recipient | `getupdates` |
-| `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, DM creation; edit of a missing message; empty or too-long content; reply to a message elsewhere; edit of a user's message |
-| `FeishuPeer` | @larksuiteoapi/node-sdk 1.68.0 | post create, reply that opens a thread, edit, a post with one Markdown element, read of a missing message, all in a group | the tenant token, and a refused one; a request without the token; reply to a recalled message; edit of a user's message; an edit past the 20th; content over 30 KB |
+| `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, a user's id read as an unknown channel, DM creation; edit of a missing message; empty or too-long content; reply to a message elsewhere; edit of a user's message |
+| `FeishuPeer` | @larksuiteoapi/node-sdk 1.68.0 | post create, reply that opens a thread, edit, a post with one Markdown element, read of a missing message, all in a group | the tenant token, and a refused one; a request without the token; reply to a recalled message; edit of a user's message; an edit past the 20th; content over 30 KB; the long connection's endpoint, the bot's identity, its frames and pushed events; a send to a person's open id |
 
-The Feishu peer answers HTTP only and has no test channel yet: the adapter hears users over the SDK's WebSocket, which the peer does not model. Its tests drive the reply delivery transport and the SDK's client directly. A Markdown element shows its source: Feishu parses it into styled runs, which the peer does not.
+The Feishu peer models the long connection the adapter hears users over: the endpoint the SDK asks for its WebSocket URL, the bot's identity, and the `pbbp2` frames (`feishu-ws.ts`): pings, and `im.message.receive_v1` events pushed to the app, which it acknowledges. Those answers are synthetic. A Markdown element shows its source: Feishu parses it into styled runs, which the peer does not.
 
-Known gap: the Discord peer's `MESSAGE_CREATE` frames are synthetic, and discord.js 14.26.2 builds no channel for a DM it has not cached from such a frame. So a test opens the DM first (`adapter.directConversationFor`), which caches the channel, before the user writes; whether a real first DM reaches the adapter without that is unverified. A recorded DM gateway event would close the gap.
+The Discord peer's `MESSAGE_CREATE` frames are synthetic. discord.js 14.26.2 builds no channel for a DM it has not cached, so Rome's adapter caches a partial DM channel from the raw event before discord.js handles it, and a person's first DM reaches it with no DM opened first. A recorded DM gateway event would confirm the frame's shape.
+
+## Conformance
+
+[`connections/adapter-conformance.ts`](../../../connections/adapter-conformance.ts) is what every chat adapter owes Chats, written once and run against each peer by `adapter-conformance.integration.test.ts` beside it. A case drives Rome's production inbound recording and an app's send path over the adapter, and checks only what a person sees on the peer and what Rome's transcript holds: a direct message is recorded once in one chat, a reply reaches where the person sees it whether Rome names the person or the address it heard them at, and a direct message Rome opened is the chat the person's answer lands in.
+
+A case Rome fails today on a platform is listed in that platform's `gaps`, with why, and skipped, so the report shows it. The step of the Chats migration that closes a gap removes its entry.
 
 ## Strictness
 
