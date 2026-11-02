@@ -4,7 +4,7 @@ import { cli, Strategy } from "@jackwener/opencli/registry";
 // Overrides the built-in twitter/follow: plugins are discovered last at opencli
 // startup, so this cli() call wins the "twitter/follow" registry key while every
 // other twitter command stays built-in. Diff base: clis/twitter/follow.js in
-// @yunfanye/opencli@1.8.8 - the only addition is the --only-follow-back gate.
+// @yunfanye/opencli@2.0.3 - the only addition is the --only-follow-back gate.
 cli({
   site: "twitter",
   name: "follow",

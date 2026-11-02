@@ -17,25 +17,28 @@ Use this skill when a task requires browser automation, web interaction, page in
 
 ## Browser connections
 
-OpenCLI uses its browser extension by default. Run `opencli profile list` to discover connected browsers before choosing a target.
+OpenCLI uses its browser extension by default. Run `opencli profile list` to discover browsers before choosing a target. It lists saved profiles too, and only a profile with `"connected": true` can run commands.
 Pass `opencli --profile <name-or-id> ...` on every command for a task so concurrent work does not change its browser.
+Browser page commands name their session with an option, as in `opencli --profile <name-or-id> browser open <url> --session <session>`.
+OpenCLI prints each result as `{"ok":true,"data":...}` and each failure as `{"ok":false,"error":{...}}` with the error's `code`, `message`, and `hint`.
 The `chatgpt_chat` and `chatgpt_image` actions take the same name or id as their `profile` input.
 If the requested browser is disconnected, report that it is unavailable. Do not substitute another browser or assume its login session is equivalent.
 Settings > Advanced > Computer Use shows observed browser connections and their last seen times.
 Use `--cdp-endpoint` only when the task explicitly requires a direct CDP connection.
 
 The available sites are:
-1688, 36kr, 51job, amazon, antigravity, apple-podcasts, arxiv, baidu-scholar, band, barchart, bbc, bilibili, binance, bloomberg, bluesky, boss, chaoxing, chatgpt, chatgpt-app, chatwise, claude, cnki, codex, coupang, craigslist, ctrip, cursor, dblp, deepseek, devto, dianping, dictionary, discord-app, douban, doubao, doubao-app, douyin, eastmoney, facebook, gemini, gitee, google, google-scholar, gov-law, gov-policy, grok, hackernews, hf, hupu, imdb, indeed, instagram, jd, jianyu, jike, jimeng, ke, lesswrong, linkedin, linux-do, lobsters, maimai, medium, mubu, notebooklm, notion, nowcoder, ones, openreview, paperreview, pixiv, producthunt, quark, reddit, reuters, sinablog, sinafinance, smzdm, spotify, stackoverflow, steam, substack, taobao, tdx, ths, tiktok, toutiao, twitter, uiverse, v2ex, wanfang, web, weibo, weixin, weread, wikipedia, xianyu, xiaoe, xiaohongshu, xiaoyuzhou, xueqiu, yahoo-finance, yollomi, youtube, yuanbao, zhihu, zlibrary, zsxq
+1688, 36kr, 51job, amazon, apple-podcasts, arxiv, baidu-scholar, band, barchart, bbc, bilibili, binance, bloomberg, bluesky, boss, chaoxing, chatgpt, claude, cnki, coupang, craigslist, ctrip, dblp, deepseek, devto, dianping, dictionary, douban, doubao, douyin, eastmoney, facebook, gemini, gitee, google, google-scholar, gov-law, gov-policy, grok, hackernews, hf, hupu, imdb, indeed, instagram, jd, jianyu, jike, jimeng, ke, lesswrong, linkedin, linux-do, lobsters, maimai, medium, mubu, notebooklm, nowcoder, ones, openreview, paperreview, pixiv, producthunt, quark, reddit, reuters, sinablog, sinafinance, smzdm, spotify, stackoverflow, steam, substack, taobao, tdx, ths, tiktok, toutiao, twitter, uiverse, v2ex, wanfang, web, weibo, weixin, weread, wikipedia, xianyu, xiaoe, xiaohongshu, xiaoyuzhou, xueqiu, yahoo-finance, yollomi, youtube, yuanbao, zhihu, zlibrary, zsxq
 
 ## When a browser command times out
 
 A browser command can fail with `command_result_unknown`, for example `Browser exec command timed out after 120s; it may still complete in the browser.` The command may still finish in the browser, so its outcome is unknown.
+`browser open` can also succeed with `"navigation": "timed_out"`. The page did not finish loading and did not answer page JavaScript, so OpenCLI skipped its page setup. Treat it the same way.
 
 1. Do not repeat the command, and do not switch to another browser.
-2. Run `opencli --profile <name-or-id> browser <session> tab list`. It reads each tab's URL and title from the browser without running page JavaScript, so it usually answers while the page is stalled. `eval` and `state` run page JavaScript and wait on the same stalled page.
+2. Run `opencli --profile <name-or-id> browser tab list --session <session>`. It reads each tab's URL and title from the browser without running page JavaScript, so it usually answers while the page is stalled. `eval` and `state` run page JavaScript and wait on the same stalled page.
 3. If the command that timed out changes something, such as a submit or a send, check for its effect before closing the tab. Report an outcome you cannot confirm instead of retrying.
-4. If you attached the session to the user's tab with `browser <session> bind`, run `opencli --profile <name-or-id> browser <session> unbind` and stop. Tell the user that their tab is stalled and the command's outcome is unknown. `close` does not close a bound tab, and opening the page again would load it in a new tab instead of the user's.
-5. Otherwise, run `opencli --profile <name-or-id> browser <session> close`. It releases the session's tab lease, which holds the stalled page. Other sessions on the same browser keep working.
+4. If you attached the session to the user's tab with `browser bind --session <session>`, run `opencli --profile <name-or-id> browser unbind --session <session>` and stop. Tell the user that their tab is stalled and the command's outcome is unknown. `close` does not close a bound tab, and opening the page again would load it in a new tab instead of the user's.
+5. Otherwise, run `opencli --profile <name-or-id> browser close --session <session>`. It releases the session's tab lease, which holds the stalled page. Other sessions on the same browser keep working.
 6. Open the page again in that session once. This is the one repeat that step 1 allows, because `close` released the stalled page. If it times out again, report the site as unavailable.
 
 ## Authoring browser automation actions

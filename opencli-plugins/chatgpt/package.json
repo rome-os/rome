@@ -7,6 +7,6 @@
     "test": "../../scripts/test-env.sh node --test chatgpt-memory.test.mjs"
   },
   "devDependencies": {
-    "@jackwener/opencli": "^1.8.6"
+    "@jackwener/opencli": "npm:@yunfanye/opencli@2.0.3"
   }
 }

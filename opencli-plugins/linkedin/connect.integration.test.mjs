@@ -58,7 +58,7 @@ function sentInvitationsDocument() {
   };
 }
 
-/** Runs both the 1.8.8 command and Rome's override against the same fictional profile DOM. */
+/** Runs both the 2.0.3 command and Rome's override against the same fictional profile DOM. */
 function fakePage(
   body,
   { menuItems = null, inviteResult, url = OWNER_URL, name = OWNER_NAME } = {},
@@ -95,7 +95,7 @@ function fakePage(
   return page;
 }
 
-test("#1542: 1.8.8 calls an existing connection connectable, and Rome does not", async () => {
+test("#1542: 2.0.3 calls an existing connection connectable, and Rome does not", async () => {
   const [baseline] = await upstreamConnect.func(fakePage(connectedHashedLayout()), dryRun);
   assert.equal(baseline.status, "connectable_dry_run");
   assert.equal(baseline.connectable, true);
@@ -108,7 +108,7 @@ test("#1542: 1.8.8 calls an existing connection connectable, and Rome does not",
   assert.deepEqual(fixedPage.profile.clicks, []);
 });
 
-test("#1542: a 1.8.8 send would open a recommended member's invitation, and Rome sends nothing", async () => {
+test("#1542: a 2.0.3 send would open a recommended member's invitation, and Rome sends nothing", async () => {
   const baselinePage = fakePage(connectedHashedLayout(), {
     inviteResult: { ok: false, status: "blocked", reason: "invite_dialog_not_found" },
   });
@@ -125,7 +125,7 @@ test("#1542: a 1.8.8 send would open a recommended member's invitation, and Rome
   assert.equal(fixedPage.sendClicks, 0);
 });
 
-test("#1491: 1.8.8 misses Connect in the owner's More menu, and Rome finds it without activating it", async () => {
+test("#1491: 2.0.3 misses Connect in the owner's More menu, and Rome finds it without activating it", async () => {
   const [baseline] = await upstreamConnect.func(
     fakePage(followPrimaryLayout(), { menuItems: MENU_WITH_CONNECT }),
     dryRun,
@@ -141,8 +141,8 @@ test("#1491: 1.8.8 misses Connect in the owner's More menu, and Rome finds it wi
   assert.equal(fixedPage.profile.menuOpen(), false);
 });
 
-test("the 1.8.8 DOM probe promotes a navigation Me label, and Rome rejects the same fixture", async () => {
-  // "Example Member" contains "me", which the 1.8.8 name match accepts as a substring.
+test("the 2.0.3 DOM probe promotes a navigation Me label, and Rome rejects the same fixture", async () => {
+  // "Example Member" contains "me", which the 2.0.3 name match accepts as a substring.
   const member = {
     url: "https://www.linkedin.com/in/example-member/",
     name: "Example Member",

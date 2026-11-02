@@ -1,4 +1,4 @@
-// Overrides clis/linkedin/connections.js from @yunfanye/opencli 1.8.8.
+// Overrides clis/linkedin/connections.js from @yunfanye/opencli 2.0.3.
 // Upstream stops at the first page shorter than it requested and returns bare rows,
 // so a partial list looks exhausted. Keep the endpoint and row mapping in sync with upstream.
 import {
