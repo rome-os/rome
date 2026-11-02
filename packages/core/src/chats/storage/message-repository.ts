@@ -265,6 +265,17 @@ export class MessageRepository {
     );
   }
 
+  /** Note that line `id` reached Rome's account `accountId`: true the first
+   *  time, false when it had already reached it. */
+  reached(id: number, accountId: string): boolean {
+    const added = this.db.run(sql`
+      INSERT INTO chat_message_deliveries (message_id, account_id)
+      VALUES (${id}, ${accountId})
+      ON CONFLICT DO NOTHING
+    `);
+    return added.changes > 0;
+  }
+
   /** The id of the line its adapter keys `key` in `chat`, or null when Rome
    *  holds none. */
   idOf(chat: ChatRef, key: string): number | null {

@@ -21,8 +21,9 @@ import type { TurnLinks } from "./turn-links.js";
 // these pin: a message is on record in its chat before the hook hears it, the
 // hook hears it through the session of the account that heard it, a
 // redelivery is neither recorded nor heard twice, even after a restart, a
-// message is held out of catch-up until every account that heard it decided
-// its wake, a place's messages are heard one at a time whichever account
+// line reaches each account once whatever its session has read, a message is
+// held out of catch-up until every account and every hook that heard it
+// decided its wake, a place's messages are heard one at a time whichever account
 // heard them, and nothing is recorded until a hook subscribes.
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
@@ -105,7 +106,6 @@ describe("messagesSaid", () => {
       recording,
       events,
       wakes: overrides.wakes ?? wiring.links,
-      links: wiring.links,
     });
   }
 
@@ -261,11 +261,10 @@ describe("messagesSaid", () => {
     await telegram.deliver(message());
     expect(lines()).toHaveLength(0);
   });
-  it("does not hear a redelivery after a restart, once the session took the line", async () => {
+  it("does not hear a redelivery after a restart, though no turn took the line", async () => {
     const heard: SaidInboundEvent[] = [];
     const leave = said.subscribe(async (event) => {
       heard.push(event);
-      wiring.links.prompt(Number(event.recorded.messageId), event.recorded.chatRecordId);
     });
     await telegram.deliver(message());
     await settled();
@@ -359,5 +358,72 @@ describe("messagesSaid", () => {
     expect(heard).toEqual(["tg-1"]);
     expect(reloaded).toEqual(["tg-3"]);
     expect(lines()).toHaveLength(2);
+  });
+  it("hears a line an account's session already caught up on, when it first reaches that account", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    const viaSecond = { ...supergroup, account: SECOND, channel: "telegram-2" };
+    await second.deliver(message({ ...viaSecond, messageId: "tg-0" }));
+    await settled();
+    await telegram.deliver(message({ ...supergroup, messageId: "tg-1" }));
+    await settled();
+    const [secondSession, first] = heard;
+    if (!secondSession || !first) throw new Error("not heard");
+    wiring.links.seen(
+      [Number(first.recorded.messageId)],
+      secondSession.recorded.chatRecordId,
+      "turn-1",
+    );
+
+    await second.deliver(message({ ...viaSecond, messageId: "tg-1" }));
+    await settled();
+    expect(heard.map((event) => [event.message.channel, event.message.messageId])).toEqual([
+      ["telegram-2", "tg-0"],
+      ["telegram", "tg-1"],
+      ["telegram-2", "tg-1"],
+    ]);
+  });
+
+  it("holds a line until every hook hearing it has decided its wake", async () => {
+    const first: SaidInboundEvent[] = [];
+    const other: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      first.push(event);
+    });
+    said.subscribe(async (event) => {
+      other.push(event);
+    });
+    await telegram.deliver(message({ timestamp: new Date(Date.now() + 60_000) }));
+    await settled();
+    const [heard] = first;
+    if (!heard || other.length !== 1) throw new Error("not heard by both hooks");
+    const session = heard.recorded.chatRecordId;
+
+    await said.decided(heard.recorded);
+    expect(wiring.links.unseen(session)).toHaveLength(0);
+    await said.decided(heard.recorded);
+    expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
+  });
+
+  it("lets a line go when the hook still deciding it leaves", async () => {
+    said.subscribe(async () => undefined);
+    const heard: SaidInboundEvent[] = [];
+    const leave = said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    await telegram.deliver(message({ timestamp: new Date(Date.now() + 60_000) }));
+    await settled();
+    const [event] = heard;
+    if (!event) throw new Error("not heard");
+
+    await said.decided(event.recorded);
+    expect(wiring.links.unseen(event.recorded.chatRecordId)).toHaveLength(0);
+    leave();
+    expect(wiring.links.unseen(event.recorded.chatRecordId).map((line) => line.text)).toEqual([
+      "Hello",
+    ]);
   });
 });

@@ -18,14 +18,10 @@ import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.j
 
 const log = createLogger("inbound-recording");
 
-/** Most (account, message) pairs remembered as heard, past which the oldest
- *  is forgotten. A redelivery comes soon after the delivery it repeats. */
-const HEARD_CAPACITY = 10_000;
-
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
   chats: Pick<ChatRepository, "start">;
-  messages: Pick<MessageRepository, "record" | "idOf">;
+  messages: Pick<MessageRepository, "record" | "idOf" | "reached">;
   events: ChatEvents;
   /** Each channel's chat adapter, which hands over what the channel hears. */
   adapters: Pick<ChatAdapters, "of">;
@@ -78,28 +74,6 @@ export function inboundRecording(
    *  waits for it here. */
   const tails = new Map<string, Promise<number | null>>();
 
-  /**
-   * Which of Rome's accounts each recorded message was raised for, as
-   * `<account>\0<id>`, oldest first. Where the platform numbers a chat's
-   * messages once for everyone, two of Rome's accounts there hear the same
-   * line: it is recorded once and raised for each, while a redelivery to the
-   * same account raises nothing. Kept in memory, like the wakes in flight: a
-   * restart forgets it, and a redelivery after one is raised again, for
-   * Agents to find the line its session already took
-   * (sessions/messages-said.ts).
-   */
-  const raised = new Set<string>();
-  const raise = (account: string, id: number): boolean => {
-    const key = `${account}\0${id}`;
-    if (raised.has(key)) return false;
-    raised.add(key);
-    if (raised.size > HEARD_CAPACITY) {
-      const oldest = raised.values().next().value;
-      if (oldest !== undefined) raised.delete(oldest);
-    }
-    return true;
-  };
-
   const recordOne = async (
     message: Inbound,
     subscription: { readonly adapter: ChannelChatAdapter },
@@ -114,8 +88,10 @@ export function inboundRecording(
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
     // Recorded and raised in one step, with nothing run in between, so
     // MessageSaid's first listener acts before anything reads the message. A
-    // line on record already is raised only for an account it was not raised
-    // for: a redelivery records nothing and raises nothing.
+    // line on record already is raised only for an account it has not
+    // reached: where the platform numbers a chat's messages once for
+    // everyone, two of Rome's accounts there hear the same line, while a
+    // redelivery, even after a restart, records nothing and raises nothing.
     const said = messageToRome({
       key: message.key,
       place: placeIn(chat.ref, message.thread?.id),
@@ -129,7 +105,7 @@ export function inboundRecording(
     });
     const fresh = deps.messages.record(said);
     const id = fresh?.id ?? deps.messages.idOf(chat.ref, message.key);
-    if (id === null || !raise(via.account.id, id)) return null;
+    if (id === null || !deps.messages.reached(id, via.account.id)) return null;
     // Raised again for another account, the line is the one on record, as
     // this account heard it.
     const { replyTo: _quote, ...unquoted } = said;

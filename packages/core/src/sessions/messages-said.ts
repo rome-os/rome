@@ -23,9 +23,6 @@ export interface MessagesSaidDeps {
   events: ChatEvents;
   /** Holds a message out of every catch-up until its wake is decided. */
   wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
-  /** What each session already took a message as, which outlives a
-   *  restart. */
-  links: Pick<TurnLinks, "linkOf">;
 }
 
 /**
@@ -33,19 +30,43 @@ export interface MessagesSaidDeps {
  * listens to `events`: its listener holds each message out of catch-up, and
  * Chats raises MessageSaid in the same step it records the message, so the
  * first listener acts before anything can read it.
+ *
+ * Each raise is held once, and let go once every hook that was hearing when
+ * it was raised has decided it, or has left.
  */
 export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
-  let hearers = 0;
+  /** The hooks hearing now. */
+  const hearers = new Set<symbol>();
+  /** Each raise still held, with the hooks that have yet to decide it. */
+  const owed = new Map<MessageSaid, Set<symbol>>();
+  /** The raises handed to a hook and not yet decided, by message and
+   *  session, as the hook names them back, each with the hooks it was handed
+   *  to in turn. */
+  const handed = new Map<string, { event: MessageSaid; hearer: symbol }[]>();
+
+  /** Hook `hearer` is done with `event`: once every hook is, its wake is
+   *  decided. */
+  const settle = (event: MessageSaid, hearer: symbol): void => {
+    const waiting = owed.get(event);
+    if (!waiting?.delete(hearer) || waiting.size > 0) return;
+    owed.delete(event);
+    deps.wakes.wakeDecided(event.message.id);
+  };
+
   deps.events.subscribe((event) => {
     // Only while a hook hears messages is anyone there to decide the wake.
-    if (event.type === "MessageSaid" && hearers > 0) deps.wakes.wakeUndecided(event.message.id);
+    if (event.type !== "MessageSaid" || hearers.size === 0) return;
+    owed.set(event, new Set(hearers));
+    deps.wakes.wakeUndecided(event.message.id);
   });
+
   return {
     subscribe(handler) {
-      hearers += 1;
+      const hearer = Symbol("hearer");
+      hearers.add(hearer);
       const unlisten = deps.recording.listen();
       const unsubscribe = deps.events.subscribe(async (event) => {
-        if (event.type !== "MessageSaid") return;
+        if (event.type !== "MessageSaid" || !owed.get(event)?.has(hearer)) return;
         // The hook still reads the platform's event, which the adapter holds
         // while it delivers the message, and Chats never sees.
         const heard = deps.recording.heard(event.via.channel, event.message.id);
@@ -53,7 +74,7 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           // Handed to nobody, as while a hook is being swapped: nothing will
           // decide its wake, so it stands decided as a message no agent
           // answered.
-          deps.wakes.wakeDecided(event.message.id);
+          settle(event, hearer);
           return;
         }
         let speaker: string;
@@ -61,33 +82,47 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           speaker = await speakerOf(deps, event, heard);
         } catch (error) {
           // Never handed over, so nothing else will decide its wake.
-          deps.wakes.wakeDecided(event.message.id);
+          settle(event, hearer);
           throw error;
-        }
-        // A session that already took the line, as a prompt or as seen, heard
-        // it before: this is a redelivery, such as one a restart brings,
-        // and its wake was decided then.
-        if (deps.links.linkOf(speaker, event.message.id)) {
-          deps.wakes.wakeDecided(event.message.id);
-          return;
         }
         const recorded: SaidInboundEvent = {
           ...heard,
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },
         };
+        const key = handedKey(recorded.recorded);
+        handed.set(key, [...(handed.get(key) ?? []), { event, hearer }]);
         await handler(recorded);
       });
       let left = false;
       return () => {
         if (left) return;
         left = true;
-        hearers -= 1;
+        hearers.delete(hearer);
         unsubscribe();
         unlisten();
+        // What it never decided, nobody will.
+        for (const [key, raises] of handed) {
+          const kept = raises.filter((raise) => raise.hearer !== hearer);
+          if (kept.length > 0) handed.set(key, kept);
+          else handed.delete(key);
+        }
+        for (const event of [...owed.keys()]) settle(event, hearer);
       };
     },
-    decided: async (recorded) => deps.wakes.wakeDecided(Number(recorded.messageId)),
+    decided: async (recorded) => {
+      const key = handedKey(recorded);
+      const [first, ...rest] = handed.get(key) ?? [];
+      if (!first) return;
+      if (rest.length > 0) handed.set(key, rest);
+      else handed.delete(key);
+      settle(first.event, first.hearer);
+    },
   };
+}
+
+/** A raise handed to a hook, as the hook names it back. */
+function handedKey(recorded: SaidInboundEvent["recorded"]): string {
+  return `${recorded.messageId}\0${recorded.chatRecordId}`;
 }
 
 /**

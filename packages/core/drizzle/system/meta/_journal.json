@@ -743,6 +743,13 @@
       "when": 1793950000000,
       "tag": "0106_chats_tables_without_rowid",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1794000000000,
+      "tag": "0107_chat_message_deliveries",
+      "breakpoints": true
     }
   ]
 }
