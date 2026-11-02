@@ -88,6 +88,8 @@ describe("messagesSaid", () => {
   let telegram: ReturnType<typeof fakeChannel>;
   let second: ReturnType<typeof fakeChannel>;
   let said: ReturnType<typeof messagesSaid>;
+  /** The events the last port built hears on. */
+  let events: ChatEvents;
 
   function build(
     overrides: {
@@ -95,7 +97,7 @@ describe("messagesSaid", () => {
       wakes?: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
     } = {},
   ) {
-    const events = new ChatEvents();
+    events = new ChatEvents();
     const recording = inboundRecording(
       { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
       [telegram.channel, second.channel],
@@ -466,5 +468,50 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(event.recorded.chatRecordId).map((line) => line.text)).toEqual([
       "Hello",
     ]);
+  });
+  it("raises a shared line with its quote for every account that hears it", async () => {
+    said.subscribe(async () => undefined);
+    const quotes: (number | undefined)[] = [];
+    events.subscribe((event) => {
+      if (event.type === "MessageSaid") quotes.push(event.message.replyTo);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    const viaSecond = { ...supergroup, account: SECOND, channel: "telegram-2" };
+    await telegram.deliver(message({ ...supergroup, messageId: "tg-0" }));
+    await settled();
+    const reply = { messageId: "tg-1", replyTo: { messageId: "tg-0" } } as Partial<ChannelMessage>;
+    await telegram.deliver(message({ ...supergroup, ...reply }));
+    await second.deliver(message({ ...viaSecond, ...reply }));
+    await settled();
+
+    const quoted = lines().find((line) => line.key.endsWith("tg-0"))?.id;
+    expect(quoted).toBeDefined();
+    expect(quotes).toEqual([undefined, quoted, quoted]);
+  });
+
+  it("hands nothing to a hook that left while its session opened", async () => {
+    const opening = gate();
+    const opened = gate();
+    const sessions = new WebChatRepository(testDb.db);
+    const slow = build({
+      sessions: {
+        ensureChannelChat: async (input) => {
+          opening.open();
+          await opened.opened;
+          return sessions.ensureChannelChat(input);
+        },
+      },
+    });
+    const heard: SaidInboundEvent[] = [];
+    const leave = slow.subscribe(async (event) => {
+      heard.push(event);
+    });
+    await telegram.deliver(message());
+    await opening.opened;
+    leave();
+    opened.open();
+    await settled();
+
+    expect(heard).toHaveLength(0);
   });
 });

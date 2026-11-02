@@ -92,6 +92,8 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           settle(event, hearer);
           throw error;
         }
+        // A hook that left while its session opened is owed nothing more.
+        if (!owed.get(event)?.has(hearer)) return;
         const recorded: SaidInboundEvent = {
           ...heard,
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },

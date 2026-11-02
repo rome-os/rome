@@ -21,7 +21,7 @@ const log = createLogger("inbound-recording");
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
   chats: Pick<ChatRepository, "start">;
-  messages: Pick<MessageRepository, "record" | "idOf" | "reached">;
+  messages: Pick<MessageRepository, "record" | "idOf" | "reached" | "quotedBy">;
   events: ChatEvents;
   /** Each channel's chat adapter, which hands over what the channel hears. */
   adapters: Pick<ChatAdapters, "of">;
@@ -107,9 +107,10 @@ export function inboundRecording(
     const id = fresh?.id ?? deps.messages.idOf(chat.ref, message.key);
     if (id === null || !deps.messages.reached(id, via.account.id)) return null;
     // Raised again for another account, the line is the one on record, as
-    // this account heard it.
+    // this account heard it, quoting the line it quotes on record.
     const { replyTo: _quote, ...unquoted } = said;
-    const recorded = fresh ?? { ...unquoted, id };
+    const quoted = fresh ? null : deps.messages.quotedBy(id);
+    const recorded = fresh ?? { ...unquoted, id, ...(quoted === null ? {} : { replyTo: quoted }) };
     const hearingAs = `${via.channel}\0${id}`;
     hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
     try {
