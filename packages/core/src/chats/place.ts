@@ -17,16 +17,6 @@ export interface ChatKey {
   readonly id: ChatId;
 }
 
-/**
- * A chat as Chats will name it once its own tables hold it: its platform and
- * an id its adapter gives it (`channels/chat-ids.ts`), opaque to Chats.
- * Nothing reads it yet: today's storage still keys a chat by {@link ChatKey}.
- */
-export interface ChatRef {
-  readonly platform: string;
-  readonly id: string;
-}
-
 /** A chat, or a thread in one. `threadId` is the platform's own id for the
  *  thread, which a channel hands out as an address of its own. */
 export interface Place {
