@@ -304,11 +304,6 @@ export function channelAdapter(
             saved,
             keying,
           );
-          const heardAs = `${inbound.chat.externalId}\0${inbound.key}`;
-          delivering.set(heardAs, {
-            ...saved,
-            message: { ...saved.message, channel: channel.name },
-          });
           // A direct message is reached where it was heard, which on some
           // platforms is an id of its own rather than the other end.
           if (inbound.chatKind === "dm" && inbound.thread === null) {
@@ -327,6 +322,11 @@ export function channelAdapter(
               inbound.chat.externalId,
             );
           }
+          const heardAs = `${inbound.chat.externalId}\0${inbound.key}`;
+          delivering.set(heardAs, {
+            ...saved,
+            message: { ...saved.message, channel: channel.name },
+          });
           try {
             await deliver(inbound);
           } finally {

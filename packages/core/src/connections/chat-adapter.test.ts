@@ -193,6 +193,35 @@ describe("channelAdapter", () => {
     expect(order).toEqual(["start 1", "start 3", "end 3", "end 1", "start 2", "end 2"]);
   });
 
+  it("hold no event for a message whose address could not be kept", async () => {
+    const { channel, hear } = fakeChannel();
+    const failing = {
+      ...deps(),
+      addresses: {
+        ...addresses,
+        bind: () => {
+          throw new Error("store down");
+        },
+        addressOf: () => null,
+        keyAt: () => null,
+        bindThread: () => {},
+        threadChatAt: () => null,
+      },
+    };
+    const adapter = channelAdapter(channel, failing);
+    const faults: Error[] = [];
+    adapter.start(
+      async () => 1,
+      (error) => faults.push(error),
+    );
+
+    await expect(hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } })).rejects.toThrow(
+      "store down",
+    );
+    expect(faults.map((error) => error.message)).toEqual(["store down"]);
+    expect(adapter.heard("dm:rome_bot:alice", "3")).toBeUndefined();
+  });
+
   it("hand nothing for a message with no text and no attachments", async () => {
     const { channel, hear } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
