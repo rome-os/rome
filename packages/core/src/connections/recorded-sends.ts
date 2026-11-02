@@ -147,10 +147,10 @@ function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): 
  * the direct message there, else the thread the address names.
  */
 function seatAt(deps: RecordedSendsDeps, channel: string, address: ChatId): string | null {
-  const account = deps.adapters.accountOn(channel).id;
+  const account = deps.adapters.accountOn(channel);
   for (const kind of ["group", "dm"] as const) {
     const chat = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
-    const seat = chat && deps.seats.seatIn(chat.ref.id, null, account);
+    const seat = chat && deps.seats.seatIn(chat.ref.id, null, account.id);
     if (seat) return seat;
   }
   return deps.seats.seatInThread(address, account);
@@ -305,7 +305,8 @@ async function openThread(
   );
   const messageId = platformIdOfLine(key, romeEnd, lineKey);
   return {
-    chatId: deps.adapters.addressAt(channel.name, placeIn(chat)),
+    // The adapter keeps the provider's thread even when storing it failed.
+    chatId: adapter.threadAddress(key.externalId),
     ...(messageId ? { messageId } : {}),
   };
 }

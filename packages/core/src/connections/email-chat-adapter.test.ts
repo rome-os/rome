@@ -145,6 +145,7 @@ describe("emailChatAdapter", () => {
     await adapter.send(chat.externalId, null, { text: "two" });
 
     expect(sent.map((s) => s.to)).toEqual(["", "thread-1"]);
+    expect(adapter.threadAddress(chat.externalId)).toBe("thread-1");
   });
 
   it("hear a reply under the chat Rome opened even when the thread's address could not be stored", async () => {

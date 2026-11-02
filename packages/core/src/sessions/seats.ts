@@ -73,11 +73,15 @@ export class Seats {
     );
   }
 
-  /** The seat Rome's account `accountId` holds in the thread the platform
-   *  calls `threadId`, in whichever chat, or null when it holds none. */
-  seatInThread(threadId: string, accountId: string): string | null {
+  /** The seat Rome's account `account` holds in the thread its platform
+   *  calls `threadId`, in whichever chat there, or null when it holds none. */
+  seatInThread(threadId: string, account: { platform: string; id: string }): string | null {
     return this.firstSeat(
-      and(eq(romeSessions.threadId, threadId), eq(romeSessions.accountId, accountId)),
+      and(
+        eq(romeSessions.threadId, threadId),
+        eq(romeSessions.chatPlatform, account.platform),
+        eq(romeSessions.accountId, account.id),
+      ),
     );
   }
 
