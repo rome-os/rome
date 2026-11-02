@@ -32,6 +32,11 @@ import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
+import {
+  isSessionTraceArchived,
+  sessionTraceCutoff,
+  TRACE_ACTIVITY_ROLES,
+} from "./trace-retention.js";
 import type { MessagePart } from "../types.js";
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
@@ -165,15 +170,72 @@ export class ChatsWebChatRepository extends WebChatRepository {
     });
     if (inChat.length === 0) return super.appendTraceBlocks(input);
     const own = said.filter((message) => !inChat.some((line) => line.message === message));
-    // Said before the trace's own transaction, so a batch that fails there is
-    // retried whole: saying a line again changes nothing. A turn reads its
-    // prompt, trace and answers in that order whenever each was written.
-    this.db.transaction(() => {
-      for (const { message, standing } of inChat) {
-        this.say(standing, message.id, message.role, partsOf(message.content), message.turnId);
-      }
-    });
-    await super.appendTraceBlocks({ ...input, transcriptMessages: own });
+    // Prompt, trace, answer, in the order and at the times the base class
+    // writes them. Each step is safe to repeat, so a batch that failed part
+    // way is retried whole: saying a line again changes nothing, and a trace
+    // batch already appended is not appended again.
+    const sayAll = (role: "user" | "assistant") =>
+      this.db.transaction(() => {
+        for (const { message, standing } of inChat) {
+          if (message.role !== role) continue;
+          this.say(standing, message.id, role, partsOf(message.content), message.turnId);
+        }
+      });
+    sayAll("user");
+    if (!this.appended(input.messageId, input.startSeq)) {
+      await super.appendTraceBlocks({ ...input, transcriptMessages: own });
+    }
+    sayAll("assistant");
+  }
+
+  /** Whether trace `messageId`'s batch from block `startSeq` is on record. */
+  private appended(messageId: string, startSeq: number): boolean {
+    return (
+      this.db.all(sql`
+        SELECT 1 FROM rome_agent_trace_blocks WHERE message_id = ${messageId} AND seq = ${startSeq}
+      `).length > 0
+    );
+  }
+
+  /**
+   * The sessions among `sessionIds` whose traces are archived, as
+   * WebChatRepository decides, counting the lines said where each session
+   * or an ancestor stands as its activity too.
+   */
+  override async getTraceArchivedSessionIds(
+    sessionIds: readonly string[],
+    cutoff = sessionTraceCutoff(),
+  ): Promise<string[]> {
+    if (sessionIds.length === 0) return [];
+    const ids = JSON.stringify([...new Set(sessionIds)]);
+    const roles = JSON.stringify(TRACE_ACTIVITY_ROLES);
+    const rows = this.db.all<{ sessionId: string; lastMessageAt: number }>(sql`
+      WITH RECURSIVE ancestors(session_id, ancestor_id, parent_id) AS (
+        SELECT id, id, parent_session_id FROM rome_sessions
+        WHERE id IN (SELECT value FROM json_each(${ids}))
+        UNION
+        SELECT ancestors.session_id, parent.id, parent.parent_session_id
+        FROM ancestors JOIN rome_sessions AS parent ON parent.id = ancestors.parent_id
+      ),
+      activity AS MATERIALIZED (
+        SELECT session_id, max(created_at) AS last_message_at FROM rome_agent_messages
+        WHERE session_id IN (SELECT ancestor_id FROM ancestors)
+          AND role IN (SELECT value FROM json_each(${roles}))
+        GROUP BY session_id
+        UNION ALL
+        SELECT s.id, max(m.said_at) FROM rome_sessions s
+        JOIN chat_messages m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+          AND m.said_at >= s.created_at
+        WHERE s.id IN (SELECT ancestor_id FROM ancestors)
+        GROUP BY s.id
+      )
+      SELECT ancestors.session_id AS sessionId, max(activity.last_message_at) AS lastMessageAt
+      FROM ancestors JOIN activity ON activity.session_id = ancestors.ancestor_id
+      GROUP BY ancestors.session_id
+    `);
+    return rows
+      .filter((row) => isSessionTraceArchived(new Date(row.lastMessageAt * 1000), cutoff))
+      .map((row) => row.sessionId);
   }
 
   override async recordUserInput(
@@ -381,7 +443,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         WHERE l.created_at >= ${Math.floor(since.getTime() / 1000)}
           AND l.role IN ('user', 'assistant')
         ORDER BY MIN(l.created_at) OVER (PARTITION BY l.session_id, COALESCE(l.turn_id, l.id)),
-          l.session_id, COALESCE(l.turn_id, l.id), l.line_order, l.created_at, l.seq
+          l.session_id, COALESCE(l.turn_id, l.id), l.created_at, l.line_order, l.seq
       `)
       .map((row) => ({
         ...storedLine(row),
@@ -405,7 +467,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .all<LineRow>(sql`
         SELECT * FROM ${sessionLines([sessionId])}
         WHERE turn_id = ${turnId} AND role IN ('user', 'assistant')
-        ORDER BY line_order, created_at, seq
+        ORDER BY created_at, line_order, seq
       `)
       .map((row) => ({
         id: row.id,
@@ -523,7 +585,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         ${where}
         ORDER BY session_id,
           MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
-          turn_id, line_order, created_at, seq
+          turn_id, created_at, line_order, seq
       `)
       .map(storedLine);
   }
@@ -617,8 +679,9 @@ function storedLine(row: LineRow): TranscriptLine {
  * chat). A line is the session's prompt or answer by its turn link; a line
  * with none, or only caught up on, is its agent's when its account said it,
  * the guardian's on the dashboard, and a notification elsewhere.
- * `line_order` puts a turn's prompt before its trace, and both before its
- * answers.
+ * Lines keep the order they were said in; within one second, `line_order`
+ * puts a turn's first prompt before its trace, and the trace before the
+ * turn's other lines.
  */
 export function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
@@ -632,8 +695,13 @@ export function sessionLines(sessionIds: readonly string[]) {
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
       m.sender_name,
-      CASE WHEN l.role = 'prompt' OR (l.role IS NULL AND m.sender_agent IS NULL) THEN 0 ELSE 2 END
-        AS line_order,
+      -- A turn's first prompt goes before its trace in the same second; every
+      -- other line goes after it, in the order it was said, as a steered
+      -- input after the card it answers.
+      CASE WHEN l.role = 'prompt' AND m.id = (
+          SELECT min(f.message_id) FROM agent_turn_messages f
+          WHERE f.session_id = s.id AND f.turn_id IS l.turn_id AND f.role = 'prompt'
+        ) THEN 0 ELSE 2 END AS line_order,
       m.seq AS seq
     FROM rome_sessions s
     JOIN ${CHATS} c ON c.id = s.chat_id

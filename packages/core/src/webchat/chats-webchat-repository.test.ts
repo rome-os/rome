@@ -206,7 +206,7 @@ describe("ChatsWebChatRepository", () => {
     expect(emitted).toEqual([]);
   });
 
-  it("retries a trace batch whole when its answer could not be said", async () => {
+  it("finishes a trace batch on retry when its answer could not be said", async () => {
     let failures = 1;
     class Failing extends MessageRepository {
       override record(message: Message): RecordedMessage | null {
@@ -247,7 +247,7 @@ describe("ChatsWebChatRepository", () => {
     };
 
     await expect(failing.appendTraceBlocks(batch)).rejects.toThrow("disk full");
-    expect(ownRows("chat-1")).toHaveLength(0);
+    expect(ownRows("chat-1").map((row) => row.role)).toEqual(["trace"]);
     await failing.appendTraceBlocks(batch);
     expect(
       (await failing.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]),
@@ -316,5 +316,44 @@ describe("ChatsWebChatRepository", () => {
       ["note-1", "notification"],
     ]);
     expect(await repo.getMessageCount("chat-1")).toBe(1);
+  });
+  it("reads a steered input after the card it answers, in the same turn", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Plan a trip"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.addMessage("card-1", "chat-1", "assistant", text("Which city?"), "turn-1");
+    await repo.recordUserInput("in-2", "chat-1", text("Lisbon"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-2",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+
+    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+      "in-1",
+      "card-1",
+      "in-2",
+    ]);
+  });
+
+  it("counts what was said in a chat as its activity for trace retention", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+    testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+      .where(eq(romeAgentMessages.id, "trace-1"))
+      .run();
+    const cutoff = new Date("2026-06-01T00:00:00Z");
+    expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual(["chat-1"]);
+
+    await repo.addMessage("in-1", "chat-1", "user", text("Back again"), "turn-2");
+    expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual([]);
   });
 });
