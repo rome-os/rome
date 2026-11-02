@@ -32,11 +32,11 @@ describe("TurnLinks", () => {
     return recorded.id;
   }
 
-  function seat(id: string, threadId: string | null = null) {
+  function seat(id: string, threadId: string | null = null, started = SEAT_STARTED) {
     testDb.db.run(sql`
       INSERT INTO rome_sessions (id, name, type, chat_id, chat_platform, thread_id, account_id, created_at, activity_at)
       VALUES (${id}, 'Seat', 'channel', ${chat.id}, 'telegram', ${threadId}, 'rome_bot',
-        ${SEAT_STARTED.getTime() / 1000}, ${SEAT_STARTED.getTime() / 1000})
+        ${started.getTime() / 1000}, ${started.getTime() / 1000})
     `);
   }
 
@@ -178,6 +178,15 @@ describe("TurnLinks", () => {
     const turns = links.turnsOf([ask, reply, aside]);
     expect([...turns.keys()].sort()).toEqual([ask, reply].sort());
     expect(turns.get(reply)).toMatchObject({ role: "answer", turnId: "turn-1" });
+  });
+
+  it("answer a message two sessions took as a prompt with the turn of the one that started first", () => {
+    seat("seat-0", null, new Date(SEAT_STARTED.getTime() - 60_000));
+    const ask = heard("m1", 5);
+    links.prompt(ask, "seat-1", "turn-1");
+    links.prompt(ask, "seat-0", "turn-0");
+
+    expect(links.turnsOf([ask]).get(ask)).toMatchObject({ turnId: "turn-0" });
   });
 
   it("catch a seat up on what it has not seen since it started, oldest first", () => {
