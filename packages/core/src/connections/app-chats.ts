@@ -94,9 +94,10 @@ async function send(
   const parts = recordedParts(out, given);
   const text = out.text ?? partsText(parts);
   // Some platforms answer an empty send with a receipt and post nothing.
-  const says = given.some((part) => part.type !== "text" || part.content.trim() !== "");
-  if (!text.trim() && !says && !out.attachments?.length) {
-    throw new SendError("unsupported", "A message with nothing to say is not sent");
+  // A platform shows the text, so parts that render none, such as a recap,
+  // say nothing there.
+  if (!text.trim() && !out.attachments?.length) {
+    throw new SendError("unsupported", "A message with no text or attachment is not sent");
   }
   const outbound = {
     text,

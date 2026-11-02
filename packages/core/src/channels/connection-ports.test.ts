@@ -60,6 +60,22 @@ describe("connection-backed send, across epochs", () => {
     offerDirect("second");
     await expect(direct.chatFor("7")).resolves.toBe("second");
   });
+
+  it("answers a direct lookup taken while talk is locked as not connected, not as unsupported", async () => {
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(createTestDb().db),
+    });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const connection = await registry.connect("fake-telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await connection.auth.revoke("bot");
+
+    const direct = connectionPorts({ registry, channelOf: kindChannelOf }, "fake-telegram")?.send
+      ?.direct;
+    expect(direct).not.toBeNull();
+    await expect(direct!.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+  });
 });
 
 describe("connection ports for a service's later channels", () => {

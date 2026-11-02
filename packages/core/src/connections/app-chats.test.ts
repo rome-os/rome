@@ -341,6 +341,9 @@ describe("appChats", () => {
       expect(await refusal(chats.send(group, { parts: [{ type: "text", content: " " }] }))).toBe(
         "unsupported",
       );
+      expect(await refusal(chats.send(group, { parts: [{ type: "turn_recap" } as never] }))).toBe(
+        "unsupported",
+      );
       expect(sent).toEqual([]);
       expect(lines()).toEqual([]);
     });
