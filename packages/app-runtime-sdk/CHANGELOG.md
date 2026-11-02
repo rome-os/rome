@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.9.6](https://github.com/rome-os/rome/compare/app-runtime-v0.9.5...app-runtime-v0.9.6) (2026-11-02)
+
+
+### Features
+
+* **app-runtime:** add the chats subpath for sending by Chats refs ([#1605](https://github.com/rome-os/rome/issues/1605)) ([c36a3a7](https://github.com/rome-os/rome/commit/c36a3a704976b495e89cfe6f459e6295f7119d8f))
+
 ## [0.9.5](https://github.com/rome-os/rome/compare/app-runtime-v0.9.4...app-runtime-v0.9.5) (2026-10-29)
 
 
