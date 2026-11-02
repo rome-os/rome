@@ -15,8 +15,10 @@ import type {
 import type { ChannelSend } from "../channels/channel.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
-import { placeIn, type ChatRef } from "../chats/storage/place.js";
+import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
+import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { SeatReplies } from "../sessions/seat-replies.js";
+import type { MessagePart } from "../types.js";
 import type { Seats } from "../sessions/seats.js";
 import { startChannelChat } from "./channel-chat.js";
 import { addressOf, lineAt, platformIdOfLine, type ChatAdapters } from "./chat-adapter.js";
@@ -29,10 +31,30 @@ export interface RecordedSendsDeps {
   chats: Pick<ChatRepository, "byKey" | "start">;
   seats: Pick<Seats, "seatOf" | "seatIn" | "seatInThread">;
   replies: Pick<SeatReplies, "send">;
-  messages: Pick<MessageRepository, "send" | "idOf">;
+  messages: Pick<MessageRepository, "send" | "idOf" | "byIds" | "chatHolding">;
 }
 
 type Out = Omit<EmailOutbound, "replyTo">;
+
+/** Where a send landed, as its receipt names it: the address, and the
+ *  platform's id for the message when it gave one. */
+interface Landed {
+  readonly address: ChatId;
+  readonly messageId: string | null;
+}
+
+/**
+ * `out` as it goes on record: its parts, else its text, else the text of
+ * its HTML, with a note for each attachment, which Chats keeps no file of.
+ */
+function recordedParts(out: Out): MessagePart[] {
+  if (out.parts?.length) return [...out.parts];
+  const text = out.text.trim() || (out.html ? htmlToMarkdown(out.html).trim() : "");
+  const notes = (out.attachments ?? []).map(
+    (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
+  );
+  return [{ type: "text", content: [text, ...notes].filter(Boolean).join("\n") }];
+}
 
 /**
  * `channels` with each send port saying what is sent through the account's
@@ -60,16 +82,34 @@ export function recordedSends<C extends Channel>(
         };
         // The port quotes by the platform's id, an email by the provider's.
         const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
-        if (email && !address.trim()) return await openThread(deps, channel, out, email);
-        const seat = seatAt(deps, channel.name, address);
-        const platformMessageId = seat
+        let at = address;
+        if (email && !address.trim()) {
+          if (!email.inReplyToMessageId) return await openThread(deps, channel, out, email);
+          // A reply that names no thread is in the thread of the email it
+          // answers, never a new one.
+          at = threadOf(deps, channel.name, email.inReplyToMessageId);
+        }
+        const seat = seatAt(deps, channel.name, at);
+        const landed = seat
           ? await sayInSeat(deps, channel, seat, out, message, quoted)
-          : await sayInChat(deps, channel, address, out, message, quoted);
-        return { chatId: address, ...(platformMessageId ? { messageId: platformMessageId } : {}) };
+          : await sayInChat(deps, channel, at, out, message, quoted);
+        return {
+          chatId: landed.address,
+          ...(landed.messageId ? { messageId: landed.messageId } : {}),
+        };
       },
     });
     return { ...channel, send: wrapped } as C;
   });
+}
+
+/** The address of the email thread that holds the email the provider calls
+ *  `messageId`. Throws when Rome holds no such email, rather than guess. */
+function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): ChatId {
+  const account = deps.adapters.accountOn(channel);
+  const chat = deps.messages.chatHolding(account.platform, messageId);
+  if (!chat) throw new Error(`Rome holds no email ${messageId} to reply to. No email was sent.`);
+  return deps.adapters.addressAt(channel, placeIn(chat));
 }
 
 /**
@@ -97,7 +137,7 @@ async function sayInSeat(
   out: Out,
   message: OutgoingMessage,
   quoted: string | undefined,
-): Promise<string | null> {
+): Promise<Landed> {
   const seat = deps.seats.seatOf(sessionId);
   if (!seat) throw new Error(`Session ${sessionId} stands in no chat to send in`);
   const key = deps.adapters.keyOf(seat.place.chat);
@@ -106,10 +146,15 @@ async function sayInSeat(
     sessionId,
     channel,
     { ...out, ...replyTo },
-    message.turnId ? { turnId: message.turnId } : {},
+    { recorded: recordedParts(out), ...(message.turnId ? { turnId: message.turnId } : {}) },
   );
   if (!said) throw new Error(`Session ${sessionId} stands in no chat to send in`);
-  return platformIdOfLine(key, seat.accountId, said.sent);
+  // The line was recorded where the platform placed it.
+  const line = said.id === null ? undefined : deps.messages.byIds([said.id])[0];
+  return {
+    address: deps.adapters.addressAt(channel.name, line?.place ?? seat.place),
+    messageId: platformIdOfLine(key, seat.accountId, said.sent),
+  };
 }
 
 /**
@@ -126,7 +171,7 @@ async function sayInChat(
   out: Out,
   message: OutgoingMessage,
   quoted: string | undefined,
-): Promise<string | null> {
+): Promise<Landed> {
   const account = deps.adapters.accountOn(channel.name);
   const adapter = deps.adapters.of(channel);
   // The port names a thread by its address alone; the adapter knows the
@@ -145,12 +190,13 @@ async function sayInChat(
   const thread = threadOf ? address : null;
   const replyTo = quoted ? quoteIn(deps, chat, lineAt(key, romeEnd, quoted)) : {};
   let lineKey: string | null = null;
+  let landedIn: Place = placeIn(chat, thread ?? undefined);
   await deps.messages.send(
     {
       direction: "fromRome",
-      place: placeIn(chat, thread ?? undefined),
+      place: landedIn,
       saidBy: { account: { platform: account.platform, id: romeEnd }, agent: "main" },
-      parts: out.parts ?? [{ type: "text", content: out.text }],
+      parts: recordedParts(out),
       ...replyTo,
     },
     async (target) => {
@@ -160,13 +206,18 @@ async function sayInChat(
         ...(message.turnId ? { turnId: message.turnId } : {}),
       });
       lineKey = sent.key;
+      landedIn = placeIn(chat, sent.threadId ?? undefined);
       return {
         key: sent.key,
         ...(sent.threadId === thread ? {} : { landedIn: { threadId: sent.threadId } }),
       };
     },
   );
-  return lineKey === null ? null : platformIdOfLine(key, romeEnd, lineKey);
+  return {
+    // The adapter keeps the address a direct message landed at.
+    address: deps.adapters.addressAt(channel.name, landedIn),
+    messageId: lineKey === null ? null : platformIdOfLine(key, romeEnd, lineKey),
+  };
 }
 
 /** The quote of the line keyed `key` in `chat`: by its id when Rome holds
@@ -208,7 +259,7 @@ async function openThread(
       direction: "fromRome",
       place: placeIn(chat),
       saidBy: { account: { platform: chat.platform, id: romeEnd }, agent: "main" },
-      parts: out.parts ?? [{ type: "text", content: out.text }],
+      parts: recordedParts(out),
     },
     async (target) => {
       lineKey = (

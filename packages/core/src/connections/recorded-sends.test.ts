@@ -26,10 +26,13 @@ describe("recordedSends", () => {
   let testDb: TestDb;
   let sent: Array<{ channel: string; address: string; message: OutgoingMessage }>;
   let send: (channel: string) => ChannelSend;
+  /** Where the port says a send to an address landed, when not there. */
+  let landsAt: Record<string, string>;
 
   beforeEach(() => {
     testDb = createTestDb();
     sent = [];
+    landsAt = {};
     let next = 0;
     /** A channel whose send port answers each message with the next id, at
      *  the address it names, or at a new email thread when it names none. */
@@ -41,7 +44,7 @@ describe("recordedSends", () => {
           send: async (address: ChatId, message: OutgoingMessage) => {
             sent.push({ channel: name, address, message });
             return {
-              chatId: (address || "thread-new") as ChatId,
+              chatId: (landsAt[address] ?? (address || "thread-new")) as ChatId,
               messageId: `m-${++next}`,
             } satisfies MessageReceipt;
           },
@@ -184,6 +187,58 @@ describe("recordedSends", () => {
     expect(sent[1]).toMatchObject({ address: "thread-new" });
     expect(lines().map((line) => line.chat)).toEqual([first?.chat, first?.chat]);
     expect(sessions()).toEqual([]);
+  });
+
+  it("answer the address a direct message landed at, and send there next", async () => {
+    landsAt.alice = "dm-99";
+
+    const receipt = await send("telegram").send("alice" as ChatId, { text: "Hi Alice" });
+    await send("telegram").send("alice" as ChatId, { text: "Again" });
+
+    expect(receipt).toEqual({ chatId: "dm-99", messageId: "m-1" });
+    expect(sent.map((one) => one.address)).toEqual(["alice", "dm-99"]);
+    expect(new Set(lines().map((line) => line.chat)).size).toBe(1);
+  });
+
+  it("reply to an email in its thread when the reply names no thread", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    const receipt = await send("email").send(
+      "" as ChatId,
+      { kind: "email", text: "Thanks", inReplyToMessageId: "m-1" } as OutgoingMessage,
+    );
+
+    expect(receipt).toEqual({ chatId: "thread-7", messageId: "m-2" });
+    expect(sent[1]).toMatchObject({
+      address: "thread-7",
+      message: { kind: "email", inReplyToMessageId: "m-1" },
+    });
+    expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
+  });
+
+  it("send no reply to an email Rome does not hold", async () => {
+    await expect(
+      send("email").send(
+        "" as ChatId,
+        { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
+      ),
+    ).rejects.toThrow("Rome holds no email unknown");
+    expect(sent).toEqual([]);
+    expect(lines()).toEqual([]);
+  });
+
+  it("record an HTML-only email by its text, and an attachment by a note", async () => {
+    await send("email").send(
+      "thread-7" as ChatId,
+      { kind: "email", text: "", html: "<p>See <b>you</b></p>" } as OutgoingMessage,
+    );
+    await send("telegram").send("-100" as ChatId, {
+      attachments: [{ type: "image", source: "/tmp/a.png", caption: "sunset" }],
+    });
+
+    const [html, image] = lines().map((line) => line.text);
+    expect(html).toMatch(/See .*you/);
+    expect(image).toBe("[image: sunset]");
   });
 
   it("send nothing and record nothing when the platform refuses", async () => {
