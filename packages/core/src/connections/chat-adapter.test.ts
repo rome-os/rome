@@ -21,6 +21,7 @@ import {
   type Inbound,
   isDirectMessage,
   lineAt,
+  namesGroup,
   platformIdOfLine,
   sentLineId,
 } from "./chat-adapter.js";
@@ -548,5 +549,14 @@ describe("ChatAdapters", () => {
     expect(adapters.chatAt("telegram", "bob", "dm")).toEqual(
       chatAt("telegram", "bob", { romeEnd: "rome_bot" }),
     );
+  });
+
+describe("namesGroup", () => {
+  it("read a group from the address where the platform's ids say so, and nowhere else", () => {
+    expect(namesGroup("telegram", "-100")).toBe(true);
+    expect(namesGroup("telegram", "4242")).toBe(false);
+    expect(namesGroup("whatsapp", "120363@g.us")).toBe(true);
+    expect(namesGroup("whatsapp", "4479@s.whatsapp.net")).toBe(false);
+    expect(namesGroup("discord", "1234567890")).toBe(false);
   });
 });

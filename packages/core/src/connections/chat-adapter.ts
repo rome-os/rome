@@ -209,10 +209,12 @@ export function chatAt(
 
 /** Whether platform address `address` names a group by itself, before Rome
  *  has heard the chat: on Telegram a group's id is negative and a person's
- *  positive (https://core.telegram.org/api/bots/ids). Elsewhere an address
- *  does not say. */
+ *  positive (https://core.telegram.org/api/bots/ids), and on WhatsApp a
+ *  group's JID ends in `@g.us`. Elsewhere an address does not say. */
 export function namesGroup(platform: string, address: string): boolean {
-  return platform === "telegram" && /^-[1-9]\d*$/.test(address);
+  if (platform === "telegram") return /^-[1-9]\d*$/.test(address);
+  if (platform === "whatsapp") return address.endsWith("@g.us");
+  return false;
 }
 
 /** Whether the chat keyed `key` is a direct message, which its key says. */
