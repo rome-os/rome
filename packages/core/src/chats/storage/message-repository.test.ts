@@ -105,6 +105,21 @@ describe("MessageRepository", () => {
     );
   });
 
+  it("records a send in the thread the platform placed it in", async () => {
+    const sent = await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "on it" }],
+      },
+      async () => ({ key: "tg-9", landedIn: { threadId: "topic-7" as ChatId } }),
+    );
+
+    expect(messages.byIds([sent.id!])[0]?.place.threadId).toBe("topic-7");
+    expect(messages.read(placeIn(chat)).messages).toEqual([]);
+  });
+
   it("records nothing when the platform refuses a send", async () => {
     await expect(
       messages.send(
