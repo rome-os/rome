@@ -36,6 +36,7 @@ Chats will record a chat and its messages under integer ids of its own, and keep
 - A direct message's key names its two ends, `dm:<Rome's account>:<other account>` ([Chat](../domains/chats.md#chat)). Where the platform addresses a direct message by the other party (Telegram, WhatsApp), the other end is that address. Email and Rome Cloud chats keep their own ids.
 - A Telegram basic group numbers messages per member account, so its message keys carry Rome's account in front (`ownedBy`).
 - Only the channels layer imports these rules, and no other code spells a key.
+- Where a chat's key is not where an account reaches it, as for a direct message Feishu or Discord gives an id of its own, the adapter keeps the address in `chat_addresses` through [`ChatAddresses`](../../packages/core/src/connections/chat-addresses.ts), by Rome's account and the chat's key. A thread's address is kept the same way under its chat's key. No adapter writes it yet.
 
 A channel's `send` takes the other party's account id as a direct message's address where the platform has one: Discord opens or finds its DM channel with the user, and Feishu sends to the user's open id. Discord also hears a person's first DM before any DM with them was opened, which discord.js alone drops.
 
