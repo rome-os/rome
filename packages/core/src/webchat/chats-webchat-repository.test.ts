@@ -1,5 +1,8 @@
+import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
+import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { chatKey } from "../chats/storage/place.js";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -460,5 +463,63 @@ describe("ChatsWebChatRepository", () => {
     } finally {
       rs.useRealTimers();
     }
+  });
+  it("ends a deleted session's dashboard chat with every line said in it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.createSession("chat-2", "Other");
+    await repo.addMessage("in-1", "chat-1", "user", text("Hi"), "turn-1");
+    await repo.addMessage("in-2", "chat-2", "user", text("Hey"), "turn-2");
+
+    await repo.deleteSession("chat-1");
+
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "chat-2" }]);
+    expect(testDb.db.select({ key: chatMessages.key }).from(chatMessages).all()).toEqual([
+      { key: "in-2" },
+    ]);
+  });
+
+  it("ends the dashboard chats of a deleted project's sessions", async () => {
+    await repo.createSession("chat-1", "Plans", undefined, "Trips", null, "/trips");
+    await repo.createSession("chat-2", "Other", undefined, "Work", null, "/work");
+
+    expect(await repo.deleteSessionsByProjectPathPrefix("/trips")).toBe(1);
+
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "chat-2" }]);
+  });
+
+  it("leaves the channel chat a deleted session stood in", async () => {
+    const telegram = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "t-1" as ChatId),
+      "dm",
+      "Ana",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:telegram:t-1",
+      type: "channel",
+      name: "Ana",
+      agentName: null,
+    });
+    testDb.db
+      .update(romeSessions)
+      .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform })
+      .where(eq(romeSessions.id, "channel:telegram:t-1"))
+      .run();
+
+    await repo.deleteSession("channel:telegram:t-1");
+
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "t-1" }]);
+  });
+
+  it("names a session's dashboard chat with it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    const chatName = () => testDb.db.select({ name: chats.name }).from(chats).get()?.name;
+
+    await repo.updateSessionName("chat-1", "Lisbon trip");
+    expect(chatName()).toBe("Lisbon trip");
+
+    expect(await repo.updateSessionNameIfCurrent("chat-1", "Plans", "Porto trip")).toBe(false);
+    expect(chatName()).toBe("Lisbon trip");
+    expect(await repo.updateSessionNameIfCurrent("chat-1", "Lisbon trip", "Porto trip")).toBe(true);
+    expect(chatName()).toBe("Porto trip");
   });
 });

@@ -29,7 +29,7 @@ import {
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
 } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 import {
   channelChatId,
   isWebchatChat,
@@ -940,17 +940,7 @@ export class WebChatRepository {
       // Same persistence contract as deleteSession(), but batched for project
       // deletion and all session kinds (top-level chats plus handoff children).
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
-        tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
-        tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
-        tx.delete(romeAgentMessagePlatformIds)
-          .where(inArray(romeAgentMessagePlatformIds.sessionId, chunk))
-          .run();
-        tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, chunk)).run();
-        tx.delete(webchatWorkspaceLayouts)
-          .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
-          .run();
-        tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
-        tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
+        this.deleteSessionRows(tx, chunk);
       }
 
       return sessionIds.length;
@@ -1812,21 +1802,28 @@ export class WebChatRepository {
     // resolves on the same tick, but the postgres adapter returns a real
     // Promise — dropping the await would silently turn this into a fire-
     // and-forget delete.
-    await this.db.transaction((tx) => {
-      tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, id)).run();
-      tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).run();
-      tx.delete(romeAgentMessagePlatformIds)
-        .where(eq(romeAgentMessagePlatformIds.sessionId, id))
-        .run();
-      tx.delete(webchatTurnFeedback).where(eq(webchatTurnFeedback.sessionId, id)).run();
-      tx.delete(webchatWorkspaceLayouts).where(eq(webchatWorkspaceLayouts.sessionId, id)).run();
-      // Kill the chat's public shares too. They're keyed by sessionId and only
-      // discoverable via listSharedChatsBySession, so leaving them behind would
-      // strand live, unrevokable links once the source chat is gone. Deleting
-      // the chat must take its public copies with it.
-      tx.delete(sharedChats).where(eq(sharedChats.sessionId, id)).run();
-      tx.delete(romeSessions).where(eq(romeSessions.id, id)).run();
-    });
+    await this.db.transaction((tx) => this.deleteSessionRows(tx, [id]));
+  }
+
+  /**
+   * Delete sessions `ids` and the rows that are theirs alone, inside `tx`.
+   * A subclass that keeps more of a session's rows elsewhere deletes them
+   * here too, so they go in the same transaction.
+   */
+  protected deleteSessionRows(tx: DrizzleTx, ids: string[]): void {
+    tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, ids)).run();
+    tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, ids)).run();
+    tx.delete(romeAgentMessagePlatformIds)
+      .where(inArray(romeAgentMessagePlatformIds.sessionId, ids))
+      .run();
+    tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, ids)).run();
+    tx.delete(webchatWorkspaceLayouts).where(inArray(webchatWorkspaceLayouts.sessionId, ids)).run();
+    // Kill the chat's public shares too. They're keyed by sessionId and only
+    // discoverable via listSharedChatsBySession, so leaving them behind would
+    // strand live, unrevokable links once the source chat is gone. Deleting
+    // the chat must take its public copies with it.
+    tx.delete(sharedChats).where(inArray(sharedChats.sessionId, ids)).run();
+    tx.delete(romeSessions).where(inArray(romeSessions.id, ids)).run();
   }
 
   async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
@@ -2151,23 +2148,35 @@ export class WebChatRepository {
   }
 
   async updateSessionName(id: string, name: string) {
-    const rows = await this.db
-      .update(romeSessions)
-      .set({ name })
-      .where(eq(romeSessions.id, id))
-      .returning({ id: romeSessions.id });
-    if (rows.length > 0) this.emitSessionNameChanged(id, name);
+    if (this.renameSession(id, name)) this.emitSessionNameChanged(id, name);
   }
 
   async updateSessionNameIfCurrent(id: string, currentName: string, name: string) {
-    const rows = await this.db
-      .update(romeSessions)
-      .set({ name })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.name, currentName)))
-      .returning({ id: romeSessions.id });
-    const renamed = rows.length > 0;
+    const renamed = this.renameSession(id, name, currentName);
     if (renamed) this.emitSessionNameChanged(id, name);
     return renamed;
+  }
+
+  /**
+   * Name session `id` `name`, when it is named `currentName` if that is
+   * given, in one transaction. A subclass that keeps the name elsewhere too
+   * renames it here. Returns whether the session was renamed.
+   */
+  protected renameSession(id: string, name: string, currentName?: string): boolean {
+    return this.db.transaction(
+      (tx) =>
+        tx
+          .update(romeSessions)
+          .set({ name })
+          .where(
+            and(
+              eq(romeSessions.id, id),
+              currentName === undefined ? undefined : eq(romeSessions.name, currentName),
+            ),
+          )
+          .returning({ id: romeSessions.id })
+          .all().length > 0,
+    );
   }
 
   async updateSessionProject(
