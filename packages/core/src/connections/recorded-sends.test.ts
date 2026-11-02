@@ -28,6 +28,7 @@ describe("recordedSends", () => {
   let send: (channel: string) => ChannelSend;
   /** Where the port says a send to an address landed, when not there. */
   let landsAt: Record<string, string>;
+  let addresses: ChatAddresses;
 
   beforeEach(() => {
     testDb = createTestDb();
@@ -54,10 +55,11 @@ describe("recordedSends", () => {
     const chats = new ChatRepository(testDb.db);
     const messages = new MessageRepository(testDb.db);
     const seats = new Seats(testDb.db, chats);
+    addresses = new ChatAddresses(testDb.db);
     const adapters = new ChatAdapters({
       accountOf: (name) => accounts[name] ?? null,
       platformOfChannel: (name) => accounts[name]?.platform ?? name,
-      addresses: new ChatAddresses(testDb.db),
+      addresses,
       keyOf: (ref) => {
         const chat = chats.get(ref);
         if (!chat) throw new Error(`No chat ${ref.id}`);
@@ -207,6 +209,30 @@ describe("recordedSends", () => {
     expect(sent[1]).toMatchObject({ address: "thread-new" });
     expect(lines().map((line) => line.chat)).toEqual([first?.chat, first?.chat]);
     expect(sessions()).toEqual([]);
+  });
+
+  it("find a thread Rome opened again when storing its address failed", async () => {
+    addresses.bind = () => {
+      throw new Error("disk full");
+    };
+    const receipt = await send("email").send(
+      "" as ChatId,
+      {
+        kind: "email",
+        to: "alice@example.com",
+        subject: "Hello",
+        text: "First note",
+      } as OutgoingMessage,
+    );
+    expect(receipt).toEqual({ chatId: "thread-new", messageId: "m-1" });
+
+    // The adapter still knows the thread, so the next note joins its chat.
+    const next = await send("email").send("thread-new" as ChatId, { text: "Second note" });
+    expect(next.chatId).toBe("thread-new");
+    expect(sent[1]).toMatchObject({ address: "thread-new" });
+    const [first, second] = lines();
+    expect(second?.chat).toBe(first?.chat);
+    expect(testDb.db.all(sql`SELECT id FROM chats`)).toHaveLength(1);
   });
 
   it("answer the address a direct message landed at, and send there next", async () => {

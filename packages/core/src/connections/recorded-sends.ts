@@ -29,7 +29,12 @@ import {
   platformIdOfLine,
   type ChatAdapters,
 } from "./chat-adapter.js";
-import { EMAIL_PLATFORM, emailOf, type EmailOutbound } from "./email-chat-adapter.js";
+import {
+  EMAIL_PLATFORM,
+  emailOf,
+  isEmailAdapter,
+  type EmailOutbound,
+} from "./email-chat-adapter.js";
 
 export interface RecordedSendsDeps {
   /** Each channel's chat adapter, which names the chat at an address and
@@ -84,6 +89,7 @@ export function recordedSends<C extends Channel>(
     const wrapped = Object.create(send) as ChannelSend;
     Object.defineProperty(wrapped, "send", {
       value: async (address: ChatId, message: OutgoingMessage): Promise<MessageReceipt> => {
+        const local = threadsStartedOn(deps, channel);
         const email = message.kind === "email" ? message : undefined;
         const out: Out = {
           // The port reads a message without text by its parts.
@@ -97,10 +103,10 @@ export function recordedSends<C extends Channel>(
         // The port quotes by the platform's id, an email by the provider's.
         const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
         let at = address;
-        if (!email && namesNewEmail(deps, channel.name, address)) {
+        if (!email && namesNewEmail(local, channel.name, address)) {
           // The email port takes a plain message to an address, or to the
           // guardian, as a new email to them.
-          return await openThread(deps, channel, out, {
+          return await openThread(local, channel, out, {
             kind: "email",
             ...message,
             to: address,
@@ -110,7 +116,7 @@ export function recordedSends<C extends Channel>(
           // The provider sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there.
           // Rome must know that email to know the thread.
-          const answered = threadOf(deps, channel.name, email.inReplyToMessageId);
+          const answered = threadOf(local, channel.name, email.inReplyToMessageId);
           if (!answered) {
             throw new Error(
               `Rome holds no email ${email.inReplyToMessageId} to reply to. No email was sent.`,
@@ -118,12 +124,12 @@ export function recordedSends<C extends Channel>(
           }
           at = answered;
         } else if (email && !address.trim()) {
-          return await openThread(deps, channel, out, email);
+          return await openThread(local, channel, out, email);
         }
-        const seat = seatAt(deps, channel.name, at);
+        const seat = seatAt(local, channel.name, at);
         const landed = seat
-          ? await sayInSeat(deps, channel, seat, out, message, quoted)
-          : await sayInChat(deps, channel, at, out, message, quoted);
+          ? await sayInSeat(local, channel, seat, out, message, quoted)
+          : await sayInChat(local, channel, at, out, message, quoted);
         return {
           chatId: landed.address,
           ...(landed.messageId ? { messageId: landed.messageId } : {}),
@@ -132,6 +138,33 @@ export function recordedSends<C extends Channel>(
     });
     return { ...channel, send: wrapped } as C;
   });
+}
+
+/**
+ * `deps` with the chat at an address on `channel` also read from the threads
+ * its email adapter started, which it keeps even when storing a thread's
+ * address failed, so a send to that thread reaches the chat Rome opened.
+ */
+function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSendsDeps {
+  if (deps.adapters.accountOn(channel.name).platform !== EMAIL_PLATFORM) return deps;
+  const adapter = deps.adapters.of(channel);
+  if (!isEmailAdapter(adapter)) return deps;
+  const { adapters } = deps;
+  return {
+    ...deps,
+    adapters: {
+      of: (of) => adapters.of(of),
+      accountOn: (name) => adapters.accountOn(name),
+      addressAt: (name, place) =>
+        name === channel.name && place.threadId === undefined
+          ? adapter.threadAddress(adapters.keyOf(place.chat).externalId)
+          : adapters.addressAt(name, place),
+      keyOf: (ref) => adapters.keyOf(ref),
+      chatAt: (name, address, kind) =>
+        (name === channel.name ? adapter.chatStartedAt(address) : null) ??
+        adapters.chatAt(name, address, kind),
+    },
+  };
 }
 
 /** Whether `address` on channel `channel` names whom a new email goes to:

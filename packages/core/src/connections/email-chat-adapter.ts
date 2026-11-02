@@ -56,6 +56,10 @@ export interface EmailChatAdapter extends ChannelChatAdapter {
   /** The provider's id for the thread keyed `chatKey`, once a message
    *  started it, else the key. Kept even when storing it failed. */
   threadAddress(chatKey: string): ChatId;
+  /** The chat of the thread Rome started that the provider calls
+   *  `address`, or null when Rome started none there. Kept even when
+   *  storing the address failed. */
+  chatStartedAt(address: string): ChatKey | null;
   /** As any chat adapter's `send`. A thread is a chat of its own, so a
    *  message never lands in a thread of one. */
   send(chatKey: string, threadId: ChatId | null, out: EmailOutbound): Promise<Sent>;
@@ -123,6 +127,11 @@ export function emailChatAdapter(
 
     threadAddress(key) {
       return (started.get(key) ?? addresses.addressOf(account(), key) ?? key) as ChatId;
+    },
+
+    chatStartedAt(address) {
+      const key = startedAt.get(address) ?? addresses.keyAt(account(), address);
+      return key === null ? null : chatKey(account().platform, key as ChatId);
     },
 
     open(recipients, subject) {
