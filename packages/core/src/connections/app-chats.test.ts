@@ -358,6 +358,16 @@ describe("appChats", () => {
       expect(lines()).toEqual([]);
     });
 
+    it("notes an attachment on record only, and sends no note as text", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      const attachments = [{ type: "image" as const, source: "https://example.com/a.png" }];
+
+      await chats.send(group, { attachments });
+
+      expect(sent[0]?.message).toEqual({ text: "", attachments });
+      expect(lines().map((line) => line.text)).toEqual(["[image]"]);
+    });
+
     it("answers a platform's refusal as failed and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       refuse = true;

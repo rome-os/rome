@@ -92,7 +92,7 @@ async function send(
   }
   const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
   const parts = recordedParts(out, given);
-  const text = out.text ?? partsText(parts);
+  const text = out.text ?? partsText(given);
   // Some platforms answer an empty send with a receipt and post nothing.
   // A platform shows the text, so parts that render none, such as a recap,
   // say nothing there.
@@ -403,7 +403,9 @@ function recordedParts(out: ChatMessage, given: readonly MessagePart[]): Message
   );
   const said: MessagePart[] = given.length
     ? [...given]
-    : [{ type: "text", content: out.text ?? "" }];
+    : out.text
+      ? [{ type: "text", content: out.text }]
+      : [];
   return notes.length ? [...said, { type: "text", content: notes.join("\n") }] : said;
 }
 
