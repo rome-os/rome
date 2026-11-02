@@ -1,10 +1,10 @@
-// Where each of Rome's agent sessions stands: a seat, one of Rome's accounts
+// Where each of Rome's agent sessions stands: a speaker, one of Rome's accounts
 // in a place, and the agent that speaks there. Vocabulary:
 // docs/domains/participation.md and docs/domains/chats.md#place.
 //
-// Agents keeps a seat on its session's row (`rome_sessions`), and the row
+// A speaker is read off its session's row (`rome_sessions`), not stored, and the row
 // names its chat by Chats' id. Nothing reads through it yet: the Chats
-// switch moves seat lookups here.
+// switch moves speaker lookups here.
 
 import type { ChatId } from "@rome-os/app-runtime";
 import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
@@ -13,16 +13,16 @@ import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { romeSessions } from "../db/schema/system.js";
 
-/** A session's seat: the place it stands in, the account of Rome's it speaks
+/** A session's speaker: the place it stands in, the account of Rome's it speaks
  *  as there, and its agent. */
-export interface Seat {
+export interface Speaker {
   readonly sessionId: string;
   readonly place: Place;
   readonly accountId: string;
   readonly agent: string;
 }
 
-export class Seats {
+export class Speakers {
   private readonly chats: Pick<ChatRepository, "find">;
 
   constructor(
@@ -33,11 +33,11 @@ export class Seats {
   }
 
   /**
-   * Session `sessionId`'s seat, or null when it stands in no chat. A seat
+   * Session `sessionId`'s speaker, or null when it stands in no chat. A speaker
    * that kept no account speaks as the platform's own (the dashboard's), and
    * one that kept no agent is the main agent's.
    */
-  seatOf(sessionId: string): Seat | null {
+  speakerOf(sessionId: string): Speaker | null {
     const row = this.db
       .select({
         chatId: romeSessions.chatId,
@@ -59,12 +59,12 @@ export class Seats {
   }
 
   /**
-   * The seat Rome's account `accountId` holds in chat `chatId`, in thread
+   * The speaker of Rome's account `accountId` in chat `chatId`, in thread
    * `threadId` or the open chat when null, by its session's id, or null when
    * it holds none there.
    */
-  seatIn(chatId: number, threadId: string | null, accountId: string): string | null {
-    return this.firstSeat(
+  speakerIn(chatId: number, threadId: string | null, accountId: string): string | null {
+    return this.firstSpeaker(
       and(
         eq(romeSessions.chatId, chatId),
         threadId === null ? isNull(romeSessions.threadId) : eq(romeSessions.threadId, threadId),
@@ -73,10 +73,10 @@ export class Seats {
     );
   }
 
-  /** The seat Rome's account `account` holds in the thread its platform
+  /** The speaker of Rome's account `account` in the thread its platform
    *  calls `threadId`, in whichever chat there, or null when it holds none. */
-  seatInThread(threadId: string, account: { platform: string; id: string }): string | null {
-    return this.firstSeat(
+  speakerInThread(threadId: string, account: { platform: string; id: string }): string | null {
+    return this.firstSpeaker(
       and(
         eq(romeSessions.threadId, threadId),
         eq(romeSessions.chatPlatform, account.platform),
@@ -86,7 +86,7 @@ export class Seats {
   }
 
   /** The oldest session `where` names, by id. */
-  private firstSeat(where: SQL | undefined): string | null {
+  private firstSpeaker(where: SQL | undefined): string | null {
     return (
       this.db
         .select({ id: romeSessions.id })

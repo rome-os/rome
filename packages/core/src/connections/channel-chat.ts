@@ -14,7 +14,7 @@ export interface StartChannelChatDeps {
 }
 
 /**
- * The chat at a channel address, started when Rome holds none, with no seat
+ * The chat at a channel address, started when Rome holds none, with no speaker
  * opened in it: its ref in Chats, its adapter's key, and Rome's end, the
  * channel's account. A thread's chat is its parent's, which is a group.
  */

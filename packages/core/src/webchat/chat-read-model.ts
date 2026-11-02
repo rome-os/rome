@@ -13,7 +13,7 @@
 // The dashboard addresses a chat by the id of the agent's `rome_sessions` row
 // it opened, as every dashboard route does today, and the session row names
 // its chat. For a dashboard chat that is the chat's own id. For a chat on a
-// messaging platform it is one of Rome's seats there, and the transcript shows
+// messaging platform it is one of Rome's speakers there, and the transcript shows
 // the whole place: every line said in it, every turn any of Rome's agents
 // took there, once.
 //
@@ -130,11 +130,11 @@ export class ChatReadModel {
    * on any copy has its trace shown. Null when the session stands in no chat.
    */
   async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
-    const seat = await this.seatOf(sessionId);
-    if (!seat) return null;
-    const { place, since, perAccount } = seat;
+    const speaker = await this.speakerOf(sessionId);
+    if (!speaker) return null;
+    const { place, since, perAccount } = speaker;
     const copies = new Map<number, number[]>();
-    // A seat sees what was said where it stands from when it joined: a line
+    // A speaker sees what was said where it stands from when it joined: a line
     // said in a group before Rome's account was there never reached it.
     const seen = (said: readonly SaidMessage[]) => said.filter((message) => message.at >= since);
     const drawn = (said: readonly SaidMessage[]) =>
@@ -363,9 +363,9 @@ export class ChatReadModel {
   }
 
   /** The place the session stands in, its chat's key and its thread, when
-   *  the seat joined it, and whether each of Rome's accounts there holds its
+   *  the speaker joined it, and whether each of Rome's accounts there holds its
    *  own copy of a message. */
-  private async seatOf(
+  private async speakerOf(
     sessionId: string,
   ): Promise<{ place: Place; since: Date; perAccount: boolean } | null> {
     const [row] = await this.db.all<{
@@ -445,7 +445,7 @@ export class ChatReadModel {
         m.sender_agent IS NOT NULL AS from_rome, m.text, m.said_at
       FROM ${CHAT_LINES} m
       JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
-      -- A seat finds what its transcript draws: its own thread, from when it
+      -- A speaker finds what its transcript draws: its own thread, from when it
       -- joined.
       JOIN rome_sessions s ON s.chat_id = c.id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at
@@ -454,7 +454,7 @@ export class ChatReadModel {
       LIMIT ${SEARCH_SCAN_LIMIT}
     `);
     // A hit draws as its line does in the transcript, under the line's
-    // first turn link whichever seat holds it.
+    // first turn link whichever speaker holds it.
     const links = this.links.turnsOf(rows.map((row) => row.line));
     const hits: ChatSearchHit[] = [];
     const seen = new Set<string>();
@@ -487,15 +487,15 @@ export class ChatReadModel {
    * transcript draws it.
    */
   async unreadCount(sessionId: string, cap: number): Promise<number> {
-    const seat = await this.seatOf(sessionId);
+    const speaker = await this.speakerOf(sessionId);
     const [mark] = await this.db.all<{ at: number | null }>(sql`
       SELECT last_seen_activity_at AS at FROM rome_sessions WHERE id = ${sessionId}
     `);
-    if (!seat || mark?.at == null) return 0;
-    const { place } = seat;
+    if (!speaker || mark?.at == null) return 0;
+    const { place } = speaker;
     const fromRome = sql`chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
       AND sender_agent IS NOT NULL AND said_at > ${mark.at}`;
-    if (!seat.perAccount) {
+    if (!speaker.perAccount) {
       const [row] = await this.db.all<{ count: number }>(sql`
         SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_LINES} WHERE ${fromRome} LIMIT ${cap})
       `);

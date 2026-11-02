@@ -8,8 +8,8 @@ import type { ChannelChatAdapter, Outbound, StreamedReply } from "../connections
 import { chatKey } from "../connections/chat-ids.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { SeatReplies } from "./seat-replies.js";
-import { Seats } from "./seats.js";
+import { SpeakerReplies } from "./speaker-replies.js";
+import { Speakers } from "./speakers.js";
 import { TurnLinks } from "./turn-links.js";
 
 const CHANNEL = { name: "telegram" } as Channel;
@@ -20,12 +20,12 @@ const POLICY = {
   maxPendingChars: 10_000,
 } as const;
 
-describe("SeatReplies", () => {
+describe("SpeakerReplies", () => {
   let testDb: TestDb;
   let chat: ChatRef;
   let messages: MessageRepository;
   let links: TurnLinks;
-  let seats: Seats;
+  let speakers: Speakers;
   let sends: Array<{ chat: string; threadId: ChatId | null; out: Outbound }>;
   let landsIn: ChatId | null;
   let refuse: boolean;
@@ -48,8 +48,8 @@ describe("SeatReplies", () => {
   } as unknown as ChannelChatAdapter;
 
   const replies = () =>
-    new SeatReplies({
-      seats,
+    new SpeakerReplies({
+      speakers,
       adapters: {
         of: () => adapter,
         keyOf: (ref) => chatKey(ref.platform, "-1001234567890123" as ChatId),
@@ -58,10 +58,10 @@ describe("SeatReplies", () => {
       links,
     });
 
-  function seat(id: string, threadId: string | null, agent: string | null = "sales") {
+  function speaker(id: string, threadId: string | null, agent: string | null = "sales") {
     testDb.db.run(sql`
       INSERT INTO rome_sessions (id, name, type, chat_id, chat_platform, thread_id, account_id, agent_name, created_at, activity_at)
-      VALUES (${id}, 'Seat', 'channel', ${chat.id}, 'telegram', ${threadId}, 'rome_bot', ${agent}, 0, 0)
+      VALUES (${id}, 'Speaker', 'channel', ${chat.id}, 'telegram', ${threadId}, 'rome_bot', ${agent}, 0, 0)
     `);
   }
 
@@ -74,17 +74,17 @@ describe("SeatReplies", () => {
     ).ref;
     messages = new MessageRepository(testDb.db);
     links = new TurnLinks(testDb.db, messages);
-    seats = new Seats(testDb.db);
+    speakers = new Speakers(testDb.db);
     sends = [];
     landsIn = null;
     refuse = false;
     streamed = { text: "All done.", key: "s1", threadId: null };
-    seat("seat-1", null);
+    speaker("speaker-1", null);
   });
   afterEach(() => testDb.close());
 
-  it("send through the seat's adapter, on record as the seat's and as the turn's answer", async () => {
-    const sent = await replies().send("seat-1", CHANNEL, { text: "hi" }, { turnId: "turn-1" });
+  it("send through the speaker's adapter, on record as the speaker's and as the turn's answer", async () => {
+    const sent = await replies().send("speaker-1", CHANNEL, { text: "hi" }, { turnId: "turn-1" });
 
     expect(sends).toEqual([
       { chat: "-1001234567890123", threadId: null, out: { text: "hi", turnId: "turn-1" } },
@@ -96,13 +96,16 @@ describe("SeatReplies", () => {
       saidBy: { account: { platform: "telegram", id: "rome_bot" }, agent: "sales" },
       body: { text: "hi" },
     });
-    expect(links.linkOf("seat-1", sent!.id!)).toMatchObject({ role: "answer", turnId: "turn-1" });
+    expect(links.linkOf("speaker-1", sent!.id!)).toMatchObject({
+      role: "answer",
+      turnId: "turn-1",
+    });
   });
 
   it("record a send in the thread the platform placed it in", async () => {
     landsIn = "topic-7" as ChatId;
 
-    const sent = await replies().send("seat-1", CHANNEL, { text: "hi" });
+    const sent = await replies().send("speaker-1", CHANNEL, { text: "hi" });
 
     expect(sent?.landedIn).toBe("topic-7");
     expect(messages.byIds([sent!.id!])[0]?.place.threadId).toBe("topic-7");
@@ -112,14 +115,14 @@ describe("SeatReplies", () => {
   it("record nothing when the platform refuses a send", async () => {
     refuse = true;
 
-    await expect(replies().send("seat-1", CHANNEL, { text: "hi" })).rejects.toThrow("refused");
+    await expect(replies().send("speaker-1", CHANNEL, { text: "hi" })).rejects.toThrow("refused");
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
 
   it("send nothing through a channel of another of Rome's accounts", async () => {
     const other = { ...adapter, account: { platform: "telegram", id: "other_bot" } };
-    const wrong = new SeatReplies({
-      seats,
+    const wrong = new SpeakerReplies({
+      speakers,
       adapters: {
         of: () => other as ChannelChatAdapter,
         keyOf: () => chatKey("telegram", "-1" as ChatId),
@@ -128,14 +131,14 @@ describe("SeatReplies", () => {
       links,
     });
 
-    await expect(wrong.send("seat-1", CHANNEL, { text: "hi" })).rejects.toThrow("other_bot");
+    await expect(wrong.send("speaker-1", CHANNEL, { text: "hi" })).rejects.toThrow("other_bot");
     expect(sends).toEqual([]);
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
 
-  it("say what a caller delivers, as the seat's", async () => {
+  it("say what a caller delivers, as the speaker's", async () => {
     const said = await replies().say(
-      "seat-1",
+      "speaker-1",
       [{ type: "text", content: "hello" }],
       async (to, key) => `${to.agent}:${key}`,
       { turnId: "turn-2" },
@@ -145,12 +148,15 @@ describe("SeatReplies", () => {
       key: "sales:-1001234567890123",
       body: { text: "hello" },
     });
-    expect(links.linkOf("seat-1", said!.id!)).toMatchObject({ role: "answer", turnId: "turn-2" });
+    expect(links.linkOf("speaker-1", said!.id!)).toMatchObject({
+      role: "answer",
+      turnId: "turn-2",
+    });
   });
 
   it("put a streamed reply on record as the turn's answer once it settles, where it landed", async () => {
     streamed = { text: "All done.", key: "s1", threadId: "topic-8" as ChatId };
-    const reply = await replies().stream("seat-1", CHANNEL, {
+    const reply = await replies().stream("speaker-1", CHANNEL, {
       turnId: "turn-3",
       policy: POLICY,
       clock: systemClock,
@@ -160,12 +166,12 @@ describe("SeatReplies", () => {
 
     const [line] = messages.read(placeIn(chat, "topic-8" as ChatId)).messages;
     expect(line).toMatchObject({ key: "s1", body: { text: "All done." } });
-    expect(links.linkOf("seat-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-3" });
+    expect(links.linkOf("speaker-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-3" });
   });
 
   it("record nothing for a streamed reply that showed nothing", async () => {
     streamed = { text: "", key: null, threadId: null };
-    const reply = await replies().stream("seat-1", CHANNEL, {
+    const reply = await replies().stream("speaker-1", CHANNEL, {
       turnId: "turn-3",
       policy: POLICY,
       clock: systemClock,
@@ -177,8 +183,8 @@ describe("SeatReplies", () => {
   });
 
   it("answer a delivered reply even when its turn link fails", async () => {
-    const broken = new SeatReplies({
-      seats,
+    const broken = new SpeakerReplies({
+      speakers,
       adapters: { of: () => adapter, keyOf: (ref) => chatKey(ref.platform, "x" as ChatId) },
       messages,
       links: {
@@ -188,16 +194,21 @@ describe("SeatReplies", () => {
       },
     });
 
-    const sent = await broken.send("seat-1", CHANNEL, { text: "hi" }, { turnId: "turn-1" });
-    const said = await broken.say("seat-1", [{ type: "text", content: "yo" }], async () => "k9", {
-      turnId: "turn-1",
-    });
+    const sent = await broken.send("speaker-1", CHANNEL, { text: "hi" }, { turnId: "turn-1" });
+    const said = await broken.say(
+      "speaker-1",
+      [{ type: "text", content: "yo" }],
+      async () => "k9",
+      {
+        turnId: "turn-1",
+      },
+    );
 
     expect(sent).toMatchObject({ id: expect.any(Number), sent: "k1" });
     expect(said).toMatchObject({ id: expect.any(Number) });
   });
 
-  it("quote in a streamed reply only a line of the seat's own chat", async () => {
+  it("quote in a streamed reply only a line of the speaker's own chat", async () => {
     const quotes: Array<string | undefined> = [];
     const quoting = {
       ...adapter,
@@ -222,16 +233,16 @@ describe("SeatReplies", () => {
       })!.id;
     const here = heard(chat);
     const there = heard(elsewhere);
-    const quotingReplies = new SeatReplies({
-      seats,
+    const quotingReplies = new SpeakerReplies({
+      speakers,
       adapters: { of: () => quoting, keyOf: (ref) => chatKey(ref.platform, "x" as ChatId) },
       messages,
       links,
     });
     const options = { turnId: "turn-4", policy: POLICY, clock: systemClock };
 
-    await quotingReplies.stream("seat-1", CHANNEL, { ...options, replyTo: here });
-    await quotingReplies.stream("seat-1", CHANNEL, { ...options, replyTo: there });
+    await quotingReplies.stream("speaker-1", CHANNEL, { ...options, replyTo: here });
+    await quotingReplies.stream("speaker-1", CHANNEL, { ...options, replyTo: there });
 
     expect(quotes).toEqual(["7", undefined]);
   });
@@ -247,8 +258,8 @@ describe("SeatReplies", () => {
   });
 });
 
-describe("Seats", () => {
-  it("read a seat's place, account and agent, the main agent's when it kept none", () => {
+describe("Speakers", () => {
+  it("read a speaker's place, account and agent, the main agent's when it kept none", () => {
     const testDb = createTestDb();
     const chat = new ChatRepository(testDb.db).start(
       { platform: "telegram", externalId: "-42" as ChatId },
@@ -257,16 +268,16 @@ describe("Seats", () => {
     ).ref;
     testDb.db.run(sql`
       INSERT INTO rome_sessions (id, name, type, chat_id, chat_platform, thread_id, created_at, activity_at)
-      VALUES ('seat-1', 'Seat', 'channel', ${chat.id}, 'telegram', 'topic-1', 0, 0)
+      VALUES ('speaker-1', 'Speaker', 'channel', ${chat.id}, 'telegram', 'topic-1', 0, 0)
     `);
 
-    expect(new Seats(testDb.db).seatOf("seat-1")).toEqual({
-      sessionId: "seat-1",
+    expect(new Speakers(testDb.db).speakerOf("speaker-1")).toEqual({
+      sessionId: "speaker-1",
       place: placeIn(chat, "topic-1" as ChatId),
       accountId: "telegram",
       agent: "main",
     });
-    expect(new Seats(testDb.db).seatOf("nobody")).toBeNull();
+    expect(new Speakers(testDb.db).speakerOf("nobody")).toBeNull();
     testDb.close();
   });
 });

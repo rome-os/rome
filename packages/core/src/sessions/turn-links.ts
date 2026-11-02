@@ -41,7 +41,7 @@ export class TurnLinks {
   /** Chats' reads, which every line a session reads goes through. */
   private readonly messages: Pick<MessageRepository, "read" | "byIds">;
 
-  /** Chats' chats, where a seat's chat is found. */
+  /** Chats' chats, where a speaker's chat is found. */
   private readonly chats: Pick<ChatRepository, "find">;
 
   constructor(
@@ -54,7 +54,7 @@ export class TurnLinks {
 
   /** Where session `sessionId` stands, from its own row, or null for a
    *  session in no chat. */
-  private seatOf(sessionId: string): {
+  private speakerOf(sessionId: string): {
     chatId: number;
     platform: string;
     threadId: string | null;
@@ -76,7 +76,7 @@ export class TurnLinks {
       .get();
     const chat = row?.chatId ? this.chats.find(row.chatId) : null;
     if (!row || !chat) return null;
-    // When the account first took a seat in the chat, in any of its threads.
+    // When the account first had a speaker in the chat, in any of its threads.
     const first = this.db
       .select({ at: min(romeSessions.createdAt) })
       .from(romeSessions)
@@ -208,17 +208,17 @@ export class TurnLinks {
    * seen on the way, with no turn. A copy of an undecided line waits with it.
    */
   unseen(sessionId: string): UnseenLine[] {
-    const seat = this.seatOf(sessionId);
-    if (!seat) return [];
-    // A line said in the second the seat started may have come before it, so
-    // only lines said after that second are the seat's to catch up on. Only
+    const speaker = this.speakerOf(sessionId);
+    if (!speaker) return [];
+    // A line said in the second the speaker started may have come before it, so
+    // only lines said after that second are the speaker's to catch up on. Only
     // ids are read here, so a long history the session has seen costs an
     // index scan rather than every line's text.
-    const where = sql`m.chat_id = ${seat.chatId} AND m.thread_id IS ${seat.threadId}`;
+    const where = sql`m.chat_id = ${speaker.chatId} AND m.thread_id IS ${speaker.threadId}`;
     const fresh = this.db
       .all<{ id: number; said_at: number }>(sql`
         SELECT m.id, m.said_at FROM chat_messages m
-        WHERE ${where} AND m.said_at > ${Math.floor(seat.since.getTime() / 1000)}
+        WHERE ${where} AND m.said_at > ${Math.floor(speaker.since.getTime() / 1000)}
           AND NOT EXISTS (
             SELECT 1 FROM agent_turn_messages l
             WHERE l.message_id = m.id AND l.session_id = ${sessionId}
@@ -254,8 +254,8 @@ export class TurnLinks {
         `)
         .map((row) => row.message_id),
     );
-    const copies = new Copies(seat.perAccount ? said : []);
-    const waiting = new Copies(seat.perAccount ? said : []);
+    const copies = new Copies(speaker.perAccount ? said : []);
+    const waiting = new Copies(speaker.perAccount ? said : []);
     for (const message of said) {
       if (linked.has(message.id)) copies.take(message);
       else if (this.undecided.has(message.id)) waiting.take(message);
@@ -285,7 +285,7 @@ export class TurnLinks {
     const quoted = new Map(
       this.messages
         .byIds(lines.flatMap((message) => (message.replyTo ? [message.replyTo] : [])))
-        .filter((message) => message.at > seat.joined)
+        .filter((message) => message.at > speaker.joined)
         .map((message) => [message.id, contextOf(message)]),
     );
     return lines.map((message) => ({

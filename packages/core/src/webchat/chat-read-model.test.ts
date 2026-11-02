@@ -7,7 +7,7 @@ import { WebChatRepository } from "../db/repositories/webchat.js";
 import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { seatFixture } from "../test/seats.js";
+import { speakerFixture } from "../test/speakers.js";
 import { ChatReadModel, type Transcript, type TranscriptCursor } from "./chat-read-model.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
@@ -17,20 +17,20 @@ describe("ChatReadModel", () => {
   let repo: WebChatRepository;
   let reads: ChatReadModel;
   let links: TurnLinks;
-  let fixture: ReturnType<typeof seatFixture>;
+  let fixture: ReturnType<typeof speakerFixture>;
 
   beforeEach(() => {
     testDb = createTestDb();
     repo = new WebChatRepository(testDb.db);
     reads = new ChatReadModel(testDb.db);
     links = new TurnLinks(testDb.db);
-    fixture = seatFixture(testDb.db);
+    fixture = speakerFixture(testDb.db);
   });
 
-  /** A dashboard chat, and the agent's seat in it, opened under `id`. */
+  /** A dashboard chat, and the agent's speaker in it, opened under `id`. */
   function dashboardChat(id: string, name = "Chat"): ChatRef {
     const chat = fixture.chat("webchat", id, "dm", name);
-    fixture.seat({ id, chat, accountId: "guardian", createdAt: new Date(0) });
+    fixture.speaker({ id, chat, accountId: "guardian", createdAt: new Date(0) });
     return chat;
   }
 
@@ -140,8 +140,8 @@ describe("ChatReadModel", () => {
       const chat = fixture.chat(key.platform, key.externalId, "group", "Launch");
       const sales = "channel:sales:oc_launch";
       const support = "channel:support:oc_launch";
-      fixture.seat({ id: sales, chat, accountId: "bot-sales", agentName: "sales" });
-      fixture.seat({ id: support, chat, accountId: "bot-support", agentName: "support" });
+      fixture.speaker({ id: sales, chat, accountId: "bot-sales", agentName: "sales" });
+      fixture.speaker({ id: support, chat, accountId: "bot-support", agentName: "support" });
       // Wei's question reaches both bots: one line in the chat.
       const asked = fixture.say({
         id: ownedBy(key, "bot-sales", "om_1"),
@@ -178,7 +178,7 @@ describe("ChatReadModel", () => {
         ["assistant", sales, "sales-turn-7", "bot-sales"],
       ]);
       expect(fromSales?.traces.map((trace) => trace.id)).toEqual(["sales-trace-7"]);
-      // Either seat opens the same place.
+      // Either speaker opens the same place.
       expect(fromSupport?.lines.map((line) => line.id)).toEqual(
         fromSales?.lines.map((line) => line.id),
       );
@@ -186,8 +186,8 @@ describe("ChatReadModel", () => {
 
     it("pages whole turns even when two agents' turns interleave, and shows each once", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
-      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
       const line = (id: string, seconds: number, agent?: string) =>
         fixture.say({
           id,
@@ -213,8 +213,8 @@ describe("ChatReadModel", () => {
 
     it("shows the trace of every turn a shown line prompted, also one drawn under another's", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
-      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
       const asked = fixture.say({ id: "q", chat, from: "wei", at: new Date(1_000_000) });
       links.prompt(asked, "sales", "turn-s");
       links.prompt(asked, "support", "turn-p");
@@ -230,8 +230,8 @@ describe("ChatReadModel", () => {
 
     it("draws a line each of Rome's accounts holds a copy of once, with every copy's turn traced", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
-      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
       const heard = (id: string, seconds: number) =>
         fixture.say({ id, chat, from: "wei", text: "hi", at: new Date(seconds * 1000) });
       heard("bot-sales:4", 999);
@@ -275,8 +275,8 @@ describe("ChatReadModel", () => {
 
     it("draws a copy queued as a prompt over a copy no turn took", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
-      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
       const heard = (id: string) =>
         fixture.say({ id, chat, from: "wei", text: "hi", at: new Date(1_000_000) });
       heard("bot-sales:5");
@@ -291,8 +291,8 @@ describe("ChatReadModel", () => {
 
     it("pages a turn by the lines it draws, not a copy it leaves to another turn", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
-      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
       const heard = (id: string, seconds: number, text: string) =>
         fixture.say({ id, chat, from: "wei", text, at: new Date(seconds * 1000) });
       links.prompt(heard("bot-sales:1", 1_000, "earlier"), "sales", "turn-s");
@@ -338,10 +338,10 @@ describe("ChatReadModel", () => {
       expect(transcript?.traces.map((trace) => trace.id)).toEqual(["t-last"]);
     });
 
-    it("draws a line no turn took as a notification, and leaves out what was said before the seat", async () => {
+    it("draws a line no turn took as a notification, and leaves out what was said before the speaker", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
-      fixture.seat({
-        id: "seat-1",
+      fixture.speaker({
+        id: "speaker-1",
         chat,
         accountId: "rome_bot",
         createdAt: new Date(1_000_000),
@@ -349,10 +349,10 @@ describe("ChatReadModel", () => {
       fixture.say({ id: "before", chat, from: "alice", at: new Date(999_000) });
       fixture.say({ id: "aside", chat, from: "alice", at: new Date(1_001_000) });
 
-      const transcript = await reads.chatTranscript("seat-1");
+      const transcript = await reads.chatTranscript("speaker-1");
 
       expect(transcript?.lines.map((line) => [line.id, line.role, line.sessionId])).toEqual([
-        ["aside", "notification", "seat-1"],
+        ["aside", "notification", "speaker-1"],
       ]);
     });
   });
@@ -440,10 +440,10 @@ describe("ChatReadModel", () => {
       ]);
     });
 
-    it("finds a line as each seat's transcript draws it, under its first turn link", async () => {
+    it("finds a line as each speaker's transcript draws it, under its first turn link", async () => {
       const chat = fixture.chat("webchat", "chat-4", "group", "Four");
-      fixture.seat({ id: "seat-a", chat, accountId: "guardian", createdAt: new Date(0) });
-      fixture.seat({ id: "seat-b", chat, accountId: "agent:b", createdAt: new Date(0) });
+      fixture.speaker({ id: "speaker-a", chat, accountId: "guardian", createdAt: new Date(0) });
+      fixture.speaker({ id: "speaker-b", chat, accountId: "agent:b", createdAt: new Date(0) });
       const asked = fixture.say({
         id: "m-1",
         chat,
@@ -451,29 +451,34 @@ describe("ChatReadModel", () => {
         text: "plan beta",
         at: new Date(1_000_000),
       });
-      links.prompt(asked, "seat-a", "turn-a");
-      links.seen([asked], "seat-b", "turn-b");
+      links.prompt(asked, "speaker-a", "turn-a");
+      links.seen([asked], "speaker-b", "turn-b");
 
       const hits = await reads.search("beta", 10);
 
       expect(hits.map((hit) => [hit.chatId, hit.role]).sort()).toEqual([
-        ["seat-a", "user"],
-        ["seat-b", "user"],
+        ["speaker-a", "user"],
+        ["speaker-b", "user"],
       ]);
-      expect((await reads.chatTranscript("seat-b"))?.lines.map((l) => l.role)).toEqual(["user"]);
+      expect((await reads.chatTranscript("speaker-b"))?.lines.map((l) => l.role)).toEqual(["user"]);
     });
 
-    it("finds a line only for a seat whose transcript draws it", async () => {
+    it("finds a line only for a speaker whose transcript draws it", async () => {
       const chat = fixture.chat("webchat", "chat-3", "group", "Three");
-      fixture.seat({ id: "open", chat, accountId: "guardian", createdAt: new Date(0) });
-      fixture.seat({
+      fixture.speaker({ id: "open", chat, accountId: "guardian", createdAt: new Date(0) });
+      fixture.speaker({
         id: "topic",
         chat,
         accountId: "guardian",
         threadId: "topic-1",
         createdAt: new Date(0),
       });
-      fixture.seat({ id: "late", chat, accountId: "agent:late", createdAt: new Date(2_000_000) });
+      fixture.speaker({
+        id: "late",
+        chat,
+        accountId: "agent:late",
+        createdAt: new Date(2_000_000),
+      });
       fixture.say({
         id: "m-1",
         chat,
@@ -517,7 +522,7 @@ describe("ChatReadModel", () => {
 
     it("counts a line from Rome each of Rome's accounts holds a copy of once", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
-      fixture.seat({
+      fixture.speaker({
         id: "sales",
         chat,
         accountId: "bot-sales",

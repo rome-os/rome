@@ -1,4 +1,4 @@
-// What one of Rome's seats says into its place, recorded in Chats and linked
+// What one of Rome's speakers says into its place, recorded in Chats and linked
 // to the turn that said it. Vocabulary: docs/domains/chats.md#message and
 // docs/domains/participation.md#reply.
 //
@@ -12,45 +12,45 @@ import type { ChatAdapters, Outbound, StreamedReply } from "../connections/chat-
 import type { Clock } from "../lib/clock.js";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
-import type { Seat, Seats } from "./seats.js";
+import type { Speaker, Speakers } from "./speakers.js";
 import type { TurnLinks } from "./turn-links.js";
 
-const log = createLogger("seat-replies");
+const log = createLogger("speaker-replies");
 
-export interface SeatRepliesDeps {
-  seats: Pick<Seats, "seatOf">;
-  /** Each channel's chat adapter, which the seat says its messages through. */
+export interface SpeakerRepliesDeps {
+  speakers: Pick<Speakers, "speakerOf">;
+  /** Each channel's chat adapter, which the speaker says its messages through. */
   adapters: Pick<ChatAdapters, "of" | "keyOf">;
   messages: Pick<MessageRepository, "send" | "byIds">;
   links: Pick<TurnLinks, "answer">;
 }
 
-/** Delivers a message on the seat's channel to the chat its adapter keys
+/** Delivers a message on the speaker's channel to the chat its adapter keys
  *  `chatKey` and answers the adapter's key for it. Throws when the platform
  *  refused it. */
-export type SeatDeliver = (seat: Seat, chatKey: string) => Promise<string>;
+export type SpeakerDeliver = (speaker: Speaker, chatKey: string) => Promise<string>;
 
 /** Where a delivered message landed, as {@link MessageRepository.send}
- *  takes it: only a thread other than the seat's. */
-function landed(seat: Seat, threadId: ChatId | null) {
-  return threadId === (seat.place.threadId ?? null) ? {} : { landedIn: { threadId } };
+ *  takes it: only a thread other than the speaker's. */
+function landed(speaker: Speaker, threadId: ChatId | null) {
+  return threadId === (speaker.place.threadId ?? null) ? {} : { landedIn: { threadId } };
 }
 
-/** What a seat said: its id in Chats, or null when it was not recorded. */
-export interface SeatSent {
+/** What a speaker said: its id in Chats, or null when it was not recorded. */
+export interface SpeakerSent {
   readonly id: number | null;
   readonly at: Date;
 }
 
-/** A message a seat sends: what its adapter takes, quoting a line by its id
+/** A message a speaker sends: what its adapter takes, quoting a line by its id
  *  in Chats, or by its adapter's key for one Rome never recorded. The turn
  *  it answers is named once, in the send's options. */
-export type SeatOutbound = Omit<Outbound, "replyTo" | "turnId"> & {
+export type SpeakerOutbound = Omit<Outbound, "replyTo" | "turnId"> & {
   readonly replyTo?: OutboundMessage["replyTo"];
 };
 
-export class SeatReplies {
-  constructor(private readonly deps: SeatRepliesDeps) {}
+export class SpeakerReplies {
+  constructor(private readonly deps: SpeakerRepliesDeps) {}
 
   /**
    * Say `parts` where session `sessionId` stands, as its account and agent,
@@ -61,22 +61,22 @@ export class SeatReplies {
   async say(
     sessionId: string,
     parts: readonly MessagePart[],
-    deliver: SeatDeliver,
+    deliver: SpeakerDeliver,
     options: { turnId?: string } = {},
-  ): Promise<SeatSent | null> {
-    const seat = this.deps.seats.seatOf(sessionId);
-    if (!seat) return null;
+  ): Promise<SpeakerSent | null> {
+    const speaker = this.deps.speakers.speakerOf(sessionId);
+    if (!speaker) return null;
     const sent = await this.deps.messages.send(
       {
         direction: "fromRome",
-        place: seat.place,
+        place: speaker.place,
         saidBy: {
-          account: { platform: seat.place.chat.platform, id: seat.accountId },
-          agent: seat.agent,
+          account: { platform: speaker.place.chat.platform, id: speaker.accountId },
+          agent: speaker.agent,
         },
         parts,
       },
-      async (target) => ({ key: await deliver(seat, target.chat) }),
+      async (target) => ({ key: await deliver(speaker, target.chat) }),
     );
     if (sent.id === null) return { id: null, at: sent.at };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
@@ -85,9 +85,9 @@ export class SeatReplies {
 
   /**
    * Send `out` where session `sessionId` stands, through its account's
-   * adapter on `channel`, record it as the seat's, and make it turn
+   * adapter on `channel`, record it as the speaker's, and make it turn
    * `turnId`'s answer when one is named. `recorded` is the line as it goes on
-   * record, when it says more than the platform shows. Answers the seat it
+   * record, when it says more than the platform shows. Answers the speaker it
    * was said through, the adapter's key for what went out as `sent`, and
    * the thread it landed in, or null for the open chat.
    * Throws the platform's refusal, and records nothing
@@ -96,37 +96,37 @@ export class SeatReplies {
   async send(
     sessionId: string,
     channel: Channel,
-    out: SeatOutbound,
+    out: SpeakerOutbound,
     options: { turnId?: string; recorded?: readonly MessagePart[] } = {},
-  ): Promise<(SeatSent & { sent: string; seat: Seat; landedIn: ChatId | null }) | null> {
-    const seat = this.deps.seats.seatOf(sessionId);
-    if (!seat) return null;
-    const { account, adapter } = this.adapterOf(seat, channel);
+  ): Promise<(SpeakerSent & { sent: string; speaker: Speaker; landedIn: ChatId | null }) | null> {
+    const speaker = this.deps.speakers.speakerOf(sessionId);
+    if (!speaker) return null;
+    const { account, adapter } = this.adapterOf(speaker, channel);
     const { replyTo, ...rest } = out;
     let lineKey = "";
-    let landedIn: ChatId | null = seat.place.threadId ?? null;
+    let landedIn: ChatId | null = speaker.place.threadId ?? null;
     const sent = await this.deps.messages.send(
       {
         direction: "fromRome",
-        place: seat.place,
-        saidBy: { account, agent: seat.agent },
+        place: speaker.place,
+        saidBy: { account, agent: speaker.agent },
         parts: options.recorded ?? out.parts ?? [{ type: "text", content: out.text }],
         ...(replyTo === undefined ? {} : { replyTo }),
       },
       async (target) => {
-        const out = await adapter.send(target.chat, seat.place.threadId ?? null, {
+        const out = await adapter.send(target.chat, speaker.place.threadId ?? null, {
           ...rest,
           ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
           ...(options.turnId ? { turnId: options.turnId } : {}),
         });
         lineKey = out.key;
         landedIn = out.threadId;
-        return { key: lineKey, ...landed(seat, out.threadId) };
+        return { key: lineKey, ...landed(speaker, out.threadId) };
       },
     );
-    if (sent.id === null) return { id: null, at: sent.at, sent: lineKey, seat, landedIn };
+    if (sent.id === null) return { id: null, at: sent.at, sent: lineKey, speaker, landedIn };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
-    return { id: sent.id, at: sent.at, sent: lineKey, seat, landedIn };
+    return { id: sent.id, at: sent.at, sent: lineKey, speaker, landedIn };
   }
 
   /**
@@ -141,15 +141,15 @@ export class SeatReplies {
     channel: Channel,
     options: { turnId: string; replyTo?: number; policy: DeliveryPolicy; clock: Clock },
   ): Promise<StreamedReply | null> {
-    const seat = this.deps.seats.seatOf(sessionId);
-    if (!seat) return null;
-    const { account, adapter } = this.adapterOf(seat, channel);
+    const speaker = this.deps.speakers.speakerOf(sessionId);
+    if (!speaker) return null;
+    const { account, adapter } = this.adapterOf(speaker, channel);
     const replyTo = options.replyTo;
-    const chat = this.deps.adapters.keyOf(seat.place.chat);
+    const chat = this.deps.adapters.keyOf(speaker.place.chat);
     // A key names a line only in its own chat.
     const line = replyTo === undefined ? undefined : this.deps.messages.byIds([replyTo])[0];
-    const quoted = line?.place.chat.id === seat.place.chat.id ? line.key : null;
-    const reply = adapter.stream?.(chat.externalId, seat.place.threadId ?? null, {
+    const quoted = line?.place.chat.id === speaker.place.chat.id ? line.key : null;
+    const reply = adapter.stream?.(chat.externalId, speaker.place.threadId ?? null, {
       ...(quoted === null ? {} : { replyTo: quoted }),
       policy: options.policy,
       clock: options.clock,
@@ -167,12 +167,12 @@ export class SeatReplies {
           const sent = await this.deps.messages.send(
             {
               direction: "fromRome",
-              place: seat.place,
-              saidBy: { account, agent: seat.agent },
+              place: speaker.place,
+              saidBy: { account, agent: speaker.agent },
               parts: [{ type: "text", content: settled.text }],
               ...(replyTo === undefined ? {} : { replyTo }),
             },
-            async () => ({ key, ...landed(seat, threadId) }),
+            async () => ({ key, ...landed(speaker, threadId) }),
           );
           if (sent.id !== null) this.answered(sent.id, sessionId, options.turnId);
         } catch (error) {
@@ -204,16 +204,16 @@ export class SeatReplies {
     }
   }
 
-  /** The seat's account and `channel`'s adapter. Throws when the channel is
+  /** The speaker's account and `channel`'s adapter. Throws when the channel is
    *  another account's, so a message is never sent as one account and
    *  recorded as another's. */
-  private adapterOf(seat: Seat, channel: Channel) {
-    const account = { platform: seat.place.chat.platform, id: seat.accountId };
+  private adapterOf(speaker: Speaker, channel: Channel) {
+    const account = { platform: speaker.place.chat.platform, id: speaker.accountId };
     const adapter = this.deps.adapters.of(channel);
     if (adapter.account.platform !== account.platform || adapter.account.id !== account.id) {
       throw new Error(
         `Channel "${channel.name}" is ${adapter.account.platform}:${adapter.account.id}, ` +
-          `not the account seat ${seat.sessionId} speaks as`,
+          `not the account speaker ${speaker.sessionId} speaks as`,
       );
     }
     return { account, adapter };

@@ -86,7 +86,7 @@ export class ChatRepository {
   }
 
   /** End the chat `ref` names: it goes, with every message said in it. The
-   *  seats in it are Agents' to remove first. Changes nothing when Rome holds
+   *  speakers in it are Agents' to remove first. Changes nothing when Rome holds
    *  no chat by that ref. */
   end(ref: ChatRef): void {
     this.db.delete(chats).where(refers(ref)).run();
