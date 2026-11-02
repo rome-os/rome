@@ -409,11 +409,12 @@ describe("messagesSaid", () => {
   });
 
   it("lets a line go when the hook still deciding it leaves", async () => {
-    said.subscribe(async () => undefined);
     const heard: SaidInboundEvent[] = [];
-    const leave = said.subscribe(async (event) => {
+    said.subscribe(async (event) => {
       heard.push(event);
     });
+    // A hook that never decides.
+    const leave = said.subscribe(async () => undefined);
     await telegram.deliver(message({ timestamp: new Date(Date.now() + 60_000) }));
     await settled();
     const [event] = heard;
@@ -426,6 +427,7 @@ describe("messagesSaid", () => {
       "Hello",
     ]);
   });
+
   it("settles the hook that decided, whichever decides first", async () => {
     const first: SaidInboundEvent[] = [];
     const other: SaidInboundEvent[] = [];
