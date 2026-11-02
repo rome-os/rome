@@ -2640,12 +2640,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ?.provider ??
       soleExhaustedProvider(state);
     if (provider !== "openai" && provider !== "anthropic") return null;
-    return quotaSwitchTarget(
-      state,
-      provider,
-      config.tier ?? "large",
-      isConciergeAgent(agentName),
-    );
+    return quotaSwitchTarget(state, provider, config.tier ?? "large", isConciergeAgent(agentName));
   };
 
   app.get("/chat/sessions/:id/quota-switch", async (c) => {
