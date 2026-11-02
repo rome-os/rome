@@ -2,6 +2,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
+import type { MessageRef, Place } from "./chats.js";
 
 export { z };
 export type { JSONSchema };
@@ -1761,6 +1762,10 @@ export interface ChannelMessage {
    *  what {@link ChannelsService.query} answers: pass it as
    *  {@link ChannelMessageQuery.after} to read the messages older than it. */
   cursor?: string;
+  /** The message as Chats recorded it, to quote with `replyTo` or to open a
+   *  thread at (`@rome-os/app-runtime/chats`). Absent from a host that
+   *  predates Chats. */
+  ref?: MessageRef;
 }
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
@@ -1942,7 +1947,14 @@ export interface ChannelSend {
  * {@link ChatRef} (conversation settings, stop), resolved by the
  * channel so a subscriber does not track what backs it.
  */
-export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ChatRef };
+export type InboundEvent = {
+  kind: "message";
+  message: ChannelMessage;
+  ref: ChatRef;
+  /** Where the message was said, to send a reply into with `deps.chats`
+   *  (`@rome-os/app-runtime/chats`). Absent from a host that predates Chats. */
+  place?: Place;
+};
 
 /**
  * Hearing what arrives on a channel. Every implementation owes all five:
@@ -2760,6 +2772,15 @@ export interface PersonRecord {
   approved?: boolean | null;
   createdAt?: Date;
   [key: string]: unknown;
+}
+
+/**
+ * Who people are, as an app may ask. An action receives it as `deps.people`.
+ */
+export interface PeopleService {
+  /** The guardian's linked accounts, to reach them on with `deps.chats.dm`.
+   *  Empty while no account is linked to the guardian. */
+  guardian(): Promise<{ accounts: Account[] }>;
 }
 
 /**
