@@ -1,4 +1,4 @@
-// Seeds chats, Rome's seats in them and the lines said there, as Chats and
+// Seeds chats, Rome's speakers in them and the lines said there, as Chats and
 // Agents store them, for tests that read those tables. Vocabulary:
 // docs/domains/chats.md.
 
@@ -10,13 +10,13 @@ import type { ChatRef } from "../chats/storage/place.js";
 
 type SessionRow = typeof romeSessions.$inferInsert;
 
-export interface SeedSeat
+export interface SeedSpeaker
   extends Partial<Omit<SessionRow, "chatId" | "threadId" | "accountId" | "id">> {
   id: string;
   chat: ChatRef;
-  /** The one of Rome's accounts the seat speaks as. */
+  /** The one of Rome's accounts the speaker speaks as. */
   accountId: string;
-  /** The topic the seat stands in, when it stands in one. */
+  /** The topic the speaker stands in, when it stands in one. */
   threadId?: string | null;
 }
 
@@ -35,8 +35,8 @@ export interface SeedLine {
   at: Date;
 }
 
-/** A fixture over `db` that seeds chats, seats and lines directly. */
-export function seatFixture(db: DrizzleDb) {
+/** A fixture over `db` that seeds chats, speakers and lines directly. */
+export function speakerFixture(db: DrizzleDb) {
   return {
     /** The chat keyed `key` on `platform`, started when absent. */
     chat(platform: string, key: string, kind: ChatKind, name: string | null = null): ChatRef {
@@ -53,8 +53,8 @@ export function seatFixture(db: DrizzleDb) {
       return { platform, id: row.id };
     },
 
-    /** A seat of Rome's account `accountId` in `chat`. */
-    seat({ id, chat, accountId, threadId = null, ...row }: SeedSeat): string {
+    /** A speaker of Rome's account `accountId` in `chat`. */
+    speaker({ id, chat, accountId, threadId = null, ...row }: SeedSpeaker): string {
       const at = row.createdAt ?? new Date(0);
       db.insert(romeSessions)
         .values({

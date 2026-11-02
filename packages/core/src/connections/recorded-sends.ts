@@ -1,5 +1,5 @@
 // A channel's send port as an app's hook gets it: whatever the app sends on
-// it goes through the chat adapter of the seat at that address and is
+// it goes through the chat adapter of the speaker at that address and is
 // recorded in Chats, as every other send Rome makes is. Contract:
 // docs/architecture/channels.md#chat-adapters.
 //
@@ -20,9 +20,9 @@ import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
 import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import { createLogger } from "../logger.js";
-import type { SeatReplies } from "../sessions/seat-replies.js";
+import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { MessagePart } from "../types.js";
-import type { Seats } from "../sessions/seats.js";
+import type { Speakers } from "../sessions/speakers.js";
 import { startChannelChat } from "./channel-chat.js";
 import {
   addressOf,
@@ -45,8 +45,8 @@ export interface RecordedSendsDeps {
    *  sends there. */
   adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "addressAt" | "keyOf">;
   chats: Pick<ChatRepository, "byKey" | "start">;
-  seats: Pick<Seats, "seatOf" | "seatIn" | "seatInThread">;
-  replies: Pick<SeatReplies, "send">;
+  speakers: Pick<Speakers, "speakerOf" | "speakerIn" | "speakerInThread">;
+  replies: Pick<SpeakerReplies, "send">;
   messages: Pick<MessageRepository, "send" | "idOf" | "chatHolding">;
 }
 
@@ -81,7 +81,7 @@ function recordedParts(out: Out): MessagePart[] {
 
 /**
  * `channels` with each send port saying what is sent through the account's
- * chat adapter, and recording it: through the seat that heard the address,
+ * chat adapter, and recording it: through the speaker that heard the address,
  * else in the chat Rome holds there, started when it holds none, with no
  * session opened. The dashboard records its own lines. An email is a message
  * in its thread's chat, and one that names no thread opens one.
@@ -151,9 +151,9 @@ export function recordedSends<C extends Channel>(
         } else if (email && !address.trim()) {
           return await openThread(local, channel, out, email);
         }
-        const seat = seatAt(local, channel.name, at);
-        const landed = seat
-          ? await sayInSeat(local, channel, seat, at, out, message, quoted)
+        const speaker = speakerAt(local, channel.name, at);
+        const landed = speaker
+          ? await sayAsSpeaker(local, channel, speaker, at, out, message, quoted)
           : await sayInChat(local, channel, at, out, message, quoted);
         return {
           chatId: landed.address,
@@ -194,7 +194,7 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
 
 /**
  * Record `out`, which the port on channel `channel` already delivered, in the
- * chat its receipt names, as the agent whose seat holds that chat, else
+ * chat its receipt names, as the agent that speaks there, else
  * Rome's main agent, quoting the email the
  * platform calls `quoted`. A failure to record is logged, not thrown: the
  * message went out, and reporting it as failed invites a second one.
@@ -213,9 +213,9 @@ async function recordDelivered(
       threadId: receipt.chatId,
       threadType: "group",
     });
-    // The agent whose seat holds the thread said it, else Rome's main agent.
-    const seat = seatAt(deps, channel, receipt.chatId);
-    const agent = (seat && deps.seats.seatOf(seat)?.agent) || "main";
+    // The agent that speaks in the thread said it, else Rome's main agent.
+    const speaker = speakerAt(deps, channel, receipt.chatId);
+    const agent = (speaker && deps.speakers.speakerOf(speaker)?.agent) || "main";
     await deps.messages.send(
       {
         direction: "fromRome",
@@ -250,24 +250,24 @@ function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): 
 }
 
 /**
- * The seat channel `channel`'s account holds in the chat at `address`, by its
+ * The speaker of channel `channel`'s account in the chat at `address`, by its
  * session's id, or null when it holds none: the group the address names, else
  * the direct message there, else the thread the address names.
  */
-function seatAt(deps: RecordedSendsDeps, channel: string, address: ChatId): string | null {
+function speakerAt(deps: RecordedSendsDeps, channel: string, address: ChatId): string | null {
   const account = deps.adapters.accountOn(channel);
   for (const kind of ["group", "dm"] as const) {
     const chat = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
-    const seat = chat && deps.seats.seatIn(chat.ref.id, null, account.id);
-    if (seat) return seat;
+    const speaker = chat && deps.speakers.speakerIn(chat.ref.id, null, account.id);
+    if (speaker) return speaker;
   }
-  return deps.seats.seatInThread(address, account);
+  return deps.speakers.speakerInThread(address, account);
 }
 
-/** Say `out` through seat `sessionId`, which heard the address. Throws when
- *  the seat stands in no chat, rather than sending a line nobody can read
+/** Say `out` through speaker `sessionId`, which heard the address. Throws when
+ *  the speaker stands in no chat, rather than sending a line nobody can read
  *  back. */
-async function sayInSeat(
+async function sayAsSpeaker(
   deps: RecordedSendsDeps,
   channel: Channel,
   sessionId: string,
@@ -276,10 +276,12 @@ async function sayInSeat(
   message: OutgoingMessage,
   quoted: string | undefined,
 ): Promise<Landed> {
-  const seat = deps.seats.seatOf(sessionId);
-  if (!seat) throw new Error(`Session ${sessionId} stands in no chat to send in`);
-  const key = deps.adapters.keyOf(seat.place.chat);
-  const replyTo = quoted ? quoteIn(deps, seat.place.chat, lineAt(key, seat.accountId, quoted)) : {};
+  const speaker = deps.speakers.speakerOf(sessionId);
+  if (!speaker) throw new Error(`Session ${sessionId} stands in no chat to send in`);
+  const key = deps.adapters.keyOf(speaker.place.chat);
+  const replyTo = quoted
+    ? quoteIn(deps, speaker.place.chat, lineAt(key, speaker.accountId, quoted))
+    : {};
   const said = await deps.replies.send(
     sessionId,
     channel,
@@ -292,15 +294,15 @@ async function sayInSeat(
     address: landedAt(
       deps,
       channel.name,
-      placeIn(seat.place.chat, said.landedIn ?? undefined),
+      placeIn(speaker.place.chat, said.landedIn ?? undefined),
       address,
     ),
-    messageId: platformIdOfLine(key, seat.accountId, said.sent),
+    messageId: platformIdOfLine(key, speaker.accountId, said.sent),
   };
 }
 
 /**
- * Say `out` at an address no seat of the account heard: in the chat Rome
+ * Say `out` at an address no speaker of the account heard: in the chat Rome
  * holds there, started when it holds none, as Rome's main agent. No session
  * opens, since no agent is in the chat until a message there wakes one. The
  * chat is the one Rome holds at the address, else the kind the address names,
@@ -409,7 +411,7 @@ function quoteIn(
 /**
  * Open a thread for `email`, which names none, and say `out` there as Rome's
  * main agent: its first message, which starts it. No session opens, as for
- * any send at an address no seat heard.
+ * any send at an address no speaker heard.
  */
 async function openThread(
   deps: RecordedSendsDeps,

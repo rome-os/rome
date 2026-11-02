@@ -536,14 +536,14 @@ export const romeSessions = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     activityAt: integer("activity_at", { mode: "timestamp" }).notNull(),
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
-    // The chat this row is one of Rome's seats in, its platform, and the
-    // platform's thread id when the seat is in a thread. Null on rows that are
+    // The chat this row's session is one of Rome's speakers in, its platform,
+    // and the platform's thread id when the speaker is in a thread. Null on rows that are
     // not chats (subagent, fork, action runs). Vocabulary: docs/domains/chats.md.
     // Nothing writes or reads them until the Chats switch.
     chatId: integer("chat_id"),
     chatPlatform: text("chat_platform"),
     threadId: text("thread_id"),
-    // The one of Rome's accounts this seat speaks as: the channel's platform
+    // The one of Rome's accounts this speaker speaks as: the channel's platform
     // account, else the channel's name, and `agent:<name>` on the dashboard.
     accountId: text("account_id"),
   },
@@ -579,7 +579,7 @@ export const chats = sqliteTable(
     platform: text("platform").notNull(),
     // The adapter's key for the chat, unique on its platform: the platform's
     // group id, or both ends of a direct message (connections/chat-ids.ts). The
-    // dashboard keys a chat by its first seat's id. Chats compares it and
+    // dashboard keys a chat by its first speaker's session id. Chats compares it and
     // never reads it.
     key: text("key").notNull(),
     kind: text("kind").notNull(), // 'dm' | 'group'
@@ -625,7 +625,7 @@ export const chatMessages = sqliteTable(
 );
 
 // Agents' link from a turn to a chat message: the message prompted the turn,
-// was its answer, or was caught up on by it. One row per message per seat, so
+// was its answer, or was caught up on by it. One row per message per speaker, so
 // two of Rome's agents in one group each keep their own.
 export const agentTurnMessages = sqliteTable(
   "agent_turn_messages",

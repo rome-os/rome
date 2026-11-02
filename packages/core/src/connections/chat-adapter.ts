@@ -66,7 +66,7 @@ export interface Inbound {
   /** The quoted message, by the adapter's key for it. */
   readonly replyTo?: string;
   /**
-   * Which of Rome's accounts heard it, and where, for the seat of that
+   * Which of Rome's accounts heard it, and where, for the speaker of that
    * account in Agents, which still keys it by the channel's address. Never
    * part of Chats.
    */

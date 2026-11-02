@@ -1,4 +1,4 @@
-// What an app's hook sends on a channel: said through the seat at that
+// What an app's hook sends on a channel: said through the speaker at that
 // address, else in the chat Rome holds there, recorded once either way.
 // Contract: docs/architecture/channels.md#chat-adapters.
 
@@ -8,11 +8,11 @@ import { sql } from "drizzle-orm";
 import type { ChannelSend } from "../channels/channel.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
-import { SeatReplies } from "../sessions/seat-replies.js";
-import { Seats } from "../sessions/seats.js";
+import { SpeakerReplies } from "../sessions/speaker-replies.js";
+import { Speakers } from "../sessions/speakers.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { seatFixture } from "../test/seats.js";
+import { speakerFixture } from "../test/speakers.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { ChatAdapters, chatAt } from "./chat-adapter.js";
 import { chatKey } from "./chat-ids.js";
@@ -63,7 +63,7 @@ describe("recordedSends", () => {
     };
     const chats = new ChatRepository(testDb.db);
     const messages = new MessageRepository(testDb.db);
-    const seats = new Seats(testDb.db, chats);
+    const speakers = new Speakers(testDb.db, chats);
     addresses = new ChatAddresses(testDb.db);
     const adapters = new ChatAdapters({
       accountOf: (name) => accounts[name] ?? null,
@@ -78,8 +78,8 @@ describe("recordedSends", () => {
         Object.keys(accounts).filter((name) => accounts[name]?.platform === platform),
       platforms: { email: emailChatAdapter },
     });
-    const replies = new SeatReplies({
-      seats,
+    const replies = new SpeakerReplies({
+      speakers,
       adapters,
       messages,
       links: new TurnLinks(testDb.db, messages),
@@ -87,7 +87,7 @@ describe("recordedSends", () => {
     const wrapped = recordedSends([channel("telegram"), channel("email"), channel("discord")], {
       adapters,
       chats,
-      seats,
+      speakers,
       replies,
       messages,
     });
@@ -106,7 +106,7 @@ describe("recordedSends", () => {
     );
   const sessions = () => testDb.db.all(sql`SELECT id FROM rome_sessions`);
 
-  it("record a send at an address no seat heard in the chat there, and open no session", async () => {
+  it("record a send at an address no speaker heard in the chat there, and open no session", async () => {
     const receipt = await send("telegram").send("4242" as ChatId, { text: "Deploy done" });
 
     expect(receipt).toEqual({ chatId: "4242", messageId: "m-1" });
@@ -188,23 +188,23 @@ describe("recordedSends", () => {
     ]);
   });
 
-  it("say a send through the seat that heard the address, in the seat's chat", async () => {
-    const fixture = seatFixture(testDb.db);
+  it("say a send through the speaker that heard the address, in the speaker's chat", async () => {
+    const fixture = speakerFixture(testDb.db);
     const group = fixture.chat("telegram", "-200", "group");
-    fixture.seat({ id: "seat-1", chat: group, accountId: BOT.id, agentName: "pm" });
+    fixture.speaker({ id: "speaker-1", chat: group, accountId: BOT.id, agentName: "pm" });
 
     await send("telegram").send("-200" as ChatId, { text: "Standup in 5" });
 
     expect(sent).toMatchObject([{ address: "-200", message: { text: "Standup in 5" } }]);
     expect(lines()).toEqual([{ chat: "-200", text: "Standup in 5", sender_agent: "pm" }]);
-    expect(sessions()).toEqual([{ id: "seat-1" }]);
+    expect(sessions()).toEqual([{ id: "speaker-1" }]);
   });
 
-  it("say a send at a topic through the seat that heard the topic", async () => {
-    const fixture = seatFixture(testDb.db);
+  it("say a send at a topic through the speaker that heard the topic", async () => {
+    const fixture = speakerFixture(testDb.db);
     const group = fixture.chat("telegram", "-200", "group");
-    fixture.seat({ id: "seat-1", chat: group, accountId: BOT.id, agentName: "pm" });
-    fixture.seat({ id: "seat-2", chat: group, accountId: BOT.id, threadId: "topic-5" });
+    fixture.speaker({ id: "speaker-1", chat: group, accountId: BOT.id, agentName: "pm" });
+    fixture.speaker({ id: "speaker-2", chat: group, accountId: BOT.id, threadId: "topic-5" });
 
     await send("telegram").send("topic-5" as ChatId, { text: "In the topic" });
 
@@ -215,7 +215,7 @@ describe("recordedSends", () => {
   });
 
   it("send an email reply through the adapter, recorded once in its thread's chat", async () => {
-    const fixture = seatFixture(testDb.db);
+    const fixture = speakerFixture(testDb.db);
     const thread = fixture.chat("email", "thread-7", "group");
     fixture.say({
       id: "in-1",
@@ -362,10 +362,10 @@ describe("recordedSends", () => {
     ]);
   });
 
-  it("record an unheld email reply as the agent whose seat holds the thread it landed in", async () => {
-    const fixture = seatFixture(testDb.db);
+  it("record an unheld email reply as the agent whose speaker holds the thread it landed in", async () => {
+    const fixture = speakerFixture(testDb.db);
     const thread = fixture.chat("email", "thread-real", "group");
-    fixture.seat({ id: "seat-9", chat: thread, accountId: MAILBOX.id, agentName: "sales" });
+    fixture.speaker({ id: "speaker-9", chat: thread, accountId: MAILBOX.id, agentName: "sales" });
     landsAt["thread-9"] = "thread-real";
 
     await send("email").send(
@@ -547,7 +547,7 @@ describe("recordedSends", () => {
           channelsOn: () => ["telegram"],
         }),
         chats: new ChatRepository(testDb.db),
-        seats: new Seats(testDb.db),
+        speakers: new Speakers(testDb.db),
         replies: { send: async () => null },
         messages: new MessageRepository(testDb.db),
       },
