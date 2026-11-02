@@ -8,13 +8,12 @@
 // Agents' catch-up and turn writes onto it.
 
 import { and, eq, isNull, min, sql } from "drizzle-orm";
-import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
+import type { AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { romeSessions } from "../db/schema/system.js";
 import type { SaidMessage } from "../chats/storage/message.js";
-import { placeIn } from "../chats/storage/place.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a line
  *  the turn caught up on. */
@@ -93,15 +92,6 @@ export class TurnLinks {
       since: row.createdAt,
       joined: first?.at ?? row.createdAt,
     };
-  }
-
-  /** The ids of every message session `sessionId` links, and how. */
-  private linksOf(sessionId: string): LinkRow[] {
-    return this.db.all<LinkRow>(sql`
-      SELECT message_id, session_id, turn_id, role, input_state
-      FROM agent_turn_messages WHERE session_id = ${sessionId}
-      ORDER BY rowid
-    `);
   }
 
   /**
@@ -213,26 +203,41 @@ export class TurnLinks {
   unseen(sessionId: string): UnseenLine[] {
     const seat = this.seatOf(sessionId);
     if (!seat) return [];
-    const linked = new Set(this.linksOf(sessionId).map((link) => link.message_id));
     // A line said in the second the seat started may have come before it, so
-    // only lines said after that second are the seat's to catch up on.
-    const said = this.messages.read(
-      placeIn(
-        { platform: seat.platform, id: seat.chatId },
-        (seat.threadId ?? undefined) as ChatId | undefined,
-      ),
-      { after: { at: seat.since } },
-    ).messages;
+    // only lines said after that second are the seat's to catch up on. Only
+    // ids are read here, so a long history the session has seen costs an
+    // index scan rather than every line's text.
+    const where = sql`m.chat_id = ${seat.chatId} AND m.thread_id IS ${seat.threadId}`;
+    const fresh = this.db
+      .all<{ id: number; said_at: number }>(sql`
+        SELECT m.id, m.said_at FROM chat_messages m
+        WHERE ${where} AND m.said_at > ${Math.floor(seat.since.getTime() / 1000)}
+          AND NOT EXISTS (
+            SELECT 1 FROM agent_turn_messages l
+            WHERE l.message_id = m.id AND l.session_id = ${sessionId}
+          )
+      `)
+      .filter((row) => !this.undecided.has(row.id));
+    if (fresh.length === 0) return [];
     // A chat that numbers messages per member account holds one copy of a
     // message for each of Rome's accounts that heard it. The session has
     // seen every copy of a message it has seen one of, and reads one copy of
-    // the rest.
-    const copies = new Copies();
-    for (const message of said) {
-      if (linked.has(message.id) || this.undecided.has(message.id)) copies.take(message);
-    }
+    // the rest. Copies share their second, so the lines said in the seconds
+    // of the fresh ones are every copy any of them can have.
+    const seconds = [...new Set(fresh.map((row) => row.said_at))];
+    const said = this.messages.byIds(
+      this.db
+        .all<{ id: number }>(sql`
+          SELECT m.id FROM chat_messages m
+          WHERE ${where} AND m.said_at IN (SELECT value FROM json_each(${JSON.stringify(seconds)}))
+        `)
+        .map((row) => row.id),
+    );
+    const unread = new Set(fresh.map((row) => row.id));
+    const copies = new Copies(said);
+    for (const message of said) if (!unread.has(message.id)) copies.take(message);
     const lines = said.filter((message) => {
-      if (linked.has(message.id) || this.undecided.has(message.id)) return false;
+      if (!unread.has(message.id)) return false;
       if (copies.heardBefore(message)) return false;
       copies.take(message);
       return true;
@@ -301,28 +306,41 @@ function toLink(row: LinkRow): TurnLink {
  * numbers messages per member account (a Telegram basic group). There each
  * key carries the account that holds it in front (`<account>:<id>`), and
  * copies share their sender, time and words. Two lines held by the same
- * account, or keyed by no account, are never copies, however alike.
+ * account, or keyed by no account, are never copies, however alike. Where
+ * one sender said the same words twice in a second, each account holds two
+ * lines, and the nth line one account holds is a copy of the nth another
+ * holds.
  */
 class Copies {
-  private readonly holders = new Map<string, Set<string>>();
+  /** Each per-account line's message, as its holder's nth line alike. */
+  private readonly occurrence = new Map<number, string>();
+  private readonly taken = new Set<string>();
+
+  /** The copies among `said`, in the order said. */
+  constructor(said: readonly SaidMessage[]) {
+    const seen = new Map<string, number>();
+    for (const message of said) {
+      const holder = holderOf(message);
+      if (holder === null) continue;
+      const copy = copyOf(message);
+      const nth = seen.get(`${holder}\n${copy}`) ?? 0;
+      seen.set(`${holder}\n${copy}`, nth + 1);
+      this.occurrence.set(message.id, `${nth}\n${copy}`);
+    }
+  }
 
   /** Note that the session reads, or has read, `message`. */
   take(message: SaidMessage): void {
-    const holder = holderOf(message);
-    if (holder === null) return;
-    const copy = copyOf(message);
-    const held = this.holders.get(copy) ?? new Set<string>();
-    held.add(holder);
-    this.holders.set(copy, held);
+    const occurrence = this.occurrence.get(message.id);
+    if (occurrence !== undefined) this.taken.add(occurrence);
   }
 
   /** Whether the session already took a copy of `message` another account
-   *  holds. */
+   *  holds. An account holds one line of each occurrence, so a copy taken is
+   *  another account's. */
   heardBefore(message: SaidMessage): boolean {
-    const holder = holderOf(message);
-    if (holder === null) return false;
-    const held = this.holders.get(copyOf(message));
-    return held !== undefined && [...held].some((other) => other !== holder);
+    const occurrence = this.occurrence.get(message.id);
+    return occurrence !== undefined && this.taken.has(occurrence);
   }
 }
 
@@ -332,14 +350,20 @@ function holderOf(message: SaidMessage): string | null {
   return at > 0 ? message.key.slice(0, at) : null;
 }
 
-/** What the copies of one message share: its sender, its time and its words. */
+/** What the copies of one message share: its sender, its time and its words.
+ *  An attachment's line names where the account that heard it saved it, which
+ *  differs between copies, so only what it is counts. */
 function copyOf(message: SaidMessage): string {
   return [
     message.saidBy?.account.id ?? message.saidBy?.agent ?? "",
     message.at.getTime(),
-    message.body.text,
+    message.body.text.replace(ATTACHMENT_PATH, "$1"),
   ].join("\n");
 }
+
+/** The path in an attachment's line of a message's text (`plainText`),
+ *  after its kind and name and before any caption. */
+const ATTACHMENT_PATH = /^(Attachment \d+ \([^\n]*?\)) path: [^\n]*?(?= caption: |$)/gm;
 
 /** `message` as a session reads it. */
 export function contextOf(message: SaidMessage): ContextLine {

@@ -111,6 +111,32 @@ describe("TurnLinks", () => {
     expect(links.unseen("seat-1")).toEqual([]);
   });
 
+  it("read a second alike line as its own, once a copy of the first is seen", () => {
+    const mine = heard("rome_bot:5", 5, { body: { text: "ok" } });
+    const theirs = heard("other_bot:9", 5, { body: { text: "ok" } });
+    const again = heard("rome_bot:6", 5, { body: { text: "ok" } });
+    links.seen([theirs], "seat-1", "turn-1");
+    links.prompt(mine, "seat-1", "turn-1");
+
+    expect(links.unseen("seat-1").map((line) => line.id)).toEqual([again]);
+  });
+
+  it("read one copy of a photo two accounts saved in two places", () => {
+    const photo = (key: string, path: string) =>
+      heard(key, 5, {
+        body: {
+          text: "look",
+          attachments: [{ type: "image", fileName: "a.jpg", localPath: path, caption: "sunset" }],
+        },
+      });
+    const mine = photo("rome_bot:5", "/media/rome_bot/5/a.jpg");
+    photo("other_bot:9", "/media/other_bot/9/a.jpg");
+
+    expect(links.unseen("seat-1").map((line) => line.id)).toEqual([mine]);
+    links.seen([mine], "seat-1", "turn-1");
+    expect(links.unseen("seat-1")).toEqual([]);
+  });
+
   it("answer each message's prompt or answer turn, leaving out lines only caught up on", () => {
     const ask = heard("m1", 5);
     const reply = heard("m2", 6, { saidBy: { account: ROME, agent: "main" } });
