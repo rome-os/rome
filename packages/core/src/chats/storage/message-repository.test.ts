@@ -141,6 +141,59 @@ describe("MessageRepository", () => {
     expect(delivered).toBe(false);
   });
 
+  it("refuses a send said by an account on another platform than the chat, before it goes out", async () => {
+    let delivered = false;
+    const send = messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: { platform: "discord", id: "rome_bot" }, agent: "main" },
+        parts: [{ type: "text", content: "x" }],
+      },
+      async () => {
+        delivered = true;
+        return { key: "tg-9" };
+      },
+    );
+
+    await expect(send).rejects.toThrow("cannot be said by a discord account");
+    expect(delivered).toBe(false);
+  });
+
+  it("links a send quoting a line by key once Rome holds that line, even one heard while sending", async () => {
+    const sent = await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "hi" }],
+        replyTo: { key: "m0" },
+      },
+      async (to) => {
+        expect(to).toEqual({ chat: "chat-1", replyTo: "m0" });
+        messages.record(heard("m0", new Date()));
+        return { key: "tg-9" };
+      },
+    );
+
+    expect(messages.byIds([sent.id!])[0]?.replyTo).toBe(messages.idOf(chat, "m0"));
+  });
+
+  it("quotes by key what the platform shows, and links nothing for a line Rome never held", async () => {
+    const sent = await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "hi" }],
+        replyTo: { key: "gone" },
+      },
+      async () => ({ key: "tg-9" }),
+    );
+
+    expect(messages.byIds([sent.id!])[0]?.replyTo).toBeUndefined();
+  });
+
   it("quotes nothing on a send whose quoted line is in another chat", async () => {
     const other = new ChatRepository(testDb.db).start(
       { platform: "telegram", externalId: "chat-2" as ChatId },
