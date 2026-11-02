@@ -545,4 +545,58 @@ describe("ChatReadModel", () => {
       expect(await reads.unreadCount("sales", 1)).toBe(1);
     });
   });
+
+  // Without statistics SQLite picks a join order by guesswork, and for these
+  // two reads it guesses an order that visits every row in the database for
+  // each row it wants: minutes for a long chat, seconds for a search.
+  describe("query plans", () => {
+    type Statement = { all(...values: unknown[]): unknown[] };
+    type Client = { prepare(sql: string): Statement };
+
+    /** The query plan of each statement `read` runs whose SQL holds `marker`. */
+    async function plansOf(marker: string, read: () => Promise<unknown>): Promise<string[]> {
+      const client = (testDb.db as unknown as { $client: Client }).$client;
+      const prepare = client.prepare.bind(client);
+      const ran: { sql: string; values: unknown[] }[] = [];
+      client.prepare = (text: string) => {
+        const statement = prepare(text);
+        const all = statement.all.bind(statement);
+        statement.all = (...values: unknown[]) => {
+          if (text.includes(marker)) ran.push({ sql: text, values });
+          return all(...values);
+        };
+        return statement;
+      };
+      try {
+        await read();
+      } finally {
+        client.prepare = prepare;
+      }
+      return ran.map(({ sql: text, values }) =>
+        (prepare(`EXPLAIN QUERY PLAN ${text}`).all(...values) as { detail: string }[])
+          .map((row) => row.detail)
+          .join("\n"),
+      );
+    }
+
+    it("finds a transcript's traces by turn, not by walking every trace", async () => {
+      const chat = dashboardChat("chat-1");
+      await dashboardTurn(chat, "chat-1", 0, 1_000);
+
+      const [plan] = await plansOf("role = 'trace'", () => reads.chatTranscript("chat-1"));
+
+      expect(plan?.split("\n")[0]).toContain("SCAN json_each");
+      expect(plan).toContain("idx_rome_agent_messages_turn_id");
+    });
+
+    it("searches in one pass over the lines, not through each chat's index", async () => {
+      const chat = dashboardChat("chat-1");
+      await dashboardTurn(chat, "chat-1", 0, 1_000);
+
+      const [plan] = await plansOf("LIKE", () => reads.search("answer", 10));
+
+      expect(plan?.split("\n")[0]).toBe("SCAN chat_messages");
+      expect(plan).not.toContain("idx_chat_messages_page");
+    });
+  });
 });
