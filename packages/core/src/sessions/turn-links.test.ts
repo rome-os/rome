@@ -121,16 +121,16 @@ describe("TurnLinks", () => {
     expect(links.unseen("seat-1").map((line) => line.id)).toEqual([again]);
   });
 
-  it("read one copy of a photo two accounts saved in two places", () => {
-    const photo = (key: string, path: string) =>
+  it("read one copy of a photo two accounts saved under their own names and places", () => {
+    const photo = (key: string, fileName: string, path: string) =>
       heard(key, 5, {
         body: {
           text: "look",
-          attachments: [{ type: "image", fileName: "a.jpg", localPath: path, caption: "sunset" }],
+          attachments: [{ type: "image", fileName, localPath: path, caption: "sunset" }],
         },
       });
-    const mine = photo("rome_bot:5", "/media/rome_bot/5/a.jpg");
-    photo("other_bot:9", "/media/other_bot/9/a.jpg");
+    const mine = photo("rome_bot:5", "photo_5.jpg", "/media/rome_bot/5/photo_5.jpg");
+    photo("other_bot:9", "photo_9.jpg", "/media/other_bot/9/photo_9.jpg");
 
     expect(links.unseen("seat-1").map((line) => line.id)).toEqual([mine]);
     links.seen([mine], "seat-1", "turn-1");

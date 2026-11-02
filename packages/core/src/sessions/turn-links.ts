@@ -357,19 +357,20 @@ function holderOf(message: SaidMessage): string | null {
 }
 
 /** What the copies of one message share: its sender, its time and its words.
- *  An attachment's line names where the account that heard it saved it, which
- *  differs between copies, so only what it is counts. */
+ *  An attachment's line names the file and where the account that heard it
+ *  saved it, both of which the receiving account may choose, so only its
+ *  kind and caption count. */
 function copyOf(message: SaidMessage): string {
   return [
     message.saidBy?.account.id ?? message.saidBy?.agent ?? "",
     message.at.getTime(),
-    message.body.text.replace(ATTACHMENT_PATH, "$1"),
+    message.body.text.replace(ATTACHMENT_FILE, "$1)"),
   ].join("\n");
 }
 
-/** The path in an attachment's line of a message's text (`plainText`),
- *  after its kind and name and before any caption. */
-const ATTACHMENT_PATH = /^(Attachment \d+ \([^\n]*?\)) path: [^\n]*?(?= caption: |$)/gm;
+/** The file name and path in an attachment's line of a message's text
+ *  (`plainText`), after its kind and before any caption. */
+const ATTACHMENT_FILE = /^(Attachment \d+ \(\w+)[^\n]*?\) path: [^\n]*?(?= caption: |$)/gm;
 
 /** `message` as a session reads it. */
 export function contextOf(message: SaidMessage): ContextLine {
