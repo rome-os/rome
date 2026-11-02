@@ -345,6 +345,11 @@ function kindAt(deps: RecordedSendsDeps, channel: string, address: string): "gro
     const held = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
     if (held) return held.kind;
   }
+  // An unbound address is read as a channel, never guessed to be a person:
+  // a sender reaches a person through the direct message's ref, which binds
+  // the address. A bare Discord user id still reaches some ports today; the
+  // Chats switch moves those callers onto the ref rather than having the
+  // adapter look the id up here.
   return kindNamedBy(deps.adapters.accountOn(channel).platform, address) ?? "group";
 }
 
