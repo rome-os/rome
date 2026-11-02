@@ -47,6 +47,8 @@ describe("appChats", () => {
    *  refusal. */
   let landsAt: Record<string, string>;
   let refuse: boolean;
+  /** Runs while the platform takes a send. */
+  let duringSend: () => void;
   /** The Discord DM channel the platform opens for each person. */
   let opened: Record<string, string | null>;
   let opens: string[];
@@ -59,6 +61,7 @@ describe("appChats", () => {
     sent = [];
     landsAt = {};
     refuse = false;
+    duringSend = () => {};
     opened = { bob: "dm-chan-bob", carol: null };
     opens = [];
     accounts = { telegram: BOT, discord: DISCORD };
@@ -70,6 +73,7 @@ describe("appChats", () => {
         send: {
           send: async (address: ChatId, message: OutgoingMessage) => {
             if (refuse) throw new Error("chat not found on the platform");
+            duringSend();
             sent.push({ channel: name, address, message });
             return {
               chatId: (landsAt[address] ?? address) as ChatId,
@@ -232,6 +236,65 @@ describe("appChats", () => {
         "chat_not_found",
       );
       expect(sent).toEqual([]);
+    });
+
+    it("refuses to quote another message in a send that opens a thread off one, and sends nothing", async () => {
+      const group = fixture.chat("discord", "guild-chan", "group");
+      const opening = fixture.say({ id: "q-1", chat: group, from: "bob", at: new Date(0) });
+      const other = fixture.say({ id: "q-2", chat: group, from: "bob", at: new Date(0) });
+
+      expect(
+        await refusal(
+          chats.send(
+            { chat: group, id: opening },
+            { text: "x", replyTo: { chat: group, id: other } },
+          ),
+        ),
+      ).toBe("unsupported");
+      expect(sent).toEqual([]);
+    });
+
+    it("sends as the one account that speaks in the thread, though none speaks in the open chat", async () => {
+      accounts["telegram-2"] = SECOND_BOT;
+      const group = fixture.chat("telegram", "-100", "group");
+      fixture.speaker({ id: "s2", chat: group, accountId: SECOND_BOT.id, threadId: "topic-9" });
+      const said = fixture.say({
+        id: "t-1",
+        chat: group,
+        threadId: "topic-9",
+        from: "alice",
+        at: new Date(0),
+      });
+
+      await chats.send({ chat: group, id: said }, { text: "x" });
+
+      expect(sent.map((send) => [send.channel, send.address])).toEqual([["telegram-2", "topic-9"]]);
+    });
+
+    it("never puts a part only the host makes on record or on the platform", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+
+      await chats.send(group, {
+        text: "Brief",
+        parts: [
+          { type: "text", content: "Brief" },
+          { type: "routine_draft_card", draft: {} } as never,
+        ],
+      });
+
+      const recorded = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
+      expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([{ type: "text", content: "Brief" }]);
+      expect(sent[0]?.message.parts).toEqual([{ type: "text", content: "Brief" }]);
+    });
+
+    it("answers a send the platform took even when its chat ends meanwhile", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      duringSend = () => testDb.db.run(sql`DELETE FROM chats WHERE id = ${group.id}`);
+
+      const result = await chats.send(group, { text: "Deploy done" });
+
+      expect(result.delivery.state).toBe("sent");
+      expect(sent).toHaveLength(1);
     });
 
     it("answers a platform's refusal as failed and records nothing", async () => {

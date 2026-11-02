@@ -25,6 +25,7 @@ import {
   type Sent as SdkSent,
 } from "@rome-os/app-runtime/chats";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
@@ -36,7 +37,7 @@ import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
 import type { MessagePart } from "../types.js";
 import { type ChatAdapters, platformIdOfLine } from "./chat-adapter.js";
-import { directMessageOn } from "./chat-ids.js";
+import { type ChatKey, directMessageOn } from "./chat-ids.js";
 
 const log = createLogger("app-chats");
 
@@ -75,18 +76,22 @@ async function send(
 ): Promise<SdkSent> {
   const chat = heldChat(deps, chatOf(place));
   const { at, anchor } = placeOf(deps, chat, place);
-  const replyTo = quoteOf(chat, out) ?? anchor;
-  const sender = senderIn(deps, chat, opts?.as);
-  const parts = recordedParts(out);
+  const replyTo = replyOf(chat, out, anchor);
+  const sender = senderIn(deps, chat, at, opts?.as);
+  // Read before delivery: nothing after the platform took the message may
+  // fail the send.
+  const key = deps.adapters.keyOf(chat.ref);
+  const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
+  const parts = recordedParts(out, given);
   const text = out.text ?? partsText(parts);
   const outbound = {
     text,
-    ...(out.parts?.length ? { parts: out.parts } : {}),
+    ...(given.length ? { parts: given } : {}),
     ...(out.attachments?.length ? { attachments: out.attachments } : {}),
   };
 
   const speaker = deps.speakers.speakerIn(chat.ref.id, at.threadId ?? null, sender.account.id);
-  try {
+  const delivered = await deliverAs(sender, async () => {
     if (speaker) {
       const said = await deps.replies.send(
         speaker,
@@ -94,7 +99,7 @@ async function send(
         { ...outbound, ...(replyTo === undefined ? {} : { replyTo }) },
         { recorded: parts },
       );
-      if (said) return sentOf(deps, chat, sender, said.id, said.sent, said.landedIn, said.at);
+      if (said) return { id: said.id, lineKey: said.sent, landedIn: said.landedIn, at: said.at };
     }
     const adapter = deps.adapters.of(sender.channel);
     let lineKey = "";
@@ -122,7 +127,25 @@ async function send(
         };
       },
     );
-    return sentOf(deps, chat, sender, sent.id, lineKey, landedIn, sent.at);
+    return { id: sent.id, lineKey, landedIn, at: sent.at };
+  });
+  return sentOf(deps, chat, key, sender, delivered);
+}
+
+/** What a delivery answers: the line's id in Chats, or null when it is not on
+ *  record, its adapter's key, and the thread it landed in. */
+interface Delivered {
+  readonly id: number | null;
+  readonly lineKey: string;
+  readonly landedIn: ChatId | null;
+  readonly at: Date;
+}
+
+/** `deliver`, with a failure to reach the platform answered as the SDK's
+ *  refusal. */
+async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Promise<Delivered> {
+  try {
+    return await deliver();
   } catch (error) {
     if (error instanceof SendError) throw error;
     if (error instanceof ChannelNotConnected) {
@@ -159,22 +182,33 @@ function placeOf(deps: AppChatsDeps, chat: Chat, place: SdkPlace): { at: Place; 
   return { at: placeIn(chat.ref), anchor: message.id };
 }
 
-/** The message `out` quotes, by its id, which has to be in `chat`. */
-function quoteOf(chat: Chat, out: ChatMessage): number | undefined {
-  if (out.replyTo === undefined) return undefined;
+/**
+ * The message a send answers, by its id, which has to be in `chat`: the one
+ * `out` quotes, else `anchor`, the message whose thread it opens. A send that
+ * opens a thread answers that message, since the platform picks the thread by
+ * the message answered, so a quote of another is refused.
+ */
+function replyOf(chat: Chat, out: ChatMessage, anchor: number | undefined): number | undefined {
+  if (out.replyTo === undefined) return anchor;
   const { chat: quoted, id } = out.replyTo;
   if (quoted.platform !== chat.ref.platform || quoted.id !== chat.ref.id) {
     throw new SendError("chat_not_found", "A reply quotes a message of the chat it is sent in");
+  }
+  if (anchor !== undefined && id !== anchor) {
+    throw new SendError(
+      "unsupported",
+      "A send that opens a thread off a message quotes that message, not another",
+    );
   }
   return id;
 }
 
 /**
- * The one of Rome's accounts a send into `chat` goes out as: `as` when it is
- * named, else Rome's end of a direct message, else the one account that
- * speaks there, else Rome's only account on the platform.
+ * The one of Rome's accounts a send to `at` in `chat` goes out as: `as` when
+ * it is named, else Rome's end of a direct message, else the one account
+ * that speaks in that place, else Rome's only account on the platform.
  */
-function senderIn(deps: AppChatsDeps, chat: Chat, as: Account | undefined): Sender {
+function senderIn(deps: AppChatsDeps, chat: Chat, at: Place, as: Account | undefined): Sender {
   const platform = chat.ref.platform;
   const romeEnd = romeEndOf(deps, chat);
   if (as) {
@@ -186,7 +220,7 @@ function senderIn(deps: AppChatsDeps, chat: Chat, as: Account | undefined): Send
   const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
   if (romeEnd !== null) return senderAs(deps, { platform, id: romeEnd });
   const speaking = accounts.filter(
-    (account) => deps.speakers.speakerIn(chat.ref.id, null, account.id) !== null,
+    (account) => deps.speakers.speakerIn(chat.ref.id, at.threadId ?? null, account.id) !== null,
   );
   const [only] = speaking.length === 1 ? speaking : accounts.length === 1 ? accounts : [];
   if (only) return senderAs(deps, only);
@@ -222,29 +256,30 @@ function senderAs(deps: AppChatsDeps, account: Account): Sender {
 }
 
 /**
- * The SDK's answer for a message the platform took. Once the platform took
- * it, a record that did not land is logged and answered by the id Rome holds
- * for the line, if any: reporting the send as failed invites a second one.
+ * The SDK's answer for a message the platform took, which never throws:
+ * reporting a sent message as failed invites a second one. A record that did
+ * not land is logged and answered by the id Rome holds for the line, if any.
  */
 function sentOf(
   deps: AppChatsDeps,
   chat: Chat,
+  key: ChatKey,
   sender: Sender,
-  id: number | null,
-  lineKey: string,
-  landedIn: ChatId | null,
-  at: Date,
+  { id, lineKey, landedIn, at }: Delivered,
 ): SdkSent {
-  const recorded = id ?? deps.messages.idOf(chat.ref, lineKey);
+  let recorded = id;
+  if (recorded === null) {
+    try {
+      recorded = deps.messages.idOf(chat.ref, lineKey);
+    } catch (error) {
+      log.warn("could not read back an app's sent line", { error: String(error) });
+    }
+  }
   if (recorded === null) {
     log.warn("an app's send went out but is not on record", { chat: chat.ref.id });
   }
   const message = { chat: chat.ref, id: recorded ?? 0 };
-  const platformMessageId = platformIdOfLine(
-    deps.adapters.keyOf(chat.ref),
-    sender.account.id,
-    lineKey,
-  );
+  const platformMessageId = platformIdOfLine(key, sender.account.id, lineKey);
   return {
     message,
     ...(platformMessageId ? { platformMessageId } : {}),
@@ -330,12 +365,12 @@ function group(
 
 /** `out` as it goes on record: its parts, else its text, with a note for
  *  each attachment, which Chats keeps no file of. */
-function recordedParts(out: ChatMessage): MessagePart[] {
+function recordedParts(out: ChatMessage, given: readonly MessagePart[]): MessagePart[] {
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
-  const said: MessagePart[] = out.parts?.length
-    ? [...out.parts]
+  const said: MessagePart[] = given.length
+    ? [...given]
     : [{ type: "text", content: out.text ?? "" }];
   return notes.length ? [...said, { type: "text", content: notes.join("\n") }] : said;
 }
