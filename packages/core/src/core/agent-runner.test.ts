@@ -4289,8 +4289,24 @@ describe("AgentRunner", () => {
       });
       const at = new Date("2026-08-03T08:00:00.000Z");
       const unseen: UnseenLine[] = [
-        { id: 7, senderName: "Bob", text: "ambient update", at, fromRome: false, quoted: null },
-        { id: 8, senderName: "Dana", text: "second update", at, fromRome: false, quoted: null },
+        {
+          id: 7,
+          senderName: "Bob",
+          text: "ambient update",
+          at,
+          fromRome: false,
+          quoted: null,
+          quotesOutside: false,
+        },
+        {
+          id: 8,
+          senderName: "Dana",
+          text: "second update",
+          at,
+          fromRome: false,
+          quoted: null,
+          quotesOutside: false,
+        },
       ];
       const seen: { ids: readonly number[]; sessionId: string; turnId: string }[] = [];
       const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
@@ -4388,8 +4404,16 @@ describe("AgentRunner", () => {
       const target = { id: 1, senderName: "Bob", text: "the question", at };
       const prompt = await linkedPrompt(
         [
-          { ...target, fromRome: false, quoted: null },
-          { id: 2, senderName: "Rome", text: "the answer", at, fromRome: true, quoted: target },
+          { ...target, fromRome: false, quoted: null, quotesOutside: false },
+          {
+            id: 2,
+            senderName: "Rome",
+            text: "the answer",
+            at,
+            fromRome: true,
+            quoted: target,
+            quotesOutside: false,
+          },
         ],
         { threadId: "open-chat" },
       );
@@ -4400,7 +4424,17 @@ describe("AgentRunner", () => {
       const at = new Date("2026-08-03T08:00:00.000Z");
       const starter = { id: 1, senderName: "Bob", text: "start here", at };
       const prompt = await linkedPrompt(
-        [{ id: 2, senderName: "Rome", text: "on it", at, fromRome: true, quoted: starter }],
+        [
+          {
+            id: 2,
+            senderName: "Rome",
+            text: "on it",
+            at,
+            fromRome: true,
+            quoted: starter,
+            quotesOutside: true,
+          },
+        ],
         { threadId: "thread-1", parentThreadId: "parent-chat" },
       );
       expect(prompt).toContain("Bob: start here");
