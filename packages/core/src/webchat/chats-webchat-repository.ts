@@ -62,8 +62,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
 
   override async createSession(...args: Parameters<WebChatRepository["createSession"]>) {
     await super.createSession(...args);
-    const [id, name, , , , , agentName = null] = args;
-    this.startDashboardChat(id, name, agentName);
+    const [id, name, , , , , agentName = null, type = "webchat"] = args;
+    // A handoff stays its own conversation, outside Chats.
+    if (type === "webchat") this.startDashboardChat(id, name, agentName);
   }
 
   override async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
@@ -655,6 +656,6 @@ export function sessionLines(sessionIds: readonly string[]) {
       r.rowid AS seq
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
-      AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant', 'notification'))
+      AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant'))
   )`;
 }

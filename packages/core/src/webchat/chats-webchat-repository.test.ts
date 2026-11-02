@@ -294,4 +294,27 @@ describe("ChatsWebChatRepository", () => {
     links.seen([line?.id ?? -1], "chat-1", "turn-2");
     expect(await roleOf()).toEqual([["out-0", "assistant", null]]);
   });
+  it("leaves a handoff outside Chats", async () => {
+    await repo.createSession(
+      "handoff-1",
+      "Handoff",
+      undefined,
+      undefined,
+      null,
+      null,
+      null,
+      "webchat_handoff",
+    );
+    expect(session("handoff-1")?.chatId).toBeNull();
+  });
+
+  it("keeps a chat's notifications in its transcript", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set"));
+
+    expect((await repo.getMessages("chat-1")).map((line) => [line.id, line.role])).toEqual([
+      ["note-1", "notification"],
+    ]);
+    expect(await repo.getMessageCount("chat-1")).toBe(1);
+  });
 });
