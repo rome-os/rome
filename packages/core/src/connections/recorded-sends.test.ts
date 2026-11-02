@@ -267,6 +267,21 @@ describe("recordedSends", () => {
     ]);
   });
 
+  it("send a plain message to an email address or the guardian as a new email", async () => {
+    const receipt = await send("email").send("alice@example.com" as ChatId, { text: "Hi" });
+    await send("email").send("guardian" as ChatId, { text: "Report" });
+
+    expect(receipt).toEqual({ chatId: "thread-new", messageId: "m-1" });
+    expect(sent).toMatchObject([
+      { address: "", message: { kind: "email", to: "alice@example.com", text: "Hi" } },
+      { address: "", message: { kind: "email", to: "guardian", text: "Report" } },
+    ]);
+    expect(testDb.db.all(sql`SELECT kind FROM chats`)).toEqual([
+      { kind: "group" },
+      { kind: "group" },
+    ]);
+  });
+
   it("send nothing and record nothing when the platform refuses", async () => {
     const [refusing] = recordedSends(
       [

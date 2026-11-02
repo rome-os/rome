@@ -87,6 +87,15 @@ export function recordedSends<C extends Channel>(
         // The port quotes by the platform's id, an email by the provider's.
         const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
         let at = address;
+        if (!email && namesNewEmail(deps, channel.name, address)) {
+          // The email port takes a plain message to an address, or to the
+          // guardian, as a new email to them.
+          return await openThread(deps, channel, out, {
+            kind: "email",
+            ...message,
+            to: address,
+          } as OutgoingEmailMessage);
+        }
         if (email && !address.trim()) {
           if (!email.inReplyToMessageId) return await openThread(deps, channel, out, email);
           // A reply that names no thread is in the thread of the email it
@@ -106,6 +115,16 @@ export function recordedSends<C extends Channel>(
     return { ...channel, send: wrapped } as C;
   });
 }
+
+/** Whether `address` on channel `channel` names whom a new email goes to:
+ *  an email address or the guardian, where Rome holds no thread. */
+function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string): boolean {
+  if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
+  const named = address.trim().toLowerCase() === "guardian" || EMAIL_ADDRESS.test(address.trim());
+  return named && !deps.chats.byKey(deps.adapters.chatAt(channel, address, "group"));
+}
+
+const EMAIL_ADDRESS = /^[^\s@<>]+@[^\s@<>]+$/;
 
 /** The address of the email thread that holds the email the provider calls
  *  `messageId`. Throws when Rome holds no such email, rather than guess. */
