@@ -394,17 +394,18 @@ export class ChatReadModel {
     const turns = new Map<string, TurnRef>();
     for (const ref of refs) turns.set(JSON.stringify([ref.sessionId, ref.turnId]), ref);
     if (turns.size === 0) return [];
-    const wanted = sql.join(
-      [...turns.values()].map((turn) => sql`(${turn.sessionId}, ${turn.turnId})`),
-      sql`, `,
-    );
+    // The turns go in as one JSON value, so a long history binds one
+    // parameter however many turns it shows.
+    const wanted = JSON.stringify([...turns.values()].map((turn) => [turn.sessionId, turn.turnId]));
     const rows = await this.db.all<{
       id: string;
       session_id: string;
       turn_id: string;
       created_at: number;
     }>(sql`
-      WITH wanted(session_id, turn_id) AS (VALUES ${wanted})
+      WITH wanted(session_id, turn_id) AS (
+        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(${wanted})
+      )
       SELECT t.id, t.session_id, t.turn_id, t.created_at
       FROM wanted w
       JOIN rome_agent_messages t

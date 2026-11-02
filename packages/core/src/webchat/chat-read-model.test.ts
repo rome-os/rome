@@ -317,6 +317,27 @@ describe("ChatReadModel", () => {
       expect(older?.nextCursor).toBeNull();
     });
 
+    it("reads the traces of more turns than SQLite binds parameters", async () => {
+      const chat = dashboardChat("chat-1");
+      const turns = 17_000;
+      testDb.db.run(sql`
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${turns})
+        INSERT INTO chat_messages (key, chat_id, sender_account_id, text, parts, said_at)
+        SELECT 'u-' || i, ${chat.id}, 'guardian', 'q', '[]', i FROM n
+      `);
+      testDb.db.run(sql`
+        INSERT INTO agent_turn_messages (message_id, session_id, turn_id, role, input_state)
+        SELECT id, 'chat-1', 'turn-' || key, 'prompt', NULL FROM chat_messages
+        WHERE chat_id = ${chat.id}
+      `);
+      await traceAt("chat-1", "t-last", `turn-u-${turns}`, turns + 1);
+
+      const transcript = await reads.chatTranscript("chat-1");
+
+      expect(transcript?.lines).toHaveLength(turns);
+      expect(transcript?.traces.map((trace) => trace.id)).toEqual(["t-last"]);
+    });
+
     it("draws a line no turn took as a notification, and leaves out what was said before the seat", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
       fixture.seat({
