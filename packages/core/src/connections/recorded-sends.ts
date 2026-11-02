@@ -109,14 +109,14 @@ export function recordedSends<C extends Channel>(
         if (email?.inReplyToMessageId) {
           // The provider sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there.
-          // One that names no thread needs Rome to know that email.
+          // Rome must know that email to know the thread.
           const answered = threadOf(deps, channel.name, email.inReplyToMessageId);
-          if (answered) at = answered;
-          else if (!address.trim()) {
+          if (!answered) {
             throw new Error(
               `Rome holds no email ${email.inReplyToMessageId} to reply to. No email was sent.`,
             );
           }
+          at = answered;
         } else if (email && !address.trim()) {
           return await openThread(deps, channel, out, email);
         }

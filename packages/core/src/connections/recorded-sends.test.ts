@@ -247,6 +247,16 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([]);
   });
 
+  it("send no reply to an email Rome does not hold, even in a named thread", async () => {
+    await expect(
+      send("email").send(
+        "thread-9" as ChatId,
+        { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
+      ),
+    ).rejects.toThrow("Rome holds no email unknown");
+    expect(sent).toEqual([]);
+  });
+
   it("record an HTML-only email by its text, and an attachment by a note", async () => {
     await send("email").send(
       "thread-7" as ChatId,
