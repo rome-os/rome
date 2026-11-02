@@ -207,6 +207,14 @@ export function chatAt(
     : chatKey(platform, address as ChatId);
 }
 
+/** Whether platform address `address` names a group by itself, before Rome
+ *  has heard the chat: on Telegram a group's id is negative and a person's
+ *  positive (https://core.telegram.org/api/bots/ids). Elsewhere an address
+ *  does not say. */
+export function namesGroup(platform: string, address: string): boolean {
+  return platform === "telegram" && /^-[1-9]\d*$/.test(address);
+}
+
 /** Whether the chat keyed `key` is a direct message, which its key says. */
 export function isDirectMessage(key: ChatKey): boolean {
   return otherEndOf(key) !== null;

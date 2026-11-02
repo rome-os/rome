@@ -96,18 +96,26 @@ describe("recordedSends", () => {
   const sessions = () => testDb.db.all(sql`SELECT id FROM rome_sessions`);
 
   it("record a send at an address no seat heard in the chat there, and open no session", async () => {
-    const receipt = await send("telegram").send("-100" as ChatId, { text: "Deploy done" });
+    const receipt = await send("telegram").send("4242" as ChatId, { text: "Deploy done" });
 
-    expect(receipt).toEqual({ chatId: "-100", messageId: "m-1" });
+    expect(receipt).toEqual({ chatId: "4242", messageId: "m-1" });
     expect(sent).toHaveLength(1);
     expect(lines()).toEqual([
       {
-        chat: chatAt("telegram", "-100", { romeEnd: BOT.id }).externalId,
+        chat: chatAt("telegram", "4242", { romeEnd: BOT.id }).externalId,
         text: "Deploy done",
         sender_agent: "main",
       },
     ]);
     expect(sessions()).toEqual([]);
+  });
+
+  it("record a send to a Telegram group Rome has not heard in the group's own chat", async () => {
+    await send("telegram").send("-300" as ChatId, { text: "Hello group" });
+
+    expect(testDb.db.all(sql`SELECT key, kind FROM chats`)).toEqual([
+      { key: "-300", kind: "group" },
+    ]);
   });
 
   it("say a send through the seat that heard the address, in the seat's chat", async () => {

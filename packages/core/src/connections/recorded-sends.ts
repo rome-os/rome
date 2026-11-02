@@ -22,7 +22,13 @@ import type { SeatReplies } from "../sessions/seat-replies.js";
 import type { MessagePart } from "../types.js";
 import type { Seats } from "../sessions/seats.js";
 import { startChannelChat } from "./channel-chat.js";
-import { addressOf, lineAt, platformIdOfLine, type ChatAdapters } from "./chat-adapter.js";
+import {
+  addressOf,
+  lineAt,
+  namesGroup,
+  platformIdOfLine,
+  type ChatAdapters,
+} from "./chat-adapter.js";
 import { EMAIL_PLATFORM, emailOf, type EmailOutbound } from "./email-chat-adapter.js";
 
 export interface RecordedSendsDeps {
@@ -205,6 +211,7 @@ async function sayInChat(
     // Every email thread is a group, whether or not the message says email.
     account.platform === EMAIL_PLATFORM ||
     message.kind === "email" ||
+    namesGroup(account.platform, address) ||
     deps.chats.byKey(deps.adapters.chatAt(channel.name, address, "group"))?.kind === "group";
   const { chat, key, romeEnd } = startChannelChat(deps, {
     channel: channel.name,
