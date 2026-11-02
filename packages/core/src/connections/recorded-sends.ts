@@ -68,7 +68,7 @@ function recordedParts(out: Out): MessagePart[] {
       ? [...out.parts, { type: "text", content: notes.join("\n") }]
       : [...out.parts];
   }
-  const text = out.text.trim() || (out.html ? htmlToMarkdown(out.html).trim() : "");
+  const text = out.text.trim() || (out.html ? htmlToMarkdown(out.html, true).trim() : "");
   return [{ type: "text", content: [text, ...notes].filter(Boolean).join("\n") }];
 }
 
@@ -103,10 +103,11 @@ export function recordedSends<C extends Channel>(
           ...(email?.cc?.length ? { cc: email.cc } : {}),
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
-        if (!out.text.trim() && !out.html?.trim() && !out.attachments?.length) {
-          // A message with nothing to show, such as an approval card, which
-          // no platform renders: the port skips it, or refuses it, as it
-          // always has. Nothing is said, so nothing is recorded.
+        if (!out.text.trim() && !out.html?.trim()) {
+          // A message with no words, such as an approval card or a bare
+          // attachment, which some ports skip: the port sends it, skips it
+          // or refuses it, as it always has. Chats keeps no file, so it is
+          // not recorded rather than recorded where nothing may have gone.
           return await send.send(address, message);
         }
         if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
@@ -127,17 +128,14 @@ export function recordedSends<C extends Channel>(
         }
         if (email?.inReplyToMessageId) {
           // The provider sends a reply into the thread of the email it
-          // answers, whatever address it names, so it is recorded there.
-          // An email Rome does not hold, as one fetched from the mailbox
-          // directly, is answered in the thread the caller names; with no
-          // thread named, Rome cannot know where the reply lands.
+          // answers, whatever address it names, so it is recorded there. An
+          // email Rome does not hold, as one fetched from the mailbox
+          // directly, sits in a thread Rome cannot know until the provider
+          // answers: the port sends the reply as it always has, and it is
+          // not recorded rather than recorded in a thread it may not be in.
           const answered = threadOf(local, channel.name, email.inReplyToMessageId);
-          if (!answered && !address.trim()) {
-            throw new Error(
-              `Rome holds no email ${email.inReplyToMessageId} to reply to, and no thread was named. No email was sent.`,
-            );
-          }
-          at = answered ?? address;
+          if (!answered) return await send.send(address, message);
+          at = answered;
         } else if (email && !address.trim()) {
           return await openThread(local, channel, out, email);
         }

@@ -315,23 +315,14 @@ describe("recordedSends", () => {
     expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
   });
 
-  it("send no reply to an email Rome does not hold", async () => {
-    await expect(
-      send("email").send(
-        "" as ChatId,
-        { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
-      ),
-    ).rejects.toThrow("Rome holds no email unknown");
-    expect(sent).toEqual([]);
-    expect(lines()).toEqual([]);
-  });
-
-  it("reply to an email Rome does not hold in the thread the caller names, quoting it by its id", async () => {
-    await send("email").send(
+  it("hand a reply to an email Rome does not hold to the port, which places it, and record nothing", async () => {
+    landsAt["thread-9"] = "thread-real";
+    const receipt = await send("email").send(
       "thread-9" as ChatId,
       { kind: "email", text: "Thanks", inReplyToMessageId: "unknown" } as OutgoingMessage,
     );
 
+    expect(receipt).toEqual({ chatId: "thread-real", messageId: "m-1" });
     expect(sent).toEqual([
       {
         channel: "email",
@@ -339,14 +330,19 @@ describe("recordedSends", () => {
         message: expect.objectContaining({ inReplyToMessageId: "unknown" }),
       },
     ]);
-    expect(lines().map((line) => line.chat)).toEqual([chatAt("email", "thread-9").externalId]);
+    expect(lines()).toEqual([]);
   });
 
-  it("record an HTML-only email by its text, and an attachment by a note", async () => {
+  it("record an HTML-only email by its text with its links, and an attachment by a note", async () => {
     await send("email").send(
       "thread-7" as ChatId,
-      { kind: "email", text: "", html: "<p>See <b>you</b></p>" } as OutgoingMessage,
+      {
+        kind: "email",
+        text: "",
+        html: '<p>See <b>you</b> at <a href="https://example.com/report">the report</a></p>',
+      } as OutgoingMessage,
     );
+    // An attachment with no words is the port's alone, and not recorded.
     await send("telegram").send("-100" as ChatId, {
       attachments: [{ type: "image", source: "/tmp/a.png", caption: "sunset" }],
     });
@@ -356,10 +352,11 @@ describe("recordedSends", () => {
       attachments: [{ type: "document", source: "/tmp/r.pdf" }],
     });
 
-    const [html, image, both] = lines().map((line) => line.text);
+    const [html, both] = lines().map((line) => line.text);
     expect(html).toMatch(/See .*you/);
-    expect(image).toBe("[image: sunset]");
+    expect(html).toContain("https://example.com/report");
     expect(both).toBe("Look\n[document]");
+    expect(sent).toHaveLength(3);
   });
 
   it("send an email's reply recipients, and its text from its parts when it has none", async () => {
@@ -444,6 +441,7 @@ describe("recordedSends", () => {
 
     // The port, not the wrapper, answers: the real one throws for attachments.
     expect(sent).toHaveLength(1);
+    expect(lines()).toEqual([]);
   });
 
   it("send no email that names a blank email to reply to", async () => {
