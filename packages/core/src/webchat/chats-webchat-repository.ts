@@ -164,16 +164,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
     });
     if (inChat.length === 0) return super.appendTraceBlocks(input);
     const own = said.filter((message) => !inChat.some((line) => line.message === message));
-    // In the order the base class writes them: prompt, trace, answer.
-    const sayAll = async (role: "user" | "assistant") => {
+    // Said before the trace's own transaction, so a batch that fails there is
+    // retried whole: saying a line again changes nothing. A turn reads its
+    // prompt, trace and answers in that order whenever each was written.
+    this.db.transaction(() => {
       for (const { message, standing } of inChat) {
-        if (message.role !== role) continue;
-        await this.say(standing, message.id, role, partsOf(message.content), message.turnId);
+        this.say(standing, message.id, message.role, partsOf(message.content), message.turnId);
       }
-    };
-    await sayAll("user");
+    });
     await super.appendTraceBlocks({ ...input, transcriptMessages: own });
-    await sayAll("assistant");
   }
 
   override async recordUserInput(
@@ -186,21 +185,25 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const standing = this.standingOf(sessionId);
     if (!standing) return super.recordUserInput(id, sessionId, content, actor, saidBy);
     const parts = partsOf(content);
-    const recorded = this.lines.record({
-      direction: "toRome",
-      key: id,
-      place: standing.place,
-      saidBy: saidBy
-        ? { account: { platform: standing.place.chat.platform, id: saidBy.id } }
-        : dashboardSender(actor),
-      body: { text: partsText(parts) },
-      parts,
-      at: new Date(),
+    // The input, its queued link and the session's activity commit together,
+    // so an input on record is always one the session can admit.
+    return this.db.transaction(() => {
+      const recorded = this.lines.record({
+        direction: "toRome",
+        key: id,
+        place: standing.place,
+        saidBy: saidBy
+          ? { account: { platform: standing.place.chat.platform, id: saidBy.id } }
+          : dashboardSender(actor),
+        body: { text: partsText(parts) },
+        parts,
+        at: new Date(),
+      });
+      if (!recorded) return false;
+      this.links.prompt(recorded.id, sessionId, null, "queued");
+      this.advanceActivity(sessionId, recorded.at);
+      return true;
     });
-    if (!recorded) return false;
-    this.links.prompt(recorded.id, sessionId, null, "queued");
-    this.advanceActivity(sessionId, recorded.at);
-    return true;
   }
 
   override async recoverInterruptedInputs(): Promise<void> {
@@ -243,7 +246,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
   ) {
     const standing = role === "user" || role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.addMessage(id, sessionId, role, content, turnId);
-    await this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
+    this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
   }
 
   protected override async insertBackendMessage(
@@ -256,7 +259,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
-    const at = await this.say(standing, key, "assistant", parts as MessagePart[], turnId);
+    const at = this.say(standing, key, "assistant", parts as MessagePart[], turnId);
     const message: StoredWebchatMessage = {
       id: key,
       sessionId,
@@ -377,7 +380,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         WHERE l.created_at >= ${Math.floor(since.getTime() / 1000)}
           AND l.role IN ('user', 'assistant')
         ORDER BY MIN(l.created_at) OVER (PARTITION BY l.session_id, COALESCE(l.turn_id, l.id)),
-          l.created_at, CASE l.role WHEN 'user' THEN 0 ELSE 1 END, l.seq
+          l.session_id, COALESCE(l.turn_id, l.id), l.line_order, l.created_at, l.seq
       `)
       .map((row) => ({
         ...storedLine(row),
@@ -401,7 +404,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .all<LineRow>(sql`
         SELECT * FROM ${sessionLines([sessionId])}
         WHERE turn_id = ${turnId} AND role IN ('user', 'assistant')
-        ORDER BY created_at, line_order, seq
+        ORDER BY line_order, created_at, seq
       `)
       .map((row) => ({
         id: row.id,
@@ -476,39 +479,36 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .run();
   }
 
-  /** Say a dashboard line where `standing` is, linked to `turnId`. Rome is
-   *  the platform, so a line is delivered once it is recorded. */
-  private async say(
+  /**
+   * Say a dashboard line where `standing` is, linked to `turnId`, in one
+   * transaction. Rome is the platform, so a line is said once it is
+   * recorded. Saying it again, as a retry does, changes nothing but a
+   * missing link.
+   */
+  private say(
     standing: Standing,
     key: string,
     role: "user" | "assistant",
     parts: MessagePart[],
     turnId: string | null,
-  ): Promise<Date> {
+  ): Date {
     const at = new Date();
-    if (role === "user") {
+    this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
         key,
         place: standing.place,
-        saidBy: dashboardSender(undefined),
+        saidBy: role === "user" ? dashboardSender(undefined) : agentSender(standing),
         body: { text: partsText(parts) },
         parts,
         at,
       });
-      if (recorded && turnId) this.links.prompt(recorded.id, standing.sessionId, turnId);
-    } else {
-      const sent = await this.lines.send(
-        { direction: "fromRome", place: standing.place, saidBy: agentSender(standing), parts },
-        // The dashboard adapter keys its line, and the client knows it by
-        // that key already.
-        async () => ({ key }),
-      );
-      // Rome is the platform: a line it did not record was never said.
-      if (sent.id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
-      if (turnId) this.links.answer(sent.id, standing.sessionId, turnId);
-    }
-    this.advanceActivity(standing.sessionId, at);
+      const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
+      if (id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
+      if (turnId && role === "user") this.links.prompt(id, standing.sessionId, turnId);
+      if (turnId && role === "assistant") this.links.answer(id, standing.sessionId, turnId);
+      this.advanceActivity(standing.sessionId, at);
+    });
     return at;
   }
 
@@ -522,7 +522,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         ${where}
         ORDER BY session_id,
           MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
-          turn_id, created_at, line_order, seq
+          turn_id, line_order, created_at, seq
       `)
       .map(storedLine);
   }
@@ -614,16 +614,16 @@ function storedLine(row: LineRow): TranscriptLine {
  * each session stands, from Chats, read as the session sees it, beside the
  * session's own lines (traces, and the lines of a session that stands in no
  * chat). A line is the session's prompt or answer by its turn link; a line
- * with none is its agent's when its account said it, the guardian's on the
- * dashboard, and a notification elsewhere. `line_order` puts a prompt before
- * the trace and answer of its turn within one second.
+ * with none, or only caught up on, is its agent's when its account said it,
+ * the guardian's on the dashboard, and a notification elsewhere.
+ * `line_order` puts a turn's prompt before its trace, and both before its
+ * answers.
  */
 export function sessionLines(sessionIds: readonly string[]) {
   const ids = JSON.stringify(sessionIds);
   return sql`(
     SELECT m.key AS id, s.id AS session_id,
-      -- A line the turn only caught up on is no part of the turn.
-      CASE WHEN l.role IN ('prompt', 'answer') THEN l.turn_id END AS turn_id, l.input_state,
+      l.turn_id, l.input_state,
       CASE WHEN l.role = 'answer'
              OR (l.role IS NULL AND m.sender_agent IS NOT NULL AND m.sender_account_id IS s.account_id)
              THEN 'assistant'
@@ -639,7 +639,10 @@ export function sessionLines(sessionIds: readonly string[]) {
     JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
+    -- Only a prompt or answer link says whose turn a line is: one caught up
+    -- on is read by who said it.
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
+      AND l.role IN ('prompt', 'answer')
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
     UNION ALL
     SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,

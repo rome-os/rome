@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
-import { MessageRepository, type Sent } from "../chats/storage/message-repository.js";
+import { MessageRepository } from "../chats/storage/message-repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
@@ -186,20 +186,112 @@ describe("ChatsWebChatRepository", () => {
     expect((await failing.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
   });
 
-  it("refuses an answer it could not record", async () => {
-    class Unrecorded extends MessageRepository {
-      override async send(): Promise<Sent> {
-        return { id: null, key: "lost", recorded: false, at: new Date() };
+  it("refuses an answer it could not record, and emits nothing", async () => {
+    class Failing extends MessageRepository {
+      override record(): RecordedMessage | null {
+        throw new Error("disk full");
       }
     }
-    const unrecorded = new ChatsWebChatRepository(testDb.db, {
+    const failing = new ChatsWebChatRepository(testDb.db, {
       links,
-      lines: new Unrecorded(testDb.db),
+      lines: new Failing(testDb.db),
     });
-    await unrecorded.createSession("chat-1", "Plans");
+    await failing.createSession("chat-1", "Plans");
+    const emitted: string[] = [];
+    failing.onMessageInserted((message) => emitted.push(message.id));
 
-    await expect(unrecorded.addBackendReplyMessage("chat-1", "turn-1", "Hello")).rejects.toThrow(
-      "could not be recorded",
+    await expect(failing.addBackendReplyMessage("chat-1", "turn-1", "Hello")).rejects.toThrow(
+      "disk full",
     );
+    expect(emitted).toEqual([]);
+  });
+
+  it("retries a trace batch whole when its answer could not be said", async () => {
+    let failures = 1;
+    class Failing extends MessageRepository {
+      override record(message: Message): RecordedMessage | null {
+        if (message.key === "out-1" && failures > 0) {
+          failures -= 1;
+          throw new Error("disk full");
+        }
+        return super.record(message);
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, {
+      links,
+      lines: new Failing(testDb.db),
+    });
+    await failing.createSession("chat-1", "Plans");
+    const batch = {
+      messageId: "trace-1",
+      sessionId: "chat-1",
+      turnId: "turn-1",
+      startSeq: 0,
+      blocks: [{ type: "text", content: "thinking" }],
+      transcriptMessages: [
+        {
+          id: "in-1",
+          sessionId: "chat-1",
+          turnId: "turn-1",
+          role: "user" as const,
+          content: text("Hi"),
+        },
+        {
+          id: "out-1",
+          sessionId: "chat-1",
+          turnId: "turn-1",
+          role: "assistant" as const,
+          content: text("Hello"),
+        },
+      ],
+    };
+
+    await expect(failing.appendTraceBlocks(batch)).rejects.toThrow("disk full");
+    expect(ownRows("chat-1")).toHaveLength(0);
+    await failing.appendTraceBlocks(batch);
+    expect(
+      (await failing.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]),
+    ).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["trace-1", "trace", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+  });
+
+  it("records an input with its queued link or not at all", async () => {
+    let failures = 1;
+    class Failing extends TurnLinks {
+      override prompt(...args: Parameters<TurnLinks["prompt"]>): void {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("disk full");
+        }
+        super.prompt(...args);
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, { links: new Failing(testDb.db) });
+    await failing.createSession("chat-1", "Plans");
+
+    await expect(failing.recordUserInput("in-1", "chat-1", text("Hi"))).rejects.toThrow(
+      "disk full",
+    );
+    expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
+    expect(await failing.recordUserInput("in-1", "chat-1", text("Hi"))).toBe(true);
+    expect(await failing.getUserInput("chat-1", "in-1")).toEqual({
+      turnId: null,
+      inputState: "queued",
+    });
+  });
+
+  it("reads a line a turn only caught up on by who said it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("out-0", "chat-1", "assistant", text("Reminder"));
+    const roleOf = async () =>
+      (await repo.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]);
+    expect(await roleOf()).toEqual([["out-0", "assistant", null]]);
+
+    const line = testDb.db.select().from(chatMessages).get();
+    links.seen([line?.id ?? -1], "chat-1", "turn-2");
+    expect(await roleOf()).toEqual([["out-0", "assistant", null]]);
   });
 });
