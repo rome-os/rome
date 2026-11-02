@@ -92,6 +92,14 @@ describe("chat adapter keys", () => {
     expect(sentLineId(basic, "rome_bot", "8")).toBe("rome_bot:8");
   });
 
+  it("quote no line in a basic group that only another of Rome's accounts holds", () => {
+    const basic = chatAt("telegram", "-42");
+    expect(platformIdOfLine(basic, "rome_bot", "other_bot:7")).toBeNull();
+    expect(platformIdOfLine(basic, "rome_bot", "7")).toBeNull();
+    const group = chatAt("telegram", "-1001234567890123");
+    expect(platformIdOfLine(group, "rome_bot", "7")).toBe("7");
+  });
+
   it("key a line the platform gave no id by one of Rome's, which names no platform line", () => {
     const group = chatAt("telegram", "-1001234567890123");
     const key = sentLineId(group, "rome_bot", undefined);
@@ -147,6 +155,42 @@ describe("channelAdapter", () => {
     ]);
     expect(event?.message.messageId).toBe("7");
     expect(adapter.heard("-42", "rome_bot:7")).toBeUndefined();
+  });
+
+  it("hand a chat's messages over one at a time, its threads' too", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    adapter.start(
+      async (message) => {
+        order.push(`start ${message.key}`);
+        if (message.key === "1") await held;
+        order.push(`end ${message.key}`);
+        return 1;
+      },
+      () => {},
+    );
+    const thread = (chatId: string, messageId: string) =>
+      hear({
+        chatId,
+        parentChatId: "-1001234567890123" as ChatId,
+        messageId,
+        thread: { kind: "topic" },
+      });
+
+    const first = thread("topic-1", "1");
+    const second = thread("topic-2", "2");
+    const elsewhere = hear({ chatId: "-1009999999999999", messageId: "3" });
+    await elsewhere;
+    expect(order).toEqual(["start 1", "start 3", "end 3"]);
+
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["start 1", "start 3", "end 3", "end 1", "start 2", "end 2"]);
   });
 
   it("hand nothing for a message with no text and no attachments", async () => {

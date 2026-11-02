@@ -197,9 +197,13 @@ export function lineAt(chat: ChatKey, romeEnd: string, platformMessageId: string
 
 /** The platform's id for the line keyed `lineKey` in the chat keyed `chat`,
  *  which Rome's account `romeEnd` sent or heard, or null for a line the
- *  platform gave no id. */
+ *  platform gave no id or that only another of Rome's accounts holds. */
 export function platformIdOfLine(chat: ChatKey, romeEnd: string, lineKey: string): string | null {
   if (lineKey.startsWith("rome:")) return null;
+  // Where each account numbers its own lines, a line another account holds
+  // has no id this one can quote.
+  const owned = ownedBy(chat, romeEnd, "");
+  if (owned !== "" && !lineKey.startsWith(owned)) return null;
   return notOwnedBy(chat, romeEnd, lineKey);
 }
 
@@ -257,6 +261,9 @@ export function channelAdapter(
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
   const delivering = new Map<string, InboundEvent>();
+  /** Each chat's last message on its way to `deliver`, which the next waits
+   *  on. */
+  const queues = new Map<string, Promise<void>>();
 
   /** Where the platform takes a message for the chat keyed `key`: the
    *  thread's id, else where the account reaches the chat when that is not
@@ -284,7 +291,11 @@ export function channelAdapter(
       started = true;
       if (!channel.inbound) return;
       unsubscribe = channel.inbound.subscribe(async (event) => {
-        const handed = (async () => {
+        // The port orders each platform address's events, but a chat's
+        // threads are addresses of their own, so the adapter orders a chat's
+        // messages itself.
+        const chat = keying(event.message.account ?? account(), event.message).key.externalId;
+        const handed = (queues.get(chat) ?? Promise.resolve()).then(async () => {
           if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
           const saved = await materialized(channel, event);
           const inbound = toInbound(
@@ -321,7 +332,12 @@ export function channelAdapter(
           } finally {
             delivering.delete(heardAs);
           }
-        })();
+        });
+        const settled = handed.then(
+          () => {},
+          () => {},
+        );
+        queues.set(chat, settled);
         inFlight.add(handed);
         try {
           await handed;
@@ -330,6 +346,7 @@ export function channelAdapter(
           throw error;
         } finally {
           inFlight.delete(handed);
+          if (queues.get(chat) === settled) queues.delete(chat);
         }
       });
     },
