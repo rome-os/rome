@@ -77,10 +77,17 @@ export function emailChatAdapter(
   deps: ChannelAdapterDeps & { addresses: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt"> },
 ): EmailChatAdapter {
   const { addresses } = deps;
+  // The thread the provider named for each thread Rome started, by key, and
+  // the key by thread. Kept here too, so a thread whose address could not be
+  // stored is still reached, and still heard as the chat Rome opened.
+  const started = new Map<string, string>();
+  const startedAt = new Map<string, string>();
   const base = channelAdapter(channel, deps, (account, message) => ({
     key: chatKey(
       account.platform,
-      (addresses.keyAt(account, message.chatId) ?? message.chatId) as ChatId,
+      (startedAt.get(message.chatId) ??
+        addresses.keyAt(account, message.chatId) ??
+        message.chatId) as ChatId,
     ),
     kind: "group",
   }));
@@ -91,9 +98,6 @@ export function emailChatAdapter(
   // A thread's first message while it goes out, by key. Another message
   // into the thread waits for it, so the thread starts once.
   const starting = new Map<string, Promise<unknown>>();
-  // The thread the provider named for each thread Rome started, kept here
-  // too, so a thread whose address could not be stored still reaches it.
-  const started = new Map<string, string>();
   const port = () => {
     if (!channel.send) throw new Error(`Channel "${channel.name}" cannot send`);
     return channel.send;
@@ -149,6 +153,7 @@ export function emailChatAdapter(
             throw new Error(`Channel "${channel.name}" named no thread for what it sent`);
           }
           started.set(key, receipt.chatId);
+          startedAt.set(receipt.chatId, key);
           // The message went out: a failed write only means mail on the
           // thread after a restart reaches a chat of its own.
           try {

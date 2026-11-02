@@ -147,6 +147,36 @@ describe("emailChatAdapter", () => {
     expect(sent.map((s) => s.to)).toEqual(["", "thread-1"]);
   });
 
+  it("hear a reply under the chat Rome opened even when the thread's address could not be stored", async () => {
+    const { channel, hear } = fakeMail();
+    let failures = 1;
+    const flaky = {
+      ...deps(),
+      addresses: Object.assign(Object.create(addresses), {
+        bind: (...args: Parameters<ChatAddresses["bind"]>) => {
+          if (failures-- > 0) throw new Error("disk full");
+          addresses.bind(...args);
+        },
+      }),
+    };
+    const adapter = emailChatAdapter(channel, flaky);
+    const chat = adapter.open({ to: "wei@example.com" }, "Plans");
+    await adapter.send(chat.externalId, null, { text: "hello" });
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+
+    await hear("thread-1", "m2");
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual([chat.externalId]);
+  });
+
   it("refuse a first message the provider named no thread for, and keep the thread unsent", async () => {
     const { channel, sent } = fakeMail({ messageId: "m1", chatId: " " });
     const adapter = emailChatAdapter(channel, deps());
