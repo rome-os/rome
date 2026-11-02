@@ -398,6 +398,22 @@ describe("recordedSends", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("send no email that names a blank email to reply to", async () => {
+    await expect(
+      send("email").send(
+        "" as ChatId,
+        {
+          kind: "email",
+          to: "alice@example.com",
+          inReplyToMessageId: " ",
+          text: "Hi",
+        } as OutgoingMessage,
+      ),
+    ).rejects.toThrow("Email replyToMessageId must not be blank. No email was sent.");
+    expect(sent).toEqual([]);
+    expect(lines()).toEqual([]);
+  });
+
   it("send nothing and record nothing when the platform refuses", async () => {
     const [refusing] = recordedSends(
       [

@@ -105,6 +105,10 @@ export function recordedSends<C extends Channel>(
           // such as an approval card, which has no email rendering.
           return { chatId: address };
         }
+        if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
+          // As the port does, rather than read a blank id as no reply.
+          throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+        }
         // The port quotes by the platform's id, an email by the provider's.
         const quoted = email?.inReplyToMessageId ?? message.replyToMessageId;
         let at = address;
