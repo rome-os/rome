@@ -83,7 +83,8 @@ export class ChatRepository {
     this.db.update(chats).set({ name }).where(eq(chats.id, ref.id)).run();
   }
 
-  /** End the chat `ref` names: it goes, with every message said in it.
+  /** End the chat `ref` names: it goes, with every message said in it and
+   *  every one of Rome's seats in it.
    *  Changes nothing when Rome holds no chat by that id. */
   end(ref: ChatRef): void {
     this.db.delete(chats).where(eq(chats.id, ref.id)).run();

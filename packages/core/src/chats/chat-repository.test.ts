@@ -88,6 +88,20 @@ describe("ChatRepository", () => {
     expect(messages.read(placeIn(ref)).messages).toEqual([]);
   });
 
+  it("ends a chat with Rome's seats in it, so no seat points at a chat that is gone", () => {
+    const { ref } = chats.start(GROUP, "group", null);
+    testDb.db.run(
+      sql`INSERT INTO rome_sessions (id, name, type, chat_id, chat_platform, account_id, created_at, activity_at)
+          VALUES ('seat-1', 'Seat', 'channel', ${ref.id}, 'feishu', 'bot', 0, 0),
+                 ('run-1', 'Run', 'subagent', NULL, NULL, NULL, 0, 0)`,
+    );
+
+    chats.end(ref);
+
+    const left = testDb.db.all<{ id: string }>(sql`SELECT id FROM rome_sessions ORDER BY id`);
+    expect(left.map((row) => row.id)).toEqual(["run-1"]);
+  });
+
   it("names a platform's and a kind's chats as subqueries", () => {
     const group = chats.start(GROUP, "group", null).ref.id;
     const dm = chats.start(DM, "dm", null).ref.id;

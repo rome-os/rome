@@ -1201,7 +1201,6 @@ export class WebChatRepository {
     // A dashboard chat is its session's alone, so it ends with it. A channel
     // chat goes on without the seat.
     const seat = await this.seatOf(id);
-    if (seat && seat.place.chat.platform === WEBCHAT_PLATFORM) this.chats.end(seat.place.chat);
     // One transaction so a crash mid-cascade can't leave orphan messages or
     // feedback rows behind. `webchat_turn_feedback` also cascades via its FK,
     // but we still issue the explicit delete so the contract holds even if a
@@ -1221,6 +1220,7 @@ export class WebChatRepository {
       // the chat must take its public copies with it.
       tx.delete(sharedChats).where(eq(sharedChats.sessionId, id)).run();
       tx.delete(romeSessions).where(eq(romeSessions.id, id)).run();
+      if (seat && seat.place.chat.platform === WEBCHAT_PLATFORM) this.chats.end(seat.place.chat);
     });
   }
 

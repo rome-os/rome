@@ -6,6 +6,7 @@ import {
   uniqueIndex,
   real,
   primaryKey,
+  type AnySQLiteColumn,
   type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -534,8 +535,9 @@ export const romeSessions = sqliteTable(
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
     // The chat this row is one of Rome's seats in, and the platform's thread
     // id when the seat is in a thread. Null on rows that are not chats
-    // (handoff, subagent, action runs). Vocabulary: docs/domains/chats.md.
-    chatId: integer("chat_id"),
+    // (handoff, subagent, action runs). A seat belongs to its chat and ends
+    // with it. Vocabulary: docs/domains/chats.md.
+    chatId: integer("chat_id").references((): AnySQLiteColumn => chats.id, { onDelete: "cascade" }),
     // The platform of the chat at `chat_id`, so a seat holds the chat's whole
     // ref and the sidebar can index the dashboard's seats on their own.
     chatPlatform: text("chat_platform"),

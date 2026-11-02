@@ -90,19 +90,6 @@ describe("recordedSends", () => {
     expect(sessions()).toEqual([{ id: "seat-1" }]);
   });
 
-  it("sends nothing when the seat stands in no chat, so nothing goes out unrecorded", async () => {
-    const fixture = seatFixture(testDb.db);
-    // A seat in a topic the address names, whose chat is gone.
-    const group = fixture.chat("telegram", "-3", "group");
-    fixture.seat({ id: "seat-2", chat: group, accountId: BOT.id, threadId: "-300" });
-    testDb.db.run(sql`DELETE FROM chats WHERE id = ${group.id}`);
-    testDb.db.run(sql`UPDATE rome_sessions SET chat_id = ${group.id} WHERE id = 'seat-2'`);
-
-    await expect(send("telegram").send("-300" as ChatId, { text: "Lost" })).rejects.toThrow();
-    expect(sent).toEqual([]);
-    expect(lines()).toEqual([]);
-  });
-
   it("sends an email reply through the adapter, recorded once in its thread's chat", async () => {
     const reply = {
       kind: "email",

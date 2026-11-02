@@ -79,7 +79,8 @@ CREATE TABLE `__new_rome_sessions` (
 	`chat_id` integer,
 	`chat_platform` text,
 	`thread_id` text,
-	`account_id` text
+	`account_id` text,
+	FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON UPDATE no action ON DELETE cascade
 );--> statement-breakpoint
 INSERT INTO `__new_chats`("id", "platform", "key", "kind", "name", "started_at")
 SELECT rowid, platform,
