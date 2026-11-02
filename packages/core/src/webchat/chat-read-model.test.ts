@@ -419,6 +419,29 @@ describe("ChatReadModel", () => {
       ]);
     });
 
+    it("finds a line as each seat's transcript draws it, under its first turn link", async () => {
+      const chat = fixture.chat("webchat", "chat-4", "group", "Four");
+      fixture.seat({ id: "seat-a", chat, accountId: "guardian", createdAt: new Date(0) });
+      fixture.seat({ id: "seat-b", chat, accountId: "agent:b", createdAt: new Date(0) });
+      const asked = fixture.say({
+        id: "m-1",
+        chat,
+        from: "guardian",
+        text: "plan beta",
+        at: new Date(1_000_000),
+      });
+      links.prompt(asked, "seat-a", "turn-a");
+      links.seen([asked], "seat-b", "turn-b");
+
+      const hits = await reads.search("beta", 10);
+
+      expect(hits.map((hit) => [hit.chatId, hit.role]).sort()).toEqual([
+        ["seat-a", "user"],
+        ["seat-b", "user"],
+      ]);
+      expect((await reads.chatTranscript("seat-b"))?.lines.map((l) => l.role)).toEqual(["user"]);
+    });
+
     it("finds a line only for a seat whose transcript draws it", async () => {
       const chat = fixture.chat("webchat", "chat-3", "group", "Three");
       fixture.seat({ id: "open", chat, accountId: "guardian", createdAt: new Date(0) });

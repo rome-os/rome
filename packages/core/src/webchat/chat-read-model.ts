@@ -100,13 +100,6 @@ const SNIPPET_CONTEXT = 40;
 const SNIPPET_LENGTH = 160;
 const LIKE_ESCAPE = "\\";
 
-/** The role a chat message `m` draws as, given the turn link `l` the
- *  transcript picked for it. */
-const lineRole = sql.raw(`CASE
-  WHEN m.sender_agent IS NOT NULL THEN 'assistant'
-  WHEN l.role = 'prompt' THEN 'user'
-  ELSE 'notification' END`);
-
 export class ChatReadModel {
   private readonly messages: Pick<MessageRepository, "read" | "idOf" | "byIds">;
   private readonly links: Pick<TurnLinks, "turnsOf">;
@@ -439,24 +432,28 @@ export class ChatReadModel {
       sql` AND `,
     );
     const rows = await this.db.all<{
+      line: number;
       id: string;
       chat_id: string;
-      role: ChatSearchHit["role"];
+      from_rome: number;
       text: string;
       said_at: number;
     }>(sql`
-      SELECT m.key AS id, s.id AS chat_id, ${lineRole} AS role, m.text, m.said_at
+      SELECT m.id AS line, m.key AS id, s.id AS chat_id,
+        m.sender_agent IS NOT NULL AS from_rome, m.text, m.said_at
       FROM ${CHAT_LINES} m
       JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
       -- A seat finds what its transcript draws: its own thread, from when it
       -- joined.
       JOIN rome_sessions s ON s.chat_id = c.id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at
-      LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       WHERE ${matchesEveryTerm}
       ORDER BY m.said_at DESC, m.id DESC
       LIMIT ${SEARCH_SCAN_LIMIT}
     `);
+    // A hit draws as its line does in the transcript, under the line's
+    // first turn link whichever seat holds it.
+    const links = this.links.turnsOf(rows.map((row) => row.line));
     const hits: ChatSearchHit[] = [];
     const seen = new Set<string>();
     for (const row of rows) {
@@ -467,7 +464,11 @@ export class ChatReadModel {
       hits.push({
         chatId: row.chat_id,
         messageId: row.id,
-        role: row.role,
+        role: row.from_rome
+          ? "assistant"
+          : links.get(row.line)?.role === "prompt"
+            ? "user"
+            : "notification",
         snippet,
         createdAt: new Date(row.said_at * 1000),
       });
