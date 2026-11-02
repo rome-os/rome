@@ -277,13 +277,13 @@ describe("recordedSends", () => {
   });
 
   it("answer the address a direct message landed at, and send there next", async () => {
-    landsAt.alice = "dm-99";
+    landsAt["5150"] = "dm-99";
 
-    const receipt = await send("telegram").send("alice" as ChatId, { text: "Hi Alice" });
-    await send("telegram").send("alice" as ChatId, { text: "Again" });
+    const receipt = await send("telegram").send("5150" as ChatId, { text: "Hi Alice" });
+    await send("telegram").send("5150" as ChatId, { text: "Again" });
 
     expect(receipt).toEqual({ chatId: "dm-99", messageId: "m-1" });
-    expect(sent.map((one) => one.address)).toEqual(["alice", "dm-99"]);
+    expect(sent.map((one) => one.address)).toEqual(["5150", "dm-99"]);
     expect(new Set(lines().map((line) => line.chat)).size).toBe(1);
   });
 
