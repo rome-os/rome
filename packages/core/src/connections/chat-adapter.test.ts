@@ -550,6 +550,7 @@ describe("ChatAdapters", () => {
       chatAt("telegram", "bob", { romeEnd: "rome_bot" }),
     );
   });
+});
 
 describe("namesGroup", () => {
   it("read a group from the address where the platform's ids say so, and nowhere else", () => {
