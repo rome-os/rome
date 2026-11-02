@@ -29,7 +29,7 @@ import {
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
-import { isWebchatChat } from "../db/session-kind.js";
+import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import type { MessagePart } from "../types.js";
@@ -73,62 +73,107 @@ export class ChatsWebChatRepository extends WebChatRepository {
     if (chat) this.startDashboardChat(input.id, input.name, input.agentName);
   }
 
-  /** A fork made a chat of its own keeps what it said, now said in its new
-   *  chat and linked to the turns that said it. */
+  /**
+   * A fork made a chat of its own keeps what it said, now said in its new
+   * chat and linked to the turns that said it. It becomes a chat, gets its
+   * chat and moves its lines in one transaction, so a failure leaves it a
+   * fork, and promoting it again starts over.
+   */
   override async promoteForkToChat(id: string): Promise<void> {
-    const fork = this.db
-      .select({ name: romeSessions.name, agentName: romeSessions.agentName })
-      .from(romeSessions)
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")))
-      .get();
-    if (!fork) return;
-    await super.promoteForkToChat(id);
-    this.startDashboardChat(id, fork.name, fork.agentName);
-    const standing = this.standingOf(id);
-    if (!standing) return;
-    const said = this.db
-      .select({
-        id: romeAgentMessages.id,
-        turnId: romeAgentMessages.turnId,
-        role: romeAgentMessages.role,
-        content: romeAgentMessages.content,
-        actor: romeAgentMessages.actor,
-        createdAt: romeAgentMessages.createdAt,
-      })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, id),
-          inArray(romeAgentMessages.role, ["user", "assistant"]),
-        ),
-      )
-      .orderBy(asc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid`)
-      .all();
-    for (const line of said) {
-      const parts = partsOf(line.content);
-      const fromAgent = line.role === "assistant";
-      const recorded = this.lines.record({
-        direction: "toRome",
-        key: line.id,
-        place: standing.place,
-        saidBy: fromAgent ? agentSender(standing) : dashboardSender(line.actor ?? undefined),
-        body: { text: partsText(parts) },
-        parts,
-        at: line.createdAt,
-      });
-      if (line.turnId === null || !recorded) continue;
-      if (fromAgent) this.links.answer(recorded.id, id, line.turnId);
-      else this.links.prompt(recorded.id, id, line.turnId);
-    }
-    this.db
-      .delete(romeAgentMessages)
-      .where(
-        and(
-          eq(romeAgentMessages.sessionId, id),
-          inArray(romeAgentMessages.role, ["user", "assistant"]),
-        ),
-      )
-      .run();
+    this.db.transaction(() => {
+      const fork = this.db
+        .select({ name: romeSessions.name, agentName: romeSessions.agentName })
+        .from(romeSessions)
+        .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")))
+        .get();
+      if (!fork) return;
+      // As WebChatRepository promotes it: an ordinary chat at its own
+      // address, its unread clock started.
+      this.db
+        .update(romeSessions)
+        .set({
+          type: storedSessionType("webchat"),
+          sourceChannel: "webchat",
+          sourceThreadId: sql`${romeSessions.id}`,
+          lastSeenActivityAt: sql`${romeSessions.activityAt}`,
+        })
+        .where(eq(romeSessions.id, id))
+        .run();
+      this.startDashboardChat(id, fork.name, fork.agentName);
+      const standing = this.standingOf(id);
+      if (!standing) throw new Error(`Promoted fork ${id} stands in no chat`);
+      const said = this.db
+        .select({
+          id: romeAgentMessages.id,
+          turnId: romeAgentMessages.turnId,
+          role: romeAgentMessages.role,
+          content: romeAgentMessages.content,
+          actor: romeAgentMessages.actor,
+          createdAt: romeAgentMessages.createdAt,
+        })
+        .from(romeAgentMessages)
+        .where(
+          and(
+            eq(romeAgentMessages.sessionId, id),
+            inArray(romeAgentMessages.role, ["user", "assistant"]),
+          ),
+        )
+        .orderBy(asc(romeAgentMessages.createdAt), sql`${romeAgentMessages}.rowid`)
+        .all();
+      for (const line of said) {
+        const parts = partsOf(line.content);
+        const fromAgent = line.role === "assistant";
+        const recorded = this.lines.record({
+          direction: "toRome",
+          key: line.id,
+          place: standing.place,
+          saidBy: fromAgent ? agentSender(standing) : dashboardSender(line.actor ?? undefined),
+          body: { text: partsText(parts) },
+          parts,
+          at: line.createdAt,
+        });
+        if (line.turnId === null || !recorded) continue;
+        if (fromAgent) this.links.answer(recorded.id, id, line.turnId);
+        else this.links.prompt(recorded.id, id, line.turnId);
+      }
+      this.db
+        .delete(romeAgentMessages)
+        .where(
+          and(
+            eq(romeAgentMessages.sessionId, id),
+            inArray(romeAgentMessages.role, ["user", "assistant"]),
+          ),
+        )
+        .run();
+    });
+  }
+
+  /**
+   * Append a turn's trace blocks. The prompt and answer they carry are said
+   * in the chat of a session that stands in one, such as a fork promoted
+   * while its turn ran, and the trace stays the session's own.
+   */
+  override async appendTraceBlocks(
+    input: Parameters<WebChatRepository["appendTraceBlocks"]>[0],
+  ): Promise<void> {
+    const said = input.transcriptMessages ?? [];
+    if (input.blocks.length === 0 || said.length === 0) return super.appendTraceBlocks(input);
+    const inChat = said.flatMap((message) => {
+      const standing = this.standingOf(message.sessionId);
+      return standing ? [{ message, standing }] : [];
+    });
+    if (inChat.length === 0) return super.appendTraceBlocks(input);
+    const own = said.filter((message) => !inChat.some((line) => line.message === message));
+    // In the order the base class writes them: prompt, trace, answer.
+    const sayAll = async (role: "user" | "assistant") => {
+      for (const { message, standing } of inChat) {
+        if (message.role !== role) continue;
+        await this.say(standing, message.id, role, partsOf(message.content), message.turnId);
+      }
+    };
+    await sayAll("user");
+    await super.appendTraceBlocks({ ...input, transcriptMessages: own });
+    await sayAll("assistant");
   }
 
   override async recordUserInput(
@@ -459,7 +504,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
         // that key already.
         async () => ({ key }),
       );
-      if (sent.id !== null && turnId) this.links.answer(sent.id, standing.sessionId, turnId);
+      // Rome is the platform: a line it did not record was never said.
+      if (sent.id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
+      if (turnId) this.links.answer(sent.id, standing.sessionId, turnId);
     }
     this.advanceActivity(standing.sessionId, at);
     return at;

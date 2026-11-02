@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { type Message, type RecordedMessage } from "../chats/storage/message.js";
+import { MessageRepository, type Sent } from "../chats/storage/message-repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
@@ -124,5 +126,80 @@ describe("ChatsWebChatRepository", () => {
       ["in-1", "user", "turn-1"],
       ["out-1", "assistant", "turn-1"],
     ]);
+  });
+  it("says the prompt and answer of a fork promoted while its turn runs in its chat", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.promoteForkToChat("fork-1");
+    await repo.appendTraceBlocks({
+      messageId: "trace-1",
+      sessionId: "fork-1",
+      turnId: "turn-1",
+      startSeq: 0,
+      blocks: [{ type: "text", content: "thinking" }],
+      transcriptMessages: [
+        { id: "in-1", sessionId: "fork-1", turnId: "turn-1", role: "user", content: text("Hi") },
+        {
+          id: "out-1",
+          sessionId: "fork-1",
+          turnId: "turn-1",
+          role: "assistant",
+          content: text("Hello"),
+        },
+      ],
+    });
+
+    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["trace"]);
+    expect(
+      (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
+    ).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["trace-1", "trace", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+  });
+
+  it("leaves a fork whose promotion failed a fork, so promoting it again finishes", async () => {
+    let failures = 1;
+    class Failing extends MessageRepository {
+      override record(message: Message): RecordedMessage | null {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("disk full");
+        }
+        return super.record(message);
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, {
+      links,
+      lines: new Failing(testDb.db),
+    });
+    await failing.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await failing.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
+
+    await expect(failing.promoteForkToChat("fork-1")).rejects.toThrow("disk full");
+    expect(session("fork-1")?.type).toBe("fork");
+    expect(session("fork-1")?.chatId).toBeNull();
+    expect(ownRows("fork-1")).toHaveLength(1);
+
+    await failing.promoteForkToChat("fork-1");
+    expect(session("fork-1")?.chatId).not.toBeNull();
+    expect((await failing.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+  });
+
+  it("refuses an answer it could not record", async () => {
+    class Unrecorded extends MessageRepository {
+      override async send(): Promise<Sent> {
+        return { id: null, key: "lost", recorded: false, at: new Date() };
+      }
+    }
+    const unrecorded = new ChatsWebChatRepository(testDb.db, {
+      links,
+      lines: new Unrecorded(testDb.db),
+    });
+    await unrecorded.createSession("chat-1", "Plans");
+
+    await expect(unrecorded.addBackendReplyMessage("chat-1", "turn-1", "Hello")).rejects.toThrow(
+      "could not be recorded",
+    );
   });
 });
