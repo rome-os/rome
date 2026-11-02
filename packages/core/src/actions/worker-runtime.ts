@@ -13,6 +13,7 @@ import { noAccountLinks } from "../channels/account-links.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
+import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -177,6 +178,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       personMappingRepo: appPersonMapping(peopleRepo, (name) =>
         channelRecords.platformOfChannel(name),
       ),
+      people: appPeople(peopleRepo),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,

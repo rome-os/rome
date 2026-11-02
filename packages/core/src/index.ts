@@ -81,6 +81,7 @@ import { runMigrations } from "./db/migrate.js";
 import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PeopleRepository } from "./db/repositories/people.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
+import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
@@ -1184,6 +1185,7 @@ async function main() {
     conversationSettings: appChatSettings,
     capabilityDiscovery,
     personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
+    people: appPeople(peopleRepo),
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
