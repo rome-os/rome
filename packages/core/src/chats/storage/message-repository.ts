@@ -110,6 +110,12 @@ export class MessageRepository {
     if (!message.saidBy.agent) {
       throw new Error("A message Rome sends needs the agent that said it");
     }
+    // Only the account's id is kept; its platform is the chat's.
+    if (message.saidBy.account.platform !== message.place.chat.platform) {
+      throw new Error(
+        `A message in a ${message.place.chat.platform} chat cannot be said by a ${message.saidBy.account.platform} account`,
+      );
+    }
     const chat = this.chatOf(message.place);
     // A quote names a line in the same chat: a key is unique only there.
     const quoted =
@@ -133,8 +139,14 @@ export class MessageRepository {
           senderName: message.saidBy.name ?? null,
           text: partsText(message.parts),
           parts: JSON.stringify(message.parts),
+          // A quote by key links once Rome holds that line, which it may by
+          // now even when it did not before the send.
           replyToMessageId:
-            typeof message.replyTo === "number" && quoted !== null ? message.replyTo : null,
+            quoted === null
+              ? null
+              : typeof message.replyTo === "number"
+                ? message.replyTo
+                : this.idIn(chat.id, quoted),
           saidAt: at,
         })
         .onConflictDoNothing()
