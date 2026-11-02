@@ -155,7 +155,8 @@ Chats records each chat once, keyed by an integer, with the adapter's key beside
 ### Invariants
 
 - Every legacy chat row stands for exactly one chat line, and a group message heard on two of Rome's accounts is one line with a turn link per seat.
-- A seat gets its chat with its first line, so a direct message on a platform with opaque DM ids is keyed by the person who wrote first, as the backfill keys it.
+- A seat gets its chat with its first line, so a direct message on a platform with opaque DM ids is keyed by the person who wrote first, as the backfill keys it. One Rome wrote first is keyed by its address until the person answers, then takes their key.
+- A quote resolves whenever the line it names is on record, including a later part of a reply Rome sent in several messages, in whichever order they arrive.
 - A chat goes when its last seat goes, with its lines and turn links.
 - A seat whose kind is learned later, such as a place first met sending and then found to be a group, moves to the chat its key now names, with its lines.
 - What a line says, and who said it, changes only with what its rows say. A line Rome said stays Rome's, whichever account's row recorded it first.

@@ -397,4 +397,98 @@ describe("0105_chats_tables triggers", () => {
       n: 1,
     });
   });
+  it("key a direct message Rome wrote first by the person once they answer", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+    sqlite.exec(`
+      INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id, source_thread_type,
+        agent_name, created_at, activity_at)
+      VALUES ('channel:sales:oc_p2p', 'oc_p2p', 'channel', 'sales', 'oc_p2p', 'private', 'sales', 60, 60);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('intro', 'channel:sales:oc_p2p', 'turn-12', 'assistant', '[{"type":"text","content":"Hi Wei"}]', 'om_8', 600);
+    `);
+    const keyOfSeat = sqlite.prepare(
+      `SELECT c.key, (SELECT count(*) FROM chat_messages m WHERE m.chat_id = c.id) AS lines
+       FROM rome_sessions s JOIN chats c ON c.id = s.chat_id WHERE s.id = 'channel:sales:oc_p2p'`,
+    );
+    expect(keyOfSeat.get()).toEqual({ key: "dm:bot-sales:oc_p2p", lines: 1 });
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('wei-back', 'channel:sales:oc_p2p', 'turn-13', 'user', '[{"type":"text","content":"Hi!"}]', 'om_9', 'ou_wei', 601);
+    `);
+
+    expect(keyOfSeat.get()).toEqual({ key: "dm:bot-sales:ou_wei", lines: 2 });
+    expect(
+      sqlite
+        .prepare("SELECT chat_key, address FROM channel_addresses WHERE address = 'oc_p2p'")
+        .all(),
+    ).toEqual([{ chat_key: "dm:bot-sales:ou_wei", address: "oc_p2p" }]);
+  });
+
+  it("keep Rome's whole reply when another account heard only its first part", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, role, content, platform_message_id, sender_id, created_at)
+      VALUES ('stream-heard', 'channel:support:oc_launch', 'notification', '[{"type":"text","content":"The price"}]', 'om_4', 'bot-sales', 300);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('stream', 'channel:sales:oc_launch', 'turn-8', 'assistant', '[{"type":"text","content":"The price is 10."}]', 'om_4', 300);
+    `);
+
+    expect(
+      sqlite.prepare("SELECT text, sender_agent FROM chat_messages WHERE key = 'om_4'").all(),
+    ).toEqual([{ text: "The price is 10.", sender_agent: "sales" }]);
+  });
+
+  it("resolve a quote of a reply's later part, whether it came before that part was kept or after", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, created_at)
+      VALUES ('long', 'channel:sales:oc_launch', 'turn-8', 'assistant', '[{"type":"text","content":"Part one. Part two."}]', 'om_4', 300);
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id,
+        reply_to_platform_message_id, created_at)
+      VALUES ('re-early', 'channel:sales:oc_launch', 'turn-9', 'user', '[{"type":"text","content":"Two?"}]', 'om_6', 'ou_wei', 'om_5', 301);
+      INSERT INTO rome_agent_message_platform_ids (session_id, platform_message_id, message_id)
+        VALUES ('channel:sales:oc_launch', 'om_5', 'long');
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, platform_message_id, sender_id,
+        reply_to_platform_message_id, created_at)
+      VALUES ('re-late', 'channel:sales:oc_launch', 'turn-10', 'user', '[{"type":"text","content":"Two!"}]', 'om_7', 'ou_wei', 'om_5', 302);
+    `);
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT m.text, q.text AS quoted FROM chat_messages m JOIN chat_messages q ON q.id = m.reply_to_message_id
+           WHERE m.key IN ('om_6', 'om_7') ORDER BY m.id`,
+        )
+        .all(),
+    ).toEqual([
+      { text: "Two?", quoted: "Part one. Part two." },
+      { text: "Two!", quoted: "Part one. Part two." },
+    ]);
+  });
+
+  it("name the agent account that wrote on the dashboard as its sender", () => {
+    const sqlite = databaseBefore(TAG);
+    migrate(sqlite);
+    sqlite.exec(GROUP_AND_DASHBOARD);
+
+    sqlite.exec(`
+      INSERT INTO rome_agent_messages (id, session_id, turn_id, role, content, sender_id, created_at)
+      VALUES ('from-concierge', 'chat-1', 'turn-2', 'user', '[{"type":"text","content":"Done"}]', 'core:concierge', 300);
+    `);
+
+    expect(
+      sqlite
+        .prepare("SELECT sender_account_id FROM chat_messages WHERE key = 'from-concierge'")
+        .get(),
+    ).toEqual({ sender_account_id: "core:concierge" });
+  });
 });
