@@ -228,6 +228,51 @@ describe("ChatReadModel", () => {
       expect(transcript?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
     });
 
+    it("draws a line each of Rome's accounts holds a copy of once, with every copy's turn traced", async () => {
+      const chat = fixture.chat("telegram", "-42", "group");
+      fixture.seat({ id: "sales", chat, accountId: "bot-sales" });
+      fixture.seat({ id: "support", chat, accountId: "bot-support" });
+      const heard = (id: string, seconds: number) =>
+        fixture.say({ id, chat, from: "wei", text: "hi", at: new Date(seconds * 1000) });
+      heard("bot-sales:4", 999);
+      heard("bot-support:8", 999);
+      const mine = heard("bot-sales:5", 1_000);
+      const theirs = heard("bot-support:9", 1_000);
+      links.prompt(theirs, "support", "turn-p");
+      links.prompt(mine, "sales", "turn-s");
+      await traceAt("sales", "trace-s", "turn-s", 1_001);
+      await traceAt("support", "trace-p", "turn-p", 1_002);
+      links.answer(
+        fixture.say({
+          id: "bot-sales:6",
+          chat,
+          from: "bot-sales",
+          agent: "main",
+          at: new Date(1_003_000),
+        }),
+        "sales",
+        "turn-s",
+      );
+
+      const whole = await reads.chatTranscript("sales");
+      expect(whole?.lines.map((l) => [l.id, l.turnId])).toEqual([
+        ["bot-sales:4", null],
+        ["bot-sales:5", "turn-s"],
+        ["bot-sales:6", "turn-s"],
+      ]);
+      expect(whole?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
+
+      const newest = await reads.chatTranscript("sales", { limit: 1 });
+      expect(newest?.lines.map((l) => l.id)).toEqual(["bot-sales:5", "bot-sales:6"]);
+      expect(newest?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
+      const older = await reads.chatTranscript("sales", {
+        limit: 1,
+        before: newest?.nextCursor ?? null,
+      });
+      expect(older?.lines.map((l) => l.id)).toEqual(["bot-sales:4"]);
+      expect(older?.nextCursor).toBeNull();
+    });
+
     it("draws a line no turn took as a notification, and leaves out what was said before the seat", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
       fixture.seat({
