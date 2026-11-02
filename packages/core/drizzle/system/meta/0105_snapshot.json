@@ -759,72 +759,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "channel_addresses": {
-      "name": "channel_addresses",
-      "columns": {
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chat_key": {
-          "name": "chat_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
-        },
-        "address": {
-          "name": "address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_channel_addresses_address": {
-          "name": "idx_channel_addresses_address",
-          "columns": [
-            "platform",
-            "account_id",
-            "address"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "channel_addresses_platform_account_id_chat_key_thread_id_pk": {
-          "columns": [
-            "platform",
-            "account_id",
-            "chat_key",
-            "thread_id"
-          ],
-          "name": "channel_addresses_platform_account_id_chat_key_thread_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "channels": {
       "name": "channels",
       "columns": {
@@ -898,6 +832,72 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "chat_addresses": {
+      "name": "chat_addresses",
+      "columns": {
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_key": {
+          "name": "chat_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_chat_addresses_address": {
+          "name": "idx_chat_addresses_address",
+          "columns": [
+            "platform",
+            "account_id",
+            "address"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "chat_addresses_platform_account_id_chat_key_thread_id_pk": {
+          "columns": [
+            "platform",
+            "account_id",
+            "chat_key",
+            "thread_id"
+          ],
+          "name": "chat_addresses_platform_account_id_chat_key_thread_id_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

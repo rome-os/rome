@@ -46,7 +46,7 @@ CREATE TABLE `agent_turn_messages` (
 --> statement-breakpoint
 CREATE INDEX `idx_agent_turn_messages_turn` ON `agent_turn_messages` (`session_id`,`turn_id`);
 --> statement-breakpoint
-CREATE TABLE `channel_addresses` (
+CREATE TABLE `chat_addresses` (
 	`platform` text NOT NULL,
 	`account_id` text NOT NULL,
 	`chat_key` text NOT NULL,
@@ -55,7 +55,7 @@ CREATE TABLE `channel_addresses` (
 	PRIMARY KEY(`platform`, `account_id`, `chat_key`, `thread_id`)
 );
 --> statement-breakpoint
-CREATE INDEX `idx_channel_addresses_address` ON `channel_addresses` (`platform`,`account_id`,`address`);
+CREATE INDEX `idx_chat_addresses_address` ON `chat_addresses` (`platform`,`account_id`,`address`);
 --> statement-breakpoint
 CREATE TABLE `legacy_chat_line_ids` (
 	`legacy_id` text PRIMARY KEY NOT NULL,
@@ -199,7 +199,7 @@ UPDATE `rome_sessions` SET
 WHERE `chat_id` IS NULL AND 1
   AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
 --> statement-breakpoint
-INSERT OR IGNORE INTO `channel_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
+INSERT OR IGNORE INTO `chat_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
 SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
 FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
 WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
@@ -280,7 +280,7 @@ BEGIN
     `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
   WHERE `chat_id` IS NULL AND `id` IN (NEW.`session_id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`session_id`))
     AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
-  INSERT OR IGNORE INTO `channel_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
+  INSERT OR IGNORE INTO `chat_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
   SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
   FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
   WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
@@ -366,7 +366,7 @@ BEGIN
     `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
   WHERE `chat_id` IS NULL AND `id` IN (NEW.`session_id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`session_id`))
     AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
-  INSERT OR IGNORE INTO `channel_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
+  INSERT OR IGNORE INTO `chat_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
   SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
   FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
   WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
@@ -484,7 +484,7 @@ BEGIN
     `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
   WHERE `chat_id` IS NULL AND `id` IN (NEW.`id`, (SELECT p.`parent_session_id` FROM `rome_sessions` p WHERE p.`id` = NEW.`id`))
     AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
-  INSERT OR IGNORE INTO `channel_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
+  INSERT OR IGNORE INTO `chat_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
   SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
   FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
   WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
@@ -543,7 +543,7 @@ WHEN NEW.`chat_id` IS NOT NULL AND EXISTS (SELECT 1 FROM `legacy_chat_seats` s J
     AND (s.`platform` IS NOT c.`platform` OR s.`key` IS NOT c.`key` OR s.`kind` IS NOT c.`kind`
       OR s.`account_id` IS NOT NEW.`account_id`))
 BEGIN
-  DELETE FROM `channel_addresses` WHERE `account_id` = NEW.`account_id`
+  DELETE FROM `chat_addresses` WHERE `account_id` = NEW.`account_id`
     AND (`platform`, `chat_key`) IN (SELECT c.`platform`, c.`key` FROM `chats` c WHERE c.`id` = NEW.`chat_id`);
   DELETE FROM `agent_turn_messages` WHERE `session_id` IN (SELECT o.`id` FROM `rome_sessions` o WHERE o.`id` = NEW.`id` OR (o.`parent_session_id` = NEW.`id` AND o.`chat_id` = NEW.`chat_id`));
   DELETE FROM `chat_messages` WHERE `id` IN (SELECT i.`message_id` FROM `legacy_chat_line_ids` i WHERE i.`legacy_id` IN (SELECT m.`id` FROM `rome_agent_messages` m WHERE m.`session_id` IN (SELECT o.`id` FROM `rome_sessions` o WHERE o.`id` = NEW.`id` OR (o.`parent_session_id` = NEW.`id` AND o.`chat_id` = NEW.`chat_id`))))
@@ -576,7 +576,7 @@ BEGIN
     `account_id` = (SELECT s.`account_id` FROM `legacy_chat_seats` s WHERE s.`session_id` = `rome_sessions`.`id`)
   WHERE `chat_id` IS NULL AND (`id` = NEW.`id` OR `parent_session_id` = NEW.`id`)
     AND `id` IN (SELECT s.`session_id` FROM `legacy_chat_seats` s WHERE s.`is_thread`);
-  INSERT OR IGNORE INTO `channel_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
+  INSERT OR IGNORE INTO `chat_addresses` (`platform`, `account_id`, `chat_key`, `thread_id`, `address`)
   SELECT c.`platform`, r.`account_id`, c.`key`, coalesce(r.`thread_id`, ''), r.`source_thread_id`
   FROM `rome_sessions` r JOIN `chats` c ON c.`id` = r.`chat_id`
   WHERE c.`platform` <> 'webchat' AND r.`account_id` IS NOT NULL AND r.`source_thread_id` IS NOT NULL
@@ -664,7 +664,7 @@ WHEN NEW.`role` IN ('user', 'notification') AND NEW.`sender_id` IS NOT NULL AND 
       AND c.`key` = 'dm:' || r.`account_id` || ':' || r.`source_thread_id`
       AND NEW.`sender_id` <> r.`source_thread_id`)
 BEGIN
-  UPDATE `channel_addresses` SET `chat_key` = (SELECT s.`key` FROM `legacy_chat_seats` s WHERE s.`session_id` = NEW.`session_id`)
+  UPDATE `chat_addresses` SET `chat_key` = (SELECT s.`key` FROM `legacy_chat_seats` s WHERE s.`session_id` = NEW.`session_id`)
   WHERE `account_id` = (SELECT r.`account_id` FROM `rome_sessions` r WHERE r.`id` = NEW.`session_id`)
     AND (`platform`, `chat_key`) IN (SELECT c.`platform`, c.`key` FROM `chats` c WHERE c.`id` = (SELECT r.`chat_id` FROM `rome_sessions` r WHERE r.`id` = NEW.`session_id`))
     AND NOT EXISTS (SELECT 1 FROM `rome_sessions` o WHERE o.`chat_id` = (SELECT r.`chat_id` FROM `rome_sessions` r WHERE r.`id` = NEW.`session_id`) AND o.`id` <> NEW.`session_id`) AND NOT EXISTS (SELECT 1 FROM `chats` t WHERE t.`platform` = (SELECT c.`platform` FROM `chats` c WHERE c.`id` = (SELECT r.`chat_id` FROM `rome_sessions` r WHERE r.`id` = NEW.`session_id`)) AND t.`key` = (SELECT s.`key` FROM `legacy_chat_seats` s WHERE s.`session_id` = NEW.`session_id`));
@@ -698,7 +698,7 @@ END;
 CREATE TRIGGER `legacy_chat_seat_delete` AFTER DELETE ON `rome_sessions`
 WHEN OLD.`chat_id` IS NOT NULL
 BEGIN
-  DELETE FROM `channel_addresses` WHERE `account_id` = OLD.`account_id` AND `thread_id` = coalesce(OLD.`thread_id`, '')
+  DELETE FROM `chat_addresses` WHERE `account_id` = OLD.`account_id` AND `thread_id` = coalesce(OLD.`thread_id`, '')
     AND (`platform`, `chat_key`) IN (SELECT c.`platform`, c.`key` FROM `chats` c WHERE c.`id` = OLD.`chat_id`);
   DELETE FROM `agent_turn_messages` WHERE `session_id` = OLD.`id`;
   DELETE FROM `agent_turn_messages` WHERE `message_id` IN (SELECT m.`id` FROM `chat_messages` m WHERE m.`chat_id` = OLD.`chat_id`)

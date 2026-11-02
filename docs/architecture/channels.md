@@ -150,7 +150,7 @@ The account's history is encrypted at rest with a key the client derives only at
 
 ## Chats storage
 
-Chats records each chat once, keyed by an integer, with the adapter's key beside it (see [Chats](../domains/chats.md#chat)). The chats, their messages, the turn links that tie a message to an agent's turn, and the channels layer's addresses each have a table of their own. Until every writer records through Chats, the legacy chat rows stay the source and the 0105 migration's triggers copy each change into the new tables.
+Chats records each chat once, keyed by an integer, with the adapter's key beside it (see [Chats](../domains/chats.md#chat)). The chats, their messages, the turn links that tie a message to an agent's turn, and the adapters' addresses (`chat_addresses`) each have a table of their own. Until every writer records through Chats, the legacy chat rows stay the source and the 0105 migration's triggers copy each change into the new tables.
 
 ### Invariants
 

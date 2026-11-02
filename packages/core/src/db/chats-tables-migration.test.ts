@@ -185,7 +185,7 @@ describe("0105_chats_tables backfill", () => {
     expect(
       sqlite
         .prepare(
-          "SELECT platform, account_id, chat_key, thread_id, address FROM channel_addresses ORDER BY platform",
+          "SELECT platform, account_id, chat_key, thread_id, address FROM chat_addresses ORDER BY platform",
         )
         .all(),
     ).toEqual([
@@ -421,9 +421,7 @@ describe("0105_chats_tables triggers", () => {
 
     expect(keyOfSeat.get()).toEqual({ key: "dm:bot-sales:ou_wei", lines: 2 });
     expect(
-      sqlite
-        .prepare("SELECT chat_key, address FROM channel_addresses WHERE address = 'oc_p2p'")
-        .all(),
+      sqlite.prepare("SELECT chat_key, address FROM chat_addresses WHERE address = 'oc_p2p'").all(),
     ).toEqual([{ chat_key: "dm:bot-sales:ou_wei", address: "oc_p2p" }]);
   });
 

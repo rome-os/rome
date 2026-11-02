@@ -646,12 +646,12 @@ export const agentTurnMessages = sqliteTable(
   ],
 );
 
-// The channels layer's address store: where one of Rome's accounts reaches a
+// The adapters' address store: where one of Rome's accounts reaches a
 // chat, or a thread in it, when the chat's key is not its address, as on a
 // platform that gives a direct message an id of its own (Feishu's p2p chat,
 // Discord's DM channel). Chats never reads it.
-export const channelAddresses = sqliteTable(
-  "channel_addresses",
+export const chatAddresses = sqliteTable(
+  "chat_addresses",
   {
     platform: text("platform").notNull(),
     // Rome's account, by its platform id.
@@ -663,7 +663,7 @@ export const channelAddresses = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.platform, table.accountId, table.chatKey, table.threadId] }),
-    index("idx_channel_addresses_address").on(table.platform, table.accountId, table.address),
+    index("idx_chat_addresses_address").on(table.platform, table.accountId, table.address),
   ],
 );
 
