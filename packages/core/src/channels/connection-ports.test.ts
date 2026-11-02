@@ -61,7 +61,7 @@ describe("connection-backed send, across epochs", () => {
     await expect(direct.chatFor("7")).resolves.toBe("second");
   });
 
-  it("answers a direct lookup taken while talk is locked as not connected, not as unsupported", async () => {
+  it("answers a direct lookup taken while talk is locked as not connected, and again once it unlocks", async () => {
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(createTestDb().db),
     });
@@ -75,6 +75,12 @@ describe("connection-backed send, across epochs", () => {
       ?.direct;
     expect(direct).not.toBeNull();
     await expect(direct!.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    const talker = fx.talkerFactory.instances.at(-1);
+    if (!talker) throw new Error("talker not built");
+    talker.directMessaging = { chatFor: async () => "after-unlock" as ChatId };
+    await expect(direct!.chatFor("7")).resolves.toBe("after-unlock");
   });
 });
 

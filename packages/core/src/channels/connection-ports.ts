@@ -261,9 +261,9 @@ async function callTalker<T>(
 
 function connectionSend(backing: Backing): ChannelSend {
   const { channel } = backing;
-  // What `direct` answers while no Connection exists for the channel, or its
-  // talk is locked: the lookup itself says so, the way `send` does, rather
-  // than passing for a channel that cannot reach an account directly.
+  // What `direct` answers while no Connection exists for the channel: the
+  // lookup itself says so, the way `send` does, rather than passing for a
+  // channel that cannot reach an account directly.
   const notConnected = () => Promise.reject(new ChannelNotConnected(channel));
   const unbacked: ChannelDirectMessaging = { chatFor: notConnected, conversationFor: notConnected };
   return {
@@ -280,9 +280,10 @@ function connectionSend(backing: Backing): ChannelSend {
     get direct() {
       const connection = connectionFor(backing);
       if (!connection) return unbacked;
+      // While talk is locked, nothing says direct messaging is missing, so the
+      // lookup stands and asks whichever talker is live when it is called.
       const offered = connection.withTalker((talker) => talker.directMessaging !== undefined);
-      if (offered === undefined) return unbacked;
-      if (!offered) return null;
+      if (offered === false) return null;
       const chatFor = (channelUserId: string) =>
         callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId));
       const direct: ChannelDirectMessaging = { chatFor, conversationFor: chatFor };
