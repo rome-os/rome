@@ -317,7 +317,9 @@ export class ChatReadModel {
       turn_at: number;
     }>(sql`
       WITH line AS (
-        SELECT id, turn_id, input_state, role, content,
+        -- A trace's blocks load only when the guardian opens it.
+        SELECT id, turn_id, input_state, role,
+          CASE WHEN role = 'trace' THEN '[]' ELSE content END AS content,
           json_extract(actor, '$.email') AS sender_name,
           created_at AS at, rowid AS seq, coalesce(turn_id, id) AS turn
         FROM rome_agent_messages WHERE session_id = ${sessionId}
