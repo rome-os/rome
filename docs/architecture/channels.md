@@ -42,6 +42,10 @@ A channel's `send` takes the other party's account id as a direct message's addr
 
 The adapter conformance suite ([`connections/adapter-conformance.ts`](../../packages/core/src/connections/adapter-conformance.ts)) is what every adapter owes Chats. It runs each adapter against its platform's peer through Rome's inbound recording and an app's send path, and checks only what a person sees on the peer and what Rome's transcript holds. A case Rome fails today on a platform is listed as a gap beside that platform, with why, and skipped.
 
+### Chat adapters
+
+Chats will reach a channel through its adapter ([`ChatAdapter`](../../packages/core/src/connections/chat-adapter.ts)): `start(deliver, fault)`, `stop()`, `send(chatKey, threadId, out)` and, where the channel streams, `stream`. The adapter hands each message someone else said to `deliver` under the keys above, a chat's messages one at a time, and answers the key of each message Rome sends once the platform took it. One adapter, `channelAdapter`, serves every channel over its `inbound` and `send` ports, and one registry, `ChatAdapters`, builds it once per channel. Code outside the adapter asks it for the chat at an address (`chatAt`, `ChatAdapters.chatAt`) or the key of a platform message (`lineAt`, `platformIdOfLine`), and spells no key itself. Nothing starts an adapter yet: today's inbound recording and sends still run on the channel ports.
+
 ### Channels for app actions
 
 App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels, the account each is, and whether each can send. It sends as an account and reads what was said on it, naming the account by its platform and the platform's own id (`Account` in the SDK). A channel's name still works in place of the account, for apps built before accounts and for a channel that has no account yet, such as `webchat` or a connection whose grant has not reported its account. In a worker the same calls cross to the main process over RPC.
