@@ -53,7 +53,14 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           deps.wakes.wakeDecided(event.message.id);
           return;
         }
-        const speaker = await speakerOf(deps, event, heard);
+        let speaker: string;
+        try {
+          speaker = await speakerOf(deps, event, heard);
+        } catch (error) {
+          // Never handed over, so nothing else will decide its wake.
+          deps.wakes.wakeDecided(event.message.id);
+          throw error;
+        }
         const recorded: SaidInboundEvent = {
           ...heard,
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },

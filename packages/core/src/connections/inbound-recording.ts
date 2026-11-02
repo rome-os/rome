@@ -13,12 +13,19 @@ import type { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
+import { createLogger } from "../logger.js";
 import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.js";
+
+const log = createLogger("inbound-recording");
+
+/** Most (account, message) pairs remembered as heard, past which the oldest
+ *  is forgotten. A redelivery comes soon after the delivery it repeats. */
+const HEARD_CAPACITY = 10_000;
 
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
   chats: Pick<ChatRepository, "start">;
-  messages: Pick<MessageRepository, "record">;
+  messages: Pick<MessageRepository, "record" | "idOf">;
   events: ChatEvents;
   /** Each channel's chat adapter, which hands over what the channel hears. */
   adapters: Pick<ChatAdapters, "of">;
@@ -59,8 +66,9 @@ export function inboundRecording(
    *  listens. */
   const recording = new Map<string, ChannelChatAdapter>();
   let listeners = 0;
-  /** The adapter's keys of each message being heard, by its recorded id. */
-  const hearing = new Map<number, { chat: string; key: string }>();
+  /** The adapter's keys of each message being heard, by channel and recorded
+   *  id. */
+  const hearing = new Map<string, { chat: string; key: string }>();
 
   /** The last recording queued in each place, by channel, chat and thread.
    *  An adapter delivers a place's messages one at a time, but a recording
@@ -68,29 +76,58 @@ export function inboundRecording(
    *  delivered once recording starts again, waits for it here. */
   const tails = new Map<string, Promise<number | null>>();
 
+  /**
+   * Which of Rome's accounts each recorded message was raised for, as
+   * `<account>\0<id>`, oldest first. Where the platform numbers a chat's
+   * messages once for everyone, two of Rome's accounts there hear the same
+   * line: it is recorded once and raised for each, while a redelivery to the
+   * same account raises nothing. Kept in memory, like the wakes in flight: a
+   * restart forgets it.
+   */
+  const raised = new Set<string>();
+  const raise = (account: string, id: number): boolean => {
+    const key = `${account}\0${id}`;
+    if (raised.has(key)) return false;
+    raised.add(key);
+    if (raised.size > HEARD_CAPACITY) {
+      const oldest = raised.values().next().value;
+      if (oldest !== undefined) raised.delete(oldest);
+    }
+    return true;
+  };
+
   const recordOne = async (message: Inbound): Promise<number | null> => {
     const { via } = message;
+    // A message still queued when the last listener left is dropped, as it
+    // is for any hook swap: nobody is there to hear it.
+    if (recording.get(via.channel) === undefined) return null;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) return null;
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
     // Recorded and raised in one step, with nothing run in between, so
     // MessageSaid's first listener acts before anything reads the message. A
-    // redelivery carries the same key, records nothing and raises nothing.
-    const recorded = deps.messages.record(
-      messageToRome({
-        key: message.key,
-        place: placeIn(chat.ref, message.thread?.id),
-        saidBy: {
-          account: { platform: chat.ref.platform, id: message.sender.accountId },
-          ...(message.sender.name === undefined ? {} : { name: message.sender.name }),
-        },
-        body: { text: message.text, attachments: [...message.attachments] },
-        ...(message.replyTo ? { replyTo: message.replyTo } : {}),
-        at: message.saidAt,
-      }),
-    );
-    if (!recorded) return null;
-    hearing.set(recorded.id, { chat: message.chat.externalId, key: message.key });
+    // line on record already is raised only for an account it was not raised
+    // for: a redelivery records nothing and raises nothing.
+    const said = messageToRome({
+      key: message.key,
+      place: placeIn(chat.ref, message.thread?.id),
+      saidBy: {
+        account: { platform: chat.ref.platform, id: message.sender.accountId },
+        ...(message.sender.name === undefined ? {} : { name: message.sender.name }),
+      },
+      body: { text: message.text, attachments: [...message.attachments] },
+      ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+      at: message.saidAt,
+    });
+    const fresh = deps.messages.record(said);
+    const id = fresh?.id ?? deps.messages.idOf(chat.ref, message.key);
+    if (id === null || !raise(via.account.id, id)) return null;
+    // Raised again for another account, the line is the one on record, as
+    // this account heard it.
+    const { replyTo: _quote, ...unquoted } = said;
+    const recorded = fresh ?? { ...unquoted, id };
+    const hearingAs = `${via.channel}\0${id}`;
+    hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
     try {
       await deps.events.publish({
         type: "MessageSaid",
@@ -98,7 +135,7 @@ export function inboundRecording(
         via: { channel: via.channel, account: via.account },
       });
     } finally {
-      hearing.delete(recorded.id);
+      hearing.delete(hearingAs);
     }
     return recorded.id;
   };
@@ -120,8 +157,11 @@ export function inboundRecording(
     if (!channel.inbound || recording.has(channel.name)) return;
     const adapter = deps.adapters.of(channel);
     recording.set(channel.name, adapter);
-    adapter.start(deliver, () => {
-      // The adapter's channel reports a failed recording itself.
+    adapter.start(deliver, (error) => {
+      log.error("failed to record an inbound message", {
+        channel: channel.name,
+        error: error.message,
+      });
     });
   };
 
@@ -144,7 +184,7 @@ export function inboundRecording(
       };
     },
     heard(channel, id) {
-      const keys = hearing.get(id);
+      const keys = hearing.get(`${channel}\0${id}`);
       return keys && recording.get(channel)?.heard(keys.chat, keys.key);
     },
     addChannels(added) {
