@@ -2,6 +2,12 @@ import { claudeUsesApiKey, type AIToolProviderId, type AIToolStateValue } from "
 import type { ModelTier } from "./agent-runner.js";
 import type { ModelSelectionId } from "./model-selector.js";
 
+/** The provider out of quota when exactly one of them is, otherwise null. */
+export function soleExhaustedProvider(state: AIToolStateValue): AIToolProviderId | null {
+  if (state.codex.quotaExhausted === state.claude.quotaExhausted) return null;
+  return state.codex.quotaExhausted ? "openai" : "anthropic";
+}
+
 /**
  * The model a click would move a chat to when `from` is out of subscription
  * quota, or null when there is no such offer. Pass raw account state, not the

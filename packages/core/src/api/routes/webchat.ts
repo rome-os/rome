@@ -66,7 +66,7 @@ import {
   resolveWebchatLargeModelSelection,
   type WebchatLargeModelSelection,
 } from "../../core/model-selector.js";
-import { quotaSwitchTarget } from "../../core/quota-switch.js";
+import { quotaSwitchTarget, soleExhaustedProvider } from "../../core/quota-switch.js";
 import { isConciergeAgent } from "../../concierge/service.js";
 import { toModelResolutionErrorPayload } from "../../core/model-resolver.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
@@ -2631,16 +2631,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
     if (config.providerId || config.modelId) return null;
-    const channelThreadKey = webchatSessionKey(session.id);
-    // Only a successful turn records the provider, so an unpinned chat whose
-    // first turn failed names it only through its open session.
+    const state = deps.aiToolState.get();
+    // Only a successful turn records a provider. A chat with none yet can only
+    // have failed on the provider marked out of quota.
     const provider =
       resolveWebchatLargeModelSelection(session.largeModelSelection)?.providerId ??
-      (await deps.sessionManager.findReusableSession(channelThreadKey, agentName))?.provider ??
-      deps.agentSessionManager.peek({ agentName, channelThreadKey })?.providerId;
+      (await deps.sessionManager.findReusableSession(webchatSessionKey(session.id), agentName))
+        ?.provider ??
+      soleExhaustedProvider(state);
     if (provider !== "openai" && provider !== "anthropic") return null;
     return quotaSwitchTarget(
-      deps.aiToolState.get(),
+      state,
       provider,
       config.tier ?? "large",
       isConciergeAgent(agentName),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { quotaSwitchTarget } from "./quota-switch.js";
+import { quotaSwitchTarget, soleExhaustedProvider } from "./quota-switch.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 
 const state = (): AIToolStateValue => ({
@@ -72,5 +72,18 @@ describe("quotaSwitchTarget", () => {
     raw.codex.quotaExhausted = true;
     raw.claude.quotaExhausted = false;
     expect(quotaSwitchTarget(raw, "openai", "small", true)?.selectionId).toBe("claude-sonnet");
+  });
+});
+
+describe("soleExhaustedProvider", () => {
+  it("names a provider only when exactly one is out of quota", () => {
+    const raw = state();
+    expect(soleExhaustedProvider(raw)).toBe("anthropic");
+    raw.codex.quotaExhausted = true;
+    expect(soleExhaustedProvider(raw)).toBeNull();
+    raw.claude.quotaExhausted = false;
+    expect(soleExhaustedProvider(raw)).toBe("openai");
+    raw.codex.quotaExhausted = false;
+    expect(soleExhaustedProvider(raw)).toBeNull();
   });
 });

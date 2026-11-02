@@ -123,6 +123,7 @@ describe("Webchat API", () => {
       "unknown provider",
     ])("refuses %s without a write or send", async (reason) => {
       const state = raw();
+      if (reason === "unknown provider") state.claude.quotaExhausted = false;
       rs.spyOn(deps.aiToolState, "get").mockImplementation(() => state);
       await deps.webchatRepo.createSession("quota", "Quota");
       if (reason !== "unknown provider")
@@ -171,12 +172,9 @@ describe("Webchat API", () => {
       ).toBe(200);
       expect(find).toHaveBeenCalledWith("webchat:quota", "main");
     });
-    it("derives the provider from the open session when the first turn failed", async () => {
+    it("offers the switch to a chat whose first turn failed before any provider was recorded", async () => {
       rs.spyOn(deps.aiToolState, "get").mockReturnValue(raw());
       await deps.webchatRepo.createSession("quota", "Quota");
-      deps.agentSessionManager = {
-        peek: rs.fn(() => ({ providerId: "anthropic" })),
-      } as unknown as typeof deps.agentSessionManager;
       const app = createWebchatRuntime(deps).routes;
       const response = await app.request("/chat/sessions/quota/quota-switch", { method: "POST" });
       expect(response.status).toBe(200);
