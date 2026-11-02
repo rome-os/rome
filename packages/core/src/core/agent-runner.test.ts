@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
+import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
 import { SessionManager } from "./session-manager.js";
@@ -2711,6 +2712,8 @@ describe("AgentRunner", () => {
       );
       expect(stored?.id).toBe(sessionInit.sessionId);
       expect(stored?.agentName).toBe("core:test-main");
+      // New session ids are UUIDv7, which sort by when they were minted.
+      expect(uuidVersion(sessionInit.sessionId)).toBe(7);
     });
 
     it("reuses an active session for the same key", async () => {
@@ -2783,6 +2786,9 @@ describe("AgentRunner", () => {
       const sessionInit = messages.find((message) => message.type === "session_init");
       expect(sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined).not.toBe(
         existingId,
+      );
+      expect(uuidVersion(sessionInit?.type === "session_init" ? sessionInit.sessionId : "")).toBe(
+        7,
       );
       expect((await repo.findById(existingId))?.status).toBe("completed");
       expect(

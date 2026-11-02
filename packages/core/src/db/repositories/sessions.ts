@@ -1,5 +1,5 @@
 import { eq, and, desc, isNull } from "drizzle-orm";
-import { v4 as uuid } from "uuid";
+import { v7 as uuid } from "uuid";
 import { sessions, sessionTurnCheckpoints } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 

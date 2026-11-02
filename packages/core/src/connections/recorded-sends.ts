@@ -17,6 +17,7 @@ import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
+import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -25,6 +26,7 @@ import type { Speakers } from "../sessions/speakers.js";
 import { startChannelChat } from "./channel-chat.js";
 import {
   addressOf,
+  isDirectMessage,
   lineAt,
   kindNamedBy,
   platformIdOfLine,
@@ -67,10 +69,11 @@ function recordedParts(out: Out): MessagePart[] {
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
-  if (out.parts?.length) {
-    return notes.length
-      ? [...out.parts, { type: "text", content: notes.join("\n") }]
-      : [...out.parts];
+  // An app cannot put a part only Rome's host makes, such as a routine
+  // draft card, on record.
+  const parts = withoutHostOnlyParts(out.parts ?? []);
+  if (parts.length) {
+    return notes.length ? [...parts, { type: "text", content: notes.join("\n") }] : parts;
   }
   const text = out.text.trim() || (out.html ? htmlToMarkdown(out.html, true).trim() : "");
   return [{ type: "text", content: [text, ...notes].filter(Boolean).join("\n") }];
@@ -385,6 +388,8 @@ function kindAt(deps: RecordedSendsDeps, channel: string, address: string): "gro
     const held = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
     if (held) return held.kind;
   }
+  // An address bound to a direct message is one, before its chat is held.
+  if (isDirectMessage(deps.adapters.chatAt(channel, address, "group"))) return "dm";
   // An unbound address is read as a channel, never guessed to be a person:
   // a sender reaches a person through the direct message's ref, which binds
   // the address. A bare Discord user id still reaches some ports today; the

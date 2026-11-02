@@ -172,16 +172,18 @@ export class TurnLinks {
     `);
   }
 
-  /** Each of `messageIds`' prompt or answer link, the first written when
-   *  several sessions linked it. A message no turn took or gave is left out. */
+  /** Each of `messageIds`' prompt or answer link, the one of the session
+   *  that started first when several sessions linked it. A message no turn
+   *  took or gave is left out. */
   turnsOf(messageIds: readonly number[]): Map<number, TurnLink> {
     if (messageIds.length === 0) return new Map();
     const rows = this.db.all<LinkRow>(sql`
-      SELECT message_id, session_id, turn_id, role, input_state
-      FROM agent_turn_messages
-      WHERE message_id IN (SELECT value FROM json_each(${JSON.stringify(messageIds)}))
-        AND role IN ('prompt', 'answer')
-      ORDER BY rowid
+      SELECT l.message_id, l.session_id, l.turn_id, l.role, l.input_state
+      FROM agent_turn_messages l
+      LEFT JOIN rome_sessions s ON s.id = l.session_id
+      WHERE l.message_id IN (SELECT value FROM json_each(${JSON.stringify(messageIds)}))
+        AND l.role IN ('prompt', 'answer')
+      ORDER BY s.created_at IS NULL, s.created_at, l.session_id
     `);
     const links = new Map<number, TurnLink>();
     for (const row of rows) if (!links.has(row.message_id)) links.set(row.message_id, toLink(row));

@@ -20,6 +20,10 @@
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
     },
+    "./chats": {
+      "types": "./dist/chats.d.ts",
+      "default": "./dist/chats.js"
+    },
     "./tsconfig.app.json": "./tsconfig.app.json"
   },
   "files": [
