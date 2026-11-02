@@ -12,6 +12,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
+import { ChannelNotConnected } from "../channels/channel.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -314,6 +315,29 @@ describe("appChats", () => {
 
       expect(result.delivery.state).toBe("sent");
       expect(sent).toHaveLength(1);
+    });
+
+    it("refuses a message left with nothing to say once host-only parts are gone, and sends nothing", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+
+      expect(
+        await refusal(
+          chats.send(group, { parts: [{ type: "routine_draft_card", draft: {} } as never] }),
+        ),
+      ).toBe("unsupported");
+      expect(await refusal(chats.send(group, { text: "  " }))).toBe("unsupported");
+      expect(sent).toEqual([]);
+      expect(lines()).toEqual([]);
+    });
+
+    it("answers a Connection whose talk is locked as not connected, and records nothing", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      duringSend = () => {
+        throw new ChannelNotConnected("telegram");
+      };
+
+      expect(await refusal(chats.send(group, { text: "x" }))).toBe("not_connected");
+      expect(lines()).toEqual([]);
     });
 
     it("answers a platform's refusal as failed and records nothing", async () => {

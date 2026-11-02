@@ -387,6 +387,12 @@ describe("reply streaming ports", () => {
     await Promise.all([first, second]);
   });
 
+  it("refuses a send while talk is locked as not connected", async () => {
+    const { send, live } = portsFor({});
+    live.talker = false;
+    await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(ChannelNotConnected);
+  });
+
   it("writes a reply through the live talker, and refuses while talk is locked", async () => {
     const { send, live } = portsFor({ pacing: pacingWith(true) });
     const replies = send.replies!;

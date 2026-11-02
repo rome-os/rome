@@ -25,6 +25,7 @@ import {
   type Sent as SdkSent,
 } from "@rome-os/app-runtime/chats";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import { DeliveryFailure } from "../channels/delivery/types.js";
 import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -92,6 +93,10 @@ async function send(
   const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
   const parts = recordedParts(out, given);
   const text = out.text ?? partsText(parts);
+  // Some platforms answer an empty send with a receipt and post nothing.
+  if (!text.trim() && !given.length && !out.attachments?.length) {
+    throw new SendError("unsupported", "A message with nothing to say is not sent");
+  }
   const outbound = {
     text,
     ...(given.length ? { parts: given } : {}),
@@ -156,7 +161,10 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
     return await deliver();
   } catch (error) {
     if (error instanceof SendError) throw error;
-    if (error instanceof ChannelNotConnected) {
+    if (
+      error instanceof ChannelNotConnected ||
+      (error instanceof DeliveryFailure && error.kind === "unauthorized")
+    ) {
       throw new SendError("not_connected", `No Connection reaches ${describe(sender.account)} now`);
     }
     throw new SendError("failed", error instanceof Error ? error.message : String(error));

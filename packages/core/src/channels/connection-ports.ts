@@ -186,7 +186,8 @@ function connectionFor(backing: Backing): Connection | null {
 
 /**
  * Sends on `connection`'s live talker. A Connection whose credentials are
- * locked or degraded has none, and sending on it refuses. With `pacing`, a
+ * locked or degraded has none, and sending on it refuses with
+ * {@link ChannelNotConnected}, as a channel no Connection backs does. With `pacing`, a
  * send waits its turn in the Connection's pacer while reply streaming is on,
  * and resolves once it has run. With streaming off it runs at once.
  */
@@ -198,7 +199,7 @@ export async function sendThrough(
 ): Promise<MessageReceipt> {
   const send = async () => {
     const sent = connection.withTalker((talker) => talker.send(chatId, message));
-    if (!sent) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
+    if (!sent) throw new ChannelNotConnected(connection.connectionKind);
     return sent;
   };
   return pacing ? pacing.run(connection, chatId, send) : send();
