@@ -1,5 +1,6 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
+import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
@@ -2404,7 +2405,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         path: listing.folder.path,
       };
     }
-    const id = randomUUID();
+    // Time-ordered, so new chats sit together in the id index (RFC 9562).
+    const id = uuidv7();
     const name = body.name || "New Chat";
     let project;
     try {
@@ -4009,7 +4011,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     });
                   } else if (suspension.kind === "handoff") {
                     const handoffAgentName = suspension.agentName;
-                    const childSessionId = randomUUID();
+                    const childSessionId = uuidv7();
                     const summary =
                       typeof suspension.payload?.summary === "string"
                         ? suspension.payload.summary
