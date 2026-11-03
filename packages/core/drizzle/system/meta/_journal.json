@@ -757,6 +757,13 @@
       "when": 1794000001000,
       "tag": "0108_drop_chat_message_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1794000002000,
+      "tag": "0109_guardian_signed_in_accounts",
+      "breakpoints": true
     }
   ]
 }

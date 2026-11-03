@@ -348,6 +348,9 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
       return {
         credential: containerCredential(status.wxid),
         ...(profile ? { profile } : {}),
+        // The signed-in account is the guardian's own, under the id
+        // `accountIdOf` records on the channel.
+        ...(status.wxid ? { guardianChannelUserId: status.wxid, addsGuardianAccount: true } : {}),
         summary: {
           title: "WeChat connected",
           body: [
