@@ -21,6 +21,7 @@
 // until the Chats switch moves it here.
 
 import { sql } from "drizzle-orm";
+import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { SaidMessage } from "../chats/storage/message.js";
@@ -574,20 +575,28 @@ function chatLine(
   link: TurnLink | undefined,
   openedSessionId: string,
 ): TranscriptLine {
+  const prompt = link?.role === "prompt";
+  const accountId = message.saidBy?.account.id;
+  // A dashboard source account is attribution, not a person an app can address.
+  const sourceId =
+    message.saidBy?.agent ??
+    (accountId?.startsWith("automated::")
+      ? accountId
+      : accountId?.startsWith("agent:")
+        ? accountId.slice(6)
+        : undefined);
+  const source =
+    prompt && message.place.chat.platform === "webchat" ? automatedSource(sourceId) : null;
   return {
     id: message.key,
     sessionId: link?.sessionId ?? openedSessionId,
     turnId: link?.turnId ?? null,
     inputState: link?.inputState ?? null,
     role:
-      message.direction === "fromRome"
-        ? "assistant"
-        : link?.role === "prompt"
-          ? "user"
-          : "notification",
+      message.direction === "fromRome" && !source ? "assistant" : prompt ? "user" : "notification",
     content: message.parts,
-    senderAccountId: message.saidBy?.account.id ?? null,
-    senderName: message.senderName ?? null,
+    senderAccountId: source ? null : (accountId ?? null),
+    senderName: source ? "Automation" : (message.senderName ?? null),
     createdAt: message.at,
   };
 }

@@ -2246,9 +2246,8 @@ export class WebChatRepository {
   }
 
   /**
-   * Record a dashboard input. `saidBy` is the agent account that said it when
-   * an agent, not the guardian, sends into the chat; its id is kept as the
-   * sender, since the account's platform is the chat's.
+   * Record a dashboard input. `saidBy` records the sending agent account or
+   * tagged automation source, independently of the accountable actor.
    */
   async recordUserInput(
     id: string,
@@ -2832,6 +2831,20 @@ export class WebChatRepository {
       );
   }
 
+  async getUserMessageSources(sessionId: string): Promise<Map<string, string>> {
+    const rows = await this.db
+      .select({ id: romeAgentMessages.id, senderId: romeAgentMessages.senderId })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+          isNotNull(romeAgentMessages.senderId),
+        ),
+      );
+    return new Map(rows.flatMap((row) => (row.senderId ? [[row.id, row.senderId] as const] : [])));
+  }
+
   /** The person who sent each user message in a session, for messages that
    * recorded one. */
   async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
@@ -2857,7 +2870,11 @@ export class WebChatRepository {
     (StoredWebchatMessage & { role: "user" | "assistant"; actor: SessionActor | null }) | null
   > {
     const [row] = await this.db
-      .select({ ...webchatMessageSelectFields, actor: romeAgentMessages.actor })
+      .select({
+        ...webchatMessageSelectFields,
+        actor: romeAgentMessages.actor,
+        senderId: romeAgentMessages.senderId,
+      })
       .from(romeAgentMessages)
       .where(
         and(

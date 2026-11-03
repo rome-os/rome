@@ -51,7 +51,7 @@ export const REPLY_TO_TEXT_MAX_LENGTH = 1000;
 export interface ReplyToPart {
   type: "reply_to";
   messageId: string;
-  author: "guardian" | "agent";
+  author: "guardian" | "agent" | "automated";
   name?: string;
   text: string;
 }
@@ -73,10 +73,35 @@ export type TranscriptPart =
   | ReplyToPart
   | QuotaSwitchPart;
 
-/** The person who sent a WebChat user message, as the dashboard shows them.
- * Absent when the message recorded no sender: one sent before senders were
- * recorded, or one an agent or a channel wrote. `name` is the guardian's name
- * or the visitor's email, null when neither is known. */
+/** The person or automation that sent a WebChat user message, resolved at load
+ * time. Absent when no sender was recorded. Automation names the actual source;
+ * onBehalfOf supplies the person whose avatar and viewer-relative side it uses.
+ * A null source type and name mark an unknown automation. */
 export type ChatMessageSender =
+  | {
+      kind: "automated";
+      sourceType: "agent" | "app" | "routine" | null;
+      name: string | null;
+      iconUrl: string | null;
+      onBehalfOf?: { kind: "guardian"; name: string | null; avatarUrl: string | null };
+    }
   | { kind: "guardian"; name: string | null; avatarUrl: string | null }
   | { kind: "visitor"; accountId: string; name: string | null; avatarUrl: string | null };
+
+// "workflow-planner" → "Workflow Planner". Canonical runtime ids are reduced
+// to their app-local name first, so `dream:skill-review` stays a runtime value
+// and renders as "Skill Review" in chat labels.
+export function prettyAgentName(name: string): string {
+  const separator = name.indexOf(":");
+  const localName = separator < 0 ? name : name.slice(separator + 1);
+  return localName
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** The configured main-agent name, or the dashboard's role label when empty. */
+export function mainAgentDisplayName(configuredName: unknown, fallback = "Rome"): string {
+  return (typeof configuredName === "string" ? configuredName.trim() : "") || fallback;
+}

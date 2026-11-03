@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { setCurrentActionContextResolver } from "@rome-os/app-runtime";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createSendUserMessageAction } from "./index.js";
 
@@ -24,6 +25,55 @@ function requestBody(impl: ReturnType<typeof rs.fn>, call: number): Record<strin
 }
 
 describe("send_user_message", () => {
+  it.each([
+    "agent:core:main",
+    "agent:coding:coding",
+    "app:daily-report",
+    "routine:Morning briefing",
+    "unknown",
+    undefined,
+  ])("passes its runtime initiator %s to the turn, not to session creation", async (initiator) => {
+    const fetchImpl = makeFetch(
+      jsonResponse(200, { id: "session" }),
+      jsonResponse(200, { turnId: "turn" }),
+    );
+    setCurrentActionContextResolver(() => ({ initiator }));
+    try {
+      const action = createSendUserMessageAction(config, { fetchImpl, baseUrl: BASE });
+      await action.execute({ text: "/brief today" });
+      expect(requestBody(fetchImpl, 0)).toEqual({});
+      expect(requestBody(fetchImpl, 1)).toEqual({
+        text: "/brief today",
+        automatedSource: initiator ?? "unknown",
+        automatedActorKind: "anonymous",
+      });
+    } finally {
+      setCurrentActionContextResolver(null);
+    }
+  });
+  it.each([
+    "guardian",
+    "visitor",
+    "anonymous",
+    undefined,
+  ] as const)("carries chain actor kind %s instead of guessing from the loopback hop", async (actorKind) => {
+    const fetchImpl = makeFetch(jsonResponse(200, { turnId: "turn" }));
+    setCurrentActionContextResolver(() => ({ initiator: "agent:core:main", actorKind }));
+    try {
+      await createSendUserMessageAction(config, { fetchImpl, baseUrl: BASE }).execute({
+        sessionId: "session",
+        text: "Status?",
+      });
+      expect(requestBody(fetchImpl, 0)).toEqual({
+        text: "Status?",
+        automatedSource: "agent:core:main",
+        automatedActorKind: actorKind ?? "anonymous",
+      });
+    } finally {
+      setCurrentActionContextResolver(null);
+    }
+  });
+
   it("defaults to creating a new chat, then posts the text as a guardian turn", async () => {
     const fetchImpl = makeFetch(
       jsonResponse(200, { id: "sess-1" }),
@@ -38,7 +88,11 @@ describe("send_user_message", () => {
     // No explicit agentName ⇒ the route's own default (main) applies.
     expect(requestBody(fetchImpl, 0)).toEqual({});
     expect(fetchImpl.mock.calls[1][0]).toBe(`${BASE}/api/chat/sessions/sess-1/turns`);
-    expect(requestBody(fetchImpl, 1)).toEqual({ text: "Summarize my inbox" });
+    expect(requestBody(fetchImpl, 1)).toEqual({
+      text: "Summarize my inbox",
+      automatedSource: "unknown",
+      automatedActorKind: "anonymous",
+    });
     expect(result).toEqual({
       status: "ok",
       data: { sessionId: "sess-1", turnId: "turn-1", createdSession: true },
@@ -239,14 +293,14 @@ describe("send_user_message", () => {
 
     const newChat = action.preview?.({ text: "Morning briefing please" });
     expect(newChat).toMatchObject({
-      title: "Start a webchat conversation as the guardian",
+      title: "Start a webchat conversation",
       summary: "Morning briefing please",
       fields: [{ label: "Agent", value: "main" }],
     });
 
     const existing = action.preview?.({ text: "and then?", sessionId: "sess-4" });
     expect(existing).toMatchObject({
-      title: "Continue a webchat conversation as the guardian",
+      title: "Continue a webchat conversation",
       summary: "and then?",
     });
     expect(JSON.stringify(existing)).not.toContain("sess-4");

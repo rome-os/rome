@@ -1,4 +1,7 @@
 {
+  "senderOnBehalf": "由{{name}}代发",
+  "senderAutomated": "自动发送",
+  "senderAutomation": "自动化",
   "markdown": {
     "code": "代码",
     "mermaid": "Mermaid 图表"
@@ -143,7 +146,7 @@
   "waitingCard": "待你处理",
   "jumpToLatest": "回到最新消息",
   "roles": {
-    "agent": "助手"
+    "agent": "Rome"
   },
   "message": {
     "copy": "复制消息",

@@ -68,6 +68,8 @@ The actor is the authenticated session identity accountable for an action execut
 - Capture is ambient, not per-route. Identity is established once where a request enters and flows to every action run during it, so a newly added route is attributed without doing anything.
 - The whole execution chain inherits the root's actor — sub-actions, detached runs, and worker-process hops — no matter how many apps or agents sit in between.
 - The trust boundary resolves the actor from primary session material, never from forwarded headers or app-supplied input ([access control](../architecture/access-control.md)).
+- An automated dashboard message keeps its accountable actor separate from its source. With a guardian chain actor, the main agent, Concierge, and apps speak for the guardian: their messages use the guardian's avatar and viewer-relative side, with the source named below the bubble.
+- Other sources, absent or anonymous chain actors, and visitor chains speak for themselves on the left with an Automated label. Each automated turn tells the receiving agent the guardian did not type it. Permissions and approvals stay unchanged.
 - A guardian actor records the guardian seat, plus the bound cloud account id and email when known. A password-only seat has no email to record.
 - Session-lifecycle audit telemetry stamps the same actor with the same absent-versus-anonymous semantics, so lifecycle changes are attributable from exported telemetry alone.
 

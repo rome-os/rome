@@ -19,7 +19,12 @@ export function QuotedReply({ part }: { part: ReplyToPart }) {
       <span className="flex h-5 shrink-0 items-center" role="img" aria-label={t("reply.action")}>
         <Reply className="size-3.5" aria-hidden />
       </span>
-      <span className="line-clamp-2 min-w-0 break-words text-ui">{plainQuote(part.text)}</span>
+      <span className="min-w-0 text-ui">
+        {part.author === "automated" ? (
+          <span className="block truncate text-aux">{part.name ?? t("senderAutomation")}</span>
+        ) : null}
+        <span className="line-clamp-2 break-words">{plainQuote(part.text)}</span>
+      </span>
     </>
   );
   const frame =

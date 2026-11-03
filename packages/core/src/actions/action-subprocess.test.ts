@@ -1,3 +1,4 @@
+import { fork } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { ChildProcess, ForkOptions } from "node:child_process";
 import { describe, expect, it, rs } from "@rstest/core";
@@ -146,6 +147,58 @@ function appContextFor(engine: ActionEngine): RomeAppContext {
 }
 
 describe("main-owned action subprocess", () => {
+  it.each([
+    { kind: "guardian", userId: "seat", via: "cookie" },
+    { kind: "visitor", accountId: "visitor", email: "visitor@example.com" },
+    { kind: "anonymous" },
+    undefined,
+  ] as const)("exposes initiator and chain actor kind in a separate worker process: %s", async (actor) => {
+    const moduleUrl = (relative: string) =>
+      JSON.stringify(new URL(relative, import.meta.url).href.replace(/\.js$/, ".ts"));
+    const program = `
+      import { ActionEngine } from ${moduleUrl("./engine.js")};
+      import { ActionRegistryImpl } from ${moduleUrl("./registry.js")};
+      import { createActionEngineRepos, createTestDb } from ${moduleUrl("../test/helpers.js")};
+      import { getCurrentActionContext } from "@rome-os/app-runtime";
+      const db = createTestDb();
+      const registry = new ActionRegistryImpl();
+      registry.register({ config: { name: "read_context", type: "system", description: "Read context", complexity: "simple", speed: "fast", reliability: "high", sideEffects: "read-only" }, execute: async () => ({ status: "ok", data: { initiator: getCurrentActionContext()?.initiator, actorKind: getCurrentActionContext()?.actorKind ?? null, pid: process.pid } }) });
+      const engine = new ActionEngine(registry, createActionEngineRepos(db.db), { processRole: "worker" });
+      process.once("message", async (payload) => {
+        const result = await engine.run(payload.actionName, payload.args, payload.context);
+        process.send(result, () => { db.close(); process.exit(0); });
+      });
+    `;
+    const child = fork("--eval", [program], {
+      execArgv: ["--import", "tsx", "--input-type=module"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    try {
+      const result = await new Promise<unknown>((resolve, reject) => {
+        child.once("message", resolve);
+        child.once("error", reject);
+        const execution = payload("read_context");
+        execution.context.initiator = "routine:Morning briefing";
+        execution.context.actor = actor;
+        child.send(execution);
+        child.once("exit", (code) => {
+          if (code !== 0) reject(new Error(stderr));
+        });
+      });
+      expect(result).toMatchObject({
+        status: "ok",
+        data: { initiator: "routine:Morning briefing", actorKind: actor?.kind ?? null },
+      });
+      expect((result as { data: { pid: number } }).data.pid).not.toBe(process.pid);
+    } finally {
+      child.kill();
+    }
+  }, 30_000);
+
   it("uses main's process factory and attaches every main-owned service to delegated W2", async () => {
     class FakeChild extends EventEmitter {
       pid = 987_654;

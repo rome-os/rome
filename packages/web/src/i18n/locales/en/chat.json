@@ -1,4 +1,7 @@
 {
+  "senderOnBehalf": "Sent by {{name}}",
+  "senderAutomated": "Automated",
+  "senderAutomation": "Automation",
   "markdown": {
     "code": "Code",
     "mermaid": "Mermaid diagram"
@@ -143,7 +146,7 @@
   "waitingCard": "Needs you",
   "jumpToLatest": "Jump to the latest message",
   "roles": {
-    "agent": "Assistant"
+    "agent": "Rome"
   },
   "message": {
     "copy": "Copy message",

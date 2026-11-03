@@ -1,20 +1,32 @@
-import type { ChatMessageSender } from "@rome/api-types/chat";
+import {
+  mainAgentDisplayName,
+  prettyAgentName,
+  type ChatMessageSender,
+} from "@rome/api-types/chat";
+import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { guardianAuth } from "../../db/schema.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";
+import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
+import {
+  automatedSource,
+  speaksForGuardian,
+  promptSafeSourceName,
+} from "../../webchat/automated-source.js";
 
 /**
- * Turn each message's recorded actor into the sender the dashboard shows. The
+ * Resolve each message's source or actor into the sender the dashboard shows. The
  * name and picture are read now, not when the message was sent, so a new
  * picture shows on old messages too.
  */
 export async function resolveChatSenders(
-  deps: Pick<ApiDeps, "db" | "settingsRepo">,
+  deps: Pick<ApiDeps, "db" | "settingsRepo" | "agentLoader" | "appCatalog">,
   actors: ReadonlyMap<string, SessionActor>,
+  sources: ReadonlyMap<string, string> = new Map(),
 ): Promise<Map<string, ChatMessageSender>> {
   const senders = new Map<string, ChatMessageSender>();
-  if (actors.size === 0) return senders;
+  if (actors.size === 0 && sources.size === 0) return senders;
 
   const list = [...actors.values()];
   const visitorIds = [
@@ -22,7 +34,7 @@ export async function resolveChatSenders(
   ];
   const profiles = await new VisitorProfilesRepository(deps.db).getMany(visitorIds);
 
-  let guardian: ChatMessageSender | null = null;
+  let guardian: Extract<ChatMessageSender, { kind: "guardian" }> | null = null;
   if (list.some((actor) => actor.kind === "guardian")) {
     const name = await deps.settingsRepo.get("guardianName");
     const [seat] = await deps.db
@@ -49,5 +61,57 @@ export async function resolveChatSenders(
       });
     }
   }
+  for (const [messageId, senderId] of sources) {
+    const sender = await resolveAutomatedSender(deps, senderId);
+    if (sender) {
+      const source = automatedSource(senderId)!;
+      const actor = actors.get(messageId);
+      if (
+        guardian &&
+        actor?.kind === "guardian" &&
+        (source.onBehalf ?? speaksForGuardian(source, actor.kind))
+      ) {
+        sender.onBehalfOf = guardian;
+      }
+      senders.set(messageId, sender);
+    }
+  }
   return senders;
+}
+
+export async function resolveAutomatedSender(
+  deps: Pick<ApiDeps, "agentLoader" | "appCatalog" | "settingsRepo">,
+  senderId: string,
+): Promise<Extract<ChatMessageSender, { kind: "automated" }> | null> {
+  const source = automatedSource(senderId);
+  if (!source) return null;
+  let name = source.id;
+  let appId: string | undefined;
+  if (source.type === "agent" && source.id) {
+    const record = deps.agentLoader.getAllRecords().get(source.id);
+    name = isCoreMainAgentId(source.id)
+      ? mainAgentDisplayName(await deps.settingsRepo.get("agentName"))
+      : record
+        ? prettyAgentName(source.id)
+        : source.id;
+    appId = record?.metadata.ownerId;
+  } else if (source.type === "app" && source.id) {
+    appId = source.id;
+    name = deps.appCatalog.get(source.id)?.displayName ?? source.id;
+  }
+  const app = appId ? deps.appCatalog.get(appId) : undefined;
+  return {
+    kind: "automated",
+    sourceType: source.type,
+    name,
+    iconUrl: appId && app?.iconAbsolutePath ? `/api/apps/${appIdToPathSegment(appId)}/icon` : null,
+  };
+}
+
+export function automatedMessageNotice(
+  sender: Extract<ChatMessageSender, { kind: "automated" }>,
+): string {
+  const name = sender.name ? promptSafeSourceName(sender.name) : "";
+  const from = name ? ` from ${sender.sourceType ?? "automation"} ${JSON.stringify(name)}` : "";
+  return `[Automated message${from}. The guardian did not type this.]`;
 }

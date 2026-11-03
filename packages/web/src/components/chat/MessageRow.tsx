@@ -7,7 +7,7 @@ interface MessageRowProps {
   avatar: ReactNode;
   /** Display name, in small type above the first bubble. */
   name: string;
-  /** Compact turn trace, on the name line. */
+  /** Compact metadata, such as a turn trace or an Automated label, beside the name. */
   subtitle?: ReactNode;
   /** Secondary turn metadata, after the trace on the name line. */
   headerAccessory?: ReactNode;
@@ -47,7 +47,7 @@ export function MessageRow({
             is fractional, and the transcript would carry the fraction into the
             pinned composer. */}
         <div className="flex h-5 min-w-0 items-center gap-2 [grid-area:header] @min-[40rem]/message:pl-3">
-          <span className="shrink-0 truncate text-aux text-muted-foreground">{name}</span>
+          <span className="min-w-0 truncate text-aux text-muted-foreground">{name}</span>
           {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
           {headerAccessory ? (
             <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>
