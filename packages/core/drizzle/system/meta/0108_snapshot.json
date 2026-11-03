@@ -1046,14 +1046,6 @@
             "id"
           ],
           "isUnique": false
-        },
-        "idx_chat_messages_reply": {
-          "name": "idx_chat_messages_reply",
-          "columns": [
-            "chat_id",
-            "reply_to_message_id"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {

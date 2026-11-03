@@ -621,8 +621,6 @@ export const chatMessages = sqliteTable(
     // A place's lines by time. Within one second lines keep the order they
     // were recorded in.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
-    // The lines that quote a line, cleared when it goes.
-    index("idx_chat_messages_reply").on(table.chatId, table.replyToMessageId),
   ],
 );
 

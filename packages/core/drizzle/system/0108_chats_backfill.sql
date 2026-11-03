@@ -240,10 +240,6 @@ WHERE `id` IN (SELECT s.`session_id` FROM `legacy_chat_speakers` s)
   AND `created_at` >= (
     SELECT min(m.`created_at`) FROM `rome_agent_messages` m WHERE m.`session_id` = `rome_sessions`.`id`);
 --> statement-breakpoint
--- Finds the lines that quote a line, so ending a long chat clears its quotes
--- in linear time.
-CREATE INDEX `idx_chat_messages_reply` ON `chat_messages` (`chat_id`,`reply_to_message_id`);
---> statement-breakpoint
 DROP VIEW `legacy_chat_line_rows`;
 --> statement-breakpoint
 DROP VIEW `legacy_chat_speakers`;
