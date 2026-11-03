@@ -9,7 +9,6 @@ import type {
   TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
-import { accountsRoutes } from "./accounts.js";
 import {
   createTestConnections,
   createTestDb,
@@ -69,7 +68,7 @@ describe("People send API", () => {
     });
 
   const timeline = async (id = personId): Promise<TimelinePage> => {
-    const res = await app.request(`/people/${id}/messages`);
+    const res = await app.request(`/people/${id}/messages?channel=telegram&channelUserId=${TG}`);
     return (await res.json()) as TimelinePage;
   };
 
@@ -330,7 +329,9 @@ describe("People on an account whose channel id is opaque", () => {
     (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
 
   const timeline = async (): Promise<TimelinePage> =>
-    (await (await app.request(`/people/${personId}/messages`)).json()) as TimelinePage;
+    (await (
+      await app.request(`/people/${personId}/messages?channel=telegram&channelUserId=${ADA}`)
+    ).json()) as TimelinePage;
 
   it("links the account under its connection kind and reads it as sendable", async () => {
     expect((await person()).accounts).toMatchObject([
@@ -338,11 +339,10 @@ describe("People on an account whose channel id is opaque", () => {
     ]);
   });
 
-  it("shows the account's conversation on the person's timeline", async () => {
+  it("shows the account's conversation on its timeline", async () => {
     const entries = (await timeline()).entries;
     expect(entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
-    // Named by the link's key, which is the account's channel on the wire, so
-    // a client's per-account view of the timeline holds it.
+    // Named by the link's key, which is the account's channel on the wire.
     expect(entries[0]?.source).toBe("telegram");
   });
 
@@ -422,15 +422,9 @@ describe("People on an account whose channel id is opaque", () => {
         linkedInAccounts: deps.linkedInAccounts,
       }),
     };
-    app = new Hono().route("/", peopleRoutes(rebooted)).route("/", accountsRoutes(rebooted));
+    app = new Hono().route("/", peopleRoutes(rebooted));
 
     expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
-    const stream = (await (await app.request("/accounts/stream")).json()) as {
-      accounts: Array<{ channel: string; channelUserId: string }>;
-    };
-    expect(stream.accounts).toContainEqual(
-      expect.objectContaining({ channel: "telegram", channelUserId: ADA }),
-    );
   });
 
   // Two of Rome's accounts hold Ada's history in two different stores: an old
@@ -486,13 +480,8 @@ describe("People on an account whose channel id is opaque", () => {
       "said just now",
       "said long ago",
     ]);
-    expect((await person()).latest?.preview).toBe("said just now");
-    const stream = (await (
-      await new Hono().route("/", accountsRoutes(deps)).request("/accounts/stream")
-    ).json()) as { accounts: Array<{ channelUserId: string; latest: { preview: string } }> };
-    expect(stream.accounts.find((row) => row.channelUserId === ADA)?.latest.preview).toBe(
-      "said just now",
-    );
+    const [head] = (await timeline()).entries;
+    expect((await person()).accounts[0]?.latestAt).toBe(head?.timestamp);
   });
 
   describe("naming the account a send goes out from", () => {

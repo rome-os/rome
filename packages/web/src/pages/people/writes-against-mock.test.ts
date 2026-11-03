@@ -141,8 +141,9 @@ const RAY_TELEGRAM = { channel: "telegram", channelUserId: "418820113" };
  *  messaging, which is the `unsupported` refusal. */
 const ARVIND = { channel: "linkedin", channelUserId: "ACoAAArvind01" };
 
-const timelineOf = (personId: string) =>
-  fetchJson<TimelinePage>(`/api/people/${personId}/messages`, {
+/** One account's timeline, the only history a person has. */
+const timelineOf = (personId: string, account: { channel: string; channelUserId: string }) =>
+  fetchJson<TimelinePage>(`/api/people/${personId}/messages?${new URLSearchParams(account)}`, {
     fallback: "timeline unavailable",
   });
 
@@ -151,7 +152,7 @@ describe("Sending, against the contract's own handlers", () => {
     const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "on my way" }, t);
     expect(sent).toMatchObject({ ok: true, value: { ref: expect.any(String) } });
 
-    const timeline = await timelineOf(RAY);
+    const timeline = await timelineOf(RAY, RAY_TELEGRAM);
     expect(timeline.entries.filter((entry) => entry.body === "on my way")).toHaveLength(1);
   });
 
@@ -162,19 +163,23 @@ describe("Sending, against the contract's own handlers", () => {
       message: "the channel rejected this message",
       status: 502,
     });
-    expect((await timelineOf(RAY)).entries.some((e) => e.body === "fail this one")).toBe(false);
+    expect(
+      (await timelineOf(RAY, RAY_TELEGRAM)).entries.some((e) => e.body === "fail this one"),
+    ).toBe(false);
 
     // A retry is the same request again, and this time it goes through.
     expect(await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail this one" }, t)).toMatchObject({
       ok: true,
     });
-    expect((await timelineOf(RAY)).entries.some((e) => e.body === "fail this one")).toBe(true);
+    expect(
+      (await timelineOf(RAY, RAY_TELEGRAM)).entries.some((e) => e.body === "fail this one"),
+    ).toBe(true);
   });
 
-  it("sends a LinkedIn reply onto the shared timeline", async () => {
+  it("sends a LinkedIn reply onto the account's timeline", async () => {
     const sent = await sendMessage("arvind-srivastav", { ...ARVIND, text: "LinkedIn reply" }, t);
     expect(sent.ok).toBe(true);
-    const timeline = await timelineOf("arvind-srivastav");
+    const timeline = await timelineOf("arvind-srivastav", ARVIND);
     expect(timeline.entries.some((entry) => entry.body === "LinkedIn reply")).toBe(true);
   });
 

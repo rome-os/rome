@@ -56,7 +56,7 @@ Each suite's config selects its cases by path: `midscene.config.ts` reads
 | FILE-03 | Handle a duplicate project-file rename | mock |
 | FILE-04 | Open a Memory file | mock |
 | PPL-01 | Open the people directory | mock |
-| PPL-02 | Filter a person timeline by channel | mock |
+| PPL-02 | Switch a person's timeline to another account | mock |
 | SET-01 | Open the appearance-mode choices | mock |
 | SET-02 | Open connection details | mock |
 | SET-03 | Inspect channel activation settings | mock |

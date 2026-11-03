@@ -61,6 +61,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 - An account is in exactly one of three states: unlinked (a [stranger](../domains/people.md#stranger)), linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
 - The state is derived from the account's link. No surface stores or reports a state that can disagree with the link behind it.
 - The guardian's own accounts on a platform are accounts like any other, linked to the guardian.
+- A history is one account's. A person's page reads one account's timeline at a time, and nothing joins the timelines of a person's accounts into one.
 
 **Not to be confused with:**
 

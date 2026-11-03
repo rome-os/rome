@@ -2,15 +2,13 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ListRow } from "@/components/ui/list-row";
 import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
-import { ChannelGlyph, ChannelPill, channelLabel } from "./channel-meta";
-import { timeAgo } from "./format";
+import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-model";
 import { accountHandle } from "./send-model";
 
-// The three rows the page renders. They differ by what the reader is doing:
-// routing to whoever has something new (stream), deciding where an unplaced
-// account belongs (unknown), or reading the roster (directory). Avatars are
-// neutral everywhere — a channel is a glyph on this page, never a color.
+// The row the page renders: the roster's contacts line, for a person and for an
+// account nobody has placed alike. Avatars are neutral everywhere — a channel is
+// a glyph on this page, never a color.
 
 const LEVEL_LABEL_KEY: Record<RowLevel, string> = {
   stranger: "levels.stranger",
@@ -33,116 +31,9 @@ export function levelLabelKey(level: RowLevel): string {
 const ROW_GRID = "grid grid-cols-[2rem_minmax(0,1fr)_auto]";
 
 /**
- * A stream row carries only what routing needs: who, what they said, where it
- * came from, how long ago. Bond and linked accounts live on the person page.
- *
- * Only a person's row opens a dossier: a dossier is a merged history, and a
- * history is what a person has. An account nobody has placed carries its own
- * evidence on the row instead — see {@link StrangerRow}.
- */
-export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void }) {
-  const { t } = useTranslation("people");
-  const body = (
-    <>
-      <Avatar name={row.displayName} />
-      <span className="grid min-w-0 gap-1 sm:grid-cols-[minmax(7rem,1fr)_minmax(0,1.8fr)] sm:items-center sm:gap-3">
-        <span className="truncate text-ui text-foreground">{row.displayName}</span>
-        <span className="flex min-w-0 items-center gap-2 text-aux text-muted-foreground">
-          {row.latest && (
-            <span className="shrink-0 text-subtle-foreground" title={row.latest.source}>
-              <ChannelGlyph channel={row.latest.source} />
-            </span>
-          )}
-          {row.latest?.preview ? (
-            <span className="truncate">{row.latest.preview}</span>
-          ) : row.latest ? (
-            <span className="truncate italic text-subtle-foreground">{t("row.noPreview")}</span>
-          ) : (
-            <span className="truncate italic text-subtle-foreground">{t("row.noActivity")}</span>
-          )}
-        </span>
-      </span>
-      <span className="justify-self-end whitespace-nowrap text-right font-mono text-badge tabular-nums text-subtle-foreground sm:w-20">
-        {timeAgo(t, row.latest?.timestamp ?? null)}
-      </span>
-    </>
-  );
-
-  if (!onOpen) return <ListRow className={ROW_GRID}>{body}</ListRow>;
-  return (
-    <ListRow asChild interactive className={ROW_GRID}>
-      <button type="button" onClick={onOpen}>
-        {body}
-      </button>
-    </ListRow>
-  );
-}
-
-/**
- * An unplaced account's row: dense on purpose. Placement decisions run on the
- * evidence — which channel, which number, how much they have said — so all of
- * it is on the row rather than a click away.
- *
- * `actions` is whatever gesture the page offers for the position it is in:
- * placing it, or taking a dismissal back. The gestures themselves are
- * `people/triage.tsx`; the row only says where they go. They show on the row
- * under the pointer, or holding focus, so a screen of rows reads as evidence
- * rather than as a wall of buttons. Hover is not a thing on touch screens, so
- * there they stay put.
- */
-export function StrangerRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
-  const { t } = useTranslation("people");
-  const handle = rowHandle(row);
-  const channel = row.accounts[0]?.channel;
-  return (
-    // The hover fill is hand-rolled rather than `interactive` on purpose: the
-    // row is not a click target, and the fill is the cue that goes with
-    // revealing the actions below on `group-hover`. `interactive` would add a
-    // focus edge and a pointer cursor for a click that does nothing.
-    <ListRow
-      className={cn(
-        ROW_GRID,
-        "group hover:bg-surface-hover sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
-      )}
-    >
-      <Avatar name={row.displayName} />
-      <span className="min-w-0 text-left">
-        <span className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-ui text-foreground">{row.displayName}</span>
-          {channel && <ChannelPill channel={channel} />}
-        </span>
-        <span className="block truncate text-aux text-muted-foreground">
-          {handle && <span className="font-mono tabular-nums">{handle}</span>}
-          {handle && row.messageCount > 0 && " · "}
-          {row.messageCount > 0 && (
-            <span className="tabular-nums">
-              {t("row.messageCount", { count: row.messageCount })}
-            </span>
-          )}
-        </span>
-      </span>
-      <span className="hidden min-w-0 text-left text-aux text-muted-foreground sm:block">
-        <span className="block truncate">{row.latest?.preview ?? ""}</span>
-      </span>
-      <span className="flex items-center justify-end gap-2">
-        <span className="font-mono text-badge tabular-nums text-subtle-foreground">
-          {timeAgo(t, row.latest?.timestamp ?? null)}
-        </span>
-        {actions && (
-          <span className="touch-show flex items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
-            {actions}
-          </span>
-        )}
-      </span>
-    </ListRow>
-  );
-}
-
-/**
  * A directory row says who only: avatar, name, and the identifier the person
  * is recognized by. Nothing about what anyone said — the directory read carries
- * none of it, which is what makes this a contacts list rather than a second
- * stream. Clicking a person opens their dossier; an account has none to open
+ * none of it, which is what makes this a contacts list. Clicking a person opens their dossier; an account has none to open
  * until it is placed on somebody.
  *
  * `actions` is whatever gesture the row's position admits: a `⋯` menu placing

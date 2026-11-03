@@ -1,10 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type {
-  AccountCounts,
-  DirectoryAccount,
-  PersonResource,
-  StreamAccount,
-} from "@rome/api-types/people";
+import type { AccountCounts, DirectoryAccount, PersonResource } from "@rome/api-types/people";
 import {
   directoryGroups,
   levelCounts,
@@ -12,21 +7,14 @@ import {
   peoplePath,
   peopleRows,
   rowHandle,
-  streamRows,
   type PeopleRow,
 } from "./people-model";
 
 // The People page reads two nouns — a person and the accounts they are reachable
 // at — and renders one ladder over both. What is pinned here is the join: which
-// contract row becomes which ladder position, how the two interleave in the
-// stream, how the contacts list orders, and whose numbers the chips and headings
-// show.
-//
-// Two account shapes, because there are two account reads. `contact` is the
-// directory's row — everyone, and nothing about what was said. `spoke` is the
-// stream's — an account something has happened on, with the line to preview.
-
-const now = Math.floor(Date.now() / 1000);
+// contract row becomes which ladder position, how the contacts list orders,
+// and whose numbers the chips and headings show. `contact` is the directory's
+// row — everyone, and nothing about what was said.
 
 function person(over: Partial<PersonResource> = {}): PersonResource {
   return {
@@ -34,8 +22,6 @@ function person(over: Partial<PersonResource> = {}): PersonResource {
     displayName: "Ray Oster",
     bondLevel: "inner-circle",
     accounts: [{ channel: "telegram", channelUserId: "418820113", displayName: "Ray" }],
-    messageCount: 2,
-    latest: { source: "telegram", timestamp: now - 600, preview: "see you thursday" },
     ...over,
   };
 }
@@ -54,18 +40,6 @@ function contact(over: Partial<DirectoryAccount> = {}): DirectoryAccount {
     ...over,
   };
 }
-
-/** The same account on the stream, with the dynamic that put it there. */
-function spoke(over: Partial<StreamAccount> = {}): StreamAccount {
-  return {
-    ...contact(over),
-    latest: { source: "telegram", timestamp: now - 300, preview: "is this the right number?" },
-    messageCount: 1,
-    ...over,
-  };
-}
-
-const rowsOf = (rows: PeopleRow[]) => rows.map((row) => row.displayName);
 
 describe("peopleRows", () => {
   it("places a person by their stored bond level, off-ladder values included", () => {
@@ -120,72 +94,6 @@ describe("peopleRows", () => {
       ],
     );
     expect(rows[0].addresses).toEqual(["1555", "1555@s.whatsapp.net"]);
-  });
-});
-
-describe("streamRows", () => {
-  it("interleaves people and accounts by what happened last", () => {
-    const rows = peopleRows(
-      [person({ latest: { source: "telegram", timestamp: now - 900, preview: "older" } })],
-      [
-        spoke({
-          channelUserId: "new",
-          displayName: "Devika",
-          latest: { source: "whatsapp", timestamp: now - 60, preview: "newer" },
-        }),
-      ],
-    );
-    // One stream over both nouns rather than a section each: a search spans the
-    // whole ladder, and the two orders have to be one order for that to mean
-    // anything.
-    expect(rowsOf(streamRows(rows, { search: "dev", filter: "all" }))).toEqual(["Devika"]);
-    expect(rowsOf(streamRows(rows, { search: "a", filter: "all" }))).toEqual([
-      "Devika",
-      "Ray Oster",
-    ]);
-  });
-
-  it("holds both unplaced ends out of All, and lets each chip in", () => {
-    const rows = peopleRows(
-      [person()],
-      [
-        spoke({ channelUserId: "waiting", displayName: "Jules" }),
-        spoke({ channelUserId: "spam", displayName: "Prize", state: "dismissed" }),
-      ],
-    );
-    expect(rowsOf(streamRows(rows, { search: "", filter: "all" }))).toEqual(["Ray Oster"]);
-    expect(rowsOf(streamRows(rows, { search: "", filter: "stranger" }))).toEqual(["Jules"]);
-    expect(rowsOf(streamRows(rows, { search: "", filter: "dismissed" }))).toEqual(["Prize"]);
-  });
-
-  it("holds back the guardian and anyone who has done nothing", () => {
-    const rows = peopleRows(
-      [
-        person({ id: "me", displayName: "Mock Guardian", bondLevel: "guardian" }),
-        person({ id: "quiet", displayName: "Nadia", latest: null, messageCount: 0 }),
-      ],
-      [],
-    );
-    // A stream row is something that happened, and it is about somebody else.
-    // The read holds back the accounts nothing happened on; a person the
-    // guardian entered by hand is on the people listing either way, so this end
-    // of the rule is the client's.
-    expect(rowsOf(streamRows(rows, { search: "", filter: "all" }))).toEqual([]);
-  });
-
-  it("lets a search reach the quiet ones, whatever chip is lit — guardian excepted", () => {
-    const rows = peopleRows(
-      [
-        person({ id: "me", displayName: "Mock Guardian", bondLevel: "guardian" }),
-        person({ id: "quiet", displayName: "Nadia Petrova", latest: null, accounts: [] }),
-      ],
-      [],
-    );
-    // Someone typing a name wants that person wherever they sit on the ladder.
-    expect(rowsOf(streamRows(rows, { search: "nadia", filter: "inner-circle" }))).toEqual([
-      "Nadia Petrova",
-    ]);
-    expect(rowsOf(streamRows(rows, { search: "mock", filter: "all" }))).toEqual([]);
   });
 });
 
@@ -326,20 +234,12 @@ describe("rowHandle", () => {
 });
 
 describe("peoplePath", () => {
-  it("gives each view its own address", () => {
-    expect(peoplePath("latest", { filter: "all", search: "" })).toBe("/people/latest");
-    expect(peoplePath("directory", { filter: "all", search: "" })).toBe("/people/directory");
-  });
-
   it("carries the chip and the term, and leaves the defaults out", () => {
-    expect(peoplePath("directory", { filter: "stranger", search: "" })).toBe(
-      "/people/directory?level=stranger",
-    );
-    expect(peoplePath("latest", { filter: "all", search: "wei chen" })).toBe(
-      "/people/latest?q=wei+chen",
-    );
-    expect(peoplePath("latest", { filter: "dismissed", search: "wei" })).toBe(
-      "/people/latest?level=dismissed&q=wei",
+    expect(peoplePath({ filter: "all", search: "" })).toBe("/people/directory");
+    expect(peoplePath({ filter: "stranger", search: "" })).toBe("/people/directory?level=stranger");
+    expect(peoplePath({ filter: "all", search: "wei chen" })).toBe("/people/directory?q=wei+chen");
+    expect(peoplePath({ filter: "dismissed", search: "wei" })).toBe(
+      "/people/directory?level=dismissed&q=wei",
     );
   });
 });

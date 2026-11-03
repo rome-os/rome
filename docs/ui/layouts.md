@@ -26,7 +26,7 @@ An empty, loading, or error state is slot content, not a layout concern. Pass an
 
 A page that offers sibling views of one collection puts the `SegmentedControl` alone in `PageActions` and takes `PageHeader align="end"`, so the switch sits opposite the title with its bottom edge on the title's line box. Every control that acts on the collection rather than choosing the view — a time range, a refresh — belongs in the toolbar instead, at the end of the row.
 
-The split is what the arrangement reads by: the header carries what the page *is*, and the toolbar carries what the reader does to it. `align="end"` is for exactly this header, where the actions are one control on the title's row. A header whose actions may wrap keeps the default `start`. [`/people/latest`](../../packages/web/src/pages/PeoplePage.tsx) is the reference.
+The split is what the arrangement reads by: the header carries what the page *is*, and the toolbar carries what the reader does to it. `align="end"` is for exactly this header, where the actions are one control on the title's row. A header whose actions may wrap keeps the default `start`.
 
 ## What the slots are built from
 
