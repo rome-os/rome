@@ -5,7 +5,7 @@
 // place newest first. Nothing here knows about turns or sessions: Agents
 // links a message to a turn after one of these returns its id.
 
-import { sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import { chatMessages, chats } from "../../db/schema/system.js";
 import { createLogger } from "../../logger.js";
@@ -137,7 +137,24 @@ export class MessageRepository {
     const threadId = landedIn ? landedIn.threadId : (message.place.threadId ?? null);
     const at = new Date();
     try {
+      const said = {
+        senderAgent: message.saidBy.agent ?? null,
+        senderName: message.saidBy.name ?? null,
+        text: partsText(message.parts),
+        parts: JSON.stringify(message.parts),
+        // A quote by key links once Rome holds that line, which it may by
+        // now even when it did not before the send.
+        replyToMessageId:
+          quoted === null
+            ? null
+            : typeof message.replyTo === "number"
+              ? message.replyTo
+              : this.idIn(chat.id, quoted),
+      };
       // The platform answered a key already on record: the same message.
+      // Where another of Rome's accounts heard it first, as anyone's, it is
+      // this account's, and goes on record as what this account said. Any
+      // other line keeps what it holds.
       this.db
         .insert(chatMessages)
         .values({
@@ -145,21 +162,20 @@ export class MessageRepository {
           key,
           threadId,
           senderAccountId: message.saidBy.account.id,
-          senderAgent: message.saidBy.agent ?? null,
-          senderName: message.saidBy.name ?? null,
-          text: partsText(message.parts),
-          parts: JSON.stringify(message.parts),
-          // A quote by key links once Rome holds that line, which it may by
-          // now even when it did not before the send.
-          replyToMessageId:
-            quoted === null
-              ? null
-              : typeof message.replyTo === "number"
-                ? message.replyTo
-                : this.idIn(chat.id, quoted),
           saidAt: at,
+          ...said,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [chatMessages.chatId, chatMessages.key],
+          set: {
+            ...said,
+            replyToMessageId: sql`coalesce(${said.replyToMessageId}, ${chatMessages.replyToMessageId})`,
+          },
+          setWhere: and(
+            isNull(chatMessages.senderAgent),
+            eq(chatMessages.senderAccountId, message.saidBy.account.id),
+          ),
+        })
         .run();
       return { id: this.idIn(chat.id, key), key, recorded: true, at };
     } catch (error) {
