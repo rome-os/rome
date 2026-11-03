@@ -454,6 +454,37 @@ describe("Chats backfill", () => {
     expect(quote.reply_to_message_id).toBe((line("om_20") as { id: number }).id);
   });
 
+  it("starts a group where two people wrote, though a send opened it as private", () => {
+    sqlite
+      .prepare(
+        `INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+         VALUES ('discord', 'discord', 'discord', 'dbot', 1)`,
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id,
+           source_thread_type, created_at)
+         VALUES ('dc-sent', 'General', 'channel', 'discord', '9001', 'private', 100)`,
+      )
+      .run();
+    const row = sqlite.prepare(
+      `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at,
+         platform_message_id, sender_id)
+       VALUES (?, 'dc-sent', ?, ?, ?, ?, ?)`,
+    );
+    row.run("dc-1", "assistant", text("Hello all"), 800, "d1", null);
+    row.run("dc-2", "user", text("Hi"), 801, "d2", "u1");
+    row.run("dc-3", "notification", text("Yo"), 802, "d3", "u2");
+
+    backfill(sqlite);
+
+    expect(
+      all(`SELECT c.key, c.kind FROM rome_sessions s JOIN chats c ON c.id = s.chat_id
+           WHERE s.id = 'dc-sent'`),
+    ).toEqual([{ key: "9001", kind: "group" }]);
+  });
+
   it("points a Concierge task at the message its legacy row became", () => {
     expect(
       all(

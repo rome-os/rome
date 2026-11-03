@@ -86,6 +86,12 @@ SELECT
        -- party's positive id, WhatsApp's is not a @g.us group.
        WHEN ((c.platform = 'telegram' AND r.source_thread_id GLOB '-*')
          OR (c.platform = 'whatsapp' AND r.source_thread_id GLOB '*@g.us')
+         -- Where the address cannot say, two people writing there make it a
+         -- group, whatever type a send that opened it named.
+         OR (c.platform NOT IN ('telegram', 'whatsapp') AND (
+           SELECT count(DISTINCT m.sender_id) FROM rome_agent_messages m
+           WHERE m.session_id = r.id AND m.role IN ('user', 'notification')
+             AND m.sender_id IS NOT NULL AND m.sender_id NOT IN ('rome', c.platform_account_id)) > 1)
          OR r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
          AND NOT (c.platform = 'telegram' AND r.source_thread_id NOT GLOB '-*')
          AND NOT (c.platform = 'whatsapp' AND r.source_thread_id NOT GLOB '*@g.us'))) THEN r.source_thread_id
@@ -107,6 +113,10 @@ SELECT
   CASE WHEN r.source_channel <> 'webchat'
         AND (c.platform = 'email' OR (c.platform = 'telegram' AND r.source_thread_id GLOB '-*')
          OR (c.platform = 'whatsapp' AND r.source_thread_id GLOB '*@g.us')
+         OR (c.platform NOT IN ('telegram', 'whatsapp') AND (
+           SELECT count(DISTINCT m.sender_id) FROM rome_agent_messages m
+           WHERE m.session_id = r.id AND m.role IN ('user', 'notification')
+             AND m.sender_id IS NOT NULL AND m.sender_id NOT IN ('rome', c.platform_account_id)) > 1)
          OR r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
          AND NOT (c.platform = 'telegram' AND r.source_thread_id NOT GLOB '-*')
          AND NOT (c.platform = 'whatsapp' AND r.source_thread_id NOT GLOB '*@g.us'))) THEN 'group'
