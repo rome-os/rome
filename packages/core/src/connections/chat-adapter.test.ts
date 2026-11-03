@@ -359,6 +359,26 @@ describe("channelAdapter", () => {
     expect(landed).toEqual({ key: "p1", threadId: null });
   });
 
+  it("refuse to answer a line the account holds no platform id for, and send nothing", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+
+    await expect(
+      adapter.send(delivered[0]!.chat.externalId, null, { text: "hello", replyTo: "rome:local-1" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    expect(sent).toEqual([]);
+  });
+
   it("answer the thread a sent message landed in when the platform placed it elsewhere", async () => {
     const { channel } = fakeChannel();
     (channel.send as { send: unknown }).send = async () => ({
