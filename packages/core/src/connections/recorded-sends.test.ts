@@ -395,10 +395,6 @@ describe("recordedSends", () => {
         html: '<p>See <b>you</b> at <a href="https://example.com/report">the report</a></p>',
       } as OutgoingMessage,
     );
-    // An attachment with no words is the port's alone, and not recorded.
-    await send("telegram").send("-100" as ChatId, {
-      attachments: [{ type: "image", source: "/tmp/a.png", caption: "sunset" }],
-    });
 
     await send("telegram").send("-100" as ChatId, {
       parts: [{ type: "text", content: "Look" }],
@@ -409,7 +405,43 @@ describe("recordedSends", () => {
     expect(html).toMatch(/See .*you/);
     expect(html).toContain("https://example.com/report");
     expect(both).toBe("Look\n[document]");
-    expect(sent).toHaveLength(3);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("send and record a message with no words, as a bare attachment or a card", async () => {
+    await send("telegram").send("-100" as ChatId, {
+      attachments: [{ type: "image", source: "/tmp/a.png", caption: "sunset" }],
+    });
+    const card = { type: "approval_card", approvalId: "ap-1" } as never;
+    await send("telegram").send("-100" as ChatId, { parts: [card] });
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.message.attachments).toEqual([
+      { type: "image", source: "/tmp/a.png", caption: "sunset" },
+    ]);
+    expect(sent[1]?.message.parts).toEqual([card]);
+    expect(lines().map((line) => line.chat)).toEqual(["-100", "-100"]);
+    expect(lines()[0]?.text).toBe("[image: sunset]");
+  });
+
+  it("refuse a message with nothing in it, and record nothing", async () => {
+    await expect(send("telegram").send("-100" as ChatId, { text: "  " })).rejects.toThrow(
+      "Nothing was sent",
+    );
+    expect(sent).toEqual([]);
+    expect(lines()).toEqual([]);
+  });
+
+  it("record nothing when the port refuses a message with no words", async () => {
+    afterSend = () => {
+      throw new Error("Telegram cannot send this card");
+    };
+    await expect(
+      send("telegram").send("-100" as ChatId, {
+        attachments: [{ type: "image", source: "/tmp/a.png" }],
+      }),
+    ).rejects.toThrow("Telegram cannot send this card");
+    expect(lines()).toEqual([]);
   });
 
   it("send an email's reply recipients, and its text from its parts when it has none", async () => {

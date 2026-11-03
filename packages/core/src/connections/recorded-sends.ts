@@ -110,12 +110,9 @@ export function recordedSends<C extends Channel>(
           ...(email?.cc?.length ? { cc: email.cc } : {}),
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
-        if (!out.text.trim() && !out.html?.trim()) {
-          // A message with no words, such as an approval card or a bare
-          // attachment, which some ports skip: the port sends it, skips it
-          // or refuses it, as it always has. Chats keeps no file, so it is
-          // not recorded rather than recorded where nothing may have gone.
-          return await send.send(address, message);
+        if (!out.text.trim() && !out.html?.trim() && !out.parts && !out.attachments) {
+          // Nothing to send, which is refused rather than skipped.
+          throw new Error("A message needs text, parts or attachments. Nothing was sent.");
         }
         if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
           // As the port does, rather than read a blank id as no reply.
