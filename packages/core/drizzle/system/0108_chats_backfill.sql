@@ -221,13 +221,14 @@ WHERE `reply_to_message_id` IS NULL AND `id` IN (
   SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
   WHERE v.`reply_key` IS NOT NULL);
 --> statement-breakpoint
--- A speaker sees what was said where it stands from when it was made. A
--- line the platform dated before its session was made, as a first message
--- delivered late, stays in view.
+-- A speaker catches up on lines said after the second it was made. A
+-- migrated speaker starts the second before its first line, so a first line
+-- the platform dated before or in the second its session was made, as a
+-- first message delivered late, stays in view.
 UPDATE `rome_sessions` SET `created_at` = (
-  SELECT min(m.`created_at`) FROM `rome_agent_messages` m WHERE m.`session_id` = `rome_sessions`.`id`)
+  SELECT min(m.`created_at`) FROM `rome_agent_messages` m WHERE m.`session_id` = `rome_sessions`.`id`) - 1
 WHERE `id` IN (SELECT s.`session_id` FROM `legacy_chat_speakers` s)
-  AND `created_at` > (
+  AND `created_at` >= (
     SELECT min(m.`created_at`) FROM `rome_agent_messages` m WHERE m.`session_id` = `rome_sessions`.`id`);
 --> statement-breakpoint
 -- Finds the lines that quote a line, so ending a long chat clears its quotes

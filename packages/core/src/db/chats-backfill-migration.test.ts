@@ -255,6 +255,8 @@ describe("0108 Chats backfill", () => {
       .run();
     // The thread's first message reached Rome after the platform dated it.
     sqlite.prepare("UPDATE rome_sessions SET created_at = 550 WHERE id = 'thread'").run();
+    // The DM's first message came in the second its session was made.
+    sqlite.prepare("UPDATE rome_sessions SET created_at = 400 WHERE id = 'dm'").run();
     migrate(sqlite);
   });
 
@@ -357,13 +359,20 @@ describe("0108 Chats backfill", () => {
     expect(line("111:7")).toBeUndefined();
   });
 
-  it("keeps in view a line dated before its session was made", () => {
+  it("keeps in view a first line dated before or in the second its session was made", () => {
+    // Catch-up reads lines said after the speaker's second, so each migrated
+    // speaker starts the second before its first line.
     expect(all("SELECT id, created_at FROM rome_sessions WHERE id IN ('thread', 'dm')")).toEqual(
       expect.arrayContaining([
-        { id: "thread", created_at: 500 },
-        { id: "dm", created_at: 100 },
+        { id: "thread", created_at: 499 },
+        { id: "dm", created_at: 399 },
       ]),
     );
+    expect(
+      all(`SELECT s.id FROM rome_sessions s
+           WHERE s.type = 'channel' AND s.created_at >= (
+             SELECT min(m.created_at) FROM rome_agent_messages m WHERE m.session_id = s.id)`),
+    ).toEqual([]);
   });
 
   it("notes each heard line as reached by the account that heard it", () => {
