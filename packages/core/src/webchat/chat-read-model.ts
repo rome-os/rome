@@ -27,7 +27,7 @@ import type { SaidMessage } from "../chats/storage/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
-import { perAccountChat } from "../connections/chat-adapter.js";
+import { lineHolder, type LineHolder } from "../connections/chat-adapter.js";
 import { occurrencesOf, TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
@@ -132,13 +132,13 @@ export class ChatReadModel {
   async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
     const speaker = await this.speakerOf(sessionId);
     if (!speaker) return null;
-    const { place, since, perAccount } = speaker;
+    const { place, since, holder } = speaker;
     const copies = new Map<number, number[]>();
     // A speaker sees what was said where it stands from when it joined: a line
     // said in a group before Rome's account was there never reached it.
     const seen = (said: readonly SaidMessage[]) => said.filter((message) => message.at >= since);
     const drawn = (said: readonly SaidMessage[]) =>
-      perAccount ? this.oneCopyEach(place, said, copies) : said;
+      holder ? this.oneCopyEach(place, said, copies, holder) : said;
     if (!page) {
       const read = await this.messages.read(place);
       return this.transcriptOf(sessionId, drawn(seen(read.messages)), null, copies);
@@ -205,6 +205,7 @@ export class ChatReadModel {
     place: Place,
     said: readonly SaidMessage[],
     copies: Map<number, number[]>,
+    holder: LineHolder,
   ): SaidMessage[] {
     if (said.length === 0) return [];
     const seconds = [...new Set(said.map((message) => Math.floor(message.at.getTime() / 1000)))];
@@ -217,7 +218,7 @@ export class ChatReadModel {
         `)
         .map((row) => row.id),
     );
-    const occurrence = occurrencesOf(near);
+    const occurrence = occurrencesOf(near, holder);
     const links = this.links.turnsOf(near.map((message) => message.id));
     const message = new Map<string, number[]>();
     for (const line of near) {
@@ -363,11 +364,11 @@ export class ChatReadModel {
   }
 
   /** The place the session stands in, its chat's key and its thread, when
-   *  the speaker joined it, and whether each of Rome's accounts there holds its
-   *  own copy of a message. */
+   *  the speaker joined it, and which of Rome's accounts holds each line where
+   *  each holds its own copy of a message. */
   private async speakerOf(
     sessionId: string,
-  ): Promise<{ place: Place; since: Date; perAccount: boolean } | null> {
+  ): Promise<{ place: Place; since: Date; holder: LineHolder | null } | null> {
     const [row] = await this.db.all<{
       platform: string;
       key: string;
@@ -386,7 +387,7 @@ export class ChatReadModel {
         (row.thread_id ?? undefined) as ChatId | undefined,
       ),
       since: new Date(row.created_at * 1000),
-      perAccount: perAccountChat(row.platform, row.key),
+      holder: lineHolder(row.platform, row.key),
     };
   }
 
@@ -501,7 +502,7 @@ export class ChatReadModel {
     const { place } = speaker;
     const fromRome = sql`chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
       AND sender_agent IS NOT NULL AND said_at > ${mark.at}`;
-    if (!speaker.perAccount) {
+    if (!speaker.holder) {
       const [row] = await this.db.all<{ count: number }>(sql`
         SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_LINES} WHERE ${fromRome} LIMIT ${cap})
       `);
@@ -515,7 +516,7 @@ export class ChatReadModel {
       )
     `);
     const said = this.messages.byIds(lines.map((line) => line.id));
-    const occurrence = occurrencesOf(said);
+    const occurrence = occurrencesOf(said, speaker.holder);
     const messages = new Set(said.map((line) => occurrence.get(line.id) ?? `line:${line.id}`));
     return Math.min(messages.size, cap);
   }

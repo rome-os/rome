@@ -13,7 +13,7 @@ import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { romeSessions } from "../db/schema/system.js";
-import { perAccountChat } from "../connections/chat-adapter.js";
+import { lineHolder, type LineHolder } from "../connections/chat-adapter.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 
 /** What a message is to a session's turn: its prompt, its answer, or a line
@@ -61,9 +61,10 @@ export class TurnLinks {
     threadId: string | null;
     since: Date;
     joined: Date;
-    /** Whether the chat numbers its messages per member account, so each of
-     *  Rome's accounts there holds its own copy of a message. */
-    perAccount: boolean;
+    /** Which of Rome's accounts holds each line, where the chat numbers its
+     *  messages per member account and each account there holds its own copy
+     *  of a message; null elsewhere. */
+    holder: LineHolder | null;
   } | null {
     const row = this.db
       .select({
@@ -96,7 +97,7 @@ export class TurnLinks {
       threadId: row.threadId,
       since: row.createdAt,
       joined: first?.at ?? row.createdAt,
-      perAccount: perAccountChat(chat.ref.platform, chat.key),
+      holder: lineHolder(chat.ref.platform, chat.key),
     };
   }
 
@@ -257,8 +258,8 @@ export class TurnLinks {
         `)
         .map((row) => row.message_id),
     );
-    const copies = new Copies(speaker.perAccount ? said : []);
-    const waiting = new Copies(speaker.perAccount ? said : []);
+    const copies = new Copies(speaker.holder ? said : [], speaker.holder);
+    const waiting = new Copies(speaker.holder ? said : [], speaker.holder);
     for (const message of said) {
       if (linked.has(message.id)) copies.take(message);
       else if (this.undecided.has(message.id)) waiting.take(message);
@@ -357,8 +358,8 @@ function toLink(row: LinkRow): TurnLink {
 
 /**
  * The copies of one message that two of Rome's accounts heard in a chat that
- * numbers messages per member account (a Telegram basic group). There each
- * key carries the account that holds it in front (`<account>:<id>`), and
+ * numbers messages per member account (a Telegram basic group). There the
+ * chat's adapter says which account holds each line ({@link LineHolder}), and
  * copies share their sender, time and words. Two lines held by the same
  * account, or keyed by no account, are never copies, however alike. Where
  * one sender said the same words twice in a second, each account holds two
@@ -370,9 +371,10 @@ class Copies {
   private readonly occurrence: ReadonlyMap<number, string>;
   private readonly taken = new Set<string>();
 
-  /** The copies among `said`, in the order said. */
-  constructor(said: readonly SaidMessage[]) {
-    this.occurrence = occurrencesOf(said);
+  /** The copies among `said`, in the order said, each held by the account
+   *  `holder` names. */
+  constructor(said: readonly SaidMessage[], holder: LineHolder | null) {
+    this.occurrence = holder ? occurrencesOf(said, holder) : new Map();
   }
 
   /** Note that the session reads, or has read, `message`. */
@@ -395,11 +397,14 @@ class Copies {
  * copy of, by line id: lines of the same message share it, as {@link Copies}
  * reads them. A line keyed by no account is a copy of nothing and is absent.
  */
-export function occurrencesOf(said: readonly SaidMessage[]): Map<number, string> {
+export function occurrencesOf(
+  said: readonly SaidMessage[],
+  holderOf: LineHolder,
+): Map<number, string> {
   const occurrence = new Map<number, string>();
   const seen = new Map<string, number>();
   for (const message of said) {
-    const holder = holderOf(message);
+    const holder = holderOf(message.key);
     if (holder === null) continue;
     const copy = copyOf(message);
     const nth = seen.get(`${holder}\n${copy}`) ?? 0;
@@ -407,12 +412,6 @@ export function occurrencesOf(said: readonly SaidMessage[]): Map<number, string>
     occurrence.set(message.id, `${nth}\n${copy}`);
   }
   return occurrence;
-}
-
-/** The account a per-account key names in front, or null for any other key. */
-function holderOf(message: SaidMessage): string | null {
-  const at = message.key.indexOf(":");
-  return at > 0 ? message.key.slice(0, at) : null;
 }
 
 /** What the copies of one message share: its sender, its time and its words.
