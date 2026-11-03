@@ -7,10 +7,10 @@ import {
   type ActionConfig,
   type ActionResult,
   type AppActionRuntimeDeps,
+  type ChannelsService,
   isCoreMainAgentId,
 } from "@rome-os/app-runtime";
 import { ACCOUNT_KINDS, onRomeAccount } from "../../lib/chat-activity.js";
-import type { ChatLine } from "@rome-os/app-runtime/chats";
 import { chatReadsOf } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
@@ -178,23 +178,21 @@ function formatChats(rows: MessageRow[]): { content: string; shown: number } {
   return { content, shown };
 }
 
-/**
- * The account of Rome's a session speaks as, from the transcript it reads:
- * the sender of a line answering one of its turns, else the sender of every
- * line Rome said when there is only one. Null when the transcript cannot
- * tell.
- */
-function accountOf(lines: ChatLine[]): string | null {
-  const answer = lines.find((line) => line.role === "assistant" && line.turnId !== null);
-  if (answer?.senderId) return answer.senderId;
-  const senders = new Set(
-    lines.filter((line) => line.role === "assistant").map((line) => line.senderId),
+/** The account each of Rome's channels is, by channel name. Empty where
+ *  the host lists no channels. */
+async function accountsByChannel(
+  channels: ChannelsService | undefined,
+): Promise<Map<string, string>> {
+  const listed = (await channels?.list()) ?? [];
+  return new Map(
+    listed.flatMap((channel) => (channel.account ? [[channel.name, channel.account.id]] : [])),
   );
-  const [only] = senders;
-  return senders.size === 1 && only ? only : null;
 }
 
-export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
+export function createAction(
+  config: ActionConfig,
+  deps: AppActionRuntimeDeps<{ channelsService?: ChannelsService }>,
+): Action {
   const { appContext } = deps;
 
   return {
@@ -231,18 +229,21 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           // Through Chats, which reads every line Rome sent as `assistant`.
           const since = new Date(cutoffSeconds * 1000);
           rows = [];
+          const accounts = await accountsByChannel(deps.channelsService);
           for (const chat of await reads.recentChats({
             since,
             where: { accountKinds: ACCOUNT_KINDS },
           })) {
             const lines = await reads.transcript(chat.sessionId, { since });
-            const ownAccount = accountOf(lines);
+            // The account the session speaks as, by its channel.
+            const ownAccount = chat.channel ? (accounts.get(chat.channel.name) ?? null) : null;
             for (const line of lines.slice(-MESSAGES_PER_CHAT)) {
               // A chat can hold several of Rome's accounts, each with its own
               // agent, so only this session's account's lines are its agent's.
+              // Where the account is unknown, no line names an agent.
               const other =
-                line.role === "assistant" && line.senderId !== null && line.senderId !== ownAccount
-                  ? line.senderId
+                line.role === "assistant" && (ownAccount === null || line.senderId !== ownAccount)
+                  ? (line.senderId ?? "unknown")
                   : undefined;
               rows.push({
                 session_id: chat.sessionId,

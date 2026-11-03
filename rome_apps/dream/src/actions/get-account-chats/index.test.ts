@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import type { ChatReads } from "@rome-os/app-runtime/chats";
 import { fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction } from "./index.js";
 
@@ -348,6 +349,21 @@ describe("get_account_chats against the system schema", () => {
 });
 
 describe("get_account_chats through Chats", () => {
+  /** Deps whose host offers `reads`, and lists each channel named as the
+   *  account given. */
+  const depsWith = (reads: ChatReads, accounts: Record<string, string>) =>
+    ({
+      appContext: withChatReads(reads),
+      channelsService: {
+        list: async () =>
+          Object.entries(accounts).map(([name, id]) => ({
+            name,
+            account: { platform: name, id },
+            sendable: true,
+          })),
+      },
+    }) as unknown as AppActionRuntimeDeps;
+
   it("groups chats on Rome's accounts under their account, Rome's lines as its own", async () => {
     const now = new Date();
     const reads = fakeChatReads([
@@ -366,7 +382,7 @@ describe("get_account_chats through Chats", () => {
             senderName: "Alice",
             senderId: "100",
           },
-          { role: "assistant", content: "done", createdAt: now },
+          { role: "assistant", content: "done", createdAt: now, senderId: "bot" },
         ],
       },
       {
@@ -374,7 +390,7 @@ describe("get_account_chats through Chats", () => {
         lines: [{ role: "user", content: "personal", createdAt: now }],
       },
     ]);
-    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
+    const deps = depsWith(reads, { telegram: "bot" });
 
     const result = await createAction(actionConfig, deps).execute({ windowHours: 1 });
 
@@ -388,25 +404,36 @@ describe("get_account_chats through Chats", () => {
     expect(data.content).not.toContain("personal");
   });
 
-  it("names only this session's account's agent in a chat it shares with another", async () => {
-    const now = new Date();
-    const reads = fakeChatReads([
+  const shared = (now: Date) =>
+    fakeChatReads([
       {
         chat: {
           sessionId: "support",
           threadName: "Shared group",
           agentName: "support",
-          channel: { name: "feishu", kind: "feishu" },
+          channel: { name: "feishu-support", kind: "feishu" },
           chat: { platform: "feishu", id: 1 },
         },
         lines: [
           { role: "user", content: "help", createdAt: now, senderName: "Alice" },
+          // Sales answered first, in a turn of its own session.
+          {
+            role: "assistant",
+            content: "buy more",
+            createdAt: now,
+            senderId: "bot-sales",
+            turnId: "t0",
+          },
           { role: "assistant", content: "on it", createdAt: now, senderId: "bot-s", turnId: "t1" },
-          { role: "assistant", content: "buy more", createdAt: now, senderId: "bot-sales" },
         ],
       },
     ]);
-    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
+
+  it("names only this session's account's agent in a chat it shares with another", async () => {
+    const deps = depsWith(shared(new Date()), {
+      "feishu-support": "bot-s",
+      "feishu-sales": "bot-sales",
+    });
 
     const result = await createAction(actionConfig, deps).execute({ windowHours: 1 });
 
@@ -414,5 +441,16 @@ describe("get_account_chats through Chats", () => {
     const { content } = result.data as { content: string };
     expect(content).toContain('**Agent "support" (Rome)**:\n> on it');
     expect(content).toContain('**Agent on Rome\'s account "bot-sales" (Rome)**:\n> buy more');
+  });
+
+  it("names no agent where the host does not say which account the session is", async () => {
+    const deps = depsWith(shared(new Date()), {});
+
+    const result = await createAction(actionConfig, deps).execute({ windowHours: 1 });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const { content } = result.data as { content: string };
+    expect(content).not.toContain('Agent "support"');
+    expect(content).toContain('**Agent on Rome\'s account "bot-s" (Rome)**:\n> on it');
   });
 });
