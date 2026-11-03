@@ -21,7 +21,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
   - `attachment_unsupported`: the message has an attachment the channel cannot carry.
   - `reply_unaddressable`: the message's `replyToMessageId` names a message the channel cannot find to answer. A platform with no quoting at all, such as WhatsApp or WeChat, answers in place instead.
 
-  The caller decides what a refusal means. An approval card is left out on a channel that cannot show one. An agent's reply that cannot quote the message it answers fails.
+  A refusal is never swallowed. An approval card a channel cannot show rejects, and the action engine logs it as an error without failing the turn. An agent's reply that cannot quote the message it answers fails.
 - An inbound event carries its chat's `ChatRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.
 - An inbound event's message is a `ChannelMessage`, the record `messages` answers: it names the channel and says it came inbound.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
