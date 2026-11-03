@@ -341,20 +341,19 @@ describe("appChats", () => {
       expect(sent.map((send) => [send.channel, send.address])).toEqual([["telegram-2", "topic-9"]]);
     });
 
-    it("never puts a part only the host makes on record or on the platform", async () => {
+    it("hands a part only the host makes to the channel, which refuses it, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
+      duringSend = () => {
+        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+      };
+      const forged = { type: "routine_draft_card", draft: {} } as never;
 
-      await chats.send(group, {
-        text: "Brief",
-        parts: [
-          { type: "text", content: "Brief" },
-          { type: "routine_draft_card", draft: {} } as never,
-        ],
-      });
-
-      const recorded = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
-      expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([{ type: "text", content: "Brief" }]);
-      expect(sent[0]?.message.parts).toEqual([{ type: "text", content: "Brief" }]);
+      expect(
+        await refusal(
+          chats.send(group, { text: "Brief", parts: [{ type: "text", content: "Brief" }, forged] }),
+        ),
+      ).toBe("unsupported");
+      expect(lines()).toEqual([]);
     });
 
     it("answers a send the platform took even when its chat ends meanwhile", async () => {

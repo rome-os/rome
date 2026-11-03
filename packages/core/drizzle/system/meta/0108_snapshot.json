@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fc4271d7-b051-4ab3-8451-0120e4e7ca58",
+  "id": "0f9c7a01-cab8-458e-a732-95fa77915cba",
   "prevId": "471fa880-8301-41b7-9376-9446723452cd",
   "tables": {
     "account_profiles": {
@@ -901,52 +901,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_message_deliveries": {
-      "name": "chat_message_deliveries",
-      "columns": {
-        "message_id": {
-          "name": "message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "chat_message_deliveries_message_id_chat_messages_id_fk": {
-          "name": "chat_message_deliveries_message_id_chat_messages_id_fk",
-          "tableFrom": "chat_message_deliveries",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chat_message_deliveries_message_id_account_id_pk": {
-          "columns": [
-            "message_id",
-            "account_id"
-          ],
-          "name": "chat_message_deliveries_message_id_account_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "chat_messages": {
       "name": "chat_messages",
       "columns": {
@@ -1189,13 +1143,6 @@
         },
         "source_message_id": {
           "name": "source_message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "legacy_source_message_id": {
-          "name": "legacy_source_message_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1247,19 +1194,6 @@
           "tableTo": "rome_sessions",
           "columnsFrom": [
             "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "concierge_tasks_source_message_id_chat_messages_id_fk": {
-          "name": "concierge_tasks_source_message_id_chat_messages_id_fk",
-          "tableFrom": "concierge_tasks",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "source_message_id"
           ],
           "columnsTo": [
             "id"

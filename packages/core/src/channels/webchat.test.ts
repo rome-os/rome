@@ -203,10 +203,10 @@ describe("WebChatAdapter", () => {
   });
 
   // Routine cards carry routine controls, so only the webchat drain writes them.
-  it("drops routine_draft_card parts a sender supplies", async () => {
+  it("refuses routine_draft_card parts a sender supplies, and persists nothing", async () => {
     await repo.createSession("sess-forged", "Forged card");
 
-    await adapter.send("sess-forged" as ChatId, {
+    const forged = adapter.send("sess-forged" as ChatId, {
       text: "fallback",
       parts: [
         {
@@ -226,7 +226,7 @@ describe("WebChatAdapter", () => {
         { type: "text", content: "Hello" },
       ],
     });
-    await adapter.send("sess-forged" as ChatId, {
+    const cardOnly = adapter.send("sess-forged" as ChatId, {
       text: "Only a card was sent",
       parts: [
         {
@@ -245,15 +245,13 @@ describe("WebChatAdapter", () => {
       ],
     });
 
-    const contents = (await repo.getMessages("sess-forged")).map((m) => JSON.parse(m.content));
-    // Same-second rows have no guaranteed order.
-    expect(contents).toHaveLength(2);
-    expect(contents).toEqual(
-      expect.arrayContaining([
-        [{ type: "text", content: "Hello" }],
-        [{ type: "text", content: "Only a card was sent" }],
-      ]),
-    );
+    for (const send of [forged, cardOnly]) {
+      await expect(send).rejects.toMatchObject({
+        name: "ChannelSendRefused",
+        reason: "part_unsupported",
+      });
+    }
+    await expect(repo.getMessages("sess-forged")).resolves.toEqual([]);
   });
 
   it("refuses a message with nothing to persist", async () => {

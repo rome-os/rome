@@ -6,7 +6,6 @@
 // Nothing wraps the channels with this yet: the Chats switch does.
 
 import {
-  ChannelSendRefused,
   type Channel,
   type ChatId,
   type MessageReceipt,
@@ -18,7 +17,6 @@ import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
-import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -73,9 +71,9 @@ function recordedParts(out: Out): MessagePart[] {
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
-  // An app cannot put a part only Rome's host makes, such as a routine
-  // draft card, on record.
-  const parts = withoutHostOnlyParts(out.parts ?? []);
+  // A part only Rome's host makes, such as a routine draft card, never gets
+  // here: the adapter refused the send.
+  const parts = [...(out.parts ?? [])];
   if (parts.length) {
     return notes.length ? [...parts, { type: "text", content: notes.join("\n") }] : parts;
   }
@@ -114,17 +112,6 @@ export function recordedSends<C extends Channel>(
           ...(email?.cc?.length ? { cc: email.cc } : {}),
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
-        if (!out.text.trim() && !out.html?.trim() && !out.parts && !out.attachments) {
-          // Nothing to send, which is refused rather than skipped.
-          throw new ChannelSendRefused(
-            "empty",
-            "A message needs text, parts or attachments. Nothing was sent.",
-          );
-        }
-        if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
-          // As the port does, rather than read a blank id as no reply.
-          throw new Error("Email replyToMessageId must not be blank. No email was sent.");
-        }
         // The port quotes by the platform's id, an email by the provider's.
         // The email port quotes only the email a reply names, and reads no
         // chat's quote hint.
@@ -139,7 +126,9 @@ export function recordedSends<C extends Channel>(
             to: address,
           } as OutgoingEmailMessage);
         }
-        if (email?.inReplyToMessageId) {
+        // A blank id is a reply too, which the port refuses, rather than
+        // read as no reply.
+        if (email?.inReplyToMessageId !== undefined) {
           // The provider sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there. An
           // email Rome does not hold, as one fetched from the mailbox

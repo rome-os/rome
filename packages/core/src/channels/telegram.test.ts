@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -368,10 +368,12 @@ describe("TelegramAdapter", () => {
     });
 
     it("sends attachments via appropriate API methods", async () => {
+      const file = join(sandboxHome, "file.pdf");
+      await writeFile(file, "%PDF-1.4");
       const outgoing: OutgoingMessage = {
         attachments: [
           { type: "image", source: "https://example.com/pic.png", caption: "pic" },
-          { type: "document", source: "/tmp/file.pdf" },
+          { type: "document", source: file },
         ],
       };
       await adapter.send(CHAT, outgoing);

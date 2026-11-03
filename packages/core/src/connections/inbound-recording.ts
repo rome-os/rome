@@ -21,7 +21,7 @@ const log = createLogger("inbound-recording");
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
   chats: Pick<ChatRepository, "start">;
-  messages: Pick<MessageRepository, "record" | "idOf" | "reached" | "quotedBy">;
+  messages: Pick<MessageRepository, "record">;
   events: ChatEvents;
   /** Each channel's chat adapter, which hands over what the channel hears. */
   adapters: Pick<ChatAdapters, "of">;
@@ -88,10 +88,8 @@ export function inboundRecording(
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
     // Recorded and raised in one step, with nothing run in between, so
     // MessageSaid's first listener acts before anything reads the message. A
-    // line on record already is raised only for an account it has not
-    // reached: where the platform numbers a chat's messages once for
-    // everyone, two of Rome's accounts there hear the same line, while a
-    // redelivery, even after a restart, records nothing and raises nothing.
+    // message already on record raises nothing: a redelivery, even after a
+    // restart, and a group message a second of Rome's accounts hears.
     const said = messageToRome({
       key: message.key,
       place: placeIn(chat.ref, message.thread?.id),
@@ -103,15 +101,9 @@ export function inboundRecording(
       ...(message.replyTo ? { replyTo: message.replyTo } : {}),
       at: message.saidAt,
     });
-    const fresh = deps.messages.record(said);
-    const id = fresh?.id ?? deps.messages.idOf(chat.ref, message.key);
-    if (id === null || !deps.messages.reached(id, via.account.id)) return null;
-    // Raised again for another account, the line is the one on record, as
-    // this account heard it, quoting the line it quotes on record.
-    const { replyTo: _quote, ...unquoted } = said;
-    const quoted = fresh ? null : deps.messages.quotedBy(id);
-    const recorded = fresh ?? { ...unquoted, id, ...(quoted === null ? {} : { replyTo: quoted }) };
-    const hearingAs = `${via.channel}\0${id}`;
+    const recorded = deps.messages.record(said);
+    if (recorded === null) return null;
+    const hearingAs = `${via.channel}\0${recorded.id}`;
     hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
     try {
       await deps.events.publish({
