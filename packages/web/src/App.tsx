@@ -156,15 +156,13 @@ export default function App() {
                 Sessions address. */}
             <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
             <Route path="/assistants" element={<AssistantsPage />} />
-            {/* The two People views are routes, so each is linkable and back
-                steps between them. The dossier takes its own segment rather
-                than sharing theirs: a person id is a slug of the display name
-                the guardian gave them, so `latest` and `directory` are ids they
-                can mint, and a static view route would leave such a person
-                unreachable. */}
+            {/* The person page takes its own segment rather than sharing the
+                roster's: a person id is a slug of the display name the guardian
+                gave them, so `directory` is an id they can mint, and a static
+                route beside it would leave such a person unreachable. */}
             <Route path="/people" element={<PeopleIndexRedirect />} />
-            <Route path="/people/latest" element={<PeoplePage view="latest" />} />
-            <Route path="/people/directory" element={<PeoplePage view="directory" />} />
+            <Route path="/people/latest" element={<PeopleIndexRedirect />} />
+            <Route path="/people/directory" element={<PeoplePage />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
             <Route path="/envoys/*" element={<EnvoysPage />} />
             <Route path="/memory/*" element={<MemoryPage />} />

@@ -15,11 +15,11 @@ import {
 import i18n from "@/i18n";
 import PersonDetailPage from "./PersonDetailPage";
 
-// The person page: who they are on top, the merged timeline below. What is under
-// test is that the page reads the two routes that own it — `GET /api/people/:id`
-// and `GET /api/people/:id/messages` — and that the timeline it renders is
-// channel-blind: a Telegram entry renders the way a WhatsApp one does, grouped
-// by the calendar day it happened on.
+// The person page: who they are on top, one account's timeline below. What is
+// under test is that the page reads the two routes that own it, `GET
+// /api/people/:id` and `GET /api/people/:id/messages` for the account on
+// screen, and that the timeline it renders is grouped by the calendar day each
+// message happened on.
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -61,8 +61,6 @@ const PERSON: PersonResource = {
       latestAt: NOW - 90_000,
     },
   ],
-  messageCount: 12,
-  latest: { source: "whatsapp", timestamp: NOW - 300, preview: "the landlord replies fast" },
   memoryPath: "memory/relationship/wei-chen.md",
 };
 
@@ -81,8 +79,6 @@ const READ_ONLY_PERSON: PersonResource = {
       latestAt: NOW - 4_000,
     },
   ],
-  messageCount: 1,
-  latest: null,
   memoryPath: null,
 };
 
@@ -116,8 +112,6 @@ const DUPLICATE: PersonResource = {
   displayName: "W. Chen",
   bondLevel: "other",
   accounts: [],
-  messageCount: 2,
-  latest: null,
   memoryPath: null,
 };
 
@@ -261,8 +255,13 @@ function mockApi(
         echoing.splice(echoing.indexOf(pending), 1);
         delivered.unshift(pending.entry);
       }
+      // One account's history: the read names the account, and a person has no
+      // history joined across them.
+      const channel = new URL(url, "http://localhost").searchParams.get("channel");
       return json({
-        entries: [...delivered, ...(options.entries ?? ENTRIES)],
+        entries: [...delivered, ...(options.entries ?? ENTRIES)].filter(
+          (entry) => entry.source === channel,
+        ),
         nextCursor: options.nextCursor ?? null,
       });
     }
@@ -297,7 +296,6 @@ function renderPage(id = "wei-chen", before?: string) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <Routes>
-          <Route path="/people/latest" element={<div>the stream</div>} />
           <Route path="/people/directory" element={<div>the directory</div>} />
           <Route path="/people/person/:personId" element={<PersonDetailPage />} />
         </Routes>
@@ -334,8 +332,14 @@ describe("PersonDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Wei Chen" })).toBeTruthy();
     expect(calls.some((call) => call.url.includes("/api/people/wei-chen"))).toBe(true);
     expect(calls.some((call) => call.url.includes("/api/people/wei-chen/messages"))).toBe(true);
-    // One request across every account, not one per channel.
-    expect(calls.filter((call) => call.url.includes("/messages"))).toHaveLength(1);
+    // One request, for the account the page opened on: there is no history
+    // joined across accounts to read instead.
+    const reads = calls.filter((call) => call.url.includes("/messages"));
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.url).toContain("channel=whatsapp");
+    expect(reads[0]!.url).toContain(
+      `channelUserId=${encodeURIComponent("6591881123@s.whatsapp.net")}`,
+    );
   });
 
   it("renders every account the person is reachable at", async () => {
@@ -348,26 +352,30 @@ describe("PersonDetailPage", () => {
     expect(screen.getByText("418820113")).toBeTruthy();
   });
 
-  it("groups the merged timeline by day, channel-blind", async () => {
+  it("shows one account's timeline by day, and switches to another account's", async () => {
+    const user = userEvent.setup();
     mockApi();
     renderPage();
 
     expect(await screen.findByText("the landlord replies fast")).toBeTruthy();
-    // A Telegram entry renders the way a WhatsApp one does — nothing here knows
-    // which store an entry came from.
-    expect(screen.getByText("dinner was great")).toBeTruthy();
     expect(screen.getByText("Today")).toBeTruthy();
-    expect(screen.getByText("Yesterday")).toBeTruthy();
     // Rome's own half of an exchange is marked as such rather than read as the
     // other person's words.
     expect(screen.getByText("You:")).toBeTruthy();
+    // Telegram's history is Telegram's, so it is not on WhatsApp's page.
+    expect(screen.queryByText("dinner was great")).toBeNull();
+
+    await user.click(screen.getByRole("radio", { name: "Telegram" }));
+    expect(await screen.findByText("dinner was great")).toBeTruthy();
+    expect(screen.getByText("Yesterday")).toBeTruthy();
+    expect(screen.queryByText("the landlord replies fast")).toBeNull();
   });
 
   it("reads a LinkedIn conversation here, the way it reads a WhatsApp one", async () => {
     // The People page carried LinkedIn in a section of its own for as long as
     // its threads resolved to no person. They resolve now, so a LinkedIn
     // conversation is read where every other channel's is: on the person,
-    // merged into one history, with no thread dialog and no composer.
+    // under its account, with no thread dialog and no composer.
     const person: PersonResource = {
       id: "priya-nair",
       displayName: "Priya Nair",
@@ -416,11 +424,11 @@ describe("PersonDetailPage", () => {
       nextCursor: "older-1",
       older: [
         {
-          source: "telegram",
+          source: "whatsapp",
           timestamp: NOW - 400_000,
           body: "first hello",
           direction: "inbound",
-          ref: "sentinel:1",
+          ref: "wa-0",
         },
       ],
     });
@@ -517,17 +525,26 @@ describe("PersonDetailPage", () => {
     expect(await screen.findByText("Couldn't load")).toBeTruthy();
     // "Nothing has happened yet" is a claim about this person, and a failed
     // fetch has not earned it.
-    expect(screen.queryByText("Nothing has happened on any account yet.")).toBeNull();
+    expect(screen.queryByText("Nothing on this WhatsApp account yet.")).toBeNull();
   });
 
   it("keeps a genuinely empty history on its own empty state", async () => {
     mockApi({ entries: [] });
     renderPage();
 
-    expect(await screen.findByText("Nothing has happened on any account yet.")).toBeTruthy();
+    expect(await screen.findByText("Nothing on this WhatsApp account yet.")).toBeTruthy();
   });
 
-  it("goes back to the stream when the dossier is the address the guardian arrived on", async () => {
+  it("says there is no history when the person holds no account", async () => {
+    mockApi({ person: { ...PERSON, accounts: [] } });
+    renderPage();
+
+    expect(
+      await screen.findByText("No accounts linked yet, so there is no history to show."),
+    ).toBeTruthy();
+  });
+
+  it("goes back to the directory when the dossier is the address the guardian arrived on", async () => {
     const user = userEvent.setup();
     mockApi();
     renderPage();
@@ -535,7 +552,7 @@ describe("PersonDetailPage", () => {
     await screen.findByRole("heading", { name: "Wei Chen" });
     await user.click(screen.getByRole("button", { name: "People" }));
 
-    expect(await screen.findByText("the stream")).toBeTruthy();
+    expect(await screen.findByText("the directory")).toBeTruthy();
   });
 
   it("returns to the view the person was opened from, on the chip it was on", async () => {
@@ -758,12 +775,12 @@ describe("PersonDetailPage back link consumes the dossier's history entry", () =
 
     await screen.findByRole("heading", { name: "Wei Chen" });
     await user.click(screen.getByRole("button", { name: "People" }));
-    expect(await screen.findByText("the stream")).toBeTruthy();
+    expect(await screen.findByText("the directory")).toBeTruthy();
 
     await user.click(screen.getByTestId("browser-back"));
 
     expect(screen.queryByRole("heading", { name: "Wei Chen" })).toBeNull();
-    expect(screen.getByTestId("address").textContent).toBe("/people/latest");
+    expect(screen.getByTestId("address").textContent).toBe("/people/directory");
   });
 });
 
@@ -771,8 +788,8 @@ describe("PersonDetailPage back link consumes the dossier's history entry", () =
 //
 // What is under test is the one rule the design turns on: Rome never picks a
 // recipient out of sight. So the target is on screen before Send is pressed, the
-// request carries the account that was on screen, and the view that already
-// names an account offers no second choice.
+// request carries the account that was on screen, and the page, which always
+// shows one account, offers no second choice.
 describe("PersonDetailPage, sending", () => {
   it("shows Sending before the request returns and preserves the next draft", async () => {
     const user = userEvent.setup();
@@ -866,10 +883,10 @@ describe("PersonDetailPage, sending", () => {
     // The sendable account heard from most recently, which is
     // `defaultSendAccount`'s answer and WhatsApp's here. A default rendered, not
     // a decision taken off screen.
-    expect(await screen.findByRole("button", { name: /WhatsApp · \+6591881123/ })).toBeTruthy();
+    expect(await screen.findByText(/WhatsApp · \+6591881123/)).toBeTruthy();
   });
 
-  it("sends from the merged view to the account it showed, and settles both reads", async () => {
+  it("sends to the account the page opened on, and settles both reads", async () => {
     const user = userEvent.setup();
     const calls = mockApi({ send: "land" });
     renderPage();
@@ -915,7 +932,7 @@ describe("PersonDetailPage, sending", () => {
     expect(await screen.findByText("on my way", {}, { timeout: 8_000 })).toBeTruthy();
   }, 15_000);
 
-  it("offers no picker inside an account view, because the view is the target", async () => {
+  it("offers no picker, because the account on screen is the target", async () => {
     const user = userEvent.setup();
     const calls = mockApi({ send: "land" });
     renderPage();
@@ -923,10 +940,9 @@ describe("PersonDetailPage, sending", () => {
     await screen.findByRole("heading", { name: "Wei Chen" });
     await user.click(screen.getByRole("radio", { name: "Telegram" }));
 
-    // The trigger that changes the target is gone; the target itself is still
-    // stated. Asking the guardian to choose again inside a view named after one
-    // account is asking twice.
-    expect(screen.queryByRole("button", { name: /WhatsApp · / })).toBeNull();
+    // The target is stated and not chosen a second time: the switcher above
+    // already named the account, and asking again would be asking twice.
+    expect(screen.queryByText(/WhatsApp · /)).toBeNull();
     expect(screen.getByText(/Telegram · 418820113/)).toBeTruthy();
 
     await user.type(screen.getByRole("textbox", { name: "Message text" }), "see you there");
@@ -963,7 +979,7 @@ describe("PersonDetailPage, sending", () => {
     expect(await screen.findByText("are you there")).toBeTruthy();
   });
 
-  it("keeps a refused message under its original account when the target changes", async () => {
+  it("keeps a refused message under its original account when the guardian switches away", async () => {
     const user = userEvent.setup();
     mockApi({ send: "refuse" });
     renderPage();
@@ -979,25 +995,35 @@ describe("PersonDetailPage, sending", () => {
     );
     expect(refusal).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /WhatsApp · / }));
-    await user.click(await screen.findByRole("menuitem", { name: /Telegram/ }));
+    // Telegram's page holds nothing WhatsApp refused, and WhatsApp's still does.
+    await user.click(screen.getByRole("radio", { name: "Telegram" }));
     expect(screen.getByText(/Telegram · 418820113/)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull();
+    await user.click(screen.getByRole("radio", { name: "WhatsApp" }));
     expect(
       within(screen.getByRole("list", { name: "Not sent" })).getByText("on my way"),
     ).toBeTruthy();
-    expect(refusal).toBeTruthy();
-    await user.click(screen.getByRole("radio", { name: "Telegram" }));
-    expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull();
   });
 
   it("replaces the composer with the reason when the account cannot be written to", async () => {
-    mockApi({ person: READ_ONLY_PERSON });
+    mockApi({
+      person: READ_ONLY_PERSON,
+      entries: [
+        {
+          source: "linkedin",
+          timestamp: NOW - 4_000,
+          body: "good to meet you",
+          direction: "inbound",
+          ref: "li-1",
+        },
+      ],
+    });
     renderPage("arvind");
 
     await screen.findByRole("heading", { name: "Arvind Srivastav" });
     expect(screen.getByText("Rome cannot send on LinkedIn yet.")).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "Message text" })).toBeNull();
     // And the history stays readable.
-    expect(await screen.findByText("the landlord replies fast")).toBeTruthy();
+    expect(await screen.findByText("good to meet you")).toBeTruthy();
   });
 });

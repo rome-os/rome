@@ -103,7 +103,7 @@ describe("LinkedIn replies through People", () => {
       { timeoutMs: 180_000 },
     );
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries).toHaveLength(1);
     expect(timeline.entries[0]).toMatchObject({
@@ -128,7 +128,7 @@ describe("LinkedIn replies through People", () => {
     expect(response.status).toBe(200);
     expect(run).toHaveBeenCalledWith(expect.arrayContaining([text]), expect.anything());
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries[0]).toMatchObject({ body: text });
   });
@@ -143,7 +143,7 @@ describe("LinkedIn replies through People", () => {
     expect((await post()).status).toBe(200);
     expect(run).toHaveBeenCalledTimes(1);
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries[0]).toMatchObject({ body: stored });
   });

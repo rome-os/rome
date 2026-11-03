@@ -1,8 +1,10 @@
-// A person's history, merged across every account they are linked to. The
-// message shape, the ordering and the cursor are the message module's
-// (@rome/api-types/message), and the page that wraps them is the People
-// contract's (@rome/api-types/people); a store is the channel's (`AccountMessages`, in
-// channels/messages.js); this module is only the merge above them.
+// One account's history. The message shape, the ordering and the cursor are
+// the message module's (@rome/api-types/message), and the page that wraps them
+// is the People contract's (@rome/api-types/people); a store is the channel's
+// (`AccountMessages`, in channels/messages.js). An account is read once per
+// channel it is stored under, and from more than one store when those channels
+// are held by different stores, so this module merges those reads into one
+// page.
 
 import { type TimelinePage } from "@rome/api-types/people";
 import {
@@ -14,15 +16,13 @@ import {
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 
 /**
- * One page of `accounts`' merged history, newest first, resuming after
- * `cursor`.
+ * One page of an account's history, newest first, resuming after `cursor`.
  *
- * `nextCursor` is null only when the whole remaining history fit. Filter
- * `accounts` before calling to narrow the page to one channel — every entry a
- * store produces belongs to the account it was read for, so the accounts are
- * the only scope there is.
+ * `accounts` is the one account as `timelineAccounts` reads it: one entry per
+ * channel it is stored under (`perChannel`). `nextCursor` is null only when
+ * the whole remaining history fit.
  */
-export async function readPersonTimeline(
+export async function readAccountTimeline(
   stores: readonly AccountMessages[],
   accounts: readonly MessageAccount[],
   options: { cursor?: Message | null; limit: number },
@@ -72,10 +72,10 @@ export async function readPersonTimeline(
  * first — a row previewing an entry from one store while the page beneath it
  * opens on another's.
  *
- * The one place the rule is applied. Every read of a person's history — the
- * page here, the summary in activity.ts — goes through this, because a summary
- * that claimed accounts on its own terms could count an exchange the page
- * attributes to a different store.
+ * The one place the rule is applied. Every read of an account's history — the
+ * page here, the heads the person read and the account stream preview — goes
+ * through this, because a head claimed on other terms could preview an
+ * exchange the page attributes to a different store.
  *
  * One `latest` per account, and the whole store's worth raised before any is
  * awaited: an adapter that groups the calls of a tick — every SQL one does —

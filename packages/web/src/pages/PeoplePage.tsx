@@ -7,10 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useComposedInput } from "@/hooks/use-composed-input";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { List } from "@/components/ui/list-row";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
-import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
+import { DirectoryRow, levelLabelKey } from "./people/rows";
 import { DismissedEntry, StrangerEntry } from "./people/triage";
 import { LinkMyAccount } from "./people/link-code";
 import {
@@ -19,48 +18,42 @@ import {
   FILTER_PARAM,
   levelCounts,
   parsePeopleFilter,
-  PEOPLE_VIEW_PATH,
+  PEOPLE_PATH,
   peoplePath,
   personPath,
   SEARCH_PARAM,
-  streamRows,
   type LevelCounts,
   type PeopleFilter,
   type PeopleRow,
-  type PeopleView,
   type RowLevel,
 } from "./people/people-model";
 import { usePeopleRoster } from "./people/use-roster";
 
 /**
- * The People page: an activity stream and a roster, over two reads.
+ * The People page: a roster, over two reads.
  *
- * Latest answers "who has something new" — one row per account with a
- * dynamic, newest first, carrying only what routing needs. Directory answers
- * "who does Rome know" — a contacts list, everyone Rome holds, by name, with no
- * preview and no count anywhere in it. Stranger and Dismissed are positions on
+ * It answers "who does Rome know" — a contacts list, everyone Rome holds, by
+ * name, with no preview and no count anywhere in it. Stranger and Dismissed are positions on
  * the same ladder as the curated levels, so an account waiting on a decision
  * and a person the guardian placed sit in one list rather than in sections that
  * cannot say where either stands relative to the other.
  *
  * The contract is two nouns and this page is one ladder over both: `GET
- * /api/people` for the people, and the account read the view is about — `GET
- * /api/accounts` for the contacts list, `GET /api/accounts/stream` for the
- * recents surface — joined in `people-model.ts`. A person's history is a third
- * read, `GET /api/people/:id/messages`, and it belongs to the person page.
+ * /api/people` for the people and `GET /api/accounts` for the accounts, joined
+ * in `people-model.ts`. An account's history is a third read, `GET
+ * /api/people/:id/messages`, and it belongs to the person page.
  *
  * Nothing here knows a channel. LinkedIn was the last one with a surface of its
- * own — a section below both views, reading its own mirror, for as long as a
+ * own — a section below the roster, reading its own mirror, for as long as a
  * LinkedIn thread resolved to no person. It resolves now, so LinkedIn arrives
  * through the same two reads as everything else and is placed, dismissed and
  * opened by the same gestures. A channel added after this page was written
  * lands here the same way, without a section.
  *
- * Both views are routes — `/people/latest` and `/people/directory` — and the
- * chip and the search term ride the query beside them. The page holds no
- * control state of its own: what is on screen is what the address says, so a
- * view is linkable, a reload returns to it, and back steps through the choices
- * that got there.
+ * The chip and the search term ride the query. The page holds no control
+ * state of its own: what is on screen is what the address says, so a view is
+ * linkable, a reload returns to it, and back steps through the choices that
+ * got there.
  *
  * Every number on screen is the server's. The directory pages, so a count taken
  * over the rows that happened to arrive would report no waiting senders as soon
@@ -68,65 +61,41 @@ import { usePeopleRoster } from "./people/use-roster";
  * invalidating these reads rather than by editing what they returned.
  */
 
-/** The chips whose level the people read can be narrowed by: the levels a
- *  person row actually holds. Stranger and Dismissed are account states, and the
- *  account read is narrowed by those instead. */
-const PLACED_FILTERS = new Set<PeopleFilter>(["inner-circle", "acquaintance", "other"]);
-
 /**
- * `/people` is the root the two views share and renders neither: it forwards to
- * the stream, carrying whatever chip and term the link arrived with, so an
- * address written before the views had their own still lands somewhere.
+ * `/people`, and `/people/latest` where an activity view once was, forward to
+ * the roster, carrying whatever chip and term the link arrived with, so an
+ * address written before still lands somewhere.
  */
 export function PeopleIndexRedirect() {
   const { search } = useLocation();
-  return <Navigate to={{ pathname: PEOPLE_VIEW_PATH.latest, search }} replace />;
+  return <Navigate to={{ pathname: PEOPLE_PATH, search }} replace />;
 }
 
-export default function PeoplePage({ view }: { view: PeopleView }) {
+export default function PeoplePage() {
   const { t } = useTranslation("people");
   const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
 
-  // Every control on this page is in the address: the view in the path, the
-  // chip and the term in the query. So each of the three moves by navigating,
+  // Every control on this page is in the address: the chip and the term in the
+  // query. So each moves by navigating,
   // and each reads back out of the URL rather than out of a second copy that
   // could disagree with it.
   const [params] = useSearchParams();
   const filter = parsePeopleFilter(params.get(FILTER_PARAM));
   const search = params.get(SEARCH_PARAM) ?? "";
 
-  // A view or a chip is one deliberate choice and gets a history entry, so back
+  // A chip is one deliberate choice and gets a history entry, so back
   // undoes it. Typing does not: a term reached by keystroke would otherwise
   // leave one entry per letter between the guardian and the page they came
   // from.
-  const go = (
-    next: { view?: PeopleView; filter?: PeopleFilter; search?: string },
-    options?: { replace?: boolean },
-  ) =>
-    navigate(
-      peoplePath(next.view ?? view, {
-        filter: next.filter ?? filter,
-        search: next.search ?? search,
-      }),
-      options,
-    );
+  const go = (next: { filter?: PeopleFilter; search?: string }, options?: { replace?: boolean }) =>
+    navigate(peoplePath({ filter: next.filter ?? filter, search: next.search ?? search }), options);
 
   const searchInput = useComposedInput(search, (next) => go({ search: next }, { replace: true }));
 
-  // The view picks the account read: the contacts list, or the recents surface.
-  //
-  // The chip rides the requests in the stream, where a level is the whole view:
-  // an account state is what the account read can narrow by, a bond level is
-  // what the people read can. The directory view renders every group at once,
-  // so it sends neither — a level on the request would leave the other headings
-  // with nothing to show.
-  const roster = usePeopleRoster({
-    search,
-    view,
-    accountState: view === "directory" ? null : filter === "dismissed" ? "dismissed" : "unlinked",
-    personLevel: view === "directory" || !PLACED_FILTERS.has(filter) ? null : filter,
-  });
+  // The roster renders every group at once, so the chip rides neither read — a
+  // level on the request would leave the other headings with nothing to show.
+  const roster = usePeopleRoster({ search });
   const rows = roster.rows;
 
   // Derived from the term the loaded rows answer, not the one in the box: the
@@ -134,17 +103,12 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   // term it was not fetched for empties it for exactly the contacts only the
   // server's search can reach.
   const settled = roster.settledSearch;
-  const latest = useMemo(
-    () => streamRows(rows, { search: settled, filter }),
-    [rows, settled, filter],
-  );
   const groups = useMemo(
     () => directoryGroups(rows, { filter, search: settled }),
     [rows, filter, settled],
   );
-  // The numbers the chips and the group headings show, from the read the view
-  // is on: what the stream calls Stranger is the senders waiting on a decision,
-  // what the directory calls Stranger is everyone Rome has not placed.
+  // The numbers the chips and the group headings show. Stranger is everyone
+  // Rome has not placed.
   const counts = useMemo(
     () => levelCounts(roster.peopleCounts, roster.accountCounts),
     [roster.peopleCounts, roster.accountCounts],
@@ -159,60 +123,34 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
     [rows],
   );
 
-  // Only a person has a dossier: a dossier is a merged history, and a history
-  // is what a person has. An account nobody has placed carries its evidence on
-  // its own row instead.
+  // Only a person has a page. An account nobody has placed carries its
+  // gestures on its own row instead.
   //
-  // The address being left goes with it, so the dossier's back link returns to
-  // this view on this chip and this term rather than to whichever entry happens
-  // to sit behind it.
+  // The address being left goes with it, so the page's back link returns to
+  // this chip and this term rather than to whichever entry happens to sit
+  // behind it.
   const openRow = (row: PeopleRow) => {
     if (row.kind !== "person") return;
-    navigate(personPath(row.id), {
-      state: { from: peoplePath(view, { filter, search }) },
-    });
+    navigate(personPath(row.id), { state: { from: peoplePath({ filter, search }) } });
   };
 
   const loading = roster.isPending;
   const loadError = roster.error ? roster.error.message : null;
 
   // Both unplaced ends of the ladder carry the gesture their position admits,
-  // on the row their view has. The stream renders them dense — a placement and
-  // a restore both decide on what the sender actually sent, so the evidence is
-  // on the row rather than a click away — and the directory renders them as the
-  // contacts line every other row is, with the gestures behind a `⋯` menu at
-  // the end of it.
-  const unplaced = (row: PeopleRow, variant: PeopleView) =>
+  // as the contacts line every other row is, with the gestures behind a `⋯`
+  // menu at the end of it.
+  const unplaced = (row: PeopleRow) =>
     row.level === "dismissed" ? (
-      <DismissedEntry key={row.id} row={row} variant={variant} />
+      <DismissedEntry key={row.id} row={row} />
     ) : (
-      <StrangerEntry key={row.id} row={row} people={linkTargets} variant={variant} />
+      <StrangerEntry key={row.id} row={row} people={linkTargets} />
     );
 
   return (
     <PageShell>
       <PageBody>
-        {/* Both of this page's one-of-N controls are the kit's radiogroups
-            rather than buttons wearing `role="radio"`: Radix supplies the
-            roving focus and arrow-key movement the role promises, which a row
-            of tab stops does not have. */}
-        <PageHeader
-          title={tCommon("nav.people")}
-          actions={
-            <>
-              <LinkMyAccount />
-              <SegmentedControl<PeopleView>
-                aria-label={t("views.label")}
-                value={view}
-                onValueChange={(next) => go({ view: next })}
-                options={[
-                  { value: "latest", label: t("views.latest") },
-                  { value: "directory", label: t("views.directory") },
-                ]}
-              />
-            </>
-          }
-        />
+        <PageHeader title={tCommon("nav.people")} actions={<LinkMyAccount />} />
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <Input
@@ -280,20 +218,13 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
               </Button>
             </AlertDescription>
           </Alert>
-        ) : view === "latest" ? (
-          <LatestView
-            rows={latest}
-            searching={settled !== ""}
-            onOpen={openRow}
-            renderUnplaced={(row) => unplaced(row, "latest")}
-          />
         ) : (
           <DirectoryView
             groups={groups}
             counts={counts}
             searching={settled !== ""}
             onOpen={openRow}
-            renderUnplaced={(row) => unplaced(row, "directory")}
+            renderUnplaced={unplaced}
           />
         )}
 
@@ -312,50 +243,6 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         )}
       </PageBody>
     </PageShell>
-  );
-}
-
-/** The stream. Accounts nobody has placed are dense — the placement decision
- *  runs on their evidence — and every other row is lean. */
-function LatestView({
-  rows,
-  searching,
-  onOpen,
-  renderUnplaced,
-}: {
-  rows: PeopleRow[];
-  searching: boolean;
-  onOpen: (row: PeopleRow) => void;
-  renderUnplaced: (row: PeopleRow) => React.ReactNode;
-}) {
-  const { t } = useTranslation("people");
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-12 border border-dashed border-border-strong bg-surface/50 py-10 text-center">
-        <p className="text-ui text-muted-foreground">
-          {searching ? t("page.emptyForSearch") : t("page.emptyTitle")}
-        </p>
-        {!searching && (
-          <p className="mt-1 text-aux text-subtle-foreground">{t("page.emptyHint")}</p>
-        )}
-      </div>
-    );
-  }
-
-  // No heading: the stream is one ungrouped list, and the segmented control
-  // above it already says which view is on screen.
-  return (
-    <section>
-      <List>
-        {rows.map((row) =>
-          row.kind === "account" ? (
-            renderUnplaced(row)
-          ) : (
-            <StreamRow key={row.id} row={row} onOpen={() => onOpen(row)} />
-          ),
-        )}
-      </List>
-    </section>
   );
 }
 

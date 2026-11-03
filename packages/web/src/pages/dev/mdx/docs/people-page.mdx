@@ -1,11 +1,4 @@
-import {
-  ChannelGlyphSet,
-  DirectoryDemo,
-  PersonPageDemo,
-  StreamDemo,
-  StrangerDemo,
-  ViewSwitcherDemo,
-} from "./people-demo";
+import { ChannelGlyphSet, DirectoryDemo, FilterChipsDemo, PersonPageDemo } from "./people-demo";
 
 # People, rebuilt
 
@@ -14,11 +7,9 @@ unmapped senders, the WhatsApp address book. The same human could sit in more th
 one, each with its own row shape and its own controls, and no section could say
 where a person stood relative to another.
 
-Even flattened into one list, a roster answers the wrong question. People open this
-page to find out **who has something new**, and a roster shows everyone at once with
-management controls on every row.
-
-This note is the design in three surfaces: a stream, a directory, and a person page.
+This note is the design in two surfaces: a directory, and a person page. A person
+page shows one account at a time, since a history is one account's, and the roster
+shows no activity at all.
 Every specimen below is live — the same primitives, tokens, and focus rules the page
 ships with, so switching the theme re-renders the design rather than a picture of it.
 
@@ -27,7 +18,7 @@ ships with, so switching the theme re-renders the design rather than a picture o
 > mockup, version `monochrome-channel-glyphs`.
 
 Every specimen renders the page's own components against literal fixtures — the
-same `StreamRow`, `StrangerRow`, `DirectoryRow`, avatar and glyph set the roster
+same `DirectoryRow`, avatar and glyph set the roster
 draws with, wired to nothing. A specimen that drew its own rows would go on
 looking right after the page stopped, which is the one thing a live note exists
 to prevent.
@@ -40,68 +31,32 @@ of the specimen and the note renders what ships.
 
 ---
 
-## Two views, one control set
+## Filter chips
 
-**Latest** is the default. **Directory** is the management view. They are a
-`SegmentedControl`, and the bond filter below it is a `FilterChipGroup` — both the
-kit's radiogroups, because Radix supplies the roving focus and arrow-key movement
-that `role="radio"` on a plain button promises and does not have.
+The bond filter is a `FilterChipGroup` — the kit's radiogroup, because Radix supplies
+the roving focus and arrow-key movement that `role="radio"` on a plain button promises
+and does not have.
 
-<Specimen title="View switcher + filter chips">
-  <ViewSwitcherDemo />
+<Specimen title="Filter chips">
+  <FilterChipsDemo />
 </Specimen>
 
-`All` means the **placed** people: it holds back both unplaced ends of the ladder, so
-Stranger and Dismissed are each entered on purpose. The Stranger chip carries a count
-when senders are waiting.
+`All` means the guardian and the **placed** people: it holds back both unplaced ends of
+the ladder, so Stranger and Dismissed are each entered on purpose. The Stranger chip
+carries a count when anyone is unplaced.
 
 <Invariant>
   Every number on screen is the server's `counts`, never derived from the rows that
   happened to load — the account read is paged, so a count taken over page one would
-  report no waiting senders whenever placed people fill it. Which accounts it counts is
-  the view's own read: the stream counts the ones something has happened on, so its
-  Stranger is the senders waiting on a decision, while the directory counts the whole
-  contacts list, so its Stranger is everyone Rome has not placed.
+  report nobody unplaced whenever placed people fill it. Its Stranger is everyone Rome
+  has not placed.
 </Invariant>
-
----
-
-## Latest — the stream
-
-One row per account, newest first, carrying only what routing needs: neutral avatar,
-name, monochrome source glyph, one line of preview, relative time.
-
-<Specimen title="Stream rows">
-  <StreamDemo />
-</Specimen>
-
-No management controls on a stream row. Bond and linked accounts live on the person
-page. A row here exists to get you to a conversation.
-
----
-
-## Stranger — the placement view
-
-The Stranger chip keeps dense rows: platform pill, number or handle, message count,
-preview, and the `⋯` menu. The placement decision runs on that evidence, so all of it
-is on the row rather than a click away. Placing a sender takes it off the view, and
-the chip's count drops because the next read says so.
-
-<Specimen title="Stranger rows">
-  <StrangerDemo />
-</Specimen>
-
-Dismissed keeps the same dense row and offers `Restore`. A restore is decided on the
-evidence a placement is decided on — what the sender actually sent — so it gets the
-row rather than a roster line with a button on it.
 
 <Invariant>
   Stranger and Dismissed are positions on one ladder, and they are still not one
   gesture. Placing a sender creates a person or links onto one; dismissing is a state
   the *account* is in, so it names no target and its way back is `restore` rather than
-  a move off a sentinel. The union page generated a row's targets from its level
-  because one verb served them all — the contract has a verb per decision, and a row
-  asks for the one its position admits.
+  a move off a sentinel. A row asks for the verb its position admits.
 </Invariant>
 
 ---
@@ -111,7 +66,7 @@ row rather than a roster line with a button on it.
 Everyone Rome knows grouped by bond, ordered by name within each group, with live
 counts and three columns (avatar, name plus identifier, `⋯`) — no platform badges, no
 preview, no message count. The directory read carries none of that, which is what
-makes this a contacts list rather than a second stream. Click a row to open the
+makes this a contacts list. Click a row to open the
 person, and click the avatar to select. A selection raises the bulk bar, whose choices
 are the **intersection** across the selection, since one choice applies to every row in
 it.
@@ -123,8 +78,8 @@ it.
 The guardian row is fixed: not moved, not merged, not selected. Nobody else is held
 back — a contact the address book synced and nobody has ever heard from is in the
 Stranger group like any other account, because looking someone up is what this view is
-for. An account nobody has decided about admits the same three placement gestures
-here that it admits on the stream, folded behind a `⋯` menu at the end of its row —
+for. An account nobody has decided about admits three placement gestures, folded behind a
+`⋯` menu at the end of its row —
 the Stranger group can hold a whole synced address book, and a row of buttons per
 contact would out-shout the roster the view exists to read.
 
@@ -133,8 +88,9 @@ contact would out-shout the roster the view exists to read.
 ## The person page
 
 `/people/person/:personId` is the dossier: the person card with bond select, linked accounts
-as neutral glyph + id pills, `Link account…`, `Merge into…` and `Delete person…`. The merged timeline
-grouped by day sits below it, and a sticky composer sits at the bottom.
+as neutral glyph + id pills, `Link account…`, `Merge into…` and `Delete person…`. One account's
+timeline grouped by day sits below it, with a switcher between the person's accounts, and a sticky
+composer that writes to the account on screen sits at the bottom.
 
 Both pickers offer more than what would succeed. `Link account…` lists the accounts
 another person already holds, because taking one back is a gesture the guardian has

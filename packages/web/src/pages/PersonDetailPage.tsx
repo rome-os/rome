@@ -11,7 +11,7 @@ import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
 import { PersonConversation } from "./people/conversation";
 import { PersonManagement } from "./people/manage";
-import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
+import { PEOPLE_PATH, personPath } from "./people/people-model";
 import { levelLabelKey } from "./people/rows";
 import { accountHandle } from "./people/send-model";
 import { usePerson } from "./people/use-roster";
@@ -20,10 +20,11 @@ import { usePerson } from "./people/use-roster";
  * One person's page: the dossier.
  *
  * Who they are on top — name, bond, the accounts that resolve to this person —
- * and everything said to or by them below. This file owns the header and the
+ * and what was said on one of those accounts below. This file owns the header and the
  * one read behind it, `GET /api/people/:id`; the conversation under it is
- * `people/conversation.tsx`, which owns the timeline, the pending sends and the
- * composer together because the three are one surface and settle as one.
+ * `people/conversation.tsx`, which owns one account's timeline, the pending
+ * sends and the composer together because the three are one surface and settle
+ * as one.
  *
  * The management gestures the design puts on this card — the bond select, Link
  * account…, Merge into… — are `people/manage.tsx`, and each settles by
@@ -61,7 +62,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   // the arrow honest about which view it owes. A dossier reached by pasted link
   // has no view behind it and replaces itself with the one `/people` is.
   const origin = (location.state as { from?: string } | null)?.from;
-  const back = () => (origin ? navigate(-1) : navigate(PEOPLE_VIEW_PATH.latest, { replace: true }));
+  const back = () => (origin ? navigate(-1) : navigate(PEOPLE_PATH, { replace: true }));
 
   const personQuery = usePerson(personId);
   const person = personQuery.data ?? null;
@@ -137,9 +138,6 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                 {t(levelLabelKey(normalizeBondLevel(person.bondLevel)))}
               </Badge>
             </div>
-            <p className="text-aux text-muted-foreground">
-              {t("row.messageCount", { count: person.messageCount })}
-            </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {person.accounts.length === 0 ? (
                 <span className="text-aux text-subtle-foreground">{t("detail.noAccounts")}</span>

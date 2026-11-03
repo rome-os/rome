@@ -1,18 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import { defaultSendAccount, type LinkedAccount } from "@rome/api-types/people";
-import type { Message } from "@rome/api-types/message";
-import {
-  ALL_ACCOUNTS,
-  accountHandle,
-  accountSegments,
-  segmentAccount,
-  segmentEntries,
-  segmentSends,
-} from "./send-model";
+import { accountHandle, accountSegments, segmentAccount, segmentSends } from "./send-model";
 
-// The shape of the person page's two views. What is under test is the one rule
-// the design turns on — a segment names an account, not a channel — and the two
-// narrowings that follow from it, each over the key its noun actually carries.
+// The shape of the person page's account switcher. What is under test is the
+// one rule the design turns on — a segment names an account, not a channel —
+// and the narrowing that follows from it.
 
 function account(over: Partial<LinkedAccount> & Pick<LinkedAccount, "channel">): LinkedAccount {
   return {
@@ -54,11 +46,6 @@ describe("accountSegments", () => {
       null,
     ]);
   });
-
-  it("never mints a value the merged segment could collide with", () => {
-    const segments = accountSegments([account({ channel: "telegram" })]);
-    expect(segments.every((segment) => segment.value !== ALL_ACCOUNTS)).toBe(true);
-  });
 });
 
 describe("accountHandle", () => {
@@ -93,32 +80,16 @@ describe("segmentAccount", () => {
   const accounts = [account({ channel: "whatsapp" }), account({ channel: "telegram" })];
   const segments = accountSegments(accounts);
 
-  it("answers null for the merged segment", () => {
-    expect(segmentAccount(segments, ALL_ACCOUNTS)).toBeNull();
+  it("answers the account a segment names", () => {
+    expect(segmentAccount(segments, segments[1]!.value)?.channel).toBe("telegram");
   });
 
   it("answers null for an account the person no longer holds", () => {
     // A merge or an unlink can take the segmented account away while the view
-    // sits open. Falling back to the merged view is the only honest answer —
-    // scoping to an account nobody holds would show an empty history under a
-    // heading naming somebody else's address.
+    // sits open. Falling back to an account the person holds is the only
+    // honest answer — scoping to an account nobody holds would show an empty
+    // history under a heading naming somebody else's address.
     expect(segmentAccount(segments, "discord:gone")).toBeNull();
-  });
-});
-
-describe("segmentEntries", () => {
-  const entries: Message[] = [
-    { source: "whatsapp", timestamp: 20, body: "wa", direction: "inbound", ref: "a" },
-    { source: "telegram", timestamp: 10, body: "tg", direction: "inbound", ref: "b" },
-  ];
-
-  it("shows everything on the merged segment", () => {
-    expect(segmentEntries(entries, null)).toHaveLength(2);
-  });
-
-  it("narrows to the segment's channel, which is all an entry names", () => {
-    const scoped = segmentEntries(entries, account({ channel: "telegram" }));
-    expect(scoped.map((entry) => entry.body)).toEqual(["tg"]);
   });
 });
 
@@ -129,9 +100,6 @@ describe("segmentSends", () => {
   ];
 
   it("narrows by the account itself, which a send does name", () => {
-    // Unlike a timeline entry. Two accounts on one channel therefore share a
-    // history under either segment and keep their pending sends apart, which
-    // is the half of the pair that can be told apart.
     const scoped = segmentSends(sends, account({ channel: "whatsapp", channelUserId: "b" }));
     expect(scoped.map((send) => send.text)).toEqual(["two"]);
   });

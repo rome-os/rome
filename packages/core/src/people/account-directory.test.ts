@@ -1,11 +1,9 @@
-// What the account reads ask the triage record for.
+// What the account read asks the triage record for.
 //
 // The triage record is the only source that says an account exists on a channel
-// Rome mirrors no address book for, so both reads enumerate its senders. Neither
-// renders anything derived from what a sender said: the directory previews
-// nothing at all, and the stream's preview comes from a `Messages` store
-// (timeline-sources.ts), read in its own second pass. So these tests pin the
-// question the reads ask — which senders exist — and that they ask no other.
+// Rome mirrors no address book for, so the read enumerates its senders. It
+// renders nothing derived from what a sender said. So these tests pin the
+// question the read asks — which senders exist — and that it asks no other.
 
 import { platformOf } from "@rome/api-types/platform";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
@@ -14,11 +12,7 @@ import { sentinelLog } from "../db/schema.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../test/helpers.js";
 import { seedBaseline } from "../test/seeds.js";
-import {
-  readAccountDirectory,
-  readAccountStream,
-  type AccountDirectoryDeps,
-} from "./account-directory.js";
+import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
 
 /** A Telegram sender the triage record is the only record of: no address book
  *  mirrors the channel, and no link names the address. */
@@ -95,11 +89,6 @@ describe("the account reads over the triage record", () => {
     expect(asked).toEqual(["listSenders"]);
   });
 
-  it("enumerates the stream's senders through the projection alone", async () => {
-    await readAccountStream(watched());
-    expect(asked).toEqual(["listSenders"]);
-  });
-
   it("lists a sender as one account, named by what it last called itself", async () => {
     const sandy = find(await readAccountDirectory(watched()))!;
     expect(sandy.addresses).toEqual([SENDER]);
@@ -107,14 +96,6 @@ describe("the account reads over the triage record", () => {
     // what answers for every channel — a mirror's name first, this second.
     expect(sandy.displayName).toBe("Sandy Sender");
     expect(sandy.state).toBe("unlinked");
-  });
-
-  it("previews the sender's newest line on the stream", async () => {
-    // What a message store answers, not an aggregate the account read carried:
-    // the two rows are one account, previewing the later of them.
-    const sandy = find(await readAccountStream(watched()))!;
-    expect(sandy.latest.preview).toBe("second line");
-    expect(sandy.latest.source).toBe("telegram");
   });
 
   it("lists exactly the accounts it lists with the real repository", async () => {
