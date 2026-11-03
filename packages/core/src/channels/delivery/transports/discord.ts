@@ -12,7 +12,13 @@ export interface DiscordTransportOptions {
    *  placed: a thread on the user's message where the chat's settings thread
    *  replies, otherwise the chat. */
   place(chat: string, replyTo: string): Promise<string>;
+  /** Waits before a create is sent again. Absent, it waits in real time. */
+  sleep?(ms: number): Promise<void>;
 }
+
+/** How long a create waits before each time it is sent again after it failed
+ *  to connect. */
+const RESEND_DELAYS_MS = [250, 1000];
 
 /**
  * Reply delivery over Discord's REST API. A message holds Markdown, as a whole
@@ -22,11 +28,18 @@ export interface DiscordTransportOptions {
  * discord.js sends a request again when it times out, its connection resets,
  * or Discord answers with a server error, a create included. Each create
  * carries a nonce Discord enforces, so a create sent again returns the message
- * the first one made instead of posting it twice. Only the last attempt's
- * error reaches the transport, so a create that fails to connect is unknown:
- * an earlier attempt may have posted it, and a new create has a new nonce.
+ * the first one made instead of posting it twice. The transport relies on that
+ * itself: a create that failed to connect is sent again with the same nonce,
+ * so a short outage at the start of a reply does not lose it. Only the last
+ * attempt's error reaches the transport, so a create that still fails to
+ * connect after those resends is unknown: an earlier attempt may have posted
+ * it.
  */
-export function discordTransport({ rest, place }: DiscordTransportOptions): DeliveryTransport {
+export function discordTransport({
+  rest,
+  place,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}: DiscordTransportOptions): DeliveryTransport {
   return {
     capabilities: {
       maxPartLength: 2000,
@@ -49,21 +62,31 @@ export function discordTransport({ rest, place }: DiscordTransportOptions): Deli
             : failure;
         }
       }
-      const created = call(async () => {
-        const sent = (await rest.post(Routes.channelMessages(target), {
-          body: {
-            content: text,
-            nonce: randomBytes(12).toString("base64url"),
-            enforce_nonce: true,
-          },
-        })) as { id: string; channel_id: string };
-        return { messageId: sent.id, chatId: sent.channel_id };
-      });
-      return created.catch((failure: DeliveryFailure) => {
-        throw failure.kind === "unavailable"
-          ? new DeliveryFailure("unknown", failure.message)
-          : failure;
-      });
+      const body = {
+        content: text,
+        nonce: randomBytes(12).toString("base64url"),
+        enforce_nonce: true,
+      };
+      const post = () =>
+        call(async () => {
+          const sent = (await rest.post(Routes.channelMessages(target), { body })) as {
+            id: string;
+            channel_id: string;
+          };
+          return { messageId: sent.id, chatId: sent.channel_id };
+        });
+      let resends = 0;
+      for (;;) {
+        try {
+          return await post();
+        } catch (error) {
+          const failure = error as DeliveryFailure;
+          if (failure.kind !== "unavailable") throw failure;
+          const delay = RESEND_DELAYS_MS[resends++];
+          if (delay === undefined) throw new DeliveryFailure("unknown", failure.message);
+          await sleep(delay);
+        }
+      }
     },
     edit: (receipt, text) =>
       call(async () => {
@@ -96,6 +119,11 @@ async function call<T>(write: () => Promise<T>): Promise<T> {
 function classify(error: unknown): DeliveryFailure {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof DiscordAPIError) {
+    // discord.js raises this for any refusal, with the response body as it
+    // came. A body that is not Discord's JSON error came from something in
+    // front of Discord, such as Cloudflare's HTML page, and the write may
+    // still have reached Discord.
+    if (!isDiscordError(error.rawError)) return new DeliveryFailure("unknown", message);
     // Only a 401 means the token is dead. A 403 is a refusal in one channel,
     // such as a user who closed their DMs, and the token still works.
     if (error.status === 401) return new DeliveryFailure("unauthorized", message);
@@ -112,4 +140,14 @@ function classify(error: unknown): DeliveryFailure {
   // sent again. Any other failure may have come after the request was written.
   if (neverConnected(error)) return new DeliveryFailure("unavailable", message);
   return new DeliveryFailure("unknown", message);
+}
+
+/** Whether a response body is the JSON error Discord's API answers with. */
+function isDiscordError(body: unknown): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    typeof (body as { message?: unknown }).message === "string" &&
+    typeof (body as { code?: unknown }).code === "number"
+  );
 }

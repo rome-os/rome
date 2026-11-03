@@ -1408,10 +1408,7 @@ Use \`/channel agent clear\` to undo.`,
       throw new Error(`Channel ${threadId} is not a text channel`);
     }
 
-    const targetChannel = await this.replyChannel(
-      channel as SendableChannel,
-      replyTo,
-    );
+    const targetChannel = await this.replyChannel(channel as SendableChannel, replyTo);
 
     try {
       let messageId: string | undefined;

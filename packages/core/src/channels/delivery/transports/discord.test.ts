@@ -27,10 +27,16 @@ function transportOver(
   const transport = discordTransport({
     rest: { post: request("post"), patch: request("patch") } as unknown as REST,
     place,
+    sleep: async () => {},
   });
   if (!transport.edit) throw new Error("The Discord transport declares edit");
   return { calls, create: transport.create, edit: transport.edit };
 }
+
+const refusedConnection = () =>
+  Object.assign(new TypeError("fetch failed"), {
+    cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+  });
 
 describe("discordTransport", () => {
   it("creates a message where the reply is placed, and names it by Discord's ids", async () => {
@@ -124,12 +130,54 @@ describe("discordTransport", () => {
     expect(await failureOf(aborted)).toMatchObject({ kind: "unknown" });
   });
 
-  it("names a create that failed to connect unknown, since an earlier attempt may have posted it", async () => {
-    const refused = Object.assign(new TypeError("fetch failed"), {
-      cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+  it("sends a create that failed to connect again with the same nonce, and shows one message", async () => {
+    let attempts = 0;
+    const { calls, create } = transportOver(() => {
+      if (++attempts === 1) throw refusedConnection();
+      return { id: "41", channel_id: "7" };
     });
+
+    expect(await create("7", "hello")).toEqual({ messageId: "41", chatId: "7" });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body).toEqual(calls[0]!.body);
+  });
+
+  it("names a create unknown once its resends also failed to connect", async () => {
+    const { calls, create } = transportOver(() => {
+      throw refusedConnection();
+    });
+
+    await expect(create("7", "hello")).rejects.toMatchObject({ kind: "unknown" });
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map((call) => call.body.nonce)).size).toBe(1);
+  });
+
+  it("does not send a refused create again", async () => {
+    const { calls, create } = transportOver(() => {
+      throw refusal(403, 50007, "Cannot send messages to this user");
+    });
+
+    await expect(create("7", "hello")).rejects.toMatchObject({ kind: "rejected" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("names a refusal that is not Discord's JSON error unknown, since the write may have landed", async () => {
+    // Cloudflare's HTML page reaches discord.js as an ArrayBuffer body.
+    const edge = (status: number) =>
+      new DiscordAPIError(
+        new TextEncoder().encode("<html>blocked</html>").buffer as never,
+        0,
+        status,
+        "POST",
+        "/channels/7/messages",
+        {},
+      );
+    expect(await failureOf(edge(403))).toMatchObject({ kind: "unknown" });
+    expect(await failureOf(edge(429))).toMatchObject({ kind: "unknown" });
+    // A create that Discord accepted but timed out, whose resend met that page,
+    // must not read as a refusal: a refusal makes the inbox send the answer again.
     const { create } = transportOver(() => {
-      throw refused;
+      throw edge(403);
     });
     await expect(create("7", "hello")).rejects.toMatchObject({ kind: "unknown" });
   });
