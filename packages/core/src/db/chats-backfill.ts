@@ -123,7 +123,7 @@ LEFT JOIN channels c ON c.id = r.source_channel;
 -- Each legacy row that is a line, as that line. A dashboard line is keyed by
 -- its row's id; a channel line by the platform's id, or, where the platform
 -- gave none, by one of Rome's own.
-CREATE TEMP VIEW legacy_chat_line_rows AS
+CREATE TEMP VIEW legacy_chat_line_rows_view AS
 SELECT
   m.id AS legacy_id,
   m.rowid AS legacy_seq,
@@ -219,6 +219,14 @@ FROM rome_sessions r JOIN chats c ON c.id = r.chat_id
 WHERE c.platform <> 'webchat' AND r.account_id IS NOT NULL AND r.source_thread_id IS NOT NULL
   AND (c.kind = 'dm' OR r.thread_id IS NOT NULL);
 --> statement-breakpoint
+-- The lines, worked out once now that each speaker stands in its chat, and
+-- found by key and by row: every statement below joins on them.
+CREATE TEMP TABLE legacy_chat_line_rows AS SELECT * FROM legacy_chat_line_rows_view;
+--> statement-breakpoint
+CREATE INDEX temp.idx_legacy_chat_line_rows_key ON legacy_chat_line_rows (chat_id, key);
+--> statement-breakpoint
+CREATE INDEX temp.idx_legacy_chat_line_rows_legacy ON legacy_chat_line_rows (legacy_id);
+--> statement-breakpoint
 -- Oldest first, so a line two rows stand for keeps the earliest of them.
 INSERT OR IGNORE INTO chat_messages (chat_id, key, thread_id, sender_account_id, sender_agent,
   sender_name, text, parts, reply_to_message_id, said_at)
@@ -288,7 +296,9 @@ UPDATE concierge_tasks SET
   legacy_source_message_id = NULL
 WHERE legacy_source_message_id IN (SELECT legacy_id FROM legacy_chat_line_ids);
 --> statement-breakpoint
-DROP VIEW legacy_chat_line_rows;
+DROP TABLE legacy_chat_line_rows;
+--> statement-breakpoint
+DROP VIEW legacy_chat_line_rows_view;
 --> statement-breakpoint
 DROP VIEW legacy_chat_speakers;
 --> statement-breakpoint

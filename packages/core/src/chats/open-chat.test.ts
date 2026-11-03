@@ -5,6 +5,7 @@ import { channelChatId } from "../db/session-kind.js";
 import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
 import type { ChatRepository } from "./chat-repository.js";
 import { chatsWiring } from "../chats-wiring.js";
+import { ChannelWithoutAccount } from "../connections/chat-adapter.js";
 import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
 import { chatKey } from "./place.js";
 
@@ -73,7 +74,7 @@ describe("openChannelChat as a speaker", () => {
   beforeEach(() => {
     testDb = createTestDb();
     wired = chatsWiring(testDb.db, {
-      accountOf: () => null,
+      accountOf: (channel) => (channel === "telegram" ? { platform: "telegram", id: "111" } : null),
       platformOfChannel: (name) => name,
       channelsOn: (platform) => [platform],
     });
@@ -94,9 +95,15 @@ describe("openChannelChat as a speaker", () => {
 
     expect(wired.speakers.speakerOf(record.id)).toMatchObject({
       place: { chat: { platform: "telegram" } },
-      accountId: "telegram",
+      accountId: "111",
       agent: "sales",
     });
+  });
+
+  it("refuses a channel that does not know its account", async () => {
+    await expect(
+      openChannelChat(deps, { channel: "lark", threadId: "oc_1", agentName: "main" }),
+    ).rejects.toThrow(ChannelWithoutAccount);
   });
 
   it("stands a thread's session in the thread of its chat", async () => {
