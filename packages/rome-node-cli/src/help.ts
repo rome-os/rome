@@ -268,11 +268,9 @@ Output:
   rome-node audit show <seq> [--content stdin|stdout|stderr|file] [--json]
   rome-node audit search [--since <time>] [--until <time>] [--action <name>]
                          [--outcome ok|exit_nonzero|error|interrupted|no_end] [--text <s>] [--json]
-  rome-node audit verify [--json]
-  rome-node audit export --out <file>
 
 While rome-node connect runs, it records every remote request in a local,
-append-only, hash-chained log before running it: argv, cwd, environment
+append-only log before running it: argv, cwd, environment
 variable names (not values), stdin, stdout and stderr (first 32 MiB each, with
 the full size and SHA-256), exit code, duration, and pushed files up to 10 MiB.
 system.info is not recorded. If the log cannot be written, connect refuses every
@@ -283,9 +281,6 @@ request except system.info, which reports why. The log is kept for 30 days or
   tail    The latest records, one per line. -f follows new records each second.
   show    One request, start and end together. --content writes raw bytes to stdout.
   search  Filter by time, action, outcome, or a substring such as a request ID.
-  verify  Check the hash chain, stored content, and SQLite integrity.
-          Exits 0 when intact, 1 with the first bad seq otherwise.
-  export  Write a consistent snapshot to a new local file. verify --db checks it.
 
 from is the sender the Gateway reported. It is shown for information only.
 Every command opens the log read-only. --db <path> reads another log, for

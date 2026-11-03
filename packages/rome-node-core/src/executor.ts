@@ -522,6 +522,10 @@ export function createExecutor(
       child.kill("SIGTERM");
       const timer = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        // A descendant that inherited the pipes would delay `close` past the host's 3 s shutdown
+        // bound, and the interrupted end record would be lost.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
       }, 1000);
       timer.unref();
     }

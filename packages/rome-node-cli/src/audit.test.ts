@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { AuditStore } from "@rome-os/node-core/host";
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
@@ -104,20 +103,6 @@ describe("rome-node audit", () => {
     expect((await cli(["audit", "search", "--outcome", "no_end"], root)).stdout).toBe("");
   });
 
-  it("exports a snapshot that verifies with --db, and verify fails on a changed record", async () => {
-    const { root, seq } = await populated();
-    const out = join(root, "export.db");
-    expect((await cli(["audit", "export", "--out", out], root)).code).toBe(0);
-    const verified = await cli(["audit", "verify", "--db", out], root);
-    expect([verified.code, verified.stdout]).toEqual([0, "OK: 5 records verified.\n"]);
-    const db = new DatabaseSync(out);
-    db.exec(`UPDATE events SET at = at + 1 WHERE seq = ${seq}`);
-    db.close();
-    const failed = await cli(["audit", "verify", "--db", out], root);
-    expect(failed.code).toBe(1);
-    expect(failed.stdout).toContain(`FAILED at seq ${seq}`);
-  });
-
   it("follows records another process writes", async () => {
     const { root, audit } = await populated();
     const tail = run(["audit", "tail", "-f", "-n", "1"], root, false);
@@ -141,7 +126,7 @@ describe("rome-node audit", () => {
     expect(status.stdout).toContain("There is no audit log yet");
     const wrong = await cli(["device", "--db", "x"], root);
     expect([wrong.code, wrong.stderr]).toEqual([1, "--db is only supported by rome-node audit.\n"]);
-    expect((await cli(["audit", "verify", "-n", "3"], root)).stderr).toContain(
+    expect((await cli(["audit", "status", "-n", "3"], root)).stderr).toContain(
       "only supported by rome-node audit tail",
     );
     expect((await cli(["audit", "nope"], root)).stderr).toContain("Usage: rome-node audit");

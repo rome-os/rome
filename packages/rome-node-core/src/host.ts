@@ -16,6 +16,5 @@ export {
   type AuditStats,
   type AuditStatus,
   type AuditSummary,
-  type AuditVerifyResult,
   type ContentName,
 } from "./audit.js";

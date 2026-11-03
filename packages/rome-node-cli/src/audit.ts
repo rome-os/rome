@@ -19,7 +19,6 @@ export interface AuditOptions {
   outcome?: string;
   text?: string;
   content?: string;
-  out?: string;
 }
 
 const OUTCOMES = ["ok", "exit_nonzero", "error", "interrupted", "no_end"];
@@ -92,15 +91,13 @@ export async function runAudit(
   defaultPath: string,
 ): Promise<void> {
   const [, command, ...rest] = positionals;
-  const commands = ["status", "tail", "show", "search", "verify", "export"];
+  const commands = ["status", "tail", "show", "search"];
   if (!commands.includes(command ?? ""))
     throw new Error(`Usage: rome-node audit <${commands.join("|")}>. Run rome-node help audit.`);
   if (command !== "show" && rest.length)
     throw new Error(`rome-node audit ${command} takes no arguments.`);
   if (options.content !== undefined && command !== "show")
     throw new Error("--content is only supported by rome-node audit show.");
-  if (options.out !== undefined && command !== "export")
-    throw new Error("--out is only supported by rome-node audit export.");
   if ((options.follow || options.lines !== undefined) && command !== "tail")
     throw new Error("-f and -n are only supported by rome-node audit tail.");
   const filters = ["since", "until", "action", "outcome", "text"] as const;
@@ -140,23 +137,6 @@ export async function runAudit(
       return;
     }
     if (status.state !== "ok") throw new Error(`${status.message}`);
-    if (command === "verify") {
-      const result = await audit.verify();
-      if (options.json) print(JSON.stringify(result));
-      else if (result.ok) print(`OK: ${result.records} records verified.`);
-      else
-        print(
-          `FAILED at seq ${result.seq ?? "-"}: ${result.reason} (${result.records} records verified before it)`,
-        );
-      if (!result.ok) process.exitCode = 1;
-      return;
-    }
-    if (command === "export") {
-      if (!options.out) throw new Error("Usage: rome-node audit export --out <file>");
-      await audit.export(options.out);
-      print(JSON.stringify({ exported: options.out }));
-      return;
-    }
     if (command === "show") {
       const seq = Number(rest[0]);
       if (rest.length !== 1 || !Number.isSafeInteger(seq))

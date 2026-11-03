@@ -1,7 +1,6 @@
 import { homedir } from "os";
 import { join } from "path";
-import { rm, writeFile } from "fs/promises";
-import { app, BrowserWindow, dialog, shell } from "electron";
+import { app, shell } from "electron";
 import { z } from "zod";
 import { AuditStore, type ContentName } from "@rome-os/node-core/host";
 import { handleTrusted } from "./ipc-trust";
@@ -12,7 +11,7 @@ const AUDIT_PATH = join(homedir(), ".rome-desktop", "audit", "audit.db");
 /** What a caller this Mac refused is told to do. */
 const DESKTOP_AUDIT_HINT = "Open Rome → Audit Log… on that Mac.";
 
-/** The detail view shows this much of a payload; "Save full content…" writes the rest. */
+/** The detail view shows this much of a payload. */
 const PREVIEW_BYTES = 256 * 1024;
 
 /** Never throws: an unavailable log only makes this computer refuse remote requests. */
@@ -41,8 +40,6 @@ const query = z
   })
   .strict();
 
-const windowOf = (sender: Electron.WebContents) => BrowserWindow.fromWebContents(sender);
-
 /**
  * The audit window's channels. Only the app's own `file:` pages may call them, and the
  * preload hands `audit` to those pages only, so a Rome or any other site in the main window
@@ -68,35 +65,6 @@ export function registerAuditHandlers(audit: AuditStore): void {
     return data
       ? { size: data.byteLength, preview: new Uint8Array(data.subarray(0, PREVIEW_BYTES)) }
       : null;
-  });
-  handleTrusted("audit:saveContent", async (event, ...args) => {
-    const [at, name] = z.tuple([seq, contentName]).parse(args);
-    const data = audit.content(at, name as ContentName);
-    if (!data) return false;
-    const options = { defaultPath: join(app.getPath("downloads"), `audit-${at}-${name}.bin`) };
-    const window = windowOf(event.sender);
-    const { canceled, filePath } = window
-      ? await dialog.showSaveDialog(window, options)
-      : await dialog.showSaveDialog(options);
-    if (canceled || !filePath) return false;
-    await writeFile(filePath, data, { mode: 0o600 });
-    return true;
-  });
-  handleTrusted("audit:verify", () => audit.verify());
-  handleTrusted("audit:export", async (event) => {
-    const options = {
-      defaultPath: join(app.getPath("desktop"), "audit-export.db"),
-      filters: [{ name: "SQLite database", extensions: ["db"] }],
-    };
-    const window = windowOf(event.sender);
-    const { canceled, filePath } = window
-      ? await dialog.showSaveDialog(window, options)
-      : await dialog.showSaveDialog(options);
-    if (canceled || !filePath) return null;
-    // The save dialog already asked before replacing an existing file.
-    await rm(filePath, { force: true });
-    await audit.export(filePath);
-    return filePath;
   });
   handleTrusted("audit:reveal", () => shell.showItemInFolder(audit.path));
 }

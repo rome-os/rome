@@ -33,10 +33,6 @@ const audit = {
     ipcRenderer.invoke("audit:stats", since, until, bucketMs),
   content: (seq: number, name: string): Promise<unknown> =>
     ipcRenderer.invoke("audit:content", seq, name),
-  saveContent: (seq: number, name: string): Promise<boolean> =>
-    ipcRenderer.invoke("audit:saveContent", seq, name),
-  verify: (): Promise<unknown> => ipcRenderer.invoke("audit:verify"),
-  export: (): Promise<string | null> => ipcRenderer.invoke("audit:export"),
   reveal: (): Promise<void> => ipcRenderer.invoke("audit:reveal"),
 };
 

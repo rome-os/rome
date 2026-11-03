@@ -16,7 +16,6 @@ import {
 } from "@rome-os/node-ui";
 import { Alert, AlertDescription, AlertTitle } from "@rome-os/ui/alert";
 import { Badge } from "@rome-os/ui/badge";
-import { Button } from "@rome-os/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,13 +23,12 @@ import {
   DropdownMenuTrigger,
 } from "@rome-os/ui/dropdown-menu";
 import { IconButton } from "@rome-os/ui/icon-button";
-import { Download, Ellipsis, FolderOpen, ShieldCheck } from "lucide-react";
+import { Ellipsis, FolderOpen } from "lucide-react";
 import {
   auditApi,
   type AuditItem,
   type AuditQuery,
   type AuditSummary,
-  type AuditVerifyResult,
   type ContentName,
 } from "@/lib/audit-api";
 import { errorMessage } from "@/lib/rome-api";
@@ -149,15 +147,6 @@ function Content({ item, name }: { item: AuditItem; name: ContentName }) {
             <Badge variant="warning">Truncated · kept {bytes(info.storedBytes)}</Badge>
           )}
         </span>
-        {preview && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void auditApi?.saveContent(owner.seq, name)}
-          >
-            Save full content…
-          </Button>
-        )}
       </div>
       <p className="break-all font-mono text-aux text-muted-foreground">SHA-256 {info.sha256}</p>
       {preview === null ? (
@@ -265,7 +254,6 @@ function AuditDetail({ item, row }: { item: AuditItem; row: NodeActionRow }) {
 
 export function AuditPage() {
   const [summary, setSummary] = useState<AuditSummary | null>(null);
-  const [failure, setFailure] = useState<Extract<AuditVerifyResult, { ok: false }> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [series, setSeries] = useState<DeviceStats>();
@@ -322,24 +310,9 @@ export function AuditPage() {
     }
   }, [query, result]);
 
-  const verify = useCallback(async (announce: boolean) => {
-    if (!auditApi) return;
-    try {
-      const outcome = await auditApi.verify();
-      setFailure(outcome.ok === false ? outcome : null);
-      if (announce && outcome.ok) setNotice("Integrity check passed.");
-    } catch (err) {
-      setFailure({ ok: false, records: 0, seq: null, reason: errorMessage(err) });
-    }
-  }, []);
-
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  // The integrity check runs once the log opens, and again when it recovers. Passing shows nothing.
-  useEffect(() => {
-    if (usable) void verify(false);
-  }, [usable, verify]);
   useEffect(() => {
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
@@ -369,22 +342,6 @@ export function AuditPage() {
         <IconButton label="Audit log actions" icon={<Ellipsis />} size="sm" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem disabled={!usable} onSelect={() => void verify(true)}>
-          <ShieldCheck className="size-4" aria-hidden />
-          Verify integrity
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          disabled={!usable}
-          onSelect={() =>
-            void auditApi
-              ?.export()
-              .then((path) => path && setNotice(`Exported to ${path}`))
-              .catch((err) => setNotice(`Export failed: ${errorMessage(err)}`))
-          }
-        >
-          <Download className="size-4" aria-hidden />
-          Export…
-        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => void auditApi?.reveal()}>
           <FolderOpen className="size-4" aria-hidden />
           Show in Finder
@@ -403,17 +360,6 @@ export function AuditPage() {
           <AlertDescription>
             <p>{reason.next}</p>
             <p className="mt-1 break-all font-mono text-aux">{status.message}</p>
-          </AlertDescription>
-        </Alert>
-      )}
-      {failure && (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>
-            The audit log failed its integrity check
-            {failure.seq === null ? "" : ` at record ${failure.seq}`}.
-          </AlertTitle>
-          <AlertDescription>
-            {failure.reason} Records may have been changed or removed outside Rome.
           </AlertDescription>
         </Alert>
       )}

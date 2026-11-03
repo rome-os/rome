@@ -102,7 +102,6 @@ async function main(): Promise<void> {
       outcome: { type: "string" },
       text: { type: "string" },
       content: { type: "string" },
-      out: { type: "string" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -133,7 +132,6 @@ async function main(): Promise<void> {
     "outcome",
     "text",
     "content",
-    "out",
   ] as const;
   if (positionals[0] !== "audit" && auditOptions.some((option) => values[option] !== undefined))
     throw new Error(

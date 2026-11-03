@@ -53,50 +53,6 @@ async function request(audit: AuditStore, n: number) {
   return seq;
 }
 
-describe("audit chain", () => {
-  it("verifies appended records and finds a change to any single column, content, or row", async () => {
-    const audit = await store();
-    for (let n = 0; n < 4; n++) await request(audit, n);
-    expect(await audit.verify()).toEqual({ ok: true, records: 9 });
-    const db = raw(audit.path);
-    const tamper = async (sql: string, seq: number) => {
-      const before = db.prepare("SELECT * FROM events WHERE seq = ?").get(seq);
-      const content = db.prepare("SELECT * FROM content WHERE seq = ?").all(seq);
-      db.exec(sql);
-      const result = await audit.verify();
-      expect({ sql, result }).toMatchObject({ sql, result: { ok: false, seq } });
-      // Restore the row exactly, then the chain must verify again.
-      db.exec("DELETE FROM content WHERE seq = " + seq);
-      for (const row of content)
-        db.prepare("INSERT INTO content VALUES (?, ?, ?)").run(row.seq, row.name, row.data);
-      db.prepare("DELETE FROM events WHERE seq = ?").run(seq);
-      const row = before as Record<string, never>;
-      db.prepare("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
-        row.seq,
-        row.at,
-        row.kind,
-        row.action,
-        row.start_seq,
-        row.outcome,
-        row.record,
-        row.prev_hash,
-        row.hash,
-      );
-      expect((await audit.verify()).ok).toBe(true);
-    };
-    await tamper("UPDATE events SET at = at + 1 WHERE seq = 3", 3);
-    await tamper("UPDATE events SET kind = 'host' WHERE seq = 3", 3);
-    await tamper("UPDATE events SET action = 'fs.list' WHERE seq = 4", 4);
-    await tamper("UPDATE events SET start_seq = 1 WHERE seq = 3", 3);
-    await tamper("UPDATE events SET outcome = 'error' WHERE seq = 3", 3);
-    await tamper(`UPDATE events SET record = replace(record, 'echo', 'rm') WHERE seq = 4`, 4);
-    await tamper(`UPDATE events SET prev_hash = '${"1".repeat(64)}' WHERE seq = 5`, 5);
-    await tamper("UPDATE content SET data = X'00' WHERE seq = 3", 3);
-    db.exec("DELETE FROM events WHERE seq = 6");
-    expect(await audit.verify()).toMatchObject({ ok: false, seq: 6 });
-  });
-});
-
 describe("opening the audit log", () => {
   it("creates a private folder and file, and refuses a newer schema without changing it", async () => {
     const dir = await folder();
@@ -194,7 +150,6 @@ describe("failed writes", () => {
       [next, "c", null],
       [seq, "a", next! - 1],
     ]);
-    expect(await audit.verify()).toMatchObject({ ok: true });
   });
 });
 
@@ -215,7 +170,7 @@ ${script}`,
   const exited = (proc: ReturnType<typeof spawn>) =>
     new Promise<number | null>((resolve) => proc.once("exit", (code) => resolve(code)));
 
-  it("keeps seq contiguous and the chain valid with two writers, and never ends another's request", async () => {
+  it("keeps seq contiguous with two writers, and never ends another's request", async () => {
     const dir = await folder();
     const path = join(dir, "audit.db");
     (await store({ path })).close();
@@ -249,7 +204,6 @@ audit.close();`;
       ),
     ).toBe(0);
     const reader = await store({ path, readOnly: true });
-    expect(await reader.verify()).toMatchObject({ ok: true });
     const killed = reader.get(victimSeq)!;
     expect(killed.record.victim).toBe(true);
     expect(killed.end).toBeNull();
@@ -271,11 +225,9 @@ describe("content", () => {
         size: stdout.byteLength,
         sha256: sha(stdout),
         storedBytes: AUDIT_OUTPUT_BYTES,
-        storedSha256: sha(stdout.subarray(0, AUDIT_OUTPUT_BYTES)),
       },
     });
     expect(audit.content(end.seq, "stdout")!.byteLength).toBe(AUDIT_OUTPUT_BYTES);
-    expect(await audit.verify()).toMatchObject({ ok: true });
   });
 
   it("masks the device token in the record and content, in the database and its WAL", async () => {
@@ -306,23 +258,27 @@ describe("content", () => {
 });
 
 describe("retention", () => {
-  it("deletes records older than 30 days, writes a prune record, and keeps the chain valid", async () => {
+  it("deletes records older than 30 days, writes a prune record, and never reuses a seq", async () => {
     let now = Date.parse("2026-01-01T00:00:00Z");
     const audit = await store({ now: () => now });
     for (let n = 0; n < 3; n++) await request(audit, n);
     now += 31 * 24 * 60 * 60 * 1000;
-    await request(audit, 3);
+    const kept = await request(audit, 3);
     audit.prune();
     const items = audit.list();
-    expect(items[0]).toMatchObject({ kind: "prune", record: { reason: "age" } });
+    expect(items[0]).toMatchObject({
+      kind: "prune",
+      record: { reason: "age", rowsThroughSeq: kept - 1, contentThroughSeq: kept - 1 },
+    });
     expect(items.some((item) => item.record.requestId === "r0")).toBe(false);
     expect(items.some((item) => item.record.requestId === "r3")).toBe(true);
-    expect(await audit.verify()).toMatchObject({ ok: true });
-    // Everything ages out: the chain continues from the last deleted record.
+    // Everything ages out, yet the next record still gets a new seq.
     now += 31 * 24 * 60 * 60 * 1000;
     audit.prune();
-    await request(audit, 4);
-    expect(await audit.verify()).toMatchObject({ ok: true });
+    const last = audit.list({ limit: 1 })[0];
+    expect(last.record).toMatchObject({ reason: "age" });
+    expect(audit.summary().records).toBe(1);
+    expect(await request(audit, 4)).toBeGreaterThan(last.seq);
   });
 
   it("over the size limit deletes the oldest content first and keeps its records", async () => {
@@ -335,27 +291,13 @@ describe("retention", () => {
     }
     audit.prune();
     const prune = audit.list()[0];
-    expect(prune).toMatchObject({ kind: "prune", record: { reason: "size", rowsThroughSeq: 0 } });
+    expect(prune.record.reason).toBe("size");
+    expect(prune.record.rowsThroughSeq).toBeNull();
+    expect(prune.record.contentThroughSeq).toBeGreaterThan(0);
     const oldest = audit.get(seqs[0])!;
     expect(oldest.end).not.toBeNull();
     expect(audit.content(oldest.end!.seq, "stdout")).toBeNull();
     expect(audit.content(audit.get(seqs[3])!.end!.seq, "stdout")).not.toBeNull();
-    expect(await audit.verify()).toMatchObject({ ok: true });
-    // A content row removed by hand, outside a prune, is still found.
-    raw(audit.path).exec(`DELETE FROM content WHERE seq = ${audit.get(seqs[3])!.end!.seq}`);
-    expect(await audit.verify()).toMatchObject({ ok: false, seq: audit.get(seqs[3])!.end!.seq });
-  });
-});
-
-describe("export", () => {
-  it("writes a snapshot that verifies on its own", async () => {
-    const audit = await store();
-    for (let n = 0; n < 3; n++) await request(audit, n);
-    const out = join(await folder(), "export.db");
-    await audit.export(out);
-    await expect(audit.export(out)).rejects.toThrow("already exists");
-    const copy = await store({ path: out, readOnly: true });
-    expect(await copy.verify()).toEqual({ ok: true, records: 7 });
   });
 });
 

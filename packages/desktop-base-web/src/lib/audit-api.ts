@@ -16,7 +16,6 @@ interface ContentInfo {
   size: number;
   sha256: string;
   storedBytes: number;
-  storedSha256: string;
 }
 
 interface AuditEvent {
@@ -57,10 +56,6 @@ export interface AuditSummary {
   retention: { maxAgeDays: number; maxBytes: number };
 }
 
-export type AuditVerifyResult =
-  | { ok: true; records: number }
-  | { ok: false; records: number; seq: number | null; reason: string };
-
 export interface AuditApi {
   status(): Promise<AuditSummary>;
   list(query?: AuditQuery): Promise<AuditItem[]>;
@@ -68,9 +63,6 @@ export interface AuditApi {
   counts(): Promise<Record<"all" | "succeeded" | "failed" | "no_result", number>>;
   stats(since: number, until: number, bucketMs: number): Promise<NodeStats>;
   content(seq: number, name: ContentName): Promise<{ size: number; preview: Uint8Array } | null>;
-  saveContent(seq: number, name: ContentName): Promise<boolean>;
-  verify(): Promise<AuditVerifyResult>;
-  export(): Promise<string | null>;
   reveal(): Promise<void>;
 }
 

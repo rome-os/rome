@@ -14,7 +14,6 @@ const AUDIT_MAX_BYTES = 1024 * 1024 * 1024;
 export const AUDIT_OUTPUT_BYTES = 32 * 1024 * 1024;
 /** A pushed file at most this large is stored in full. */
 export const AUDIT_PUSH_BYTES = 10 * 1024 * 1024;
-const ZERO_HASH = "0".repeat(64);
 const RETRY_MS = 5000;
 const PRUNE_MS = 60 * 60 * 1000;
 
@@ -26,12 +25,11 @@ export type AuditStatus =
   | { state: "ok" }
   | { state: "unavailable"; code: AuditUnavailableCode; message: string };
 
-/** Size and SHA-256 of a payload and of the bytes kept from it. */
+/** Size and SHA-256 of a payload, and how many of its bytes are kept. */
 interface ContentInfo {
   size: number;
   sha256: string;
   storedBytes: number;
-  storedSha256: string;
 }
 
 export interface AuditEvent {
@@ -96,17 +94,13 @@ export interface AuditSummary {
   retention: { maxAgeDays: number; maxBytes: number };
 }
 
-export type AuditVerifyResult =
-  | { ok: true; records: number }
-  | { ok: false; records: number; seq: number | null; reason: string };
-
 export interface AuditOpenOptions {
   path: string;
   entry: "cli" | "desktop";
   /** What a refused caller is told to do, for this entry point. */
   hint: string;
   version?: string;
-  /** Reader mode for the CLI and exports: no writes, no host record, no pruning. */
+  /** Reader mode for the CLI: no writes, no host record, no pruning. */
   readOnly?: boolean;
   /** Tests only. */
   now?: () => number;
@@ -125,23 +119,6 @@ interface Row {
 }
 
 const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
-
-function chainHash(
-  prevHash: string,
-  row: {
-    seq: number;
-    at: number;
-    kind: string;
-    action: string | null;
-    startSeq: number | null;
-    outcome: string | null;
-    text: string;
-  },
-): string {
-  return sha256(
-    `${prevHash}\n${JSON.stringify([row.seq, row.at, row.kind, row.action, row.startSeq, row.outcome, row.text])}`,
-  );
-}
 
 /** Overwrites each secret occurrence with as many `*` bytes, so byte offsets stay valid. */
 function maskBytes(data: Buffer, secrets: string[]): Buffer {
@@ -173,7 +150,6 @@ export class AuditStore {
   private lastAttempt = 0;
   private opening: Promise<void> | null = null;
   private pending: Row[] = [];
-  private lastDeleted: { seq: number; hash: string } | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | undefined;
   private readonly now: () => number;
 
@@ -279,15 +255,13 @@ export class AuditStore {
         if (version === 0) {
           db.exec(`BEGIN IMMEDIATE;
 CREATE TABLE events (
-  seq INTEGER PRIMARY KEY,
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
   at INTEGER NOT NULL,
   kind TEXT NOT NULL,
   action TEXT,
   start_seq INTEGER,
   outcome TEXT,
-  record TEXT NOT NULL,
-  prev_hash TEXT NOT NULL,
-  hash TEXT NOT NULL
+  record TEXT NOT NULL
 ) STRICT;
 CREATE INDEX events_at ON events(at);
 CREATE INDEX events_start ON events(start_seq);
@@ -350,13 +324,7 @@ COMMIT;`);
       // A copy, so masking never changes the bytes a program or the caller receives.
       const full = maskBytes(Buffer.from(data), secrets);
       const kept = full.subarray(0, limits[name] ?? full.byteLength);
-      const fullHash = sha256(full);
-      info[name] = {
-        size: full.byteLength,
-        sha256: fullHash,
-        storedBytes: kept.byteLength,
-        storedSha256: kept.byteLength === full.byteLength ? fullHash : sha256(kept),
-      };
+      info[name] = { size: full.byteLength, sha256: sha256(full), storedBytes: kept.byteLength };
       stored.push([name, kept]);
     }
     const body = Object.keys(info).length ? { ...record, content: info } : record;
@@ -389,24 +357,13 @@ COMMIT;`);
   }
 
   private insert(db: DatabaseSync, row: Row): number {
-    const head = db.prepare("SELECT seq, hash FROM events ORDER BY seq DESC LIMIT 1").get() as
-      | { seq: number; hash: string }
-      | undefined;
-    // After a prune deleted every row, the chain continues from the last deleted one.
-    const seq = (head ? Number(head.seq) : (this.lastDeleted?.seq ?? 0)) + 1;
-    const prevHash = head?.hash ?? this.lastDeleted?.hash ?? ZERO_HASH;
-    db.prepare(
-      "INSERT INTO events (seq, at, kind, action, start_seq, outcome, record, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ).run(
-      seq,
-      row.at,
-      row.kind,
-      row.action,
-      row.startSeq,
-      row.outcome,
-      row.text,
-      prevHash,
-      chainHash(prevHash, { seq, ...row }),
+    // SQLite assigns the seq; AUTOINCREMENT never reuses one, even after a prune deleted every row.
+    const seq = Number(
+      db
+        .prepare(
+          "INSERT INTO events (at, kind, action, start_seq, outcome, record) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(row.at, row.kind, row.action, row.startSeq, row.outcome, row.text).lastInsertRowid,
     );
     for (const [name, data] of row.content)
       db.prepare("INSERT INTO content (seq, name, data) VALUES (?, ?, ?)").run(seq, name, data);
@@ -478,24 +435,12 @@ COMMIT;`);
     try {
       this.write([], (db) => {
         for (const row of this.pending) this.insert(db, row);
-        const last = db
-          .prepare("SELECT record FROM events WHERE kind = 'prune' ORDER BY seq DESC LIMIT 1")
-          .get() as { record: string } | undefined;
-        const previous = last ? (JSON.parse(last.record) as Record<string, unknown>) : {};
-        let rowsThroughSeq = Number(previous.rowsThroughSeq ?? 0);
-        let rowsLastHash = String(previous.rowsLastHash ?? ZERO_HASH);
-        let contentThroughSeq = Number(previous.contentThroughSeq ?? 0);
+        let rowsThroughSeq: number | null = null;
+        let contentThroughSeq: number | null = null;
         let reason: "age" | "size" | null = null;
-        const head = db.prepare("SELECT seq, hash FROM events ORDER BY seq DESC LIMIT 1").get() as
-          | { seq: number; hash: string }
-          | undefined;
         const deleteRows = (through: number) => {
-          const row = db.prepare("SELECT hash FROM events WHERE seq = ?").get(through) as {
-            hash: string;
-          };
-          rowsLastHash = row.hash;
           rowsThroughSeq = through;
-          contentThroughSeq = Math.max(contentThroughSeq, through);
+          contentThroughSeq = Math.max(contentThroughSeq ?? 0, through);
           db.prepare("DELETE FROM content WHERE seq <= ?").run(through);
           db.prepare("DELETE FROM events WHERE seq <= ?").run(through);
         };
@@ -528,7 +473,7 @@ COMMIT;`);
           }
           if (through !== null) {
             db.prepare("DELETE FROM content WHERE seq <= ?").run(through);
-            contentThroughSeq = Math.max(contentThroughSeq, through);
+            contentThroughSeq = Math.max(contentThroughSeq ?? 0, through);
             reason = "size";
           }
           bytes = used();
@@ -549,30 +494,20 @@ COMMIT;`);
           }
         }
         if (!reason) return;
-        if (head && rowsThroughSeq >= Number(head.seq))
-          this.lastDeleted = { seq: Number(head.seq), hash: head.hash };
         marker = this.row(
           "prune",
           null,
           null,
           null,
-          {
-            reason,
-            rowsThroughSeq,
-            rowsLastHash,
-            contentThroughSeq,
-          },
+          { reason, rowsThroughSeq, contentThroughSeq },
           {},
           [],
         );
         this.insert(db, marker);
       });
       this.pending = [];
-      this.lastDeleted = null;
       if (marker) this.db.exec("PRAGMA incremental_vacuum");
-    } catch {
-      this.lastDeleted = null;
-    }
+    } catch {}
   }
 
   /** Writes a closing host record and closes the database. */
@@ -755,97 +690,5 @@ COMMIT;`);
       newestAt: counts.newest === null ? null : Number(counts.newest),
       lastPrune: prune ? this.event(prune) : null,
     };
-  }
-
-  /**
-   * Checks the hash chain, every stored payload against its record, and SQLite's integrity.
-   * Yields to the event loop every 500 records so a window stays responsive.
-   */
-  async verify(onProgress?: (checked: number, total: number) => void): Promise<AuditVerifyResult> {
-    const db = this.reader();
-    const total = Number((db.prepare("SELECT count(*) AS n FROM events").get() as { n: number }).n);
-    const prune = db
-      .prepare("SELECT record FROM events WHERE kind = 'prune' ORDER BY seq DESC LIMIT 1")
-      .get() as { record: string } | undefined;
-    const marker = prune ? (JSON.parse(prune.record) as Record<string, unknown>) : {};
-    let prevHash = String(marker.rowsLastHash ?? ZERO_HASH);
-    let expectedSeq = Number(marker.rowsThroughSeq ?? 0) + 1;
-    const contentThrough = Number(marker.contentThroughSeq ?? 0);
-    const described = new Set<string>();
-    let checked = 0;
-    let afterSeq = 0;
-    const page = db.prepare("SELECT * FROM events WHERE seq > ? ORDER BY seq LIMIT 500");
-    const stored = db.prepare(
-      "SELECT length(data) AS bytes, data FROM content WHERE seq = ? AND name = ?",
-    );
-    const bad = (seq: number | null, reason: string): AuditVerifyResult => ({
-      ok: false,
-      records: checked,
-      seq,
-      reason,
-    });
-    for (;;) {
-      const rows = page.all(afterSeq) as Record<string, SQLInputValue>[];
-      if (!rows.length) break;
-      for (const row of rows) {
-        const seq = Number(row.seq);
-        if (seq !== expectedSeq) return bad(expectedSeq, `Record ${expectedSeq} is missing.`);
-        if (row.prev_hash !== prevHash)
-          return bad(seq, "The link to the previous record does not match.");
-        const hash = chainHash(prevHash, {
-          seq,
-          at: Number(row.at),
-          kind: String(row.kind),
-          action: (row.action as string | null) ?? null,
-          startSeq: row.start_seq === null ? null : Number(row.start_seq),
-          outcome: (row.outcome as string | null) ?? null,
-          text: String(row.record),
-        });
-        if (hash !== row.hash) return bad(seq, "The record was changed after it was written.");
-        let record: Record<string, unknown>;
-        try {
-          record = JSON.parse(String(row.record));
-        } catch {
-          return bad(seq, "The record text is not valid JSON.");
-        }
-        const content = (record.content ?? {}) as Record<string, ContentInfo>;
-        for (const [name, info] of Object.entries(content)) {
-          described.add(`${seq}/${name}`);
-          const data = stored.get(seq, name) as { bytes: number; data: Uint8Array } | undefined;
-          if (!data) {
-            if (seq <= contentThrough) continue;
-            return bad(seq, `The ${name} content is missing.`);
-          }
-          if (Number(data.bytes) !== info.storedBytes || sha256(data.data) !== info.storedSha256)
-            return bad(seq, `The ${name} content was changed.`);
-        }
-        prevHash = String(row.hash);
-        expectedSeq = seq + 1;
-        afterSeq = seq;
-        checked++;
-      }
-      onProgress?.(checked, total);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    for (const row of db.prepare("SELECT seq, name FROM content").iterate() as Iterable<{
-      seq: number;
-      name: string;
-    }>)
-      if (!described.has(`${row.seq}/${row.name}`))
-        return bad(Number(row.seq), `Content ${row.name} has no record.`);
-    const integrity = db.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
-    if (integrity.length !== 1 || integrity[0].integrity_check !== "ok")
-      return bad(
-        null,
-        `SQLite integrity check failed: ${integrity.map((r) => r.integrity_check).join("; ")}`,
-      );
-    return { ok: true, records: checked };
-  }
-
-  /** Writes a consistent snapshot to `destination`, which must not exist yet. */
-  async export(destination: string): Promise<void> {
-    const sqlite = process.getBuiltinModule("node:sqlite");
-    if (existsSync(destination)) throw new Error(`${destination} already exists.`);
-    await sqlite.backup(this.reader(), destination);
   }
 }

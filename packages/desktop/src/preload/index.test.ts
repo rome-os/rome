@@ -39,18 +39,7 @@ describe("preload bridge", () => {
   it("gives the app's own pages the audit log", async () => {
     const local = await load("file:");
     expect(Object.keys(local.audit as object).sort()).toEqual(
-      [
-        "content",
-        "counts",
-        "export",
-        "get",
-        "list",
-        "reveal",
-        "saveContent",
-        "stats",
-        "status",
-        "verify",
-      ].sort(),
+      ["content", "counts", "get", "list", "reveal", "stats", "status"].sort(),
     );
   });
 });

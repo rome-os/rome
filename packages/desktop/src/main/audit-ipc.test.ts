@@ -2,9 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 
 rs.mock("electron", () => ({
   ipcMain: { handle: rs.fn() },
-  app: { getVersion: () => "0.0.0", getPath: () => "/tmp" },
-  BrowserWindow: { fromWebContents: () => null },
-  dialog: { showSaveDialog: rs.fn(async () => ({ canceled: true })) },
+  app: { getVersion: () => "0.0.0" },
   shell: { showItemInFolder: rs.fn() },
 }));
 
@@ -24,8 +22,6 @@ const store = {
   list: rs.fn(() => []),
   get: () => null,
   content: () => null,
-  verify: async () => ({ ok: true, records: 1 }),
-  export: rs.fn(async () => undefined),
 } as unknown as AuditStore;
 
 const sender = (url: string) => ({ senderFrame: { url }, sender: {} });
@@ -43,9 +39,6 @@ describe("audit IPC", () => {
     "audit:counts",
     "audit:stats",
     "audit:content",
-    "audit:saveContent",
-    "audit:verify",
-    "audit:export",
     "audit:reveal",
   ];
 
