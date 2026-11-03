@@ -424,9 +424,6 @@ export class WhatsAppAdapter {
       types: ALL_ATTACHMENT_TYPES,
       urls: false,
     });
-    // Every file is read before the first message goes out, so a send never
-    // stops part way for a file it could not read.
-    const media = await Promise.all(attachments.map((att) => readFile(att.source)));
     const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
 
@@ -437,26 +434,28 @@ export class WhatsAppAdapter {
         messageId = sent?.key.id ?? undefined;
       }
 
-      for (const [i, att] of attachments.entries()) {
+      for (const att of attachments) {
+        // Read one at a time, so a send holds one file in memory at once.
+        const media = await readFile(att.source);
         switch (att.type) {
           case "image":
             await this.sock.sendMessage(jid, {
-              image: media[i]!,
+              image: media,
               caption: att.caption,
             });
             break;
           case "video":
             await this.sock.sendMessage(jid, {
-              video: media[i]!,
+              video: media,
               caption: att.caption,
             });
             break;
           case "audio":
-            await this.sock.sendMessage(jid, { audio: media[i]!, mimetype: "audio/mpeg" });
+            await this.sock.sendMessage(jid, { audio: media, mimetype: "audio/mpeg" });
             break;
           case "document":
             await this.sock.sendMessage(jid, {
-              document: media[i]!,
+              document: media,
               mimetype: "application/octet-stream",
               fileName: att.source.split("/").pop() ?? "file",
               caption: att.caption,

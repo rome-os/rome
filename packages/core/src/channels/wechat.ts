@@ -1218,9 +1218,6 @@ export class WechatAdapter {
       types: ALL_ATTACHMENT_TYPES,
       urls: false,
     });
-    // Every file is read before the first message goes out, so a send never
-    // stops part way for a file it could not read.
-    const media = await Promise.all(attachments.map((att) => readFile(att.source)));
     this.assertSessionActive();
     const target = this.resolveSendTarget(chatId);
 
@@ -1235,7 +1232,7 @@ export class WechatAdapter {
       );
     }
 
-    for (const [i, attachment] of attachments.entries()) {
+    for (const attachment of attachments) {
       const mediaType =
         attachment.type === "image"
           ? MSG_ITEM_IMAGE
@@ -1244,7 +1241,8 @@ export class WechatAdapter {
             : attachment.type === "audio"
               ? MSG_ITEM_VOICE
               : MSG_ITEM_FILE;
-      const data = media[i]!;
+      // Read one at a time, so a send holds one file in memory at once.
+      const data = await readFile(attachment.source);
       const fileName =
         attachment.type === "document" || attachment.type === "audio"
           ? basename(attachment.source)
