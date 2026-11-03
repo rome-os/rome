@@ -59,6 +59,7 @@ describe("Chats backfill", () => {
     channel.run("tg-sales", "telegram", "telegram", "111");
     channel.run("tg-support", "telegram", "telegram", "222");
     channel.run("feishu", "feishu", "feishu", "bot");
+    channel.run("mail", "email", "email", "rome@example.com");
     const session = sqlite.prepare(
       `INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id,
          source_thread_type, source_thread_name, parent_session_id, agent_name, created_at)
@@ -85,6 +86,8 @@ describe("Chats backfill", () => {
     // group from a direct message.
     session.run("tg-dm", "Ada", "channel", "tg-sales", "55", null, null, null, null);
     session.run("tg-group", "Club", "channel", "tg-sales", "-77", null, "Club", null, null);
+    // An email thread, which a send opened as private.
+    session.run("mail-1", "Invoice", "channel", "mail", "thr-1", "private", "Invoice", null, null);
     // A send opened every new address as private, a group's too.
     session.run("tg-sent", "Crew", "channel", "tg-sales", "-88", "private", "Crew", null, null);
     // A chat heard on a channel that knows no account: it waits until the
@@ -278,6 +281,7 @@ describe("Chats backfill", () => {
       { platform: "feishu", key: "dm:bot:ou_wei", kind: "dm" },
       { platform: "telegram", key: "-42", kind: "group" },
       { platform: "feishu", key: "oc_launch", kind: "group" },
+      { platform: "email", key: "thr-1", kind: "group" },
       { platform: "telegram", key: "dm:111:55", kind: "dm" },
       { platform: "telegram", key: "-77", kind: "group" },
       { platform: "telegram", key: "-88", kind: "group" },
@@ -295,6 +299,7 @@ describe("Chats backfill", () => {
       { id: "g-sales", key: "-42", thread_id: null, account_id: "111" },
       { id: "g-support", key: "-42", thread_id: null, account_id: "222" },
       { id: "group", key: "oc_launch", thread_id: null, account_id: "bot" },
+      { id: "mail-1", key: "thr-1", thread_id: null, account_id: "rome@example.com" },
       { id: "tg-dm", key: "dm:111:55", thread_id: null, account_id: "111" },
       { id: "tg-group", key: "-77", thread_id: null, account_id: "111" },
       { id: "tg-sent", key: "-88", thread_id: null, account_id: "111" },
@@ -474,6 +479,6 @@ describe("Chats backfill", () => {
            JOIN chats c ON c.id = s.chat_id WHERE s.id = 'tgu-dm'`),
     ).toEqual([{ platform: "telegram", key: "dm:333:99", kind: "dm", account_id: "333" }]);
     backfill(sqlite);
-    expect(all("SELECT count(*) AS n FROM chats")).toEqual([{ n: 8 }]);
+    expect(all("SELECT count(*) AS n FROM chats")).toEqual([{ n: 9 }]);
   });
 });

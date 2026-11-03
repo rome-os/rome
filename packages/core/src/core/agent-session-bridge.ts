@@ -279,10 +279,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 actionContext: req.actionContext,
                 persistTranscript: true,
                 persistUserTranscript: !conversation.promptPersisted,
-                // A reply the bridge streams records itself. With Chats, the
-                // caller records the answer as it sends it, so the recorder
-                // writing it too would say it twice.
-                persistAssistantTranscript: !reply && !this.runLineDeps,
+                // A reply the bridge streams records itself. Where the
+                // session stands in a chat, the caller records the answer as
+                // it sends it, so the recorder writing it too would say it
+                // twice, or say one that never went out.
+                persistAssistantTranscript:
+                  !reply && !this.runLineDeps?.lines.stands(romeSessionId),
               })
             : null;
 

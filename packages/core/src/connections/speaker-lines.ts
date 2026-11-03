@@ -23,6 +23,12 @@ export class SpeakerLines {
     },
   ) {}
 
+  /** Whether session `sessionId` stands in a chat, where what its account
+   *  sends goes on record as it is sent. */
+  stands(sessionId: string): boolean {
+    return this.deps.speakers.speakerOf(sessionId) !== null;
+  }
+
   /** The key the message the platform calls `platformMessageId` has where
    *  `speaker` stands, as its account heard or sent it. */
   keyIn(speaker: SpeakerAt, platformMessageId: string): string {
@@ -80,6 +86,6 @@ export async function runLines(
 /** What a run reads its lines through: the lines it names by the platform's
  *  ids, and the turn links its prompt becomes its turn's through. */
 export interface RunLineDeps {
-  lines: Pick<SpeakerLines, "recorded">;
+  lines: Pick<SpeakerLines, "recorded" | "stands">;
   links: Pick<TurnLinks, "prompt">;
 }

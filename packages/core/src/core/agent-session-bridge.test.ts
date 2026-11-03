@@ -974,22 +974,29 @@ describe("AgentSessionBridge reply streaming", () => {
     }
   });
 
-  it("leaves an answer it does not stream for its caller to record, once Chats records sends", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const { turnEnd } = run(turnEvents(...answer), {
-        streamReply: false,
-        repo,
-        db,
-        runLineDeps: { lines: { recorded: async () => null }, links: { prompt: () => {} } },
-      });
+  for (const stands of [true, false]) {
+    it(`records an answer it does not stream ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
+      const { repo, db, answers, close } = await recorded();
+      try {
+        const { turnEnd } = run(turnEvents(...answer), {
+          streamReply: false,
+          repo,
+          db,
+          runLineDeps: {
+            lines: { recorded: async () => null, stands: () => stands },
+            links: { prompt: () => {} },
+          },
+        });
 
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(await answers()).toEqual([]);
-    } finally {
-      close();
-    }
-  });
+        await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+        expect(await answers()).toEqual(
+          stands ? [] : [JSON.stringify([{ type: "text", content: "hi there" }])],
+        );
+      } finally {
+        close();
+      }
+    });
+  }
 
   it("records the answer of a reply whose create may have landed, which its caller does not send", async () => {
     const { repo, db, answers, close } = await recorded();

@@ -103,8 +103,9 @@ SELECT
                   AND m.sender_id IS NOT NULL AND m.sender_id <> 'rome'
                 ORDER BY m.created_at, m.rowid LIMIT 1), r.source_thread_id) END
        END AS key,
+  -- An email thread is a group, as the email adapter keys one.
   CASE WHEN r.source_channel <> 'webchat'
-        AND ((c.platform = 'telegram' AND r.source_thread_id GLOB '-*')
+        AND (c.platform = 'email' OR (c.platform = 'telegram' AND r.source_thread_id GLOB '-*')
          OR (c.platform = 'whatsapp' AND r.source_thread_id GLOB '*@g.us')
          OR r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
          AND NOT (c.platform = 'telegram' AND r.source_thread_id NOT GLOB '-*')
