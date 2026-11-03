@@ -418,7 +418,7 @@ describe("Webchat API", () => {
         testDb.db.all(
           sql`SELECT sender_account_id FROM chat_messages WHERE key = ${inputs[0]!.id}`,
         ),
-      ).toEqual([{ sender_account_id: "core:concierge" }]);
+      ).toEqual([{ sender_account_id: "agent:core:concierge" }]);
       expect(runtime.isRunning(id)).toBe(true);
       expect(runtime.activeTurns(id)).toEqual(["task-1"]);
       await runtime.interruptTurn("task-1");
