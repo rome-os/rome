@@ -497,7 +497,12 @@ describe("GET /connections accounts", () => {
       onEvent: (tx, event) => {
         if (event.kind !== "connected") return;
         const record = event.connection;
-        records.claim(tx, { ...record, domain: domainOf(event.profile) }, record.createdAt);
+        // As Rome claims it: with the account the connection reached.
+        records.claim(
+          tx,
+          { ...record, domain: domainOf(event.profile), account: event.account },
+          record.createdAt,
+        );
       },
     });
     registry.register({ ...telegram.descriptor, connectionKind: "feishu", severalAccounts: true });

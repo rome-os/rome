@@ -609,12 +609,13 @@ export async function buildTestDeps(
   // Chats as production wires it, with each dashboard chat's lines in it.
   // Every test channel is active: one its record names no account for is
   // the account named like it, so tests need not record one per channel.
+  const accountOf = (channel: string) =>
+    channelRecords.accountOf(channel) ?? {
+      platform: channelRecords.platformOfChannel(channel),
+      id: channel,
+    };
   const chatsWired = chatsWiring(db, {
-    accountOf: (channel) =>
-      channelRecords.accountOf(channel) ?? {
-        platform: channelRecords.platformOfChannel(channel),
-        id: channel,
-      },
+    accountOf,
     platformOfChannel: (name) => channelRecords.platformOfChannel(name),
     channelsOn: (platform) => channelRecords.namesOn(platform),
   });
@@ -800,7 +801,8 @@ export async function buildTestDeps(
     platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
     recordedOn: (platform: string) => channelRecords.namesOn(platform),
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
-    accountOf: (channel: string) => channelRecords.accountOf(channel),
+    // The same account Chats reads each test channel as.
+    accountOf,
     transcript: "chats",
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
