@@ -179,13 +179,14 @@ describe("SpeakerReplies", () => {
       },
       messages,
       links,
-      activity: (sessionId, at) => moved.push([sessionId, at.getTime()]),
+      // Chats keeps a message's time to the second.
+      activity: (sessionId, at) => moved.push([sessionId, Math.floor(at.getTime() / 1000)]),
     }).stream("speaker-1", CHANNEL, { turnId: "turn-5", policy: POLICY, clock: systemClock });
 
     await reply!.settle(false);
 
     const [line] = messages.read(placeIn(chat)).messages;
-    expect(moved).toEqual([["speaker-1", line!.at.getTime()]]);
+    expect(moved).toEqual([["speaker-1", Math.floor(line!.at.getTime() / 1000)]]);
   });
 
   it("put a streamed reply on record as the agent whose turn wrote it", async () => {
