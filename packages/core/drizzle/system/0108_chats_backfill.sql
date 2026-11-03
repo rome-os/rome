@@ -74,6 +74,7 @@ SELECT
   r.`chat_id` AS `chat_id`,
   r.`thread_id` AS `thread_id`,
   r.`account_id` AS `account_id`,
+  s.`per_account` AS `per_account`,
   CASE WHEN m.`role` = 'assistant' OR (m.`role` = 'notification' AND m.`sender_id` = 'rome')
          THEN s.`account_id`
        WHEN s.`dashboard` THEN
@@ -108,6 +109,8 @@ SELECT
          JOIN `rome_agent_messages` h ON h.`id` = a.`message_id`
          JOIN `rome_sessions` hr ON hr.`id` = h.`session_id`
          WHERE a.`platform_message_id` = m.`platform_message_id` AND hr.`chat_id` = r.`chat_id`
+           -- Where each account numbers its own lines, only its own aliases.
+           AND (NOT s.`per_account` OR hr.`account_id` IS r.`account_id`)
            AND h.`platform_message_id` IS NOT NULL LIMIT 1), m.`platform_message_id`)
        END AS `key`,
   CASE WHEN m.`reply_to_platform_message_id` IS NULL THEN NULL
@@ -208,6 +211,7 @@ UPDATE `chat_messages` SET `reply_to_message_id` = (
       JOIN `rome_sessions` ar ON ar.`id` = a.`session_id`
       JOIN `legacy_chat_line_ids` j ON j.`legacy_id` = a.`message_id`
       WHERE ar.`chat_id` = v.`chat_id`
+        AND (NOT v.`per_account` OR ar.`account_id` IS v.`account_id`)
         AND a.`platform_message_id` = (SELECT m.`reply_to_platform_message_id` FROM `rome_agent_messages` m
           WHERE m.`id` = v.`legacy_id`) LIMIT 1))
   FROM `legacy_chat_line_ids` i JOIN `legacy_chat_line_rows` v ON v.`legacy_id` = i.`legacy_id`
@@ -216,6 +220,15 @@ UPDATE `chat_messages` SET `reply_to_message_id` = (
 WHERE `reply_to_message_id` IS NULL AND `id` IN (
   SELECT i.`message_id` FROM `legacy_chat_line_rows` v JOIN `legacy_chat_line_ids` i ON i.`legacy_id` = v.`legacy_id`
   WHERE v.`reply_key` IS NOT NULL);
+--> statement-breakpoint
+-- A speaker sees what was said where it stands from when it was made. A
+-- line the platform dated before its session was made, as a first message
+-- delivered late, stays in view.
+UPDATE `rome_sessions` SET `created_at` = (
+  SELECT min(m.`created_at`) FROM `rome_agent_messages` m WHERE m.`session_id` = `rome_sessions`.`id`)
+WHERE `id` IN (SELECT s.`session_id` FROM `legacy_chat_speakers` s)
+  AND `created_at` > (
+    SELECT min(m.`created_at`) FROM `rome_agent_messages` m WHERE m.`session_id` = `rome_sessions`.`id`);
 --> statement-breakpoint
 -- Finds the lines that quote a line, so ending a long chat clears its quotes
 -- in linear time.

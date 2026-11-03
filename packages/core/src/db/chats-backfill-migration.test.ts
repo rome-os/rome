@@ -161,6 +161,27 @@ describe("0108 Chats backfill", () => {
         pmid: "6",
         reply: "5",
       },
+      // Support's own lines, numbered by its account as Sales numbers its.
+      {
+        id: "g-4",
+        session: "g-support",
+        role: "notification",
+        content: text("Six"),
+        at: 302,
+        pmid: "6",
+        sender: "u10",
+        name: "Bo",
+      },
+      {
+        id: "g-5",
+        session: "g-support",
+        role: "notification",
+        content: text("Seven"),
+        at: 303,
+        pmid: "7",
+        sender: "u10",
+        name: "Bo",
+      },
       {
         id: "dm-1",
         session: "dm",
@@ -229,9 +250,11 @@ describe("0108 Chats backfill", () => {
     sqlite
       .prepare(
         `INSERT INTO rome_agent_message_platform_ids (message_id, session_id, platform_message_id)
-         VALUES ('dm-2', 'dm', 'om_3')`,
+         VALUES ('dm-2', 'dm', 'om_3'), ('g-3', 'g-sales', '7')`,
       )
       .run();
+    // The thread's first message reached Rome after the platform dated it.
+    sqlite.prepare("UPDATE rome_sessions SET created_at = 550 WHERE id = 'thread'").run();
     migrate(sqlite);
   });
 
@@ -326,6 +349,23 @@ describe("0108 Chats backfill", () => {
     expect(reply.reply_to_message_id).toBe((line("111:5") as { id: number }).id);
   });
 
+  it("reads a basic group's reply aliases only for the account that holds them", () => {
+    // Sales sent its reply as its 6 and 7; Support's own 6 and 7 are other lines.
+    expect(line("111:6")).toMatchObject({ text: "Hey" });
+    expect(line("222:6")).toMatchObject({ text: "Six" });
+    expect(line("222:7")).toMatchObject({ text: "Seven" });
+    expect(line("111:7")).toBeUndefined();
+  });
+
+  it("keeps in view a line dated before its session was made", () => {
+    expect(all("SELECT id, created_at FROM rome_sessions WHERE id IN ('thread', 'dm')")).toEqual(
+      expect.arrayContaining([
+        { id: "thread", created_at: 500 },
+        { id: "dm", created_at: 100 },
+      ]),
+    );
+  });
+
   it("notes each heard line as reached by the account that heard it", () => {
     expect(
       all(`SELECT m.key, d.account_id FROM chat_message_deliveries d
@@ -333,6 +373,8 @@ describe("0108 Chats backfill", () => {
     ).toEqual([
       { key: "111:5", account_id: "111" },
       { key: "222:5", account_id: "222" },
+      { key: "222:6", account_id: "222" },
+      { key: "222:7", account_id: "222" },
       { key: "om_1", account_id: "bot" },
       { key: "om_4", account_id: "bot" },
       { key: "om_9", account_id: "bot" },
@@ -373,7 +415,7 @@ describe("0108 Chats backfill", () => {
 
   it("leaves a fork's rows its own and every legacy row in place", () => {
     expect(line("fork-in")).toBeUndefined();
-    expect(all("SELECT count(*) AS n FROM rome_agent_messages")).toEqual([{ n: 15 }]);
+    expect(all("SELECT count(*) AS n FROM rome_agent_messages")).toEqual([{ n: 17 }]);
     expect(all("SELECT name FROM sqlite_master WHERE name LIKE 'legacy_chat%'")).toEqual([]);
   });
 });

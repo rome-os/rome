@@ -321,6 +321,46 @@ describe("ChatsWebChatRepository", () => {
     ]);
     expect(await repo.getMessageCount("chat-1")).toBe(1);
   });
+  it("reads a channel chat's notification once, from Chats, though its old row stays", async () => {
+    const telegram = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "t-1" as ChatId),
+      "dm",
+      "Ana",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:telegram:t-1",
+      type: "channel",
+      name: "Ana",
+      agentName: null,
+    });
+    // As the backfill leaves it: the line in Chats, and its old row kept.
+    testDb.db
+      .update(romeSessions)
+      .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform, createdAt: new Date(0) })
+      .where(eq(romeSessions.id, "channel:telegram:t-1"))
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "note-1",
+        sessionId: "channel:telegram:t-1",
+        role: "notification",
+        content: text("Hi"),
+        createdAt: new Date(),
+      })
+      .run();
+    new MessageRepository(testDb.db).record({
+      direction: "toRome",
+      place: { chat: telegram.ref },
+      saidBy: { account: { platform: "telegram", id: "ana" } },
+      key: "5",
+      body: { text: "Hi" },
+      at: new Date(),
+    });
+
+    expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
+  });
+
   it("reads a steered input after the card it answers, in the same turn", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.recordUserInput("in-1", "chat-1", text("Plan a trip"));

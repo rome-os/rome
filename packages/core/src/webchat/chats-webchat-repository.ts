@@ -773,5 +773,9 @@ export function sessionLines(sessionIds: readonly string[]) {
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role NOT IN ('user', 'assistant'))
+      -- A channel chat's notifications are its lines in Chats; only the
+      -- dashboard keeps notices of its own.
+      AND NOT (r.role = 'notification' AND s.chat_id IS NOT NULL
+        AND s.chat_platform IS NOT ${WEBCHAT_PLATFORM})
   )`;
 }

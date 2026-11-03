@@ -1078,6 +1078,8 @@ async function main() {
       lifecycleDispatcher,
       webchatRepo,
       chatMessages,
+      // Catch-up reads what was said where the session stands from Chats.
+      turnLinks: chatsWired.links,
       platformOfChannel,
       subagentExecutionService,
       activeSubagentRegistry,
