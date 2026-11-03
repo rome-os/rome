@@ -1,21 +1,7 @@
 import type { TFunction } from "i18next";
 
-// Time rendering shared by the stream and the person timeline. Both read epoch
-// seconds — the unit every People-page surface carries — and both answer in the
-// active locale.
-
-/** A stream row's age: coarse on purpose, since the stream is ordered and the
- *  label only has to say "how fresh". */
-export function timeAgo(t: TFunction<"people">, ts: number | null): string {
-  if (!ts) return "";
-  const diffSec = Math.floor((Date.now() - ts * 1000) / 1000);
-  if (diffSec < 60) return t("timeAgo.justNow");
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return t("timeAgo.minutes", { count: diffMin });
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return t("timeAgo.hours", { count: diffHr });
-  return t("timeAgo.days", { count: Math.floor(diffHr / 24) });
-}
+// Time rendering for an account's timeline. It reads epoch seconds — the unit
+// every People-page surface carries — and answers in the active locale.
 
 /** Local midnight, in epoch seconds, of the day a timestamp falls on — the key
  *  the timeline groups by, so a day boundary is a calendar comparison rather

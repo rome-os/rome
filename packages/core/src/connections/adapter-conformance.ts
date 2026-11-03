@@ -366,7 +366,7 @@ export function describeAdapterConformance(
     );
 
     runs("quote")(
-      "records a reply that quotes the person's message as a reply to that line",
+      "records a reply that quotes the person's message as a reply to that message",
       async () => {
         const heard = await personSays("which day?");
 
@@ -432,7 +432,7 @@ export function describeAdapterConformance(
         await secondSend!(group.at, { text: "from the second" });
 
         // How the platform shows the person naming the other account is the
-        // platform's, so the person's line is checked by its words.
+        // platform's, so the person's message is checked by its words.
         const lines = await transcript(heard.message.place);
         expect(lines).toHaveLength(3);
         expect(lines[0]).toMatchObject({ text: expect.stringContaining("hello both") });
@@ -462,7 +462,7 @@ export function describeAdapterConformance(
           { text: "plans?", fromRome: false },
           { text: "Tuesday", fromRome: true },
         ]);
-        // The thread stands in its group's chat, which holds no line of it.
+        // The thread stands in its group's chat, which holds no message of it.
         expect(await transcript(placeIn(heard.message.place.chat))).toEqual([]);
       },
     );

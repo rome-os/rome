@@ -71,6 +71,26 @@ describe("timelineAccounts", () => {
     expect(whatsapp.listings).toBe(1);
   });
 
+  it("keeps every link's own address on the account it folds onto", async () => {
+    // LinkedIn's book lists only the member id, and resolves the profile URL
+    // to it. A person holding both links is one account, and either link is
+    // found on it by its own address.
+    const memberId = "ACoAAAda";
+    const profileUrl = "https://www.linkedin.com/in/ada/";
+    const linkedin = new FakeAccounts([account(memberId)], { [profileUrl]: memberId });
+
+    const [accounts] = await timelineAccounts({ channels: channelList({ linkedin }) }, [
+      [
+        { platform: "linkedin", id: memberId },
+        { platform: "linkedin", id: profileUrl },
+      ],
+    ]);
+
+    expect(accounts).toEqual([
+      { channel: "linkedin", storedUnder: ["linkedin"], addresses: [memberId, profileUrl] },
+    ]);
+  });
+
   it("reads one account per channel, each folded by that channel's own book", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
     const telegram = new FakeAccounts([account(adaTelegram, [adaTelegram, adaTelegramHandle])]);
@@ -295,10 +315,8 @@ describe("romeAccountsOn", () => {
     ]);
   });
 
-  it("names the channel itself when Rome never spoke there", () => {
+  it("names no account where the channel knows none and Rome never spoke there", () => {
     const db = seeded();
-    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([
-      { platform: "telegram", id: "tg-other" },
-    ]);
+    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([]);
   });
 });

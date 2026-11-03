@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { getProfileDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import { textToSend } from "./send-refusals.js";
+import { ALL_ATTACHMENT_TYPES, attachmentsToSend, textToSend } from "./send-refusals.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, MessageReplyReference, OutgoingMessage } from "./types.js";
 import {
@@ -1214,6 +1214,10 @@ export class WechatAdapter {
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const text = textToSend("wechat", message);
+    const attachments = await attachmentsToSend("wechat", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: false,
+    });
     this.assertSessionActive();
     const target = this.resolveSendTarget(chatId);
 
@@ -1228,7 +1232,7 @@ export class WechatAdapter {
       );
     }
 
-    for (const attachment of message.attachments ?? []) {
+    for (const attachment of attachments) {
       const mediaType =
         attachment.type === "image"
           ? MSG_ITEM_IMAGE
@@ -1237,6 +1241,7 @@ export class WechatAdapter {
             : attachment.type === "audio"
               ? MSG_ITEM_VOICE
               : MSG_ITEM_FILE;
+      // Read one at a time, so a send holds one file in memory at once.
       const data = await readFile(attachment.source);
       const fileName =
         attachment.type === "document" || attachment.type === "audio"

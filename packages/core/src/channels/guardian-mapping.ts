@@ -118,6 +118,7 @@ export async function planGuardianMapping(
   repo: PeopleRepository,
   platform: string,
   accountId: string,
+  opts: { addOnly?: boolean } = {},
 ): Promise<GuardianMappingPlan> {
   const account: Account = { platform, id: accountId };
   if (await repo.byAccount(account)) return { op: "noop" };
@@ -127,7 +128,7 @@ export async function planGuardianMapping(
   if (guardians.length === 0) return { op: "noop" };
 
   const guardian = guardians[0];
-  const stale = staleAddress(guardian.links, platform);
+  const stale = opts.addOnly ? undefined : staleAddress(guardian.links, platform);
   // The plan names the row it re-points, so an account placed between this read
   // and the apply — a link write runs outside the grant section that holds
   // competing grants off — is left where it is rather than swept onto

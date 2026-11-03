@@ -121,6 +121,8 @@ describe("makeTelegramUserSetup", () => {
     expect(commit.mock.calls[0][0]).toEqual({
       credential: { material: telegramUserMaterialFromSettings(ACCOUNT), expiresAt: "never" },
       profile: telegramUserProfileFromSettings(ACCOUNT),
+      guardianChannelUserId: "42",
+      addsGuardianAccount: true,
       summary: {
         title: "Telegram account connected",
         body: ["Guardian is connected and can send and read messages as you."],

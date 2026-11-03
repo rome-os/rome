@@ -328,7 +328,9 @@ export class SetupManager {
       // tell a platform apart by, so the kind names it.
       const platform = platformOf(target.connectionKind);
       const plan = channelUserId
-        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId)
+        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId, {
+            addOnly: given.addsGuardianAccount,
+          })
         : null;
       const opts = {
         ...(plan && channelUserId

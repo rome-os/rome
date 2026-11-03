@@ -3,7 +3,13 @@
 // Contract: docs/architecture/channels.md#chat-adapters.
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { Channel, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import {
+  type Channel,
+  ChannelSendRefused,
+  type ChatId,
+  type MessageReceipt,
+  type OutgoingMessage,
+} from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import type { ChannelSend } from "../channels/channel.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -32,12 +38,15 @@ describe("recordedSends", () => {
   let addresses: ChatAddresses;
   /** Runs once the port has taken a send. */
   let afterSend: () => void;
+  /** Runs before the port takes a send, as an adapter checks one. */
+  let beforeSend: (message: OutgoingMessage) => void;
 
   beforeEach(() => {
     testDb = createTestDb();
     sent = [];
     landsAt = {};
     afterSend = () => {};
+    beforeSend = () => {};
     let next = 0;
     /** A channel whose send port answers each message with the next id, at
      *  the address it names, or at a new email thread when it names none. */
@@ -47,6 +56,7 @@ describe("recordedSends", () => {
         inbound: null,
         send: {
           send: async (address: ChatId, message: OutgoingMessage) => {
+            beforeSend(message);
             sent.push({ channel: name, address, message });
             afterSend();
             return {
@@ -143,19 +153,24 @@ describe("recordedSends", () => {
     ]);
   });
 
-  it("put no part only Rome's host makes on record from an app's send", async () => {
-    await send("telegram").send(
-      "-100" as ChatId,
-      {
-        parts: [
-          { type: "text", content: "Here" },
-          { type: "routine_draft_card", draft: {} },
-        ],
-      } as unknown as OutgoingMessage,
-    );
-
-    const [row] = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
-    expect(JSON.parse(row?.parts ?? "[]")).toEqual([{ type: "text", content: "Here" }]);
+  it("hand the port a part only Rome's host makes, and record nothing when it refuses", async () => {
+    beforeSend = (message) => {
+      if (message.parts?.some((part) => part.type === "routine_draft_card")) {
+        throw new ChannelSendRefused("part_unsupported", "Telegram shows text only");
+      }
+    };
+    await expect(
+      send("telegram").send(
+        "-100" as ChatId,
+        {
+          parts: [
+            { type: "text", content: "Here" },
+            { type: "routine_draft_card", draft: {} },
+          ],
+        } as unknown as OutgoingMessage,
+      ),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
+    expect(lines()).toEqual([]);
   });
 
   it("record a send to a Discord DM channel Rome bound to a person in that direct message", async () => {
@@ -430,7 +445,10 @@ describe("recordedSends", () => {
     expect(lines()[0]?.text).toBe("[image: sunset]");
   });
 
-  it("refuse a message with nothing in it, and record nothing", async () => {
+  it("record nothing when the port refuses a message with nothing in it", async () => {
+    beforeSend = () => {
+      throw new ChannelSendRefused("empty", "A message needs text or an attachment");
+    };
     for (const name of ["telegram", "email"]) {
       await expect(send(name).send("thread-1" as ChatId, { text: "  " })).rejects.toMatchObject({
         name: "ChannelSendRefused",
@@ -515,7 +533,12 @@ describe("recordedSends", () => {
     expect(lines().map((line) => line.text)).toEqual(["[document]"]);
   });
 
-  it("send no email that names a blank email to reply to", async () => {
+  it("hand the port a blank email to reply to as given, and record nothing when it refuses", async () => {
+    beforeSend = (message) => {
+      if (message.kind === "email" && message.inReplyToMessageId === " ") {
+        throw new ChannelSendRefused("reply_unaddressable", "inReplyToMessageId is blank");
+      }
+    };
     await expect(
       send("email").send(
         "" as ChatId,
@@ -526,7 +549,7 @@ describe("recordedSends", () => {
           text: "Hi",
         } as OutgoingMessage,
       ),
-    ).rejects.toThrow("Email replyToMessageId must not be blank. No email was sent.");
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
     expect(sent).toEqual([]);
     expect(lines()).toEqual([]);
   });

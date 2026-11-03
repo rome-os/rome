@@ -25,23 +25,29 @@ const TODAY: Record<
      *  the error the send fails with. Null where the peer models no limit. */
     longText: number[] | string | null;
     /** The test channel carries a reply delivery transport, so a reply can
-     *  stream into the conversation. Discord and WeChat have none. */
+     *  stream into the conversation. WeChat has none. */
     streams: boolean;
   }
 > = {
   telegram: { linksReply: true, longText: "message is too long", streams: true },
   // In a DM the adapter sends a plain message; it threads replies only in guild channels.
-  discord: { linksReply: false, longText: [2000, 2000, 1000], streams: false },
+  discord: { linksReply: false, longText: [2000, 2000, 1000], streams: true },
   // iLink has no reply reference, and documents no length limit for the peer to model.
   wechat: { linksReply: false, longText: null, streams: false },
 };
 
-// The request of a platform's API that a scenario holds in flight and then cuts
-// off, so the platform applies it and the client never hears. Null where no
-// transport streams.
-const EDIT_REQUEST: Record<Platform, string | null> = {
-  telegram: `/bot${TELEGRAM_TOKEN}/editMessageText`,
-  discord: null,
+// The request of a platform's API that edits `message` in `conversation`, which
+// a scenario holds in flight and then cuts off, so the platform applies it and
+// the client never hears. Null where no transport streams.
+const EDIT_REQUEST: Record<
+  Platform,
+  ((conversation: string, message: string) => { method: string; path: string }) | null
+> = {
+  telegram: () => ({ method: "POST", path: `/bot${TELEGRAM_TOKEN}/editMessageText` }),
+  discord: (conversation, message) => ({
+    method: "PATCH",
+    path: `/api/v10/channels/${conversation}/messages/${message}`,
+  }),
   wechat: null,
 };
 
@@ -193,15 +199,11 @@ describe.each(platforms)("%s", (platform) => {
         const { outcome } = await streamScript(context, channel, async ({ emit }) => {
           emit({ type: "text_delta", content: "Hello", blockId: "a" });
           await channel.peer.server.waitFor((e) => e.accepted);
+          const edit = EDIT_REQUEST[platform]!(channel.conversation, romeMessages(channel)[0]!.id);
           // The next edit reaches the platform and waits there, applies, and loses its answer.
-          channel.peer.server.once({
-            method: "POST",
-            path: EDIT_REQUEST[platform]!,
-            before: () => held,
-            dropAfterAccept: true,
-          });
+          channel.peer.server.once({ ...edit, before: () => held, dropAfterAccept: true });
           emit({ type: "text_delta", content: " world", blockId: "a" });
-          await channel.peer.server.waitFor((e) => e.request.path === EDIT_REQUEST[platform]);
+          await channel.peer.server.waitFor((e) => e.request.path === edit.path);
           // The block completes back to what the client last saw acknowledged.
           emit({ type: "text", content: "Hello", blockId: "a", turnPhase: "final" });
           release();

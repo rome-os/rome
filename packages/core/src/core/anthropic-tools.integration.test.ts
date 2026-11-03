@@ -13,13 +13,7 @@ import { createRomeMcpServer, type RomeMcpGroup } from "./mcp/server.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "./model-selector.js";
 
 // Every Rome MCP group, so a group the builder stops registering still counts.
-const ROME_MCP_GROUPS: readonly RomeMcpGroup[] = [
-  "actions",
-  "subagents",
-  "skills",
-  "output",
-  "ask_user",
-];
+const ROME_MCP_GROUPS: readonly RomeMcpGroup[] = ["actions", "subagents", "skills", "ask_user"];
 
 const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
   .filter((selection) => selection.providerId === "anthropic")

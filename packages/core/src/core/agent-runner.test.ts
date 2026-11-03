@@ -350,6 +350,46 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it.each([
+    ["writes", undefined, true],
+    ["leaves out", false, false],
+  ])("%s a turn's answer in its transcript as the caller asks, and keeps its trace", async (_label, persistAnswer, answered) => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-answer", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-answer",
+        prompt: "continue",
+        threadContext: {
+          channel: "webchat",
+          threadId: "chat-answer",
+          romeSessionId: "chat-answer",
+        },
+        persistTrace: true,
+        persistAnswer,
+      }),
+    );
+
+    const roles = (await webchatRepo.getMessages("chat-answer")).map((message) => message.role);
+    expect(roles).toContain("trace");
+    expect(roles.includes("assistant")).toBe(answered);
+    await manager.shutdown();
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {
@@ -1492,7 +1532,6 @@ describe("AgentRunner", () => {
       expect(forkOpen!.builtinTools).toEqual([]);
       expect(forkOpen!.reasoningEffort).toBe("high");
       expect(forkOpen!.supportsInteractiveSurface).toBe(false);
-      expect(forkOpen!.handback).toBeUndefined();
       await expect(forkOpen!.executeAction("demo_action", {})).rejects.toThrow(
         "Actions are disabled in forked turns",
       );
@@ -1722,7 +1761,6 @@ describe("AgentRunner", () => {
       expect(forkOpen!.outputSchema).toEqual(
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
-      expect(forkOpen!.handback).toBeUndefined();
       expect(messages.some((message) => message.type === "structured_output")).toBe(false);
       expect(messages.find((message) => message.type === "result")).toMatchObject({
         content: JSON.stringify(payload),
@@ -1858,70 +1896,6 @@ describe("AgentRunner", () => {
       expect((actionResult as { pendingInteraction?: boolean }).pendingInteraction).toBeUndefined();
 
       await session.close("shutdown");
-    });
-
-    it("exact forks of a handback session reject submit_output instead of claiming guardian review", async () => {
-      let forkOpen: ModelSessionForkOpenParams | undefined;
-      let submitResponse: unknown;
-      const provider = withForkSupport(
-        new MockModelProvider([[{ type: "result", content: "Done" }]]),
-        (openParams) => {
-          forkOpen = openParams;
-          return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentEvent> {
-              submitResponse = await openParams.executeSubmitOutput!({ answer: "candidate" });
-              yield { type: "result", content: "tried to submit" };
-            })(),
-          });
-        },
-      );
-      const modelResolver = createTestModelResolver({ providers: [provider] });
-      const manager = createAgentSessionManager(managerDeps(modelResolver), {
-        keepAliveAcrossTurns: true,
-      });
-      const runner = new AgentRunner(manager, agentLoader);
-      // A conversational-handback source (interactive-summon child session):
-      // No config outputSchema; the session-scoped contract wires handback tools.
-      const source = await manager.acquire(
-        { agentName: "test-main", channelThreadKey: "webchat:handback-fork" },
-        {
-          handback: {
-            schema: {
-              type: "object",
-              properties: { answer: { type: "string" } },
-              required: ["answer"],
-            },
-          },
-        },
-      );
-
-      const messages = await collectMessages(
-        runner.runForked({
-          agentName: "test-main",
-          sourceSessionId: source.sessionId,
-          channelThreadKey: "webchat:handback-fork",
-          prompt: "fork it",
-          mode: "exact",
-        }),
-      );
-
-      // The fork still advertises the source's handback contract
-      // (catalog identity with the source)...
-      expect(forkOpen!.handback).toBeDefined();
-      expect(forkOpen!.outputSchema).toBeUndefined();
-      expect(forkOpen!.executeSubmitOutput).toBeDefined();
-      // ...but a handback submission is a UI act: no webchat drain persists a
-      // submission_card off a fork stream, so accepting it would claim a
-      // guardian review that can never happen.
-      expect(submitResponse).toMatchObject({
-        ok: false,
-        error: expect.stringContaining("no guardian approval surface"),
-      });
-      expect(messages.some((m) => m.type === "structured_output")).toBe(false);
-      // Handbacks stay exempt from the fail-closed terminal rule (live
-      // parity): the fork's result passes through.
-      expect(messages.map((m) => m.type)).toEqual(["turn_start", "result", "turn_end"]);
-      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
     });
 
     it("exact fork subagents run in fresh fork-owned child sessions", async () => {
@@ -6390,9 +6364,6 @@ describe("AgentRunner", () => {
         expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
       );
       expect(calls[0].outputSchema).toEqual(provider.sessions[0].outputSchema);
-      expect(provider.sessions[0].handback).toBeUndefined();
-      expect(provider.sessions[0].executeSubmitOutput).toBeUndefined();
-      expect(provider.sessions[0].systemPrompt).not.toContain("submit_output");
       expect(events.filter((event) => event.type === "result")).toEqual([
         expect.objectContaining({
           type: "result",
@@ -6486,7 +6457,6 @@ describe("AgentRunner", () => {
 
       expect(provider.sessions).toHaveLength(1);
       expect(provider.sessions[0].outputSchema).toBeUndefined();
-      expect(provider.sessions[0].handback).toBeUndefined();
     });
   });
 });

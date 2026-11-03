@@ -103,27 +103,6 @@ describe("summon", () => {
     expect(calls.map((call) => call.workingDir)).toEqual(["landingpage/content"]);
   });
 
-  it("rejects a working directory on an interactive summon without running the agent", async () => {
-    const calls: unknown[] = [];
-    const runner = {
-      async *run(params: unknown) {
-        calls.push(params);
-      },
-    } as unknown as AgentRunner;
-
-    const tool = createSummonAction(actionConfig, summonDeps(runner));
-    const result = await tool.execute({
-      agentName: "designer",
-      prompt: "Draft the layout.",
-      interactive: true,
-      appId: "workflow-studio",
-      workingDir: "landingpage",
-    });
-
-    expect(result).toMatchObject({ status: "error", error: expect.stringContaining("workingDir") });
-    expect(calls).toHaveLength(0);
-  });
-
   it("reports why the host refused to start the summoned agent", async () => {
     const runner = {
       async *run() {
@@ -377,65 +356,6 @@ describe("summon", () => {
       kind: "generic",
       title: "Run agent “main”",
       summary: "Summarize the email.",
-    });
-  });
-
-  it("previews an interactive summon as a handoff to the agent", () => {
-    const tool = createSummonAction(actionConfig, summonDeps(createMockRunner()));
-    const payload = tool.preview!({
-      agentName: "designer",
-      prompt: "Draft the layout.",
-      interactive: true,
-      appId: "workflow-studio",
-    });
-
-    expect(payload).toMatchObject({ kind: "generic", title: "Hand off to “designer”" });
-  });
-
-  it("canonicalizes interactive handoff references before returning the directive", async () => {
-    const resolveArtifactReference = rs.fn(({ kind }: { kind: "agent" | "action" }) =>
-      kind === "agent" ? "workflow-studio:designer" : "workflow-studio:validate-design",
-    );
-    const tool = createSummonAction(actionConfig, {
-      agentRunner: createMockRunner(),
-      resolveArtifactReference,
-    });
-    const result = await actionExecutionContext.run(
-      {
-        executionId: "exec-handoff",
-        rootExecutionId: "exec-handoff",
-        initiator: "app:workflow-studio",
-      },
-      () =>
-        tool.execute({
-          agentName: "workflow-studio:designer",
-          prompt: "Draft the layout.",
-          interactive: true,
-          appId: "workflow-studio",
-          handback: {
-            schema: { type: "object" },
-            validate: "workflow-studio:validate-design",
-          },
-        }),
-    );
-
-    expect(result).toMatchObject({
-      status: "handoff",
-      handoff: {
-        appId: "workflow-studio",
-        agentName: "workflow-studio:designer",
-        handback: {
-          validate: "workflow-studio:validate-design",
-        },
-      },
-    });
-    expect(resolveArtifactReference).toHaveBeenNthCalledWith(1, {
-      kind: "agent",
-      value: "workflow-studio:designer",
-    });
-    expect(resolveArtifactReference).toHaveBeenNthCalledWith(2, {
-      kind: "action",
-      value: "workflow-studio:validate-design",
     });
   });
 

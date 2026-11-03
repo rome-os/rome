@@ -8,6 +8,7 @@
 // this file, makes or reads one.
 
 import type { ChatId } from "@rome-os/app-runtime";
+import { type SQL, sql } from "drizzle-orm";
 
 /**
  * What a platform calls a chat, on the adapter's side of Chats: the platform
@@ -57,6 +58,21 @@ export function ownedBy(key: ChatKey, romeEnd: string, platformMessageId: string
   return BigInt(key.externalId.slice(1)) < 1_000_000_000_000n
     ? `${romeEnd}:${platformMessageId}`
     : platformMessageId;
+}
+
+/**
+ * Whether the message keyed `messageKey`, in the chat on `platform` keyed
+ * `key`, is another account's copy than Rome's account `account`: true only
+ * where the chat numbers its messages per account ({@link ownedBy}) and
+ * another account's id is in front. For a read in SQL, which cannot ask
+ * {@link ownedBy}.
+ */
+export function heldByAnother(platform: SQL, key: SQL, messageKey: SQL, account: SQL): SQL {
+  // A basic group's address: '-' then at most 12 digits, so below 10^12.
+  return sql`(${platform} = 'telegram' AND ${key} GLOB '-[1-9]*'
+    AND NOT substr(${key}, 2) GLOB '*[^0-9]*' AND length(${key}) <= 13
+    AND instr(${messageKey}, ':') > 0 AND ${messageKey} NOT GLOB 'rome:*'
+    AND substr(${messageKey}, 1, instr(${messageKey}, ':') - 1) IS NOT ${account})`;
 }
 
 /** The platform's own id for message id `messageId` of the chat at `key`, the

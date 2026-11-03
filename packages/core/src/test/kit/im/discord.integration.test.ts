@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import { REST, type RequestMethod, Routes } from "discord.js";
-import type { DiscordAdapter } from "../../../channels/discord.js";
+import { REST, type RequestMethod, type RESTOptions, Routes } from "discord.js";
+import { DiscordAdapter } from "../../../channels/discord.js";
 import { comparable, loadCapture } from "./capture.js";
 import textCapture from "./captures/discord-text.capture.json" with { type: "json" };
 import { DISCORD_DM, DISCORD_TOKEN, DiscordPeer } from "./discord.js";
@@ -103,6 +103,78 @@ describe("DiscordAdapter.send against the peer", () => {
     expect(sent.map((message) => message.text.length)).toEqual([2000, 500]);
     // The receipt names only the first part.
     expect(receipt.messageId).toBe(sent[0]?.id);
+    peer.server.assertClean();
+  });
+
+  // discord.js sends a request again when it times out, a create included, so
+  // only Discord's nonce check keeps the message from showing twice.
+  it("shows a create that discord.js sent again after a timeout once", async () => {
+    const impatient = new DiscordAdapter({
+      botToken: DISCORD_TOKEN,
+      rest: { ...peer.restOptions(), timeout: 100 },
+    });
+    try {
+      await impatient.start();
+      const late = deferred();
+      peer.server.once({
+        method: "POST",
+        path: `/api/v10/channels/${DISCORD_DM}/messages`,
+        holdAnswer: () => late.promise,
+      });
+
+      const receipt = await impatient.replyDelivery().create(DISCORD_DM, "hello");
+      late.resolve();
+
+      const creates = peer.server.exchanges.filter((e) => e.request.path.endsWith("/messages"));
+      expect(creates.map((e) => e.dropped === true)).toEqual([true, false]);
+      expect(peer.visible()).toEqual([
+        expect.objectContaining({ id: receipt.messageId, from: "rome", text: "hello" }),
+      ]);
+    } finally {
+      await impatient.stop();
+    }
+    peer.server.assertClean();
+  });
+
+  // Only the last attempt's error reaches the transport. An earlier attempt
+  // that timed out may have posted the message, so the create is unknown.
+  it("names a create unknown when discord.js's resend cannot connect after a timeout", async () => {
+    let refuse = false;
+    const impatient = new DiscordAdapter({
+      botToken: DISCORD_TOKEN,
+      rest: {
+        ...peer.restOptions(),
+        timeout: 100,
+        makeRequest: (async (...args: Parameters<typeof peer.server.fetch>) => {
+          if (refuse)
+            throw Object.assign(new TypeError("fetch failed"), {
+              cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+            });
+          return peer.server.fetch(...args);
+        }) as unknown as RESTOptions["makeRequest"],
+      },
+    });
+    try {
+      await impatient.start();
+      const late = deferred();
+      peer.server.once({
+        method: "POST",
+        path: `/api/v10/channels/${DISCORD_DM}/messages`,
+        holdAnswer: () => {
+          refuse = true;
+          return late.promise;
+        },
+      });
+
+      await expect(impatient.replyDelivery().create(DISCORD_DM, "hello")).rejects.toMatchObject({
+        kind: "unknown",
+      });
+      late.resolve();
+      expect(peer.visible()).toEqual([expect.objectContaining({ from: "rome", text: "hello" })]);
+    } finally {
+      refuse = false;
+      await impatient.stop();
+    }
     peer.server.assertClean();
   });
 });

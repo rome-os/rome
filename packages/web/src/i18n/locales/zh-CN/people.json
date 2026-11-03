@@ -1,8 +1,6 @@
 {
   "page": {
     "loading": "加载中…",
-    "emptyTitle": "暂无新动态",
-    "emptyHint": "给你发过消息的人会出现在这里。",
     "emptyForSearch": "没有符合搜索条件的人",
     "emptyDirectory": "这里还没有人",
     "loadMore": "显示更多"
@@ -13,12 +11,6 @@
   "search": {
     "label": "搜索人物",
     "placeholder": "搜索姓名、号码、账号…"
-  },
-  "timeAgo": {
-    "justNow": "刚刚",
-    "minutes": "{{count}} 分钟前",
-    "hours": "{{count}} 小时前",
-    "days": "{{count}} 天前"
   },
   "levels": {
     "stranger": "陌生人",
@@ -45,10 +37,7 @@
     "all": "全部"
   },
   "row": {
-    "messageCount_one": "{{count}} 条消息",
-    "messageCount_other": "{{count}} 条消息",
-    "noPreview": "这条没有文字内容",
-    "noActivity": "暂无动态"
+    "noPreview": "这条没有文字内容"
   },
   "guardian": {
     "you": "你本人",
@@ -110,11 +99,6 @@
     "send": "发送",
     "notConnected": "WhatsApp 未连接 — 请在设置中关联后再发送。"
   },
-  "views": {
-    "label": "视图",
-    "latest": "最新",
-    "directory": "名录"
-  },
   "detail": {
     "back": "人物",
     "bond": "亲密度",
@@ -122,7 +106,7 @@
     "changeBond": "更改亲密度",
     "memoryProfile": "记忆档案",
     "timeline": "时间线",
-    "timelineEmpty": "各个账号都还没有任何往来。",
+    "timelineEmpty": "还没有关联任何账号，所以没有历史记录可显示。",
     "loadOlder": "加载更早",
     "outboundPrefix": "你：",
     "sendVia": "发送渠道",
@@ -131,7 +115,7 @@
     "composerPlaceholder": "给 {{name}} 发消息…",
     "missingTitle": "找不到这个人",
     "missingBody": "该人物可能已被合并到其他人名下或已被删除。返回人物页面即可找到他们。",
-    "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
+    "linkDescription": "你选择的账号将归属到此人名下，其历史记录会显示在该账号下。",
     "noAccounts": "暂无账号",
     "delegate": "代理"
   },
@@ -139,7 +123,6 @@
     "to": "发送至",
     "segments": {
       "label": "账号",
-      "all": "全部",
       "empty": "这个 {{channel}} 账号还没有往来。"
     },
     "submit": "发送",

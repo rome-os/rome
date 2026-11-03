@@ -13,23 +13,15 @@ function allBuiltInTools(): FacadeToolDef[] {
     subagentTools: [],
     executeAction: async () => ({}),
     executeSubagent: async () => ({}),
-    executeSubmitOutput: async () => ({}),
     executeDefer: async () => ({}),
     supportsInteractiveSurface: true,
-    handback: { schema: { type: "object", properties: { a: { type: "string" } } } },
     routineActivation: {
       canCallAction: () => "permitted",
       validateArgs: () => null,
       routineKeyFor: () => undefined,
     },
   });
-  return [
-    ...bundle.actions,
-    ...bundle.subagents,
-    ...bundle.skills,
-    ...bundle.submitOutput,
-    ...bundle.interactiveTools,
-  ];
+  return [...bundle.actions, ...bundle.subagents, ...bundle.skills, ...bundle.interactiveTools];
 }
 
 function findTool(name: string): FacadeToolDef {
@@ -44,14 +36,7 @@ function findTool(name: string): FacadeToolDef {
 describe("facade tool input schemas", () => {
   it("offers every optional built-in when each option is on", () => {
     expect(allBuiltInTools().map((t) => t.name)).toEqual(
-      expect.arrayContaining([
-        "execute_action",
-        "submit_output",
-        "ask_question",
-        "defer",
-        "confirm_output",
-        "propose_routine",
-      ]),
+      expect.arrayContaining(["execute_action", "ask_question", "defer", "propose_routine"]),
     );
   });
 

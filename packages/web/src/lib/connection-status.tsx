@@ -21,6 +21,7 @@
  *
  * Mapping over the card's slot states:
  *   any slot broken                        → amber dot, "Broken"
+ *   working, but no account known          → amber dot, "Broken"
  *   transient runtime degradation          → amber dot, "Working" (reason tooltip)
  *   any slot working                       → green dot, "Working"
  *   none connected + connect unavailable   → muted dot, "Unavailable" (reason tooltip)
@@ -50,6 +51,16 @@ export function connectionStatus(card: ConnectionCard): ConnectionStatus {
       label: "Broken",
       tone: "attention",
       title: "The platform stopped accepting Rome's access. Give access again.",
+    };
+  }
+  // Access works, but the channel never learned which account it is, so it
+  // is not active: nothing reaches it and nothing goes out.
+  if (card.accountUnknown) {
+    return {
+      label: "Broken",
+      tone: "attention",
+      title:
+        "Rome doesn't know which account this is, so it hears and sends nothing. Give access again.",
     };
   }
   if (card.degradation) {

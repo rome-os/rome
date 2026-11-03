@@ -5,7 +5,8 @@ import type { ConciergeService } from "../../concierge/service.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
-import { romeAgentMessages } from "../../db/schema.js";
+import { chatMessages } from "../../db/schema.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
@@ -30,7 +31,8 @@ describe("GET /concierge/session", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    webchatRepo = new WebChatRepository(testDb.db);
+    // The repository production wires: what Rome says lands in Chats.
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
     enabled = true;
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
@@ -162,7 +164,7 @@ describe("GET /concierge/tasks", () => {
   });
 
   it("carries the source message's id while the message exists, and null after it is gone", async () => {
-    const chats = new WebChatRepository(testDb.db);
+    const chats = new ChatsWebChatRepository(testDb.db);
     await chats.createSession("concierge", "Concierge");
     const { id } = await chats.addBackendMessage("concierge", "turn-1", [
       { type: "text", content: "Which account?" },
@@ -177,7 +179,7 @@ describe("GET /concierge/tasks", () => {
         }
       ).tasks.find((task) => task.id === row.id)?.sourceMessageId;
     expect(await sourceOf()).toBe(id);
-    testDb.db.delete(romeAgentMessages).where(eq(romeAgentMessages.id, id)).run();
+    testDb.db.delete(chatMessages).where(eq(chatMessages.key, id)).run();
     expect(await sourceOf()).toBeNull();
   });
 

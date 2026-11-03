@@ -1,4 +1,19 @@
-export { NodeDeviceActivity, type NodeDeviceActivityProps } from "./device-activity.js";
+export {
+  NodeActivityView,
+  NodeDeviceActivity,
+  type NodeActivityViewProps,
+  type NodeDeviceActivityProps,
+} from "./device-activity.js";
+export { byteFormat, clock, commandText, formatDuration, resultOf } from "./format.js";
+export { messagesFor } from "./messages.js";
+export { ResultMark } from "./parts.js";
+export {
+  BUCKET_MS,
+  statsByPeer,
+  windowStart,
+  type DeviceStats,
+  type ResultCounts,
+} from "./stats.js";
 export {
   NodeDeviceCard,
   NodeDevices,

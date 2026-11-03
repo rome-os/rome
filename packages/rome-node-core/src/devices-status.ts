@@ -7,6 +7,8 @@ export interface DeviceStatus {
   name: string;
   platform: string | null;
   status: "connected" | "not_connected" | "unknown" | "revoked";
+  /** The device's audit log, from system.info. Absent for hosts that predate it. */
+  audit?: { state: "ok" | "unavailable"; code?: string; message?: string };
 }
 
 export interface DevicesStatus {
@@ -69,6 +71,14 @@ export class DeviceStatusReader {
             : response.error.code === "target_unavailable"
               ? "not_connected"
               : "unknown";
+          const audit =
+            response.ok && isRecord(response.result) ? response.result.audit : undefined;
+          if (isRecord(audit) && (audit.state === "ok" || audit.state === "unavailable"))
+            device.audit = {
+              state: audit.state,
+              ...(typeof audit.code === "string" ? { code: audit.code } : {}),
+              ...(typeof audit.message === "string" ? { message: audit.message } : {}),
+            };
         }
       }),
     );

@@ -1,5 +1,5 @@
 // Person rows as the contract's `PersonResource`: their accounts named as each
-// platform names them, and their activity read across all of them.
+// platform names them, and when each account was last active.
 //
 // Here rather than in the route because every write on this surface answers
 // with the person it changed — create, link, unlink, transfer, dismiss, merge —
@@ -16,9 +16,9 @@ import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
-import { readActivity } from "./activity.js";
-import { readSendStates, sendersOf, type SendDeps } from "./send.js";
-import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
+import { assignAccountHeads } from "./timeline.js";
+import { asGuardian, readSendStates, sendersOf, type SendDeps } from "./send.js";
+import { guardianChannels, personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
@@ -61,7 +61,7 @@ export async function findPerson(
 /**
  * Costs the same handful of reads whether it is given one person or every one
  * of them — one address-book read per channel, one display-name read per
- * provider, one summary read per message store — so the listing never grows a
+ * provider, one head read per message store — so the listing never grows a
  * per-person query.
  */
 async function serialize(
@@ -69,34 +69,40 @@ async function serialize(
   persons: readonly PersonRow[],
 ): Promise<PersonResource[]> {
   // One link is one account on the wire, so a client can address the link it
-  // sees. The activity fold is the one place two links of a single account
-  // collapse — reporting one person's history twice would be a wrong
-  // number, whereas showing both addresses is only what the guardian stored.
+  // sees. Two links of a single account share one head (`latestAtOf`).
   const refs = persons.flatMap((person) => person.links);
 
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
   // from one read of it instead of two.
+  // The same scope the timeline reads, so an account's time is the time of
+  // the guardian's chat with it.
+  const guardians = await guardianChannels(deps);
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
     timelineAccounts(
-      deps,
+      { ...deps, guardians },
       persons.map((person) => person.links),
     ),
     deps.accountNames.displayNames(refs),
     // Whether each link can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
-    readSendStates(deps, refs),
+    readSendStates(asGuardian(deps, guardians), refs),
     memoryProfilePaths(persons),
   ]);
-  const activity = await readActivity(personMessageStores(deps), accountsByPerson);
+  // Each account's newest entry, which is also what settles the store that
+  // owns it, so one read answers both.
+  const owned = await assignAccountHeads(personMessageStores(deps), accountsByPerson.flat());
+  const heads = new Map([...owned].map(([account, { head }]) => [account, head]));
 
   // Asked once per platform, since each answer reads the channel records.
   const senders = new Map<string, Account[]>();
   const sendersOn = (platform: string) => {
     let found = senders.get(platform);
     if (!found) {
-      found = sendersOf(deps, platform).flatMap((channel) => deps.accountOf?.(channel) ?? []);
+      found = sendersOf(asGuardian(deps, guardians), platform).flatMap(
+        (channel) => deps.accountOf?.(channel) ?? [],
+      );
       senders.set(platform, found);
     }
     return found;
@@ -114,13 +120,12 @@ async function serialize(
         channelUserId: link.id,
         displayName: names[index],
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
-        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], link),
+        latestAt: latestAtOf(heads, accountsByPerson[i], link),
         from: sendersOn(link.platform),
         ...(link.delegate ? { delegate: true as const } : {}),
       };
     }),
     memoryPath: memoryPaths[i],
-    ...activity.perPerson[i],
   }));
 }
 
@@ -158,7 +163,7 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
 /**
  * When the account behind one link was last active.
  *
- * The activity read is keyed by folded account and this is asked per link,
+ * The heads are keyed by folded account and this is asked per link,
  * and the two are not the same count: a platform that folds a phone JID and
  * its `@lid` form onto one account answers one head for the two links naming
  * it. So the link is matched by the address the fold put on its account, which

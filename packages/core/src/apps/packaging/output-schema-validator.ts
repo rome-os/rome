@@ -304,14 +304,9 @@ export function assertPortableOutputSchema(
   if (issues.length > 0) throw new PortableOutputSchemaError(issues);
 }
 
-/** Compile a general JSON Schema used by Rome's UI-only handback contract. */
-export function compileJsonSchema(schema: Record<string, unknown>): CompiledOutputSchema {
-  return { validate: ajv.compile(schema) };
-}
-
 export function compileOutputSchema(schema: Record<string, unknown>): CompiledOutputSchema {
   assertPortableOutputSchema(schema);
-  return compileJsonSchema(schema);
+  return { validate: ajv.compile(schema) };
 }
 
 export function formatOutputSchemaErrors(errors: ErrorObject[] | null | undefined): string[] {

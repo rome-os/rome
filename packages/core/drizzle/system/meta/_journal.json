@@ -750,6 +750,27 @@
       "when": 1794000000000,
       "tag": "0107_chat_message_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1794000001000,
+      "tag": "0108_drop_chat_message_deliveries",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1794000002000,
+      "tag": "0109_guardian_signed_in_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "6",
+      "when": 1794000003000,
+      "tag": "0110_concierge_task_sources",
+      "breakpoints": true
     }
   ]
 }

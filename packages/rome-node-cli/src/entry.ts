@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { isRecord, cloudOrigin, validId, type ActionResponse } from "@rome-os/node-core";
 import { authorizeServer, configureCaller } from "@rome-os/node-core/auth";
@@ -15,6 +16,16 @@ import {
 } from "@rome-os/node-core/client";
 import { commandHelp } from "./help.js";
 import { copyRequest } from "./copy.js";
+import { CLI_AUDIT_HINT, cliAuditPath, runAudit } from "./audit.js";
+import type { ConnectUi } from "./connect-ui.js";
+
+const version = (): string | undefined => {
+  try {
+    return JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  } catch {
+    return undefined;
+  }
+};
 
 const failed = (response: ActionResponse) =>
   !response.ok ||
@@ -81,6 +92,16 @@ async function main(): Promise<void> {
       output: { type: "string" },
       server: { type: "boolean" },
       "device-code": { type: "boolean" },
+      db: { type: "string" },
+      json: { type: "boolean" },
+      follow: { type: "boolean", short: "f" },
+      lines: { type: "string", short: "n" },
+      since: { type: "string" },
+      until: { type: "string" },
+      action: { type: "string" },
+      outcome: { type: "string" },
+      text: { type: "string" },
+      content: { type: "string" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -100,6 +121,32 @@ async function main(): Promise<void> {
     !(positionals[0] === "device" && positionals[1] === "run")
   )
     throw new Error("--input and --output are only supported by rome-node device run.");
+  const auditOptions = [
+    "db",
+    "json",
+    "follow",
+    "lines",
+    "since",
+    "until",
+    "action",
+    "outcome",
+    "text",
+    "content",
+  ] as const;
+  if (positionals[0] !== "audit" && auditOptions.some((option) => values[option] !== undefined))
+    throw new Error(
+      `--${auditOptions.find((option) => values[option] !== undefined)} is only supported by rome-node audit.`,
+    );
+  if (positionals[0] === "audit") {
+    const { AuditStore } = await import("@rome-os/node-core/host");
+    await runAudit(
+      positionals,
+      values,
+      (path) => AuditStore.open({ path, entry: "cli", hint: CLI_AUDIT_HINT, readOnly: true }),
+      cliAuditPath(config.directory),
+    );
+    return;
+  }
   if (positionals[0] === "cp") {
     if (positionals.length !== 3) throw new Error("Usage: rome-node cp <src> <dst>");
     const request = copyRequest(positionals[1], positionals[2], process.cwd());
@@ -196,6 +243,7 @@ async function main(): Promise<void> {
   }
   if (positionals[0] === "connect" && positionals.length === 1) {
     const {
+      AuditStore,
       connectHost,
       defaultDeviceName,
       loginDevice,
@@ -203,9 +251,26 @@ async function main(): Promise<void> {
       createFileCredentialStore,
     } = await import("@rome-os/node-core/host");
     const name = values.name ?? defaultDeviceName();
+    const audit = await AuditStore.open({
+      path: cliAuditPath(config.directory),
+      entry: "cli",
+      hint: CLI_AUDIT_HINT,
+      version: version(),
+    });
+    // Connects anyway, so system.info can tell the account why requests are refused.
+    if (audit.state.state === "unavailable")
+      process.stderr.write(
+        `Audit log unavailable: ${audit.state.message}\nRemote requests will be refused until it is fixed. Run rome-node audit status.\n`,
+      );
+    else process.stderr.write(`Audit log: ${audit.path}\n`);
+    // On a terminal, the status screen replaces the Connection lines once sign-in is over.
+    const screen = process.stdout.isTTY ? await import("./connect-ui.js") : undefined;
+    let ui: ConnectUi | undefined;
+    const cloud = values.cloud ?? "https://romeos.cc";
     await withShutdown((signal) =>
       connectHost({
-        cloudUrl: values.cloud ?? "https://romeos.cc",
+        audit,
+        cloudUrl: cloud,
         name,
         signal,
         credentials: createFileCredentialStore(join(config.directory, "credential.json")),
@@ -231,12 +296,22 @@ async function main(): Promise<void> {
             );
           else if (event.type === "retrying")
             process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");
+          else if (event.type === "device" && screen)
+            ui = screen.startConnectUi(audit, {
+              name: event.name,
+              deviceId: event.deviceId,
+              cloud,
+            });
           else if (event.type === "device")
             process.stderr.write(`Device: ${event.name}\nDevice ID: ${event.deviceId}\n`);
+          else if (ui) ui.setStatus(event.status);
           else process.stderr.write(`Connection: ${event.status}\n`);
         },
       }),
-    );
+    ).finally(() => {
+      ui?.stop();
+      audit.close();
+    });
     return;
   }
   if (positionals[0] !== "device") throw new Error("Unknown command. Run rome-node --help.");

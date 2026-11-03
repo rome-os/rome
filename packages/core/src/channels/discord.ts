@@ -47,7 +47,14 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import { createLogger } from "../logger.js";
-import { textToSend } from "./send-refusals.js";
+import { discordTransport } from "./delivery/transports/discord.js";
+import type { DeliveryTransport } from "./delivery/types.js";
+import {
+  ALL_ATTACHMENT_TYPES,
+  attachmentsToSend,
+  replyToShaped,
+  textToSend,
+} from "./send-refusals.js";
 import { saveUrlAttachments } from "./attachment-files.js";
 import { createReadStream } from "node:fs";
 import { basename, extname } from "node:path";
@@ -1390,28 +1397,18 @@ Use \`/channel agent clear\` to undo.`,
     // keys it by (docs/architecture/channels.md#direct-messages): Discord's
     // DM channel for that user is opened, or found, here.
     const text = textToSend("discord", message);
+    const replyTo = replyToShaped("discord", message.replyToMessageId, DISCORD_SNOWFLAKE);
+    const attachments = await attachmentsToSend("discord", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: true,
+    });
     const threadId: string = await this.channelOf(chatId);
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Channel ${threadId} is not a text channel`);
     }
 
-    const snapshot = await this.getConversationSettings(
-      threadId,
-      "name" in channel ? (channel.name ?? undefined) : undefined,
-      channel.isThread() ? channel.parentId : null,
-      "guild" in channel ? channel.guild?.name : undefined,
-    );
-    const autoThread = snapshot?.effective.replies.placement !== "inline";
-
-    // For regular guild text channels, reply inside a thread to avoid flooding the channel
-    let targetChannel: SendableChannel;
-    if (message.replyToMessageId && channel.type === ChannelType.GuildText && autoThread) {
-      const textChannel = channel as TextChannel;
-      targetChannel = await this.getOrCreateThread(textChannel, message.replyToMessageId);
-    } else {
-      targetChannel = channel as SendableChannel;
-    }
+    const targetChannel = await this.replyChannel(channel as SendableChannel, replyTo);
 
     try {
       let messageId: string | undefined;
@@ -1425,7 +1422,7 @@ Use \`/channel agent clear\` to undo.`,
         }
       }
 
-      for (const att of message.attachments ?? []) {
+      for (const att of attachments) {
         const attachmentMessageId = await this.sendAttachment(targetChannel, att);
         messageId ??= attachmentMessageId;
       }
@@ -1444,6 +1441,39 @@ Use \`/channel agent clear\` to undo.`,
       });
       throw err;
     }
+  }
+
+  /** Streams replies through this adapter's bot, placed as `send` places them,
+   *  so its writes share the bot's rate limits. */
+  replyDelivery(): DeliveryTransport {
+    return discordTransport({
+      rest: this.client.rest,
+      place: async (chatId, replyTo) => {
+        const channel = await this.client.channels.fetch(chatId);
+        if (!channel || !channel.isTextBased())
+          throw new Error(`Channel ${chatId} is not a text channel`);
+        return (await this.replyChannel(channel as SendableChannel, replyTo)).id;
+      },
+    });
+  }
+
+  /** Where a reply to `replyTo` in `channel` goes. In a guild text channel
+   *  whose settings thread replies, that is a thread on the user's message,
+   *  so the reply does not flood the channel. */
+  private async replyChannel(
+    channel: SendableChannel,
+    replyTo: string | undefined,
+  ): Promise<SendableChannel> {
+    const snapshot = await this.getConversationSettings(
+      channel.id,
+      "name" in channel ? (channel.name ?? undefined) : undefined,
+      channel.isThread() ? channel.parentId : null,
+      "guild" in channel ? channel.guild?.name : undefined,
+    );
+    const autoThread = snapshot?.effective.replies.placement !== "inline";
+    if (replyTo && channel.type === ChannelType.GuildText && autoThread)
+      return this.getOrCreateThread(channel, replyTo);
+    return channel;
   }
 
   /** Keeps bot replies out of the main channel by threading them. */
@@ -1536,6 +1566,9 @@ Use \`/channel agent clear\` to undo.`,
     return sent.id;
   }
 }
+
+/** A Discord message id: a snowflake, a decimal number. */
+const DISCORD_SNOWFLAKE = /^\d{1,20}$/;
 
 function answersLine(agent: string | null): string {
   return agent

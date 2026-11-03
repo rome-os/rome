@@ -65,7 +65,7 @@ export interface SqlMessagesOptions {
    * addresses read.
    *
    * Absent for a store that holds every channel's messages side by side and
-   * keys them by the pair: Rome's own transcript, the sentinel's log. Such a
+   * keys them by the pair, as Rome's own transcript does. Such a
    * store is scoped by `(channel, key)` throughout, and its view is handed the
    * pairs rather than bare strings so it can say the same.
    */

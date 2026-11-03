@@ -18,7 +18,7 @@ export type Direction = "toRome" | "fromRome";
 export interface SaidBy {
   readonly account: Account;
   /** What the sender was called on the message, as the platform showed it.
-   *  The account profile is the lasting name. This is only what the line
+   *  The account profile is the lasting name. This is only what the message
    *  carried. */
   readonly name?: string;
   readonly onBehalfOf?: string;
@@ -87,8 +87,8 @@ export type RecordedMessage = Message & { readonly id: string };
  * (docs/domains/chats.md#delivery).
  *
  * `saidBy` is absent when the record kept no account for the message: an
- * older row, or one of Rome's lines on a channel that has no account of its
- * own. `senderName` is what the line called its sender, kept even then, so a
+ * older row, or one of Rome's messages on a channel that has no account of its
+ * own. `senderName` is what the message called its sender, kept even then, so a
  * reader can still say who spoke. `turnId` names the agent turn that said the message or was woken by
  * it. It is an id in Agents, which Chats keeps and never reads.
  */

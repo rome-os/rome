@@ -29,7 +29,7 @@ describe("SpeakerReplies", () => {
   let sends: Array<{ chat: string; threadId: ChatId | null; out: Outbound }>;
   let landsIn: ChatId | null;
   let refuse: boolean;
-  let streamed: { text: string; key: string | null; threadId: ChatId | null };
+  let streamed: { text: string; key: string; threadId: ChatId | null }[];
 
   const adapter = {
     account: { platform: "telegram", id: "rome_bot" },
@@ -42,7 +42,7 @@ describe("SpeakerReplies", () => {
       return {
         accept: () => {},
         stop: () => {},
-        settle: async () => ({ outcome: {} as never, ...streamed }),
+        settle: async () => ({ outcome: {} as never, shown: streamed }),
       };
     },
   } as unknown as ChannelChatAdapter;
@@ -78,7 +78,7 @@ describe("SpeakerReplies", () => {
     sends = [];
     landsIn = null;
     refuse = false;
-    streamed = { text: "All done.", key: "s1", threadId: null };
+    streamed = [{ text: "All done.", key: "s1", threadId: null }];
     speaker("speaker-1", null);
   });
   afterEach(() => testDb.close());
@@ -155,7 +155,7 @@ describe("SpeakerReplies", () => {
   });
 
   it("put a streamed reply on record as the turn's answer once it settles, where it landed", async () => {
-    streamed = { text: "All done.", key: "s1", threadId: "topic-8" as ChatId };
+    streamed = [{ text: "All done.", key: "s1", threadId: "topic-8" as ChatId }];
     const reply = await replies().stream("speaker-1", CHANNEL, {
       turnId: "turn-3",
       policy: POLICY,
@@ -169,8 +169,92 @@ describe("SpeakerReplies", () => {
     expect(links.linkOf("speaker-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-3" });
   });
 
+  it("move the session's activity up to a streamed reply once it settles", async () => {
+    const moved: Array<[string, number]> = [];
+    const reply = await new SpeakerReplies({
+      speakers,
+      adapters: {
+        of: () => adapter,
+        keyOf: (ref) => chatKey(ref.platform, "-1001234567890123" as ChatId),
+      },
+      messages,
+      links,
+      // Chats keeps a message's time to the second.
+      activity: (sessionId, at) => moved.push([sessionId, Math.floor(at.getTime() / 1000)]),
+    }).stream("speaker-1", CHANNEL, { turnId: "turn-5", policy: POLICY, clock: systemClock });
+
+    await reply!.settle(false);
+
+    const [line] = messages.read(placeIn(chat)).messages;
+    expect(moved).toEqual([["speaker-1", Math.floor(line!.at.getTime() / 1000)]]);
+  });
+
+  it("put a streamed reply on record as the agent whose turn wrote it", async () => {
+    // The session still names the agent it opened with; the account's own
+    // agent ran the turn.
+    const reply = await replies().stream("speaker-1", CHANNEL, {
+      turnId: "turn-4",
+      agent: "support",
+      policy: POLICY,
+      clock: systemClock,
+    });
+
+    await reply!.settle(false);
+
+    const [line] = messages.read(placeIn(chat)).messages;
+    expect(line?.saidBy).toMatchObject({ agent: "support" });
+  });
+
+  it("send as the agent whose turn sends, when the send names none", async () => {
+    // A reply sent whole, as without streaming: the session still names the
+    // agent it opened with, and the account's own agent ran the turn.
+    const speaking = replies();
+    speaking.runs("turn-5", "support");
+
+    const sent = await speaking.send("speaker-1", CHANNEL, { text: "hi" }, { turnId: "turn-5" });
+    const unnoted = await speaking.send("speaker-1", CHANNEL, { text: "yo" }, { turnId: "turn-6" });
+
+    expect(messages.byIds([sent!.id!])[0]?.saidBy).toMatchObject({ agent: "support" });
+    expect(messages.byIds([unnoted!.id!])[0]?.saidBy).toMatchObject({ agent: "sales" });
+  });
+
+  it("record each message of a reply the platform split as its own, each the turn's answer", async () => {
+    streamed = [
+      { text: "First half, ", key: "s1", threadId: null },
+      { text: "second half.", key: "s2", threadId: null },
+    ];
+    const quoted = messages.record({
+      direction: "toRome",
+      key: "7",
+      place: placeIn(chat),
+      saidBy: { account: { platform: "telegram", id: "wei" } },
+      body: { text: "q" },
+      at: new Date(),
+    })!.id;
+    const reply = await replies().stream("speaker-1", CHANNEL, {
+      turnId: "turn-5",
+      replyTo: quoted,
+      policy: POLICY,
+      clock: systemClock,
+    });
+
+    await reply!.settle(false);
+
+    const said = messages.read(placeIn(chat)).messages.filter((m) => m.direction === "fromRome");
+    expect(said.map((m) => [m.key, m.body.text, m.replyTo ?? null])).toEqual([
+      ["s1", "First half, ", quoted],
+      ["s2", "second half.", null],
+    ]);
+    for (const message of said) {
+      expect(links.linkOf("speaker-1", message.id)).toMatchObject({
+        role: "answer",
+        turnId: "turn-5",
+      });
+    }
+  });
+
   it("record nothing for a streamed reply that showed nothing", async () => {
-    streamed = { text: "", key: null, threadId: null };
+    streamed = [];
     const reply = await replies().stream("speaker-1", CHANNEL, {
       turnId: "turn-3",
       policy: POLICY,
@@ -208,7 +292,7 @@ describe("SpeakerReplies", () => {
     expect(said).toMatchObject({ id: expect.any(Number) });
   });
 
-  it("quote in a streamed reply only a line of the speaker's own chat", async () => {
+  it("quote in a streamed reply only a message of the speaker's own chat", async () => {
     const quotes: Array<string | undefined> = [];
     const quoting = {
       ...adapter,

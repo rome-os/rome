@@ -1,10 +1,8 @@
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
-import { prettyAgentName } from "@/lib/agent-name";
 import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
-// Pure derivation: many flat per-session message lists → one renderable view.
-// This is the single place the multi-session handoff tree is merged. No React,
+// Pure derivation: per-session message lists → one renderable view. No React,
 // no fetch — fully unit-testable.
 
 export interface AgentIdentity {
@@ -12,38 +10,12 @@ export interface AgentIdentity {
   iconUrl: string | null;
 }
 
-// One handoff seam located in some session's transcript: the assistant `handoff`
-// block that opened it, the `interaction_result` (in the SAME parent session)
-// that closed it (open while absent), and the child session the specialist's
-// conversation lives in. Handoffs nest — a child can hold its own.
-export interface HandoffNode {
-  toolUseId: string;
-  appId: string;
-  agentName?: string;
-  agentLabel: string;
-  summary?: string;
-  // The session whose transcript contains this handoff block — where its
-  // resolution is posted. Not always the main session.
-  parentSessionId: string;
-  childSessionId: string;
-  // "cancelled" = resolved by dismissing (no handback), distinct from "done".
-  status: "open" | "done" | "cancelled";
-}
-
 export interface ChatView {
-  // Flat, ordered, child-spliced transcript across the whole session tree.
+  // The main session's transcript, ordered.
   displayMessages: ChatMessage[];
-  // Every handoff reachable from the main session (recursive).
-  handoffList: HandoffNode[];
-  // The session the single composer currently talks to (deepest open handoff's
-  // child, else main).
-  floorSessionId: string;
-  // sessionId → avatar + name for the group-chat rows.
+  // sessionId → avatar + name for the speaker rows.
   identityBySession: Map<string, AgentIdentity>;
-  // childSessionId → its seed brief (suppressed in the transcript, shown as the
-  // caller's @mention instead).
-  seedByChild: Map<string, string>;
-  // toolUseId → resolved interaction output (for inline cards + seam status).
+  // toolUseId → resolved interaction output (for inline cards).
   interactionResults: Map<string, Record<string, unknown>>;
 }
 
@@ -55,100 +27,6 @@ export function userMessageText(content: string): string {
     .join("\n");
 }
 
-// Index every handoff reachable from `sessionId`, recursing into child sessions.
-// Status is derived by pairing each handoff with its interaction_result within
-// the same (parent) session — an ordered pass handles toolUseId recycling.
-function indexHandoffs(
-  sessionId: string,
-  messagesBySession: Map<string, ChatMessage[]>,
-  out: HandoffNode[] = [],
-): HandoffNode[] {
-  const msgs = messagesBySession.get(sessionId) ?? [];
-  const openByToolUseId = new Map<string, HandoffNode>();
-  for (const msg of msgs) {
-    for (const b of parseMessageEntries(msg)) {
-      if (msg.role === "user") {
-        if (b.type === "interaction_result") {
-          const node = openByToolUseId.get(b.toolUseId);
-          if (node) {
-            node.status = b.output.dismissed === true ? "cancelled" : "done";
-            openByToolUseId.delete(b.toolUseId);
-          }
-        }
-        continue;
-      }
-      if (msg.role !== "assistant" || b.type !== "handoff") continue;
-      if (!b.childSessionId) continue;
-      const node: HandoffNode = {
-        toolUseId: b.toolUseId,
-        appId: b.appId,
-        agentName: b.agentName,
-        agentLabel:
-          (typeof b.payload?.agentLabel === "string" && b.payload.agentLabel) ||
-          prettyAgentName(b.agentName ?? b.appId),
-        summary: typeof b.payload?.summary === "string" ? b.payload.summary : undefined,
-        parentSessionId: sessionId,
-        childSessionId: b.childSessionId,
-        status: "open",
-      };
-      out.push(node);
-      openByToolUseId.set(b.toolUseId, node);
-      indexHandoffs(b.childSessionId, messagesBySession, out);
-    }
-  }
-  return out;
-}
-
-// Walk from the main session down the chain of OPEN handoffs to the deepest
-// open child — the session the single composer currently talks to.
-function findFloorSession(sessionId: string, handoffsByParent: Map<string, HandoffNode[]>): string {
-  const open = (handoffsByParent.get(sessionId) ?? []).find((h) => h.status === "open");
-  return open ? findFloorSession(open.childSessionId, handoffsByParent) : sessionId;
-}
-
-// Flatten the whole session tree into one transcript: a session's messages in
-// order, and after each handoff the child session's messages spliced in
-// (recursively). The child is spliced after the ENTIRE turn that contains the
-// handoff — not immediately after the handoff message — so the calling agent's
-// turn (its @mention plus any narration it sent in the same turn) stays one
-// contiguous speaker block. A child session's seed (the opening brief) is shown
-// as the caller's @mention instead, so it's suppressed — matched by text so a
-// real first reply is never hidden when a handoff carried no brief.
-function buildDisplayMessages(
-  sessionId: string,
-  messagesBySession: Map<string, ChatMessage[]>,
-  seedByChild: Map<string, string>,
-): ChatMessage[] {
-  const msgs = messagesBySession.get(sessionId) ?? [];
-  const seedText = seedByChild.get(sessionId);
-  const out: ChatMessage[] = [];
-  let checkedFirstUser = false;
-  let pendingChildren: string[] = [];
-  let currentTurn: string | null | undefined;
-  const flushChildren = () => {
-    for (const childSid of pendingChildren) {
-      out.push(...buildDisplayMessages(childSid, messagesBySession, seedByChild));
-    }
-    pendingChildren = [];
-  };
-  for (const msg of msgs) {
-    if (msg.turnId !== currentTurn) {
-      flushChildren();
-      currentTurn = msg.turnId;
-    }
-    if (!checkedFirstUser && msg.role === "user") {
-      checkedFirstUser = true;
-      if (seedText && userMessageText(msg.content).trim() === seedText.trim()) continue;
-    }
-    out.push(msg);
-    for (const b of parseMessageEntries(msg)) {
-      if (b.type === "handoff" && b.childSessionId) pendingChildren.push(b.childSessionId);
-    }
-  }
-  flushChildren();
-  return out;
-}
-
 // Key resolved-interaction state by (session, toolUseId). Provider toolUseIds
 // like `item_0` recur every turn AND across sessions, so the merged transcript
 // must namespace them per session or one session's resolved card would mark a
@@ -157,7 +35,7 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
   return `${sessionId}:${toolUseId}`;
 }
 
-// The host's own built-in cards (vs an app's inline component or a handoff):
+// The host's own built-in cards (vs an app's inline component):
 // the only suspensions auto-dismissed by a free-text reply, since typing in
 // chat instead of using the card is the natural "skip this" for a question or a
 // provider sign-in, but not for an app's half-filled form.
@@ -190,7 +68,7 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   for (const msg of messages) {
     let userTextReply = false;
     for (const b of parseMessageEntries(msg)) {
-      if (msg.role === "assistant" && (b.type === "pending_interaction" || b.type === "handoff")) {
+      if (msg.role === "assistant" && b.type === "pending_interaction") {
         map.delete(interactionResultKey(msg.sessionId, b.toolUseId));
         if (isAutoDismissedCard(b)) {
           const open = openCards.get(msg.sessionId) ?? new Set<string>();
@@ -218,113 +96,75 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   return map;
 }
 
-/**
- * Whether the open chat's model picker shows. A side chat promoted to a chat
- * still runs on its branch (#1384), and during an open handoff the composer
- * talks to the specialist, whose model the picker does not hold.
- */
-export function canPickChatModel(chat: {
-  mainSessionId: string;
-  floorSessionId: string;
-  isSideChat: boolean;
-}): boolean {
-  return !chat.isSideChat && chat.floorSessionId === chat.mainSessionId;
-}
-
 export function buildChatView(
   messages: Map<string, ChatMessage[]>,
   mainSessionId: string,
   mainIdentity: AgentIdentity,
 ): ChatView {
-  const messagesBySession = new Map<string, ChatMessage[]>();
-  // Trace placement no longer needs a reorder: rows are grouped by turn and a
-  // turn's trace is looked up by id and shown as its subtitle, so its position
-  // in the list doesn't matter.
-  for (const [sid, raw] of messages) messagesBySession.set(sid, orderChatMessages(raw));
-
-  const handoffList = indexHandoffs(mainSessionId, messagesBySession);
-
-  const handoffsByParent = new Map<string, HandoffNode[]>();
-  const seedByChild = new Map<string, string>();
-  const identityBySession = new Map<string, AgentIdentity>([[mainSessionId, mainIdentity]]);
-  for (const h of handoffList) {
-    const arr = handoffsByParent.get(h.parentSessionId) ?? [];
-    arr.push(h);
-    handoffsByParent.set(h.parentSessionId, arr);
-    if (h.summary) seedByChild.set(h.childSessionId, h.summary);
-    identityBySession.set(h.childSessionId, {
-      name: h.agentLabel,
-      iconUrl: `/api/apps/${encodeURIComponent(h.appId)}/icon`,
-    });
-  }
-
-  const floorSessionId = findFloorSession(mainSessionId, handoffsByParent);
-  const displayMessages = buildDisplayMessages(mainSessionId, messagesBySession, seedByChild);
-  const interactionResults = buildInteractionResults(displayMessages);
-
+  // Trace placement needs no reorder: rows are grouped by turn and a turn's
+  // trace is looked up by id and shown as its subtitle, so its position in the
+  // list doesn't matter.
+  const displayMessages = orderChatMessages(messages.get(mainSessionId) ?? []);
   return {
     displayMessages,
-    handoffList,
-    floorSessionId,
-    identityBySession,
-    seedByChild,
-    interactionResults,
+    identityBySession: new Map([[mainSessionId, mainIdentity]]),
+    interactionResults: buildInteractionResults(displayMessages),
   };
 }
 
-/** Assistant messages in the floor's latest turn, after its last guardian input.
+/** Assistant messages in the latest turn, after its last guardian input.
  * An unpersisted running turn supersedes the saved reply as well. */
 export function currentReplyMessages(
-  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
+  view: Pick<ChatView, "displayMessages">,
   runningTurnId: string | null = null,
 ): ChatMessage[] {
-  const floor = view.displayMessages.filter((m) => m.sessionId === view.floorSessionId);
-  const latestTurnId = floor.at(-1)?.turnId;
+  const messages = view.displayMessages;
+  const latestTurnId = messages.at(-1)?.turnId;
   if (runningTurnId !== null && latestTurnId !== runningTurnId) return [];
   const reply: ChatMessage[] = [];
-  for (let i = floor.length - 1; i >= 0; i--) {
-    const msg = floor[i];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
     if (msg.turnId !== latestTurnId || msg.role === "user") break;
     if (msg.role === "assistant") reply.push(msg);
   }
   return reply.reverse();
 }
 
-// Whether the floor session is parked on a card the guardian has not answered
-// yet (an ask_question card, a connect-AI card, an app component). Only the
-// floor session's latest turn counts, meaning every assistant message that
+// Whether the chat is parked on a card the guardian has not answered yet (an
+// ask_question card, a connect-AI card, an app component). Only the latest
+// turn counts, meaning every assistant message that
 // shares the turn id of its last message: the card is saved mid-turn and the
 // turn's closing text and recap land after it under the same id. A card from
 // an earlier turn is no longer what the agent waits on, and a backend-initiated
 // turn (an approval continuation) starts a new id without a user message.
-// Pass the floor's running turn while one streams. A backend task that runs no
+// Pass the running turn while one streams. A backend task that runs no
 // recorded turn persists its messages only when it ends, so until then the
 // transcript still closes on the previous turn, whose cards it has moved past.
 // A recorded backend turn saves its cards mid-turn under its own id, which is
 // then the running turn id, so its cards count as they land.
 export function isAwaitingGuardian(
-  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  view: Pick<ChatView, "displayMessages" | "interactionResults">,
   runningTurnId: string | null = null,
 ): boolean {
-  return openFloorCards(view, runningTurnId).length > 0;
+  return openCards(view, runningTurnId).length > 0;
 }
 
-// Whether the floor session waits on a card that is the only way to answer
+// Whether the chat waits on a card that is the only way to answer
 // (`render.requiresCard`), in the same window as isAwaitingGuardian. The
 // composer locks while this holds.
 export function isLockedByCard(
-  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  view: Pick<ChatView, "displayMessages" | "interactionResults">,
   runningTurnId: string | null = null,
 ): boolean {
-  return openFloorCards(view, runningTurnId).some((card) => card.render.requiresCard === true);
+  return openCards(view, runningTurnId).some((card) => card.render.requiresCard === true);
 }
 
 type PendingCard = Extract<TranscriptPart, { type: "pending_interaction" }>;
 
-// The unanswered cards of the floor session's latest turn, in the window
+// The unanswered cards of the latest turn, in the window
 // isAwaitingGuardian describes.
-function openFloorCards(
-  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+function openCards(
+  view: Pick<ChatView, "displayMessages" | "interactionResults">,
   runningTurnId: string | null,
 ): PendingCard[] {
   const cards: PendingCard[] = [];
@@ -332,7 +172,7 @@ function openFloorCards(
     for (const b of parseMessageEntries(msg)) {
       if (
         b.type === "pending_interaction" &&
-        !view.interactionResults.has(interactionResultKey(view.floorSessionId, b.toolUseId))
+        !view.interactionResults.has(interactionResultKey(msg.sessionId, b.toolUseId))
       ) {
         cards.push(b);
       }
@@ -341,15 +181,13 @@ function openFloorCards(
   return cards;
 }
 
-// Whether the floor session's latest finished turn ended with an error: the
-// same turn_end status the sidebar's failed mark reads.
-export function isLastTurnFailed(
-  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
-): boolean {
-  const { displayMessages, floorSessionId } = view;
+// Whether the latest finished turn ended with an error: the same turn_end
+// status the sidebar's failed mark reads.
+export function isLastTurnFailed(view: Pick<ChatView, "displayMessages">): boolean {
+  const { displayMessages } = view;
   for (let i = displayMessages.length - 1; i >= 0; i--) {
     const msg = displayMessages[i];
-    if (msg.sessionId === floorSessionId && msg.role === "trace" && msg.traceSummary) {
+    if (msg.role === "trace" && msg.traceSummary) {
       return msg.traceSummary.turnStatus === "error";
     }
   }
@@ -370,8 +208,7 @@ export type ChatRow =
   // A reply-less turn's trace, standing on its own.
   | (RowBase & { kind: "trace"; message: ChatMessage; identity: AgentIdentity })
   // One speaker turn: identity header once, its trace, and the blocks of every
-  // assistant message in the turn. (A handoff seam is just a `handoff` block in
-  // here — the seam's own backdrop is the block's, not the row's.)
+  // assistant message in the turn.
   | (RowBase & {
       kind: "agent";
       identity: AgentIdentity;

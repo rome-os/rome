@@ -62,7 +62,7 @@ import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
-import { storedOn, type Channel, type Channels } from "../channels/channel.js";
+import type { Channel, Channels } from "../channels/channel.js";
 import { ChatEvents } from "../chats/events.js";
 import { StoredMessages } from "../chats/message-repository.js";
 import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
@@ -79,6 +79,8 @@ import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatsWiring } from "../chats-wiring.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
@@ -604,7 +606,24 @@ export async function buildTestDeps(
   const appKeysRepo = new AppKeysRepository(db);
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
-  const webchatRepo = new WebChatRepository(db);
+  // Chats as production wires it, with each dashboard chat's lines in it.
+  // Every test channel is active: one its record names no account for is
+  // the account named like it, so tests need not record one per channel.
+  const accountOf = (channel: string) =>
+    channelRecords.accountOf(channel) ?? {
+      platform: channelRecords.platformOfChannel(channel),
+      id: channel,
+    };
+  const chatsWired = chatsWiring(db, {
+    accountOf,
+    platformOfChannel: (name) => channelRecords.platformOfChannel(name),
+    channelsOn: (platform) => channelRecords.namesOn(platform),
+  });
+  const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db, {
+    chats: chatsWired.chats,
+    lines: chatsWired.messages,
+    links: chatsWired.links,
+  });
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
@@ -782,7 +801,9 @@ export async function buildTestDeps(
     platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
     recordedOn: (platform: string) => channelRecords.namesOn(platform),
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
-    accountOf: (channel: string) => channelRecords.accountOf(channel),
+    // The same account Chats reads each test channel as.
+    accountOf,
+    transcript: "chats",
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
@@ -798,16 +819,13 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), {
-      channelsOn: (platform) =>
-        storedOn(
-          channels,
-          (name) => channelRecords.platformOfChannel(name),
-          platform,
-          (name) => channelRecords.namesOn(name),
-        ),
-      accountOf: (channel) => channelRecords.accountOf(channel),
-    }),
+    chats: chatsWired.chats,
+    messages: chatsWired.messages,
+    recording: {
+      adapters: chatsWired.adapters,
+      chats: chatsWired.chats,
+      messages: chatsWired.messages,
+    },
     actionExecutionsRepo,
     executionJournalRepo,
     webhookInvocationsRepo,
@@ -1171,7 +1189,7 @@ export async function createAppLifecycleHarness(
       processRole: "worker",
     });
     const settingsRepo = new SettingsRepository(db);
-    const webchatRepo = new WebChatRepository(db);
+    const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db);
     const appRuntimeRepositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
@@ -1283,4 +1301,45 @@ export async function createAppLifecycleHarness(
     restart,
     cleanup,
   } as AppLifecycleHarness;
+}
+
+/**
+ * Make each named channel one of the guardian's own connected accounts: a
+ * channel record that knows its account, a live grant reaching that account,
+ * and a link from it to the guardian. A person's page reads and sends only
+ * over the guardian's own accounts, so a test of that page names the channels
+ * it reads through here. `guardianId` is the seeded guardian's.
+ */
+export function ownedByGuardian(
+  db: DrizzleDb,
+  peopleRepo: PeopleRepository,
+  guardianId: string,
+  owned: readonly { channel: string; platform: string }[],
+): void {
+  for (const { channel, platform } of owned) {
+    const account = { platform, id: `guardian-on-${channel}` };
+    db.insert(schema.channels)
+      .values({
+        id: channel,
+        connectionKind: channel,
+        platform,
+        platformAccountId: account.id,
+        connectionId: null,
+        createdAt: new Date(0),
+      })
+      .onConflictDoUpdate({
+        target: schema.channels.id,
+        set: { platformAccountId: account.id },
+      })
+      .run();
+    db.insert(schema.connectionGrants)
+      .values({
+        custody: `test:guardian:${channel}`,
+        state: "authorized",
+        platform,
+        accountId: account.id,
+      })
+      .run();
+    peopleRepo.linkStated(account, guardianId);
+  }
 }

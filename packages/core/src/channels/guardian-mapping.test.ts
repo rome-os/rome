@@ -76,6 +76,18 @@ describe("guardian channel mapping", () => {
     expect(await accounts("telegram")).toEqual(["tg-personal", "tg-third", "tg-work"]);
   });
 
+  it("plans an add beside the guardian's only account when the incoming one is another account", async () => {
+    await repo.linkStated({ platform: "telegram", id: "tg-personal" }, "guardian");
+
+    const plan = await planGuardianMapping(repo, "telegram", "tg-work", { addOnly: true });
+    expect(plan).toEqual({ op: "add", guardianId: "guardian" });
+
+    testDb.db.transaction((tx) => {
+      applyGuardianMappingWithinTx(tx, repo, "telegram", "tg-work", plan);
+    });
+    expect(await accounts("telegram")).toEqual(["tg-personal", "tg-work"]);
+  });
+
   it("applies a planned re-point to the planned account only", async () => {
     await repo.linkStated({ platform: "telegram", id: "tg-work" }, "guardian");
 

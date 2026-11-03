@@ -357,9 +357,13 @@ export class EmailAdapter {
     refuseUnshownParts("email", message);
     const email = message.kind === "email" ? message : undefined;
     if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
-      throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+      throw new ChannelSendRefused(
+        "reply_unaddressable",
+        "Email inReplyToMessageId must not be blank. No email was sent.",
+      );
     }
-    const bodyText = (message.text ?? textFromParts(message.parts)).trim();
+    // Blank text says nothing, so the text parts speak, as on every channel.
+    const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.

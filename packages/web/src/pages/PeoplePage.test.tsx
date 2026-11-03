@@ -10,25 +10,20 @@ import {
   parseAccountCursor,
   parseAccountState,
   parsePersonFilterLevel,
-  parseStreamCursor,
   personMatchesLevel,
   personMatchesQuery,
   sliceAccountDirectory,
-  sliceAccountStream,
-  type AccountDynamic,
   type DirectoryAccount,
   type PersonResource,
-  type StreamAccount,
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
 import PeoplePage, { PeopleIndexRedirect } from "./PeoplePage";
 
-// The People page as the guardian drives it: a stream that routes to whoever
-// has something new, and a directory — a contacts list — that reads the roster.
-// The derivations behind grouping and counts are pinned in
-// `people/people-model.test.ts`; what is under test here is the page wiring —
-// which of the two account reads a view sends, what it shows afterwards, and
-// where a click takes the guardian.
+// The People page as the guardian drives it: a directory — a contacts list —
+// that reads the roster. The derivations behind grouping and counts are pinned
+// in `people/people-model.test.ts`; what is under test here is the page wiring
+// — what it reads, what it shows afterwards, and where a click takes the
+// guardian.
 //
 // The backend is stubbed through the contract's own helpers rather than
 // restated, so a fixture cannot drift from the routes on ordering, filtering,
@@ -62,15 +57,11 @@ interface FetchCall {
   body: WriteBody | undefined;
 }
 
-const NOW = Math.floor(Date.now() / 1000);
-
 const GUARDIAN: PersonResource = {
   id: "me",
   displayName: "Zhangfan Dong",
   bondLevel: "guardian",
   accounts: [{ channel: "webchat", channelUserId: "wc-1", displayName: "wc-1" }],
-  messageCount: 0,
-  latest: null,
   memoryPath: "memory/relationship/GUARDIAN.md",
 };
 
@@ -79,8 +70,6 @@ const FRIEND: PersonResource = {
   displayName: "Wei Chen",
   bondLevel: "inner-circle",
   accounts: [{ channel: "telegram", channelUserId: "418820113", displayName: "wei_c" }],
-  messageCount: 30,
-  latest: { source: "telegram", timestamp: NOW - 600, preview: "on my way" },
   memoryPath: "memory/relationship/wei-chen.md",
 };
 
@@ -89,28 +78,13 @@ const QUIET_PERSON: PersonResource = {
   displayName: "Nadia Petrova",
   bondLevel: "acquaintance",
   accounts: [],
-  messageCount: 0,
-  latest: null,
   memoryPath: null,
 };
 
-/**
- * One account as the world holds it: the contacts-list row, plus the activity
- * the stream read would project. Neither read answers this shape — `directoryRow`
- * and `streamRow` below cut it down to the one each contract carries.
- */
-type WorldAccount = DirectoryAccount & {
-  latest: AccountDynamic | null;
-  messageCount: number;
-};
+/** One account as the world holds it: the contacts-list row. */
+type WorldAccount = DirectoryAccount;
 
-const directoryRow = ({ latest: _l, messageCount: _c, ...row }: WorldAccount): DirectoryAccount =>
-  row;
-
-const streamRow = (account: WorldAccount): StreamAccount | null =>
-  account.latest == null
-    ? null
-    : { ...directoryRow(account), latest: account.latest, messageCount: account.messageCount };
+const directoryRow = (row: WorldAccount): DirectoryAccount => ({ ...row });
 
 const UNKNOWN_SENDER: WorldAccount = {
   channel: "whatsapp",
@@ -120,8 +94,6 @@ const UNKNOWN_SENDER: WorldAccount = {
   state: "unlinked",
   personId: null,
   personName: null,
-  latest: { source: "whatsapp", timestamp: NOW - 7_200, preview: "Are you free Saturday?" },
-  messageCount: 12,
 };
 
 const SILENT_CONTACT: WorldAccount = {
@@ -132,8 +104,6 @@ const SILENT_CONTACT: WorldAccount = {
   state: "unlinked",
   personId: null,
   personName: null,
-  latest: null,
-  messageCount: 0,
 };
 
 const DISMISSED: WorldAccount = {
@@ -144,8 +114,6 @@ const DISMISSED: WorldAccount = {
   state: "dismissed",
   personId: null,
   personName: null,
-  latest: { source: "whatsapp", timestamp: NOW - 90_000, preview: "100x gains guaranteed" },
-  messageCount: 6,
 };
 
 const LINKED_ACCOUNT: WorldAccount = {
@@ -156,8 +124,6 @@ const LINKED_ACCOUNT: WorldAccount = {
   state: "linked",
   personId: "wei-chen",
   personName: "Wei Chen",
-  latest: { source: "telegram", timestamp: NOW - 600, preview: "on my way" },
-  messageCount: 30,
 };
 
 /** A LinkedIn sender nobody has placed. LinkedIn had a section of its own on
@@ -172,12 +138,6 @@ const LINKEDIN_SENDER: WorldAccount = {
   state: "unlinked",
   personId: null,
   personName: null,
-  latest: {
-    source: "linkedin",
-    timestamp: NOW - 3_600,
-    preview: "Thursday works. Calendar invite sent.",
-  },
-  messageCount: 3,
 };
 
 const LINKEDIN_PERSON: PersonResource = {
@@ -185,8 +145,6 @@ const LINKEDIN_PERSON: PersonResource = {
   displayName: "Priya Nair",
   bondLevel: "acquaintance",
   accounts: [{ channel: "linkedin", channelUserId: "ACoAAPriya01", displayName: "Priya Nair" }],
-  messageCount: 4,
-  latest: { source: "linkedin", timestamp: NOW - 900, preview: "sent you a note about the role" },
   memoryPath: null,
 };
 
@@ -232,8 +190,6 @@ function attach(world: World, person: PersonResource, ref: AccountRef) {
       displayName: account.displayName,
     },
   ];
-  person.messageCount += account.messageCount;
-  person.latest = account.latest ?? person.latest;
 }
 
 /**
@@ -279,8 +235,6 @@ function applyWrite(
       displayName: body.displayName ?? "",
       bondLevel: body.bondLevel ?? "other",
       accounts: [],
-      messageCount: 0,
-      latest: null,
       memoryPath: null,
     };
     world.people.push(person);
@@ -373,24 +327,6 @@ function mockApi(
       return applyWrite(state, method, parsed.pathname, body ?? {}, json);
     }
 
-    // The two account reads over one world: the contacts list, and the recents
-    // surface. Which one the page asked for is the view's own answer, so a test
-    // that drove the wrong view reads the wrong rows rather than none.
-    if (parsed.pathname === "/api/accounts/stream") {
-      if (state.accountsFail) return json({ error: "directory unavailable" }, 500);
-      return json(
-        sliceAccountStream(
-          state.accounts.flatMap((account) => streamRow(account) ?? []),
-          {
-            query: params.get("q"),
-            state: parseAccountState(params.get("state")),
-            cursor: parseStreamCursor(params.get("cursor")),
-            limit: options.limit ?? null,
-          },
-        ),
-      );
-    }
-
     if (url.includes("/api/accounts")) {
       if (state.accountsFail) return json({ error: "directory unavailable" }, 500);
       return json(
@@ -423,7 +359,7 @@ function mockApi(
 }
 
 /** The People routes as `App.tsx` declares them, so a test drives the same
- *  redirect, the same two view paths and the same person route the app does —
+ *  redirects, the same roster path and the same person route the app does —
  *  and a control that navigates is exercised end to end rather than against a
  *  single route that would swallow every address it produced. */
 function renderPage(entry = "/people") {
@@ -433,8 +369,8 @@ function renderPage(entry = "/people") {
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/people" element={<PeopleIndexRedirect />} />
-          <Route path="/people/latest" element={<PeoplePage view="latest" />} />
-          <Route path="/people/directory" element={<PeoplePage view="directory" />} />
+          <Route path="/people/latest" element={<PeopleIndexRedirect />} />
+          <Route path="/people/directory" element={<PeoplePage />} />
           <Route path="/people/person/:personId" element={<div>person page</div>} />
         </Routes>
         <Address />
@@ -471,34 +407,13 @@ function chip(name: RegExp) {
   return screen.getByRole("radio", { name });
 }
 
-async function showDirectory(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("radio", { name: "Directory" }));
+/** Open an unplaced account's row menu and pick one of its gestures. */
+async function rowAction(user: ReturnType<typeof userEvent.setup>, name: string, item: string) {
+  await user.click(screen.getByRole("button", { name: `Actions for ${name}` }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
 }
 
-describe("PeoplePage stream", () => {
-  it("opens on the stream, and reaches a waiting sender through its chip", async () => {
-    mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER] });
-    const user = userEvent.setup();
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    // A stream row carries the dynamic, not the bond.
-    expect(screen.getByText("on my way")).toBeTruthy();
-
-    await user.click(chip(/^Stranger/));
-    expect(await screen.findByText("Rachel Lim")).toBeTruthy();
-    expect(screen.getByText("Are you free Saturday?")).toBeTruthy();
-  });
-
-  it("keeps people with no dynamics out of the stream, and the guardian too", async () => {
-    mockApi({ people: [GUARDIAN, FRIEND, QUIET_PERSON] });
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    expect(screen.queryByText("Nadia Petrova")).toBeNull();
-    expect(screen.queryByText("Zhangfan Dong")).toBeNull();
-  });
-
+describe("PeoplePage directory", () => {
   it("holds both unplaced ends out of All — each chip is their way in", async () => {
     const user = userEvent.setup();
     mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER, DISMISSED] });
@@ -519,38 +434,9 @@ describe("PeoplePage stream", () => {
     mockApi({ people: [FRIEND], accounts: [LINKED_ACCOUNT] });
     renderPage();
 
-    // Wei Chen's Telegram account is Wei Chen. Two rows would put the bond on
-    // one and the history on the other.
+    // Wei Chen's Telegram account is Wei Chen, so the person is the one row.
     expect(await screen.findByText("Wei Chen")).toBeTruthy();
     expect(screen.queryByText("wei_c")).toBeNull();
-  });
-
-  it("counts waiting senders on the Stranger chip, and nowhere else", async () => {
-    mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER, SILENT_CONTACT] });
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    // The stream's read is the accounts something has happened on, so its count
-    // of unlinked ones is the senders waiting on a decision — a contact nobody
-    // has ever heard from is not one, and never reaches this view.
-    await waitFor(() => expect(within(chip(/^Stranger/)).getByText("1")).toBeTruthy());
-    expect(within(chip(/^All/)).queryByText(/^\d+$/)).toBeNull();
-  });
-
-  it("asks each endpoint for the chip's own narrowing rather than filtering a page", async () => {
-    const user = userEvent.setup();
-    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER, DISMISSED] });
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    await user.click(chip(/^Dismissed/));
-    // The directory pages, so a chip that filtered loaded rows would show only
-    // the matches that happened to land on page one.
-    await waitFor(() => expect(calls.some((c) => c.url.includes("state=dismissed"))).toBe(true));
-
-    await user.click(chip(/^Inner circle/));
-    // A bond level is the people read's own parameter.
-    await waitFor(() => expect(calls.some((c) => c.url.includes("level=inner-circle"))).toBe(true));
   });
 
   it("opens a person's dossier from their row", async () => {
@@ -578,9 +464,7 @@ describe("PeoplePage stream", () => {
     // No prefix of "rachel" ever reaches the wire.
     expect(calls.filter((c) => /[?&]q=(r|ra|rac|rach|rache)(&|$)/.test(c.url))).toHaveLength(0);
   });
-});
 
-describe("PeoplePage directory", () => {
   it("groups the roster by bond, with the server's totals on each heading", async () => {
     const user = userEvent.setup();
     mockApi({
@@ -590,7 +474,6 @@ describe("PeoplePage directory", () => {
     renderPage();
 
     await screen.findByText("Wei Chen");
-    await showDirectory(user);
 
     // All is the guardian's own row, then the placed roster, the quiet person
     // included — a contacts list answers "who does Rome know", not "who said
@@ -606,24 +489,18 @@ describe("PeoplePage directory", () => {
     expect(within(strangers).getByText("2")).toBeTruthy();
   });
 
-  it("reads the contacts list rather than the stream, and shows no activity in it", async () => {
-    const user = userEvent.setup();
+  it("reads the contacts list, and shows no activity in it", async () => {
     const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
 
     await screen.findByText("Wei Chen");
-    expect(screen.getByText("on my way")).toBeTruthy();
-    await showDirectory(user);
-
-    const accountReads = () =>
-      calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/accounts"));
-    await waitFor(() =>
-      expect(accountReads().some((c) => !c.url.startsWith("/api/accounts/stream"))).toBe(true),
+    const accountReads = calls.filter(
+      (c) => c.method === "GET" && c.url.startsWith("/api/accounts"),
     );
-    // No preview and no count anywhere in the view — the read carries neither.
-    await waitFor(() => expect(screen.queryByText("on my way")).toBeNull());
-    expect(screen.queryByText("Are you free Saturday?")).toBeNull();
+    expect(accountReads.length).toBeGreaterThan(0);
+    // No count and no time anywhere in the view — the reads carry neither.
     expect(screen.queryByText(/\d+ messages?/)).toBeNull();
+    expect(screen.queryByText(/ago$/)).toBeNull();
   });
 
   it("folds the placement gestures into one row menu on an account nobody has decided about", async () => {
@@ -632,12 +509,10 @@ describe("PeoplePage directory", () => {
     renderPage();
 
     await screen.findByText("Wei Chen");
-    await showDirectory(user);
     await user.click(chip(/^Stranger/));
 
-    // The decision is available wherever the account is, but the roster is for
-    // reading: the row wears one quiet control, and the stream's three verbs
-    // sit behind it.
+    // The roster is for reading: the row wears one quiet control, and the
+    // three verbs sit behind it.
     await screen.findByText("Rachel Lim");
     expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
@@ -647,8 +522,7 @@ describe("PeoplePage directory", () => {
     expect(screen.getByRole("menuitem", { name: "Link to person…" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Dismiss" })).toBeTruthy();
 
-    // The menu reaches the same verb the stream's button does: one request
-    // creating the person with the account already on it.
+    // One request creating the person with the account already on it.
     await user.click(screen.getByRole("menuitem", { name: "Create profile…" }));
     await user.click(await screen.findByRole("button", { name: "Create profile" }));
     await waitFor(() =>
@@ -663,12 +537,10 @@ describe("PeoplePage directory", () => {
       channelUserId: "6580001111@s.whatsapp.net",
       addresses: ["6580001111@s.whatsapp.net"],
       displayName: "Priya Nair",
-      latest: { source: "whatsapp", timestamp: NOW - 20_000, preview: "hello!" },
     };
     const { calls } = mockApi({ accounts: [UNKNOWN_SENDER, second] }, { limit: 1 });
     renderPage();
 
-    await showDirectory(user);
     await user.click(chip(/^Stranger/));
     // By name, so Priya comes first however recently Rachel said something.
     expect(await screen.findByText("Priya Nair")).toBeTruthy();
@@ -683,13 +555,10 @@ describe("PeoplePage directory", () => {
   });
 
   it("says the roster is empty rather than blaming a search nobody ran", async () => {
-    const user = userEvent.setup();
     // Nobody placed and nothing to show: the directory is legitimately empty
     // with an empty search box.
     mockApi({ people: [], accounts: [] });
     renderPage();
-
-    await showDirectory(user);
 
     expect(await screen.findByText("Nobody here yet")).toBeTruthy();
     expect(screen.queryByText("Nobody matches your search")).toBeNull();
@@ -701,7 +570,6 @@ describe("PeoplePage directory", () => {
     renderPage();
 
     await screen.findByText("Wei Chen");
-    await showDirectory(user);
     await user.type(screen.getByRole("searchbox", { name: /search people/i }), "jonas");
 
     // The contacts list is where a lookup lands: every account is in it, and the
@@ -724,7 +592,7 @@ describe("PeoplePage placement", () => {
 
     await user.click(chip(/^Stranger/));
     await screen.findByText("Rachel Lim");
-    await user.click(screen.getByRole("button", { name: "Create" }));
+    await rowAction(user, "Rachel Lim", "Create profile…");
     await user.click(screen.getByRole("button", { name: "Create profile" }));
 
     const create = await waitFor(() => {
@@ -750,7 +618,7 @@ describe("PeoplePage placement", () => {
 
     await user.click(chip(/^Stranger/));
     await screen.findByText("Rachel Lim");
-    await user.click(screen.getByRole("button", { name: "Link" }));
+    await rowAction(user, "Rachel Lim", "Link to person…");
     await user.click(screen.getByRole("combobox"));
     await user.click(await screen.findByRole("option", { name: /Wei Chen/ }));
     await user.click(screen.getByRole("button", { name: "Link" }));
@@ -775,7 +643,7 @@ describe("PeoplePage placement", () => {
 
     await user.click(chip(/^Stranger/));
     await screen.findByText("Rachel Lim");
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await rowAction(user, "Rachel Lim", "Dismiss");
 
     // A dismissal changes how Rome answers this sender, so nothing is posted
     // until the confirmation is accepted.
@@ -798,18 +666,20 @@ describe("PeoplePage placement", () => {
 
     await user.click(chip(/^Stranger/));
     await screen.findByText("Rachel Lim");
-    await waitFor(() => expect(within(chip(/^Stranger/)).getByText("1")).toBeTruthy());
+    // The silent contact is a stranger too, since the directory holds back
+    // nobody the guardian has not placed.
+    await waitFor(() => expect(within(chip(/^Stranger/)).getByText("2")).toBeTruthy());
 
-    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await rowAction(user, "Rachel Lim", "Dismiss");
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Dismiss" }));
 
     // The row leaves the view because the directory no longer serves it under
-    // `state=unlinked`, and the chip loses its number because the directory's
+    // `state=unlinked`, and the chip drops to one because the directory's
     // own `counts` came back one lower. Neither is a patch of what was cached:
     // the page holds nothing it could have patched.
     await waitFor(() => expect(screen.queryByText("Rachel Lim")).toBeNull());
-    expect(within(chip(/^Stranger/)).queryByText(/^\d+$/)).toBeNull();
+    expect(within(chip(/^Stranger/)).getByText("1")).toBeTruthy();
     const dismiss = calls.find((c) => c.url.includes("/dismiss"))!;
     // Named by the pair the contract names the account with, so every
     // address it answers to travels with it.
@@ -854,7 +724,7 @@ describe("PeoplePage placement", () => {
     state.accounts[0]!.personId = "mira";
     state.accounts[0]!.personName = "Mira Chen";
 
-    await user.click(screen.getByRole("button", { name: "Link" }));
+    await rowAction(user, "Rachel Lim", "Link to person…");
     await user.click(screen.getByRole("combobox"));
     await user.click(await screen.findByRole("option", { name: /Wei Chen/ }));
     await user.click(screen.getByRole("button", { name: "Link" }));
@@ -898,7 +768,7 @@ describe("PeoplePage placement", () => {
     state.accounts[0]!.personId = "mira";
     state.accounts[0]!.personName = "Mira Chen";
 
-    await user.click(screen.getByRole("button", { name: "Link" }));
+    await rowAction(user, "Rachel Lim", "Link to person…");
     await user.click(screen.getByRole("combobox"));
     await user.click(await screen.findByRole("option", { name: /Wei Chen/ }));
     await user.click(screen.getByRole("button", { name: "Link" }));
@@ -927,7 +797,7 @@ describe("PeoplePage folds LinkedIn into the general surface", () => {
 
     await screen.findByText("Wei Chen");
     // The section is gone whole, heading and all — there is no channel-shaped
-    // surface below the two views any more.
+    // surface below the roster any more.
     expect(screen.queryByText("LinkedIn messages")).toBeNull();
     expect(screen.queryByText("No LinkedIn conversations")).toBeNull();
     // And with it the two abilities only it had: no group thread reaches this
@@ -947,25 +817,21 @@ describe("PeoplePage folds LinkedIn into the general surface", () => {
     expect(reads.filter((url) => url.includes("/api/linkedin/"))).toEqual([]);
   });
 
-  it("streams a LinkedIn sender the way it streams a WhatsApp one", async () => {
+  it("lists a LinkedIn sender among the strangers the way it lists a WhatsApp one", async () => {
     const user = userEvent.setup();
     mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER, LINKEDIN_SENDER] });
     renderPage();
 
     await screen.findByText("Wei Chen");
-    // Both are senders waiting on a decision, so both sit behind the same chip
-    // and are counted by it once each.
+    // Both are accounts nobody has placed, so both sit behind the same chip and
+    // are counted by it once each.
     await user.click(chip(/^Stranger/));
     expect(await screen.findByText("Arvind Srivastav")).toBeTruthy();
-    expect(screen.getByText("Thursday works. Calendar invite sent.")).toBeTruthy();
     expect(screen.getByText("Rachel Lim")).toBeTruthy();
-    // Named by the same channel vocabulary every other channel is named by.
-    expect(screen.getByText("LinkedIn")).toBeTruthy();
     await waitFor(() => expect(within(chip(/^Stranger/)).getByText("2")).toBeTruthy());
   });
 
   it("lists a LinkedIn contact in the directory the way it lists a WhatsApp one", async () => {
-    const user = userEvent.setup();
     const WHATSAPP_PERSON: PersonResource = {
       id: "nadia-cross",
       displayName: "Nadia Cross",
@@ -977,15 +843,12 @@ describe("PeoplePage folds LinkedIn into the general surface", () => {
           displayName: "Nadia",
         },
       ],
-      messageCount: 8,
-      latest: null,
       memoryPath: null,
     };
     mockApi({ people: [GUARDIAN, WHATSAPP_PERSON, LINKEDIN_PERSON] });
     renderPage();
 
     await screen.findByText("Priya Nair");
-    await showDirectory(user);
 
     // Same heading, same row: name over the identifier the channel recognizes
     // them by, and one row per human either way.
@@ -1015,7 +878,7 @@ describe("PeoplePage load failures", () => {
     renderPage();
 
     expect(await screen.findByText("Couldn't load")).toBeTruthy();
-    expect(screen.queryByText("Nothing new yet")).toBeNull();
+    expect(screen.queryByText("Nobody here yet")).toBeNull();
   });
 
   it("retries in place, without a page reload", async () => {
@@ -1036,7 +899,7 @@ describe("PeoplePage load failures", () => {
     mockApi({});
     renderPage();
 
-    expect(await screen.findByText("Nothing new yet")).toBeTruthy();
+    expect(await screen.findByText("Nobody here yet")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });
@@ -1049,54 +912,38 @@ describe("PeoplePage puts its controls in the address", () => {
   const checked = (name: string) =>
     screen.getByRole("radio", { name }).getAttribute("aria-checked") === "true";
 
-  it("forwards /people to the stream, keeping the chip and term it arrived with", async () => {
+  it("forwards /people to the roster, keeping the chip and term it arrived with", async () => {
     mockApi({ people: [GUARDIAN, FRIEND] });
     renderPage("/people?level=inner-circle&q=wei");
 
-    await waitFor(() => expect(address()).toBe("/people/latest?level=inner-circle&q=wei"));
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle&q=wei"));
   });
 
-  it("opens the view its address names, not the default one", async () => {
-    mockApi({ people: [GUARDIAN, FRIEND, QUIET_PERSON] });
-    renderPage("/people/directory");
+  it("forwards the retired /people/latest address to the roster", async () => {
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage("/people/latest?level=inner-circle");
 
-    // The quiet person is a directory row and never a stream one, so their
-    // presence is what says which view the address opened.
-    expect(await screen.findByText("Nadia Petrova")).toBeTruthy();
-    expect(checked("Directory")).toBe(true);
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
   });
 
-  it("moves the view into the path and the chip into the query", async () => {
+  it("puts the chip in the query, and back undoes one choice", async () => {
     const user = userEvent.setup();
     mockApi({ people: [GUARDIAN, FRIEND] });
     renderPage();
 
     await screen.findByText("Wei Chen");
-    expect(address()).toBe("/people/latest");
-
-    await showDirectory(user);
-    await waitFor(() => expect(address()).toBe("/people/directory"));
+    expect(address()).toBe("/people/directory");
 
     await user.click(chip(/^Inner circle/));
     await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
-  });
 
-  it("carries the chip across a view change, and back undoes one choice", async () => {
-    const user = userEvent.setup();
-    mockApi({ people: [GUARDIAN, FRIEND] });
-    renderPage();
+    await user.click(chip(/^Acquaintance/));
+    await waitFor(() => expect(address()).toBe("/people/directory?level=acquaintance"));
 
-    await screen.findByText("Wei Chen");
-    await user.click(chip(/^Inner circle/));
-    await waitFor(() => expect(address()).toBe("/people/latest?level=inner-circle"));
-
-    await showDirectory(user);
-    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
-
-    // One deliberate choice, one history entry: back undoes the view change
-    // and returns to the stream still on the chip picked before it.
+    // One deliberate choice, one history entry.
     await user.click(screen.getByTestId("back"));
-    await waitFor(() => expect(address()).toBe("/people/latest?level=inner-circle"));
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
+    expect(checked("Inner circle")).toBe(true);
   });
 
   it("puts the typed term in the address without an entry per letter", async () => {
@@ -1105,16 +952,17 @@ describe("PeoplePage puts its controls in the address", () => {
     renderPage();
 
     await screen.findByText("Wei Chen");
-    await showDirectory(user);
+    await user.click(chip(/^Inner circle/));
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
     await user.type(searchBox(), "wei");
-    await waitFor(() => expect(address()).toBe("/people/directory?q=wei"));
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle&q=wei"));
     expect(searchBox().value).toBe("wei");
 
-    // Three keystrokes replaced the view's entry rather than stacking three on
-    // top of it, so one step back is the way out of the directory — not a walk
-    // through "we" and "w" to get there.
+    // Three keystrokes replaced the chip's entry rather than stacking three on
+    // top of it, so one step back undoes the chip — not a walk through "we"
+    // and "w" to get there.
     await user.click(screen.getByTestId("back"));
-    await waitFor(() => expect(address()).toBe("/people/latest"));
+    await waitFor(() => expect(address()).toBe("/people/directory"));
   });
 
   it("leaves the address alone while an input method is composing", async () => {
@@ -1126,11 +974,13 @@ describe("PeoplePage puts its controls in the address", () => {
     fireEvent.input(box, { target: { value: "shou" }, isComposing: true });
     fireEvent.input(box, { target: { value: "shoushi" }, isComposing: true });
     expect(box.value).toBe("shoushi");
-    expect(address()).toBe("/people/latest");
+    expect(address()).toBe("/people/directory");
 
     fireEvent.input(box, { target: { value: "收拾" }, isComposing: true });
     fireEvent.compositionEnd(box);
-    await waitFor(() => expect(address()).toBe(`/people/latest?q=${encodeURIComponent("收拾")}`));
+    await waitFor(() =>
+      expect(address()).toBe(`/people/directory?q=${encodeURIComponent("收拾")}`),
+    );
     expect(box.value).toBe("收拾");
   });
 
@@ -1146,18 +996,18 @@ describe("PeoplePage puts its controls in the address", () => {
 
   it("falls back to every level when the address names one the rail dropped", async () => {
     mockApi({ people: [GUARDIAN, FRIEND] });
-    renderPage("/people/latest?level=former-colleague");
+    renderPage("/people/directory?level=former-colleague");
 
     expect(await screen.findByText("Wei Chen")).toBeTruthy();
     expect(checked("All")).toBe(true);
   });
 });
 
-// A dossier is opened from a view, and the view it was opened from is what its
-// back link owes the guardian. The address travels with the navigation rather
+// A dossier is opened from the roster, and the chip and term it was opened on
+// are what its back link owes the guardian. The address travels with the navigation rather
 // than being inferred from history, which a merge rewrites.
-describe("PeoplePage hands the dossier the view it was opened from", () => {
-  it("names the view, the chip and the term the person was reached from", async () => {
+describe("PeoplePage hands the dossier the address it was opened from", () => {
+  it("names the chip and the term the person was reached from", async () => {
     const user = userEvent.setup();
     mockApi({ people: [GUARDIAN, FRIEND, QUIET_PERSON] });
     renderPage("/people/directory?level=inner-circle");

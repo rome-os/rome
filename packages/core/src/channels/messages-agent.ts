@@ -8,7 +8,7 @@ import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 import type { Account, ChatId } from "@rome-os/app-runtime";
-import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
+import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { addressOf, chatAt } from "../connections/chat-adapter.js";
 import { chatKey } from "../connections/chat-ids.js";
 
@@ -186,7 +186,7 @@ export function chatsAgentMessages(
           json_array(m.id, v.account) AS detail_key
         FROM dm v
         JOIN ${CHATS} c ON c.platform = v.platform AND c.key = v.chat
-        JOIN ${CHAT_LINES} m ON m.chat_id = c.id AND m.thread_id IS NULL
+        JOIN ${CHAT_MESSAGES} m ON m.chat_id = c.id AND m.thread_id IS NULL
         WHERE c.kind = 'dm' AND c.platform <> 'webchat'`;
     },
     body: messageContentText,
@@ -206,7 +206,7 @@ export function chatsAgentMessages(
             WHERE a.platform = c.platform AND a.account_id = json_extract(${key}, '$[1]')
               AND a.chat_key = c.key AND a.thread_id = '')
         )
-        FROM ${CHAT_LINES} m
+        FROM ${CHAT_MESSAGES} m
         JOIN ${CHATS} c ON c.id = m.chat_id
         WHERE m.id = json_extract(${key}, '$[0]')
       )`,

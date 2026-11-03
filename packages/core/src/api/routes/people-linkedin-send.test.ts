@@ -9,10 +9,12 @@ import {
   createTestConnections,
   createTestDb,
   FakeTransport,
+  ownedByGuardian,
   testChannels,
   type TestDb,
   type TestDeps,
 } from "../../test/helpers.js";
+import { seedBaseline } from "../../test/seeds.js";
 import { peopleRoutes } from "./people.js";
 
 const MEMBER = "ACoAARecipient";
@@ -39,6 +41,11 @@ describe("LinkedIn replies through People", () => {
   beforeEach(async () => {
     db = createTestDb();
     deps = await buildTestDeps(db.db);
+    // The LinkedIn account Rome is connected as is the guardian's own.
+    await seedBaseline(db.db);
+    ownedByGuardian(db.db, deps.peopleRepo, "guardian", [
+      { channel: "linkedin", platform: "linkedin" },
+    ]);
     run.mockReset();
     run.mockResolvedValue({ code: 0, stdout: JSON.stringify([reply]), stderr: "" });
     await deps.linkedInStoreRepo.upsertThreads([
@@ -103,7 +110,7 @@ describe("LinkedIn replies through People", () => {
       { timeoutMs: 180_000 },
     );
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries).toHaveLength(1);
     expect(timeline.entries[0]).toMatchObject({
@@ -128,7 +135,7 @@ describe("LinkedIn replies through People", () => {
     expect(response.status).toBe(200);
     expect(run).toHaveBeenCalledWith(expect.arrayContaining([text]), expect.anything());
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries[0]).toMatchObject({ body: text });
   });
@@ -143,7 +150,7 @@ describe("LinkedIn replies through People", () => {
     expect((await post()).status).toBe(200);
     expect(run).toHaveBeenCalledTimes(1);
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries[0]).toMatchObject({ body: stored });
   });

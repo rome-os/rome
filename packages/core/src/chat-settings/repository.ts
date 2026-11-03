@@ -1,9 +1,9 @@
-import { and, asc, eq, isNull, like } from "drizzle-orm";
+import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { withoutRouting, withRoutingOf, type ChatRepository } from "../chats/chat-repository.js";
 import { chatKey } from "../chats/place.js";
-import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
+import { chatMessages, romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
@@ -96,14 +96,17 @@ export class ChatSettingsRepository {
     return this.chats.accountOn(channel).platform;
   }
 
+  /** Whether anything was said where session `sessionId` stands: a line in
+   *  its chat and thread, or a row of its own. */
   hasMessageHistory(sessionId: string): boolean {
     return (
-      this.db
-        .select({ id: romeAgentMessages.id })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, sessionId))
-        .limit(1)
-        .get() !== undefined
+      this.db.all(sql`
+        SELECT 1 FROM ${romeSessions} s
+        WHERE s.id = ${sessionId} AND (
+          EXISTS (SELECT 1 FROM ${chatMessages} m
+            WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id)
+          OR EXISTS (SELECT 1 FROM ${romeAgentMessages} r WHERE r.session_id = s.id))
+      `).length > 0
     );
   }
 

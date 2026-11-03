@@ -24,6 +24,8 @@ export interface NodeUiMessages {
   card: {
     /** The name of a device's curve. */
     chart: Plural;
+    /** Shown when a device reports that its audit log cannot be written. */
+    auditUnavailable: string;
   };
   chart: {
     label: string;
@@ -42,6 +44,8 @@ export interface NodeUiMessages {
     disabled: string;
   };
   manage: {
+    /** Opens this computer's local audit log, inside the Mac app only. */
+    auditLog: string;
     menu: string;
     rename: string;
     renameTitle: string;
@@ -141,6 +145,8 @@ const en: NodeUiMessages = {
   statsUnavailable: "Restart the device service to show command counts.",
   card: {
     chart: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
+    auditUnavailable:
+      "This computer's audit log is unavailable, so it refuses remote actions. Check it on that computer.",
   },
   chart: {
     label: "Commands per 10 minutes over the last 24 hours",
@@ -159,6 +165,7 @@ const en: NodeUiMessages = {
     disabled: "Turned off",
   },
   manage: {
+    auditLog: "View audit log",
     menu: "Device actions",
     rename: "Rename",
     renameTitle: "Rename device",
@@ -272,6 +279,7 @@ const zhCN: NodeUiMessages = {
   statsUnavailable: "重启设备服务后即可显示命令统计。",
   card: {
     chart: { one: "24 小时 {count} 条命令", other: "24 小时 {count} 条命令" },
+    auditUnavailable: "这台电脑的审计日志不可用，远程操作会被拒绝。请在那台电脑上查看。",
   },
   chart: {
     label: "最近 24 小时每 10 分钟的命令数",
@@ -290,6 +298,7 @@ const zhCN: NodeUiMessages = {
     disabled: "已关闭",
   },
   manage: {
+    auditLog: "查看审计日志",
     menu: "设备操作",
     rename: "重命名",
     renameTitle: "重命名设备",

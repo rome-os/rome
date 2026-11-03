@@ -25,6 +25,8 @@ export interface DeviceHostOptions {
   /** Runs once, before the first connection. */
   prepare?(): Promise<void>;
   onStatus?(status: DeviceStatus): void;
+  /** Every remote request is recorded here before it runs. */
+  audit: HostOptions["audit"];
   connect?: (options: HostOptions) => Promise<void>;
 }
 
@@ -111,6 +113,7 @@ export class DeviceHost {
         cloudUrl: cloudOrigin,
         name,
         signal,
+        audit: this.options.audit,
         credentials: {
           load: async () => ({
             cloudUrl: cloudOrigin,
