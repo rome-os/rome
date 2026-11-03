@@ -96,6 +96,36 @@ export interface ChatSearchHit {
   createdAt: Date;
 }
 
+/**
+ * Whether the session in the current `rome_sessions` row waits on the
+ * guardian, read from Chats: a card (question, connect-AI, app component) in
+ * a line from Rome after the guardian's last prompt where the session's
+ * speaker stands, or an approval still pending in this chat. Any answer to a
+ * card is the guardian's line prompting a turn, so a card after the last one
+ * is still open. `seq` is the order Chats recorded lines in. The pending
+ * approvals' chats are collected once per list rather than scanned per chat.
+ * json_valid and the object check skip lines whose parts are not a block
+ * array, which would otherwise fail the whole list. The Chats version of the
+ * legacy `sessionAwaitingGuardian` (db/repositories/webchat.ts), for a
+ * select over `rome_sessions`.
+ */
+export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
+  select 1 from ${CHAT_LINES} m, json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and m."sender_agent" is not null and json_valid(m."parts")
+  and m."seq" > coalesce((
+    select max(u."seq") from ${CHAT_LINES} u
+    where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
+    and u."sender_agent" is null
+    and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
+  ), 0)
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+) or "rome_sessions"."id" in (
+  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
+  where a."status" = 'pending'
+  and json_extract(a."payload", '$.channelContext.threadId') is not null
+))`.mapWith(Boolean);
+
 const SEARCH_SCAN_LIMIT = 400;
 const SNIPPET_CONTEXT = 40;
 const SNIPPET_LENGTH = 160;

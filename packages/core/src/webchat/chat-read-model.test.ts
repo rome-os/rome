@@ -4,11 +4,16 @@ import { sql } from "drizzle-orm";
 import { chatKey, ownedBy } from "../connections/chat-ids.js";
 import type { ChatRef } from "../chats/storage/place.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { approvals, channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { speakerFixture } from "../test/speakers.js";
-import { ChatReadModel, type Transcript, type TranscriptCursor } from "./chat-read-model.js";
+import {
+  ChatReadModel,
+  chatsSessionAwaitingGuardian,
+  type Transcript,
+  type TranscriptCursor,
+} from "./chat-read-model.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
 
@@ -491,6 +496,79 @@ describe("ChatReadModel", () => {
 
       expect(hits.map((hit) => hit.chatId)).toEqual(["open"]);
       expect((await reads.chatTranscript("open"))?.lines.map((l) => l.id)).toEqual(["m-1"]);
+    });
+  });
+
+  describe("chatsSessionAwaitingGuardian", () => {
+    const card = [{ type: "pending_interaction", interaction: { kind: "question" } }];
+
+    async function awaiting(sessionId: string): Promise<boolean | undefined> {
+      const [row] = await testDb.db
+        .select({ awaiting: chatsSessionAwaitingGuardian })
+        .from(romeSessions)
+        .where(sql`${romeSessions.id} = ${sessionId}`);
+      return row?.awaiting;
+    }
+
+    /** A line from Rome in `chat`, with `parts`. */
+    function fromRome(chat: ChatRef, id: string, at: number, parts?: unknown[]) {
+      return fixture.say({
+        id,
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(at * 1000),
+        ...(parts ? { parts } : {}),
+      });
+    }
+
+    it("waits while a card Rome posted after the guardian's last prompt is open", async () => {
+      const chat = dashboardChat("chat-1");
+      links.prompt(
+        fixture.say({ id: "q", chat, from: "guardian", at: new Date(1_000) }),
+        "chat-1",
+        "t1",
+      );
+      fromRome(chat, "card", 2, card);
+
+      expect(await awaiting("chat-1")).toBe(true);
+    });
+
+    it("stops waiting once the guardian's answer prompts a turn", async () => {
+      const chat = dashboardChat("chat-1");
+      fromRome(chat, "card", 1, card);
+      links.prompt(
+        fixture.say({ id: "answer", chat, from: "guardian", at: new Date(2_000) }),
+        "chat-1",
+        "t2",
+      );
+      fromRome(chat, "thanks", 3);
+
+      expect(await awaiting("chat-1")).toBe(false);
+    });
+
+    it("does not wait on a line Rome posted without a card", async () => {
+      const chat = dashboardChat("chat-1");
+      fromRome(chat, "plain", 1);
+      fixture.say({ id: "text", chat, from: "agent:main", agent: "main", at: new Date(2_000) });
+
+      expect(await awaiting("chat-1")).toBe(false);
+    });
+
+    it("waits while an approval in the chat is pending", async () => {
+      dashboardChat("chat-1");
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "pending",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(0),
+      });
+
+      expect(await awaiting("chat-1")).toBe(true);
     });
   });
 
