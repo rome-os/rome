@@ -16,6 +16,7 @@ import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-o
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
+import { heldByAnother } from "../connections/chat-ids.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/place.js";
@@ -73,10 +74,31 @@ export class ChatsWebChatRepository extends WebChatRepository {
   protected override readonly messageCountColumn = chatsSessionMessageCount;
   protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
 
-  /** Searches the dashboard chats' lines in Chats, at most one match per
-   *  chat, most recent first. */
+  /** Searches the dashboard chats' messages in Chats and the notices each
+   *  dashboard session keeps of its own, at most one match per chat, the
+   *  most recent, most recent first. */
   override async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
-    const hits = await this.reads.search(query, Math.max(1, options.sessionLimit ?? 20));
+    const limit = Math.max(1, options.sessionLimit ?? 20);
+    const [said, notices] = await Promise.all([
+      this.searchChats(query, limit),
+      this.searchSessionRows(query, { sessionLimit: limit }, ["notification"]),
+    ]);
+    const newest = new Map<string, (typeof said)[number]>();
+    for (const match of [...said, ...notices]) {
+      const kept = newest.get(match.session.id);
+      if (!kept || match.message.createdAt > kept.message.createdAt) {
+        newest.set(match.session.id, match);
+      }
+    }
+    return [...newest.values()]
+      .sort((a, b) => b.message.createdAt.getTime() - a.message.createdAt.getTime())
+      .slice(0, limit);
+  }
+
+  /** The dashboard chats' messages in Chats that match `query`, at most one
+   *  per chat, most recent first. */
+  private async searchChats(query: string, limit: number) {
+    const hits = await this.reads.search(query, limit);
     if (hits.length === 0) return [];
     const sessions = new Map(
       (
@@ -810,6 +832,8 @@ export function sessionLines(sessionIds: readonly string[]) {
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
       AND l.role IN ('prompt', 'answer')
     WHERE s.id IN (SELECT value FROM json_each(${ids}))
+      -- Where each account holds its own copy, the session reads its own.
+      AND NOT ${heldByAnother(sql`c.platform`, sql`c.key`, sql`m.key`, sql`s.account_id`)}
     UNION ALL
     SELECT r.id, r.session_id, r.turn_id, r.input_state, r.role,
       CASE WHEN r.role = 'trace' THEN '[]' ELSE r.content END AS content,
@@ -838,9 +862,10 @@ export function sessionLines(sessionIds: readonly string[]) {
  * `rome_sessions`.
  */
 const chatsSessionMessageCount = sql<number>`((
-  select count(*) from ${CHAT_MESSAGES} m
+  select count(*) from ${CHAT_MESSAGES} m join ${CHATS} c on c.id = m.chat_id
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
     and m."said_at" >= "rome_sessions"."created_at"
+    and not ${heldByAnother(sql`c.platform`, sql`c.key`, sql`m.key`, sql`"rome_sessions"."account_id"`)}
 ) + (
   select count(*) from "rome_agent_messages" r
   where r."session_id" = "rome_sessions"."id"

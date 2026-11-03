@@ -1938,6 +1938,15 @@ export class WebChatRepository {
    * message — ordered by message recency, capped at `sessionLimit` sessions.
    */
   async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
+    return this.searchSessionRows(query, options, ["user", "assistant", "notification"]);
+  }
+
+  /** {@link searchSessionMessages} over the sessions' own rows of `roles`. */
+  protected async searchSessionRows(
+    query: string,
+    options: { sessionLimit?: number },
+    roles: readonly ("user" | "assistant" | "notification")[],
+  ) {
     const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
@@ -1952,13 +1961,7 @@ export class WebChatRepository {
       .select({ message: webchatMessageSelectFields, session: this.sessionFields() })
       .from(romeAgentMessages)
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
-      .where(
-        and(
-          isWebchatChat,
-          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          ...likePredicates,
-        ),
-      )
+      .where(and(isWebchatChat, inArray(romeAgentMessages.role, [...roles]), ...likePredicates))
       .orderBy(desc(romeAgentMessages.createdAt), desc(romeAgentMessages.id))
       .limit(SEARCH_MESSAGE_SCAN_LIMIT);
 

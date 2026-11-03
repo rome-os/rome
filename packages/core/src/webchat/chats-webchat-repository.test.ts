@@ -361,6 +361,47 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
   });
 
+  it("reads its own account's copy of a message where each account holds one", async () => {
+    // A Telegram basic group numbers its messages per member account.
+    const group = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "-42" as ChatId),
+      "group",
+      "Family",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:tg-sales:-42",
+      type: "channel",
+      name: "Family",
+      agentName: null,
+    });
+    testDb.db
+      .update(romeSessions)
+      .set({
+        chatId: group.ref.id,
+        chatPlatform: group.ref.platform,
+        accountId: "111",
+        createdAt: new Date(0),
+      })
+      .where(eq(romeSessions.id, "channel:tg-sales:-42"))
+      .run();
+    const messages = new MessageRepository(testDb.db);
+    for (const key of ["111:5", "222:7"]) {
+      messages.record({
+        direction: "toRome",
+        place: { chat: group.ref },
+        saidBy: { account: { platform: "telegram", id: "ann" } },
+        key,
+        body: { text: "Yo" },
+        at: new Date(1000),
+      });
+    }
+
+    expect((await repo.getMessages("channel:tg-sales:-42")).map((line) => line.id)).toEqual([
+      "111:5",
+    ]);
+    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(1);
+  });
+
   it("reads a steered input after the card it answers, in the same turn", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.recordUserInput("in-1", "chat-1", text("Plan a trip"));
@@ -598,6 +639,16 @@ describe("ChatsWebChatRepository", () => {
       matches.map((match) => [match.session.id, match.message.id, match.message.role]),
     ).toEqual([["chat-1", "out-1", "assistant"]]);
     expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
+  });
+
+  it("finds a chat by a notice it keeps of its own", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set for the ferry"));
+
+    const matches = await repo.searchSessionMessages("ferry");
+    expect(matches.map((match) => [match.session.id, match.message.id])).toEqual([
+      ["chat-1", "note-1"],
+    ]);
   });
 
   it("counts the lines from Rome since the chat was last read, up to a cap", async () => {
