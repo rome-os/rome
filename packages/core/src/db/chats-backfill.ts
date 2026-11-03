@@ -79,10 +79,14 @@ SELECT
   -- Rome's end: the account's platform id.
   c.platform_account_id AS rome_end,
   CASE WHEN r.source_channel = 'webchat' THEN r.id
-       -- A row that names no type is a group, as the adapters open one,
-       -- unless its address says it is a direct message: Telegram's is the
-       -- other party's positive id, WhatsApp's is not a @g.us group.
-       WHEN (r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
+       -- A Telegram or WhatsApp address says whether it is a group, whatever
+       -- type the row names: a send opened every new address as private. A
+       -- row that names no type is a group, as the adapters open one, unless
+       -- its address says it is a direct message: Telegram's is the other
+       -- party's positive id, WhatsApp's is not a @g.us group.
+       WHEN ((c.platform = 'telegram' AND r.source_thread_id GLOB '-*')
+         OR (c.platform = 'whatsapp' AND r.source_thread_id GLOB '*@g.us')
+         OR r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
          AND NOT (c.platform = 'telegram' AND r.source_thread_id NOT GLOB '-*')
          AND NOT (c.platform = 'whatsapp' AND r.source_thread_id NOT GLOB '*@g.us'))) THEN r.source_thread_id
        WHEN c.platform IN ('email', 'agents') THEN r.source_thread_id
@@ -100,7 +104,9 @@ SELECT
                 ORDER BY m.created_at, m.rowid LIMIT 1), r.source_thread_id) END
        END AS key,
   CASE WHEN r.source_channel <> 'webchat'
-        AND (r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
+        AND ((c.platform = 'telegram' AND r.source_thread_id GLOB '-*')
+         OR (c.platform = 'whatsapp' AND r.source_thread_id GLOB '*@g.us')
+         OR r.source_thread_type IN ('group', 'channel') OR (r.source_thread_type IS NULL
          AND NOT (c.platform = 'telegram' AND r.source_thread_id NOT GLOB '-*')
          AND NOT (c.platform = 'whatsapp' AND r.source_thread_id NOT GLOB '*@g.us'))) THEN 'group'
        ELSE 'dm' END AS kind,

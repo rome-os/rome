@@ -220,10 +220,14 @@ function toCard(connection: ApiConnection): ConnectionCard {
     linkReported: connection.agent !== undefined,
     link: connection.link ?? null,
     severalAccounts: connection.severalAccounts === true,
-    ...(connection.accountUnknown && connection.state === "working"
-      ? { accountUnknown: true }
-      : {}),
+    ...(accountUnknown(connection) ? { accountUnknown: true } : {}),
   };
+}
+
+/** A working connection whose channel does not know its account hears and
+ *  sends nothing. */
+function accountUnknown(connection: ApiConnection): boolean {
+  return connection.accountUnknown === true && connection.state === "working";
 }
 
 /** The Composio ACCOUNT broker as a card. Not a registry connection — its Auth
@@ -302,6 +306,7 @@ export function buildConnectionCards(
     if (card) {
       card.slots.push(...sessionSlots);
       card.degradation ??= runtimeDegradation(connection);
+      if (accountUnknown(connection)) card.accountUnknown = true;
     } else {
       cards.set(brand, {
         route: brand,
@@ -315,6 +320,7 @@ export function buildConnectionCards(
         linkReported: false,
         link: null,
         severalAccounts: false,
+        ...(accountUnknown(connection) ? { accountUnknown: true } : {}),
       });
     }
   }

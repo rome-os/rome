@@ -85,6 +85,8 @@ describe("Chats backfill", () => {
     // group from a direct message.
     session.run("tg-dm", "Ada", "channel", "tg-sales", "55", null, null, null, null);
     session.run("tg-group", "Club", "channel", "tg-sales", "-77", null, "Club", null, null);
+    // A send opened every new address as private, a group's too.
+    session.run("tg-sent", "Crew", "channel", "tg-sales", "-88", "private", "Crew", null, null);
     // A chat heard on a channel that knows no account: it waits until the
     // channel does.
     session.run("tgu-dm", "Bo", "channel", "telegram_user", "99", null, null, null, null);
@@ -270,7 +272,7 @@ describe("Chats backfill", () => {
     backfill(sqlite);
   });
 
-  it("starts a chat for each place, as the adapters key it", () => {
+  it("starts a chat for each place, as the adapters key it, a group by its address", () => {
     expect(all("SELECT platform, key, kind FROM chats ORDER BY id")).toEqual([
       { platform: "webchat", key: "chat-1", kind: "dm" },
       { platform: "feishu", key: "dm:bot:ou_wei", kind: "dm" },
@@ -278,6 +280,7 @@ describe("Chats backfill", () => {
       { platform: "feishu", key: "oc_launch", kind: "group" },
       { platform: "telegram", key: "dm:111:55", kind: "dm" },
       { platform: "telegram", key: "-77", kind: "group" },
+      { platform: "telegram", key: "-88", kind: "group" },
     ]);
   });
 
@@ -294,6 +297,7 @@ describe("Chats backfill", () => {
       { id: "group", key: "oc_launch", thread_id: null, account_id: "bot" },
       { id: "tg-dm", key: "dm:111:55", thread_id: null, account_id: "111" },
       { id: "tg-group", key: "-77", thread_id: null, account_id: "111" },
+      { id: "tg-sent", key: "-88", thread_id: null, account_id: "111" },
       { id: "tgu-dm", key: null, thread_id: null, account_id: null },
       { id: "thread", key: "oc_launch", thread_id: "omt_1", account_id: "bot" },
     ]);
@@ -470,6 +474,6 @@ describe("Chats backfill", () => {
            JOIN chats c ON c.id = s.chat_id WHERE s.id = 'tgu-dm'`),
     ).toEqual([{ platform: "telegram", key: "dm:333:99", kind: "dm", account_id: "333" }]);
     backfill(sqlite);
-    expect(all("SELECT count(*) AS n FROM chats")).toEqual([{ n: 7 }]);
+    expect(all("SELECT count(*) AS n FROM chats")).toEqual([{ n: 8 }]);
   });
 });
