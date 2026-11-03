@@ -1,3 +1,6 @@
+import { appChatReads } from "../apps/chat-reads.js";
+import { ChatReadModel } from "../webchat/chat-read-model.js";
+import { chatAddresses, chatMessages, romeSessions } from "../db/schema.js";
 // What the account read asks the triage record for.
 //
 // The triage record is the only source that says an account exists on a channel
@@ -80,6 +83,66 @@ describe("the account reads over the triage record", () => {
       },
     };
   }
+
+  it("keeps dashboard automation out of People and app-facing person accounts", async () => {
+    await deps.webchatRepo.createSession("automation-chat", "Automation");
+    const before = await readAccountDirectory(watched());
+    const addresses = await testDb.db.select().from(chatAddresses);
+    const readers = await testDb.db
+      .select({ accountId: romeSessions.accountId })
+      .from(romeSessions);
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    for (const [id, source, actor] of [
+      ["app", "automated::1::app:daily-report", guardian],
+      ["routine", "automated::0::routine:Morning briefing", guardian],
+      ["concierge", "core:concierge", guardian],
+      ["subagent", "coding:coding", undefined],
+    ] as const) {
+      await deps.webchatRepo.recordUserInput(
+        id,
+        "automation-chat",
+        JSON.stringify([{ type: "text", content: `Status ${id}` }]),
+        actor,
+        { platform: "webchat", id: source },
+      );
+    }
+    await deps.webchatRepo.recordUserInput("visitor", "automation-chat", "[]", {
+      kind: "visitor",
+      accountId: "alex",
+      email: "alex@example.com",
+    });
+    expect(await readAccountDirectory(watched())).toEqual(before);
+    expect(await testDb.db.select().from(chatAddresses)).toEqual(addresses);
+    expect(
+      await testDb.db.select({ accountId: romeSessions.accountId }).from(romeSessions),
+    ).toEqual(readers);
+    expect(await deps.peopleRepo.all()).not.toContainEqual(
+      expect.objectContaining({ id: expect.stringContaining("automated::") }),
+    );
+    // Storage retains provenance; read models do not turn it into a person's address.
+    expect(
+      (await testDb.db.select().from(chatMessages)).some((row) =>
+        row.senderAccountId?.startsWith("automated::"),
+      ),
+    ).toBe(true);
+    const model = new ChatReadModel(testDb.db);
+    const transcript = (await model.chatTranscript("automation-chat"))!;
+    for (const line of transcript.lines.filter((line) => line.id !== "visitor")) {
+      expect(line).toMatchObject({ role: "user", senderAccountId: null, senderName: "Automation" });
+    }
+    const apps = appChatReads({ db: testDb.db, reads: model, webchatRepo: deps.webchatRepo });
+    const lines = await apps.transcript("automation-chat");
+    for (const line of lines.filter((line) => line.key !== "visitor")) {
+      expect(line).toMatchObject({ role: "user", senderId: null, senderName: "Automation" });
+    }
+    expect(lines.find((line) => line.key === "visitor")).toMatchObject({
+      senderId: "visitor:alex",
+      senderName: "alex@example.com",
+    });
+    expect(JSON.stringify(lines)).not.toContain("automated::");
+    expect(await apps.recentChats({ since: new Date(0), where: "dashboard" })).toHaveLength(1);
+    expect(await deps.webchatRepo.searchSessionMessages("Status")).toHaveLength(1);
+  });
 
   const find = <T extends { channel: string; channelUserId: string }>(accounts: T[]) =>
     accounts.find((account) => account.channel === "telegram" && account.channelUserId === SENDER);
