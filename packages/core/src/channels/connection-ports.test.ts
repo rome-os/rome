@@ -60,6 +60,28 @@ describe("connection-backed send, across epochs", () => {
     offerDirect("second");
     await expect(direct.chatFor("7")).resolves.toBe("second");
   });
+
+  it("answers a direct lookup taken while talk is locked as not connected, and again once it unlocks", async () => {
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(createTestDb().db),
+    });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const connection = await registry.connect("fake-telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await connection.auth.revoke("bot");
+
+    const direct = connectionPorts({ registry, channelOf: kindChannelOf }, "fake-telegram")?.send
+      ?.direct;
+    expect(direct).not.toBeNull();
+    await expect(direct!.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    const talker = fx.talkerFactory.instances.at(-1);
+    if (!talker) throw new Error("talker not built");
+    talker.directMessaging = { chatFor: async () => "after-unlock" as ChatId };
+    await expect(direct!.chatFor("7")).resolves.toBe("after-unlock");
+  });
 });
 
 describe("connection ports for a service's later channels", () => {
@@ -385,6 +407,12 @@ describe("reply streaming ports", () => {
     expect(sent).toEqual(["start first", "start second", "end second"]);
     release();
     await Promise.all([first, second]);
+  });
+
+  it("refuses a send while talk is locked as not connected", async () => {
+    const { send, live } = portsFor({});
+    live.talker = false;
+    await expect(send.send(chat, { text: "hi" })).rejects.toBeInstanceOf(ChannelNotConnected);
   });
 
   it("writes a reply through the live talker, and refuses while talk is locked", async () => {
