@@ -256,6 +256,33 @@ describe("appChats", () => {
       expect(sent).toEqual([]);
     });
 
+    it("refuses to quote a message the chat does not hold, and sends nothing", async () => {
+      const group = fixture.chat("discord", "guild-chan", "group");
+      const other = fixture.chat("discord", "other-chan", "group");
+      const elsewhere = fixture.say({ id: "q-1", chat: other, from: "bob", at: new Date(0) });
+
+      for (const id of [elsewhere, 999_999]) {
+        expect(await refusal(chats.send(group, { text: "x", replyTo: { chat: group, id } }))).toBe(
+          "chat_not_found",
+        );
+      }
+      expect(sent).toEqual([]);
+    });
+
+    it("records what the platform shows: the text given, in place of the text parts", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      const card = { type: "approval_card", approvalId: "ap-1" } as never;
+
+      await chats.send(group, { text: "A", parts: [{ type: "text", content: "B" }, card] });
+
+      expect(sent[0]?.message.text).toBe("A");
+      const recorded = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
+      expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([
+        { type: "text", content: "A" },
+        card,
+      ]);
+    });
+
     it("refuses to quote another message in a send that opens a thread off one, and sends nothing", async () => {
       const group = fixture.chat("discord", "guild-chan", "group");
       const opening = fixture.say({ id: "q-1", chat: group, from: "bob", at: new Date(0) });
@@ -434,6 +461,13 @@ describe("appChats", () => {
       fixture.chat("telegram", "-1", "group", "ops");
       const spoken = fixture.chat("telegram", "-2", "group", "ops");
       fixture.speaker({ id: "s1", chat: spoken, accountId: BOT.id });
+
+      expect(await chats.group({ platform: "telegram", name: "ops", as: BOT })).toEqual([spoken]);
+    });
+
+    it("counts an account that speaks only in a group's thread as speaking there", async () => {
+      const spoken = fixture.chat("telegram", "-2", "group", "ops");
+      fixture.speaker({ id: "s1", chat: spoken, accountId: BOT.id, threadId: "topic-9" });
 
       expect(await chats.group({ platform: "telegram", name: "ops", as: BOT })).toEqual([spoken]);
     });

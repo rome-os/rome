@@ -73,6 +73,16 @@ export class Speakers {
     );
   }
 
+  /** Whether Rome's account `accountId` holds a speaker anywhere in chat
+   *  `chatId`, its threads included. */
+  speaksIn(chatId: number, accountId: string): boolean {
+    return (
+      this.firstSpeaker(
+        and(eq(romeSessions.chatId, chatId), eq(romeSessions.accountId, accountId)),
+      ) !== null
+    );
+  }
+
   /** The speaker of Rome's account `account` in the thread its platform
    *  calls `threadId`, in whichever chat there, or null when it holds none. */
   speakerInThread(threadId: string, account: { platform: string; id: string }): string | null {

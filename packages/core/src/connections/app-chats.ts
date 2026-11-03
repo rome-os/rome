@@ -54,7 +54,7 @@ export interface AppChatsDeps {
   channelsOn(platform: string): readonly string[];
   adapters: Pick<ChatAdapters, "of" | "accountOn" | "channelOf" | "keyOf" | "directMessageReached">;
   chats: Pick<ChatRepository, "get" | "byKey" | "start" | "list">;
-  speakers: Pick<Speakers, "speakerIn">;
+  speakers: Pick<Speakers, "speakerIn" | "speaksIn">;
   replies: Pick<SpeakerReplies, "send">;
   messages: Pick<MessageRepository, "send" | "byIds" | "idOf">;
 }
@@ -82,7 +82,7 @@ async function send(
 ): Promise<SdkSent> {
   const chat = heldChat(deps, chatOf(place));
   const { at, anchor } = placeOf(deps, chat, place);
-  const replyTo = replyOf(chat, out, anchor?.id);
+  const replyTo = replyOf(deps, chat, out, anchor?.id);
   const sender = senderIn(deps, chat, at, opts?.as);
   // Read before delivery: nothing after the platform took the message may
   // fail the send.
@@ -96,10 +96,12 @@ async function send(
     );
   }
   const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
-  const parts = recordedParts(out, given);
-  // A message with no words, such as a card, goes to the adapter as it is:
-  // one that cannot show it refuses it, and so does one given nothing.
-  const text = out.text ?? partsText(given);
+  // The text an adapter shows: `text` when it says anything, else the text
+  // parts. A message with no words, such as a card, goes to the adapter as
+  // it is: one that cannot show it refuses it, and so does one given nothing.
+  const said = out.text?.trim() ? out.text : undefined;
+  const text = said ?? partsText(given);
+  const parts = recordedParts(out, given, said);
   const outbound = {
     text,
     ...(given.length ? { parts: given } : {}),
@@ -212,11 +214,20 @@ function placeOf(
  * opens a thread answers that message, since the platform picks the thread by
  * the message answered, so a quote of another is refused.
  */
-function replyOf(chat: Chat, out: ChatMessage, anchor: number | undefined): number | undefined {
+function replyOf(
+  deps: AppChatsDeps,
+  chat: Chat,
+  out: ChatMessage,
+  anchor: number | undefined,
+): number | undefined {
   if (out.replyTo === undefined) return anchor;
   const { chat: quoted, id } = out.replyTo;
   if (quoted.platform !== chat.ref.platform || quoted.id !== chat.ref.id) {
     throw new SendError("chat_not_found", "A reply quotes a message of the chat it is sent in");
+  }
+  const [message] = deps.messages.byIds([id]);
+  if (!message || message.place.chat.id !== chat.ref.id) {
+    throw new SendError("chat_not_found", `No message ${id} in that chat to quote`);
   }
   if (anchor !== undefined && id !== anchor) {
     throw new SendError(
@@ -393,21 +404,26 @@ function group(
   return deps.chats
     .list(query.platform)
     .filter((chat) => chat.kind === "group" && chat.name === query.name)
-    .filter((chat) => !as || deps.speakers.speakerIn(chat.ref.id, null, as.id) !== null)
+    .filter((chat) => !as || deps.speakers.speaksIn(chat.ref.id, as.id))
     .map((chat) => chat.ref);
 }
 
-/** `out` as it goes on record: its parts, else its text, with a note for
- *  each attachment, which Chats keeps no file of. */
-function recordedParts(out: ChatMessage, given: readonly MessagePart[]): MessagePart[] {
+/** `out` as it goes on record, saying what the platform shows: `text`, the
+ *  message's own when it says anything, in place of its text parts, beside
+ *  the other parts, with
+ *  a note for each attachment, which Chats keeps no file of. */
+function recordedParts(
+  out: ChatMessage,
+  given: readonly MessagePart[],
+  text: string | undefined,
+): MessagePart[] {
   const notes = (out.attachments ?? []).map(
     (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
   );
-  const said: MessagePart[] = given.length
-    ? [...given]
-    : out.text
-      ? [{ type: "text", content: out.text }]
-      : [];
+  const said: MessagePart[] =
+    text === undefined
+      ? [...given]
+      : [{ type: "text", content: text }, ...given.filter((part) => part.type !== "text")];
   return notes.length ? [...said, { type: "text", content: notes.join("\n") }] : said;
 }
 
