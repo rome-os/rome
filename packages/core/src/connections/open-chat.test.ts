@@ -3,11 +3,11 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
-import type { ChatRepository } from "./chat-repository.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
 import { chatsWiring } from "../chats-wiring.js";
-import { ChannelWithoutAccount } from "../connections/chat-adapter.js";
+import { ChannelWithoutAccount } from "./chat-adapter.js";
 import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
-import { chatKey } from "./place.js";
+import { chatKey } from "../chats/place.js";
 
 describe("openChannelChat", () => {
   let testDb: TestDb;

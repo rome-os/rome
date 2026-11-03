@@ -13,7 +13,7 @@ import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { MessagePage, MessageRepository } from "../chats/message-repository.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
-import { DASHBOARD_PLATFORM } from "../chats/send.js";
+import { DASHBOARD_PLATFORM } from "../connections/send.js";
 
 /** A task chat is a direct message on the dashboard, read through its channel. */
 const DASHBOARD = { channel: WEBCHAT_CHANNEL };

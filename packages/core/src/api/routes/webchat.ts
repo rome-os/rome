@@ -81,7 +81,7 @@ import {
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
 import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
-import type { DashboardInbox } from "../../chats/send.js";
+import type { DashboardInbox } from "../../connections/send.js";
 import { resolveChatSenders } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
@@ -748,7 +748,7 @@ export interface WebchatRuntime {
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
-  /** The dashboard's side of a send into one of its chats (chats/send.ts). */
+  /** The dashboard's side of a send into one of its chats (connections/send.ts). */
   post: DashboardInbox["post"];
   /** Start a chat for the guardian, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */

@@ -36,7 +36,7 @@ import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
-import { DASHBOARD_PLATFORM } from "../chats/send.js";
+import { DASHBOARD_PLATFORM } from "./send.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";

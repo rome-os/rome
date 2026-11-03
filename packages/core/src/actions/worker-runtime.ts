@@ -11,7 +11,7 @@ import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { noAccountLinks } from "../channels/account-links.js";
 import type { Channel } from "../channels/channel.js";
-import { openChannelChat } from "../chats/open-chat.js";
+import { openChannelChat } from "../connections/open-chat.js";
 import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PeopleRepository } from "../db/repositories/people.js";

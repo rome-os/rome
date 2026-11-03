@@ -8,7 +8,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
-import { openChannelChat, type OpenSpeakerDeps } from "../chats/open-chat.js";
+import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";

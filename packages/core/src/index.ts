@@ -155,7 +155,7 @@ import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-se
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
-import { openChannelChat } from "./chats/open-chat.js";
+import { openChannelChat } from "./connections/open-chat.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";

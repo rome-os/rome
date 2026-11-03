@@ -8,7 +8,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
-import type { SendRecording } from "../chats/send.js";
+import type { SendRecording } from "../connections/send.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";

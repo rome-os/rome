@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../test/helpers.js";
 import { seedBaseline } from "../test/seeds.js";
 import { romeAgentMessages } from "../db/schema.js";
-import { chatKey, placeIn } from "./place.js";
+import { chatKey, placeIn } from "../chats/place.js";
 import { send } from "./send.js";
 
 // Sending into a place. What these pin: a send names a place and goes out at

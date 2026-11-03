@@ -4,7 +4,7 @@
 // Vocabulary: docs/concepts/people.md. The wire shapes are the People
 // contract's (`@rome/api-types/people`).
 //
-// Saying the message is `chats/send.ts`'s, which takes a place. This module
+// Saying the message is `connections/send.ts`'s, which takes a place. This module
 // finds the place: the direct message that reaches the account a send names.
 //
 // A send names its account. There is no entry point here that takes a person
@@ -39,7 +39,7 @@ import {
   type SendDeps,
   type SendIntoPlaceDeps,
   type SendResult,
-} from "../chats/send.js";
+} from "../connections/send.js";
 
 export { sendersOf, type SendDeps };
 

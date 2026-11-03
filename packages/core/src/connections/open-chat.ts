@@ -3,11 +3,11 @@
 
 import type { ChatId, ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { startChannelChat, type StartChannelChatDeps } from "../connections/channel-chat.js";
+import { startChannelChat, type StartChannelChatDeps } from "./channel-chat.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Speakers } from "../sessions/speakers.js";
-import type { ChatRepository } from "./chat-repository.js";
-import { chatKey } from "./place.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
+import { chatKey } from "../chats/place.js";
 
 export interface OpenChannelChatDeps {
   /** Today's chats, which the chat starts in. Unused when `speakers` is
