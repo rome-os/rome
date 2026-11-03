@@ -4,6 +4,7 @@
 import type { ChatId, ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { startChannelChat, type StartChannelChatDeps } from "./channel-chat.js";
+import { addressOf, type ChatAdapters } from "./chat-adapter.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Speakers } from "../sessions/speakers.js";
 import type { ChatRepository } from "../chats/chat-repository.js";
@@ -21,6 +22,7 @@ export interface OpenChannelChatDeps {
 
 export interface OpenSpeakerDeps extends StartChannelChatDeps {
   speakers: Pick<Speakers, "speakerOf">;
+  adapters: StartChannelChatDeps["adapters"] & Pick<ChatAdapters, "threadChatAt">;
 }
 
 /**
@@ -75,8 +77,18 @@ export function openChannelChat(
 async function openAsSpeaker(
   webchatRepo: OpenChannelChatDeps["webchatRepo"],
   deps: OpenSpeakerDeps,
-  input: EnsureChannelChatInput,
+  named: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
+  // An address that names no parent may be a thread Rome already knows, as
+  // one a streamed reply opened: the session stands in that thread of its
+  // chat, not in a chat of its own.
+  const thread =
+    named.parentThreadId === undefined
+      ? deps.adapters.threadChatAt(named.channel, named.threadId)
+      : null;
+  const input: EnsureChannelChatInput = thread
+    ? { ...named, parentThreadId: addressOf(thread), threadType: "group" }
+    : named;
   const { chat, romeEnd } = startChannelChat(deps, input);
   const opened = await webchatRepo.ensureChannelChat(input);
   // A session keeps its place while the channel's account is still the one
