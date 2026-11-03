@@ -455,6 +455,55 @@ describe("Chats backfill", () => {
     expect(quote.reply_to_message_id).toBe((line("om_20") as { id: number }).id);
   });
 
+  it("keeps a reply once that another account heard before its sender's channel moved", () => {
+    const session = sqlite.prepare(
+      `INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id,
+         source_thread_type, created_at)
+       VALUES (?, 'Ops', 'channel', ?, 'oc_echo', 'group', 100)`,
+    );
+    const row = sqlite.prepare(
+      `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at,
+         platform_message_id, sender_id, reply_to_platform_message_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    // A second Feishu account, whose channel knows no account yet, replied in
+    // two parts. The first account heard the second part, and a quote of it.
+    sqlite
+      .prepare(
+        `INSERT INTO channels (id, connection_kind, platform, created_at)
+         VALUES ('feishu-3', 'feishu', 'feishu', 1)`,
+      )
+      .run();
+    session.run("echo-b", "feishu-3");
+    row.run("echo-b1", "echo-b", "assistant", text("Part one"), 700, "om_30", null, null);
+    sqlite
+      .prepare(
+        `INSERT INTO rome_agent_message_platform_ids (message_id, session_id, platform_message_id)
+         VALUES ('echo-b1', 'echo-b', 'om_31')`,
+      )
+      .run();
+    session.run("echo-a", "feishu");
+    row.run("echo-a1", "echo-a", "notification", text("Part two"), 701, "om_31", "ou_b", null);
+    row.run("echo-a2", "echo-a", "notification", text("About it"), 702, "om_32", "ou_li", "om_31");
+    backfill(sqlite);
+    expect(line("om_31")).toBeUndefined();
+    expect((line("om_32") as { reply_to_message_id: number }).reply_to_message_id).toBe(
+      (line("om_30") as { id: number }).id,
+    );
+
+    // The second account's channel learns its account, and its reply moves.
+    sqlite.prepare("UPDATE channels SET platform_account_id = 'bot3' WHERE id = 'feishu-3'").run();
+    backfill(sqlite);
+
+    expect(
+      all(`SELECT m.key, m.sender_account_id, m.sender_agent FROM chat_messages m
+           JOIN chats c ON c.id = m.chat_id WHERE c.key = 'oc_echo' ORDER BY m.id`),
+    ).toEqual([
+      { key: "om_30", sender_account_id: "bot3", sender_agent: "main" },
+      { key: "om_32", sender_account_id: "ou_li", sender_agent: null },
+    ]);
+  });
+
   it("starts a group where two people wrote, though a send opened it as private", () => {
     sqlite
       .prepare(

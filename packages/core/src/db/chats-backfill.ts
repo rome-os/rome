@@ -220,7 +220,13 @@ SELECT
          SELECT h.platform_message_id FROM rome_agent_message_platform_ids a
          JOIN rome_agent_messages h ON h.id = a.message_id
          JOIN rome_sessions hr ON hr.id = h.session_id
-         WHERE a.platform_message_id = m.platform_message_id AND hr.chat_id = r.chat_id
+         WHERE a.platform_message_id = m.platform_message_id
+           -- In the same chat, or at the same address on a channel that has
+           -- not learned its account yet, so this copy and the one a later
+           -- pass moves are one message.
+           AND (hr.chat_id = r.chat_id OR (hr.chat_id IS NULL
+             AND hr.source_thread_id = r.source_thread_id
+             AND (SELECT c.platform FROM channels c WHERE c.id = hr.source_channel) = s.platform))
            -- Where each account numbers its own messages, only its own aliases.
            AND (NOT s.per_account OR hr.account_id IS r.account_id)
            AND h.platform_message_id IS NOT NULL LIMIT 1), m.platform_message_id)
@@ -325,7 +331,10 @@ UPDATE chat_messages SET reply_to_message_id = (
       JOIN rome_sessions ar ON ar.id = h.session_id
       JOIN chat_messages q ON q.chat_id = v.chat_id
         AND q.key = CASE WHEN v.per_account THEN v.account_id || ':' ELSE '' END || h.platform_message_id
-      WHERE ar.chat_id = v.chat_id
+      WHERE (ar.chat_id = v.chat_id OR (ar.chat_id IS NULL
+          AND ar.source_thread_id = (SELECT r.source_thread_id FROM rome_sessions r WHERE r.id = v.session_id)
+          AND (SELECT c.platform FROM channels c WHERE c.id = ar.source_channel) = (
+            SELECT ch.platform FROM chats ch WHERE ch.id = v.chat_id)))
         AND (NOT v.per_account OR ar.account_id IS v.account_id)
         AND h.platform_message_id IS NOT NULL
         AND a.platform_message_id = (SELECT m.reply_to_platform_message_id FROM rome_agent_messages m
