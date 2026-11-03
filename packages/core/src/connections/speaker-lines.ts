@@ -8,7 +8,7 @@
 import type { SaidMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import type { Speaker, Speakers } from "../sessions/speakers.js";
-import { contextOf, type ContextLine } from "../sessions/turn-links.js";
+import { contextOf, type ContextLine, type TurnLinks } from "../sessions/turn-links.js";
 import { type ChatAdapters, lineAt, platformIdOfLine } from "./chat-adapter.js";
 
 /** Where a speaker stands and the account it speaks as. */
@@ -75,4 +75,11 @@ export async function runLines(
     run.replyTo?.messageId ? speakerLines?.recorded(sessionId, run.replyTo.messageId) : null,
   ]);
   return { prompt: prompt?.id ?? null, quoted: quoted ? contextOf(quoted) : null };
+}
+
+/** What a run reads its lines through: the lines it names by the platform's
+ *  ids, and the turn links its prompt becomes its turn's through. */
+export interface RunLineDeps {
+  lines: Pick<SpeakerLines, "recorded">;
+  links: Pick<TurnLinks, "prompt">;
 }

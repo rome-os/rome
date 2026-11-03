@@ -124,15 +124,12 @@ describe("a link on a platform Rome holds accounts on", () => {
             return { chatId };
           },
         });
-      const unused = () => Promise.reject(new Error("nothing is recorded for a refused send"));
       const deps = {
         channels: [recording("tg-first"), recording("tg-second")],
         platformOfChannel,
         sendersOn: (platform: string) => (platform === "telegram" ? senders : null),
         accountOf: (name: string) =>
           recorded && !vacated.has(name) ? { platform: "telegram", id: `${name}-account` } : null,
-        webchatRepo: { ensureChannelChat: unused },
-        chatMessages: { recordSent: unused },
       };
 
       const found = await directPlace(deps, link);

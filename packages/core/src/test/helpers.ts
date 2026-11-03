@@ -62,7 +62,7 @@ import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
-import { storedOn, type Channel, type Channels } from "../channels/channel.js";
+import type { Channel, Channels } from "../channels/channel.js";
 import { ChatEvents } from "../chats/events.js";
 import { StoredMessages } from "../chats/message-repository.js";
 import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
@@ -812,16 +812,11 @@ export async function buildTestDeps(
     webchatRepo,
     chats: chatsWired.chats,
     messages: chatsWired.messages,
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), {
-      channelsOn: (platform) =>
-        storedOn(
-          channels,
-          (name) => channelRecords.platformOfChannel(name),
-          platform,
-          (name) => channelRecords.namesOn(name),
-        ),
-      accountOf: (channel) => channelRecords.accountOf(channel),
-    }),
+    recording: {
+      adapters: chatsWired.adapters,
+      chats: chatsWired.chats,
+      messages: chatsWired.messages,
+    },
     actionExecutionsRepo,
     executionJournalRepo,
     webhookInvocationsRepo,

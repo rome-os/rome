@@ -3,13 +3,24 @@
 
 import type { ChatId, ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { startChannelChat, type StartChannelChatDeps } from "../connections/channel-chat.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { Speakers } from "../sessions/speakers.js";
 import type { ChatRepository } from "./chat-repository.js";
 import { chatKey } from "./place.js";
 
 export interface OpenChannelChatDeps {
-  chats: ChatRepository;
+  /** Today's chats, which the chat starts in. Unused when `speakers` is
+   *  given. */
+  chats?: ChatRepository;
   webchatRepo: Pick<WebChatRepository, "ensureChannelChat">;
+  /** Chats and Agents' speakers. Given, the chat starts in Chats and the
+   *  row's session stands in it as the speaker of the channel's account. */
+  speakers?: OpenSpeakerDeps;
+}
+
+export interface OpenSpeakerDeps extends StartChannelChatDeps {
+  speakers: Pick<Speakers, "speakerOf">;
 }
 
 /**
@@ -23,7 +34,10 @@ export function openChannelChat(
   deps: OpenChannelChatDeps,
   input: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
-  if (input.channel !== "webchat") {
+  if (input.channel !== "webchat" && deps.speakers) {
+    return openAsSpeaker(deps.webchatRepo, deps.speakers, input);
+  }
+  if (input.channel !== "webchat" && deps.chats) {
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
         ? input.parentThreadId
@@ -50,4 +64,24 @@ export function openChannelChat(
     }
   }
   return deps.webchatRepo.ensureChannelChat(input);
+}
+
+/**
+ * The row a message at a channel address is stored under, with its session
+ * standing in the chat Rome holds there, started when it holds none. A
+ * session that already stands somewhere keeps its place, and its activity is
+ * left alone: only a session that stands nowhere yet is placed.
+ */
+async function openAsSpeaker(
+  webchatRepo: OpenChannelChatDeps["webchatRepo"],
+  deps: OpenSpeakerDeps,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  const { chat, romeEnd } = startChannelChat(deps, input);
+  const opened = await webchatRepo.ensureChannelChat(input);
+  if (deps.speakers.speakerOf(opened.id)) return opened;
+  return webchatRepo.ensureChannelChat({
+    ...input,
+    speaker: { chat, accountId: romeEnd, at: new Date() },
+  });
 }

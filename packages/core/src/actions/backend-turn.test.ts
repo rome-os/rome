@@ -3,6 +3,7 @@ import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import { chatKey, placeIn } from "../chats/place.js";
 import { createMockAgentRunner } from "../test/helpers.js";
+import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 describe("backend turn delivery", () => {
@@ -262,5 +263,82 @@ describe("backend turn delivery", () => {
         prompt: "continue",
       }),
     ).rejects.toThrow('Channel "wechat_user" cannot send');
+  });
+
+  describe("through the session's speaker", () => {
+    const answered = () =>
+      createMockAgentRunner([
+        [
+          { type: "turn_start", turnId: "turn-1", sessionId: "agent-session-1", userPrompt: "p" },
+          { type: "result", content: "Done." },
+        ],
+      ]);
+    type Send = NonNullable<Channel["send"]>["send"];
+    const wechatWith = (send: Send): Channel => ({
+      name: "wechat",
+      send: { send, direct: null, activity: null },
+      inbound: null,
+      accounts: null,
+      messages: null,
+      directory: null,
+    });
+    const chats = {
+      ensureChannelChat: async () => ({ id: "session-1", agentName: null }),
+    } as unknown as ChatRepository;
+    const params = {
+      agentName: "main",
+      sessionId: "agent-session-1",
+      channel: "wechat",
+      threadId: "wechat-thread-1",
+      prompt: "p",
+    };
+
+    it("says the reply through the speaker, as the turn's answer", async () => {
+      const send = rs.fn<Send>(async (chatId) => ({ chatId }));
+      const wechat = wechatWith(send);
+      const replies = {
+        send: rs.fn<SpeakerReplies["send"]>(async () => ({
+          id: 1,
+          at: new Date(),
+          sent: "k",
+          speaker: {} as never,
+          landedIn: null,
+        })),
+      };
+      const recordSent = rs.fn(async () => {});
+      const runner = createBackendTurnRunner({
+        agentRunner: answered(),
+        channel: (name) => (name === "wechat" ? wechat : null),
+        chats,
+        replies,
+        messages: { recordSent },
+      });
+
+      await runner.runAndDeliver(params);
+
+      expect(replies.send).toHaveBeenCalledWith(
+        "session-1",
+        wechat,
+        { text: "Done." },
+        { turnId: "turn-1" },
+      );
+      // The speaker's adapter sends it, not the runner.
+      expect(send).not.toHaveBeenCalled();
+      expect(recordSent).not.toHaveBeenCalled();
+    });
+
+    it("still sends the reply when the session stands in no chat", async () => {
+      const send = rs.fn<Send>(async (chatId) => ({ chatId }));
+      const runner = createBackendTurnRunner({
+        agentRunner: answered(),
+        channel: () => wechatWith(send),
+        chats,
+        replies: { send: async () => null },
+      });
+
+      await runner.runAndDeliver(params);
+
+      expect(send).toHaveBeenCalledWith("wechat-thread-1", { text: "Done.", turnId: "turn-1" });
+    });
   });
 });

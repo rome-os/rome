@@ -4,7 +4,8 @@ import { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
 import type { ChatRepository } from "./chat-repository.js";
-import { openChannelChat } from "./open-chat.js";
+import { chatsWiring } from "../chats-wiring.js";
+import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
 import { chatKey } from "./place.js";
 
 describe("openChannelChat", () => {
@@ -63,3 +64,60 @@ describe("openChannelChat", () => {
     ).rejects.toThrow("No chat at webchat address chat-9");
   });
 });
+
+describe("openChannelChat as a speaker", () => {
+  let testDb: TestDb;
+  let wired: ReturnType<typeof chatsWiring>;
+  let deps: OpenChannelChatDeps;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    wired = chatsWiring(testDb.db, {
+      accountOf: () => null,
+      platformOfChannel: (name) => name,
+      channelsOn: (platform) => [platform],
+    });
+    deps = {
+      webchatRepo: new WebChatRepository(testDb.db),
+      speakers: { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers },
+    };
+  });
+  afterEach(() => testDb.close());
+
+  it("starts the chat in Chats and stands the session there as the channel's account", async () => {
+    const record = await openChannelChat(deps, {
+      channel: "telegram",
+      threadId: "42",
+      threadType: "private",
+      agentName: "sales",
+    });
+
+    expect(wired.speakers.speakerOf(record.id)).toMatchObject({
+      place: { chat: { platform: "telegram" } },
+      accountId: "telegram",
+      agent: "sales",
+    });
+  });
+
+  it("stands a thread's session in the thread of its chat", async () => {
+    const record = await openChannelChat(deps, {
+      channel: "telegram",
+      threadId: "-100:7",
+      parentThreadId: "-100",
+      agentName: "main",
+    });
+
+    expect(wired.speakers.speakerOf(record.id)?.place.threadId).toBe("-100:7");
+  });
+
+  it("keeps a session that already stands somewhere where it stands", async () => {
+    const input = { channel: "telegram", threadId: "42", threadType: "private" as const };
+    const first = await openChannelChat(deps, { ...input, agentName: "main" });
+    const placed = wired.speakers.speakerOf(first.id);
+    const again = await openChannelChat(deps, { ...input, agentName: "main" });
+
+    expect(again.id).toBe(first.id);
+    expect(wired.speakers.speakerOf(again.id)).toEqual(placed);
+  });
+});
+

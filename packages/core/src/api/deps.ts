@@ -8,7 +8,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
-import type { MessageRepository } from "../chats/message-repository.js";
+import type { SendRecording } from "../chats/send.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
@@ -118,8 +118,8 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
-  /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
+  /** Where a send into a place is said and put on record in Chats. */
+  recording: SendRecording;
   /** The chats Rome takes part in, by their adapter's keys. */
   chats: Pick<ChatRepository, "byKey">;
   /** What was said in each chat, as Chats records it. */

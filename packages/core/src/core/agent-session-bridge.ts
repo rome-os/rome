@@ -38,6 +38,7 @@ import {
 } from "../actions/action-subprocess.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
+import { runLines, type RunLineDeps } from "../connections/speaker-lines.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -96,6 +97,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private projectsRoot?: string,
     /** Streams replies into external channels while reply streaming is on. */
     private replyStreams?: ReplyStreams,
+    /** Chats' lines a run names by the platform's ids. Given, a recorded
+     *  prompt becomes its turn's through Chats' turn links, not
+     *  `webchatRepo`'s rows. */
+    private runLineDeps?: RunLineDeps,
   ) {}
 
   attach(rpc: IpcRpc, child: ChildProcess): void {
@@ -176,6 +181,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           _type: romeSessionType,
         };
 
+        // The line the run names by its platform id, which the turn answers,
+        // and the one its reply quotes, as Chats holds them.
+        const lines = this.runLineDeps
+          ? await runLines(this.runLineDeps.lines, romeSessionId, req)
+          : null;
+
         // sendTurn is sync — turnId returned immediately,
         // events drain in the background as the turn runs.
         const handle = session.sendTurn(req.input, {
@@ -184,6 +195,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           romeSessionId,
           romeSessionType,
           replyTo: req.replyTo,
+          ...(lines ? { quoted: lines.quoted } : {}),
         });
         const turnLogFields = {
           ...baseLogFields,
@@ -202,19 +214,23 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             reply?.stop();
           },
         );
-        if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
-          try {
+        try {
+          if (lines && this.runLineDeps) {
+            if (conversation.promptPersisted && lines.prompt !== null) {
+              this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
+            }
+          } else if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
             await this.webchatRepo.assignConversationMessageTurn(
               romeSessionId,
               req.platformMessageId,
               handle.turnId,
             );
-          } catch (err) {
-            // The drain loop below never starts, so nothing would read this
-            // turn's events and the worker never learns its turnId.
-            workerWatch.interrupt("agent turn setup failed");
-            throw err;
           }
+        } catch (err) {
+          // The drain loop below never starts, so nothing would read this
+          // turn's events and the worker never learns its turnId.
+          workerWatch.interrupt("agent turn setup failed");
+          throw err;
         }
 
         // A reply streams only when the caller asked, the setting is on and the
@@ -228,6 +244,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               channel: thread.channel,
               chatId: thread.threadId,
               ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
+              ...(lines?.prompt ? { replyTo: lines.prompt } : {}),
               // The transcript leaves the answer to the reply, so the reply
               // records it in the conversation the turn is recorded in.
               romeSessionId,

@@ -1,8 +1,9 @@
-import type { StreamAgentEvent } from "@rome-os/app-runtime";
+import type { Channel, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ChatRepository } from "../../chats/chat-repository.js";
 import type { MessageRepository } from "../../chats/message-repository.js";
 import type { Clock } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
+import type { SpeakerReplies } from "../../sessions/speaker-replies.js";
 import type { ChannelReplies } from "../channel.js";
 import { ReplyDelivery, type ReplyOutcome } from "./reply.js";
 import type { ReplyStreamingSwitch } from "./streaming-switch.js";
@@ -24,8 +25,11 @@ const DEFAULT_POLICY: DeliveryPolicy = {
 export interface ReplyTarget {
   channel: string;
   chatId: string;
-  /** The message the reply answers. */
+  /** The message the reply answers, by the platform's id. */
   replyToMessageId?: string;
+  /** The line the reply answers, by its id in Chats. Read when the reply
+   *  goes through a speaker. */
+  replyTo?: number;
   /** The conversation the run's turn is recorded in. */
   romeSessionId: string;
   turnId: string;
@@ -51,7 +55,19 @@ export interface ReplyStreamsDeps {
   messages?: Pick<MessageRepository, "recordSent">;
   /** The place the conversation a turn is recorded in stands for. */
   places?: Pick<ChatRepository, "placeOfRecord">;
+  /** The speaker of the session a turn is recorded in, which writes the reply
+   *  through its account's chat adapter and puts it on record as the turn's
+   *  answer. Given, it takes the place of `replies`, `messages` and `places`. */
+  speakers?: ReplyStreamsSpeakers;
   policy?: DeliveryPolicy;
+}
+
+export interface ReplyStreamsSpeakers {
+  /** The channel a reply goes out on, read when a reply opens. Its send port
+   *  must be the platform's own, not one that records its sends: the speaker
+   *  records the reply. */
+  channel(name: string): Channel | undefined;
+  replies: Pick<SpeakerReplies, "stream">;
 }
 
 /**
@@ -59,17 +75,20 @@ export interface ReplyStreamsDeps {
  * ReplyDelivery per run, fed the run's events as they happen. A settled
  * reply is put on record in its place once, as the text the user was shown or
  * may have been shown. That message is the turn's only answer, since the
- * run's transcript leaves a streamed answer to it.
+ * run's transcript leaves a streamed answer to it. With `speakers`, the
+ * session's speaker writes the reply and records it in Chats.
  */
 export class ReplyStreams {
   constructor(private readonly deps: ReplyStreamsDeps) {}
 
   /**
-   * A stream for `target`, or null when reply streaming is off or its channel
-   * cannot stream. A reply that gets null is sent whole by its caller.
+   * A stream for `target`, or null when reply streaming is off, its channel
+   * cannot stream, or, through a speaker, its session stands in no chat. A
+   * reply that gets null is sent whole by its caller.
    */
   async open(target: ReplyTarget): Promise<ReplyStream | null> {
     if (!(await this.deps.streaming())) return null;
+    if (this.deps.speakers) return await this.openAsSpeaker(target, this.deps.speakers);
     const replies = this.deps.replies(target.channel);
     if (!replies) return null;
     const delivery = new ReplyDelivery({
@@ -86,16 +105,46 @@ export class ReplyStreams {
       settle: async (stopped) => {
         const outcome = await (stopped ? delivery.stop() : delivery.finish());
         await this.record(target, outcome);
-        if (outcome.status !== "delivered")
-          log.warn("reply not fully delivered", {
-            channel: target.channel,
-            turnId: target.turnId,
-            status: outcome.status,
-            failure: outcome.failure,
-          });
+        this.warnUndelivered(target, outcome);
         return outcome;
       },
     };
+  }
+
+  /** The reply written and recorded by the speaker of the session the turn
+   *  is recorded in. */
+  private async openAsSpeaker(
+    target: ReplyTarget,
+    speakers: ReplyStreamsSpeakers,
+  ): Promise<ReplyStream | null> {
+    const channel = speakers.channel(target.channel);
+    if (!channel) return null;
+    const reply = await speakers.replies.stream(target.romeSessionId, channel, {
+      turnId: target.turnId,
+      ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
+      policy: this.deps.policy ?? DEFAULT_POLICY,
+      clock: this.deps.clock,
+    });
+    if (!reply) return null;
+    return {
+      accept: (event) => reply.accept(event),
+      stop: () => reply.stop(),
+      settle: async (stopped) => {
+        const { outcome } = await reply.settle(stopped);
+        this.warnUndelivered(target, outcome);
+        return outcome;
+      },
+    };
+  }
+
+  private warnUndelivered(target: ReplyTarget, outcome: ReplyOutcome): void {
+    if (outcome.status === "delivered") return;
+    log.warn("reply not fully delivered", {
+      channel: target.channel,
+      turnId: target.turnId,
+      status: outcome.status,
+      failure: outcome.failure,
+    });
   }
 
   private async record(target: ReplyTarget, outcome: ReplyOutcome): Promise<void> {

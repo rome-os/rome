@@ -2,9 +2,11 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { ChatEvents } from "../../chats/events.js";
 import { StoredMessages } from "../../chats/message-repository.js";
 import { chatKey, placeIn } from "../../chats/place.js";
-import type { ChatId } from "@rome-os/app-runtime";
+import type { Channel, ChatId } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import { systemClock } from "../../lib/clock.js";
+import type { StreamedReply } from "../../connections/chat-adapter.js";
+import type { SpeakerReplies } from "../../sessions/speaker-replies.js";
 import { Pacer } from "./pacer.js";
 import { ReplyStreams } from "./streams.js";
 import { DeliveryFailure, type DeliveryTransport, plainText } from "./types.js";
@@ -274,5 +276,60 @@ describe("ReplyStreams", () => {
       turnId: "turn-1",
     });
     expect(recorded).not.toHaveProperty("platformMessageId");
+  });
+
+  describe("through the session's speaker", () => {
+    const telegram = { name: "telegram" } as unknown as Channel;
+    const settled = {
+      outcome: { status: "delivered" as const, parts: [] },
+      text: "hi",
+      key: "k",
+      threadId: null,
+    };
+
+    it("opens the speaker's reply on the channel, answering the line by its id", async () => {
+      const reply = {
+        accept: rs.fn(),
+        stop: rs.fn(),
+        settle: rs.fn<StreamedReply["settle"]>(async () => settled),
+      };
+      const stream = rs.fn<SpeakerReplies["stream"]>(async () => reply);
+      const legacy = rs.fn(replies);
+      const streams = new ReplyStreams({
+        streaming: async () => true,
+        replies: legacy,
+        clock: systemClock,
+        speakers: {
+          channel: (name) => (name === "telegram" ? telegram : undefined),
+          replies: { stream },
+        },
+      });
+
+      const opened = await streams.open({ ...target, replyTo: 7 });
+
+      expect(stream).toHaveBeenCalledWith(
+        target.romeSessionId,
+        telegram,
+        expect.objectContaining({ turnId: target.turnId, replyTo: 7, clock: systemClock }),
+      );
+      expect(legacy).not.toHaveBeenCalled();
+      expect(await opened?.settle(false)).toEqual(settled.outcome);
+      expect(reply.settle).toHaveBeenCalledWith(false);
+    });
+
+    it("opens nothing where the session stands in no chat, or the channel is gone", async () => {
+      const streams = new ReplyStreams({
+        streaming: async () => true,
+        replies: replies,
+        clock: systemClock,
+        speakers: {
+          channel: (name) => (name === "telegram" ? telegram : undefined),
+          replies: { stream: async () => null },
+        },
+      });
+
+      expect(await streams.open(target)).toBeNull();
+      expect(await streams.open({ ...target, channel: "gone" })).toBeNull();
+    });
   });
 });

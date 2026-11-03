@@ -86,7 +86,12 @@ describe("People send API", () => {
     const sent = (await res.json()) as SentMessage;
     expect(sent.ref).toMatch(new RegExp(`^${TG}:`));
     expect(sent.timestamp).toBeGreaterThan(0);
-    expect((await timeline()).entries.map((entry) => entry.body)).toContain("on my way");
+    // Said in Chats, in the direct message with the account.
+    expect(
+      testDb.db.all<{ kind: string; text: string }>(
+        sql`SELECT c.kind, m.text FROM chat_messages m JOIN chats c ON c.id = m.chat_id`,
+      ),
+    ).toEqual([{ kind: "dm", text: "on my way" }]);
 
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: TG, message: { text: "on my way" } },
@@ -357,21 +362,14 @@ describe("People on an account whose channel id is opaque", () => {
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: ADA, message: { text: "hi Ada" } },
     ]);
-    // Rome's line joins the conversation the account already holds, rather
-    // than one under the service's name.
-    const entries = (await timeline()).entries;
-    expect(entries.map((entry) => [entry.body, entry.source])).toEqual([
-      ["hi Ada", "telegram"],
-      ["hello from Ada", "telegram"],
-    ]);
-    const held = testDb.db
-      .select({ sessionId: romeAgentMessages.sessionId })
-      .from(romeAgentMessages)
-      .all();
-    expect(held.map((row) => row.sessionId)).toEqual([
-      channelChatId(OPAQUE, ADA),
-      channelChatId(OPAQUE, ADA),
-    ]);
+    // Rome's line is said in Chats, in the direct message with Ada, as the
+    // opaque account's.
+    expect(
+      testDb.db.all<{ kind: string; account: string; text: string }>(sql`
+        SELECT c.kind, m.sender_account_id AS account, m.text
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id
+      `),
+    ).toEqual([{ kind: "dm", account: ME.id, text: "hi Ada" }]);
   });
 
   // Rome never picks among its accounts on a platform: with a second one

@@ -6,10 +6,10 @@
 // finding the place first, which `people/send.ts` does for the People and
 // assistants surfaces.
 //
-// Over today's storage a place's chat is a channel's conversation row, and the
-// send goes out on the channel of the one of Rome's accounts that says it.
-// Delivery is answered, not stored: the message is recorded once the platform
-// took it, and a refused one is not recorded, until storage holds a delivery.
+// The send goes out on the channel of the one of Rome's accounts that says it,
+// through its chat adapter, and the message is recorded in Chats once the
+// platform took it. Delivery is answered, not stored: a refused message is not
+// recorded, until storage holds a delivery.
 //
 // A dashboard chat is the exception. Rome is its platform, so a send there is
 // said as an agent's dashboard account and wakes the chat's agent, the way the
@@ -21,17 +21,20 @@ import { platformOf } from "@rome/api-types/platform";
 import {
   ChannelNotConnected,
   channelsOn,
+  type Channel,
   type Channels,
   type PlatformOfChannel,
 } from "../channels/channel.js";
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
+import { startChannelChat } from "../connections/channel-chat.js";
+import { platformIdOfLine, type ChatAdapters } from "../connections/chat-adapter.js";
+import { kindAt } from "../connections/recorded-sends.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import { createLogger } from "../logger.js";
 import type { Delivery } from "./delivery.js";
-import type { MessageRepository } from "./message-repository.js";
 import { addressOf, type Place } from "./place.js";
-
-const log = createLogger("chats-send");
+import type { ChatRepository } from "./storage/chat-repository.js";
+import type { MessageRepository } from "./storage/message-repository.js";
+import { placeIn } from "./storage/place.js";
 
 export interface SendDeps {
   channels: Channels;
@@ -56,19 +59,19 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
   );
 }
 
-/** The slice of the conversation repository a send opens its chat through. */
-interface OutboundChats {
-  ensureChannelChat(input: {
-    channel: string;
-    threadId: string;
-    parentThreadId?: string;
-  }): Promise<{ id: string }>;
+/** Where a send is said and recorded: Chats, and each channel's chat
+ *  adapter, which the message goes out through. */
+export interface SendRecording {
+  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "directMessageReached">;
+  chats: Pick<ChatRepository, "start" | "byKey">;
+  messages: Pick<MessageRepository, "send">;
 }
 
 export interface SendIntoPlaceDeps extends SendDeps {
-  webchatRepo: OutboundChats;
-  /** Where a sent message is put on record. */
-  chatMessages: Pick<MessageRepository, "recordSent">;
+  /** Where a sent message is said and put on record. Absent, a send goes out
+   *  on the channel's port and nothing records it. The channels' ports must
+   *  be the platforms' own, not ones that record their sends. */
+  recording?: SendRecording;
   /** Rome's own account on a channel, which a send names as `as`. Absent, no
    *  channel answers to one. */
   accountOf?: ChannelRecordsRepository["accountOf"];
@@ -156,7 +159,9 @@ export async function send(
   const address = addressOf(place);
   let messageId: string | null;
   try {
-    messageId = (await channel.send.send(address, { text: body.text })).messageId ?? null;
+    messageId = deps.recording
+      ? await sayInChats(deps.recording, channel, place, body)
+      : ((await channel.send.send(address, { text: body.text })).messageId ?? null);
   } catch (error) {
     // The Connection went between choosing the sender and asking it: the same
     // answer a send that found none to begin with gives.
@@ -166,7 +171,6 @@ export async function send(
   }
 
   const at = new Date();
-  await record(deps, channel.name, place, body, messageId);
   return {
     ok: true,
     sent: {
@@ -238,38 +242,44 @@ export function soleSender(deps: SendDeps, platform: string): string | undefined
   return senders.length === 1 ? senders[0] : undefined;
 }
 
-/** Rome's own transcript of what it said, written under the channel that
- *  sent it so the line joins the chat Rome holds there. On a channel with a
- *  mirror of its own it sits behind the provider's copy, which is the store
- *  precedence in `people/timeline-sources.ts`. */
-async function record(
-  deps: SendIntoPlaceDeps,
-  channel: string,
+/**
+ * Say `body` in `place` through channel `channel`'s chat adapter and record it
+ * in the chat Rome holds there, started when it holds none, as Rome's main
+ * agent: no agent's turn said it. Answers the platform's id for the message,
+ * or null when it gave none. Throws the platform's refusal, and records
+ * nothing then; a failure to record what the platform took is logged by
+ * Chats, and the send still answers.
+ */
+async function sayInChats(
+  recording: SendRecording,
+  channel: Channel,
   place: Place,
   body: Body,
-  messageId: string | null,
-): Promise<void> {
-  try {
-    await deps.webchatRepo.ensureChannelChat({
-      channel,
-      threadId: addressOf(place),
-      ...(place.threadId === undefined ? {} : { parentThreadId: place.chat.id }),
-    });
-    await deps.chatMessages.recordSent(
-      {
-        direction: "fromRome",
-        place,
-        parts: [{ type: "text", content: body.text }],
-        ...(messageId ? { platformMessageId: messageId } : {}),
-        // Not said by an agent turn.
-        turnAnswer: false,
-      },
-      { channel },
-    );
-  } catch (error) {
-    log.warn("outbound message delivered but recording failed", {
-      channel,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+): Promise<string | null> {
+  const thread = place.threadId ?? null;
+  // A thread's chat is a group; otherwise the chat Rome holds at the
+  // address, else the kind the address names.
+  const kind = thread === null ? kindAt(recording, channel.name, place.chat.id) : "group";
+  const { chat, key, romeEnd } = startChannelChat(recording, {
+    channel: channel.name,
+    threadId: place.chat.id,
+    threadType: kind === "dm" ? "private" : "group",
+  });
+  const adapter = recording.adapters.of(channel);
+  const sent = await recording.messages.send(
+    {
+      direction: "fromRome",
+      place: placeIn(chat, thread ?? undefined),
+      saidBy: { account: { platform: chat.platform, id: romeEnd }, agent: "main" },
+      parts: [{ type: "text", content: body.text }],
+    },
+    async (target) => {
+      const out = await adapter.send(target.chat, thread, { text: body.text });
+      return {
+        key: out.key,
+        ...(out.threadId === thread ? {} : { landedIn: { threadId: out.threadId } }),
+      };
+    },
+  );
+  return platformIdOfLine(key, romeEnd, sent.key);
 }

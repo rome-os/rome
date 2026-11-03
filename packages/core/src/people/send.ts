@@ -165,9 +165,10 @@ export async function readSendStates(
  * Its key is the address the sender's channel holds for the direct message,
  * which is the platform's own id for it over today's storage, so the send has
  * to go out as `as`: another account's channel may hold another address.
+ * With `recording`, the direct message is held in Chats from here on.
  */
 export async function directPlace(
-  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf">,
+  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf" | "recording">,
   account: Account,
   from?: Account,
 ): Promise<{ ok: true; place: Place; as: Sender } | Extract<SendResult, { ok: false }>> {
@@ -184,5 +185,12 @@ export async function directPlace(
   const as: Sender = from ?? deps.accountOf?.(sender) ?? { channel: sender };
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
-  return { ok: true, place: placeIn(chatKey(account.platform, resolution.target.chatId)), as };
+  const address = resolution.target.chatId;
+  if (deps.recording) {
+    // Held in Chats before the send, so the send finds the direct message at
+    // the address and says the line there, not in a group.
+    const { adapters, chats } = deps.recording;
+    chats.start(adapters.directMessageReached(sender, account.id, address), "dm", null);
+  }
+  return { ok: true, place: placeIn(chatKey(account.platform, address)), as };
 }

@@ -383,7 +383,14 @@ function landedAt(deps: RecordedSendsDeps, channel: string, place: Place, sentTo
 /** The kind of chat channel `channel`'s account reaches at `address`: the
  *  kind of the chat Rome holds there, else the kind the address names, else
  *  a group. */
-function kindAt(deps: RecordedSendsDeps, channel: string, address: string): "group" | "dm" {
+export function kindAt(
+  deps: {
+    adapters: Pick<RecordedSendsDeps["adapters"], "chatAt" | "accountOn">;
+    chats: Pick<RecordedSendsDeps["chats"], "byKey">;
+  },
+  channel: string,
+  address: string,
+): "group" | "dm" {
   for (const kind of ["group", "dm"] as const) {
     const held = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
     if (held) return held.kind;

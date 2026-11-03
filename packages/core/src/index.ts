@@ -1914,7 +1914,11 @@ async function main() {
       accountNames,
       assistants: listedAgents,
       webchatRepo,
-      chatMessages,
+      recording: {
+        adapters: chatsWired.adapters,
+        chats: chatsWired.chats,
+        messages: chatsWired.messages,
+      },
       chats: chatsWired.chats,
       messages: chatsWired.messages,
       webhookInvocationsRepo,

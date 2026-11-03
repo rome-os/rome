@@ -12,9 +12,9 @@ import { timelinePageLimit, type TimelinePage } from "@rome/api-types/people";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
 import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
-import type { SaidMessage } from "../../chats/message.js";
-import type { MessageCursor, MessagePage } from "../../chats/message-repository.js";
-import { chatKey, placeIn } from "../../chats/place.js";
+import type { SaidMessage } from "../../chats/storage/message.js";
+import type { MessageCursor, MessagePage } from "../../chats/storage/message-repository.js";
+import { chatKey, placeIn } from "../../chats/storage/place.js";
 import { send } from "../../chats/send.js";
 import { directPlace } from "../../people/send.js";
 import type { ApiDeps } from "../deps.js";
@@ -80,7 +80,7 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     if (rawCursor != null && rawCursor !== "" && !before) {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
-    const page = await messagesAt(deps, address, timelinePageLimit(c.req.query("limit")), before);
+    const page = messagesAt(deps, address, timelinePageLimit(c.req.query("limit")), before);
     const entries = page.messages.map(timelineEntry).reverse();
     const oldest = entries.at(-1);
     return c.json({
@@ -147,7 +147,9 @@ function timelineEntry(message: SaidMessage): Message {
  *  names no message of Rome's transcript. */
 function positionOf(cursor: Message): MessageCursor | null {
   if (!cursor.ref.startsWith(REF_PREFIX)) return null;
-  return { at: new Date(cursor.timestamp * 1000), id: cursor.ref.slice(REF_PREFIX.length) };
+  const id = cursor.ref.slice(REF_PREFIX.length);
+  if (!/^[1-9]\d*$/.test(id)) return null;
+  return { at: new Date(cursor.timestamp * 1000), id: Number(id) };
 }
 
 /** The assistant's chat read back from `before`, or from its newest message.
@@ -158,15 +160,16 @@ function messagesAt(
   address: Account,
   limit: number,
   before?: MessageCursor | null,
-): Promise<MessagePage> {
-  const place = placeIn(chatKey(address.platform, address.id as ChatId));
-  return before
-    ? deps.chatMessages.before(place, before, limit)
-    : deps.chatMessages.recent(place, limit);
+): MessagePage {
+  // The agents platform keys a direct message by the assistant's address
+  // (docs/architecture/channels.md#adapter-keys).
+  const chat = deps.chats.byKey(chatKey(address.platform, address.id as ChatId));
+  if (!chat) return { messages: [], older: null, newer: null };
+  return deps.messages.read(placeIn(chat.ref), { before: before ?? null, limit });
 }
 
 /** The newest `limit` messages of the assistant's chat, newest first. */
 async function newest(deps: ApiDeps, address: Account, limit: number): Promise<Message[]> {
-  const page = await messagesAt(deps, address, limit);
+  const page = messagesAt(deps, address, limit);
   return page.messages.map(timelineEntry).reverse();
 }
