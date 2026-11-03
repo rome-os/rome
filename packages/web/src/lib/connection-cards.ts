@@ -81,6 +81,9 @@ export interface ConnectionCard {
   link: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts: boolean;
+  /** Rome holds access, but its channel does not know which account it is,
+   *  so it hears and sends nothing. */
+  accountUnknown?: boolean;
 }
 
 /** Fixed dashboard ordering: Talk channels, then OAuth services; services
@@ -217,6 +220,9 @@ function toCard(connection: ApiConnection): ConnectionCard {
     linkReported: connection.agent !== undefined,
     link: connection.link ?? null,
     severalAccounts: connection.severalAccounts === true,
+    ...(connection.accountUnknown && connection.state === "working"
+      ? { accountUnknown: true }
+      : {}),
   };
 }
 

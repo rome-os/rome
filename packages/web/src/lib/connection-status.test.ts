@@ -84,6 +84,12 @@ describe("connectionStatus — status vocabulary", () => {
     });
   });
 
+  it("working access whose channel knows no account ⇒ attention-toned Broken", () => {
+    expect(
+      connectionStatus(card({ slots: [slot("working")], accountUnknown: true })),
+    ).toMatchObject({ label: "Broken", tone: "attention" });
+  });
+
   it("no state ⇒ muted Not connected", () => {
     expect(connectionStatus(card({ slots: [slot(null)] }))).toEqual({
       label: "Not connected",

@@ -512,6 +512,8 @@ describe("GET /connections accounts", () => {
       channel: records.idOf(lark.id),
       platform: "lark",
       account: { platform: "lark", id: "cli_lark" },
+      // Its channel knows the account, so it is active.
+      accountUnknown: false,
     });
   });
 
