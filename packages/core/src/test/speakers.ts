@@ -129,7 +129,11 @@ export function sayOnChannel(
     at: Date;
   },
 ): number {
-  const account = romeAccountsOn(deps, line.channel)[0]!;
+  // A fixture channel with no account recorded speaks as its own name.
+  const account = romeAccountsOn(deps, line.channel)[0] ?? {
+    platform: deps.platformOfChannel(line.channel),
+    id: line.channel,
+  };
   const kind = line.kind ?? "dm";
   const key =
     kind === "dm"
