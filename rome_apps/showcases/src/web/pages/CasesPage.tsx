@@ -393,7 +393,7 @@ export function CasesPage({ navigate }: { navigate: (hash: string) => void }) {
                   ) : (
                     sources.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} ({s.traceCount})
+                        {s.name}
                       </option>
                     ))
                   )}
