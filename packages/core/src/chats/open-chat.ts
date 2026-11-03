@@ -79,7 +79,13 @@ async function openAsSpeaker(
 ): Promise<ChatRecord> {
   const { chat, romeEnd } = startChannelChat(deps, input);
   const opened = await webchatRepo.ensureChannelChat(input);
-  if (deps.speakers.speakerOf(opened.id)) return opened;
+  // A session keeps its place while the channel's account is still the one
+  // it speaks as. A channel paired again as another account moves it to that
+  // account's chat; what was said in the old one stays there.
+  const standing = deps.speakers.speakerOf(opened.id);
+  if (standing?.accountId === romeEnd && standing.place.chat.platform === chat.platform) {
+    return opened;
+  }
   return webchatRepo.ensureChannelChat({
     ...input,
     speaker: { chat, accountId: romeEnd, at: new Date() },

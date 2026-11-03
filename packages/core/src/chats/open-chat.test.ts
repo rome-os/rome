@@ -71,10 +71,14 @@ describe("openChannelChat as a speaker", () => {
   let wired: ReturnType<typeof chatsWiring>;
   let deps: OpenChannelChatDeps;
 
+  let telegramAccount: string;
+
   beforeEach(() => {
     testDb = createTestDb();
+    telegramAccount = "111";
     wired = chatsWiring(testDb.db, {
-      accountOf: (channel) => (channel === "telegram" ? { platform: "telegram", id: "111" } : null),
+      accountOf: (channel) =>
+        channel === "telegram" ? { platform: "telegram", id: telegramAccount } : null,
       platformOfChannel: (name) => name,
       channelsOn: (platform) => [platform],
     });
@@ -125,5 +129,28 @@ describe("openChannelChat as a speaker", () => {
 
     expect(again.id).toBe(first.id);
     expect(wired.speakers.speakerOf(again.id)).toEqual(placed);
+  });
+
+  it("opens a group where the address says so, though a send named it private", async () => {
+    const record = await openChannelChat(deps, {
+      channel: "telegram",
+      threadId: "-42",
+      threadType: "private",
+      agentName: "main",
+    });
+
+    const speaker = wired.speakers.speakerOf(record.id);
+    expect(speaker && wired.adapters.keyOf(speaker.place.chat).externalId).toBe("-42");
+  });
+
+  it("moves a session to the chat of the account its channel is paired as now", async () => {
+    const input = { channel: "telegram", threadId: "-42", threadType: "group" as const };
+    const first = await openChannelChat(deps, { ...input, agentName: "main" });
+    telegramAccount = "222";
+
+    const again = await openChannelChat(deps, { ...input, agentName: "main" });
+
+    expect(again.id).toBe(first.id);
+    expect(wired.speakers.speakerOf(again.id)?.accountId).toBe("222");
   });
 });

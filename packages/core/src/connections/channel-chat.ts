@@ -5,7 +5,7 @@
 import type { EnsureChannelChatInput } from "@rome-os/app-runtime";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatKey, ChatRef } from "../chats/storage/place.js";
-import type { ChatAdapters } from "./chat-adapter.js";
+import { type ChatAdapters, kindNamedBy } from "./chat-adapter.js";
 
 export interface StartChannelChatDeps {
   chats: Pick<ChatRepository, "start">;
@@ -29,7 +29,12 @@ export function startChannelChat(
     input.parentThreadId && input.parentThreadId !== input.threadId
       ? input.parentThreadId
       : undefined;
-  const kind = parent || input.threadType !== "private" ? "group" : "dm";
+  // Where the address says which it is, it is that, whatever type the
+  // caller named: a send opens every new address as private.
+  const named = parent
+    ? "group"
+    : kindNamedBy(deps.adapters.accountOn(input.channel).platform, input.threadId);
+  const kind = named ?? (input.threadType === "private" ? "dm" : "group");
   const key = deps.adapters.chatAt(input.channel, parent ?? input.threadId, kind);
   const chat = deps.chats.start(key, kind, parent ? null : (input.threadName ?? null));
   // Opened at its address, the direct message is kept there, so the other
