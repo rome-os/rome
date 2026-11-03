@@ -64,7 +64,7 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
 export interface SendRecording {
   adapters: Pick<
     ChatAdapters,
-    "of" | "chatAt" | "accountOn" | "platformOn" | "directMessageReached"
+    "of" | "chatAt" | "accountOn" | "knownAccountOn" | "platformOn" | "directMessageReached"
   >;
   chats: Pick<ChatRepository, "start" | "byKey">;
   messages: Pick<MessageRepository, "send">;

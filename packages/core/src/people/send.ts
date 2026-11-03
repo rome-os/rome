@@ -190,6 +190,11 @@ export async function directPlace(
     // Held in Chats before the send, so the send finds the direct message at
     // the address and says the line there, not in a group.
     const { adapters, chats } = deps.recording;
+    // The channel may have come back as another account while the lookup
+    // ran, and the address is this one's: keep it under no other.
+    if ("id" in as && adapters.knownAccountOn(sender)?.id !== as.id) {
+      return { ok: false, send: "not-connected" };
+    }
     chats.start(adapters.directMessageReached(sender, account.id, address), "dm", null);
   }
   return { ok: true, place: placeIn(chatKey(account.platform, address)), as };
