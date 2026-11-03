@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import type { ChatReads, RecentChat } from "@rome-os/app-runtime/chats";
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
 import { createApiHandler } from "./index.js";
 
@@ -158,15 +158,29 @@ describe("showcases webchat sources through Chats", () => {
     },
   };
 
-  it("lists the dashboard chats that have traces", async () => {
+  it("lists the dashboard chats without reading their traces", async () => {
+    const traces = rs.spyOn(reads, "traces");
     const res = await handler(reads).handle(request("GET", "sources/sessions"));
 
     const { sessions } = (await res.json()) as {
-      sessions: Array<{ id: string; traceCount: number; agentName: string }>;
+      sessions: Array<{ id: string; agentName: string }>;
     };
     expect(sessions).toEqual([
-      expect.objectContaining({ id: "web", traceCount: 1, agentName: "helper" }),
+      expect.objectContaining({ id: "web", agentName: "helper" }),
+      expect.objectContaining({ id: "quiet" }),
     ]);
+    expect(sessions[0]).not.toHaveProperty("traceCount");
+    expect(traces).not.toHaveBeenCalled();
+    traces.mockRestore();
+  });
+
+  it("says a listed chat with no traces has nothing to import", async () => {
+    const res = await handler(reads).handle(
+      request("POST", "imports/webchat-session", { sessionId: "quiet" }),
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ message: "No trace rows found for that session." });
   });
 
   it("imports a chat with its prompt, steps and reply", async () => {

@@ -27,7 +27,6 @@ interface SourceSessionRow {
   project_path: string | null;
   agent_name: string | null;
   created_at: number | string | Date;
-  trace_count: number;
 }
 
 interface SourceTraceRow {
@@ -133,7 +132,6 @@ interface SourceSession {
   projectPath: string | null;
   agentName: string | null;
   createdAt: string;
-  traceCount: number;
 }
 
 function sourceTraceTitle(name: string, index: number): string {
@@ -411,27 +409,22 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     return chats as ChatReads;
   }
 
-  /** The guardian's dashboard chats with traces, most recently active
-   *  first, read through Chats when the host offers it. */
+  /** The guardian's dashboard chats, most recently active first, read
+   *  through Chats when the host offers it. Each chat's traces are left
+   *  unread here, since a picker loading every one would read them all; an
+   *  import of a chat with none says so. */
   private async listSourceSessions(): Promise<SourceSession[]> {
     const reads = this.chatReads();
     if (!reads) return this.legacySourceSessions();
-    const sessions: SourceSession[] = [];
-    for (const chat of await reads.recentChats({ since: new Date(0), where: "dashboard" })) {
-      const traceCount = (await reads.traces(chat.sessionId)).length;
-      if (traceCount === 0) continue;
-      sessions.push({
-        id: chat.sessionId,
-        name: chat.name,
-        projectName: chat.projectName,
-        projectPath: chat.projectPath,
-        agentName: chat.agentName,
-        createdAt: chat.startedAt.toISOString(),
-        traceCount,
-      });
-      if (sessions.length === 100) break;
-    }
-    return sessions;
+    const chats = await reads.recentChats({ since: new Date(0), where: "dashboard" });
+    return chats.slice(0, 100).map((chat) => ({
+      id: chat.sessionId,
+      name: chat.name,
+      projectName: chat.projectName,
+      projectPath: chat.projectPath,
+      agentName: chat.agentName,
+      createdAt: chat.startedAt.toISOString(),
+    }));
   }
 
   private legacySourceSessions(): SourceSession[] {
@@ -445,8 +438,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
         ws.project_name,
         ws.project_path,
         ws.agent_name,
-        ws.created_at,
-        cast(count(wm.id) as integer) AS trace_count
+        ws.created_at
       FROM rome_sessions ws
       JOIN rome_agent_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
       WHERE (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
@@ -462,7 +454,6 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       projectPath: row.project_path,
       agentName: row.agent_name,
       createdAt: toDate(row.created_at).toISOString(),
-      traceCount: Number(row.trace_count) || 0,
     }));
   }
 
