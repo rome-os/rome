@@ -469,6 +469,40 @@ describe("messagesSaid", () => {
       "Hello",
     ]);
   });
+  it("catches a group's session up on a line that woke no agent when a later line wakes one", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const now = Date.now();
+    await telegram.deliver(
+      message({ messageId: "tg-1", text: "lunch?", timestamp: new Date(now) }),
+    );
+    await telegram.deliver(
+      message({ messageId: "tg-2", text: "@rome book a table", timestamp: new Date(now + 60_000) }),
+    );
+    await settled();
+    const [ambient, waking] = heard;
+    if (!ambient || !waking) throw new Error("not heard");
+    const session = waking.recorded.chatRecordId;
+    expect(ambient.recorded.chatRecordId).toBe(session);
+
+    // The first line wakes no agent; the second wakes one and is its turn's prompt.
+    await said.decided(ambient.recorded);
+    wiring.links.prompt(Number(waking.recorded.messageId), session, "turn-1");
+    await said.decided(waking.recorded);
+
+    const unseen = wiring.links.unseen(session);
+    expect(unseen.map((line) => line.text)).toEqual(["lunch?"]);
+    // Once the turn has caught up on it, the next turn reads nothing again.
+    wiring.links.seen(
+      unseen.map((line) => line.id),
+      session,
+      "turn-1",
+    );
+    expect(wiring.links.unseen(session)).toEqual([]);
+  });
+
   it("raises a shared line with its quote for every account that hears it", async () => {
     said.subscribe(async () => undefined);
     const quotes: (number | undefined)[] = [];
