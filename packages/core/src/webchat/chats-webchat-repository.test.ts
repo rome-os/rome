@@ -38,7 +38,7 @@ describe("ChatsWebChatRepository", () => {
   const ownRows = (id: string) =>
     testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all();
 
-  it("preserves legacy Concierge delegation and human identities through startup backfill", async () => {
+  it("keeps legacy Concierge attribution and human identities through startup backfill", async () => {
     const legacy = new WebChatRepository(testDb.db);
     await legacy.createSession("old-chat", "Before the switch");
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
@@ -70,11 +70,8 @@ describe("ChatsWebChatRepository", () => {
       await repo.getUserMessageActors("old-chat"),
       sources,
     );
-    expect(senders.get("old-concierge")).toMatchObject({
-      kind: "automated",
-      name: "Concierge",
-      onBehalfOf: { kind: "guardian", name: "Ray" },
-    });
+    expect(senders.get("old-concierge")).toMatchObject({ kind: "automated", name: "Concierge" });
+    expect(senders.get("old-concierge")).not.toHaveProperty("onBehalfOf");
     expect(senders.get("old-loopback")).toMatchObject({ kind: "guardian", name: "Ray" });
     expect(senders.get("old-cookie")).toMatchObject({ kind: "guardian", name: "Ray" });
     expect(senders.get("old-visitor")).toMatchObject({
@@ -82,7 +79,7 @@ describe("ChatsWebChatRepository", () => {
       name: "alex@example.com",
       accountId: "alex",
     });
-    expect((await repo.getReplyTarget("old-chat", "old-concierge"))?.actor?.kind).toBe("guardian");
+    expect(await repo.getReplyTarget("old-chat", "old-concierge")).not.toBeNull();
     const page = await repo.getMessagesPage("old-chat", { limit: 10 });
     expect(page.rows.map((message) => message.id).sort()).toEqual([
       "old-concierge",

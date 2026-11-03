@@ -192,11 +192,8 @@ SELECT
   CASE WHEN m.role = 'assistant' OR (m.role = 'notification' AND m.sender_id = 'rome')
          THEN s.account_id
        WHEN s.dashboard THEN
-         -- An agent speaks from its account, or for its recorded guardian.
-         CASE WHEN m.sender_id IN ('main', 'core:main', 'core:concierge')
-                   AND json_valid(m.actor) AND json_extract(m.actor, '$.kind') = 'guardian'
-              THEN 'guardian'
-              WHEN m.sender_id IS NOT NULL THEN 'agent:' || m.sender_id
+         -- An agent saying it on the dashboard says it as its dashboard account.
+         CASE WHEN m.sender_id IS NOT NULL THEN 'agent:' || m.sender_id
               WHEN json_valid(m.actor) AND json_extract(m.actor, '$.kind') = 'visitor'
               THEN 'visitor:' || json_extract(m.actor, '$.accountId') ELSE 'guardian' END
        ELSE m.sender_id END AS sender_account_id,
