@@ -180,7 +180,7 @@ rs.mock("@/components/chat/MessageList", () => ({
         id?: string;
         content: string;
         traceArchived?: boolean;
-        sender?: { name: string | null; avatarUrl: string | null };
+        sender?: { name: string | null; avatarUrl?: string | null; onBehalfOf?: { kind: string } };
       };
     }[];
   }) => (
@@ -211,6 +211,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-row-key={row.key}
             data-timeline-anchor={row.message?.id}
             data-sender={row.message?.sender?.name}
+            data-on-behalf={row.message?.sender?.onBehalfOf?.kind}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
             {row.message?.content}
@@ -1095,6 +1096,73 @@ describe("Chat turn poll", () => {
     await flush();
     expect(turnLookups()).toBe(2);
     expect(rs.mocked(openTurnStream).mock.calls.map(([turnId]) => turnId)).toEqual(["turn-9"]);
+    expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it.each([
+    false,
+    true,
+  ])("loads a remote automated input before its reply ends, on behalf: %s", async (onBehalf) => {
+    const socket = await renderIdle();
+    let loaded!: (messages: import("@/lib/chat-types").ChatMessage[]) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          loaded = resolve;
+        }),
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "remote-turn", status: "running" }]);
+    rs.mocked(openTurnStream).mockImplementationOnce(
+      async (_id, signal) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  'event: input_status\ndata: {"type":"input_status","inputId":"remote-input","turnId":"remote-turn","state":"accepted"}\n\n',
+                ),
+              );
+              signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        ),
+    );
+    act(() =>
+      socket.receive({
+        type: "event",
+        topic: sessionTopic,
+        event: "session_running",
+        data: { sessionId: "session-1", running: true },
+      }),
+    );
+    await flush();
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    // While the read is pending, no sender-less own-message placeholder is painted.
+    expect(screen.queryByTestId("user-row")).toBeNull();
+    await act(async () =>
+      loaded([
+        {
+          id: "remote-input",
+          sessionId: "session-1",
+          turnId: "remote-turn",
+          role: "user",
+          createdAt: "2026-10-24T12:00:00Z",
+          content: "Remote input",
+          sender: {
+            kind: "automated",
+            sourceType: "app",
+            name: "Daily Report",
+            iconUrl: null,
+            ...(onBehalf ? { onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null } } : {}),
+          },
+        },
+      ]),
+    );
+    await flush();
+    expect(screen.getByTestId("user-row").getAttribute("data-sender")).toBe("Daily Report");
+    expect(screen.getByTestId("user-row").getAttribute("data-on-behalf")).toBe(
+      onBehalf ? "guardian" : null,
+    );
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
   });
 

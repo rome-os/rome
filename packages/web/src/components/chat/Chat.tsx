@@ -1152,6 +1152,15 @@ export function Chat({
               const status = JSON.parse(
                 evt.data,
               ) as import("@rome/api-types/trace-segments").InputStatusEvent;
+              // An input from another caller has no local optimistic row. Load its
+              // durable sender before first paint, without waiting for the reply.
+              if (
+                !(messagesRef.current.get(sessionId) ?? []).some(
+                  (message) => message.id === status.inputId,
+                )
+              ) {
+                void loadMessages(sessionId, { force: true });
+              }
               setMessages((prev) => {
                 const next = new Map(prev);
                 next.set(
