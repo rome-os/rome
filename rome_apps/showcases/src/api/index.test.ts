@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
+import type { ChatReads, RecentChat } from "@rome-os/app-runtime/chats";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
 import { createApiHandler } from "./index.js";
@@ -24,8 +25,9 @@ afterEach(() => {
   testDb.close();
 });
 
-function handler() {
+function handler(chats?: ChatReads) {
   return createApiHandler({
+    ...(chats ? { repositories: { chats } } : {}),
     app: { id: "showcases", version: "0.0.0" },
     db: {
       connection: testDb.db,
@@ -104,5 +106,92 @@ describe("showcases webchat sources", () => {
     const blocks = JSON.stringify(await raw.json());
     expect(blocks).toContain('"name":"search"');
     expect(blocks).toContain("web answer");
+  });
+});
+
+describe("showcases webchat sources through Chats", () => {
+  const at = new Date(1700000000 * 1000);
+  const dashboardChat = (sessionId: string, name: string): RecentChat => ({
+    sessionId,
+    chat: { platform: "webchat", id: 1 },
+    name,
+    threadName: null,
+    ownerKey: "guardian",
+    archived: false,
+    channel: null,
+    agentName: "helper",
+    projectName: null,
+    projectPath: null,
+    startedAt: at,
+  });
+  const trace = (id: string) => ({
+    id: `${id}-trace`,
+    turnId: `${id}-turn`,
+    content: JSON.stringify([{ type: "tool_use", id: "t1", name: "search", input: {} }]),
+    createdAt: at,
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: null,
+    cacheWriteTokens: null,
+    costUsd: null,
+  });
+  // Two dashboard chats, only "web" with a trace.
+  const reads: ChatReads = {
+    async recentChats() {
+      return [dashboardChat("web", "Web chat"), dashboardChat("quiet", "Quiet chat")];
+    },
+    async transcript(sessionId) {
+      if (sessionId !== "web") return [];
+      const line = (role: "user" | "assistant", content: string) => ({
+        key: `${sessionId}-${role}`,
+        turnId: "web-turn",
+        role,
+        senderId: null,
+        senderName: null,
+        content,
+        createdAt: at,
+      });
+      return [line("user", text("web question")), line("assistant", text("web answer"))];
+    },
+    async traces(sessionId) {
+      return sessionId === "web" ? [trace("web")] : [];
+    },
+  };
+
+  it("lists the dashboard chats that have traces", async () => {
+    const res = await handler(reads).handle(request("GET", "sources/sessions"));
+
+    const { sessions } = (await res.json()) as {
+      sessions: Array<{ id: string; traceCount: number; agentName: string }>;
+    };
+    expect(sessions).toEqual([
+      expect.objectContaining({ id: "web", traceCount: 1, agentName: "helper" }),
+    ]);
+  });
+
+  it("imports a chat with its prompt, steps and reply", async () => {
+    const api = handler(reads);
+    const res = await api.handle(request("POST", "imports/webchat-session", { sessionId: "web" }));
+
+    expect(res.status).toBe(200);
+    const imported = (await res.json()) as { collectionId: string; traceCount: number };
+    expect(imported.traceCount).toBe(1);
+    const list = await api.handle(request("GET", `collections/${imported.collectionId}/traces`));
+    const { traces } = (await list.json()) as {
+      traces: Array<{ id: string; metadata: { userPrompt?: string } }>;
+    };
+    expect(traces[0]?.metadata.userPrompt).toBe("web question");
+    const raw = await api.handle(request("GET", `traces/${traces[0]!.id}/raw.json`));
+    const blocks = JSON.stringify(await raw.json());
+    expect(blocks).toContain('"name":"search"');
+    expect(blocks).toContain("web answer");
+  });
+
+  it("imports nothing from a session that is not a dashboard chat", async () => {
+    const res = await handler(reads).handle(
+      request("POST", "imports/webchat-session", { sessionId: "elsewhere" }),
+    );
+
+    expect(res.status).toBe(404);
   });
 });
