@@ -9,7 +9,6 @@ const rendererOutDir = fileURLToPath(new URL("../desktop/src/renderer", import.m
 const ENTRY_TITLES: Record<string, string> = {
   onboarding: "Rome",
   settings: "Rome Settings",
-  quitting: "Rome",
   pill: "Rome",
 };
 
@@ -24,7 +23,6 @@ export default defineConfig({
     entry: {
       onboarding: resolve(srcDir, "entries/onboarding.tsx"),
       settings: resolve(srcDir, "entries/settings.tsx"),
-      quitting: resolve(srcDir, "entries/quitting.tsx"),
       pill: resolve(srcDir, "entries/pill.tsx"),
     },
   },

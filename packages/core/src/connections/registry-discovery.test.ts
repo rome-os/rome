@@ -1,53 +1,55 @@
 // Registry discovery contract tests.
 //
-// Covers spec scenarios: 1 (zero-grant), 2 (needs-auth precision),
-// 3 (import unlocks + onUnlocked), 4 (idempotent import),
+// Covers spec scenarios: 1 (chat unlocked by its grant), 2 (needs-auth precision),
+// 3 (import unlocks + onUnlocked), 4 (every grant is a fresh grant),
 // 14 (ledger invariants), 16 (late onUnlocked registration),
 // 17 (register validation), 18 (load with unregistered service).
 //
 // The suite runs against the drizzle-backed ledger (fresh test db per test).
 
+import { NO_GRANT } from "./grant.js";
 import { describe, it, expect } from "@rstest/core";
 import { sendThrough } from "../channels/connection-ports.js";
 import { ConnectionRegistry } from "./registry.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { createTestDb } from "../test/helpers.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import {
-  makeZeroGrantTalk,
   makePasteTalk,
-  makeTwoGrant,
+  makeBotAll,
+  makeRenewableAct,
   makeInboundMessage,
   CredentialRejected,
 } from "./test-fixtures.js";
-import type { GrantLedger } from "./ledger.js";
+import type { ConnectionsRepository } from "./repository.js";
 import type { Connection } from "./types.js";
 
 // Ledger factory — a fresh drizzle-backed ledger per test
 
-function makeLedger(): GrantLedger {
-  return new DrizzleGrantLedger(createTestDb().db);
+function makeLedger(): ConnectionsRepository {
+  return new DrizzleConnectionsRepository(createTestDb().db);
 }
 
 // Helpers
 
-function makeRegistry(ledger: GrantLedger): ConnectionRegistry {
-  return new ConnectionRegistry({ ledger });
+function makeRegistry(ledger: ConnectionsRepository): ConnectionRegistry {
+  return new ConnectionRegistry({ repository: ledger });
 }
 
-// Scenario 1 — zero-grant: unlocked at connect; onUnlocked fires; talk roundtrip
+// Scenario 1 — chat unlocked by its grant; onUnlocked fires; talker roundtrip
 
-describe("scenario 1: zero-grant talk", () => {
-  it("talk is non-null immediately after connect", async () => {
+describe("scenario 1: chat unlocked by its grant", () => {
+  it("talk is locked at connect and unlocked once the grant is held", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, talkerFactory, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
-    const conn = await reg.connect("fake-webchat");
+    const conn = await reg.connect("fake-telegram");
+    expect(conn.isUnlocked("chat")).toBe(false);
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
 
-    // Zero-grant capability must be unlocked at birth.
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(conn.act).toBeNull();
     expect(conn.watch).toBeNull();
     expect(talkerFactory.instances).toHaveLength(1);
@@ -56,27 +58,29 @@ describe("scenario 1: zero-grant talk", () => {
   it("status reports unlocked for talk, unsupported for act/watch", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
-    const conn = await reg.connect("fake-webchat");
+    const conn = await reg.connect("fake-telegram");
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
     const s = conn.status();
 
-    expect(s.talk).toEqual({ state: "unlocked" });
+    expect(s.chat).toEqual({ state: "unlocked" });
     expect(s.act).toEqual({ state: "unsupported" });
     expect(s.watch).toEqual({ state: "unsupported" });
   });
 
-  it("onUnlocked fires synchronously when registered before connect", async () => {
+  it("onUnlocked fires when registered before connect", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
-    const conn = await reg.connect("fake-webchat");
+    const conn = await reg.connect("fake-telegram");
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
 
     expect(fired).toHaveLength(1);
     expect(fired[0].id).toBe(conn.id);
@@ -85,10 +89,11 @@ describe("scenario 1: zero-grant talk", () => {
   it("deliver→handler roundtrip: message delivered via onMessage reaches the handler", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, talkerFactory, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
-    const conn = await reg.connect("fake-webchat");
+    const conn = await reg.connect("fake-telegram");
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
     const received: unknown[] = [];
     conn.hearTalker(async (msg) => {
       received.push(msg);
@@ -104,10 +109,11 @@ describe("scenario 1: zero-grant talk", () => {
   it("send() is recorded on the fake talker", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, talkerFactory, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
-    const conn = await reg.connect("fake-webchat");
+    const conn = await reg.connect("fake-telegram");
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
     await sendThrough(conn, "thread-1" as ChatId, { text: "reply" });
 
     expect(talkerFactory.instances[0].state.sends).toHaveLength(1);
@@ -115,25 +121,25 @@ describe("scenario 1: zero-grant talk", () => {
   });
 });
 
-// Scenario 2 — needs-auth precision: twoGrant with nothing conferred
+// Scenario 2 — needs-auth precision: botAll with nothing granted
 
 describe("scenario 2: needs-auth precision", () => {
-  it("talk status reports needs-auth with [bot] before any confer", async () => {
+  it("talk status reports needs-auth with [bot] before any grant", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeTwoGrant();
+    const { descriptor } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
     const s = conn.status();
 
-    expect(s.talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(s.chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
   });
 
-  it("watch status reports needs-auth with [bot] before any confer", async () => {
+  it("watch status reports needs-auth with [bot] before any grant", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeTwoGrant();
+    const { descriptor } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
@@ -142,62 +148,62 @@ describe("scenario 2: needs-auth precision", () => {
     expect(s.watch).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
   });
 
-  it("act status reports needs-auth with [user] before any confer", async () => {
+  it("act status reports needs-auth with [bot] before any grant", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeTwoGrant();
+    const { descriptor } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
     const s = conn.status();
 
-    expect(s.act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
+    expect(s.act).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
   });
 
-  it("after bot import: talk+watch unlocked, act still needs-auth [user]", async () => {
+  it("after bot import: talk, watch and act are unlocked", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
+    const { descriptor, botCredential } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
     const s = conn.status();
 
-    expect(s.talk).toEqual({ state: "unlocked" });
+    expect(s.chat).toEqual({ state: "unlocked" });
     expect(s.watch).toEqual({ state: "unlocked" });
-    expect(s.act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
+    expect(s.act).toEqual({ state: "unlocked" });
   });
 
-  it("talk and watch handles are non-null after bot import; act is still null", async () => {
+  it("talk, watch and act handles are non-null after bot import", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
+    const { descriptor, botCredential } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(conn.watch).not.toBeNull();
-    expect(conn.act).toBeNull();
+    expect(conn.act).not.toBeNull();
   });
 });
 
-// Scenario 3 — authorize via importCredential unlocks + fires onUnlocked once per cap
+// Scenario 3 — authorize via grant unlocks + fires onUnlocked once per cap
 
 describe("scenario 3: import unlocks + fires onUnlocked", () => {
-  it("importCredential transitions grants() to authorized", async () => {
+  it("grant transitions grants() to authorized", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
+    const { descriptor, botCredential } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
     expect(conn.auth.grants()["bot"]).toBe("unauthorized");
 
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(conn.auth.grants()["bot"]).toBe("authorized");
   });
@@ -205,16 +211,16 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
   it("onUnlocked fires for talk and watch after bot import", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
+    const { descriptor, botCredential } = makeBotAll();
     reg.register(descriptor);
 
     const talkFired: Connection[] = [];
     const watchFired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => talkFired.push(c));
+    reg.onUnlocked("chat", (c) => talkFired.push(c));
     reg.onUnlocked("watch", (c) => watchFired.push(c));
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(talkFired).toHaveLength(1);
     expect(talkFired[0].id).toBe(conn.id);
@@ -225,77 +231,35 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
   it("onUnlocked fires ONCE per cap (not twice) for a single import", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
+    const { descriptor, botCredential } = makeBotAll();
     reg.register(descriptor);
 
     let count = 0;
-    reg.onUnlocked("talk", () => count++);
+    reg.onUnlocked("chat", () => count++);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(count).toBe(1);
   });
 });
 
-// Scenario 4 — idempotent import: same material → no new epoch, no re-fire
+// Scenario 4 — every grant is a fresh grant: even the same material rebuilds
 
-describe("scenario 4: idempotent import", () => {
-  it("re-importing same material does not call stop() on the talker", async () => {
+describe("scenario 4: every grant is a fresh grant", () => {
+  it("a grant rebuilds the epoch", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential, talkerFactory } = makeTwoGrant();
+    const { descriptor, botCredential, talkerFactory } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    const cred = botCredential();
-    await reg.importCredential(conn.id, "bot", cred);
-
-    const firstInstance = talkerFactory.instances[0];
-    expect(firstInstance.state.stopCount).toBe(0);
-
-    // Re-import identical material.
-    await reg.importCredential(conn.id, "bot", { ...cred });
-
-    // No new stop() call, same instance count.
-    expect(firstInstance.state.stopCount).toBe(0);
-    expect(talkerFactory.instances).toHaveLength(1);
-  });
-
-  it("re-importing same material does not re-fire onUnlocked", async () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
-    reg.register(descriptor);
-
-    let count = 0;
-    reg.onUnlocked("talk", () => count++);
-
-    const conn = await reg.connect("fake-discord");
-    const cred = botCredential();
-    await reg.importCredential(conn.id, "bot", cred);
-    expect(count).toBe(1);
-
-    // Re-import identical material.
-    await reg.importCredential(conn.id, "bot", { ...cred });
-
-    // Still exactly 1.
-    expect(count).toBe(1);
-  });
-
-  it("importing different material DOES trigger a new epoch", async () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-    const { descriptor, botCredential, talkerFactory } = makeTwoGrant();
-    reg.register(descriptor);
-
-    const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
     const firstInstance = talkerFactory.instances[0];
 
     // Import a credential with different material.
-    await reg.importCredential(conn.id, "bot", {
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", {
       material: { token: "different-token" },
       expiresAt: "never",
     });
@@ -304,51 +268,99 @@ describe("scenario 4: idempotent import", () => {
     expect(firstInstance.state.stopCount).toBe(1);
     expect(talkerFactory.instances).toHaveLength(2);
   });
+
+  it("fixing the same material activates a capability whose build failed", async () => {
+    const reg = makeRegistry(makeLedger());
+    const fx = makePasteTalk();
+    const talker = fx.descriptor.capabilities.talker!;
+    let failNext = true;
+    reg.register({
+      ...fx.descriptor,
+      capabilities: {
+        ...fx.descriptor.capabilities,
+        talker: {
+          ...talker,
+          build(...args: Parameters<typeof talker.build>) {
+            if (failNext) {
+              failNext = false;
+              throw new Error("build failed");
+            }
+            return talker.build(...args);
+          },
+        },
+      },
+    });
+    const conn = await reg.connect("fake-telegram");
+
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
+    expect(conn.isUnlocked("chat")).toBe(false);
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
+
+    expect(conn.isUnlocked("chat")).toBe(true);
+  });
+
+  it("fixing same material with a later expiry keeps the grant from renewing early", async () => {
+    const now = new Date("2026-10-26T00:00:00Z");
+    const reg = new ConnectionRegistry({ repository: makeLedger(), clock: () => now });
+    const { descriptor, userScheme } = makeRenewableAct();
+    reg.register(descriptor);
+    const conn = await reg.connect("fake-github");
+    const material = { token: "same-token" };
+
+    await reg.giveGrant(conn.connectionKind, conn.id, "user", {
+      material,
+      expiresAt: new Date(now.getTime() + 60_000),
+    });
+    await reg.giveGrant(conn.connectionKind, conn.id, "user", {
+      material: { ...material },
+      expiresAt: new Date(now.getTime() + 10 * 24 * 60 * 60_000),
+    });
+    await reg.renewExpiring(60 * 60_000);
+
+    // The live credential took the later expiry, so nothing was due to renew.
+    expect(userScheme.materialHistory).toEqual([]);
+  });
 });
 
 // Scenario 14 — ledger invariants
 
 describe("scenario 14: ledger invariants", () => {
-  it("grant rows exist in unauthorized state immediately after connect (before any confer)", async () => {
+  it("the grant row exists in unauthorized state immediately after connect (before any grant)", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeTwoGrant();
+    const { descriptor } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
 
-    // Both grants must exist immediately after connect.
-    const botRow = await ledger.getGrant(conn.id, "bot");
-    const userRow = await ledger.getGrant(conn.id, "user");
+    const botRow = await ledger.grantOf(conn.id);
 
     expect(botRow).not.toBeNull();
     expect(botRow!.state).toBe("unauthorized");
-    expect(userRow).not.toBeNull();
-    expect(userRow!.state).toBe("unauthorized");
   });
 
   it("credential is absent (undefined) when grant is unauthorized", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeTwoGrant();
+    const { descriptor } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
 
-    const botRow = await ledger.getGrant(conn.id, "bot");
+    const botRow = await ledger.grantOf(conn.id);
     expect(botRow!.credential).toBeUndefined();
   });
 
   it("credential is present after import (state authorized)", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeTwoGrant();
+    const { descriptor, botCredential } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
-    const botRow = await ledger.getGrant(conn.id, "bot");
+    const botRow = await ledger.grantOf(conn.id);
     expect(botRow!.state).toBe("authorized");
     expect(botRow!.credential).toBeDefined();
   });
@@ -356,18 +368,18 @@ describe("scenario 14: ledger invariants", () => {
   it("deleteConnection cascades connection-scoped grants", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeTwoGrant();
+    const { descriptor } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
 
     // Verify grant rows exist first.
-    expect(await ledger.getGrant(conn.id, "bot")).not.toBeNull();
+    expect(await ledger.grantOf(conn.id)).not.toBeNull();
 
     await reg.remove(conn.id);
 
     // Grant row must be gone after deletion.
-    const afterBot = await ledger.getGrant(conn.id, "bot");
+    const afterBot = await ledger.grantOf(conn.id);
     expect(afterBot).toBeNull();
   });
 });
@@ -378,15 +390,16 @@ describe("scenario 16: late onUnlocked registration", () => {
   it("onUnlocked fires immediately for already-unlocked connections when registered late", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
-    // Connect first (zero-grant → immediately unlocked).
-    const conn = await reg.connect("fake-webchat");
+    // Connect and give access first, so talk is unlocked.
+    const conn = await reg.connect("fake-telegram");
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
 
     // Register the handler AFTER the connection is already unlocked.
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     // Handler must fire immediately for the already-unlocked connection.
     expect(fired).toHaveLength(1);
@@ -396,15 +409,17 @@ describe("scenario 16: late onUnlocked registration", () => {
   it("onUnlocked fires immediately for multiple already-unlocked connections", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor, validCredential } = makePasteTalk();
     reg.register(descriptor);
-    reg.register({ ...descriptor, connectionKind: "fake-browser-chat" });
+    reg.register({ ...descriptor, connectionKind: "fake-signal" });
 
-    const connA = await reg.connect("fake-webchat");
-    const connB = await reg.connect("fake-browser-chat");
+    const connA = await reg.connect("fake-telegram");
+    const connB = await reg.connect("fake-signal");
+    await reg.giveGrant(connA.connectionKind, connA.id, "bot", validCredential());
+    await reg.giveGrant(connB.connectionKind, connB.id, "bot", validCredential());
 
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     expect(fired).toHaveLength(2);
     const ids = fired.map((c) => c.id);
@@ -422,7 +437,7 @@ describe("scenario 16: late onUnlocked registration", () => {
     await reg.connect("fake-telegram");
 
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     // No fire because the connection is locked (needs-auth).
     expect(fired).toHaveLength(0);
@@ -435,80 +450,10 @@ describe("scenario 17: register() validation", () => {
   it("throws on duplicate service name", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor } = makePasteTalk();
     reg.register(descriptor);
 
     expect(() => reg.register(descriptor)).toThrow(/duplicate/i);
-  });
-
-  it("throws when capability needs a grant not in auth", () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-
-    expect(() =>
-      reg.register({
-        connectionKind: "bad-service",
-        auth: {},
-        capabilities: {
-          actor: {
-            needs: ["user" as const],
-            build: () => ({
-              operations: () => [],
-              async invoke() {
-                return null;
-              },
-            }),
-          },
-        },
-      }),
-    ).toThrow(/undeclared grant/i);
-  });
-
-  it("throws when talker needs an undeclared grant", () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-
-    expect(() =>
-      reg.register({
-        connectionKind: "bad-talk",
-        auth: {},
-        capabilities: {
-          talker: {
-            needs: ["bot" as const],
-            build: () => ({
-              start() {},
-              stop() {},
-              async send(chatId) {
-                return { chatId };
-              },
-            }),
-          },
-        },
-      }),
-    ).toThrow(/undeclared grant/i);
-  });
-
-  it("allows registration of a descriptor with empty needs (valid)", () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-
-    expect(() =>
-      reg.register({
-        connectionKind: "valid-service",
-        auth: {},
-        capabilities: {
-          actor: {
-            needs: [] as const,
-            build: () => ({
-              operations: () => [],
-              async invoke() {
-                return null;
-              },
-            }),
-          },
-        },
-      }),
-    ).not.toThrow();
   });
 });
 
@@ -519,16 +464,19 @@ describe("scenario 18: load() with unregistered service rows", () => {
     const ledger = makeLedger();
 
     // Manually insert a connection for a service that won't be registered.
-    await ledger.createConnection({
-      id: "orphan-conn-1",
-      connectionKind: "ghost-service",
-      label: "ghost",
-      createdAt: new Date(),
-    });
+    ledger.transaction((tx) =>
+      ledger.save(tx, {
+        id: "orphan-conn-1",
+        connectionKind: "ghost-service",
+        label: "ghost",
+        createdAt: new Date(),
+        grant: NO_GRANT,
+      }),
+    );
 
     const reg = makeRegistry(ledger);
     // Register a DIFFERENT service, not "ghost-service".
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor } = makePasteTalk();
     reg.register(descriptor);
 
     // load() must not throw, even though "ghost-service" has no descriptor.
@@ -539,20 +487,24 @@ describe("scenario 18: load() with unregistered service rows", () => {
     const ledger = makeLedger();
 
     // Insert an orphan.
-    await ledger.createConnection({
-      id: "orphan-conn-2",
-      connectionKind: "ghost-service-2",
-      label: "ghost2",
-      createdAt: new Date(),
-    });
+    ledger.transaction((tx) =>
+      ledger.save(tx, {
+        id: "orphan-conn-2",
+        connectionKind: "ghost-service-2",
+        label: "ghost2",
+        createdAt: new Date(),
+        grant: NO_GRANT,
+      }),
+    );
 
     const reg = makeRegistry(ledger);
-    const { descriptor } = makeZeroGrantTalk();
+    const { descriptor, validCredential } = makePasteTalk();
     reg.register(descriptor);
 
     // Also mint a real connection through the registry (goes through ledger).
-    const conn = await reg.connect("fake-webchat");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    const conn = await reg.connect("fake-telegram");
+    await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
+    expect(conn.isUnlocked("chat")).toBe(true);
 
     // Create a new registry over the same ledger and load.
     const reg2 = makeRegistry(ledger);
@@ -560,21 +512,24 @@ describe("scenario 18: load() with unregistered service rows", () => {
 
     await reg2.load();
 
-    const loaded = reg2.find("fake-webchat");
+    const loaded = reg2.find("fake-telegram");
     expect(loaded).toHaveLength(1);
     expect(loaded[0].id).toBe(conn.id);
-    expect(loaded[0].isUnlocked("talk")).toBe(true);
+    expect(loaded[0].isUnlocked("chat")).toBe(true);
   });
 
   it("all() does not include orphaned unknown-service connections after load", async () => {
     const ledger = makeLedger();
 
-    await ledger.createConnection({
-      id: "orphan-conn-3",
-      connectionKind: "totally-unknown",
-      label: "unknown",
-      createdAt: new Date(),
-    });
+    ledger.transaction((tx) =>
+      ledger.save(tx, {
+        id: "orphan-conn-3",
+        connectionKind: "totally-unknown",
+        label: "unknown",
+        createdAt: new Date(),
+        grant: NO_GRANT,
+      }),
+    );
 
     const reg = makeRegistry(ledger);
     await reg.load();
@@ -588,29 +543,29 @@ describe("scenario 18: load() with unregistered service rows", () => {
 describe("startup capability activation barrier", () => {
   it("hydrates connections without starting Talk until the cutover releases the barrier", async () => {
     const ledger = makeLedger();
-    await ledger.createConnection({
-      id: "boot-webchat",
-      connectionKind: "fake-webchat",
-      label: "Webchat",
-      createdAt: new Date(),
-    });
+    const first = makePasteTalk();
+    const before = makeRegistry(ledger);
+    before.register(first.descriptor);
+    const { id } = await before.connect("fake-telegram", "Telegram");
+    await before.giveGrant("fake-telegram", id, "bot", first.validCredential());
+
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, talkerFactory } = makePasteTalk();
     reg.register(descriptor);
     const unlocked: Connection[] = [];
-    reg.onUnlocked("talk", (connection) => unlocked.push(connection));
+    reg.onUnlocked("chat", (connection) => unlocked.push(connection));
 
     await reg.load({ deferCapabilities: true });
 
-    expect(reg.get("boot-webchat").isUnlocked("talk")).toBe(false);
+    expect(reg.get(id).isUnlocked("chat")).toBe(false);
     expect(talkerFactory.instances).toHaveLength(0);
     expect(unlocked).toHaveLength(0);
 
     reg.startCapabilities();
 
-    expect(reg.get("boot-webchat").isUnlocked("talk")).toBe(true);
+    expect(reg.get(id).isUnlocked("chat")).toBe(true);
     expect(talkerFactory.instances).toHaveLength(1);
-    expect(unlocked).toEqual([reg.get("boot-webchat")]);
+    expect(unlocked).toEqual([reg.get(id)]);
   });
 });
 

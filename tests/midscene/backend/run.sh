@@ -21,7 +21,7 @@ rm -rf "$out" && mkdir -p "$out"
 
 export ROME_E2E_BASE_URL="http://127.0.0.1:${ROME_E2E_PORT:-8090}"
 export ROME_E2E_EVENTS_FILE="$out/events.jsonl"
-(cd "$suite" && npm run -s test:backend)
+(cd "$suite" && pnpm run -s test:backend)
 status=$?
 
 "$here/instance.sh" collect "$out"

@@ -213,9 +213,18 @@ export function unsupportedToolkitHint(toolkit: string): string {
   return `Rome can't connect "${toolkit}" — it isn't one of Rome's supported integrations. Pick a supported toolkit (e.g. gmail, slack, notion, linear, github) or ask the guardian to add it.`;
 }
 
+const INLINE_CONNECT_ROME_MANAGED = new Set(["github", "shopify"]);
+
+export function isInlineConnectRomeManagedToolkit(toolkit: string): boolean {
+  return INLINE_CONNECT_ROME_MANAGED.has(toolkit.toLowerCase());
+}
+
 /** Guidance shown when the agent tries to connect a Rome-managed toolkit, or
- *  acts on one that isn't connected yet — points to the one place that owns it. */
+ *  acts on one that isn't connected yet. Native-card toolkits can connect in chat. */
 export function romeManagedConnectHint(toolkit: string): string {
+  if (isInlineConnectRomeManagedToolkit(toolkit)) {
+    return `${toolkit} is managed by Rome. Call connector_connect(${JSON.stringify({ toolkit: toolkit.toLowerCase() })}) to show the connect card, then retry once connected. On surfaces without cards, ask the guardian to use Settings → Connections.`;
+  }
   return `${toolkit} is managed by Rome — it can't be connected from here. Ask the guardian to connect ${toolkit} in Settings → Connections.`;
 }
 
@@ -223,13 +232,13 @@ export function romeManagedConnectHint(toolkit: string): string {
  *  for a Rome-managed toolkit. These have no Composio tools — they're driven by
  *  `connector_proxy` against the provider's native API with Rome's OAuth token. */
 export function romeManagedToolExecuteHint(toolkit: string): string {
-  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector_proxy (toolkit "${toolkit}") instead. If it isn't connected yet, ask the guardian to connect ${toolkit} in Settings → Connections.`;
+  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector_proxy (toolkit "${toolkit}") instead. If it is not connected: ${romeManagedConnectHint(toolkit)}`;
 }
 
 /** Guidance for an agent that reached a Composio surface for GitHub. GitHub has
  *  no Composio connection at all — it runs through Rome's own integration. */
 export function githubViaRomeHint(): string {
-  return 'GitHub does not run through Composio. Use the `gh` CLI or `git` in the shell, or `connector_proxy` with toolkit "github" for direct GitHub REST/GraphQL calls. If `gh`/`git` reports it is not authenticated, ask the guardian to connect GitHub at Settings → Connections.';
+  return `GitHub does not run through Composio. Use the \`gh\` CLI or \`git\` in the shell, or \`connector_proxy\` with toolkit "github" for direct GitHub REST/GraphQL calls. If \`gh\`/\`git\` reports it is not authenticated, ${romeManagedConnectHint("github")}`;
 }
 
 /**

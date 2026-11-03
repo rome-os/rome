@@ -122,6 +122,16 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
+    // Overrides of the session policy (core/session-policy.ts). Each omitted
+    // field keeps the default chat behavior.
+    policy: z
+      .object({
+        finalText: z.enum(["deliver", "private"]).optional(),
+        autoTitle: z.boolean().optional(),
+        loadMemory: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((raw, ctx) => {

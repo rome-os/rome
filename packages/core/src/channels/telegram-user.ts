@@ -1,4 +1,10 @@
 import { Api, TelegramClient } from "telegram";
+import {
+  ALL_ATTACHMENT_TYPES,
+  attachmentsToSend,
+  numericReplyTo,
+  textToSend,
+} from "./send-refusals.js";
 import { NewMessage, type NewMessageEvent } from "telegram/events/NewMessage.js";
 import { StringSession } from "telegram/sessions/StringSession.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
@@ -21,7 +27,7 @@ type SimpleEntity = string | number;
  * `displayName`/`phoneNumber`), or the connect timestamp; there is no config, so
  * this is NEVER persisted to a settings row. The login ceremony
  * returns it to the route, which splits it into the grant's credential material
- * and profile and writes both into the ledger via a single `importCredential`.
+ * and profile and writes both into the ledger via a single `grant`.
  */
 export interface TelegramUserSettings {
   apiId: number;
@@ -39,7 +45,7 @@ export interface TelegramUserSettings {
 export type TelegramUserLoginOutcome =
   | {
       status: "connected";
-      /** The full connected account — the conferral setup turns it into the
+      /** The full connected account — the setup turns it into the
        *  `session` grant's credential material + profile and writes both to the
        *  ledger in one terminal write. Carries secrets (`sessionString`/`apiHash`);
        *  only the non-secret identity ever crosses to a client. */
@@ -51,7 +57,7 @@ export type TelegramUserLoginOutcome =
     };
 
 /**
- * One in-flight interactive login, held for the lifetime of a conferral setup
+ * One in-flight interactive login, held for the lifetime of a setup
  * coroutine: a single GramJS client + StringSession. The coroutine
  * holds exactly one handle in scope, so — unlike the retired route-era
  * `TelegramUserAuthService` — there is no attempt-id map and no `hasPendingLogin`
@@ -189,24 +195,31 @@ export class TelegramUserAdapter {
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = chatId;
     const entity = entityFromThreadId(threadId);
-    const replyTo = message.replyToMessageId
-      ? Number.parseInt(message.replyToMessageId, 10)
-      : undefined;
+    const text = textToSend("telegram_user", message);
+    const replyTo = numericReplyTo("telegram_user", message.replyToMessageId);
+    const attachments = await attachmentsToSend("telegram_user", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: true,
+    });
 
     let messageId: string | undefined;
-    if (message.text) {
+    if (text) {
       const sent = await this.client.sendMessage(entity, {
-        message: message.text,
-        replyTo: Number.isFinite(replyTo) ? replyTo : undefined,
+        message: text,
+        replyTo,
       });
       messageId = String(sent.id);
     }
 
-    for (const attachment of message.attachments ?? []) {
+    // With no text, the first attachment carries the quote.
+    let quote = text ? undefined : replyTo;
+    for (const attachment of attachments) {
       await this.client.sendMessage(entity, {
         message: attachment.caption,
         file: attachment.source,
+        replyTo: quote,
       });
+      quote = undefined;
     }
 
     log.info("telegram user message sent", { threadId });
@@ -284,46 +297,6 @@ export class TelegramUserAdapter {
     ]);
   }
 
-  /** Messages from the last `windowHours`, oldest first: one conversation's
-   *  last 100, or the last 50 of each of the first 50 dialogs when
-   *  `threadId` is null. Every line is `direction: "inbound"`. Its `raw`
-   *  `Api.Message` carries `out`, which tells the account's own lines apart. */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-    const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
-    if (threadId) {
-      const messages = await this.client.getMessages(entityFromThreadId(threadId), {
-        limit: 100,
-      });
-      return messages
-        .filter((message) => message instanceof Api.Message)
-        .map((message) => this.normalizeMessage(message, { threadId }))
-        .filter((message) => message.timestamp.getTime() >= cutoffMs)
-        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    }
-
-    const dialogs = await this.client.getDialogs({ limit: 50 });
-    const allMessages: ChannelMessage[] = [];
-    for (const dialog of dialogs) {
-      const dialogId = dialog.id?.toString();
-      if (!dialogId) continue;
-
-      const messages = await this.client.getMessages(dialog.inputEntity, { limit: 50 });
-      for (const message of messages) {
-        if (!(message instanceof Api.Message)) continue;
-        const normalized = this.normalizeMessage(message, {
-          threadId: dialogId,
-          threadName: dialog.title ?? dialog.name,
-          threadType: dialog.isUser ? "private" : "group",
-        });
-        if (normalized.timestamp.getTime() >= cutoffMs) {
-          allMessages.push(normalized);
-        }
-      }
-    }
-
-    return allMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }
-
   async listDialogs(limit = 50): Promise<TelegramUserDialogSummary[]> {
     const dialogs = await this.client.getDialogs({ limit });
     return dialogs
@@ -343,24 +316,21 @@ export class TelegramUserAdapter {
     await this.handler(this.normalizeMessage(event.message));
   }
 
-  private normalizeMessage(
-    message: Api.Message,
-    context: {
-      threadId?: string;
-      threadName?: string;
-      threadType?: "private" | "group";
-    } = {},
-  ): ChannelMessage {
-    const threadId = context.threadId ?? peerToThreadId(message.peerId);
+  private normalizeMessage(message: Api.Message): ChannelMessage {
+    const threadId = peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
+    // A sender's name is known only for the guardian's own lines: a live
+    // message carries no name, and an id would read as a name to every
+    // consumer.
+    const senderDisplayName = isOutgoing ? this.settings.displayName : undefined;
     return {
       channel: "telegram_user",
       direction: "inbound",
       messageId: String(message.id),
       chatId: threadId as ChatId,
       senderId: isOutgoing ? this.settings.userId : fromId,
-      senderDisplayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
+      ...(senderDisplayName ? { senderDisplayName } : {}),
       text: message.message ?? "",
       attachments: extractTelegramAttachments(message.media),
       timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
@@ -368,11 +338,8 @@ export class TelegramUserAdapter {
         ? { replyTo: { messageId: String(message.replyTo.replyToMsgId) } }
         : {}),
       // A live message carries no dialog context, so it reads as a group even
-      // in a private chat. Only the all-dialogs history read knows a line's kind.
-      thread: {
-        kind: context.threadType === "private" ? "dm" : "group",
-        ...(context.threadName ? { name: context.threadName } : {}),
-      },
+      // in a private chat.
+      thread: { kind: "group" },
       raw: message,
     };
   }
@@ -380,7 +347,7 @@ export class TelegramUserAdapter {
 
 /**
  * The interactive-login implementation behind {@link openTelegramUserLogin}: one
- * throwaway GramJS client + StringSession driven by the conferral setup coroutine.
+ * throwaway GramJS client + StringSession driven by the setup coroutine.
  * `sendCode` connects and requests the phone code; `submitCode` /
  * `submitPassword` complete the phone-code + optional 2FA handshake and serialize
  * the authorized session into a {@link TelegramUserSettings} account. The
@@ -476,7 +443,7 @@ class TelegramUserLogin implements TelegramUserLoginHandle {
   }
 
   /** Serialize the authorized client + session into the connected-account payload
-   *  the terminal conferral records (credential material + profile). */
+   *  the terminal grant records (credential material + profile). */
   private finalize(user: Api.TypeUser): TelegramUserSettings {
     if (!(user instanceof Api.User)) {
       throw new TelegramUserAuthError("Telegram login did not return a user account");

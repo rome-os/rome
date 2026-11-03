@@ -8,6 +8,7 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
 import type { ApiConnection } from "@/lib/connections-api";
 import EnvoysPage from "./EnvoysPage";
+import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -23,10 +24,11 @@ function connection(service: string, name: string, agent: string | null): ApiCon
     id: `${service}-id`,
     connectionKind: service,
     label: service,
+    state: "working",
     grants: { bot: "authorized" },
     display: { bot: { displayName: name } },
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -34,6 +36,7 @@ function connection(service: string, name: string, agent: string | null): ApiCon
     setups: {},
     channel: service,
     agent,
+    link: linkOf(service),
   } as ApiConnection;
 }
 
@@ -49,11 +52,11 @@ function mockServer(
       return Response.json({ agents: [{ name: "main" }, { name: "sales:agent" }] });
     }
     if (url === "/api/connections") return Response.json({ connections });
-    const link = url.match(/^\/api\/channels\/accounts\/(.+)\/agent$/);
+    const link = url.match(/^\/api\/accounts\/(.+)\/agent$/);
     if (link && init?.method === "PUT") {
       await beforeLink();
       const { agent } = JSON.parse(String(init.body)) as { agent: string | null };
-      const account = connections.find((c) => c.channel === decodeURIComponent(link[1]!))!;
+      const account = connections.find((c) => c.id === decodeURIComponent(link[1]!))!;
       account.agent = agent;
       return Response.json({ account: {} });
     }
@@ -142,6 +145,17 @@ describe("EnvoysPage", () => {
 
     const link = await screen.findByRole("link", { name: "Sales" });
     expect(link.getAttribute("href")).toBe("/settings/connections/discord");
+  });
+
+  it("marks each account with its kind of link", async () => {
+    mockServer([
+      connection("discord", "Sales", "sales:agent"),
+      connection("telegram_user", "Me", "sales:agent"),
+    ]);
+    renderAt("/envoys/sales:agent");
+
+    expect(await screen.findByText("Own account")).toBeTruthy();
+    expect(screen.getByText("Delegate")).toBeTruthy();
   });
 
   it("stays on Settings while the agent keeps other accounts", async () => {

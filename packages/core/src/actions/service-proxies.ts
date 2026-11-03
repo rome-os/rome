@@ -18,6 +18,7 @@
 import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
+import type { CloudProfileOutcome, CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNameResolution, AgentNamesService } from "../channels/agent-names.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
@@ -42,11 +43,13 @@ import type {
   ChatSettingsControl,
   ChatSettingsPage,
   ChatSettingsSnapshot,
-  EventCatalogEntry,
   EventCatalogReader,
+  EventCatalogSearchOptions,
+  EventCatalogSearchResult,
   EventPublisher,
   Routine,
   RoutineEngine,
+  Account,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -56,20 +59,74 @@ import type {
   ListChatSettingsInput,
   ResetChatSettingsInput,
   UpdateChatSettingsInput,
+  AppConnectionDescription,
+  AppConnectionInvokeResult,
+  AppConnectionOperationsPage,
+  AppConnectionPage,
 } from "@rome-os/app-runtime";
+import type {
+  AppConnectionBrokerPort,
+  AppConnectionBrokerResult,
+  AppConnectionsContextFactory,
+} from "../connections/app-connections.js";
+import { BoundAppConnections } from "../connections/app-connections.js";
 
 /** apps.* operations install/pack on the main process — minutes, not seconds. */
 const APP_INSTALL_RPC_TIMEOUT_MS = 3 * 60 * 1000;
 /** A flag flip with no filesystem work. */
 const SHORT_RPC_TIMEOUT_MS = 30 * 1000;
 /** A backend turn runs a full agent turn in the main process and blocks until
- * delivery finishes, so allow long-running continuations generous headroom. */
-const BACKEND_TURN_RPC_TIMEOUT_MS = 30 * 60 * 1000;
+ * delivery finishes. The timeout does not stop that turn: main keeps running it,
+ * and only the caller (the routine run) records an error. Agentic turns that
+ * resume a session routinely pass 30 minutes, so 2 hours keeps the recorded
+ * outcome honest for nearly all of them while bounding how long the worker
+ * stays parked. */
+const BACKEND_TURN_RPC_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 /** Push notify: NotifyClient bounds the main-to-Rome Cloud request at 120s,
  * including Rome Cloud's server-side APNs fan-out (~100s worst case). Keep this
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
  * callMain's 30s default. */
 const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
+
+export class AppConnectionsProxy implements AppConnectionBrokerPort, AppConnectionsContextFactory {
+  forApp(appId: string) {
+    return new BoundAppConnections(appId, this);
+  }
+
+  list(
+    _appId: string,
+    input: { cursor?: string; limit?: number } = {},
+  ): Promise<AppConnectionBrokerResult<AppConnectionPage>> {
+    return callMain("connections.app.list", input);
+  }
+
+  describe(
+    _appId: string,
+    input: { connectionId: string; identity: string },
+  ): Promise<AppConnectionBrokerResult<AppConnectionDescription>> {
+    return callMain("connections.app.describe", input);
+  }
+
+  operations(
+    _appId: string,
+    input: { connectionId: string; identity: string; cursor?: string; limit?: number },
+  ): Promise<AppConnectionBrokerResult<AppConnectionOperationsPage>> {
+    return callMain("connections.app.operations", input);
+  }
+
+  invoke(
+    _appId: string,
+    input: {
+      connectionId: string;
+      identity: string;
+      operation: string;
+      input?: unknown;
+      requestId?: string;
+    },
+  ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    return callMain("connections.app.invoke", input, { timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS });
+  }
+}
 
 /**
  * Worker-side stand-in for the main-process `RoutineEngine`. Implements the
@@ -146,10 +203,12 @@ export class EventCatalogProxy implements EventCatalogReader {
   async search(
     query: string,
     limit: number,
-  ): Promise<{ entries: EventCatalogEntry[]; total: number }> {
-    return await callMain<{ entries: EventCatalogEntry[]; total: number }>("events.searchCatalog", {
+    options: EventCatalogSearchOptions = {},
+  ): Promise<EventCatalogSearchResult> {
+    return await callMain<EventCatalogSearchResult>("events.searchCatalog", {
       query,
       limit,
+      ...(options.match ? { match: options.match } : {}),
     });
   }
 }
@@ -237,7 +296,11 @@ export class ChannelsServiceProxy implements ChannelsService {
     return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
-  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+  send(
+    channel: Account | string,
+    chatId: ChatId,
+    message: OutgoingMessage,
+  ): Promise<MessageReceipt> {
     return callMain<MessageReceipt>("channels.send", {
       channel,
       chatId,
@@ -245,7 +308,10 @@ export class ChannelsServiceProxy implements ChannelsService {
     });
   }
 
-  async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
+  async query(
+    channel: Account | string,
+    query: ChannelMessageQuery = {},
+  ): Promise<ChannelMessage[]> {
     return fromWire(
       await callMain<WireChannelMessage[]>("channels.query", {
         channel,
@@ -337,6 +403,13 @@ export class EmailInboundControlProxy implements EmailInboundControl {
 export class AgentNamesProxy implements AgentNamesService {
   resolve(name: string): Promise<AgentNameResolution> {
     return callMain<AgentNameResolution>("agentNames.resolve", { name });
+  }
+}
+
+/** The instance token that reads the guardian's profile stays in main. */
+export class CloudProfileProxy implements CloudProfileService {
+  get(): Promise<CloudProfileOutcome> {
+    return callMain<CloudProfileOutcome>("cloudProfile.get", {});
   }
 }
 

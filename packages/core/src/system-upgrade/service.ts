@@ -21,6 +21,12 @@ import { UpgradeStatusHub } from "./status-hub.js";
 
 const log = createLogger("system-upgrade");
 
+/** Rome Cloud spends up to 40 minutes on an accepted upgrade: up to 10 pulling
+ * images, then up to 30 for the upgrade itself, rollback included. Every path
+ * that stops Rome replaces this process. An hour leaves margin for queueing
+ * before the upgrade starts. */
+export const UPGRADE_RESTART_WINDOW_MS = 60 * 60_000;
+
 export interface SystemUpgradeOfferResult {
   /** Whether an upgrade offer is now (or already was) live. */
   pending: boolean;
@@ -41,6 +47,9 @@ export interface SystemUpgradeChecker {
 export interface SystemUpgradeServiceOptions {
   /** How long the consent countdown runs before proceeding on silence. */
   countdownMs: number;
+  /** How long an accepted cutover may leave this process alive before the hub
+   * returns to idle. Defaults to `UPGRADE_RESTART_WINDOW_MS`. */
+  restartWindowMs?: number;
   /** Whether the automatic nightly flow is enabled for this instance — the
    * `auto_upgrade` rollout gate, evaluated live on each probe so a flip takes
    * effect on the next fire without a restart. Defaults to always-enabled when
@@ -76,6 +85,7 @@ export class SystemUpgradeService implements SystemUpgradeChecker {
       onDeadline: (target) => {
         void this.cutoverOnDeadline(target);
       },
+      restartWindowMs: options.restartWindowMs ?? UPGRADE_RESTART_WINDOW_MS,
       now: options.now,
       setTimeout: options.setTimeout,
       clearTimeout: options.clearTimeout,
@@ -178,7 +188,8 @@ export class SystemUpgradeService implements SystemUpgradeChecker {
 
   /** Relay the apply to Rome Cloud, which orchestrates the restart. Only a 200
    * from Rome Cloud moves the hub to `updating` — after that this process is
-   * living on borrowed time and the phase is terminal. */
+   * living on borrowed time, and only the hub's restart window brings it back
+   * to idle. */
   private relayCutover(target: string): Promise<UpgradeNowResult> {
     // The clear runs in a microtask, so it always lands after the assignment
     // below even if the relay settles without ever suspending.

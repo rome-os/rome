@@ -9,17 +9,24 @@ import type { AgentMessage } from "@rome-os/app-runtime";
 const APP_ID = "welcome-to-rome";
 const TOOL = "welcome_card";
 
+/** `requiresCard` closes the composer while the card waits (the host reads
+ *  it off the stored card); leave it unset for a card typed text may replace. */
+export interface EmitCardOptions {
+  requiresCard?: boolean;
+}
+
 export function emitComponent(
   emit: (event: AgentMessage) => void,
   componentId: string,
   props: Record<string, unknown>,
+  options: EmitCardOptions = {},
 ): void {
   const toolUseId = randomUUID();
   emit({ type: "tool_use", id: toolUseId, tool: TOOL, input: { componentId, props } });
   const payload = {
     pendingInteraction: true,
     appId: APP_ID,
-    render: { kind: "inline", componentId, props },
+    render: { kind: "inline", componentId, props, ...cardFlags(options) },
   };
   emit({
     type: "tool_result",
@@ -77,13 +84,22 @@ export function emitAskQuestion(
 // `{ connected: true }` or `{ skip: true }` (parsed via readResolutionJson).
 const CONNECT_AI_TOOL = "connect_ai";
 
-export function emitConnectAi(emit: (event: AgentMessage) => void): void {
+export function emitConnectAi(
+  emit: (event: AgentMessage) => void,
+  options: EmitCardOptions = {},
+): void {
   const toolUseId = randomUUID();
   emit({ type: "tool_use", id: toolUseId, tool: CONNECT_AI_TOOL, input: {} });
   const payload = {
     pendingInteraction: true,
     appId: "core",
-    render: { kind: "inline", componentId: "ai-tools-card", props: {}, builtin: true },
+    render: {
+      kind: "inline",
+      componentId: "ai-tools-card",
+      props: {},
+      builtin: true,
+      ...cardFlags(options),
+    },
   };
   emit({
     type: "tool_result",
@@ -91,4 +107,8 @@ export function emitConnectAi(emit: (event: AgentMessage) => void): void {
     tool: CONNECT_AI_TOOL,
     output: [{ type: "text", text: JSON.stringify(payload) }],
   });
+}
+
+function cardFlags(options: EmitCardOptions): { requiresCard?: true } {
+  return options.requiresCard ? { requiresCard: true } : {};
 }

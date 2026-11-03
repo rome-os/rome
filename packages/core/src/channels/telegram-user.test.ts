@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -129,7 +129,6 @@ describe("TelegramUserAdapter", () => {
         messageId: "7",
         chatId: "-100555",
         senderId: "111",
-        senderDisplayName: "111",
         text: "see this",
         attachments: [{ type: "document" }],
         timestamp: new Date(1_700_000_000_000),
@@ -154,40 +153,14 @@ describe("TelegramUserAdapter", () => {
 
   it("answers an attachment-only send with no message id", async () => {
     internals.client = { sendMessage: rs.fn().mockResolvedValue({ id: 1 }) };
+    const file = join(sandboxHome, "a.pdf");
+    await writeFile(file, "%PDF-1.4");
 
     await expect(
       adapter.send("123" as ChatId, {
-        attachments: [{ type: "document", source: "/tmp/a.pdf" }],
+        attachments: [{ type: "document", source: file }],
       }),
     ).resolves.toStrictEqual({ chatId: "123" });
-  });
-
-  it("reads each dialog's history with its kind and name, own lines carrying `out`", async () => {
-    const own = documentMessage({ out: true });
-    internals.client = {
-      getDialogs: async () => [
-        { id: returnBigInt(111), inputEntity: "dm", title: "Alice", isUser: true },
-      ],
-      getMessages: async () => [own],
-    };
-
-    const lines = await adapter.fetchHistory(null, 24 * 365 * 100);
-    expect(lines).toStrictEqual([
-      {
-        channel: "telegram_user",
-        direction: "inbound",
-        messageId: "7",
-        chatId: "111",
-        senderId: "42",
-        senderDisplayName: "Me",
-        text: "see this",
-        attachments: [{ type: "document" }],
-        timestamp: new Date(1_700_000_000_000),
-        replyTo: { messageId: "5" },
-        thread: { kind: "dm", name: "Alice" },
-        raw: own,
-      },
-    ]);
   });
 
   describe("saveIncomingAttachments", () => {

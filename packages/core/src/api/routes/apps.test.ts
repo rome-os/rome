@@ -24,7 +24,10 @@ function buildResolvedApp(
   appId: string,
   skillRef?: ArtifactRef,
   overrides?: Partial<
-    Pick<ResolvedApp, "firstParty" | "source" | "rootPath" | "includeSource" | "installedAt">
+    Pick<
+      ResolvedApp,
+      "firstParty" | "source" | "rootPath" | "includeSource" | "hideInLauncher" | "installedAt"
+    >
   >,
 ): ResolvedApp {
   return {
@@ -33,6 +36,7 @@ function buildResolvedApp(
     enabled: true,
     firstParty: overrides?.firstParty ?? false,
     includeSource: overrides?.includeSource,
+    hideInLauncher: overrides?.hideInLauncher,
     source: overrides?.source ?? { mode: "bundle", path: "/tmp/unused" },
     installedHash: "0".repeat(64),
     installedVersion: "0.0.1",
@@ -274,6 +278,33 @@ describe("GET /apps", () => {
       expect(Object.fromEntries(body.apps.map((card) => [card.id, card.includeSource]))).toEqual({
         remixable: true,
         "runtime-only": false,
+      });
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("projects hideInLauncher from the installed manifest onto the app card", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalogWith(
+          buildResolvedApp("quiet", undefined, { hideInLauncher: true }),
+          buildResolvedApp("listed"),
+        ),
+      };
+      const app = new Hono().route("/", appsRoutes(deps));
+
+      const res = await app.request("/apps");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        apps: Array<{ id: string; hideInLauncher?: boolean }>;
+      };
+      expect(Object.fromEntries(body.apps.map((card) => [card.id, card.hideInLauncher]))).toEqual({
+        quiet: true,
+        listed: false,
       });
     } finally {
       testDb.close();

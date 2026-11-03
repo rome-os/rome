@@ -1,4 +1,4 @@
-import type { GrantRecord } from "../connections/ledger.js";
+import type { GrantValue } from "../connections/grant.js";
 
 // The mapping lives in `@rome/api-types/platform`, where the dashboard reads it
 // too. This re-export keeps imports of this path compiling.
@@ -13,15 +13,12 @@ export function domainOf(
   return typeof domain === "string" ? domain : undefined;
 }
 
-/** The domain a Connection's grants name, from the first grant that names one.
- *  A grant from before profiles names it only in its inline material, so that
- *  is read when the profile names none, the way migration 0083 reads it. */
-export function domainOfGrants(grants: readonly GrantRecord[]): string | undefined {
-  for (const grant of grants) {
-    const material = grant.credential?.material;
-    const domain =
-      domainOf(grant.profile) ?? (material?.kind === "inline" ? material.record.domain : undefined);
-    if (typeof domain === "string") return domain;
-  }
-  return undefined;
+/** The domain a Connection's grant names. A grant from before profiles names
+ *  it only in its inline material, so that is read when the profile names
+ *  none, the way migration 0083 reads it. */
+export function domainOfGrant(grant: GrantValue | null): string | undefined {
+  const material = grant?.credential?.material;
+  const domain =
+    domainOf(grant?.profile) ?? (material?.kind === "inline" ? material.record.domain : undefined);
+  return typeof domain === "string" ? domain : undefined;
 }

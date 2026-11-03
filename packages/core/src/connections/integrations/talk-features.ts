@@ -1,18 +1,5 @@
 import type { ChatId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/app-runtime";
 
-export function historyWindowHours(since?: Date): number {
-  if (!since) return 24;
-  return Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000));
-}
-
-const DEFAULT_HISTORY_LIMIT = 100;
-const MAX_HISTORY_LIMIT = 1_000;
-
-export function historyQueryLimit(limit?: number): number {
-  if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_HISTORY_LIMIT;
-  return Math.max(1, Math.min(Math.floor(limit), MAX_HISTORY_LIMIT));
-}
-
 const MAX_DIRECTORY_OFFSET = 10_000;
 
 export function directoryCursorOffset(cursor?: string): number {

@@ -10,6 +10,7 @@ import {
   type ComponentPropsWithoutRef,
 } from "react";
 import {
+  defaultRehypePlugins,
   defaultRemarkPlugins,
   Streamdown,
   type Components,
@@ -180,6 +181,33 @@ const REMARK_PLUGINS: NonNullable<StreamdownProps["remarkPlugins"]> = [
   remarkDropTrailingEmptyListItems,
 ];
 
+interface HastNode {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+
+function deferImages(node: HastNode): void {
+  if (node.type === "element" && node.tagName === "img") {
+    node.properties = { ...node.properties, loading: "lazy", decoding: "async" };
+  }
+  for (const child of node.children ?? []) deferImages(child);
+}
+
+// A message with many images would otherwise fetch every one when it mounts,
+// including those far below the viewport. Named, since Streamdown keys its
+// shared processor cache by plugin name.
+function rehypeDeferImages() {
+  return deferImages;
+}
+
+// Last, so the sanitizer that runs before it cannot strip what it adds.
+const REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
+  ...Object.values(defaultRehypePlugins),
+  rehypeDeferImages,
+];
+
 const DEFAULT_TOKENS: MarkdownThemeTokens = {
   fontFamily: ["--font-sans"],
   foreground: ["--foreground"],
@@ -290,7 +318,13 @@ export function readMarkdownMermaidTheme(theme?: MarkdownTheme): MermaidTheme {
 
 const EMPTY_MERMAID_THEME: MermaidTheme = { fontFamily: "", themeVariables: {} };
 
-const THEME_ROOT_ATTRIBUTES = ["class", "data-theme", "style"];
+// What re-themes the page: a class ("dark") or a data-theme name on <html>. Its
+// inline style is not one of them, and the page writes to it often (see
+// lib/visual-viewport.ts in the dashboard), each time invalidating every
+// resolved theme. A custom root has no such stylesheet, so there the inline
+// style may carry the tokens.
+const DOCUMENT_THEME_ATTRIBUTES = ["class", "data-theme"];
+const CUSTOM_ROOT_THEME_ATTRIBUTES = [...DOCUMENT_THEME_ATTRIBUTES, "style"];
 
 interface ResolvedMermaidTheme {
   theme: MermaidTheme;
@@ -329,7 +363,13 @@ function subscribeToThemeRoot(root: Element, listener: () => void): () => void {
       for (const entry of store.byTokens.values()) entry.stale = true;
       for (const notify of store.listeners) notify();
     });
-    observer.observe(root, { attributes: true, attributeFilter: THEME_ROOT_ATTRIBUTES });
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter:
+        root === root.ownerDocument.documentElement
+          ? DOCUMENT_THEME_ATTRIBUTES
+          : CUSTOM_ROOT_THEME_ATTRIBUTES,
+    });
     store.observer = observer;
   }
   return () => {
@@ -474,6 +514,7 @@ function MarkdownImpl({
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
         plugins={plugins}
+        rehypePlugins={REHYPE_PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
         // Streamdown caps a table at 300px by default and scrolls the rest
         // inside the table. Rome sets a table as text in the column, so it

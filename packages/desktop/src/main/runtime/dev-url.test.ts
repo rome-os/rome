@@ -35,7 +35,7 @@ describe("DevUrlRuntime", () => {
     const runtime = new DevUrlRuntime(origin, { openLogs: async () => {} });
     expect(runtime.isReady()).toBe(true);
     expect(runtime.getDashboardUrl()).toBe(origin);
-    expect(runtime.getStatus()).toMatchObject({ phase: "ready", provider: "remote" });
+    expect(runtime.getStatus()).toMatchObject({ phase: "ready" });
     expect(await runtime.isServing()).toBe(true);
   });
 

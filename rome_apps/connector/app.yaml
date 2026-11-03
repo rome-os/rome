@@ -17,6 +17,7 @@ description: |
 
   Shopify is also Rome-managed (no Composio): act on it with `connector_proxy` (toolkit `shopify`) against the store's GraphQL Admin API, POST `/admin/api/2026-10/graphql.json` with a `{ query, variables }` body. That endpoint is the only one allowed: a REST Admin API path or a method other than POST is refused. Omit `host`: Rome sends the call to the connected store's `<store>.myshopify.com`. Rome OS can read and update products and inventory and read orders; anything else returns an access error. Do NOT use `connector_login`/`connector_tool_execute` for Shopify. To connect it, call `connector_connect` with toolkit `shopify`: the card it shows opens Shopify, where the guardian picks the store and approves Rome OS. Never ask the guardian for the store's address. If a Shopify call comes back not-connected, do the same.
 tagline: "Give your agent Gmail, Slack, GitHub, Notion, and 18 more, in one click."
+hideInLauncher: true
 appRoot: dist
 
 web:
@@ -54,6 +55,31 @@ actions:
   - actions/connector-event-subscribe
   - actions/connector-github-subscribe
   - actions/connector-github-unsubscribe
+  - actions/connector-event-ensure
+
+# Events this app delivers on the bus. A `defer` on one of them calls
+# `ensureAction` to subscribe first, and `search_event_catalog` lists `types`
+# before they are first emitted. `keys`: filter fields that pick the repo or org.
+eventSources:
+  - events: "provider:event:github.*"
+    keys: [["repository.full_name"], ["organization.login"]]
+    types:
+      - push
+      - pull_request
+      - pull_request_review
+      - pull_request_review_comment
+      - issues
+      - issue_comment
+      - workflow_run
+      - workflow_job
+      - check_suite
+      - check_run
+      - status
+      - release
+      - create
+      - delete
+      - deployment_status
+    ensureAction: connector_event_ensure
 
 skills:
   - skills/composio-cli

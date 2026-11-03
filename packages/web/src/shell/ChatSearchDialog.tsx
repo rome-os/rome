@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -29,7 +29,8 @@ import {
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { useAppsList } from "@/hooks/use-apps";
-import { isCarrierApp } from "@/lib/chat-helpers";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
 import { prettyAgentName } from "@/lib/agent-name";
 import { getHostAppRoute } from "@/lib/auth-routing";
@@ -37,7 +38,6 @@ import {
   ChatApiError,
   createSession,
   listChatAgents,
-  listSessions,
   postSessionTurn,
   searchChatMessages,
 } from "@/lib/chat-api";
@@ -57,6 +57,13 @@ import { randomUUID } from "@/lib/random-uuid";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 
 const RECENT_CHAT_LIMIT = 10;
+/**
+ * The most chat rows a search draws. Every row is formatted and highlighted on
+ * each keystroke, so a query that matches hundreds of chats would redraw all
+ * of them while the guardian is still typing; the ranking puts the best
+ * matches first, and more typing narrows the rest.
+ */
+const MAX_CHAT_RESULTS = 50;
 const CONTENT_SEARCH_DEBOUNCE_MS = 200;
 
 /** One row of the result list: a session, plus the message-content hit that
@@ -75,10 +82,6 @@ interface PageSearchEntry {
   page: BuiltinNavEntry;
   label: string;
 }
-
-/** Built-in pages the switcher can open. The App Store has no dashboard route
- * (it opens a sheet or Rome Cloud), so it stays with the sidebar and launcher. */
-const SEARCHABLE_PAGES = APP_NAV.filter((page) => page.id !== "store");
 
 /**
  * The agent filter while the query is a lone `@` token at its start, else
@@ -106,7 +109,7 @@ function matchingOpenableApps(apps: InstalledAppCard[], normalizedQuery: string)
 
   return apps
     .map((app, originalIndex) => {
-      if (isCarrierApp(app.id)) return null;
+      if (isHiddenInLauncher(app)) return null;
       const href = openableAppHref(app);
       if (!href) return null;
       const name = normalizeSearchText(app.displayName);
@@ -229,6 +232,86 @@ function rankSession(session: ChatSession, normalizedQuery: string): number | nu
   return 0;
 }
 
+/**
+ * One chat in the result list. Memoized with its inputs only, so a keystroke
+ * redraws the rows whose highlighting changes and an unrelated update (a
+ * request settling, the dialog's other sections) redraws none.
+ */
+const ChatResultRow = memo(function ChatResultRow({
+  session,
+  match,
+  terms,
+  current,
+  onOpen,
+}: {
+  session: ChatSession;
+  match: SearchEntry["match"];
+  terms: string[];
+  current: boolean;
+  onOpen: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation("common");
+  const archived = Boolean(session.archivedAt);
+  const project = session.projectPath || session.projectName;
+  const timestamp = useMemo(() => formatMessageTimestamp(session.activityAt), [session.activityAt]);
+  return (
+    <CommandItem
+      value={`chat:${session.id}`}
+      onSelect={() => onOpen(session.id)}
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <span
+        className={cn(
+          "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+          "bg-surface-muted text-muted-foreground",
+          "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+        )}
+      >
+        <MessageSquare className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui text-foreground">
+          <HighlightedText text={session.name} terms={terms} />
+        </span>
+        {match ? (
+          <span className="mt-1 block truncate text-aux text-muted-foreground">
+            <span className="text-foreground/80">
+              {match.role === "user"
+                ? t("recentChats.searchMatchUser")
+                : t("recentChats.searchMatchAssistant")}
+              {": "}
+            </span>
+            <HighlightedText text={match.snippet} terms={terms} />
+          </span>
+        ) : null}
+        <span className="mt-1 flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
+          <Folder className="size-3 shrink-0" aria-hidden />
+          <span className="truncate">
+            <HighlightedText text={project} terms={terms} />
+          </span>
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {archived ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 text-aux text-muted-foreground">
+            <Archive className="size-3" aria-hidden />
+            {t("recentChats.statusArchived")}
+          </span>
+        ) : null}
+        {current ? (
+          <span className="inline-flex items-center gap-1 text-aux text-foreground">
+            <Check className="size-3" aria-hidden />
+            {t("recentChats.searchCurrent")}
+          </span>
+        ) : null}
+        {timestamp ? (
+          <span className="text-aux tabular-nums text-muted-foreground">{timestamp}</span>
+        ) : null}
+      </span>
+    </CommandItem>
+  );
+});
+
 export interface ChatSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -260,9 +343,15 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   // The last failed turn. Resending the same text reuses its `inputId`, so a
   // turn the server accepted before the failure is not recorded twice.
   const failedTurnRef = useRef<{ sessionId: string; text: string; inputId: string } | null>(null);
-  const [sessions, setSessions] = useState<ChatSession[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [loadAttempt, setLoadAttempt] = useState(0);
+  // The sidebar's cached list: an opening shows it at once and refetches behind
+  // it, and a refetch that finds nothing new leaves the rows alone.
+  const {
+    sessions: cachedSessions,
+    isError: sessionsFailed,
+    refetch: refetchSessions,
+  } = useChatSessions("all", undefined, { enabled: open });
+  const sessions = cachedSessions ?? null;
+  const loadError = sessionsFailed && !cachedSessions;
   const [contentMatches, setContentMatches] = useState<ChatSearchMessageMatch[]>([]);
   const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [contentLoading, setContentLoading] = useState(false);
@@ -337,22 +426,6 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     () => (mentionQuery === null ? [] : filterAgentCatalog(agentCatalog ?? [], mentionQuery)),
     [agentCatalog, mentionQuery],
   );
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setSessions(null);
-    setLoadError(false);
-    listSessions("all")
-      .then((result) => {
-        if (!cancelled) setSessions(result);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadAttempt, open]);
 
   // Debounced transcript search: matches inside user + assistant messages.
   // Failures degrade silently to title/project-only results.
@@ -389,7 +462,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
   const normalizedQuery = normalizeSearchText(searchQuery);
   const matchingPageEntries = useMemo(
-    () => matchingPages(SEARCHABLE_PAGES, (page) => t(page.labelKey), normalizedQuery),
+    () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
     [normalizedQuery, t],
   );
   const matchingApps = useMemo(
@@ -425,7 +498,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     const matchBySession = new Map(
       currentContentMatches.map((match) => [match.session.id, match.message] as const),
     );
-    const entries: SearchEntry[] = matchingSessions.map((session) => ({
+    const entries: SearchEntry[] = matchingSessions.slice(0, MAX_CHAT_RESULTS).map((session) => ({
       session,
       match: matchBySession.get(session.id),
     }));
@@ -433,6 +506,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     // already matched by title needs skipping here.
     const titleMatched = new Set(matchingSessions.map((session) => session.id));
     for (const match of currentContentMatches) {
+      if (entries.length >= MAX_CHAT_RESULTS) break;
       if (titleMatched.has(match.session.id)) continue;
       entries.push({ session: match.session, match: match.message });
     }
@@ -453,11 +527,6 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       );
     },
     [location.search, navigate, onOpenChange],
-  );
-
-  const openSession = useCallback(
-    (session: ChatSession) => openSessionById(session.id),
-    [openSessionById],
   );
 
   const pickAgent = useCallback((group: AgentCatalogGroup, agentName: string) => {
@@ -742,70 +811,16 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     </CommandItem>
   ));
 
-  const chatItems = visibleEntries.map((entry) => {
-    const session = entry.session;
-    const archived = Boolean(session.archivedAt);
-    const current = session.id === currentSessionId;
-    const project = session.projectPath || session.projectName;
-    const timestamp = formatMessageTimestamp(session.activityAt);
-    return (
-      <CommandItem
-        key={`chat:${session.id}`}
-        value={`chat:${session.id}`}
-        onSelect={() => openSession(session)}
-        className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
-      >
-        <span
-          className={cn(
-            "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
-            "bg-surface-muted text-muted-foreground",
-            "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
-          )}
-        >
-          <MessageSquare className="size-4" aria-hidden />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-ui text-foreground">
-            <HighlightedText text={session.name} terms={queryTerms} />
-          </span>
-          {entry.match ? (
-            <span className="mt-1 block truncate text-aux text-muted-foreground">
-              <span className="text-foreground/80">
-                {entry.match.role === "user"
-                  ? t("recentChats.searchMatchUser")
-                  : t("recentChats.searchMatchAssistant")}
-                {": "}
-              </span>
-              <HighlightedText text={entry.match.snippet} terms={queryTerms} />
-            </span>
-          ) : null}
-          <span className="mt-1 flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
-            <Folder className="size-3 shrink-0" aria-hidden />
-            <span className="truncate">
-              <HighlightedText text={project} terms={queryTerms} />
-            </span>
-          </span>
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
-          {archived ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 text-aux text-muted-foreground">
-              <Archive className="size-3" aria-hidden />
-              {t("recentChats.statusArchived")}
-            </span>
-          ) : null}
-          {current ? (
-            <span className="inline-flex items-center gap-1 text-aux text-foreground">
-              <Check className="size-3" aria-hidden />
-              {t("recentChats.searchCurrent")}
-            </span>
-          ) : null}
-          {timestamp ? (
-            <span className="text-aux tabular-nums text-muted-foreground">{timestamp}</span>
-          ) : null}
-        </span>
-      </CommandItem>
-    );
-  });
+  const chatItems = visibleEntries.map((entry) => (
+    <ChatResultRow
+      key={`chat:${entry.session.id}`}
+      session={entry.session}
+      match={entry.match}
+      terms={queryTerms}
+      current={entry.session.id === currentSessionId}
+      onOpen={openSessionById}
+    />
+  ));
 
   return (
     <Dialog
@@ -975,7 +990,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+                  onClick={() => void refetchSessions()}
                   onKeyDown={stopEnterPropagation}
                   className="mt-3"
                 >
@@ -1022,7 +1037,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
                     variant="outline"
                     size="sm"
                     aria-label={t("recentChats.searchRetryChats")}
-                    onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+                    onClick={() => void refetchSessions()}
                     onKeyDown={stopEnterPropagation}
                   >
                     {t("recentChats.searchRetry")}

@@ -88,6 +88,7 @@ name: Test App
 version: 0.0.1
 description: catalog hydration fixture
 includeSource: true
+hideInLauncher: true
 agents: []
 actions:
   - actions/echo
@@ -142,6 +143,7 @@ sideEffects: read-only
       enabled: false,
       displayName: "Test App",
       includeSource: true,
+      hideInLauncher: true,
     });
     expect(view && "manifest" in view).toBe(false);
     expect(catalog.listResolved()).toEqual([]);

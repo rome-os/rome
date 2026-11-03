@@ -268,7 +268,7 @@ function unavailableDiscordAuth(
 } {
   const bots = candidates ?? deps.connectionRegistry?.find("discord") ?? [];
   if (hasActiveDiscordSetup(deps, bots, includeNewAccount)) return notPaired();
-  const rejected = bots.some((connection) => connection.auth.grants().bot === "degraded");
+  const rejected = bots.some((connection) => connection.state() === "broken");
   return rejected ? credentialRejected() : notAuthenticated();
 }
 

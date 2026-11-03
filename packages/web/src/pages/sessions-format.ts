@@ -1,4 +1,10 @@
-import type { RomeSessionType, RunOutcomeSummary, RunUsageSummary } from "@rome/api-types/sessions";
+import type {
+  RomeSessionType,
+  RunOutcomeSummary,
+  RunUsageSummary,
+  SessionMetricGroup,
+} from "@rome/api-types/sessions";
+import { modelDisplayName } from "@/lib/model-display";
 
 export const SESSION_TYPE_LABELS: Record<RomeSessionType, string> = {
   webchat: "Chat",
@@ -57,4 +63,12 @@ export function costCoverage(usage: RunUsageSummary, runCount: number): string |
 export function sourceLabel(value: string | null): string {
   if (!value) return "Internal";
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/** A metric group's name; a model group reads by the shared model display name. */
+export function metricGroupLabel(group: Pick<SessionMetricGroup, "label" | "dimension">): string {
+  const { dimension } = group;
+  return dimension.dimension === "model" && dimension.state === "known"
+    ? modelDisplayName(dimension.name)
+    : group.label;
 }

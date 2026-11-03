@@ -29,7 +29,7 @@ function makeMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 }
 
 interface HistoryAdapter {
-  fetchHistory?: (chatId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
+  readHistory?: (chatId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
 }
 
 function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: ChannelsService } {
@@ -42,12 +42,12 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
       async query(channel, { chatId, since } = {}) {
         const adapter = adapters.get(channel);
         // What the channels service says of a channel that reads no messages.
-        if (!adapter?.fetchHistory) throw new Error(`Channel "${channel}" reads no messages`);
+        if (!adapter?.readHistory) throw new Error(`Channel "${channel}" reads no messages`);
         const hours = since
           ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
           : 24;
         // An adapter answers oldest first, and `query` newest first.
-        return [...(await adapter.fetchHistory(chatId ?? null, hours))].reverse();
+        return [...(await adapter.readHistory(chatId ?? null, hours))].reverse();
       },
     },
   };
@@ -57,7 +57,7 @@ describe("fetch_channel_history", () => {
   it("returns formatted messages on success", async () => {
     const messages = [makeMessage()];
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue(messages),
+      readHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -82,22 +82,6 @@ describe("fetch_channel_history", () => {
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toBe('Channel "slack" is not configured or not running.');
-  });
-
-  // A channel with no store reads through its Connection, and none is connected.
-  it("returns error when no Connection backs a channel read through one", async () => {
-    const deps = makeDeps(new Map([["discord", {}]]));
-    deps.channelsService.list = async () => [{ name: "discord", sendable: false }];
-    // What the channels service says of a channel no Connection backs.
-    deps.channelsService.query = async () => {
-      throw new Error('No connection backs channel "discord"');
-    };
-
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({ channel: "discord" });
-
-    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toBe('Channel "discord" is not configured or not running.');
   });
 
   it("lists the newest-first page `query` answers oldest first", async () => {
@@ -129,9 +113,9 @@ describe("fetch_channel_history", () => {
     );
   });
 
-  it("returns error when fetchHistory throws", async () => {
+  it("returns error when the read throws", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockRejectedValue(new Error("API rate limit")),
+      readHistory: rs.fn().mockRejectedValue(new Error("API rate limit")),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -144,7 +128,7 @@ describe("fetch_channel_history", () => {
 
   it("returns no-messages text when history is empty", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue([]),
+      readHistory: rs.fn().mockResolvedValue([]),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -164,7 +148,7 @@ describe("fetch_channel_history", () => {
       }),
     ];
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue(messages),
+      readHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -178,7 +162,7 @@ describe("fetch_channel_history", () => {
 
   it("does not include a structured messages array by default", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue([makeMessage()]),
+      readHistory: rs.fn().mockResolvedValue([makeMessage()]),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -207,7 +191,7 @@ describe("fetch_channel_history", () => {
       }),
     ];
     const adapter: HistoryAdapter = {
-      fetchHistory: rs.fn().mockResolvedValue(messages),
+      readHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -244,5 +228,136 @@ describe("fetch_channel_history", () => {
     });
     // localPath is intentionally excluded from the structured payload.
     expect("localPath" in data.messages[0].attachments[0]).toBe(false);
+  });
+
+  describe("on a platform", () => {
+    const account = { platform: "whatsapp", id: "15551234567" };
+    function platformDeps(...names: string[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue([]);
+      const deps = {
+        channelsService: {
+          list: async () =>
+            names.map((name) => ({ name, account, platform: "whatsapp", sendable: true })),
+          send: async (_account: unknown, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, action: createAction(actionConfig, deps) };
+    }
+
+    it("reads Rome's one account there, by its platform and id", async () => {
+      const { query, action } = platformDeps("6f1d2c3b-0000-4000-8000-000000000001");
+
+      const result = await action.execute({ platform: "whatsapp" });
+
+      expect(result.status).toBe("ok");
+      expect(query).toHaveBeenCalledWith(account, expect.anything());
+    });
+
+    it("counts only the accounts Rome holds, and reads a disconnected one by its name", async () => {
+      const held = { platform: "lark", id: "ou_new" };
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue([]);
+      const action = createAction(actionConfig, {
+        channelsService: {
+          // The first account was disconnected, and its channel stays behind.
+          list: async () => [
+            { name: "released", platform: "lark", sendable: false },
+            { name: "connected", account: held, platform: "lark", sendable: true },
+          ],
+          send: async (_account: unknown, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      });
+
+      expect((await action.execute({ platform: "lark" })).status).toBe("ok");
+      expect((await action.execute({ channel: "released" })).status).toBe("ok");
+      expect(query.mock.calls.map(([account]) => account)).toEqual([held, "released"]);
+    });
+
+    it("refuses a platform where Rome has several accounts", async () => {
+      const { query, action } = platformDeps("first", "second");
+
+      const result = await action.execute({ platform: "whatsapp" });
+
+      expect(result).toEqual({
+        status: "error",
+        error: expect.stringContaining('Rome has several accounts on "whatsapp"'),
+      });
+      expect(query).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("paging with limit and cursor", () => {
+    function pagedDeps(page: ChannelMessage[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue(page);
+      const deps = {
+        channelsService: {
+          list: async () => [{ name: "webchat", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, action: createAction(actionConfig, deps) };
+    }
+    const at = (id: string, minute: number, cursor: string) =>
+      makeMessage({
+        messageId: id,
+        text: id,
+        timestamp: new Date(Date.UTC(2026, 9, 26, 0, minute)),
+        cursor,
+      });
+
+    it("asks for a page with no time bound and returns the cursor of its oldest message", async () => {
+      const { query, action } = pagedDeps([at("m3", 3, "c3"), at("m2", 2, "c2")]);
+      const result = await action.execute({ channel: "webchat", threadId: "chat-1", limit: 2 });
+
+      expect(query).toHaveBeenCalledWith("webchat", {
+        chatId: "chat-1",
+        since: new Date(0),
+        limit: 2,
+      });
+      const data = (result as { data: { nextCursor: string | null; content: string } }).data;
+      expect(data.nextCursor).toBe("c2");
+      expect(data.content.indexOf("m2")).toBeLessThan(data.content.indexOf("m3"));
+    });
+
+    it("names the default page size when only a cursor is given", async () => {
+      const { query, action } = pagedDeps([]);
+      await action.execute({ channel: "webchat", threadId: "chat-1", cursor: "c2" });
+      expect(query).toHaveBeenCalledWith("webchat", {
+        chatId: "chat-1",
+        since: new Date(0),
+        after: "c2",
+        limit: 100,
+      });
+    });
+
+    it("refuses to page without a threadId", async () => {
+      const { query, action } = pagedDeps([]);
+      const result = await action.execute({ channel: "webchat", limit: 5 });
+      expect(result).toEqual({
+        status: "error",
+        error: "Paging with limit or cursor needs a threadId.",
+      });
+      expect(query).not.toHaveBeenCalled();
+    });
+
+    it("resumes after a cursor, and ends with no cursor on a short page", async () => {
+      const { query, action } = pagedDeps([at("m1", 1, "c1")]);
+      const result = await action.execute({
+        channel: "webchat",
+        threadId: "chat-1",
+        limit: 2,
+        cursor: "c2",
+      });
+
+      expect(query).toHaveBeenCalledWith("webchat", {
+        chatId: "chat-1",
+        since: new Date(0),
+        after: "c2",
+        limit: 2,
+      });
+      expect((result as { data: { nextCursor: string | null } }).data.nextCursor).toBeNull();
+    });
   });
 });

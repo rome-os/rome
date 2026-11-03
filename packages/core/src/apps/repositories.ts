@@ -3,16 +3,32 @@ import type {
   AppSettingsRepository,
   ChatRepository,
   GuardianProfileRepository,
+  MessagePart,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
+import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
+import type { MessageRepository } from "../chats/message-repository.js";
+import { openChannelChat } from "../chats/open-chat.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { applyGuardianProfile } from "../lib/guardian-profile.js";
+import { type AppChatReadsDeps, appChatReads } from "./chat-reads.js";
+import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
   webchatRepo: WebChatRepository;
+  /** The chats a channel thread's first message starts. */
+  chatRepo: ChatsByKey;
+  /** Where a message an app sent is put on record. */
+  chatMessages: Pick<MessageRepository, "recordSent">;
+  /** Chats, read and written for apps. Given, an app reads its chats
+   *  through `recentChats`, `transcript` and `traces`, and its lines go on
+   *  record in Chats: `addMessage`, `promoteMessageToUser`, `send` and
+   *  `sendEmail`. Its `open` opens every channel session, so it has to put
+   *  the session in Chats. The Chats switch passes it. */
+  inChats?: { reads: AppChatReadsDeps; writes: AppChatWritesDeps };
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -21,7 +37,17 @@ export interface CreateAppRuntimeRepositoriesDeps {
 export function createAppRuntimeRepositories(
   deps: CreateAppRuntimeRepositoriesDeps,
 ): AppRuntimeRepositories {
-  const chats = createChatRepository(deps.webchatRepo);
+  const legacy = createChatRepository(deps.webchatRepo, deps.chatRepo, deps.chatMessages);
+  const chats: ChatRepository = deps.inChats
+    ? {
+        ...legacy,
+        ...appChatReads(deps.inChats.reads),
+        ...appChatWrites(deps.inChats.writes),
+        // A session opens in Chats too, where the writes find it.
+        ensureChannelChat: deps.inChats.writes.open,
+        ensureChannelConversation: deps.inChats.writes.open,
+      }
+    : legacy;
   return {
     settings: createAppSettingsRepository(deps.settingsRepo),
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
@@ -55,14 +81,37 @@ function createGuardianProfileRepository(deps: {
   };
 }
 
-function createChatRepository(repo: WebChatRepository): ChatRepository {
+function createChatRepository(
+  repo: WebChatRepository,
+  chats: ChatsByKey,
+  messages: Pick<MessageRepository, "recordSent">,
+): ChatRepository {
+  const open: ChatRepository["ensureChannelChat"] = (input) =>
+    openChannelChat({ chats, webchatRepo: repo }, input);
   return {
-    ensureChannelChat: (input) => repo.ensureChannelChat(input),
-    ensureChannelConversation: (input) => repo.ensureChannelChat(input),
+    ensureChannelChat: open,
+    ensureChannelConversation: open,
     addMessage: (input) => repo.addConversationMessage(input),
     promoteMessageToUser: (sessionId, platformMessageId) =>
       repo.promoteConversationMessageToUser(sessionId, platformMessageId),
-    recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
+    // An app names the conversation row it opened. The message is recorded in
+    // the place that row stands for, as said by Rome.
+    recordOutboundMessage: async (input) => {
+      const at = chats.placeOfRecord(input.sessionId);
+      if (!at) throw new Error(`No place for conversation ${input.sessionId}`);
+      await messages.recordSent(
+        {
+          direction: "fromRome",
+          place: at.place,
+          parts: JSON.parse(input.content) as MessagePart[],
+          ...(input.platformMessageId ? { platformMessageId: input.platformMessageId } : {}),
+          ...(input.replyToPlatformMessageId ? { replyTo: input.replyToPlatformMessageId } : {}),
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+          turnAnswer: input.knownToProvider,
+        },
+        { channel: at.channel },
+      );
+    },
   };
 }
 

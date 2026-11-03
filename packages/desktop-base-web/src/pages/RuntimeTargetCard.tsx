@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 type Busy = "sign-in" | "sign-out" | "list" | "save" | null;
 
 function sameTarget(a: RuntimeTarget, b: RuntimeTarget): boolean {
-  if (a.kind === "local" || b.kind === "local") return a.kind === b.kind;
   return (a.instance?.id ?? null) === (b.instance?.id ?? null);
 }
 
@@ -43,26 +42,22 @@ function OptionRow({
   title,
   detail,
   trailing,
-  disabled,
 }: {
   checked: boolean;
   onSelect: () => void;
   title: string;
   detail: string;
   trailing?: React.ReactNode;
-  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={checked}
-      disabled={disabled}
       onClick={onSelect}
       className={cn(
         "flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-colors",
         checked ? "border-foreground/40 bg-muted/50" : "hover:bg-muted/30",
-        disabled && "opacity-50",
       )}
     >
       <span
@@ -84,14 +79,12 @@ function OptionRow({
 }
 
 /**
- * Picks the Rome the app opens: the VM on this computer, or a hosted Rome from
- * the user's Rome Cloud account. Saving restarts the app, which is when the
- * choice takes effect.
+ * Picks the hosted Rome the app opens from the user's Rome Cloud account.
+ * Saving restarts the app, which is when the choice takes effect.
  */
 export function RuntimeTargetCard() {
   const [cloud, setCloud] = useState<CloudState | null>(null);
   const [instances, setInstances] = useState<CloudInstance[] | null>(null);
-  const [kind, setKind] = useState<RuntimeTarget["kind"]>("local");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,10 +116,7 @@ export function RuntimeTargetCard() {
       .getState()
       .then((state) => {
         setCloud(state);
-        setKind(state.savedTarget.kind);
-        if (state.savedTarget.kind === "remote") {
-          setSelectedId(state.savedTarget.instance?.id ?? null);
-        }
+        setSelectedId(state.savedTarget.instance?.id ?? null);
         if (state.signedIn) void loadInstances();
       })
       .catch((err) => setError(errorMessage(err)));
@@ -154,7 +144,6 @@ export function RuntimeTargetCard() {
       setCloud(state);
       setInstances(null);
       setSelectedId(null);
-      setKind("local");
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -165,15 +154,10 @@ export function RuntimeTargetCard() {
   const selected = instances?.find((instance) => instance.id === selectedId) ?? null;
   // Rome Cloud with nothing picked is allowed: the app opens on its welcome
   // screen and signs in or picks there.
-  const target: RuntimeTarget =
-    kind === "local"
-      ? { kind: "local" }
-      : {
-          kind: "remote",
-          instance: selected
-            ? { id: selected.id, name: selected.name, origin: selected.origin }
-            : null,
-        };
+  const target: RuntimeTarget = {
+    kind: "remote",
+    instance: selected ? { id: selected.id, name: selected.name, origin: selected.origin } : null,
+  };
   const changed = !!cloud && !sameTarget(target, cloud.activeTarget);
 
   const handleSave = useCallback(async () => {
@@ -192,34 +176,16 @@ export function RuntimeTargetCard() {
     }
   }, [target]);
 
-  // Only a Rome Cloud launch connects this computer.
-  const deviceText = cloud?.activeTarget.kind === "remote" ? deviceLine(cloud.device) : null;
+  const deviceText = cloud ? deviceLine(cloud.device) : null;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Where Rome runs</CardTitle>
-        <CardDescription>Rome restarts to switch.</CardDescription>
+        <CardTitle>Rome Cloud</CardTitle>
+        <CardDescription>The Rome this app opens. Rome restarts to switch.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div role="radiogroup" aria-label="Where Rome runs" className="space-y-2">
-          <OptionRow
-            checked={kind === "remote"}
-            onSelect={() => setKind("remote")}
-            disabled={cloud?.available === false}
-            title="Rome Cloud"
-            detail="Open a Rome hosted in your Rome Cloud account."
-          />
-          <OptionRow
-            checked={kind === "local"}
-            onSelect={() => setKind("local")}
-            disabled={cloud?.localVm.supported === false}
-            title="A private VM on this Mac"
-            detail="A separate Rome that runs on this computer."
-          />
-        </div>
-
-        {kind === "remote" && cloud && !cloud.signedIn && (
+        {cloud && !cloud.signedIn && (
           <div className="flex items-center gap-3">
             <Button
               size="sm"
@@ -245,7 +211,7 @@ export function RuntimeTargetCard() {
           </div>
         )}
 
-        {kind === "remote" && cloud?.signedIn && (
+        {cloud?.signedIn && (
           <div className="space-y-2">
             {busy === "list" && !instances && (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -277,7 +243,7 @@ export function RuntimeTargetCard() {
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              Signed in to {cloud.cloudOrigin ? new URL(cloud.cloudOrigin).host : "Rome Cloud"} ·{" "}
+              Signed in to {new URL(cloud.cloudOrigin).host} ·{" "}
               <button
                 type="button"
                 className="underline-offset-2 hover:text-foreground hover:underline"
@@ -301,11 +267,9 @@ export function RuntimeTargetCard() {
           <p className="text-xs text-muted-foreground">
             {cloud && !sameTarget(cloud.savedTarget, cloud.activeTarget)
               ? "A saved change applies when Rome restarts."
-              : cloud?.activeTarget.kind === "remote"
-                ? cloud.activeTarget.instance
-                  ? `Now using ${cloud.activeTarget.instance.name}.`
-                  : "Now on Rome Cloud sign-in."
-                : "Now using the private VM."}
+              : cloud?.activeTarget.instance
+                ? `Now using ${cloud.activeTarget.instance.name}.`
+                : "Now on Rome Cloud sign-in."}
           </p>
           <Button
             size="sm"

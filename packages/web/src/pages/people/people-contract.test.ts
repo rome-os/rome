@@ -19,7 +19,7 @@ import {
   parseMessageCursor,
   type Message,
 } from "@rome/api-types/message";
-import { protectedPersonReason, STRANGER_PERSON_ID } from "@rome/api-types/persons";
+import { protectedPersonReason } from "@rome/api-types/persons";
 
 // The rules `@rome/api-types/people` holds that both ends have to agree on,
 // exercised directly rather than through whichever surface happens to call
@@ -283,15 +283,11 @@ describe("normalizeBondLevel", () => {
 });
 
 describe("protectedPersonReason", () => {
-  it("refuses the guardian and the stranger sentinel", () => {
-    expect(protectedPersonReason({ id: "ada", bondLevel: "guardian" })).toBe("guardian");
-    // The sentinel carries an ordinary bond level, so its id is the only signal.
-    expect(protectedPersonReason({ id: STRANGER_PERSON_ID, bondLevel: "other" })).toBe(
-      "stranger-sentinel",
-    );
+  it("refuses the guardian", () => {
+    expect(protectedPersonReason({ bondLevel: "guardian" })).toBe("guardian");
   });
 
   it("accepts an ordinary person", () => {
-    expect(protectedPersonReason({ id: "ada", bondLevel: "inner-circle" })).toBeNull();
+    expect(protectedPersonReason({ bondLevel: "inner-circle" })).toBeNull();
   });
 });

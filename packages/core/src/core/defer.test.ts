@@ -177,6 +177,76 @@ describe("runDefer", () => {
     });
   });
 
+  it("subscribes through the event source before it creates the wait", async () => {
+    const calls: string[] = [];
+    const prepareEventWait = rs.fn(async () => {
+      calls.push("prepare");
+      return { ok: true as const, subscription: "created" as const };
+    });
+    const createRoutine = rs.fn(async () => {
+      calls.push("create");
+      return { routineId: "r-ev" };
+    });
+    const filter = [{ field: "repository.full_name", equals: "acme/widgets" }];
+    const result = await runDefer(
+      { name: "CI", event: { eventName: "provider:event:github.workflow_run", filter } },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+
+    expect(calls).toEqual(["prepare", "create"]);
+    expect(prepareEventWait).toHaveBeenCalledWith("provider:event:github.workflow_run", filter);
+    expect(result).toEqual({
+      ok: true,
+      name: "CI",
+      waitingFor: "provider:event:github.workflow_run",
+      subscription: "created",
+      routineId: "r-ev",
+    });
+  });
+
+  it("creates no wait when the event source refuses", async () => {
+    const createRoutine = rs.fn();
+    const prepareEventWait = rs.fn(async () => ({
+      ok: false as const,
+      error: "GitHub refused the webhook on acme/widgets",
+    }));
+    await expect(
+      runDefer(
+        { name: "CI", event: { eventName: "provider:event:github.workflow_run" } },
+        { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+      ),
+    ).rejects.toThrow("GitHub refused the webhook on acme/widgets");
+    expect(prepareEventWait).toHaveBeenCalledWith("provider:event:github.workflow_run", []);
+    expect(createRoutine).not.toHaveBeenCalled();
+  });
+
+  it("creates the wait and passes on a warning from the event source", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-w" });
+    const prepareEventWait = rs.fn(async () => ({
+      ok: true as const,
+      warning: "Nothing has emitted it since Rome started",
+    }));
+    const result = await runDefer(
+      { name: "reply", event: { eventName: "provider:event:gmail.new_message" } },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+    expect(createRoutine).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      warning: "Nothing has emitted it since Rome started",
+    });
+  });
+
+  it("does not ask the event source for a time wakeup", async () => {
+    const prepareEventWait = rs.fn();
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-t" });
+    await runDefer(
+      { name: "x", afterMinutes: 5 },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+    expect(prepareEventWait).not.toHaveBeenCalled();
+  });
+
   it("creates a one-off UTC routine targeting the dispatcher", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
     const result = await runDefer(

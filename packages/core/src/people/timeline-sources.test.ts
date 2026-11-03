@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account, AccountId, Accounts } from "../channels/accounts.js";
 import type { Channels } from "../channels/channel.js";
-import { timelineAccounts } from "./timeline-sources.js";
+import { romeSessions } from "../db/schema.js";
+import { createTestDb } from "../test/helpers.js";
+import { romeAccountsOn, timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
   id: id as AccountId,
@@ -58,12 +60,14 @@ describe("timelineAccounts", () => {
 
     const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
       [
-        { channel: "whatsapp", channelUserId: ada },
-        { channel: "whatsapp", channelUserId: adaLid },
+        { platform: "whatsapp", id: ada },
+        { platform: "whatsapp", id: adaLid },
       ],
     ]);
 
-    expect(accounts).toEqual([{ channel: "whatsapp", addresses: [ada, adaLid] }]);
+    expect(accounts).toEqual([
+      { channel: "whatsapp", storedUnder: ["whatsapp"], addresses: [ada, adaLid] },
+    ]);
     expect(whatsapp.listings).toBe(1);
   });
 
@@ -73,16 +77,20 @@ describe("timelineAccounts", () => {
 
     const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp, telegram }) }, [
       [
-        { channel: "whatsapp", channelUserId: adaLid },
-        { channel: "telegram", channelUserId: adaTelegramHandle },
+        { platform: "whatsapp", id: adaLid },
+        { platform: "telegram", id: adaTelegramHandle },
       ],
     ]);
 
     expect(
       accounts?.map((found) => ({ ...found, addresses: [...found.addresses].sort() })),
     ).toEqual([
-      { channel: "whatsapp", addresses: [ada, adaLid].sort() },
-      { channel: "telegram", addresses: [adaTelegram, adaTelegramHandle].sort() },
+      { channel: "whatsapp", storedUnder: ["whatsapp"], addresses: [ada, adaLid].sort() },
+      {
+        channel: "telegram",
+        storedUnder: ["telegram"],
+        addresses: [adaTelegram, adaTelegramHandle].sort(),
+      },
     ]);
     expect(whatsapp.listings).toBe(1);
     expect(telegram.listings).toBe(1);
@@ -97,7 +105,7 @@ describe("timelineAccounts", () => {
     });
 
     const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
-      [{ channel: "whatsapp", channelUserId: "+1 202 555 0100" }],
+      [{ platform: "whatsapp", id: "+1 202 555 0100" }],
     ]);
 
     expect(accounts).toHaveLength(1);
@@ -110,7 +118,7 @@ describe("timelineAccounts", () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
 
     const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
-      [{ channel: "whatsapp", channelUserId: adaLid }],
+      [{ platform: "whatsapp", id: adaLid }],
     ]);
 
     expect(accounts).toHaveLength(1);
@@ -122,8 +130,8 @@ describe("timelineAccounts", () => {
 
     const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
       [
-        { channel: "whatsapp", channelUserId: adaLid },
-        { channel: "whatsapp", channelUserId: grace },
+        { platform: "whatsapp", id: adaLid },
+        { platform: "whatsapp", id: grace },
       ],
     ]);
 
@@ -134,10 +142,12 @@ describe("timelineAccounts", () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
 
     const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
-      [{ channel: "whatsapp", channelUserId: "12025550999@s.whatsapp.net" }],
+      [{ platform: "whatsapp", id: "12025550999@s.whatsapp.net" }],
     ]);
 
-    expect(accounts).toEqual([{ channel: "whatsapp", addresses: ["12025550999@s.whatsapp.net"] }]);
+    expect(accounts).toEqual([
+      { channel: "whatsapp", storedUnder: ["whatsapp"], addresses: ["12025550999@s.whatsapp.net"] },
+    ]);
   });
 
   it("gives a channel with no address book the link's own address", async () => {
@@ -145,10 +155,12 @@ describe("timelineAccounts", () => {
 
     const [accounts] = await timelineAccounts(
       { channels: channelList({ whatsapp, linkedin: null }) },
-      [[{ channel: "linkedin", channelUserId: "ACoAAAda0001" }]],
+      [[{ platform: "linkedin", id: "ACoAAAda0001" }]],
     );
 
-    expect(accounts).toEqual([{ channel: "linkedin", addresses: ["ACoAAAda0001"] }]);
+    expect(accounts).toEqual([
+      { channel: "linkedin", storedUnder: ["linkedin"], addresses: ["ACoAAAda0001"] },
+    ]);
     // No mapping named WhatsApp, so its address book is never read.
     expect(whatsapp.listings).toBe(0);
   });
@@ -157,16 +169,136 @@ describe("timelineAccounts", () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid]), account(grace)]);
 
     const groups = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
-      [{ channel: "whatsapp", channelUserId: grace }],
+      [{ platform: "whatsapp", id: grace }],
       [],
-      [{ channel: "whatsapp", channelUserId: adaLid }],
+      [{ platform: "whatsapp", id: adaLid }],
     ]);
 
     expect(groups).toHaveLength(3);
-    expect(groups[0]).toEqual([{ channel: "whatsapp", addresses: [grace] }]);
+    expect(groups[0]).toEqual([
+      { channel: "whatsapp", storedUnder: ["whatsapp"], addresses: [grace] },
+    ]);
     expect(groups[1]).toEqual([]);
     expect(groups[2]?.[0]?.channel).toBe("whatsapp");
     // One read serves every group.
     expect(whatsapp.listings).toBe(1);
+  });
+});
+
+describe("timelineAccounts on a platform Rome holds several accounts on", () => {
+  // A Telegram bot, a signed-in Telegram account, and a second bot whose
+  // channel has an opaque id; and a Lark app whose channel is named `feishu`.
+  const platforms: Record<string, string> = {
+    telegram: "telegram",
+    telegram_user: "telegram",
+    "tg-second": "telegram",
+    feishu: "lark",
+  };
+  const platformOfChannel = (name: string) => platforms[name] ?? name;
+  const channels = channelList({
+    telegram: null,
+    telegram_user: null,
+    "tg-second": null,
+    feishu: null,
+  });
+
+  // Once per channel, so each channel's history is claimed by the store that
+  // holds it rather than the account's whole history by one store.
+  it("reads the account under every channel on its platform, one read per channel", async () => {
+    const [accounts] = await timelineAccounts({ channels, platformOfChannel }, [
+      [{ platform: "telegram", id: adaTelegram }],
+    ]);
+
+    expect(accounts).toEqual(
+      ["telegram", "telegram_user", "tg-second"].map((name) => ({
+        channel: "telegram",
+        storedUnder: [name],
+        addresses: [adaTelegram],
+      })),
+    );
+  });
+
+  it("reads an account under the channel whose platform it is on, whatever the channel's name", async () => {
+    const [accounts] = await timelineAccounts({ channels, platformOfChannel }, [
+      [
+        { platform: "lark", id: "ou_ada" },
+        { platform: "feishu", id: "ou_grace" },
+      ],
+    ]);
+
+    expect(accounts).toEqual([
+      { channel: "lark", storedUnder: ["feishu"], addresses: ["ou_ada"] },
+      // Rome holds no Feishu app, so nothing stores a Feishu account's history.
+      { channel: "feishu", storedUnder: [], addresses: ["ou_grace"] },
+    ]);
+  });
+});
+
+describe("romeAccountsOn", () => {
+  const platformOfChannel = () => "telegram";
+
+  function seeded() {
+    const { db } = createTestDb();
+    db.insert(romeSessions)
+      .values({
+        id: "s-dm",
+        name: "DM",
+        type: "channel",
+        sourceChannel: "tg-bot",
+        accountId: "bot-123",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    return db;
+  }
+
+  it("names the account the channel's record holds", () => {
+    const db = seeded();
+    const accountOf = () => ({ platform: "telegram", id: "bot-live" });
+    expect(romeAccountsOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual([
+      { platform: "telegram", id: "bot-live" },
+      { platform: "telegram", id: "bot-123" },
+    ]);
+  });
+
+  // A kept connection signed in as another account keeps the chats its
+  // earlier accounts had, keyed by them.
+  it("names every account Rome spoke as there, newest first, once each", () => {
+    const db = seeded();
+    db.insert(romeSessions)
+      .values(
+        ["bot-456", "bot-123"].map((accountId, at) => ({
+          id: `s-${at}`,
+          name: "DM",
+          type: "channel" as const,
+          sourceChannel: "tg-bot",
+          accountId,
+          createdAt: new Date(1000 * (at + 1)),
+          activityAt: new Date(1000 * (at + 1)),
+        })),
+      )
+      .run();
+    const accountOf = () => ({ platform: "telegram", id: "bot-123" });
+    expect(romeAccountsOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual([
+      { platform: "telegram", id: "bot-123" },
+      { platform: "telegram", id: "bot-456" },
+    ]);
+  });
+
+  // Disconnecting an account clears its record, and its chats stay keyed by
+  // the account that spoke in them.
+  it("names the account Rome spoke as once the record holds none", () => {
+    const db = seeded();
+    expect(romeAccountsOn({ db, platformOfChannel, accountOf: () => null }, "tg-bot")).toEqual([
+      { platform: "telegram", id: "bot-123" },
+    ]);
+  });
+
+  it("names the channel itself when Rome never spoke there", () => {
+    const db = seeded();
+    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([
+      { platform: "telegram", id: "tg-other" },
+    ]);
   });
 });

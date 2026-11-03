@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import {
   persons,
-  channelMappings,
+  links,
   routines,
   sessions,
   sentinelLog,
@@ -26,7 +26,7 @@ describe("Database Integration", () => {
     expect(await testDb.db.select().from(routines)).toEqual([]);
     expect(await testDb.db.select().from(sessions)).toEqual([]);
     expect(await testDb.db.select().from(persons)).toEqual([]);
-    expect(await testDb.db.select().from(channelMappings)).toEqual([]);
+    expect(await testDb.db.select().from(links)).toEqual([]);
     expect(await testDb.db.select().from(sentinelLog)).toEqual([]);
     expect(await testDb.db.select().from(approvals)).toEqual([]);
     expect(await testDb.db.select().from(settings)).toEqual([]);
@@ -76,16 +76,16 @@ describe("Database Integration", () => {
     });
   });
 
-  it("foreign key constraints are enforced (channelMappings → persons)", async () => {
+  it("foreign key constraints are enforced (links → persons)", async () => {
     testDb = createTestDb();
 
-    // Inserting a channel mapping without a valid person should fail
+    // Inserting a link without a valid person should fail
     await expect(
-      testDb.db.insert(channelMappings).values({
+      testDb.db.insert(links).values({
         id: "cm-1",
         personId: "nonexistent-person",
-        channel: "telegram",
-        channelUserId: "user-123",
+        platform: "telegram",
+        accountId: "user-123",
       }),
     ).rejects.toThrow();
   });

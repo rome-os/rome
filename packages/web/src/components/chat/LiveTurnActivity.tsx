@@ -1,10 +1,11 @@
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { TranscriptEntry } from "@/components/chat/TranscriptEntry";
 import { getThinkingBlockPreview } from "@/components/chat/entries/ThinkingBlock";
 
-export function LiveTurnActivity({
+export const LiveTurnActivity = memo(function LiveTurnActivity({
   snapshot,
   textThroughOrdinal = -1,
   hasText,
@@ -86,4 +87,4 @@ export function LiveTurnActivity({
       {typing}
     </TranscriptEntry>
   );
-}
+});

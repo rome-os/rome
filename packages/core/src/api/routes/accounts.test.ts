@@ -10,7 +10,6 @@ import {
 import { accountsRoutes } from "./accounts.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { STRANGER_PERSON_ID } from "../../constants.js";
 
 // The two account reads over one set of sources — the links, the sentinel log
 // and the channel mirrors. GET /accounts is the contacts list: every account
@@ -71,11 +70,11 @@ describe("Accounts API", () => {
       },
     ]);
 
-    waPersonId = await deps.personMappingRepo.create({
+    waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
+      links: [{ platform: "whatsapp", id: LINKED_JID }],
     });
 
     // A dismissal: the sender is filed under the stranger sentinel.
@@ -87,12 +86,7 @@ describe("Accounts API", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.personMappingRepo.addChannelMapping(
-      STRANGER_PERSON_ID,
-      "telegram",
-      DISMISSED_SENDER,
-      "Spammer",
-    );
+    await deps.peopleRepo.dismiss({ platform: "telegram", id: DISMISSED_SENDER });
   });
 
   afterEach(() => testDb.close());
@@ -219,11 +213,7 @@ describe("Accounts API", () => {
       await until(() => asked.includes(TALKING_JID));
 
       // A write lands while the first read is waiting on its heads.
-      await deps.personMappingRepo.linkAccount({
-        personId: STRANGER_PERSON_ID,
-        channel: "whatsapp",
-        channelUserId: TALKING_JID,
-      });
+      await deps.peopleRepo.dismiss({ platform: "whatsapp", id: TALKING_JID });
       const directory = countDirectoryReads();
       const second = fetchStream();
       await until(() => directory.done === 1);
@@ -329,9 +319,6 @@ describe("Accounts API", () => {
     expect(dismissed.state).toBe("dismissed");
     expect(dismissed.personId).toBeNull();
     expect(dismissed.personName).toBeNull();
-    // Not merely absent from that row: the sentinel is not a person, so its id
-    // may not reach a client on any row of any page.
-    expect(JSON.stringify(page)).not.toContain(STRANGER_PERSON_ID);
   });
 
   it("filters the listing by state, and answers 400 for a state that is not one", async () => {
@@ -378,11 +365,11 @@ describe("Accounts API", () => {
   });
 
   it("lists an account on a channel with no history at all", async () => {
-    const linkedSilent = await deps.personMappingRepo.create({
+    const linkedSilent = await deps.peopleRepo.create({
       displayName: "Quiet Link",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "signal", channelUserId: "sig-quiet" }],
+      links: [{ platform: "signal", id: "sig-quiet" }],
     });
     const account = find(await fetchPage(), "signal:sig-quiet")!;
     expect(account.personId).toBe(linkedSilent);

@@ -48,7 +48,7 @@ export async function githubProxyCall(params: {
   endpoint: string;
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD";
   body?: unknown;
-  query?: Record<string, string | number>;
+  query?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
 }): Promise<ProxiedResponse> {
   const url = new URL(params.endpoint);

@@ -1,9 +1,4 @@
-import {
-  accountRef,
-  formatWhatsAppPhone,
-  type LinkedAccount,
-  type OutboxMessage,
-} from "@rome/api-types/people";
+import { accountRef, formatWhatsAppPhone, type LinkedAccount } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
 
 // The shape of the person page's two views, with no React in it: which segments
@@ -97,16 +92,15 @@ export function segmentEntries(
   return account ? entries.filter((entry) => entry.source === account.channel) : [...entries];
 }
 
-/** The outbox rows a segment shows. Narrowed by the account itself, which an
- *  outbox row does name. */
-export function segmentOutbox(
-  messages: readonly OutboxMessage[],
+/** The pending sends a segment shows. Narrowed by the account itself, which a
+ *  send does name. */
+export function segmentSends<T extends { channel: string; channelUserId: string }>(
+  sends: readonly T[],
   account: LinkedAccount | null,
-): OutboxMessage[] {
+): T[] {
   return account
-    ? messages.filter(
-        (message) =>
-          message.channel === account.channel && message.channelUserId === account.channelUserId,
+    ? sends.filter(
+        (send) => send.channel === account.channel && send.channelUserId === account.channelUserId,
       )
-    : [...messages];
+    : [...sends];
 }

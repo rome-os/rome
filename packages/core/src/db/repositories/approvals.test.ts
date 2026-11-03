@@ -32,6 +32,31 @@ describe("ApprovalsRepository", () => {
     expect(approval!.requestedBy).toBe("sentinel");
   });
 
+  it("create() tells the created listeners about the stored approval, until they unsubscribe", async () => {
+    const seen: Array<{ id: string; status: string; description: string; payload: unknown }> = [];
+    const unsubscribe = repo.onCreated((approval) => seen.push(approval));
+    const id = await repo.create({
+      type: "person_mapping",
+      requestedBy: "sentinel",
+      description: "Add new person: Alice",
+      payload: { channelContext: { threadId: "chat-1" } },
+    });
+    expect(seen).toEqual([
+      {
+        id,
+        type: "person_mapping",
+        status: "pending",
+        description: "Add new person: Alice",
+        payload: { channelContext: { threadId: "chat-1" } },
+      },
+    ]);
+    // The row is stored by the time the listener runs.
+    expect(await repo.findById(id)).not.toBeNull();
+    unsubscribe();
+    await repo.create({ type: "person_mapping", requestedBy: "x", description: "y" });
+    expect(seen).toHaveLength(1);
+  });
+
   // An app compiled against an older SDK reaches create() with an unchecked
   // string, so the type union alone does not close this.
   it("create() rejects a lifecycle no resolver recognises", async () => {
@@ -111,6 +136,39 @@ describe("ApprovalsRepository", () => {
     const approval = await repo.findById(id);
     expect(approval).not.toBeNull();
     expect(approval!.payload).toEqual(payload);
+  });
+
+  it("findActiveActionArgs() returns only active approvals for the named action", async () => {
+    const matching = await repo.create({
+      type: "action_execution",
+      requestedBy: "app:notes",
+      description: "Create a document",
+      payload: {
+        actionName: "core:app_connection_write",
+        args: { invocationId: "invocation-active" },
+      },
+    });
+    const rejected = await repo.create({
+      type: "action_execution",
+      requestedBy: "app:notes",
+      description: "Create another document",
+      payload: {
+        actionName: "core:app_connection_write",
+        args: { invocationId: "invocation-rejected" },
+      },
+    });
+    await repo.create({
+      type: "action_execution",
+      requestedBy: "app:notes",
+      description: "Run another action",
+      payload: { actionName: "other", args: { invocationId: "other" } },
+    });
+    await repo.resolvePending(rejected, "reject", "guardian");
+
+    expect(await repo.findActiveActionArgs("core:app_connection_write")).toEqual([
+      { invocationId: "invocation-active" },
+    ]);
+    expect(await repo.findById(matching)).toMatchObject({ status: "pending" });
   });
 
   it("resolvePending() atomically resolves pending action_execution and queues execution", async () => {

@@ -6,8 +6,9 @@ Who said what, where, and as whom. Chats follows the definitions in [Connections
 
 A place where people and agents talk: a group, a direct message, the chat built into the dashboard. The code and the dashboard call it a conversation, a deprecated alias for the same thing.
 
+- A chat is known by its platform and the platform's own id for it. Whether it is a group or a direct message is something about the chat, not part of what it is known by.
 - A group is named by the platform's own id for it, so one group is one chat however many of Rome's accounts are in it.
-- A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two.
+- A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two. Where the platform gives a direct message no id of its own across Rome's accounts, Rome derives one from the two ends.
 - A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
 - A chat's history belongs to the chat. It goes when the last of Rome's accounts leaves the chat, not before.
 - A chat may have threads inside it.
@@ -23,6 +24,15 @@ A chat inside a chat, usually started from one of its messages. A thread is not 
 - Everyone in the chat whom the platform lets see a thread sees it: who is in it and what is said. An agent in the chat sees its threads the same way, and can write in them. A thread the platform hides from some members, such as a private thread, is hidden from them in Rome too.
 - The chat's reply rule applies in its threads. A thread has no reply rule of its own.
 - A thread goes with its chat.
+
+## Place
+
+Where a message is said, and where a send goes: a chat, or a thread in a chat.
+
+- Two places are the same when they name the same chat and the same thread, or both name no thread.
+- Rome sends to a place, never to an account. Messaging a person on one of their accounts is sending into the direct message that reaches that account.
+- A send into a place goes out from one of Rome's accounts in it: the one the send names, or the only one Rome holds on the platform. With several and none named, the send is refused rather than sent from an account nobody chose.
+- On the dashboard each of Rome's agents has its own account, so a send into a dashboard chat names the agent it is from. Rome is the dashboard's platform, so the message is said once it is recorded, and the chat's agent is woken by it as by the guardian's.
 
 ## Participant
 
@@ -66,10 +76,19 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 One thing a participant said or did in a chat.
 
 - Every message goes one way: to Rome or from Rome.
+- A message that reaches Rome is recorded in its chat before anything acts on it, whether or not an agent is woken by it. A platform delivering the same message again records nothing new.
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
+
+## Delivery
+
+How a message Rome sends stands with its platform: pending, sent or failed. Only a message from Rome has one.
+
+- The platform's answer settles it: sent once the platform took the message, failed with the platform's own words when it refused.
+- Once the platform has taken a message, it is sent, even when Rome fails to write that down. Reporting it failed would invite a second real message.
+- A failed message reads as never said, to the guardian and to the agent. Sending the text again is a new message.
 
 ## Widget
 
@@ -95,12 +114,33 @@ A participant's identity on a platform. A colleague's Feishu identity is an acco
 - The platform's own id is the one the platform uses for that account everywhere, so the same person is seen with the same id by every one of Rome's accounts on that platform. On Feishu that is the tenant-wide user id, not the per-app one.
 - A person's identity and an agent's identity on a platform are the same kind of thing.
 - Most accounts in a chat are other people's. Rome has no connection to them and no agent speaks through them.
-- An account Rome holds a connection to has at most one agent speaking through it, in every chat and DM that account is in: an own-account link if the account is the agent's own, a delegate if it is the guardian's. There is no per-chat choice of agent.
+- An account Rome holds a connection to has at most one agent speaking through it, held by its [connected account](#connected-account), in every chat and DM that account is in: an own-account link if the account is the agent's own, a delegate if it is the guardian's. There is no per-chat choice of agent.
 - A connected account may have no agent: the guardian gave Rome access to it but is not using envoy on it. Rome then does not listen to that account's messages at all. No chat forms through it and nothing is recorded, until an agent is linked.
-- Those link rules cover accounts that take an agent. An account that takes none, such as email or WhatsApp, is always listened to and keeps its current contracts.
+- Those link rules cover accounts that take an agent. An account that takes none, such as email or WhatsApp, is always listened to.
 - The guardian **links** an agent to the account, **switches** it in one step, or **unlinks** it. The noun is the account's agent.
 - Connecting an account and linking an agent are two separate operations, never one. So every connected account passes through the state of being connected with no agent, however briefly, and Rome never picks an agent for it on its own. Where the product asks the guardian to pick one, before or after connecting, is a matter of design, not of the model.
 - An account named "Sales agent" is the sales agent, wherever it appears. That is the intuition the rules protect.
+
+## Connected account
+
+One of Rome's accounts as Chats sees it: a [connection](connections.md#connection) that lets Rome chat, with the agent that speaks through it.
+
+- A connected account has the identity of its connection and no other. Its one attribute is its agent.
+- It starts when its connection is connected, with no agent, and ends when the connection is disconnected, for every kind of connection. Connecting the same account again makes a new connected account, with no agent.
+- The account it stands for is the one its connection's grant names. One connection reaches an account at a time, so one connected account stands for it at a time.
+- The guardian links, switches and unlinks its agent on the connected account, naming it by its connection. The dashboard shows it by its account's platform, id and name.
+- A message or a participant names an account by platform and the platform's own id, never by a connection. A message remembers who said it, not the connection that carried it. Rome finds the connection when it sends, as the one whose grant reaches the account.
+- Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from its kind of connection: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
+
+## Account profile
+
+What a platform says about an [account](#account): its display name, handle and avatar. Chats keeps it as a cache, not a record of its own.
+
+- It is keyed by the account, the platform and the platform's own id, and has no identity of its own. Nothing points at it: a reader that holds an account looks its profile up by the same value.
+- The channels fill it as they learn: from an address book's sync, and from what a sender put on a message. On a platform Rome mirrors an address book for, only the address book fills it, keyed by the book's own id for the account, since a message may name the sender by another of the account's addresses. Elsewhere, what a platform's address book holds would outrank what a sender called themselves, so a message never overwrites a profile an address book wrote.
+- It can be dropped and rebuilt from the platforms at any time, and nothing else is lost when it is. An account no profile has been learned for yet is still an account.
+- A profile may be missing for an account a link, a dismissal or a message names. A reader then shows the account by its id.
+- A channel's own mirror of an address book stays the source for what it mirrors. A name is read from the mirror first, then from the profile.
 
 ## Envoy
 
@@ -114,12 +154,16 @@ One kind of link: an agent linked to an account that is the agent's own, so the 
 
 The other kind of link: an agent linked to the guardian's own account, so it answers on their behalf. The guardian picks the delegate. Main is suggested.
 
-- Own account and delegate are different kinds of link, and the product shows which one an account has.
+- Own account and delegate are different kinds of link, and the product shows which one an account has. The kind of connection decides which, and the guardian never picks it.
 - When the guardian switches the agent on an account, the new agent picks up where the old one left off: the chat's history is there for it to read. What it remembers is its own business.
 
 ## Decided against
 
-- **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection and chat. In code, channel stays as the name of the layer that carries an account's messages ([Channels](../architecture/channels.md)), a technical word like repository.
+- **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
+- **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
+- **A record of Rome's account kept by its platform and id rather than by its connection.** It would outlive the connection and survive a reconnect, so a new connection would inherit an agent the guardian never set on it. A connection whose grant has not yet reported its account would have no record to hold an agent.
+- **Linking an agent by the account's platform and id.** A dashboard tab left open across a disconnect and a reconnect would link an agent to a connection the guardian never looked at. The connection's identity changes on reconnect, so a stale command is refused.
+- **Storing the kind of link.** It follows from the kind of connection, and a stored copy could disagree with it. It becomes the guardian's choice only if a kind of connection ever allows both.
 - **A per-chat choice of agent that overrides the account's agent.** An account named "Sales agent" has to be the sales agent wherever it appears, and a per-chat override breaks that intuition.
 - **At most one account per agent per platform.** A guardian with two Feishu accounts for one agent is an ordinary case, and the rule forced a "move the link" behaviour nobody asked for.
 - **Linking the first account of a kind of connection to main automatically.** Connecting and linking are two operations and cannot be made one, so a state with no agent exists anyway, and an agent the guardian did not pick is confusing.
@@ -132,4 +176,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.
+- **Sending to an account.** A person's account is reached in a chat, and a group or a thread has no account to address. One destination, the place, serves a direct message, a group and a thread alike.
+- **A queue of pending sends kept apart from the chat.** It held a message Rome had not yet said outside the chat it belonged to, so the chat and the queue could disagree about what was said. A delivery on the message keeps one record.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
+- **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.

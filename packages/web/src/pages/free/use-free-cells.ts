@@ -84,8 +84,19 @@ function saveToolView(next: ToolView) {
   }
 }
 
+// Counts explicit activations: every `selectTool` call, which comes from the
+// user opening an app (a tab, a chat link, a navigation handoff). Store-side
+// changes such as an agent re-placing a tile or a background tab closing don't
+// count, so a view layered over the pane (the Trace tab) can tell them apart.
+let activations = 0;
+
 export function selectTool(id: string) {
   if (!snapshot.some((p) => p.id === id)) return;
+  activations += 1;
+  showTool(id);
+}
+
+function showTool(id: string) {
   saveToolView({
     activeId: id,
     collapsed: false,
@@ -96,7 +107,7 @@ export function selectTool(id: string) {
 
 export function setToolsCollapsed(collapsed: boolean) {
   if (!collapsed && toolView.activeId) {
-    selectTool(toolView.activeId);
+    if (snapshot.some((p) => p.id === toolView.activeId)) showTool(toolView.activeId);
     return;
   }
   saveToolView({ ...toolView, collapsed });
@@ -658,6 +669,7 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
 export function useFreeCells() {
   const placements = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const view = useSyncExternalStore(subscribe, getToolView, getToolView);
+  const toolActivations = useSyncExternalStore(subscribe, getActivations, getActivations);
 
   const addWidget = useCallback((type: WidgetType, targetId?: string) => {
     const current = getSnapshot();
@@ -680,6 +692,7 @@ export function useFreeCells() {
     addWidget,
     removeWidget,
     toolView: view,
+    toolActivations,
     selectTool,
     setToolsCollapsed,
   };
@@ -687,4 +700,8 @@ export function useFreeCells() {
 
 function getToolView() {
   return toolView;
+}
+
+function getActivations() {
+  return activations;
 }

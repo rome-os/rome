@@ -197,12 +197,25 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
     const controller = new AbortController();
     let disposed = false;
     let pollTimer: number | null = null;
+    let polling = false;
 
+    // A hidden tab has no banner to show, so it stops here and the
+    // visibilitychange below polls as the tab is shown again.
     const schedulePoll = () => {
-      if (disposed) return;
+      if (disposed || document.visibilityState === "hidden") return;
       pollTimer = window.setTimeout(() => void poll(), pollMs);
     };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        if (pollTimer !== null) window.clearTimeout(pollTimer);
+        pollTimer = null;
+      } else if (!polling && pollTimer === null) {
+        void poll();
+      }
+    };
     const poll = async () => {
+      pollTimer = null;
+      polling = true;
       const generation = pollGenerationRef.current;
       // Per-request abort: fires on unmount/cadence change (the outer
       // controller) or on the request deadline, whichever comes first.
@@ -250,14 +263,17 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
       } finally {
         window.clearTimeout(deadline);
         controller.signal.removeEventListener("abort", abortRequest);
+        polling = false;
         schedulePoll();
       }
     };
 
+    document.addEventListener("visibilitychange", onVisibility);
     void poll();
     return () => {
       disposed = true;
       controller.abort();
+      document.removeEventListener("visibilitychange", onVisibility);
       if (pollTimer !== null) window.clearTimeout(pollTimer);
     };
   }, [pollMs, applySnapshot]);

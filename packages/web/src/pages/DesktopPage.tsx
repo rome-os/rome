@@ -1,6 +1,12 @@
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
+/** The page in the iframe is plain HTML outside i18n, so the dashboard writes its copy. */
+function applyDesktopStatusText(iframe: HTMLIFrameElement, reconnecting: string): void {
+  const status = iframe.contentDocument?.getElementById("connection-status");
+  if (status) status.textContent = reconnecting;
+}
+
 function applyDesktopSafeAreaBottom(iframe: HTMLIFrameElement, safeAreaBottom: string): void {
   if (!safeAreaBottom) return;
   iframe.contentDocument?.documentElement?.style.setProperty(
@@ -29,6 +35,7 @@ export default function DesktopPage({ name }: { name?: string }) {
             .getPropertyValue("--rome-safe-area-bottom")
             .trim();
           applyDesktopSafeAreaBottom(event.currentTarget, safeAreaBottom);
+          applyDesktopStatusText(event.currentTarget, t("desktop.reconnecting"));
         }}
       />
     </div>

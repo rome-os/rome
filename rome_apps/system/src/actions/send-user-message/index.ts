@@ -48,8 +48,9 @@ export const sendUserMessageInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Webchat project the new chat works in (as shown in the dashboard's project picker). " +
-        "Defaults to the default project. Only read when `sessionId` is omitted.",
+      "Path relative to the projects root, e.g. `default` (the default) or `apps/agent-bench`. " +
+        "Not an absolute filesystem path or a `/projects/...` URL path. " +
+        "Only read when `sessionId` is omitted.",
     ),
 });
 
@@ -69,6 +70,38 @@ async function readErrorMessage(res: Response): Promise<string> {
     // Non-JSON body (proxy error page, empty response) — fall through.
   }
   return `HTTP ${res.status}`;
+}
+
+const projectCatalogSchema = z.object({
+  projects: z.array(
+    z.object({
+      projectPath: z.string().min(1),
+      archivedAt: z.string().nullable().optional(),
+    }),
+  ),
+});
+
+async function readProjectPathHint(fetchImpl: typeof fetch, baseUrl: string): Promise<string> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/api/chat/projects`);
+    if (!res.ok) return "";
+    const catalog = projectCatalogSchema.safeParse(await res.json());
+    if (!catalog.success) return "";
+    const paths = [
+      ...new Set([
+        "default",
+        ...catalog.data.projects
+          .filter((project) => project.archivedAt == null)
+          .map((project) => project.projectPath),
+      ]),
+    ];
+    const choices = paths.slice(0, 10).join(", ");
+    const more = paths.length > 10 ? `, … (+${paths.length - 10} more)` : "";
+    return ` Pass projectPath relative to the projects root, one of: ${choices}${more}.`;
+  } catch {
+    // Suggestions must not hide the session creation error.
+    return "";
+  }
 }
 
 export function createSendUserMessageAction(
@@ -98,9 +131,14 @@ export function createSendUserMessageAction(
           }),
         });
         if (!res.ok) {
+          const detail = await readErrorMessage(res);
+          const hint =
+            projectPath && res.status === 400 && /project/i.test(detail)
+              ? await readProjectPathHint(fetchImpl, baseUrl)
+              : "";
           return {
             status: "error",
-            error: `Failed to create a webchat session: ${await readErrorMessage(res)}`,
+            error: `Failed to create a webchat session: ${detail}${hint}`,
           };
         }
         const session = (await res.json()) as { id?: unknown };

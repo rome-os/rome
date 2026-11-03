@@ -3,8 +3,11 @@ import type { ChatMessage } from "@/lib/chat-types";
 import {
   buildChatView,
   buildRows,
+  canPickChatModel,
+  currentReplyMessages,
   interactionResultKey,
   isAwaitingGuardian,
+  isLockedByCard,
   isLastTurnFailed,
   type AgentIdentity,
 } from "./chat-view";
@@ -262,6 +265,77 @@ describe("buildRows", () => {
   });
 });
 
+describe("buildRows model switch notice", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const turn = (sessionId: string, turnId: string, model?: string) => [
+    mk(sessionId, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(sessionId, "trace", turnId, [], {
+      traceSummary: {
+        distinctApps: [],
+        totalSteps: 0,
+        invocationCounts: {},
+        ...(model ? { model } : {}),
+      },
+    }),
+    mk(sessionId, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+  ];
+  const rowsOf = (messages: ChatMessage[], runningTurnId: string | null = null) =>
+    buildRows(messages, idMap, MAIN_IDENTITY, { runningTurnId, isStreaming: !!runningTurnId });
+
+  it("puts a notice before the first turn that ran on another model", () => {
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t2", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t3", "gpt-6-luna"),
+      ...turn(MAIN, "t4", "gpt-6-luna"),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "user",
+      "agent",
+      "model_switch",
+      "user",
+      "agent",
+      "user",
+      "agent",
+    ]);
+    expect(rows[4]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", turnId: "t3" });
+  });
+
+  it("skips turns with no known model and compares within one session", () => {
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6-luna"),
+      ...turn(MAIN, "t2"),
+      ...turn(CHILD, "c1", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t3", "gpt-6-luna"),
+    ]);
+    expect(rows.some((r) => r.kind === "model_switch")).toBe(false);
+  });
+
+  it("shows no notice for the first turn or the running turn", () => {
+    const messages = [...turn(MAIN, "t1", "claude-sonnet-5-5"), ...turn(MAIN, "t2")];
+    expect(rowsOf(messages, "t2").some((r) => r.kind === "model_switch")).toBe(false);
+  });
+});
+
+describe("canPickChatModel", () => {
+  it("shows the picker in an open chat with no handoff", () => {
+    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: false })).toBe(
+      true,
+    );
+  });
+
+  it("hides it during an open handoff and in a promoted side chat", () => {
+    expect(
+      canPickChatModel({ mainSessionId: MAIN, floorSessionId: CHILD, isSideChat: false }),
+    ).toBe(false);
+    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: true })).toBe(
+      false,
+    );
+  });
+});
+
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {
@@ -401,5 +475,188 @@ describe("isAwaitingGuardian", () => {
         [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
       ),
     ).toBe(true);
+  });
+});
+
+describe("isLockedByCard", () => {
+  const card = (toolUseId: string, requiresCard?: boolean) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "welcome-to-rome",
+    render: {
+      kind: "inline",
+      componentId: "name-card",
+      props: {},
+      ...(requiresCard === undefined ? {} : { requiresCard }),
+    },
+  });
+  const locked = (main: ChatMessage[], runningTurnId?: string) =>
+    isLockedByCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
+
+  it("is true while a card that is the only way to answer waits", () => {
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false for a card typed text may replace", () => {
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0")]),
+      ]),
+    ).toBe(false);
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0", false)]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false once the card is answered", () => {
+    expect(
+      locked([
+        mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+        mk(MAIN, "user", "t2", [{ type: "interaction_result", toolUseId: "c_0", output: {} }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false while a newer turn runs that has saved nothing yet", () => {
+    expect(
+      locked(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+          mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+        ],
+        "backend:b1",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("currentReplyMessages", () => {
+  for (const toolUseId of ["question", "app"]) {
+    it(`retires sibling proposals when a ${toolUseId} resolution starts a new turn`, () => {
+      const routine = mk(MAIN, "assistant", "proposal-turn", [
+        { type: "text", content: "Routine" },
+      ]);
+      const app = mk(MAIN, "assistant", "proposal-turn", []);
+      const view = { displayMessages: [routine, app], floorSessionId: MAIN };
+      expect(currentReplyMessages(view)).toEqual([routine, app]);
+      expect(currentReplyMessages(view, "resolution-turn")).toEqual([]);
+      const resolution = mk(MAIN, "user", "resolution-turn", [
+        { type: "interaction_result", toolUseId, output: {} },
+      ]);
+      const resumed = mk(MAIN, "assistant", "resolution-turn", []);
+      expect(
+        currentReplyMessages({ ...view, displayMessages: [routine, app, resolution] }),
+      ).toEqual([]);
+      expect(
+        currentReplyMessages({ ...view, displayMessages: [routine, app, resolution, resumed] }),
+      ).toEqual([resumed]);
+    });
+  }
+
+  it("keeps every assistant message in the current floor reply, not older or other-session cards", () => {
+    const old = mk(MAIN, "assistant", "old", []);
+    const input = mk(MAIN, "user", "current", []);
+    const card = mk(MAIN, "assistant", "current", []);
+    const text = mk(MAIN, "assistant", "current", []);
+    const child = mk(CHILD, "assistant", "child", []);
+    const view = { displayMessages: [old, input, card, child, text], floorSessionId: MAIN };
+    expect(currentReplyMessages(view)).toEqual([card, text]);
+    expect(currentReplyMessages({ ...view, floorSessionId: CHILD })).toEqual([child]);
+    expect(currentReplyMessages(view, "unpersisted-backend-turn")).toEqual([]);
+  });
+
+  it("stops reminding as soon as the guardian sends another input, including legacy rows without turn IDs", () => {
+    for (const turnId of ["turn", undefined]) {
+      const card = mk(MAIN, "assistant", "turn", [], { turnId });
+      const input = mk(MAIN, "user", "turn", [], { turnId });
+      expect(
+        currentReplyMessages({ displayMessages: [card, input], floorSessionId: MAIN }),
+      ).toEqual([]);
+    }
+  });
+});
+
+describe("buildRows reference stability", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const opts = { runningTurnId: null, isStreaming: false };
+  const summary = { distinctApps: [], totalSteps: 1, invocationCounts: {} };
+  const turn = (turnId: string) => [
+    mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+    mk(MAIN, "trace", turnId, [], { traceSummary: summary }),
+  ];
+
+  it("hands back the same row objects when the messages are the same", () => {
+    const messages = [...turn("t1"), ...turn("t2")];
+    const first = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const second = buildRows(messages, new Map(idMap), { ...MAIN_IDENTITY }, opts);
+
+    expect(second).toHaveLength(first.length);
+    second.forEach((row, index) => expect(row).toBe(first[index]));
+  });
+
+  it("builds only the row of a message that arrives", () => {
+    const messages = [...turn("t1"), ...turn("t2")];
+    const before = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const arrived = mk(MAIN, "user", "t3", [{ type: "text", content: "ask t3" }]);
+    const after = buildRows([...messages, arrived], idMap, MAIN_IDENTITY, {
+      ...opts,
+      runningTurnId: "t3",
+      isStreaming: true,
+    });
+
+    expect(after).toHaveLength(before.length + 1);
+    before.forEach((row, index) => expect(after[index]).toBe(row));
+  });
+
+  it("renews a turn's row when a message joins it, and no other", () => {
+    const messages = [...turn("t1"), ...turn("t2")];
+    const before = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const second = mk(MAIN, "assistant", "t2", [{ type: "text", content: "more" }]);
+    const after = buildRows([...messages, second], idMap, MAIN_IDENTITY, opts);
+
+    expect(after).toHaveLength(before.length);
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(after[2]).toBe(before[2]);
+    expect(after[3]).not.toBe(before[3]);
+  });
+
+  it("renews a row whose message was replaced, or whose agent is named differently", () => {
+    const messages = turn("t1");
+    const before = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+
+    const renamedIdentity = { name: "Renamed", iconUrl: null };
+    const renamed = buildRows(messages, new Map([[MAIN, renamedIdentity]]), renamedIdentity, opts);
+    expect(renamed[0]).toBe(before[0]);
+    expect(renamed[1]).not.toBe(before[1]);
+
+    const edited = [messages[0], { ...messages[1], content: "[]" }, messages[2]];
+    const replaced = buildRows(edited, idMap, MAIN_IDENTITY, opts);
+    expect(replaced[0]).toBe(before[0]);
+    expect(replaced[1]).not.toBe(before[1]);
+  });
+
+  it("keeps a model-switch notice while its turn and models stand", () => {
+    const withModel = (turnId: string, model: string) => [
+      mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+      mk(MAIN, "trace", turnId, [], { traceSummary: { ...summary, model } }),
+      mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+    ];
+    const messages = [...withModel("t1", "m-a"), ...withModel("t2", "m-b")];
+    const first = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+    const second = buildRows(messages, idMap, MAIN_IDENTITY, opts);
+
+    expect(first.map((row) => row.kind)).toContain("model_switch");
+    second.forEach((row, index) => expect(row).toBe(first[index]));
   });
 });

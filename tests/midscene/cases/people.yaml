@@ -9,7 +9,7 @@ cases:
           Click the visible "Directory" tab once, then stop.
       - aiAssert: >-
           The Directory view shows bond filter chips including "All", "Inner circle",
-          "Acquaintance", "Other", and "Stranger", with "All" active, plus a separate "Unknown 11"
+          "Acquaintance", "Other", and "Dismissed", with "All" active, plus a separate "Stranger 11"
           count control. People are grouped under headings "INNER CIRCLE 2" ("Nadia Petrova", "Ray
           Oster"), "ACQUAINTANCE 2" ("Arvind Srivastav", "Mira Chen"), and "OTHER 2" ("Hollis Park",
           "Sam Okafor"), each row showing an avatar; rows that have linked accounts additionally

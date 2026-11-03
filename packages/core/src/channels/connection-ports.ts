@@ -1,14 +1,14 @@
 /**
- * The `send`, `inbound`, `messages` and `directory` ports of a channel a
- * Connection backs.
+ * The `send`, `inbound` and `directory` ports of a channel a Connection
+ * backs.
  * A connection kind's channels each have their own name, and the Connection that backs
  * one is looked up by that name when a port is used, so a port outlives any
  * one Connection epoch.
- * Contract: `Channel` (channel.ts), `ChannelInbound` (the apps SDK), `Messages`
- * (messages.ts).
+ * Contract: `Channel` (channel.ts), `ChannelInbound` (the apps SDK).
  */
 
 import type {
+  Account,
   ChannelActivity,
   ChannelInbound,
   ChannelInboundMedia,
@@ -20,7 +20,6 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import type { Connection, TalkFeatureName, Talker } from "../connections/types.js";
-import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
@@ -34,7 +33,6 @@ import {
 import { ChatBuffers } from "./conversation-buffer.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { DeliveryFailure, type DeliveryTransport } from "./delivery/types.js";
-import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -54,19 +52,27 @@ export interface ConnectionPortsDeps {
   channelOf: ChannelOf;
   /** Paces a send while reply streaming is on, and backs the `replies` port. */
   pacing?: ConnectionPacing;
-  /** Which channels the inbound port hears. Absent, every channel is heard. */
+  /** Which Connections the inbound port hears. Absent, every one is heard. */
   listening?: InboundListening;
+  /** The account each Connection reaches, which an inbound message names as
+   *  the one it arrived on. Absent, or null for a Connection, a message names
+   *  none. */
+  accountOf?: (connectionId: string) => Account | null;
+  /** Hears each inbound message an admitted sender sends, before anything
+   *  else does, so what the sender called themselves reaches the account
+   *  profile cache (account-profiles.ts). Must not throw. */
+  heard?: (message: ChannelMessage) => void;
 }
 
 /**
- * Whether a channel's inbound port hears its Connections now. `onChange` tells
- * each port the name of a channel whose answer may have changed, and the port
+ * Whether an inbound port hears a Connection now, by its id. `onChange` tells
+ * each port the id of a Connection whose answer may have changed, and the port
  * reads `listens` again. A port reads `listens` when a Connection unlocks and
  * on each change, never per message.
  */
 export interface InboundListening {
-  listens(channel: string): boolean;
-  onChange(listener: (channel: string) => void): void;
+  listens(connectionId: string): boolean;
+  onChange(listener: (connectionId: string) => void): void;
 }
 
 /** The name of the channel a Connection backs, or null when it backs none.
@@ -93,7 +99,6 @@ export function recordedChannelOf(
 export interface ConnectionPorts {
   send: ChannelSend | null;
   inbound: ChannelInbound | null;
-  messages: Messages | null;
   directory: ChannelDirectory;
 }
 
@@ -103,7 +108,7 @@ export interface ConnectionPorts {
  * its first channel.
  *
  * Building the ports subscribes the inbound port to the channel's talkers for
- * the registry's lifetime, while `deps.listening` listens to the channel, and
+ * the registry's lifetime, while `deps.listening` hears each Connection, and
  * admission runs once per message for each subscription. So build one set per
  * registry and channel, as `channelList` does: a second set would run
  * admission twice.
@@ -119,7 +124,6 @@ export function connectionPorts(
   return {
     send: talker.sends === false ? null : connectionSend(backing),
     inbound: talker.receives === false ? null : connectionInbound(backing),
-    messages: talker.history === true ? connectionMessages(backing) : null,
     directory: connectionDirectory(backing),
   };
 }
@@ -174,126 +178,6 @@ function connectionDirectory(backing: Backing): ChannelDirectory {
   };
 }
 
-/**
- * What was said on a channel with no store of its own, read through its
- * Connection's history. No store answers per-account reads for it, so there is
- * no `byAccount`: a People timeline reads these channels from Rome's own
- * transcript instead.
- *
- * The history answers within the Connection's own caps, and reads a window
- * rounded out to whole hours; this port keeps what falls at or after `since`
- * and answers newest first, as every `query` does. It sorts by time rather
- * than trusting the history's order: a read over every conversation
- * (Discord's) orders each conversation's lines but joins the conversations
- * one after another. The history
- * keeps the oldest thousand lines of a window that holds more, so such a
- * window answers the newest of those.
- *
- * A query naming no `since` reads the last {@link LIVE_DEFAULT_WINDOW_MS}. A
- * wider default would not answer newer lines: some platforms' reads (Discord's)
- * keep the oldest lines after their cutoff, so reaching further back trades
- * the newest lines for older ones. A caller wanting more names a `since`.
- *
- * A query is a live platform read, and one naming no conversation is the
- * costly kind: a Telegram account reads its fifty newest chats and fifty lines
- * of each, Discord every channel of every server the bot is in, and email
- * hydrates up to a thousand message bodies. So a read is shared for
- * {@link LIVE_READ_TTL_MS}: a query for the same conversation, or for every
- * conversation, reuses a read already made or under way over the same
- * whole-hour window. Only the same window will do. A Connection cuts what it
- * answers within its window (Discord keeps the oldest hundred lines of each
- * channel), so a wider read can hold none of the lines a narrower one would.
- * A reused read answers what a fresh one would, older by at most that long,
- * and `fetch_channel_history` reads through it like any other caller.
- *
- * The port reads the channel's one Connection. A connection kind may hold several,
- * and each backs a channel of its own.
- */
-export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
-
-/** How long a live read is shared among the queries its window covers. */
-export const LIVE_READ_TTL_MS = 30_000;
-
-/** One live read, shared while it is fresh. */
-interface SharedRead {
-  at: number;
-  lines: Promise<ChannelMessage[]>;
-}
-
-function connectionMessages(backing: Backing): Messages {
-  const { channel } = backing;
-  const shared = new Map<string, SharedRead>();
-
-  /** The read `key` names, shared while it is fresh. */
-  function read(key: string, fresh: () => Promise<ChannelMessage[]>): Promise<ChannelMessage[]> {
-    const now = Date.now();
-    for (const [held, entry] of shared) {
-      if (now - entry.at >= LIVE_READ_TTL_MS) shared.delete(held);
-    }
-    const hit = shared.get(key);
-    if (hit) return hit.lines;
-    const entry: SharedRead = { at: now, lines: fresh() };
-    shared.set(key, entry);
-    entry.lines.catch(() => {
-      if (shared.get(key) === entry) shared.delete(key);
-    });
-    return entry.lines;
-  }
-
-  return {
-    async query({ chatId, since, limit }) {
-      const connection = connectionFor(backing);
-      if (!connection) throw new ChannelNotConnected(channel);
-      const connectionId = connection.id;
-      // A Connection whose talker is not built yet (a credential missing or
-      // degraded) backs nothing, the same as no Connection at all.
-      if (!connection.withTalker((talker) => talker.history !== undefined)) {
-        throw new ChannelNotConnected(channel);
-      }
-      const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
-      // The Connection reads whole hours back, so the window it will read
-      // names the read along with the conversation.
-      const hours = historyWindowHours(from);
-      const lines = await read(
-        `${connectionId}\n${chatId ?? ""}\n${hours}`,
-        () =>
-          connection.withTalker((talker) =>
-            talker.history?.query({
-              ...(chatId ? { chatId } : {}),
-              since: from,
-              limit: MAX_QUERY_LIMIT,
-            }),
-          ) ?? Promise.reject(new ChannelNotConnected(channel)),
-      );
-      // Reversed before the sort, so lines sharing a timestamp come newest
-      // first too.
-      return lines
-        .filter((message) => message.timestamp.getTime() >= from.getTime())
-        .reverse()
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-        .slice(0, queryLimit(limit))
-        .map((message) => copyOf(message, channel));
-    },
-    byAccount: null,
-  };
-}
-
-/** A shared read's message, copied for one caller, so a caller that edits what
- *  it was answered leaves the others' answers as read: every field, the
- *  timestamp, attachments, thread and reply included. `raw` alone stays
- *  shared: it is the provider's own, which no caller edits. A talker names
- *  its connection kind, so the copy names the channel it was read on. */
-function copyOf(message: ChannelMessage, channel: string): ChannelMessage {
-  return {
-    ...message,
-    channel,
-    timestamp: new Date(message.timestamp.getTime()),
-    attachments: message.attachments.map((attachment) => ({ ...attachment })),
-    ...(message.thread ? { thread: { ...message.thread } } : {}),
-    ...(message.replyTo ? { replyTo: { ...message.replyTo } } : {}),
-  };
-}
-
 /** The Connection that backs the channel now. A channel is one presence, so
  *  at most one Connection backs it. */
 function connectionFor(backing: Backing): Connection | null {
@@ -302,7 +186,8 @@ function connectionFor(backing: Backing): Connection | null {
 
 /**
  * Sends on `connection`'s live talker. A Connection whose credentials are
- * locked or degraded has none, and sending on it refuses. With `pacing`, a
+ * locked or degraded has none, and sending on it refuses with
+ * {@link ChannelNotConnected}, as a channel no Connection backs does. With `pacing`, a
  * send waits its turn in the Connection's pacer while reply streaming is on,
  * and resolves once it has run. With streaming off it runs at once.
  */
@@ -314,7 +199,7 @@ export async function sendThrough(
 ): Promise<MessageReceipt> {
   const send = async () => {
     const sent = connection.withTalker((talker) => talker.send(chatId, message));
-    if (!sent) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
+    if (!sent) throw new ChannelNotConnected(connection.connectionKind);
     return sent;
   };
   return pacing ? pacing.run(connection, chatId, send) : send();
@@ -323,7 +208,7 @@ export async function sendThrough(
 /**
  * The reply port of `connection`, or null when its talker cannot stream. Each
  * write looks the talker up when it runs, so a reply survives a new credential
- * epoch and fails `unauthorized` while talk is locked, rather than writing as a
+ * epoch and fails `unauthorized` while chat is locked, rather than writing as a
  * stale epoch.
  */
 function connectionReplies(
@@ -395,7 +280,10 @@ function connectionSend(backing: Backing): ChannelSend {
     get direct() {
       const connection = connectionFor(backing);
       if (!connection) return unbacked;
-      if (!offers(connection, "directMessaging")) return null;
+      // While talk is locked, nothing says direct messaging is missing, so the
+      // lookup stands and asks whichever talker is live when it is called.
+      const offered = connection.withTalker((talker) => talker.directMessaging !== undefined);
+      if (offered === false) return null;
       const chatFor = (channelUserId: string) =>
         callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId));
       const direct: ChannelDirectMessaging = { chatFor, conversationFor: chatFor };
@@ -438,12 +326,17 @@ function connectionInbound(backing: Backing): ChannelInbound {
   const dispatchFrom =
     (connectionId: string) =>
     async (message: ChannelMessage): Promise<void> => {
-      if (!isAnswerable(message)) return;
       // A talker delivers the channel's own record, inbound, named after its
-      // connection kind. The event names the channel it arrived on.
+      // connection kind. The event names the channel and the account it
+      // arrived on.
+      const account = deps.accountOf?.(connectionId) ?? null;
+      const named: ChannelMessage = { ...message, channel, ...(account ? { account } : {}) };
+      // A message with nothing to answer still says who sent it.
+      deps.heard?.(named);
+      if (!isAnswerable(message)) return;
       const event: InboundEvent = {
         kind: "message",
-        message: message.channel === channel ? message : { ...message, channel },
+        message: named,
         ref: { connectionId, chatId: message.chatId },
       };
       // A Connection id is a UUID, so the first colon ends it.
@@ -451,7 +344,8 @@ function connectionInbound(backing: Backing): ChannelInbound {
       for (const buffers of subscriptions) buffers.push(conversation, event);
     };
 
-  const listens = (): boolean => deps.listening?.listens(channel) ?? true;
+  const listens = (connection: Connection): boolean =>
+    deps.listening?.listens(connection.id) ?? true;
 
   // Admission runs whether or not anyone subscribes yet: the Agents channel
   // links an agent to the guardian even before the inbox hears it. A channel that is
@@ -467,7 +361,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
       detach();
       attached.delete(id);
     }
-    if (!listens()) return;
+    if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
       admission.deliver(connection, message, dispatch),
@@ -476,7 +370,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
   };
 
   // Fires now for each Connection already unlocked, then at every unlock.
-  deps.registry.onUnlocked("talk", (connection) => {
+  deps.registry.onUnlocked("chat", (connection) => {
     if (connection.connectionKind !== backing.connectionKind) return;
     const named = deps.channelOf(connection);
     if (named === channel) attach(connection);
@@ -491,19 +385,18 @@ function connectionInbound(backing: Backing): ChannelInbound {
     }
   });
 
-  // A channel starts listening on the Connections unlocked now, and stops by
-  // dropping every talker subscription. The subscribers stay, so a channel
-  // listened to again reaches the same handlers.
+  // A Connection starts being heard once unlocked, and stops by dropping its
+  // talker subscription. The subscribers stay, so a Connection heard again
+  // reaches the same handlers.
   deps.listening?.onChange((changed) => {
-    if (changed !== channel) return;
-    if (!listens()) {
-      for (const detach of attached.values()) detach();
-      attached.clear();
+    const connection = connectionsOf(backing).find((each) => each.id === changed);
+    if (!connection) return;
+    if (!listens(connection)) {
+      attached.get(connection.id)?.();
+      attached.delete(connection.id);
       return;
     }
-    for (const connection of connectionsOf(backing)) {
-      if (!attached.has(connection.id)) attach(connection);
-    }
+    if (!attached.has(connection.id)) attach(connection);
   });
 
   return {

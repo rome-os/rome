@@ -23,7 +23,38 @@ export type RetryExecutionResult =
   | { outcome: "not_found" }
   | { outcome: "not_retryable"; approval: ApprovalRow };
 
+function activeActionExecutionApproval() {
+  return and(
+    eq(approvals.type, "action_execution"),
+    or(
+      eq(approvals.status, "pending"),
+      and(
+        eq(approvals.status, "approved"),
+        or(
+          eq(approvals.executionState, "idle"),
+          eq(approvals.executionState, "queued"),
+          eq(approvals.executionState, "running"),
+          eq(approvals.executionState, "failed"),
+        ),
+      ),
+    ),
+  );
+}
+
+/** An approval as {@link ApprovalsRepository.create} stored it. */
+export interface CreatedApproval {
+  id: string;
+  type: ApprovalType;
+  status: ApprovalStatus;
+  description: string;
+  payload: unknown;
+}
+
+export type ApprovalCreatedListener = (approval: CreatedApproval) => void;
+
 export class ApprovalsRepository {
+  private createdListeners = new Set<ApprovalCreatedListener>();
+
   constructor(private db: DrizzleDb) {}
 
   /** Closes every pairing request still pending. Rome creates none and
@@ -102,10 +133,11 @@ export class ApprovalsRepository {
     }
     const id = uuid();
     const now = new Date();
+    const status = data.status ?? "pending";
     await this.db.insert(approvals).values({
       id,
       type: data.type,
-      status: data.status ?? "pending",
+      status,
       requestedBy: data.requestedBy,
       description: data.description,
       payload: data.payload ?? null,
@@ -114,7 +146,25 @@ export class ApprovalsRepository {
       resolvedAt: null,
       resolvedBy: null,
     });
+    // After the insert, so a listener that reads the row finds it.
+    for (const listener of this.createdListeners) {
+      listener({
+        id,
+        type: data.type,
+        status,
+        description: data.description,
+        payload: data.payload ?? null,
+      });
+    }
     return id;
+  }
+
+  /** Tells `listener` about every approval created from now on. Returns the unsubscribe. */
+  onCreated(listener: ApprovalCreatedListener): () => void {
+    this.createdListeners.add(listener);
+    return () => {
+      this.createdListeners.delete(listener);
+    };
   }
 
   async findPending() {
@@ -213,23 +263,7 @@ export class ApprovalsRepository {
     const rows = await this.db
       .select({ payload: approvals.payload })
       .from(approvals)
-      .where(
-        and(
-          eq(approvals.type, "action_execution"),
-          or(
-            eq(approvals.status, "pending"),
-            and(
-              eq(approvals.status, "approved"),
-              or(
-                eq(approvals.executionState, "idle"),
-                eq(approvals.executionState, "queued"),
-                eq(approvals.executionState, "running"),
-                eq(approvals.executionState, "failed"),
-              ),
-            ),
-          ),
-        ),
-      );
+      .where(activeActionExecutionApproval());
     const ids: string[] = [];
     for (const row of rows) {
       const payload = row.payload as Record<string, unknown> | null;
@@ -238,6 +272,28 @@ export class ApprovalsRepository {
       }
     }
     return ids;
+  }
+
+  /** Returns the args stored by active action-execution approvals for `actionName`. */
+  async findActiveActionArgs(actionName: string): Promise<Record<string, unknown>[]> {
+    const rows = await this.db
+      .select({ payload: approvals.payload })
+      .from(approvals)
+      .where(activeActionExecutionApproval());
+    return rows.flatMap(({ payload }) => {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+      const record = payload as Record<string, unknown>;
+      const args = record.args;
+      if (
+        record.actionName !== actionName ||
+        !args ||
+        typeof args !== "object" ||
+        Array.isArray(args)
+      ) {
+        return [];
+      }
+      return [args as Record<string, unknown>];
+    });
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {

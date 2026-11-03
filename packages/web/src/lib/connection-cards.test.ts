@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
-import { buildConnectionCards } from "@/lib/connection-cards";
+import {
+  buildConnectionCards,
+  groupConnectionCards,
+  isConnectedCard,
+} from "@/lib/connection-cards";
+import { connectionStatus } from "@/lib/connection-status";
 import type { ApiConnection, GrantDisplay } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { stateOfGrants } from "@/test/connection-state";
 
 /**
  * The presentation fold over `GET /api/connections`: one card per service,
@@ -21,10 +27,11 @@ function conn(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -77,7 +84,7 @@ describe("buildConnectionCards — runtime degradation", () => {
         connectionKind: "wechat",
         grants: { account: "authorized" },
         capabilities: {
-          talk: {
+          chat: {
             state: "unlocked",
             degradation: {
               reason: "WeChat reported a stale session.",
@@ -94,7 +101,7 @@ describe("buildConnectionCards — runtime degradation", () => {
       reason: "WeChat reported a stale session.",
       retryAt: "2026-07-20T12:00:00.000Z",
     });
-    expect(cards[0].slots[0].state).toBe("authorized");
+    expect(cards[0].slots[0].state).toBe("working");
   });
 });
 
@@ -125,7 +132,7 @@ describe("buildConnectionCards — Telegram fold", () => {
     expect(bot).toMatchObject({
       connectionId: "conn-tg",
       grant: "bot",
-      state: "authorized",
+      state: "working",
       identity: "mybot",
     });
 
@@ -135,7 +142,7 @@ describe("buildConnectionCards — Telegram fold", () => {
     expect(session).toMatchObject({
       connectionId: "conn-tg-user",
       grant: "session",
-      state: "authorized",
+      state: "working",
       identity: "My Name",
     });
     expect(session?.display).toEqual(display({ displayName: "My Name", handle: "me" }));
@@ -180,7 +187,7 @@ describe("buildConnectionCards — Telegram fold", () => {
       key: "session",
       connectionId: "conn-tg-user",
       grant: "session",
-      state: "degraded",
+      state: "broken",
       identity: "My Name",
     });
   });
@@ -208,25 +215,25 @@ describe("buildConnectionCards — Composio card", () => {
     expect(last.service).toBe("composio");
     expect(last.kind).toBe("composio");
     expect(last.label).toBe("Composio");
-    expect(last.alwaysOn).toBe(false);
   });
 
-  it("maps the CLI login state onto the synthetic slot's grant state", () => {
+  it("maps the CLI login state onto the synthetic slot's state", () => {
     const loggedOut = buildConnectionCards([], composio({ loggedIn: false }));
     expect(loggedOut[0].slots).toEqual([
       {
         key: "user",
         connectionId: null,
         grant: null,
-        state: "unauthorized",
+        state: null,
         display: null,
         identity: null,
         activeSetupCid: null,
+        link: null,
       },
     ]);
 
     const loggedIn = buildConnectionCards([], composio({ loggedIn: true }));
-    expect(loggedIn[0].slots[0].state).toBe("authorized");
+    expect(loggedIn[0].slots[0].state).toBe("working");
   });
 });
 
@@ -235,7 +242,6 @@ describe("buildConnectionCards — ordering", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "slack" }),
       conn({ connectionKind: "google" }),
-      conn({ connectionKind: "webchat" }),
       conn({ connectionKind: "github" }),
       conn({ connectionKind: "email" }),
       conn({ connectionKind: "discord" }),
@@ -251,7 +257,6 @@ describe("buildConnectionCards — ordering", () => {
       "discord",
       "email",
       "feishu",
-      "webchat",
       "github",
       "google",
       "slack",
@@ -287,7 +292,7 @@ describe("buildConnectionCards — slot mapping", () => {
     expect(cards.find((c) => c.service === "wechat")?.slots[0].grant).toBe("account");
   });
 
-  it("maps OAuth conferrals onto the user slot, Slack's workspace grant included", () => {
+  it("maps OAuth grants onto the user slot, Slack's workspace grant included", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "slack", grants: { workspace: "authorized" } }),
       conn({ connectionKind: "github", grants: { user: "authorized" } }),
@@ -295,25 +300,6 @@ describe("buildConnectionCards — slot mapping", () => {
     const slack = cards.find((c) => c.service === "slack");
     expect(slack?.slots[0]).toMatchObject({ key: "user", grant: "workspace" });
     expect(cards.find((c) => c.service === "github")?.slots[0].key).toBe("user");
-  });
-
-  it("webchat is alwaysOn with one synthesized authorized slot (zero-grant service)", () => {
-    const cards = buildConnectionCards([conn({ connectionKind: "webchat", id: "conn-webchat" })]);
-    expect(cards).toHaveLength(1);
-    const webchat = cards[0];
-    expect(webchat.alwaysOn).toBe(true);
-    expect(webchat.kind).toBe("channel");
-    expect(webchat.slots).toEqual([
-      {
-        key: "bot",
-        connectionId: "conn-webchat",
-        grant: null,
-        state: "authorized",
-        display: null,
-        identity: null,
-        activeSetupCid: null,
-      },
-    ]);
   });
 
   it("folds the slot identity as displayName || handle || email", () => {
@@ -352,7 +338,7 @@ describe("buildConnectionCards — slot mapping", () => {
     expect(cards[0].slots[0]).toMatchObject({
       connectionId: null,
       grant: "user",
-      state: "unauthorized",
+      state: null,
     });
   });
 });
@@ -423,7 +409,6 @@ describe("buildConnectionCards — several accounts per service", () => {
     expect(cards.map((card) => card.route)).toEqual(["feishu", SECOND]);
     const [first, second] = cards;
     expect(first.label).toBe("Feishu");
-    expect(first.channel).toBe("feishu");
     expect(first.agent).toBeNull();
     expect(second.label).toBe("Feishu · Sales Bot");
     expect(second.service).toBe("feishu");
@@ -512,7 +497,70 @@ describe("buildConnectionCards — several accounts per service", () => {
       conn({ connectionKind: "feishu", grants: { app: "authorized" } }),
     ]);
     expect(cards[0].route).toBe("feishu");
-    expect(cards[0].channel).toBeNull();
     expect(cards[0].severalAccounts).toBe(false);
+  });
+});
+
+describe("Connections tabs and groups", () => {
+  const needsAttention = (card: Parameters<typeof connectionStatus>[0]) =>
+    connectionStatus(card).tone === "attention";
+
+  it("counts working and broken connections as connected, and placeholders as not", () => {
+    const cards = buildConnectionCards([
+      conn({ connectionKind: "github", grants: { user: "authorized" } }),
+      conn({ connectionKind: "slack", grants: { workspace: "degraded" } }),
+      conn({ connectionKind: "google", id: null, grants: { user: "unauthorized" } }),
+    ]);
+    expect(cards.filter(isConnectedCard).map((card) => card.service)).toEqual(["github", "slack"]);
+  });
+
+  it("counts a Telegram card with only its personal account as connected", () => {
+    const cards = buildConnectionCards([
+      conn({ connectionKind: "telegram_user", grants: { session: "authorized" } }),
+    ]);
+    expect(cards.map((card) => [card.service, isConnectedCard(card)])).toEqual([
+      ["telegram", true],
+    ]);
+  });
+
+  it("puts channels under Messaging and OAuth and Composio under Accounts", () => {
+    const cards = buildConnectionCards(
+      [
+        conn({ connectionKind: "telegram", grants: { bot: "authorized" } }),
+        conn({ connectionKind: "github", grants: { user: "authorized" } }),
+      ],
+      composio({ installed: true, loggedIn: true }),
+    );
+    expect(
+      groupConnectionCards(cards, needsAttention).map(({ group, cards: rows }) => [
+        group,
+        rows.map((card) => card.service),
+      ]),
+    ).toEqual([
+      ["messaging", ["telegram"]],
+      ["accounts", ["github", "composio"]],
+    ]);
+  });
+
+  it("leads a group with the cards that need attention, broken or degraded", () => {
+    const cards = buildConnectionCards([
+      conn({ connectionKind: "github", grants: { user: "authorized" } }),
+      conn({ connectionKind: "slack", grants: { workspace: "degraded" } }),
+    ]);
+    expect(
+      groupConnectionCards(cards, needsAttention)[0]?.cards.map((card) => card.service),
+    ).toEqual(["slack", "github"]);
+  });
+
+  it("drops an empty group unless the caller keeps it", () => {
+    const cards = buildConnectionCards([
+      conn({ connectionKind: "telegram", grants: { bot: "authorized" } }),
+    ]);
+    expect(groupConnectionCards(cards, needsAttention).map(({ group }) => group)).toEqual([
+      "messaging",
+    ]);
+    expect(
+      groupConnectionCards(cards, needsAttention, { accounts: true }).map(({ group }) => group),
+    ).toEqual(["messaging", "accounts"]);
   });
 });

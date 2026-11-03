@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { getProfileDir } from "../paths.js";
 import { createLogger } from "../logger.js";
+import { ALL_ATTACHMENT_TYPES, attachmentsToSend, textToSend } from "./send-refusals.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, MessageReplyReference, OutgoingMessage } from "./types.js";
 import {
@@ -231,8 +232,8 @@ interface LoginAttempt {
   qrContent: string;
   createdAt: number;
   /** Set once the provider reports the scan confirmed. The attempt is retained
-   *  (with this cached account) until the route's ledger conferral succeeds and
-   *  calls `completeLogin`, so a transient conferral failure is retryable from
+   *  (with this cached account) until the route's ledger grant succeeds and
+   *  calls `completeLogin`, so a transient grant failure is retryable from
    *  the cache without redoing the QR scan. */
   confirmedAccount?: WechatSettings;
 }
@@ -1110,9 +1111,9 @@ export class WechatAuthService {
     const attempt = this.attempts.get(attemptId);
     if (!attempt) return { status: "expired" };
 
-    // A previously-confirmed attempt whose ledger conferral failed: answer from
+    // A previously-confirmed attempt whose ledger grant failed: answer from
     // the cache (the provider's QR is single-use post-scan) so the route can
-    // retry the conferral without a new scan.
+    // retry the grant without a new scan.
     if (attempt.confirmedAccount) {
       return { status: "confirmed", account: attempt.confirmedAccount };
     }
@@ -1128,10 +1129,10 @@ export class WechatAuthService {
     }
 
     // Return the confirmed account to the route WITHOUT persisting it: the route
-    // confers it directly into the grant ledger. The
+    // grants it directly into the grant ledger. The
     // attempt is retained (account cached) until `completeLogin`, so the only
     // copy of the confirmed credential can never be discarded by a failed
-    // conferral.
+    // grant.
     const account: WechatSettings = {
       token: status.bot_token,
       baseUrl: normalizeWechatBaseUrl(status.baseurl || attempt.baseUrl),
@@ -1144,9 +1145,9 @@ export class WechatAuthService {
     return { status: "confirmed", account };
   }
 
-  /** Discard a confirmed attempt once its account has been conferred into the
+  /** Discard a confirmed attempt once its account has been granted into the
    *  grant ledger. Until this is called, `pollLogin` keeps answering from the
-   *  cached confirmed account so a failed conferral is retryable. */
+   *  cached confirmed account so a failed grant is retryable. */
   completeLogin(attemptId: string): void {
     this.attempts.delete(attemptId);
   }
@@ -1212,21 +1213,26 @@ export class WechatAdapter {
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const text = textToSend("wechat", message);
+    const attachments = await attachmentsToSend("wechat", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: false,
+    });
     this.assertSessionActive();
     const target = this.resolveSendTarget(chatId);
 
     let messageId: string | undefined;
-    if (message.text) {
+    if (text) {
       messageId = await sendTextMessage(
         this.config.baseUrl,
         this.config.token,
         target.to,
-        message.text,
+        text,
         target.contextToken,
       );
     }
 
-    for (const attachment of message.attachments ?? []) {
+    for (const attachment of attachments) {
       const mediaType =
         attachment.type === "image"
           ? MSG_ITEM_IMAGE
@@ -1235,6 +1241,7 @@ export class WechatAdapter {
             : attachment.type === "audio"
               ? MSG_ITEM_VOICE
               : MSG_ITEM_FILE;
+      // Read one at a time, so a send holds one file in memory at once.
       const data = await readFile(attachment.source);
       const fileName =
         attachment.type === "document" || attachment.type === "audio"

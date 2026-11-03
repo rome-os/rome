@@ -1,5 +1,5 @@
 /**
- * Client types + fetchers for the generic conferral-setup surface.
+ * Client types + fetchers for the generic grant-setup surface.
  * The state/content types mirror the backend `SetupState` verbatim — payloads
  * are semantically complete (copy authored server-side), so the standard
  * renderers narrate any setup from these shapes alone. Per-`(connection kind, state)`
@@ -59,7 +59,7 @@ export type SetupState =
   | { status: "awaiting-input"; form: SetupForm; error?: string }
   | { status: "awaiting-redirect"; url: string }
   | { status: "presenting"; view: SetupView }
-  | { status: "done"; conferral: SetupDoneView }
+  | { status: "done"; grant: SetupDoneView }
   | { status: "failed"; reason: string }
   | { status: "cancelled" };
 
@@ -80,7 +80,7 @@ export type SetupStartResult = { ok: true; start: SetupStart } | { ok: false; er
 
 /** Start or re-attach a setup for one grant. `idOrKind` is the connection
  *  id, or the bare connection kind for a never-connected connection kind (the terminal
- *  conferral mints the row). With `another`, `idOrKind` is the connection kind and
+ *  grant mints the row). With `another`, `idOrKind` is the connection kind and
  *  the setup connects a new account of it. */
 export async function startSetup(
   idOrKind: string,
@@ -202,7 +202,7 @@ export async function submitSetupReturn(params: {
       state: payload.state,
     };
   }
-  // Not matched. A 5xx is ambiguous (the confer may have landed); a 404 (or any
+  // Not matched. A 5xx is ambiguous (the grant may have landed); a 404 (or any
   // 4xx) is a definitive no-match the caller can fall back on.
   return res.status >= 500 ? { matched: false, ambiguous: true } : { matched: false };
 }

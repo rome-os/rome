@@ -31,6 +31,9 @@ export interface WelcomeProgress {
   /** Null until the connect-AI step resolves. */
   aiConnected: boolean | null;
   completedAt: string | null;
+  /** The webchat chat this run lives in (the id in `/chat/<id>`). Null before
+   *  the first turn, and for a run that started before the column existed. */
+  sessionId: string | null;
 }
 
 const EMPTY: WelcomeProgress = {
@@ -41,6 +44,7 @@ const EMPTY: WelcomeProgress = {
   ideasGeneratedAt: null,
   aiConnected: null,
   completedAt: null,
+  sessionId: null,
 };
 
 interface ProgressPatch {
@@ -51,6 +55,7 @@ interface ProgressPatch {
   appIdeasGeneratedAt?: string | null;
   aiConnected?: boolean | null;
   completedAt?: string | null;
+  sessionId?: string | null;
 }
 
 // A cursor from a script version that no longer exists reads as `greet`, so a
@@ -118,6 +123,7 @@ export class ProgressRepository {
       ideasGeneratedAt: row.appIdeasGeneratedAt,
       aiConnected: row.aiConnected ?? null,
       completedAt: row.completedAt,
+      sessionId: row.sessionId ?? null,
     };
   }
 
@@ -145,6 +151,7 @@ export class ProgressRepository {
         patch.aiConnected !== undefined ? patch.aiConnected : (existing?.aiConnected ?? null),
       completedAt:
         patch.completedAt !== undefined ? patch.completedAt : (existing?.completedAt ?? null),
+      sessionId: patch.sessionId !== undefined ? patch.sessionId : (existing?.sessionId ?? null),
       updatedAt: now,
     };
 
@@ -166,15 +173,16 @@ export class ProgressRepository {
       ideasGeneratedAt: next.appIdeasGeneratedAt,
       aiConnected: next.aiConnected,
       completedAt: next.completedAt,
+      sessionId: next.sessionId,
     };
   }
 
   /**
    * Wipe the welcome run back to a clean first-contact state: cursor at `greet`
    * and every captured artifact (ChatGPT/interview input, folded summary,
-   * brainstormed ideas, completion stamp) cleared. The landing screen calls this
-   * before starting a chat, so every entry from the welcome screen — first run or
-   * a "run the welcome again" restart — replays the flow from scratch. Scope is
+   * brainstormed ideas, completion stamp, chat id) cleared. The landing screen
+   * calls this when the guardian starts the welcome, or chooses to start over,
+   * so the new chat replays the flow from scratch. Scope is
    * deliberately just this row: memory, settings, and prior transcripts are left
    * untouched.
    */
@@ -187,6 +195,7 @@ export class ProgressRepository {
       appIdeasGeneratedAt: null,
       aiConnected: null,
       completedAt: null,
+      sessionId: null,
     });
   }
 }

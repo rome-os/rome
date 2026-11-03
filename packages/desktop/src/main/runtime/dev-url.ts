@@ -67,15 +67,7 @@ export class DevUrlRuntime extends EventEmitter implements Runtime {
     return true;
   }
 
-  async stopForQuit(): Promise<void> {}
-
-  async upgradeRuntime(): Promise<void> {}
-
-  async openInstallPage(): Promise<void> {}
-
-  async startRuntimeApp(): Promise<void> {}
-
-  async openRuntimeFolder(): Promise<void> {}
+  async openCloud(): Promise<void> {}
 
   openLogs(): Promise<void> {
     return this.deps.openLogs();
@@ -97,16 +89,7 @@ export class DevUrlRuntime extends EventEmitter implements Runtime {
       detail: error ?? `Using ${this.origin} from ${DEV_DASHBOARD_URL_ENV}.`,
       primaryAction: phase === "ready" ? "open_dashboard" : "retry",
       dashboardUrl: this.origin,
-      healthUrl: `${this.origin}/api/health`,
-      installDir: "",
-      image: "",
-      containerName: "",
-      provider: "remote",
-      runtimeInstalled: true,
-      runtimeRunning: phase === "ready",
-      runtimeInstallUrl: "",
       lastError: error,
-      pullProgress: null,
     };
   }
 }

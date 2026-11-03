@@ -84,7 +84,7 @@ describe("peopleRows", () => {
         contact({ channelUserId: "2", state: "dismissed" }),
       ],
     );
-    expect(rows.map((row) => row.level)).toEqual(["unknown", "stranger"]);
+    expect(rows.map((row) => row.level)).toEqual(["stranger", "dismissed"]);
   });
 
   it("leaves a linked account to the person it resolves to", () => {
@@ -154,8 +154,8 @@ describe("streamRows", () => {
       ],
     );
     expect(rowsOf(streamRows(rows, { search: "", filter: "all" }))).toEqual(["Ray Oster"]);
-    expect(rowsOf(streamRows(rows, { search: "", filter: "unknown" }))).toEqual(["Jules"]);
-    expect(rowsOf(streamRows(rows, { search: "", filter: "stranger" }))).toEqual(["Prize"]);
+    expect(rowsOf(streamRows(rows, { search: "", filter: "stranger" }))).toEqual(["Jules"]);
+    expect(rowsOf(streamRows(rows, { search: "", filter: "dismissed" }))).toEqual(["Prize"]);
   });
 
   it("holds back the guardian and anyone who has done nothing", () => {
@@ -211,30 +211,33 @@ describe("directoryGroups", () => {
       group.rows.map((row) => row.displayName),
     ]);
 
-  it("groups the placed people in ladder order, and orders each group by name", () => {
-    // "All" is the roster the guardian has placed, in ladder order, and the
-    // order within a group is the name, not what anyone last said.
+  it("leads with the guardian, then the placed people in ladder order, each group by name", () => {
+    // "All" is the guardian's own row, where they read which accounts are
+    // theirs, then the roster they have placed, in ladder order. The order
+    // within a group is the name, not what anyone last said.
     expect(groupsOf({ filter: "all", search: "" })).toEqual([
+      ["guardian", ["Mock Guardian"]],
       ["inner-circle", ["Ray Oster"]],
       ["other", ["Sam Okafor"]],
     ]);
   });
 
-  it("holds every position but the placed ones back from All, and enters each on purpose", () => {
-    // A queue, a dismissal and the reader's own row each answer a different
-    // question than "who does Rome know", so none of the three pads All.
+  it("holds the unplaced positions back from All, and enters each on purpose", () => {
+    // A queue and a dismissal each answer a different question than "who does
+    // Rome know", so neither pads All.
     expect(groupsOf({ filter: "all", search: "" }).map(([level]) => level)).toEqual([
+      "guardian",
       "inner-circle",
       "other",
     ]);
-    expect(groupsOf({ filter: "unknown", search: "" })).toEqual([
-      ["unknown", ["Abby Nunes", "Jonas Tan", "Jules"]],
+    expect(groupsOf({ filter: "stranger", search: "" })).toEqual([
+      ["stranger", ["Abby Nunes", "Jonas Tan", "Jules"]],
     ]);
-    expect(groupsOf({ filter: "stranger", search: "" })).toEqual([["stranger", ["Prize"]]]);
+    expect(groupsOf({ filter: "dismissed", search: "" })).toEqual([["dismissed", ["Prize"]]]);
   });
 
-  it("leaves the guardian to a search rather than a chip", () => {
-    // No chip selects the guardian, and no chip carries them along either.
+  it("gives the guardian no chip of their own", () => {
+    // No chip selects the guardian, and a level chip does not carry them along.
     expect(groupsOf({ filter: "inner-circle", search: "" }).map(([level]) => level)).not.toContain(
       "guardian",
     );
@@ -245,7 +248,7 @@ describe("directoryGroups", () => {
 
   it("reaches the address book through a search, whatever chip is lit", () => {
     expect(groupsOf({ filter: "inner-circle", search: "jonas" })).toEqual([
-      ["unknown", ["Jonas Tan"]],
+      ["stranger", ["Jonas Tan"]],
     ]);
   });
 
@@ -269,12 +272,12 @@ describe("levelCounts", () => {
 
   it("reads every number off the server, never off the loaded rows", () => {
     expect(levelCounts(people, accounts())).toEqual({
-      unknown: 6,
+      stranger: 6,
       guardian: 1,
       "inner-circle": 3,
       acquaintance: 4,
       other: 1,
-      stranger: 2,
+      dismissed: 2,
     });
     // Linked accounts are counted under the person they resolve to, never again
     // as accounts — the two nouns describe one roster.
@@ -288,8 +291,8 @@ describe("levelCounts", () => {
     // Unknown is the senders waiting on a decision. The directory's is the whole
     // contacts list, so its Unknown is everyone Rome has not placed — a bigger
     // number describing a bigger listing, which is the one on screen.
-    expect(levelCounts(people, accounts({ unlinked: 6 })).unknown).toBe(6);
-    expect(levelCounts(people, accounts({ unlinked: 4_212 })).unknown).toBe(4_212);
+    expect(levelCounts(people, accounts({ unlinked: 6 })).stranger).toBe(6);
+    expect(levelCounts(people, accounts({ unlinked: 4_212 })).stranger).toBe(4_212);
   });
 });
 
@@ -329,14 +332,14 @@ describe("peoplePath", () => {
   });
 
   it("carries the chip and the term, and leaves the defaults out", () => {
-    expect(peoplePath("directory", { filter: "unknown", search: "" })).toBe(
-      "/people/directory?level=unknown",
+    expect(peoplePath("directory", { filter: "stranger", search: "" })).toBe(
+      "/people/directory?level=stranger",
     );
     expect(peoplePath("latest", { filter: "all", search: "wei chen" })).toBe(
       "/people/latest?q=wei+chen",
     );
-    expect(peoplePath("latest", { filter: "stranger", search: "wei" })).toBe(
-      "/people/latest?level=stranger&q=wei",
+    expect(peoplePath("latest", { filter: "dismissed", search: "wei" })).toBe(
+      "/people/latest?level=dismissed&q=wei",
     );
   });
 });
@@ -344,7 +347,7 @@ describe("peoplePath", () => {
 describe("parsePeopleFilter", () => {
   it("takes the chips the rail offers", () => {
     expect(parsePeopleFilter("inner-circle")).toBe("inner-circle");
-    expect(parsePeopleFilter("stranger")).toBe("stranger");
+    expect(parsePeopleFilter("dismissed")).toBe("dismissed");
   });
 
   it("answers a missing or unoffered level with every level", () => {

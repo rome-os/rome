@@ -826,7 +826,7 @@ function createDaemonConfig(): DaemonConfig {
       10,
     ),
     healthRetryDelayMs: Number.parseInt(process.env.HEALTH_CHECK_RETRY_DELAY_MS ?? "15000", 10),
-    healthTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "10000", 10),
+    healthTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "60000", 10),
     actionHost: process.env.HEALTH_DAEMON_HOST ?? "0.0.0.0",
     actionPort: Number.parseInt(process.env.HEALTH_DAEMON_PORT ?? "9368", 10),
     romePort: Number.parseInt(process.env.INTERNAL_API_PORT ?? "4141", 10),

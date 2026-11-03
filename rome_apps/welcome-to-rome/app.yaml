@@ -11,8 +11,9 @@ web:
   manifest: web/manifest.json
   displayName: Welcome to Rome
 
-# The landing screen (src/web/App.tsx) calls POST /reset before starting a chat
-# so every entry from the welcome screen replays the flow from a clean slate.
+# The landing screen (src/web/App.tsx) reads GET /state to show where the
+# welcome run stands, records the chat it finds for an older run with
+# POST /session, and calls POST /reset before it opens a new welcome chat.
 api:
   entry: api/index
 

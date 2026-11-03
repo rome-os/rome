@@ -7,7 +7,7 @@ import {
   accountSegments,
   segmentAccount,
   segmentEntries,
-  segmentOutbox,
+  segmentSends,
 } from "./send-model";
 
 // The shape of the person page's two views. What is under test is the one rule
@@ -122,36 +122,18 @@ describe("segmentEntries", () => {
   });
 });
 
-describe("segmentOutbox", () => {
-  const messages = [
-    {
-      id: "1",
-      channel: "whatsapp",
-      channelUserId: "a",
-      text: "one",
-      timestamp: 1,
-      state: "sending" as const,
-      ref: null,
-      error: null,
-    },
-    {
-      id: "2",
-      channel: "whatsapp",
-      channelUserId: "b",
-      text: "two",
-      timestamp: 2,
-      state: "sending" as const,
-      ref: null,
-      error: null,
-    },
+describe("segmentSends", () => {
+  const sends = [
+    { id: "1", channel: "whatsapp", channelUserId: "a", text: "one" },
+    { id: "2", channel: "whatsapp", channelUserId: "b", text: "two" },
   ];
 
-  it("narrows by the account itself, which an outbox row does name", () => {
+  it("narrows by the account itself, which a send does name", () => {
     // Unlike a timeline entry. Two accounts on one channel therefore share a
-    // history under either segment and keep their outboxes apart, which is the
-    // half of the pair that can be told apart.
-    const scoped = segmentOutbox(messages, account({ channel: "whatsapp", channelUserId: "b" }));
-    expect(scoped.map((message) => message.text)).toEqual(["two"]);
+    // history under either segment and keep their pending sends apart, which
+    // is the half of the pair that can be told apart.
+    const scoped = segmentSends(sends, account({ channel: "whatsapp", channelUserId: "b" }));
+    expect(scoped.map((send) => send.text)).toEqual(["two"]);
   });
 });
 

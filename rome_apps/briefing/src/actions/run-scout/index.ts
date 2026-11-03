@@ -108,7 +108,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       await resultsRepo.finish(resultId, { status: "failed", error: errorMsg });
       log.warn("scout run failed", { scoutId: scout.id, error: errorMsg });
-      return { status: "ok", data: { resultId, status: "failed", error: errorMsg } };
+      return { status: "error", error: errorMsg };
     },
   };
 }

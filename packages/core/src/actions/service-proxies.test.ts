@@ -122,7 +122,7 @@ describe("BackendTurnRunnerProxy", () => {
     setWorkerRpcInProcessDispatcher(null);
   });
 
-  it("allows a backend turn 30 minutes to finish", async () => {
+  it("allows a backend turn 2 hours to finish", async () => {
     rs.useFakeTimers();
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(() => new Promise<never>(() => {}));
@@ -144,13 +144,13 @@ describe("BackendTurnRunnerProxy", () => {
       },
     );
 
-    await rs.advanceTimersByTimeAsync(10 * 60 * 1000);
+    await rs.advanceTimersByTimeAsync(90 * 60 * 1000);
     expect(settled).toBe(false);
 
     const rejection = expect(promise).rejects.toThrow(
-      "IpcRpc timeout: session.continue (1800000ms)",
+      "IpcRpc timeout: session.continue (7200000ms)",
     );
-    await rs.advanceTimersByTimeAsync(20 * 60 * 1000);
+    await rs.advanceTimersByTimeAsync(30 * 60 * 1000);
     await rejection;
   });
 });

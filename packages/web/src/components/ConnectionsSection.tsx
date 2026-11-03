@@ -9,16 +9,35 @@ import {
 import { ListCollection } from "@rome-os/ui/layout-list";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
+import { CircleAlert, RefreshCw, Search, Unplug, X } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { AppKeysRow } from "@/components/connections/app-keys-row";
+import {
+  ComposioServiceDialog,
+  ComposioServiceRowButton,
+  ComposioSignInBanner,
+  useComposioConnect,
+  useComposioServices,
+} from "@/components/connections/composio-services";
 import { ConnectionDetailDialog } from "@/components/ConnectionDetail";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
-import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
-import { StatusIndicator } from "@/lib/connection-status";
+import { slotCardCopy } from "@/lib/connection-capability-copy";
+import {
+  accountRoute,
+  buildConnectionCards,
+  groupConnectionCards,
+  isConnectedCard,
+  type ConnectionCard,
+  type ConnectionTab,
+} from "@/lib/connection-cards";
+import { connectionStatus, StatusIndicator } from "@/lib/connection-status";
+import { isImeCompositionEvent } from "@/lib/keyboard-submit";
+import type { ComposioServiceRow } from "@/lib/composio-services";
 import type { ApiConnection } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 
@@ -26,17 +45,20 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
  * Unified Connections list (list of rows).
  *
  * Renders every service the registry reports — Talk channels, OAuth services,
- * and the Composio broker account — as one uniform list over
- * `GET /api/connections`. Each row is a full-width button showing the brand
- * badge + label on the left and a dot+text `StatusIndicator` on the right;
- * clicking it opens the `ConnectionDetailDialog` over the list, where the
- * connect ceremony lives. The list itself performs NO ceremony — no inline
- * connect/disconnect, no expand-in-place cards, no accordion.
+ * and the Composio broker account — over `GET /api/connections`, split into a
+ * Connected and an Available tab with one search box over both, and grouped
+ * into Messaging and Accounts. Each row is a full-width button: a connected
+ * row shows the brand badge + label on the left and a dot+text
+ * `StatusIndicator` on the right; an available row shows what the connection
+ * does and a Connect cue. Clicking either opens the `ConnectionDetailDialog`
+ * over the list, where the connect ceremony lives. The list itself performs NO
+ * ceremony — no inline connect/disconnect, no expand-in-place cards, no
+ * accordion.
  *
- * The list closes with the `AppKeysRow` — the app-keys vault is not a registry
- * service, but it lives on this surface, so it renders in the same row anatomy
- * and navigates to its own page. It self-loads and stays up whatever state the
- * registry request is in.
+ * The Connected tab closes with the `AppKeysRow` — the app-keys vault is not a
+ * registry service, but it lives on this surface, so it renders in the same
+ * row anatomy and navigates to its own page. It self-loads and stays up
+ * whatever state the registry request is in.
  */
 export function ConnectionsSection({
   connections,
@@ -70,6 +92,101 @@ export function ConnectionsSection({
   };
   const selected = cards.find((card) => card.route === selectedRoute) ?? null;
 
+  // The page opens on Connected when anything is connected, otherwise on
+  // Available. The choice is made once, when the list first loads, so a later
+  // refresh never moves the guardian to the other tab.
+  const [chosenTab, setChosenTab] = useState<ConnectionTab | null>(null);
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLocaleLowerCase();
+  const describe = (card: ConnectionCard): string => {
+    const slot = card.slots[0];
+    const bullet = slot
+      ? slotCardCopy(card.service, slot, slot.identity !== null).bullets[0]
+      : null;
+    return bullet ? t(bullet.key, bullet.params) : "";
+  };
+  // Search matches what a row shows: the name, plus what the service does on
+  // Available, the only tab that shows it.
+  const matches = (card: ConnectionCard, withDescription: boolean) =>
+    !needle ||
+    `${card.label} ${withDescription ? describe(card) : ""}`.toLocaleLowerCase().includes(needle);
+  const connected = cards.filter(isConnectedCard);
+  // Signed out, the Composio group's sign-in banner stands in for the
+  // Composio account row.
+  const available = cards.filter((card) => !isConnectedCard(card) && card.kind !== "composio");
+  const shown: Record<ConnectionTab, ConnectionCard[]> = {
+    connected: connected.filter((card) => matches(card, false)),
+    available: available.filter((card) => matches(card, true)),
+  };
+
+  // The services Rome reaches through Composio, from the Connector app.
+  const composioInstalled = composio?.installed === true;
+  const composioSignedIn = composioInstalled && composio?.loggedIn === true;
+  const composioServices = useComposioServices({
+    installed: composioInstalled,
+    signedIn: composioSignedIn,
+  });
+  const { connect: connectComposio, busySlug } = useComposioConnect(onFlash);
+  const [openService, setOpenService] = useState<string | null>(null);
+  const matchesService = (row: ComposioServiceRow, withScope: boolean) =>
+    !needle || `${row.name} ${withScope ? row.scope : ""}`.toLocaleLowerCase().includes(needle);
+  const shownServices: Record<ConnectionTab, ComposioServiceRow[]> = {
+    connected: composioServices.rows.connected.filter((row) => matchesService(row, false)),
+    available: composioServices.rows.available.filter((row) => matchesService(row, true)),
+  };
+  const count = (value: ConnectionTab) => shown[value].length + shownServices[value].length;
+  const tab: ConnectionTab = chosenTab ?? (connected.length > 0 ? "connected" : "available");
+  if (chosenTab === null && !loading && !error && cards.length > 0) setChosenTab(tab);
+  const otherTab: ConnectionTab = tab === "connected" ? "available" : "connected";
+  const showAppKeys =
+    tab === "connected" && (!needle || t("appKeys.title").toLocaleLowerCase().includes(needle));
+  const needsAttention = (card: ConnectionCard) => connectionStatus(card).tone === "attention";
+
+  const renderCard = (card: ConnectionCard) => (
+    <Button
+      key={card.route}
+      type="button"
+      variant="outline"
+      size="default"
+      align="between"
+      onClick={() => select(card.route)}
+      className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
+      aria-label={`Open ${card.label}`}
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <ConnectionBrandBadge connection={card.service} />
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-ui text-foreground">{card.label}</span>
+          {tab === "available" && describe(card) ? (
+            <span className="truncate text-aux text-muted-foreground">{describe(card)}</span>
+          ) : null}
+        </span>
+      </span>
+      {/* A service the host cannot offer keeps its Unavailable
+          status and reason instead of a Connect cue. */}
+      {tab === "connected" || card.connect?.available === false ? (
+        <StatusIndicator card={card} />
+      ) : (
+        <span className="shrink-0 text-ui text-primary">{t("connections.connect")}</span>
+      )}
+    </Button>
+  );
+  // On Connected, Composio services join the Accounts group, and whatever
+  // needs attention leads it, Rome's own or Composio's.
+  const ordered = (
+    group: string,
+    rows: ConnectionCard[],
+  ): (ConnectionCard | ComposioServiceRow)[] => {
+    if (tab !== "connected" || group !== "accounts") return rows;
+    const services = shownServices.connected;
+    return [
+      ...rows.filter(needsAttention),
+      ...services.filter((row) => row.needsAttention),
+      ...rows.filter((card) => !needsAttention(card)),
+      ...services.filter((row) => !row.needsAttention),
+    ];
+  };
+
   // A freshly added account has no card until the list refetches, so refetch
   // first and point the dialog at it only once its card exists. Otherwise the
   // dialog would close, then reopen by itself when a later poll lists it.
@@ -96,65 +213,199 @@ export function ConnectionsSection({
           </SectionHeading>
         </SectionHeader>
 
-        <ListCollection className="flex flex-col gap-2">
-          {loading ? (
-            <div
-              className="flex flex-col gap-2"
-              role="status"
-              aria-label={t("connections.loading")}
-            >
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-16 w-full" />
-              ))}
-            </div>
-          ) : error ? (
-            <Alert variant="destructive">
-              <CircleAlert aria-hidden />
-              <AlertTitle>{t("connections.errorTitle")}</AlertTitle>
-              <AlertDescription>
-                <p>{error}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => void onRefresh()}
-                >
-                  <RefreshCw data-icon="inline-start" aria-hidden />
-                  {t("page.retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : cards.length === 0 ? (
-            <EmptyState className="rounded-8 border border-dashed border-border bg-surface/50">
-              <EmptyStateIcon>
-                <Unplug aria-hidden />
-              </EmptyStateIcon>
-              <EmptyStateTitle>{t("connections.emptyTitle")}</EmptyStateTitle>
-            </EmptyState>
-          ) : (
-            cards.map((card) => (
+        {loading ? (
+          <div className="flex flex-col gap-2" role="status" aria-label={t("connections.loading")}>
+            {[0, 1, 2].map((index) => (
+              <Skeleton key={index} className="h-16 w-full" />
+            ))}
+          </div>
+        ) : error ? (
+          <Alert variant="destructive">
+            <CircleAlert aria-hidden />
+            <AlertTitle>{t("connections.errorTitle")}</AlertTitle>
+            <AlertDescription>
+              <p>{error}</p>
               <Button
-                key={card.route}
                 type="button"
                 variant="outline"
-                size="default"
-                align="between"
-                onClick={() => select(card.route)}
-                className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
-                aria-label={`Open ${card.label}`}
+                size="sm"
+                className="mt-3"
+                onClick={() => void onRefresh()}
               >
-                <span className="flex min-w-0 items-center gap-3">
-                  <ConnectionBrandBadge connection={card.service} />
-                  <span className="truncate text-ui text-foreground">{card.label}</span>
-                </span>
-                <StatusIndicator card={card} />
+                <RefreshCw data-icon="inline-start" aria-hidden />
+                {t("page.retry")}
               </Button>
-            ))
-          )}
-          <AppKeysRow />
-        </ListCollection>
+            </AlertDescription>
+          </Alert>
+        ) : cards.length === 0 ? (
+          <EmptyState className="rounded-8 border border-dashed border-border bg-surface/50">
+            <EmptyStateIcon>
+              <Unplug aria-hidden />
+            </EmptyStateIcon>
+            <EmptyStateTitle>{t("connections.emptyTitle")}</EmptyStateTitle>
+          </EmptyState>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="relative w-full">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle-foreground"
+                aria-hidden
+              />
+              <Input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  // Escape clears, but not mid-IME-composition, where it cancels
+                  // the candidate buffer instead.
+                  if (event.key === "Escape" && !isImeCompositionEvent(event)) setQuery("");
+                }}
+                placeholder={t("connections.search.placeholder")}
+                aria-label={t("connections.search.placeholder")}
+                className="h-9 pl-8 pr-8"
+              />
+              {query ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setQuery("")}
+                  aria-label={t("connections.search.clear")}
+                  title={t("connections.search.clear")}
+                  className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
+                >
+                  <X className="size-3.5" aria-hidden />
+                </Button>
+              ) : null}
+            </div>
+            <SegmentedControl
+              aria-label={t("connections.tabs.label")}
+              value={tab}
+              onValueChange={setChosenTab}
+              className="self-start"
+              options={(["connected", "available"] as const).map((value) => ({
+                value,
+                label: (
+                  <span className="inline-flex items-center gap-2">
+                    {t(`connections.tabs.${value}`)}
+                    <span className="tabular-nums text-muted-foreground">{count(value)}</span>
+                  </span>
+                ),
+              }))}
+            />
+            {/* On both tabs: a failed load hides connected services as well as
+                available ones. */}
+            {composioInstalled && composioServices.error ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-8 border border-border px-4 py-3 text-ui text-muted-foreground">
+                <span>{t("connections.composioServices.loadFailed")}</span>
+                <Button type="button" variant="outline" size="sm" onClick={composioServices.retry}>
+                  {t("page.retry")}
+                </Button>
+              </div>
+            ) : null}
+            {/* A search that matches only App keys shows that row, not a
+                no-match message above it. */}
+            {count(tab) === 0 && !(needle && showAppKeys) ? (
+              <div className="flex flex-col items-center gap-3 rounded-8 border border-dashed border-border px-4 py-6 text-center text-ui text-muted-foreground">
+                <p>
+                  {needle
+                    ? t(`connections.search.noMatch.${tab}`, { query: query.trim() })
+                    : t(`connections.tabs.empty.${tab}`)}
+                </p>
+                {count(otherTab) > 0 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setChosenTab(otherTab)}
+                  >
+                    {t(`connections.tabs.show.${otherTab}`, { count: count(otherTab) })}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {groupConnectionCards(shown[tab], needsAttention, {
+              accounts: tab === "connected" && shownServices.connected.length > 0,
+            }).map(({ group, cards: rows }) => (
+              <section
+                key={group}
+                className="flex flex-col gap-2"
+                aria-labelledby={`${group}-heading`}
+              >
+                <h3 id={`${group}-heading`} className="text-aux text-muted-foreground">
+                  {t(`connections.groups.${group}`)}
+                </h3>
+                <ListCollection className="flex flex-col gap-2">
+                  {ordered(group, rows).map((row) =>
+                    "route" in row ? (
+                      renderCard(row)
+                    ) : (
+                      <ComposioServiceRowButton
+                        key={`composio:${row.slug}`}
+                        row={row}
+                        connected
+                        disabled={false}
+                        busy={false}
+                        onClick={() => setOpenService(row.slug)}
+                      />
+                    ),
+                  )}
+                </ListCollection>
+              </section>
+            ))}
+            {/* Signed out, the group always shows, since its banner is where
+                the guardian signs in to Composio. */}
+            {tab === "available" &&
+            composioInstalled &&
+            (!composioSignedIn || shownServices.available.length > 0) ? (
+              <section className="flex flex-col gap-2" aria-labelledby="composio-heading">
+                <h3 id="composio-heading" className="text-aux text-muted-foreground">
+                  {t("connections.composioServices.group")}
+                </h3>
+                {!composioSignedIn ? (
+                  <ComposioSignInBanner onSignIn={() => select("composio")} />
+                ) : null}
+                <ListCollection className="flex flex-col gap-2">
+                  {shownServices.available.map((row) => (
+                    <ComposioServiceRowButton
+                      key={`composio:${row.slug}`}
+                      row={row}
+                      connected={false}
+                      disabled={!composioSignedIn}
+                      busy={busySlug === row.slug}
+                      onClick={() => void connectComposio(row)}
+                    />
+                  ))}
+                </ListCollection>
+              </section>
+            ) : null}
+            {showAppKeys ? (
+              <section className="flex flex-col gap-2" aria-labelledby="other-heading">
+                <h3 id="other-heading" className="text-aux text-muted-foreground">
+                  {t("connections.groups.other")}
+                </h3>
+                <ListCollection className="flex flex-col gap-2">
+                  <AppKeysRow />
+                </ListCollection>
+              </section>
+            ) : null}
+          </div>
+        )}
+        {loading || error || cards.length === 0 ? (
+          <ListCollection className="mt-2 flex flex-col gap-2">
+            <AppKeysRow />
+          </ListCollection>
+        ) : null}
 
+        {/* Keyed by service, so each opens fresh, never mid-confirmation. */}
+        <ComposioServiceDialog
+          key={openService ?? "none"}
+          row={composioServices.rows.connected.find((row) => row.slug === openService) ?? null}
+          busy={busySlug !== null}
+          onReconnect={(row) => void connectComposio(row)}
+          onClose={() => setOpenService(null)}
+          onFlash={onFlash}
+        />
         <ConnectionDetailDialog
           card={selected}
           composio={composio}

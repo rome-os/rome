@@ -22,3 +22,17 @@ export function parseSSEEvents(text: string): SSEEvent[] {
   }
   return events;
 }
+
+// The turn SSE server emits a keepalive every 15s (TURN_STREAM_KEEPALIVE_
+// INTERVAL_MS in webchat.ts). If nothing arrives for this long the connection
+// is dead — mobile background/lock, proxy idle timeout, network swap — and the
+// reader would otherwise hang forever with no error, leaving the streaming UI
+// (and the Stop button's turnId) stuck on a stale turn. Three missed
+// keepalives + margin.
+export const STREAM_STALL_TIMEOUT_MS = 50_000;
+
+// A dropped turn stream is retried against the same turnId. Short and capped:
+// the server answers definitively (replayed `done`, or 404 once the turn is
+// gone), so a retry is cheap, and a resumed mobile tab catches up quickly.
+export const TURN_RESUME_BASE_DELAY_MS = 1_000;
+export const TURN_RESUME_MAX_DELAY_MS = 5_000;

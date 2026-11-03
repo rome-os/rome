@@ -125,6 +125,13 @@ export function isCarrierApp(appId: string): boolean {
   return Object.hasOwn(CARRIER_REDIRECTS, appId);
 }
 
+/** Whether `app` stays off the launcher surfaces: the Apps page, the sidebar,
+ * search, and the app picker. A carrier is always hidden. Any other app opts
+ * out with `hideInLauncher: true` in its app.yaml, and still opens by URL. */
+export function isHiddenInLauncher(app: { id: string; hideInLauncher?: boolean }): boolean {
+  return isCarrierApp(app.id) || app.hideInLauncher === true;
+}
+
 export function sameApproval(a: ApprovalRecord | null, b: ApprovalRecord): boolean {
   if (!a) return false;
   return (

@@ -7,6 +7,7 @@ import {
   type RomeAppContext,
   type RomeAppRuntimeServices,
 } from "./context.js";
+import type { ChatRepository } from "../chats/chat-repository.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { AppApiDispatcher } from "./api.js";
 import type { AppCatalog } from "./catalog.js";
@@ -190,6 +191,52 @@ export function createAction(config, deps) {
     expect(context.repositories).toBe(repositories);
   });
 
+  it("binds the connections capability to the host-resolved App id", async () => {
+    const forApp = rs.fn((appId: string) => ({
+      list: async () => ({
+        connections: [
+          {
+            connectionId: appId,
+            connectionKind: "fake",
+            label: appId,
+            identity: "account",
+            health: "working" as const,
+          },
+        ],
+      }),
+      describe: rs.fn(),
+      operations: rs.fn(),
+      invoke: rs.fn(),
+    }));
+    const app = resolvedApp("bound-app");
+    const context = createRomeAppContext(app, {
+      catalog: catalogFor(app),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: {} as ActionEngine,
+      repositories: createRepositories(),
+      appConnections: { forApp },
+    });
+
+    expect(await context.connections.list()).toEqual({
+      connections: [expect.objectContaining({ connectionId: "bound-app" })],
+    });
+    expect(forApp).toHaveBeenCalledWith("bound-app");
+  });
+
+  it("keeps old runtime wiring compatible with a default-deny capability", async () => {
+    const app = resolvedApp("old-host");
+    const context = createRomeAppContext(app, {
+      catalog: catalogFor(app),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: {} as ActionEngine,
+      repositories: createRepositories(),
+    });
+
+    await expect(context.connections.list()).rejects.toMatchObject({
+      detail: { code: "access_denied" },
+    });
+  });
+
   it("exposes adapter ports instead of broad internal repository objects", () => {
     const settingsRepo = {
       get: rs.fn(async () => null),
@@ -204,7 +251,12 @@ export function createAction(config, deps) {
       deleteSession: rs.fn(),
     } as unknown as WebChatRepository;
 
-    const repositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+    const repositories = createAppRuntimeRepositories({
+      settingsRepo,
+      webchatRepo,
+      chatRepo: {} as ChatRepository,
+      chatMessages: { recordSent: rs.fn() },
+    });
 
     expect("delete" in repositories.settings).toBe(false);
     expect("getAll" in repositories.settings).toBe(false);

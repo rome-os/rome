@@ -20,10 +20,5 @@
     "dotenv": "^16.4.5",
     "playwright": "^1.45.0",
     "typescript": "^5.8.3"
-  },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": false,
-    "sharp@0.34.5": true
   }
 }

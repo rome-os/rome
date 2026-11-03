@@ -1,5 +1,5 @@
-// An account exists only while it is connected. Model:
-// docs/domains/chats.md#account.
+// A connection exists only while it is connected, whatever its kind. Model:
+// docs/domains/connections.md#connection.
 
 import { createLogger } from "../logger.js";
 import type { ConnectionRegistry } from "./registry.js";
@@ -7,31 +7,28 @@ import type { Connection } from "./types.js";
 
 const log = createLogger("connections");
 
-/** Whether `conn` is an account no grant connects. An account here is a
- *  Connection of a connection kind with a Talk that names its accounts (an app's or a
- *  user's id), and it is removed, along with its channel, once every grant is
- *  unauthorized. Any other Connection (email, a zero-grant channel, a connection kind
- *  without a Talk) stays after its last grant goes. Each such connection kind holds a
- *  single grant, so a disconnect's grant section covers every grant read here. */
+/** Whether `conn` is a connection no grant connects any more: its grant is
+ *  unauthorized, so it was disconnected, and it is removed along with its
+ *  channel. Every kind of connection ends this way, email, WhatsApp and the
+ *  sign-ins such as GitHub included. */
 export async function isUnconnectedAccount(
-  registry: Pick<ConnectionRegistry, "getDescriptor" | "getLedger">,
+  registry: Pick<ConnectionRegistry, "grantOf">,
   conn: Pick<Connection, "id" | "connectionKind">,
 ): Promise<boolean> {
-  const descriptor = registry.getDescriptor(conn.connectionKind);
-  if (!descriptor?.capabilities.talker || !descriptor.accountIdOf) return false;
-  const grants = await registry.getLedger().listGrants(conn.id);
-  return grants.length > 0 && grants.every((grant) => grant.state === "unauthorized");
+  const grant = await registry.grantOf(conn.id);
+  return grant?.state === "unauthorized";
 }
 
 /**
- * Remove every unconnected account, for the boot pass. Before an account
- * existed only while connected, "Add another account" made one ahead of its
- * setup and Disconnect left the Connection behind, so an upgrade can find
- * either, and a removal that failed on disconnect leaves one too. Answers the
- * ids it removed; one that fails is logged and kept.
+ * Remove every disconnected connection, for the boot pass. Before a
+ * connection existed only while connected, "Add another account" made one
+ * ahead of its setup and Disconnect left the Connection behind, and until
+ * email, WhatsApp and the sign-ins ended at disconnect too, theirs stayed. An
+ * upgrade can find any of these. Answers the ids it removed; one that fails is logged and
+ * kept.
  */
 export async function removeUnconnectedAccounts(
-  registry: Pick<ConnectionRegistry, "all" | "getDescriptor" | "getLedger" | "remove">,
+  registry: Pick<ConnectionRegistry, "all" | "grantOf" | "remove">,
 ): Promise<string[]> {
   const removed: string[] = [];
   for (const conn of registry.all()) {
@@ -41,9 +38,9 @@ export async function removeUnconnectedAccounts(
       removed.push(conn.id);
     } catch (error) {
       // A leftover row must not keep Rome from starting; the next boot retries it.
-      log.warn("could not remove an account no grant connects", { id: conn.id, error });
+      log.warn("could not remove a connection no grant connects", { id: conn.id, error });
     }
   }
-  if (removed.length > 0) log.info("removed accounts no grant connects", { removed });
+  if (removed.length > 0) log.info("removed connections no grant connects", { removed });
   return removed;
 }

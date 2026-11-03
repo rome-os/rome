@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { Link } from "react-router-dom";
+import { useSubagentProgress } from "@/hooks/use-subagent-progress";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
   describeToolSummary,
@@ -28,6 +29,7 @@ export function SubagentCallView({
   output,
   error,
   durationMs,
+  startedAt,
   live = false,
 }: {
   agentName: string;
@@ -38,9 +40,18 @@ export function SubagentCallView({
   output?: unknown;
   error?: { message: string; code?: string };
   durationMs?: number;
+  /** ISO start of the call; times the elapsed clock while it runs. */
+  startedAt?: string;
   live?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const running = status === "running";
+  const startedAtMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const progress = useSubagentProgress({
+    turnId,
+    running,
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : null,
+  });
   const displayAgentName = artifactLocalName(agentName);
   const summary = describeToolSummary(
     displayAgentName,
@@ -88,7 +99,12 @@ export function SubagentCallView({
         ) : (
           <span className="flex-1" />
         )}
-        <span className="flex-none font-mono text-aux text-subtle-foreground">{status}</span>
+        <span
+          title={progress.currentStep ?? undefined}
+          className="flex-none font-mono text-aux tabular-nums text-subtle-foreground"
+        >
+          {running && progress.label ? progress.label : status}
+        </span>
         {duration && (
           <span className="flex-none font-mono text-aux tracking-wide tabular-nums text-subtle-foreground">
             {duration}

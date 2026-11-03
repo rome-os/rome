@@ -11,7 +11,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { List } from "@/components/ui/list-row";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
-import { DismissedEntry, UnknownEntry } from "./people/triage";
+import { DismissedEntry, StrangerEntry } from "./people/triage";
 import { LinkMyAccount } from "./people/link-code";
 import {
   directoryGroups,
@@ -38,7 +38,7 @@ import { usePeopleRoster } from "./people/use-roster";
  * Latest answers "who has something new" — one row per account with a
  * dynamic, newest first, carrying only what routing needs. Directory answers
  * "who does Rome know" — a contacts list, everyone Rome holds, by name, with no
- * preview and no count anywhere in it. Unknown and Stranger are positions on
+ * preview and no count anywhere in it. Stranger and Dismissed are positions on
  * the same ladder as the curated levels, so an account waiting on a decision
  * and a person the guardian placed sit in one list rather than in sections that
  * cannot say where either stands relative to the other.
@@ -69,7 +69,7 @@ import { usePeopleRoster } from "./people/use-roster";
  */
 
 /** The chips whose level the people read can be narrowed by: the levels a
- *  person row actually holds. Unknown and Stranger are account states, and the
+ *  person row actually holds. Stranger and Dismissed are account states, and the
  *  account read is narrowed by those instead. */
 const PLACED_FILTERS = new Set<PeopleFilter>(["inner-circle", "acquaintance", "other"]);
 
@@ -124,7 +124,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   const roster = usePeopleRoster({
     search,
     view,
-    accountState: view === "directory" ? null : filter === "stranger" ? "dismissed" : "unlinked",
+    accountState: view === "directory" ? null : filter === "dismissed" ? "dismissed" : "unlinked",
     personLevel: view === "directory" || !PLACED_FILTERS.has(filter) ? null : filter,
   });
   const rows = roster.rows;
@@ -143,8 +143,8 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
     [rows, filter, settled],
   );
   // The numbers the chips and the group headings show, from the read the view
-  // is on: what the stream calls Unknown is the senders waiting on a decision,
-  // what the directory calls Unknown is everyone Rome has not placed.
+  // is on: what the stream calls Stranger is the senders waiting on a decision,
+  // what the directory calls Stranger is everyone Rome has not placed.
   const counts = useMemo(
     () => levelCounts(roster.peopleCounts, roster.accountCounts),
     [roster.peopleCounts, roster.accountCounts],
@@ -183,10 +183,10 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   // contacts line every other row is, with the gestures behind a `⋯` menu at
   // the end of it.
   const unplaced = (row: PeopleRow, variant: PeopleView) =>
-    row.level === "stranger" ? (
+    row.level === "dismissed" ? (
       <DismissedEntry key={row.id} row={row} variant={variant} />
     ) : (
-      <UnknownEntry key={row.id} row={row} people={linkTargets} variant={variant} />
+      <StrangerEntry key={row.id} row={row} people={linkTargets} variant={variant} />
     );
 
   return (
@@ -230,13 +230,13 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
             options={FILTER_ORDER.map((option) => ({
               value: option,
               label: option === "all" ? t("filters.all") : t(levelLabelKey(option)),
-              // Unknown is the page's one number that asks for a decision, so
+              // Stranger is the page's one number that asks for a decision, so
               // it carries a count; the other chips are plain labels. It sits
               // at the far end for the same reason: the chips before it are
               // bonds the guardian has given, and this is what is still
               // waiting on them.
-              count: option === "unknown" && counts.unknown > 0 ? counts.unknown : undefined,
-              alignEnd: option === "unknown",
+              count: option === "stranger" && counts.stranger > 0 ? counts.stranger : undefined,
+              alignEnd: option === "stranger",
             }))}
           />
         </div>

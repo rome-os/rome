@@ -9,8 +9,8 @@ import {
 //
 // `traceUrl` is set only for cards with a published "see how it was built" trace.
 // App cards link to the demo deployment's full-page app route. System cards use
-// internal soft navigation (the SDK's navigateRome bridge), a host-relative app
-// route (e.g. /apps/connector), or an external link (the Rome Cloud app store).
+// internal soft navigation (the SDK's navigateRome bridge) or an external link
+// (the Rome Cloud app store).
 const DEMO_BASE = "https://demo.romeos.cc";
 const appUrl = (slug: string): string => `${DEMO_BASE}/full/apps/${slug}`;
 
@@ -40,7 +40,7 @@ export const MOCK_PRESET_CATALOG: PresetCatalog = {
           icon: "Plug",
           title: "Connect apps",
           description: "Connect Gmail, Calendar, GitHub, Slack, and more to your agent.",
-          mainCta: { label: "Open Connector", href: "/apps/connector" },
+          mainCta: { label: "Open settings", navigate: { path: "settings", tab: "connections" } },
           traceUrl: null,
         },
         {

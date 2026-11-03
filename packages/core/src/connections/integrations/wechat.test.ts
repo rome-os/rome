@@ -4,7 +4,7 @@
 //      createAdapter seam) fires its onFault callback so we assert HTTP 401/403
 //      → CredentialRejected{ grant: "account" } and other terminal → Disconnected.
 //   3. The account-401 → renew-once-then-degrade flow end-to-end over the real
-//      ConnectionRegistry (the route-driven scheme's renew answers "re-confer").
+//      ConnectionRegistry (the route-driven scheme's renew answers "needs-fix").
 //   4. Inbound delivery over the real WechatAdapter, with ilinkai played by a
 //      stubbed fetch.
 
@@ -17,21 +17,21 @@ import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Connection, StreamFault, Talker } from "../types.js";
 import { createWechatDescriptor } from "./wechat.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -86,7 +86,7 @@ class FakeWechatAdapter {
 
 function setup(): { registry: ConnectionRegistry; adapters: FakeWechatAdapter[] } {
   const adapters: FakeWechatAdapter[] = [];
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   registry.register(
     createWechatDescriptor({
       createAdapter: (config) => {
@@ -119,36 +119,35 @@ describe("wechat descriptor shape", () => {
   it("declares one `account` grant and a talker needing it", () => {
     const desc = createWechatDescriptor();
     expect(desc.connectionKind).toBe("wechat");
-    expect(Object.keys(desc.auth)).toEqual(["account"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["account"]);
+    expect(desc.grant).toBe("account");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("throws from confer (conferral is the setup) and re-confers on renew", async () => {
-    const scheme = createWechatDescriptor().auth.account;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+  it("throws from grant (grant is the setup) and fixes on renew", async () => {
+    const scheme = createWechatDescriptor().auth;
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
     // The setup is attached to the scheme (the generic routes discover it here).
     expect(scheme.setup).toBeTypeOf("function");
-    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("re-confer");
+    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("needs-fix");
   });
 
   it("reports needs-auth for talk before the account grant is imported", async () => {
     const { registry } = setup();
     const conn = await registry.connect("wechat");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["account"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk and forwards attachments + typing once the grant is imported", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.importCredential(conn.id, "account", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(adapters).toHaveLength(1);
     expect(adapters[0].started).toBe(true);
 
@@ -171,24 +170,24 @@ describe("wechat descriptor shape", () => {
     ).resolves.toEqual([]);
   });
 
-  it("reports transient adapter degradation without relocking the talk capability", async () => {
+  it("reports transient adapter degradation without relocking the chat capability", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.importCredential(conn.id, "account", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
 
     adapters[0].degradation = {
       reason: "WeChat reported a stale session.",
       retryAt: "2026-07-20T12:00:00.000Z",
     };
 
-    expect(conn.status().talk).toEqual({
+    expect(conn.status().chat).toEqual({
       state: "unlocked",
       degradation: {
         reason: "WeChat reported a stale session.",
         retryAt: "2026-07-20T12:00:00.000Z",
       },
     });
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(conn.auth.grants().account).toBe("authorized");
   });
 });
@@ -202,14 +201,11 @@ function buildTalker(): { talker: Talker; adapter: FakeWechatAdapter; faults: St
       return adapter as never;
     },
   });
-  const talker = desc.capabilities.talker!.build(
-    { account: validCred() },
-    {
-      connectionId: "wechat-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "wechat-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   talker.start(
     () => {},
@@ -237,26 +233,26 @@ describe("wechat Talker fault mapping", () => {
 });
 
 describe("wechat account-401 drives renew-once-then-degrade", () => {
-  it("relocks talk after a terminal auth fault (route-driven renew answers re-confer)", async () => {
+  it("relocks talk after a terminal auth fault (route-driven renew answers fix)", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.importCredential(conn.id, "account", validCred());
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
 
     adapters[0].fault(new Error("HTTP 401: unauthorized"));
     await flush();
 
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["account"] });
     expect(conn.auth.grants().account).toBe("degraded");
 
     // Re-importing (a fresh pairing) re-unlocks talk.
     let reUnlocked: Connection | null = null;
-    registry.onUnlocked("talk", (c) => {
+    registry.onUnlocked("chat", (c) => {
       reUnlocked = c;
     });
-    await registry.importCredential(conn.id, "account", validCred());
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });
 });
@@ -316,7 +312,7 @@ describe("wechat inbound delivery", () => {
 
     const desc = createWechatDescriptor({ createAdapter: (config) => new WechatAdapter(config) });
     const talker = desc.capabilities.talker!.build(
-      { account: { ...validCred(), material: { ...validCred().material, statePath } } },
+      { ...validCred(), material: { ...validCred().material, statePath } },
       {
         connectionId: "wechat-test",
         persist: async () => {},

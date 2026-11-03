@@ -4,21 +4,25 @@
  */
 
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import type { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
 
 /**
  * Record a channel for every Connection that has none. A Connection minted
  * after channels were recorded got its channel in the same transaction, so
  * this only reaches Connections from before. A connection kind held one Connection
- * then, so each takes its connection kind's own name. Such an account answered as
- * main before accounts took agents, so it keeps main, as migration 0081 kept
- * it for the channels recorded then. `domainOf` answers a Feishu
+ * then, so each takes its connection kind's own name. Each gets its connected
+ * account too. Such an account answered as main before accounts took agents,
+ * so one whose connection kind takes an agent keeps main, as migration 0081 kept it
+ * for the channels recorded then. `domainOf` answers a Feishu
  * app's domain, and is asked only of a Connection that has no channel.
  */
 export async function claimChannels(
   db: DrizzleDb,
-  records: Pick<ChannelRecordsRepository, "claim" | "unclaimed">,
+  records: Pick<ChannelRecordsRepository, "claim" | "unclaimed" | "linkOf">,
+  accounts: Pick<ConnectedAccountsRepository, "add">,
   connections: ReadonlyArray<{ id: string; connectionKind: string }>,
   domainOf: (connectionId: string) => Promise<string | undefined> = async () => undefined,
 ): Promise<void> {
@@ -28,7 +32,40 @@ export async function claimChannels(
   const now = new Date();
   db.transaction((tx) => {
     for (const [i, connection] of unclaimed.entries()) {
-      records.claim(tx, { ...connection, domain: domains[i] }, now, { agent: MAIN_AGENT_ID });
+      records.claim(tx, { ...connection, domain: domains[i] }, now, {
+        id: connection.connectionKind,
+      });
+      const agent = records.linkOf(connection.connectionKind) === null ? null : MAIN_AGENT_ID;
+      accounts.add(tx, connection.id, agent);
+    }
+  });
+}
+
+/**
+ * Record the account each backed channel is, for channels recorded before
+ * they knew it: the account its Connection's held grant reaches, once the
+ * grant names it. A channel whose Connection holds no such grant stays
+ * without one until a grant reports it.
+ */
+export async function recordChannelAccounts(
+  db: DrizzleDb,
+  records: Pick<ChannelRecordsRepository, "all" | "recordAccount">,
+  grants: Pick<ConnectionRegistry, "grantOf">,
+): Promise<void> {
+  const unknown = records
+    .all()
+    .filter((record) => record.connectionId !== null && record.platformAccountId === null);
+  if (unknown.length === 0) return;
+  const accounts = await Promise.all(
+    unknown.map(async (record) => {
+      const grant = await grants.grantOf(record.connectionId!);
+      return grant && grant.state !== "unauthorized" ? grant.account : undefined;
+    }),
+  );
+  db.transaction((tx) => {
+    for (const [i, record] of unknown.entries()) {
+      const account = accounts[i];
+      if (account) records.recordAccount(tx, record.connectionId!, account);
     }
   });
 }

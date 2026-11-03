@@ -12,7 +12,18 @@ import {
   SquareActivity,
   X,
 } from "lucide-react";
-import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import ActivityPage, { PendingApprovalsCallout } from "@/pages/ActivityPage";
+import { staticLiveText } from "@/hooks/live-text";
+import { useApprovals } from "@/hooks/use-approvals";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -58,6 +69,7 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
+import { modelDisplayName } from "@/lib/model-display";
 import type {
   ChatMessage,
   RomeSessionExplorerRecord,
@@ -259,6 +271,59 @@ function sessionsViewportClass(fullMode: boolean): string {
   return fullMode
     ? "h-[var(--rome-viewport-height)] pt-safe"
     : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]";
+}
+
+type ActivityView = "overview" | "sessions" | "events";
+
+/** Where the Activity page lives: in the shell, or mounted as a workspace tile. */
+function useActivityBase(): string {
+  return useLocation().pathname.startsWith("/full/apps/sessions")
+    ? "/full/apps/sessions"
+    : "/sessions";
+}
+
+/** The switch between the Activity page's three tabs. */
+function ActivityViewSwitch({ view }: { view: ActivityView }) {
+  const navigate = useNavigate();
+  const base = useActivityBase();
+  return (
+    <SegmentedControl
+      aria-label="Activity view"
+      size="sm"
+      value={view}
+      onValueChange={(value) => {
+        if (value === view) return;
+        navigate(
+          value === "overview" ? base : `${base}/${value === "sessions" ? "all" : "events"}`,
+        );
+      }}
+      options={[
+        { value: "overview", label: "Overview" },
+        { value: "sessions", label: "Sessions" },
+        { value: "events", label: "Events" },
+      ]}
+    />
+  );
+}
+
+/**
+ * Pending approvals wait on the Events tab, so the other tabs say they are
+ * there: an approval must not go unseen because another tab is open.
+ */
+function PendingApprovalsBanner({ className }: { className?: string }) {
+  const navigate = useNavigate();
+  const base = useActivityBase();
+  const approvals = useApprovals();
+  const count = (approvals.data ?? []).filter((approval) => approval.status === "pending").length;
+  if (count === 0) return null;
+  return (
+    <div className={className}>
+      <PendingApprovalsCallout
+        count={count}
+        onReview={() => navigate(`${base}/events?status=pending`)}
+      />
+    </div>
+  );
 }
 
 function SessionsIndexPage({
@@ -587,7 +652,7 @@ function SessionsIndexPage({
     model
       ? {
           key: "model",
-          label: `Model: ${model.kind === "unknown" ? "Unknown" : model.name}`,
+          label: `Model: ${model.kind === "unknown" ? "Unknown" : modelDisplayName(model.name)}`,
           clear: () => setModel(undefined),
         }
       : null,
@@ -617,20 +682,7 @@ function SessionsIndexPage({
     [navigate, view],
   );
 
-  const viewSwitch = (
-    <SegmentedControl
-      aria-label="Sessions view"
-      value={view}
-      onValueChange={(value) => {
-        if (value === view) return;
-        navigate(value === "sessions" ? "all" : "..", { relative: "path" });
-      }}
-      options={[
-        { value: "overview", label: "Overview" },
-        { value: "sessions", label: "Sessions" },
-      ]}
-    />
-  );
+  const viewSwitch = <ActivityViewSwitch view={view} />;
   const rangeItems = (
     <>
       <SelectItem value="24h">24 hours</SelectItem>
@@ -679,6 +731,7 @@ function SessionsIndexPage({
               </PageHeading>
               <PageActions>{viewSwitch}</PageActions>
             </PageHeader>
+            <PendingApprovalsBanner />
             <ListToolbar aria-label="Filter sessions">
               {/* Search leads and grows: it is the only text control here, and the
                 one the reader reaches for first. */}
@@ -1021,6 +1074,7 @@ function SessionsIndexPage({
         </header>
 
         <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
+          <PendingApprovalsBanner className="px-5 pt-4" />
           <SessionsOverview
             data={metrics.data}
             error={metrics.error}
@@ -1090,6 +1144,8 @@ function ReadOnlySessionChat({
       }),
     [identity, liveTurn, view],
   );
+  const liveText = liveTurn?.text ?? "";
+  const liveTextStore = useMemo(() => staticLiveText(liveText), [liveText]);
   const actions = useMemo<BlockActions>(
     () => ({
       onApprovalResolved: NO_OP,
@@ -1100,7 +1156,10 @@ function ReadOnlySessionChat({
     [view.interactionResults],
   );
   const loadStoredTrace = useCallback(
-    async (messageId: string, includeSubagentUsage: boolean): Promise<TraceSnapshot | null> => {
+    async (
+      messageId: string,
+      includeSubagentUsage: boolean,
+    ): Promise<TraceSnapshot | "archived" | null> => {
       const params = new URLSearchParams({
         includeSubagentUsage: String(includeSubagentUsage),
       });
@@ -1109,8 +1168,8 @@ function ReadOnlySessionChat({
         { credentials: "include" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { trace: TraceSnapshot | null };
-      return data.trace;
+      const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+      return data.traceArchived ? "archived" : data.trace;
     },
     [],
   );
@@ -1143,7 +1202,7 @@ function ReadOnlySessionChat({
                 isStreaming: liveTurn !== null,
                 runningTurnId: liveTurn?.turnId ?? null,
                 snapshot: liveTurn?.snapshot ?? null,
-                text: liveTurn?.text ?? "",
+                textStore: liveTextStore,
                 identity,
               }}
               contentRef={NO_OP}
@@ -1613,8 +1672,23 @@ export default function SessionsPage() {
     <Routes>
       <Route index element={<SessionsIndexPage state={state} view="overview" />} />
       <Route path="all" element={<SessionsIndexPage state={state} view="sessions" />} />
+      <Route path="events" element={<ActivityEventsRoute />} />
       <Route path=":sessionId" element={<SessionDetailRoute />} />
     </Routes>
+  );
+}
+
+/** The Events tab: the event log. `?status=pending` opens it on the pending approvals. */
+function ActivityEventsRoute() {
+  const [params] = useSearchParams();
+  const fullMode = useActivityBase() !== "/sessions";
+  return (
+    <SessionsListFrame fullMode={fullMode}>
+      <ActivityPage
+        viewSwitch={<ActivityViewSwitch view="events" />}
+        initialFilter={params.get("status") === "pending" ? "pending" : "all"}
+      />
+    </SessionsListFrame>
   );
 }
 

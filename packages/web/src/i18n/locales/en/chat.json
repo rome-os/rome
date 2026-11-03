@@ -4,6 +4,85 @@
     "mermaid": "Mermaid diagram"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "Typing",
+    "taskChat": "Task chat",
+    "taskStatus": {
+      "running": "Working",
+      "waiting": "Needs you",
+      "failed": "Stopped with an error",
+      "idle": "Done"
+    },
+    "openForwardedChat": "Open task chat {{title}}",
+    "showFullText": "Show full text",
+    "showLess": "Show less",
+    "openTaskChat": "Open",
+    "tasks": {
+      "title": "Tasks",
+      "close": "Close tasks",
+      "groups": {
+        "needsYou": "Needs you",
+        "doing": "Doing",
+        "next": "Up next",
+        "watching": "Watching",
+        "done": "Done"
+      },
+      "stop": "Stop",
+      "done": "Done",
+      "archive": "Archive",
+      "retry": "Try again",
+      "pending": {
+        "stop": "Stopping…",
+        "archive": "Archiving…",
+        "done": "Sending…"
+      },
+      "unchanged": "Concierge did not change it",
+      "timeout": "Concierge has not handled this yet",
+      "failed": "Could not send",
+      "notSynced": "Not synced",
+      "sourceMissing": "Can't find the original message",
+      "findingMessage": "Finding message…",
+      "showMore": "Show {{count}} older",
+      "showLess": "Show less",
+      "openChat": "Open the chat for {{title}}",
+      "actionText": {
+        "stop": "Stop \"{{title}}\"",
+        "archive": "Archive \"{{title}}\"",
+        "done": "Done \"{{title}}\"",
+        "withId": "(task {{id}})"
+      },
+      "replyText": {
+        "done": "I've done this"
+      },
+      "pill": {
+        "needsYou_one": "Tasks, {{count}} needs you",
+        "needsYou_other": "Tasks, {{count}} need you",
+        "doing_one": "Tasks, {{count}} in progress",
+        "doing_other": "Tasks, {{count}} in progress",
+        "idle": "Tasks"
+      },
+      "emptyTitle": "No tasks yet",
+      "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
+    },
+    "messageDetails": "Message details",
+    "composerMenu": "Add files or change the model",
+    "placeholder": "Message",
+    "empty": {
+      "title": "Just tell me what you want to get done",
+      "prompts": {
+        "weather": "What's the weather today?",
+        "reminder": "Remind me to stretch in an hour",
+        "email": "Summarize my unread email",
+        "task": "Build me a simple habit tracker app"
+      }
+    }
+  },
+  "reply": {
+    "action": "Reply",
+    "dismiss": "Cancel reply",
+    "jump": "Go to the original message"
+  },
+  "senderGuardian": "Guardian",
   "inputState": {
     "queued": "Waiting to be included",
     "submitted": "Sending to agent",
@@ -60,6 +139,8 @@
   "timeline": {
     "label": "Question timeline"
   },
+  "jumpToWaitingCard": "Needs you: jump to waiting card",
+  "waitingCard": "Needs you",
   "jumpToLatest": "Jump to the latest message",
   "roles": {
     "agent": "Assistant"
@@ -223,6 +304,7 @@
   },
   "composer": {
     "placeholderDefault": "How can I help you today?",
+    "lockedByCard": "Answer the card above to continue.",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
     "hints": {
       "skill": "Type / to use a skill",
@@ -262,6 +344,9 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "appComponent": {
+    "dismiss": "Dismiss"
+  },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",
     "hint": "I think with your existing subscription. Sign in to one so I can start working.",
@@ -269,6 +354,8 @@
     "connected": "Connected",
     "skipped": "Skipped for now",
     "skip": "Skip for now",
+    "sendFailed": "That didn't go through.",
+    "retry": "Try again",
     "connectedSummary": "Connected an AI",
     "skippedSummary": "Skipped connecting an AI",
     "connectedTitle": "AI connected",
@@ -282,6 +369,9 @@
       "using": "Rome credits in use",
       "ready": "Rome credits ready"
     }
+  },
+  "modelSwitch": {
+    "notice": "Switched to {{model}}"
   },
   "modelSelector": {
     "label": "Model",

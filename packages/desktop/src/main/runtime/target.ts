@@ -11,14 +11,16 @@ export interface RemoteInstanceRef {
 }
 
 /**
- * Which Rome the app opens. `local` boots the private VM on this computer.
- * `remote` opens a hosted Rome from the user's Rome Cloud account; its
+ * Which Rome the app opens: a hosted Rome from the user's Rome Cloud account.
  * `instance` is null until one is picked, which is also the signed-out state
  * a new install starts in.
  */
-export type RuntimeTarget =
-  | { kind: "local" }
-  | { kind: "remote"; instance: RemoteInstanceRef | null };
+export interface RuntimeTarget {
+  kind: "remote";
+  instance: RemoteInstanceRef | null;
+}
+
+const SIGN_IN: RuntimeTarget = { kind: "remote", instance: null };
 
 const instanceSchema = z.object({
   id: z.string().min(1),
@@ -26,26 +28,20 @@ const instanceSchema = z.object({
   origin: z.string().refine((value) => exactHttpsOrigin(value) === value),
 });
 
-const targetSchema = z.union([
-  z.object({ kind: z.literal("local") }),
-  z.object({ kind: z.literal("remote"), instance: instanceSchema.nullable() }),
-]);
+const targetSchema = z.object({ kind: z.literal("remote"), instance: instanceSchema.nullable() });
 
 /**
- * The saved target, or the default for a computer that never saved one: the
- * VM when it already has one (an install from before Rome Cloud mode, whose
- * Rome lives there), Rome Cloud sign-in otherwise.
+ * The saved target, or Rome Cloud sign-in for anything else. That includes
+ * `{"kind":"local"}`, which builds that ran a private VM on this computer
+ * saved: the app no longer runs one, so those installs land on sign-in.
  */
-export function parseRuntimeTarget(raw: string | null, hasLocalRuntime: boolean): RuntimeTarget {
-  const fallback: RuntimeTarget = hasLocalRuntime
-    ? { kind: "local" }
-    : { kind: "remote", instance: null };
-  if (!raw) return fallback;
+export function parseRuntimeTarget(raw: string | null): RuntimeTarget {
+  if (!raw) return SIGN_IN;
   try {
     const parsed = targetSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : fallback;
+    return parsed.success ? parsed.data : SIGN_IN;
   } catch {
-    return fallback;
+    return SIGN_IN;
   }
 }
 
@@ -55,6 +51,5 @@ export function requireRuntimeTarget(value: unknown): RuntimeTarget {
 }
 
 export function sameTarget(a: RuntimeTarget, b: RuntimeTarget): boolean {
-  if (a.kind === "local" || b.kind === "local") return a.kind === b.kind;
   return (a.instance?.id ?? null) === (b.instance?.id ?? null);
 }

@@ -674,6 +674,22 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
+  it("attributes commits and PRs to Rome OS through SDK flag settings", async () => {
+    const session = await new AnthropicProvider().openSession(buildParams());
+
+    expect(queryMock.mock.calls[0]![0].options).toMatchObject({
+      settingSources: ["project"],
+      settings: {
+        attribution: {
+          commit: "Co-Authored-By: Rome OS <noreply@romeos.cc>",
+          pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
+        },
+      },
+    });
+
+    await session.close();
+  });
+
   it("uses SDK outputFormat and publishes only the native structured terminal", async () => {
     const schema = {
       type: "object",
@@ -1603,6 +1619,34 @@ describe("AnthropicProvider", () => {
       await collectEvents(session);
       await session.close();
       expect(queryMock.mock.calls[0]![0].options.env.ROME_CHANNEL).toBe(expected);
+    });
+
+    it.each([
+      [true, "0"],
+      [false, undefined],
+      [undefined, undefined],
+    ])("with textPrivate %s, sets CLAUDE_CODE_SILENT_TURN_REMINDER to %s", async (textPrivate, expected) => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+      const session = await provider.openSession(buildParams({ textPrivate }));
+      await collectEvents(session);
+      await session.close();
+      expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_SILENT_TURN_REMINDER).toBe(
+        expected,
+      );
+    });
+
+    it("drops the defer confirmation line for a private-text agent", async () => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+      const session = await provider.openSession(
+        buildParams({ textPrivate: true, executeDefer: async () => ({ ok: true }) }),
+      );
+      await collectEvents(session);
+      await session.close();
+      const { mcpServers } = queryMock.mock.calls[0]![0].options;
+      const defer = mcpServers.ask_user.tools.find(
+        (tool: { name: string }) => tool.name === "defer",
+      );
+      expect(defer.description).not.toContain("write one short line confirming");
     });
 
     function terminalMcpTools(): string[] | undefined {

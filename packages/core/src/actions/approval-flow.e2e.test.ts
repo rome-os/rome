@@ -401,7 +401,15 @@ describe("Approval flow E2E — resolving an approval", () => {
       const events = await app.request(`/api/chat/sessions/${sessionId}/events`, { headers });
       expect(events.status).toBe(200);
       const reader = events.body!.getReader();
-      const pendingRead = reader.read();
+      // The resumed turn's `session_running` comes first.
+      let text = "";
+      const pendingRead = (async () => {
+        while (!text.includes("event: message_insert")) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          text += new TextDecoder().decode(chunk.value);
+        }
+      })();
 
       // Act: the guardian approves over HTTP.
       const approveRes = await app.request(`/api/approvals/${approvalId}/approve`, {
@@ -411,9 +419,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       expect(approveRes.status).toBe(202);
 
       // Observe (live): the reply is pushed to the open view with no reload.
-      const chunk = await pendingRead;
-      expect(chunk.done).toBe(false);
-      const text = new TextDecoder().decode(chunk.value);
+      await pendingRead;
       expect(text).toContain("event: message_insert");
       expect(text).toContain("Done — I sent the message.");
       await reader.cancel();

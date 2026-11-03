@@ -33,17 +33,23 @@ interface SentinelEntry {
 }
 
 // Lean subset of /api/connections — only what the read-only source overview
-// needs: per-kind grant states (conferred or not) and whether the Talk
+// needs: per-kind connection state (connected or not) and whether the Talk
 // capability is actually unlocked (the live transport).
 interface ConnectionLite {
   connectionKind: string;
-  grants: Record<string, "unauthorized" | "authorized" | "degraded">;
-  capabilities: { talk: { state: string } };
+  state: "working" | "broken" | null;
+  capabilities: { chat: { state: string } };
 }
 
-// "configured" = set up but the live connection is not currently open (pending
-// QR/login, reconnecting, or errored) — distinct from a confirmed "connected".
-type SourceStatus = "connected" | "configured" | "awaiting" | "disconnected" | "alwaysOn";
+// "configured" = a working connection whose Talk is not unlocked yet; "broken" =
+// the platform stopped accepting Rome's access, so the guardian must fix it.
+type SourceStatus =
+  | "connected"
+  | "configured"
+  | "broken"
+  | "awaiting"
+  | "disconnected"
+  | "alwaysOn";
 
 const ALL_BOND_LEVELS = ["guardian", "inner-circle", "acquaintance", "other"] as const;
 const DEFAULT_TRUSTED_LEVELS = ["guardian"];
@@ -375,15 +381,16 @@ function BondLevelToggle({
 // ── Section: Message sources (read-only overview + deep link) ───────────
 
 // One shared rule over the registry-native projection: a service whose Talk is
-// unlocked is connected; a conferred credential (authorized or degraded) whose
-// transport is not up reads "configured"; nothing conferred is disconnected.
+// unlocked is connected; a broken connection reads "broken", as it does in
+// Settings → Connections; a working connection whose Talk is still locked
+// reads "configured"; a connection with no state is disconnected.
 // The old per-channel nuances (guardian-awaiting, live-socket "open") are
 // ceremony detail that lives in Settings → Connections, not this overview.
 function sourceStatus(conn: ConnectionLite | undefined): SourceStatus {
   if (!conn) return "disconnected";
-  if (conn.capabilities.talk.state === "unlocked") return "connected";
-  const conferred = Object.values(conn.grants).some((state) => state !== "unauthorized");
-  return conferred ? "configured" : "disconnected";
+  if (conn.capabilities.chat.state === "unlocked") return "connected";
+  if (conn.state === "broken") return "broken";
+  return conn.state !== null ? "configured" : "disconnected";
 }
 
 function MessageSourcesSection({ connections }: { connections: ConnectionLite[] | null }) {
@@ -403,6 +410,7 @@ function MessageSourcesSection({ connections }: { connections: ConnectionLite[] 
   const statusTone: Record<SourceStatus, string> = {
     connected: "bg-success-bg text-success-fg",
     configured: "bg-warning-bg text-warning-fg",
+    broken: "bg-warning-bg text-warning-fg",
     awaiting: "bg-warning-bg text-warning-fg",
     disconnected: "bg-surface-muted text-muted-foreground",
     alwaysOn: "bg-info-bg text-info-fg",

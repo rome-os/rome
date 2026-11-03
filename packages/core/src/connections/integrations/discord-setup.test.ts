@@ -1,12 +1,12 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import { makeDiscordSetup } from "./discord.js";
 
 describe("discord credential setup", () => {
-  it("confers validated credentials without consuming inbound messages or mapping an account", async () => {
+  it("grants validated credentials without consuming inbound messages or mapping an account", async () => {
     const probeBotIdentity = rs.fn(async () => ({ botId: "42", botUsername: "rome_bot" }));
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({ fn: makeDiscordSetup({ probeBotIdentity }), commit });
     await session.started();
     expect(session.state.status).toBe("awaiting-input");
@@ -25,7 +25,7 @@ describe("discord credential setup", () => {
       if (token === "bad") throw new Error("Invalid token");
       return { botId: "42", botUsername: "rome_bot" };
     });
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({ fn: makeDiscordSetup({ probeBotIdentity }), commit });
     await session.started();
     await session.provideInput({ token: "bad" });
@@ -42,7 +42,7 @@ describe("discord credential setup", () => {
           signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         }),
     );
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({ fn: makeDiscordSetup({ probeBotIdentity }), commit });
     await session.started();
     const input = session.provideInput({ token: "good" });

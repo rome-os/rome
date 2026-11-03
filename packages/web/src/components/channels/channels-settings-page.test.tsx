@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { ChannelsSettingsPage } from "./channels-settings-page";
+import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -163,7 +164,7 @@ describe("ChannelsSettingsPage", () => {
               grants: {},
               display: {},
               capabilities: {
-                talk: { state: "unlocked" },
+                chat: { state: "unlocked" },
                 act: { state: "unsupported" },
                 watch: { state: "unsupported" },
               },
@@ -258,11 +259,12 @@ describe("ChannelsSettingsPage", () => {
       grants: {},
       display: {},
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
       connect: null,
+      link: linkOf(service),
       ...linked,
     });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
@@ -328,12 +330,13 @@ describe("ChannelsSettingsPage", () => {
               grants: {},
               display: {},
               capabilities: {
-                talk: { state: "unlocked" },
+                chat: { state: "unlocked" },
                 act: { state: "unsupported" },
                 watch: { state: "unsupported" },
               },
               connect: null,
               agent: "sales:agent",
+              link: "own_account",
             },
           ],
         });
@@ -384,9 +387,10 @@ describe("ChannelsSettingsPage", () => {
               label: "Discord · Rome",
               grants: {},
               display: {},
-              capabilities: { talk: { state: "unlocked" } },
+              capabilities: { chat: { state: "unlocked" } },
               connect: null,
               agent: "sales:agent",
+              link: "own_account",
             },
           ],
         });

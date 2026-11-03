@@ -6,9 +6,10 @@ import { Mutex } from "async-mutex";
 import {
   AgentInputQueue,
   type AgentInputReceipt,
+  SUPERSEDED_INTERRUPT_REASON,
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
-import { v4 as uuidv4 } from "uuid";
+import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
@@ -16,9 +17,11 @@ import type { ConnectionKindOfChannel } from "../db/repositories/channel-records
 import type { SessionsRepository } from "../db/repositories/sessions.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
+  buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
+  FETCH_CHANNEL_HISTORY_ACTION,
   type PromptBuilder,
 } from "./prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
@@ -46,6 +49,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
+import type { EventSources } from "../events/event-sources.js";
 import type {
   ActionMcpDefinition,
   ModelSession,
@@ -115,11 +119,20 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
+import { resolveSessionPolicy } from "./session-policy.js";
+import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type {
   StoredConversationContextMessage,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
+import type { PlatformOfChannel } from "../channels/channel.js";
+import { ChatEvents, type Via } from "../chats/events.js";
+import type { SaidMessage } from "../chats/message.js";
+import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";
+import { chatKey, placeIn, type Place } from "../chats/place.js";
+import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
+import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
   forkSessionKey,
@@ -150,22 +163,92 @@ function conversationMessageText(content: string): string {
   }
 }
 
-type ConversationContextMessage = Omit<StoredConversationContextMessage, "createdAt"> & {
+/** One line of the context a turn's prompt opens with. */
+interface ConversationContextLine {
+  id: string;
+  sender: string | null;
+  text: string;
   createdAt?: Date;
-};
+}
 
-function conversationContextLine(message: ConversationContextMessage): string {
-  const sender = message.senderName?.trim() || "Unknown sender";
-  const timestamp = message.createdAt ? `[${message.createdAt.toISOString()}] ` : "";
-  return `${timestamp}${sender}: ${conversationMessageText(message.content)}`;
+function contextLine(message: ContextLine): ConversationContextLine {
+  return {
+    id: String(message.id),
+    sender: message.senderName,
+    text: message.text,
+    createdAt: message.at,
+  };
+}
+
+function storedContextLine(
+  message: Omit<StoredConversationContextMessage, "createdAt"> & { createdAt?: Date },
+): ConversationContextLine {
+  return {
+    id: message.id,
+    sender: message.senderName,
+    text: conversationMessageText(message.content),
+    ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+  };
+}
+
+function saidContextLine(message: SaidMessage): ConversationContextLine {
+  return {
+    id: message.id,
+    sender: message.senderName ?? null,
+    text: message.body.text,
+    createdAt: message.at,
+  };
+}
+
+function conversationContextLine(line: ConversationContextLine): string {
+  return replyContextLine({
+    createdAt: line.createdAt,
+    sender: line.sender?.trim() || "Unknown sender",
+    text: line.text,
+  });
+}
+
+/** The record of one channel's chats alone, for a manager given no
+ *  {@link MessageRepository}. Nothing is recorded through it. */
+function channelMessages(
+  rows: WebChatRepository,
+  channel: string,
+): Pick<MessageRepository, "find"> {
+  return new StoredMessages(rows, new ChatEvents(), { channelsOn: () => [channel] });
+}
+
+/** How many of the messages the agent has not seen a turn's prompt carries.
+ *  The rest are counted, not shown. */
+const CATCH_UP_LIMIT = 20;
+
+/**
+ * The newest of `unseen` as the place's record holds them, oldest first, at
+ * most {@link CATCH_UP_LIMIT}, and how many more there were
+ * (docs/domains/participation.md#projection), read as the account the agent
+ * was woken on heard it, which is the record the unseen ids name. `unseen`
+ * comes oldest first.
+ */
+async function catchUp(
+  messages: Pick<MessageRepository, "find">,
+  place: Place,
+  via: Pick<Via, "channel">,
+  unseen: readonly { id: string }[],
+): Promise<{ lines: SaidMessage[]; omitted: number }> {
+  const shown = unseen.slice(-CATCH_UP_LIMIT);
+  const lines = await messages.find(
+    place,
+    shown.map((message) => message.id),
+    via,
+  );
+  return { lines, omitted: unseen.length - shown.length };
 }
 
 function prependConversationContext(
   prompt: string,
   context: {
-    notifications: StoredConversationContextMessage[];
+    notifications: ConversationContextLine[];
     omittedNotificationCount: number;
-    repliedTo: ConversationContextMessage | null;
+    repliedTo: ConversationContextLine | null;
   },
 ): string {
   const sections: string[] = [];
@@ -183,14 +266,10 @@ function prependConversationContext(
     );
   }
   if (context.repliedTo) {
-    sections.push(
-      "<reply_context>",
-      conversationContextLine(context.repliedTo),
-      "</reply_context>",
-    );
+    sections.push(...replyContextSection(conversationContextLine(context.repliedTo)));
   }
   if (sections.length === 0) return prompt;
-  sections.push("<current_message>", prompt, "</current_message>");
+  sections.push(...currentMessageSection(prompt));
   return sections.join("\n");
 }
 
@@ -219,8 +298,12 @@ export interface AgentSessionInit {
   resumeSessionId?: string;
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
-  /** Optional exact model selection, used by the WebChat model selector. */
-  selectionId?: ModelSelectionId;
+  /**
+   * Optional exact model selection, used by the WebChat model selector. On a
+   * session that is already open, a value replaces its selection from the next
+   * turn and null clears it; undefined leaves it as it is.
+   */
+  selectionId?: ModelSelectionId | null;
   reasoningEffort?: ModelReasoningEffort;
   /**
    * Open this session with the same tool catalog and system prompt but no live
@@ -310,6 +393,9 @@ export interface SendTurnOptions {
   romeSessionType?: RomeSessionType;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The line `replyTo` names, as Rome holds it where the turn's session
+   *  stands, or null when Rome holds none. Read only with `turnLinks`. */
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
 }
 
@@ -391,6 +477,16 @@ interface ManagerDeps {
   lifecycleDispatcher: AgentLifecycleDispatcher;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
+  /** What was said in each place, read for the agent's catch-up at a wake.
+   *  Absent, the catch-up reads the woken channel's own record only. */
+  chatMessages?: Pick<MessageRepository, "find">;
+  /** Each session's links to what was said where it stands. Given, a wake's
+   *  catch-up reads and marks them in place of `webchatRepo`'s rows. Nothing
+   *  passes it until the Chats switch. */
+  turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+  /** The platform a channel's accounts live on. Absent, a channel's name
+   *  is its platform. */
+  platformOfChannel?: PlatformOfChannel;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
@@ -406,6 +502,11 @@ interface ManagerDeps {
   /** The connection kind behind a channel id. When absent, every channel id reads as
    *  its own connection kind, which holds only where no connection kind has a second channel. */
   connectionKindOfChannel?: ConnectionKindOfChannel;
+  /** App-declared event sources: an event `defer` subscribes through them.
+   *  When absent, an event wait is created without any check. */
+  eventSources?: EventSources;
+  /** Extra tools per session. When absent, no session carries any. */
+  sessionTools?: SessionToolsProvider;
 }
 
 /** The parts of a channel's surface that change how its sessions prompt. */
@@ -560,7 +661,7 @@ export function createAgentSessionManager(
           const replacement = await deps.sessionsRepo.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
-            newSessionId: uuidv4(),
+            newSessionId: uuidv7(),
             chatId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
@@ -629,19 +730,19 @@ export function createAgentSessionManager(
         reopen = true;
       } else if (explicitResume && existingIsQuiescent) {
         await existing.close("idle");
-      } else if (existing.status === "idle") {
+      } else {
         // Provider/model changes are resolved at the serialized turn boundary.
         // Reusing the Rome session here preserves its turn queue and lets the
-        // session swap only the model backend when needed.
-        recordAcquire("reuse");
-        return existing;
-      } else {
+        // session swap only the model backend when needed. A selection made
+        // in the open chat applies from the next turn.
+        if (init?.selectionId !== undefined) existing.selectModel(init.selectionId);
         recordAcquire("reuse");
         return existing;
       }
     }
     const current = sessions.get(k);
     if (current && current.status !== "closed") {
+      if (init?.selectionId !== undefined) current.selectModel(init.selectionId);
       recordAcquire("reuse");
       return current;
     }
@@ -946,7 +1047,7 @@ async function openSession(
       const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
-        newSessionId: uuidv4(),
+        newSessionId: uuidv7(),
         chatId: requestedRomeSessionId,
       });
       preparedSessionId = replacement.id;
@@ -955,7 +1056,7 @@ async function openSession(
     }
   }
 
-  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv4();
+  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv7();
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
   // A caller that names no conversation still serves the one the row recorded.
@@ -1317,6 +1418,15 @@ async function openSession(
     isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) &&
     !opts.isSubagent &&
     !init.interactiveSurfaceDetached;
+  const eventSources = deps.eventSources;
+  // Actions `defer` runs on the agent's behalf are attributed to its turn.
+  const agentRunContext = (refs: TurnExecRefs) => ({
+    initiator: `agent:${key.agentName}`,
+    sessionId: refs.sessionId,
+    agentName: key.agentName,
+    channelThreadKey: key.channelThreadKey,
+    turnId: refs.getTurnId(),
+  });
   const makeExecuteDefer =
     (refs: TurnExecRefs) =>
     async (input: DeferInput): Promise<unknown> =>
@@ -1328,19 +1438,23 @@ async function openSession(
             channelContext: refs.getThreadContext(),
           },
           createRoutine: async (createArgs) => {
-            const result = await deps.actionEngine.run("create_routine", createArgs, {
-              initiator: `agent:${key.agentName}`,
-              sessionId: refs.sessionId,
-              agentName: key.agentName,
-              channelThreadKey: key.channelThreadKey,
-              turnId: refs.getTurnId(),
-            });
+            const result = await deps.actionEngine.run(
+              "create_routine",
+              createArgs,
+              agentRunContext(refs),
+            );
             if (result.status === "error") throw new Error(result.error);
             if (result.status !== "ok") {
               throw new Error(`create_routine returned ${result.status}`);
             }
             return result.data;
           },
+          prepareEventWait: eventSources
+            ? (eventName, filter) =>
+                eventSources.prepareWait(eventName, filter, (name, args) =>
+                  deps.actionEngine.run(name, args, agentRunContext(refs)),
+                )
+            : undefined,
           now: Date.now(),
         }),
       );
@@ -1515,6 +1629,7 @@ async function openSession(
     reasoningEffort,
     workingDir,
     channel: sessionKeyChannel(key.channelThreadKey),
+    textPrivate: resolveSessionPolicy(config).finalText === "private",
     externalMcpServers,
     sessionId,
     isNewSession: sessionIdUnused,
@@ -1540,6 +1655,15 @@ async function openSession(
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
+    const sessionTools = await deps.sessionTools?.({
+      agentName: key.agentName,
+      channelThreadKey: key.channelThreadKey,
+      sessionId,
+      isSubagent: opts.isSubagent === true,
+      getTurnId: sessionExecRefs.getTurnId,
+      getThreadContext: sessionExecRefs.getThreadContext,
+    });
+    if (sessionTools?.length) params.sessionTools = sessionTools;
     sessionIdUnused = false;
     const resumed = params.providerThreadId !== undefined;
     const openStartMs = Date.now();
@@ -1696,6 +1820,9 @@ async function openSession(
         executeSubagent: makeExecuteSubagent(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+        sessionTools: liveOpenParams.sessionTools
+          ? detachSessionTools(liveOpenParams.sessionTools)
+          : undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
         // to the source); this flag makes the interactive *runtime* degrade
@@ -1755,6 +1882,9 @@ async function openSession(
   // would raise on the second turn (there is no SDK conversation to resume).
   let modelSession: ModelSession;
   let initialResolution: ModelResolution | undefined;
+  // Whether the provider continues a thread it already has, rather than
+  // starting one that has seen nothing of this chat.
+  let threadResumed = false;
   if (config.codeBacked) {
     modelSession = createNullModelSession({
       ...buildSessionParams({
@@ -1779,6 +1909,9 @@ async function openSession(
       resumeResult?.provider,
       providerThreadId,
     );
+    threadResumed =
+      providerThreadId !== undefined &&
+      resumeResult?.provider === initialResolution.modelProvider.id;
   }
   // A resume the caller moved to another dir now writes its transcript there,
   // so the row follows it once the provider has opened.
@@ -1803,6 +1936,11 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
+    threadResumed,
+    // The row recorded a thread this open does not resume: another provider
+    // now runs the chat, and its new thread has seen none of it.
+    replacedThread: !threadResumed && !!resumeResult?.providerThreadId,
+    previousModel: resumeResult?.model ?? undefined,
     openModelSession,
     toolCount:
       (initialResolution
@@ -1847,6 +1985,12 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
+  /** The opened provider session continues a thread the row recorded. */
+  threadResumed: boolean;
+  /** The opened provider session starts a new thread in place of the row's. */
+  replacedThread: boolean;
+  /** The model the row's thread ran on. */
+  previousModel?: string;
   openModelSession: (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1861,6 +2005,9 @@ interface ImplArgs {
 
 interface TurnSink {
   turnId: string;
+  /** The turn's prompt carries the `<continuation>` notice, which stays due
+   *  until the turn returns a result. */
+  carriesContinuation?: boolean;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
@@ -1901,6 +2048,7 @@ interface TurnSink {
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -2091,6 +2239,19 @@ class AgentSessionImpl implements AgentSession {
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
+  /**
+   * The current provider thread started in this session rather than resuming
+   * one, so its first turn carries the `<thread_context>` block.
+   */
+  private threadFresh: boolean;
+  /**
+   * The current thread replaced one that held this chat, so its turns carry a
+   * `<continuation>` notice to read the earlier messages until one returns a
+   * result: a turn that fails may never have reached the thread.
+   */
+  private continuationPending: boolean;
+  /** The model the chat ran on before the current thread started. */
+  private previousModel?: string;
   private selectionId?: ModelSelectionId;
   /**
    * The session model pin: the concrete model this session's history
@@ -2138,6 +2299,9 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
+    this.threadFresh = !args.threadResumed;
+    this.continuationPending = args.replacedThread;
+    this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
@@ -2220,6 +2384,15 @@ class AgentSessionImpl implements AgentSession {
     this.modelEventsLoop = this.runEventsLoop(session);
   }
 
+  /**
+   * The guardian picked a model in the open chat. The next turn resolves it
+   * ahead of the pin, and its successful turn re-pins the session. Null clears
+   * the selection, so the pin decides again.
+   */
+  selectModel(selectionId: ModelSelectionId | null): void {
+    this.selectionId = selectionId ?? undefined;
+  }
+
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
     const resolution = await this.deps.modelResolver.getModelProvider(
@@ -2250,6 +2423,15 @@ class AgentSessionImpl implements AgentSession {
       this.modelSession = next;
       this.modelSessionAvailable = true;
       this.providerInfoStored = false;
+      if (resumeThreadId === undefined) {
+        // Another provider: the new thread has seen nothing of this chat.
+        this.threadFresh = true;
+        this.threadContextInjected = false;
+        if (previous.providerThreadId !== undefined) {
+          this.continuationPending = true;
+          this.previousModel = previous.model;
+        }
+      }
       this.toolCount =
         this.config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)).length +
         buildSubagentTools(this.deps.agentLoader, this.config).tools.length;
@@ -2389,6 +2571,7 @@ class AgentSessionImpl implements AgentSession {
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
+            if (sink.carriesContinuation) this.continuationPending = false;
             await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
@@ -2626,6 +2809,13 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private providerInfoStored = false;
+
+  private mayCall(actionName: string): boolean {
+    const canonical = this.deps.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
+    return this.deps.actionRegistry
+      .getForAgent(this.config.actions ?? [])
+      .some((action) => action.config.name === canonical);
+  }
 
   private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
     if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
@@ -2956,9 +3146,9 @@ class AgentSessionImpl implements AgentSession {
     // is synthesized: that re-emission is an ordinary-turn compatibility
     // shim slated for removal (step 2 of the stream-shape cleanup), and
     // forked-stream consumers read identity off turn_start.
-    const forkSessionId = uuidv4();
+    const forkSessionId = uuidv7();
     this.activeForkSessionIds.add(forkSessionId);
-    const turnId = uuidv4();
+    const turnId = uuidv7();
     const startMs = Date.now();
 
     // Bracketing invariant: once turn_start is out, the stream must end
@@ -3246,7 +3436,25 @@ class AgentSessionImpl implements AgentSession {
     options: SubmitInputOptions,
   ): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
-    return this.inputs.submit(input, options);
+    const receipt = this.inputs.submit(input, options);
+    // The queue ends its own turn. A system turn (a backend continuation) runs
+    // outside the queue, so a `now` input ends it here.
+    const sink = this.currentSink;
+    if (
+      options.priority === "now" &&
+      sink &&
+      !sink.done &&
+      sink.turnId !== receipt.turnId &&
+      !this.inputs.owns(sink.turnId)
+    ) {
+      void this.interrupt(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
+        log.warn("superseding the running turn failed", {
+          sessionId: this.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return receipt;
   }
 
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
@@ -3257,7 +3465,7 @@ class AgentSessionImpl implements AgentSession {
     // stack, and threaded back to every consumer (route, tracing, IPC stream
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
-    const turnId = uuidv4();
+    const turnId = uuidv7();
     const sink: TurnSink = {
       turnId,
       userPrompt: input.prompt,
@@ -3282,6 +3490,7 @@ class AgentSessionImpl implements AgentSession {
             ? "channel"
             : "action"),
       replyTo: options?.replyTo,
+      quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
@@ -3458,40 +3667,106 @@ class AgentSessionImpl implements AgentSession {
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       let pendingConversationMessageIds: string[] = [];
+      let unseenLineIds: number[] = [];
       // A channel conversation stores lines the agent never saw as turns. The
       // surface says whether this channel does; webchat, for one, does not.
       const channel = sink.threadContext?.channel;
-      if (
-        this.deps.webchatRepo &&
+      const catchesUp =
         sink.romeSessionType === "channel" &&
         sink.romeSessionId &&
+        sink.threadContext &&
         channel &&
-        channelSurfaceOf(this.deps, channel).promptContext
-      ) {
+        channelSurfaceOf(this.deps, channel).promptContext;
+      if (catchesUp && this.deps.turnLinks) {
+        // The agent catches up on the lines said where its session stands
+        // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
+        const unseen = this.deps.turnLinks.unseen(sink.romeSessionId);
+        const shown = unseen.slice(-CATCH_UP_LIMIT);
+        // Rome's first line in a thread quotes the line that started it, said
+        // in the chat outside the thread. No line in the thread is a starter.
+        const threadStarter =
+          unseen.find((line) => line.fromRome && line.quotesOutside)?.quoted ?? null;
+        const repliedTo = sink.quoted
+          ? contextLine(sink.quoted)
+          : sink.replyTo?.content
+            ? {
+                id: `runtime-reply:${sink.replyTo.messageId}`,
+                sender: sink.replyTo.senderName ?? null,
+                text: sink.replyTo.content,
+              }
+            : null;
+        unseenLineIds = unseen.map((line) => line.id);
+        userPrompt = prependConversationContext(userPrompt, {
+          notifications: [
+            ...(threadStarter ? [contextLine(threadStarter)] : []),
+            ...shown.map(contextLine),
+          ],
+          omittedNotificationCount: unseen.length - shown.length,
+          repliedTo,
+        });
+      } else if (catchesUp && this.deps.webchatRepo && sink.threadContext && channel) {
         const storedContext = await this.deps.webchatRepo.loadConversationContext(
           sink.romeSessionId,
           sink.replyTo?.messageId,
         );
-        const conversationContext =
-          storedContext.repliedTo || !sink.replyTo?.content
-            ? storedContext
-            : {
-                ...storedContext,
-                repliedTo: {
-                  id: `runtime-reply:${sink.replyTo.messageId}`,
-                  content: JSON.stringify([{ type: "text", content: sink.replyTo.content }]),
-                  senderName: sink.replyTo.senderName ?? null,
-                },
-              };
-        pendingConversationMessageIds = storedContext.pendingNotificationIds;
-        userPrompt = prependConversationContext(userPrompt, conversationContext);
+        // The agent catches up on the place the waking message was said in:
+        // the chat, or the thread in it.
+        const woken = sink.threadContext;
+        const parent = woken.parentThreadId;
+        const place = placeIn(
+          chatKey(
+            this.deps.platformOfChannel?.(channel) ?? channel,
+            (parent ?? woken.threadId) as ChatId,
+          ),
+          parent === undefined ? undefined : (woken.threadId as ChatId),
+        );
+        const caughtUp = await catchUp(
+          this.deps.chatMessages ?? channelMessages(this.deps.webchatRepo, channel),
+          place,
+          { channel },
+          storedContext.unseen,
+        );
+        const repliedTo = storedContext.repliedTo
+          ? storedContextLine(storedContext.repliedTo)
+          : sink.replyTo?.content
+            ? {
+                id: `runtime-reply:${sink.replyTo.messageId}`,
+                sender: sink.replyTo.senderName ?? null,
+                text: sink.replyTo.content,
+              }
+            : null;
+        pendingConversationMessageIds = storedContext.unseen.map((message) => message.id);
+        userPrompt = prependConversationContext(userPrompt, {
+          notifications: [
+            ...(storedContext.threadStarter
+              ? [storedContextLine(storedContext.threadStarter)]
+              : []),
+            ...caughtUp.lines.map(saidContextLine),
+          ],
+          omittedNotificationCount: caughtUp.omitted,
+          repliedTo,
+        });
       }
       // Every turn, subagents included: the folder is where the work happens.
       const deviceFolderBlock = buildDeviceFolderBlock(tc);
       if (deviceFolderBlock) {
         userPrompt = `${deviceFolderBlock}\n\n${userPrompt}`;
       }
-      if (!this.isSubagent && this.isNewSession && !this.threadContextInjected && tc) {
+      if (!this.isSubagent && this.continuationPending) {
+        sink.carriesContinuation = true;
+        const previousModel =
+          this.previousModel && this.previousModel !== this.modelSession.model
+            ? this.previousModel
+            : undefined;
+        const block = buildContinuationBlock({
+          ...(previousModel ? { previousModel } : {}),
+          canReadHistory: this.mayCall(FETCH_CHANNEL_HISTORY_ACTION),
+        });
+        userPrompt = `${block}\n\n${userPrompt}`;
+      }
+      // A thread that starts in this session, the first one or one that
+      // replaced it on another provider, has not seen the block yet.
+      if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
         const block = buildThreadContextBlock(tc, this.workingDir);
         if (block) {
@@ -3628,6 +3903,18 @@ class AgentSessionImpl implements AgentSession {
               injectedToolResult: input.injectedToolResult,
             });
             this.inputs.ready(turnId);
+            if (this.deps.turnLinks && unseenLineIds.length > 0) {
+              try {
+                this.deps.turnLinks.seen(unseenLineIds, sink.romeSessionId, sink.turnId);
+              } catch (err) {
+                // As below: the turn goes on, and a later turn retries.
+                log.warn("failed to mark conversation context seen", {
+                  romeSessionId: sink.romeSessionId,
+                  turnId: sink.turnId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
             if (this.deps.webchatRepo && pendingConversationMessageIds.length > 0) {
               try {
                 await this.deps.webchatRepo.markConversationContextInjected(

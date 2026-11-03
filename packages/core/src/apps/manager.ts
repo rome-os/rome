@@ -25,6 +25,9 @@ import {
   type SpecSource,
   writeLockfile,
 } from "./lockfile.js";
+import { resolveArtifactId, type LegacyArtifactBindings } from "./artifact-id.js";
+import type { RoutinesRepository } from "../db/repositories/routines.js";
+import type { RoutineEngine } from "../routines/engine.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
 import { normalizeListingId } from "./rome-cloud-urls.js";
@@ -100,6 +103,11 @@ export interface BootResult {
 export interface AppManagerOptions {
   lockfilePath: string;
   installer: AppInstaller;
+  routines?: {
+    legacyBindings: Readonly<LegacyArtifactBindings>;
+    repository: Pick<RoutinesRepository, "findEnabled" | "update">;
+    engine: Pick<RoutineEngine, "deactivate">;
+  };
 }
 
 /**
@@ -114,7 +122,7 @@ export class AppManager {
   private readonly lockfileMutex = new Mutex();
   private readonly inFlightOps = new Map<AppId, InFlightOp>();
 
-  constructor(opts: AppManagerOptions) {
+  constructor(private readonly opts: AppManagerOptions) {
     this.lockfilePath = opts.lockfilePath;
     this.installer = opts.installer;
   }
@@ -219,6 +227,9 @@ export class AppManager {
         await this.lockfileMutex.runExclusive(async () => {
           const lockfile = await this.readLockfileForMutation();
           const prior = lockfile.apps[appId];
+          if (prior && prior.enabled !== false && opts.enabled === false) {
+            await this.pauseRoutines(appId);
+          }
           lockfile.apps[appId] = {
             source: persistedSource,
             enabled: opts.enabled ?? prior?.enabled ?? true,
@@ -276,6 +287,9 @@ export class AppManager {
           const prior = lockfile.apps[appId];
           priorHash = prior?.installedHash ?? null;
           priorVersion = prior?.installedVersion ?? null;
+          if (prior && prior.enabled !== false && opts.enabled === false) {
+            await this.pauseRoutines(appId);
+          }
           lockfile.apps[appId] = {
             source,
             enabled: opts.enabled ?? prior?.enabled ?? true,
@@ -513,6 +527,7 @@ export class AppManager {
       const startedAt = nowIso();
       this.inFlightOps.set(appId, { kind: "uninstall", startedAt });
       try {
+        await this.pauseRoutines(appId);
         await this.catalog?.refresh(appId);
         const lockfile = await this.readLockfileForMutation();
         if (lockfile.apps[appId] == null) {
@@ -561,6 +576,7 @@ export class AppManager {
             throw new AppManagerError("NOT_INSTALLED", `app "${appId}" is not installed`);
           }
           if (entry.enabled === enabled) return;
+          if (!enabled) await this.pauseRoutines(appId);
           entry.enabled = enabled;
           entry.updatedAt = nowIso();
           await writeLockfile(this.lockfilePath, lockfile);
@@ -569,6 +585,29 @@ export class AppManager {
         await this.catalog?.refresh(appId);
       }
     });
+  }
+
+  private async pauseRoutines(appId: AppId): Promise<void> {
+    const deps = this.opts.routines;
+    if (!deps) return;
+    const prefix = `${appId}:`;
+    for (const routine of await deps.repository.findEnabled()) {
+      let actionName = routine.actionName;
+      if (!actionName.startsWith(prefix)) {
+        try {
+          actionName = resolveArtifactId({
+            kind: "action",
+            value: actionName,
+            legacyBindings: deps.legacyBindings,
+          });
+        } catch {
+          continue;
+        }
+        if (!actionName.startsWith(prefix)) continue;
+      }
+      await deps.repository.update(routine.id, { enabled: false });
+      await deps.engine.deactivate(routine.id);
+    }
   }
 
   async boot(): Promise<BootResult> {

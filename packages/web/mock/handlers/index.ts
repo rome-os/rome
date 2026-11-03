@@ -42,9 +42,10 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { connectorHandlers } from "./connector";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -211,6 +212,13 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
   // through `terminalError` alone — the error block never leaves the trace.
   const lastError = blocks.filter((block) => block.type === "error").at(-1);
   const failed = turnEnd?.type === "turn_end" && turnEnd.status === "error";
+  const terminal = blocks
+    .filter((block) => block.type === "result" || block.type === "error")
+    .at(-1);
+  const model =
+    terminal?.type === "result" || terminal?.type === "error"
+      ? terminal.accounting?.model
+      : undefined;
   return {
     distinctApps: totalSteps > 0 ? [ROME_APP] : [],
     totalSteps,
@@ -221,6 +229,7 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
       ? { stoppedByUser: true }
       : {}),
     ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
@@ -251,6 +260,7 @@ const turn = (
       role: "user",
       content: JSON.stringify(typeof prompt === "string" ? [text(prompt)] : prompt),
       createdAt: startedAt,
+      sender: { kind: "guardian", name: identity.displayName, avatarUrl: identity.avatarUrl },
     },
   ];
   if (traceEvents?.length) {
@@ -738,9 +748,19 @@ const session = (
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
-  { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
-  { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
-  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
+  {
+    ...session("mock-chat-1", "Morning brief tweaks", "default"),
+    running: true,
+    model: "claude-opus-5-5[1m]",
+    reasoningEffort: "high",
+  },
+  {
+    ...session("mock-chat-2", "Draft launch email", "website-redesign"),
+    unread: true,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
   // A chat that works in a folder on another computer groups under that folder.
   {
@@ -1137,11 +1157,25 @@ export const handlers = [
       ? HttpResponse.json(found)
       : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
   }),
-  http.get("/api/chat/sessions/:sessionId/messages", ({ params }) => {
+  http.get("/api/chat/sessions/:sessionId/messages", ({ params, request }) => {
     const messages = transcripts[String(params.sessionId)];
-    return messages
-      ? HttpResponse.json(messages)
-      : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const query = new URL(request.url).searchParams;
+    const limit = Number(query.get("limit"));
+    if (!limit) return HttpResponse.json(messages);
+    // Pages by turn like the server; the cursor is the index of the page's first turn.
+    const turns = new Map<string, typeof messages>();
+    for (const message of messages) {
+      const key = message.turnId ?? message.id;
+      turns.set(key, [...(turns.get(key) ?? []), message]);
+    }
+    const groups = [...turns.values()];
+    const end = query.has("before") ? Number(query.get("before")) : groups.length;
+    const start = Math.max(0, end - limit);
+    return HttpResponse.json({
+      messages: groups.slice(start, end).flat(),
+      nextCursor: start > 0 ? String(start) : null,
+    });
   }),
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
@@ -1164,6 +1198,14 @@ export const handlers = [
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const { pinned } = (await request.json()) as { pinned: boolean };
     found.pinnedAt = pinned ? new Date().toISOString() : null;
+    return HttpResponse.json(found);
+  }),
+  // The open chat's model picker. Kept in memory like the pin.
+  http.patch("/api/chat/sessions/:sessionId/model", async ({ params, request }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { largeModelSelection } = (await request.json()) as { largeModelSelection: string };
+    found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
     return HttpResponse.json(found);
   }),
   // Thumbs on an assistant turn. Each row hydrates lazily as it scrolls into
@@ -1287,41 +1329,27 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // Link an agent to an account. Only this account changes: an agent may be
-  // linked to any number of accounts, several on one platform included.
-  http.put("/api/channels/accounts/:id/agent", async ({ params, request }) => {
+  // Link an agent to a connected account, named by its connection's id. Only
+  // this account changes: an agent may be linked to any number of accounts,
+  // several on one platform included.
+  http.put("/api/accounts/:id/agent", async ({ params, request }) => {
     const id = String(params.id);
     const body = (await request.json()) as { agent: string | null };
     // Core stores main by its canonical id and accepts the short name.
     const agent = body.agent === "main" ? MAIN_AGENT_ID : body.agent;
-    const target = connections.connections.find((candidate) => candidate.channel === id);
+    const target = connections.connections.find((candidate) => candidate.id === id);
     if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
     if (agent !== null && !mockAgentNames.includes(agent)) {
       return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
     }
-    if (!LINKABLE_KINDS.has(target.connectionKind)) {
+    if (agent !== null && !target.link) {
       return HttpResponse.json(
         { error: `${target.connectionKind} accounts do not take an agent.` },
         { status: 400 },
       );
     }
-    const connected = Object.values(target.grants).some((state) => state !== "unauthorized");
-    if (!connected) {
-      return HttpResponse.json(
-        { error: "This account does not receive messages." },
-        { status: 409 },
-      );
-    }
     target.agent = agent;
-    return HttpResponse.json({
-      account: {
-        id,
-        service: target.connectionKind,
-        platform: target.platform ?? platformOf(target.connectionKind),
-        connectionId: target.id,
-        agent,
-      },
-    });
+    return HttpResponse.json({ account: { id, agent, link: target.link ?? null } });
   }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
@@ -1342,6 +1370,7 @@ export const handlers = [
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
     connection.grants[grant] = "unauthorized";
+    connection.state = null;
     connection.display[grant] = null;
     // Which capability a grant backs is the registry's to know, and a fixture
     // cannot reproduce that map without inventing it. What it can say without
@@ -1357,10 +1386,8 @@ export const handlers = [
       };
     }
     // Core removes an account of a service that names its accounts, which
-    // the linkable services are.
-    const unconnectedAccount =
-      LINKABLE_KINDS.has(connection.connectionKind) &&
-      Object.values(connection.grants).every((state) => state === "unauthorized");
+    // the services that take an agent are.
+    const unconnectedAccount = Boolean(connection.link);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(
       (candidate) =>
@@ -1423,6 +1450,7 @@ export const handlers = [
   // and message counts read off that chat's transcript.
   ...sessionQueryHandlers(chatSessions, transcripts),
   ...settingsHandlers,
+  ...connectorHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
   ...liveEventsHandlers,

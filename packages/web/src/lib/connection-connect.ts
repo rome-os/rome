@@ -2,7 +2,7 @@
  * Network-side executors for the unified Connections detail page.
  *
  * OAuth (Rome Cloud-brokered) connect/reconnect/disconnect no longer live here:
- * connect/reconnect run through the conferral setup (#1611, via
+ * connect/reconnect run through the setup (#1611, via
  * `useSetup` in `oauth-connection-section.tsx`) and disconnect is the
  * registry-native grant revoke (`revokeConnectionGrant`). What remains is the
  * Composio account prerequisite that sits above the connection list.

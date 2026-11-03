@@ -6,6 +6,10 @@ import {
 } from "@rome/api-types/anthropic-compatible-providers";
 import { http, HttpResponse } from "msw";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
+import {
+  DEFAULT_RECAP_SETTINGS,
+  type RecapSettings,
+} from "../../../../rome_apps/system/src/settings";
 import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
 import type {
   AIToolStatus,
@@ -316,7 +320,15 @@ const statusDevices: DevicesStatus["devices"] = [
   { id: "old-laptop", name: "Old laptop", platform: "darwin", status: "revoked" },
 ];
 
+// The System app serves these; the mock keeps whatever the page last saved.
+let recapSettings: RecapSettings = { ...DEFAULT_RECAP_SETTINGS };
+
 export const settingsHandlers = [
+  http.get("/api/apps/system/settings", () => HttpResponse.json(recapSettings)),
+  http.put("/api/apps/system/settings", async ({ request }) => {
+    recapSettings = (await request.json()) as RecapSettings;
+    return HttpResponse.json(recapSettings);
+  }),
   http.get("/api/devices/list", () =>
     HttpResponse.json({ devices: pickerDevices } satisfies DeviceList),
   ),

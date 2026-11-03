@@ -1,5 +1,22 @@
-import { ChevronDown, ExternalLink, LayoutGrid, PanelRightClose, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  ChevronDown,
+  ExternalLink,
+  LayoutGrid,
+  ListChecks,
+  ListTree,
+  PanelRightClose,
+  Plus,
+  X,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   DropdownMenu,
@@ -20,6 +37,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WidgetPicker } from "./WidgetPicker";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
+import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
+import { ConciergeTaskPanel } from "@/components/concierge/ConciergeTaskPanel";
+import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
+import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
 
 const WIDTH_KEY = "rome:tool-chat-ratio";
@@ -27,6 +48,10 @@ const DEFAULT_RATIO = 0.4;
 const MIN_PANE_WIDTH = 360;
 const SEPARATOR_WIDTH = 1;
 export const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
+// Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
+const TRACE_TAB_ID = "__trace__";
+// Tab value of the Tasks tab, likewise.
+const TASKS_TAB_ID = "__tasks__";
 
 function readRatio() {
   try {
@@ -37,32 +62,30 @@ function readRatio() {
 }
 
 interface ToolTabProps {
-  widget: WidgetPlacement;
+  id: string;
   label: string;
   icon: ReactNode;
   active: boolean;
-  unread: boolean;
+  unread?: boolean;
+  /** Shown as a pulsing dot with this accessible name. */
+  liveLabel?: string;
   onClose: () => void;
 }
 
-function ToolTab({ widget, label, icon, active, unread, onClose }: ToolTabProps) {
+function ToolTab({ id, label, icon, active, unread = false, liveLabel, onClose }: ToolTabProps) {
   const { t } = useTranslation("common");
-  const tabRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (active) tabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [active]);
 
   return (
     <div
-      ref={tabRef}
-      className={`relative flex h-9 shrink-0 items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+      style={{ minWidth: MIN_TAB_WIDTH }}
+      className={`relative flex h-9 shrink items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
     >
       <TabsTrigger
-        value={widget.id}
+        value={id}
         role="tab"
         aria-selected={active}
         title={label}
-        className="h-full max-w-48 gap-2 after:hidden"
+        className="h-full min-w-0 max-w-48 flex-1 gap-2 after:hidden"
         onKeyDown={(event) => {
           if (event.key === "Delete") {
             event.preventDefault();
@@ -76,6 +99,12 @@ function ToolTab({ widget, label, icon, active, unread, onClose }: ToolTabProps)
           <span
             className="size-1.5 shrink-0 rounded-full bg-info"
             aria-label={t("chat.toolUpdated")}
+          />
+        )}
+        {liveLabel && (
+          <span
+            className="size-1.5 shrink-0 animate-pulse rounded-full bg-info"
+            aria-label={liveLabel}
           />
         )}
       </TabsTrigger>
@@ -104,6 +133,8 @@ interface ToolWorkspaceProps {
   fullHref: (widget: WidgetPlacement) => string | null;
   /** Fires just before the full-page link can be followed, to refresh it. */
   onOpenIntent?: (widget: WidgetPlacement) => void;
+  /** The store's count of explicit app activations; a change leaves the Trace tab. */
+  activations?: number;
   children: ReactNode;
 }
 
@@ -119,17 +150,141 @@ export function ToolWorkspace({
   content,
   fullHref,
   onOpenIntent,
+  activations,
   children,
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
+  const { t: tActivity } = useTranslation("activity");
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [ratio, setRatio] = useState(readRatio);
   const [resizing, setResizing] = useState(false);
+  const [outlet, setOutlet] = useState<HTMLDivElement | null>(null);
+  const [strip, setStrip] = useState<HTMLDivElement | null>(null);
+  const [stripWidth, setStripWidth] = useState<number | null>(null);
+
+  // The Trace tab is view state, not layout: it lives here, never reaches
+  // `use-free-cells`, and so is not saved with the session. Selecting it leaves
+  // the store's `activeId` alone, so the app tab that was active before is
+  // still the one the store holds, and closing the Trace tab restores it by
+  // clearing `traceSelected`.
+  //
+  // The pane's expansion is view state too. The store's `collapsed` is saved per
+  // session and written through the module-global active session, so a trace
+  // must never write it: a write could land on another session after a switch,
+  // and a reload would bring back a pane that nothing fills. Instead, a trace
+  // opened over a collapsed pane sets `holdsOpen`, and the pane renders
+  // open while the tab exists. Ending the trace clears the flag, and the pane
+  // falls back to the session's stored state: a collapsed pane is collapsed
+  // again, an open pane stays open on its previous app tab.
+  // - The pane's collapse button clears the flag and collapses for real. The
+  //   tab stays, and expanding shows it again.
+  // - Choosing an app tab or adding an app expands the pane for real, through
+  //   the store, because the user has moved on to the pane. The flag is then
+  //   redundant and clears, so the app stays visible after the trace closes.
+  //
+  // The Tasks tab is the same kind of tab: view state, never saved, at most one.
+  // Selecting one built-in tab deselects the other. A built-in tab opened over
+  // a collapsed pane holds it open with the same flag.
+  const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
+  const [traceSelected, setTraceSelected] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [tasksSelected, setTasksSelected] = useState(false);
+  const [holdsOpen, setHoldsOpen] = useState(false);
+  const traceOwnerRef = useRef<string | null>(null);
+  const traceCloseRef = useRef<(() => void) | null>(null);
+  const latest = useRef({ view, setCollapsed });
+  latest.current = { view, setCollapsed };
+
+  const reveal = useCallback(() => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    setTraceSelected(true);
+    setTasksSelected(false);
+  }, []);
+
+  const setTraceTab = useCallback(
+    (owner: string, tab: ToolTraceTab | null) => {
+      if (tab === null) {
+        if (traceOwnerRef.current !== owner) return;
+        traceOwnerRef.current = null;
+        traceCloseRef.current = null;
+        setTraceSelected(false);
+        setHoldsOpen(false);
+        setTrace(null);
+        return;
+      }
+      const previousOwner = traceOwnerRef.current;
+      const previousClose = traceCloseRef.current;
+      traceOwnerRef.current = owner;
+      traceCloseRef.current = tab.onClose;
+      if (previousOwner !== owner) previousClose?.();
+      setTrace((prev) =>
+        prev && prev.owner === owner && prev.streaming === tab.streaming
+          ? prev
+          : { owner, streaming: tab.streaming },
+      );
+      if (previousOwner === null) reveal();
+    },
+    [reveal],
+  );
+
+  // Only the user's own choice of an app deselects the Trace tab: a tab or
+  // picker here, or an explicit activation elsewhere (a chat link), which the
+  // store counts. Store-side changes, such as an agent re-placing the active
+  // app under a new id or a background app closing, move `view.activeId`
+  // without the user asking to leave the trace, so they never touch it.
+  useEffect(() => {
+    if (activations !== undefined) {
+      setTraceSelected(false);
+      setTasksSelected(false);
+    }
+  }, [activations]);
+
+  function addAndShow(type: WidgetType, targetId?: string) {
+    setTraceSelected(false);
+    setTasksSelected(false);
+    addWidget(type, targetId);
+  }
+
+  // A real expansion supersedes the hold.
+  useEffect(() => {
+    if (!view.collapsed) setHoldsOpen(false);
+  }, [view.collapsed]);
+
+  const open = !view.collapsed || ((trace !== null || tasksOpen) && holdsOpen);
+  const setPaneCollapsed = useCallback((collapsed: boolean) => {
+    setHoldsOpen(false);
+    latest.current.setCollapsed(collapsed);
+  }, []);
+
+  const traceActive = trace !== null && traceSelected;
+  const tasksActive = tasksOpen && tasksSelected;
+  const builtinActive = traceActive || tasksActive;
+  const traceHost = useMemo<ToolTraceHost>(
+    () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
+    [outlet, open, setPaneCollapsed, reveal, setTraceTab],
+  );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
+  const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
   const compact = width < COMPACT_WIDTH;
-  const open = !view.collapsed;
-  const activeWidget = sorted.find((widget) => widget.id === view.activeId);
+  const showTasks = useCallback(() => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    setTasksOpen(true);
+    setTasksSelected(true);
+    setTraceSelected(false);
+  }, []);
+  const hideTasks = useCallback(() => {
+    setTasksOpen(false);
+    setTasksSelected(false);
+    if (traceOwnerRef.current === null) setHoldsOpen(false);
+  }, []);
+  const tasksHost = useMemo<ToolTasksHost>(
+    () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
+    [tasksActive, open, compact, showTasks, hideTasks],
+  );
+  const activeWidget = builtinActive
+    ? undefined
+    : sorted.find((widget) => widget.id === view.activeId);
   const activeHref = activeWidget ? fullHref(activeWidget) : null;
   const available = Math.max(0, width - SEPARATOR_WIDTH);
   const chatWidth = Math.max(
@@ -145,30 +300,79 @@ export function ToolWorkspace({
     return () => observer.disconnect();
   }, []);
 
+  // The strip is a state-held element, not a ref, because the title bar portal
+  // and the in-pane header swap it for a new one.
+  useEffect(() => {
+    if (!strip) return;
+    const observer = new ResizeObserver(([entry]) => setStripWidth(entry.contentRect.width));
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [strip]);
+
   // In the Mac app the tabs move up into the title bar, over this panel, so the
   // window has one row on top. The header there is as wide as the panel.
   const inTitlebar = useSlotOutlet(TITLEBAR_END_SLOT);
   const toolsWidth = compact ? width : Math.max(0, width - chatWidth - SEPARATOR_WIDTH);
   // The tabs keep the `Tabs` root's context through the portal, but not its
-  // CSS group, so the list states its full height itself.
+  // CSS group, so the list states its full height itself. The kit's own list
+  // height is shorter than a tab, so inside the group the list takes the row's
+  // height too, or it would clip the tabs. The strip never scrolls: tabs that
+  // do not fit at their minimum width leave it, and the all-tools menu lists
+  // them. The same `header` renders in the title bar, so both share this.
+  const tabIds = [
+    ...(trace ? [TRACE_TAB_ID] : []),
+    ...(tasksOpen ? [TASKS_TAB_ID] : []),
+    ...sorted.map((widget) => widget.id),
+  ];
+  const activeTabId = traceActive
+    ? TRACE_TAB_ID
+    : tasksActive
+      ? TASKS_TAB_ID
+      : (view.activeId ?? null);
+  const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
+  const hiddenCount = tabIds.length - shownIds.size;
+  const allToolsLabel =
+    hiddenCount > 0 ? t("chat.allToolsHidden", { count: hiddenCount }) : t("chat.allTools");
   const header = (
     <>
-      {sorted.length > 0 ? (
+      {hasTabs ? (
         <TabsList
+          ref={setStrip}
           aria-label={t("chat.tools")}
-          className="h-full min-w-0 flex-1 justify-start overflow-x-auto p-0"
+          className="h-full min-w-0 flex-1 justify-start overflow-hidden group-data-horizontal/tabs:h-full p-0"
         >
-          {sorted.map((widget) => (
+          {trace && shownIds.has(TRACE_TAB_ID) && (
             <ToolTab
-              key={widget.id}
-              widget={widget}
-              label={label(widget)}
-              icon={icon(widget)}
-              active={widget.id === view.activeId}
-              unread={view.unreadIds.includes(widget.id)}
-              onClose={() => closeTab(widget.id)}
+              id={TRACE_TAB_ID}
+              label={tActivity("trace.drawer.title")}
+              icon={<ListTree className="size-3.5" />}
+              active={traceActive}
+              liveLabel={trace.streaming ? tActivity("trace.drawer.live") : undefined}
+              onClose={() => traceCloseRef.current?.()}
             />
-          ))}
+          )}
+          {tasksOpen && shownIds.has(TASKS_TAB_ID) && (
+            <ToolTab
+              id={TASKS_TAB_ID}
+              label={t("chat.tasksTab")}
+              icon={<ListChecks className="size-3.5" />}
+              active={tasksActive}
+              onClose={hideTasks}
+            />
+          )}
+          {sorted
+            .filter((widget) => shownIds.has(widget.id))
+            .map((widget) => (
+              <ToolTab
+                key={widget.id}
+                id={widget.id}
+                label={label(widget)}
+                icon={icon(widget)}
+                active={!builtinActive && widget.id === view.activeId}
+                unread={view.unreadIds.includes(widget.id)}
+                onClose={() => closeTab(widget.id)}
+              />
+            ))}
         </TabsList>
       ) : (
         <span className="flex h-full flex-1 items-center px-2 text-ui text-muted-foreground">
@@ -192,14 +396,39 @@ export function ToolWorkspace({
           </a>
         </Button>
       )}
-      {sorted.length > 0 && (
+      {hasTabs && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <IconButton size="sm" label={t("chat.allTools")} icon={<ChevronDown />} />
+            {hiddenCount > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={allToolsLabel}
+                title={allToolsLabel}
+                className="shrink-0"
+              >
+                <ChevronDown />
+                <span className="text-aux tabular-nums">+{hiddenCount}</span>
+              </Button>
+            ) : (
+              <IconButton size="sm" label={allToolsLabel} icon={<ChevronDown />} />
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {trace && (
+              <DropdownMenuItem onSelect={() => pickTab(TRACE_TAB_ID)}>
+                <ListTree className="size-3.5" />
+                {tActivity("trace.drawer.title")}
+              </DropdownMenuItem>
+            )}
+            {tasksOpen && (
+              <DropdownMenuItem onSelect={() => pickTab(TASKS_TAB_ID)}>
+                <ListChecks className="size-3.5" />
+                {t("chat.tasksTab")}
+              </DropdownMenuItem>
+            )}
             {sorted.map((widget) => (
-              <DropdownMenuItem key={widget.id} onSelect={() => selectTool(widget.id)}>
+              <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
                 {label(widget)}
                 {view.unreadIds.includes(widget.id) && (
@@ -212,8 +441,8 @@ export function ToolWorkspace({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {sorted.length > 0 && (
-        <WidgetPicker onSelect={addWidget} placements={placements}>
+      {hasTabs && (
+        <WidgetPicker onSelect={addAndShow} placements={placements}>
           <IconButton size="sm" data-coach="add-widget" label={t("chat.add")} icon={<Plus />} />
         </WidgetPicker>
       )}
@@ -223,10 +452,26 @@ export function ToolWorkspace({
         label={t("chat.collapseTools")}
         aria-expanded={true}
         icon={<PanelRightClose />}
-        onClick={() => setCollapsed(true)}
+        onClick={() => setPaneCollapsed(true)}
       />
     </>
   );
+
+  function pickTab(id: string) {
+    if (id === TRACE_TAB_ID) {
+      setTraceSelected(true);
+      setTasksSelected(false);
+      return;
+    }
+    if (id === TASKS_TAB_ID) {
+      setTasksSelected(true);
+      setTraceSelected(false);
+      return;
+    }
+    setTraceSelected(false);
+    setTasksSelected(false);
+    selectTool(id);
+  }
 
   function changeRatio(next: number) {
     const constrained = Math.max(0.2, Math.min(0.8, next));
@@ -253,127 +498,163 @@ export function ToolWorkspace({
   }
 
   return (
-    <div
-      ref={rootRef}
-      data-testid="tool-workspace"
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
-      style={{ "--rome-chat-col": open && !compact ? `${chatWidth}px` : "100%" } as CSSProperties}
-    >
+    <ToolTraceContext.Provider value={traceHost}>
       <div
-        className="relative flex min-h-0 min-w-0 flex-col"
-        data-testid="workspace-chat"
-        style={{
-          display: compact && open ? "none" : undefined,
-          width: open && !compact ? chatWidth : "100%",
-          flexShrink: 0,
-        }}
+        ref={rootRef}
+        data-testid="tool-workspace"
+        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+        style={{ "--rome-chat-col": open && !compact ? `${chatWidth}px` : "100%" } as CSSProperties}
       >
-        {children}
-      </div>
-      {open && !compact && (
         <div
-          role="separator"
-          tabIndex={0}
-          aria-label={t("chat.resizeTools")}
-          aria-orientation="vertical"
-          aria-valuemin={MIN_PANE_WIDTH}
-          aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
-          aria-valuenow={Math.round(chatWidth)}
-          data-resizing={resizing || undefined}
-          className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-ring/50 focus-visible:after:w-1 data-[resizing]:after:w-1"
-          onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            setResizing(true);
+          className="relative flex min-h-0 min-w-0 flex-col"
+          data-testid="workspace-chat"
+          style={{
+            display: compact && open ? "none" : undefined,
+            width: open && !compact ? chatWidth : "100%",
+            flexShrink: 0,
           }}
-          onPointerMove={(event) => {
-            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-            const left = rootRef.current?.getBoundingClientRect().left ?? 0;
-            changeRatio(
-              Math.max(MIN_PANE_WIDTH, Math.min(available - MIN_PANE_WIDTH, event.clientX - left)) /
-                available,
-            );
-          }}
-          onPointerUp={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId))
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            setResizing(false);
-          }}
-          onLostPointerCapture={() => setResizing(false)}
-          onKeyDown={(event) => {
-            if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
-            event.preventDefault();
-            changeRatio(
-              event.key === "Home"
-                ? DEFAULT_RATIO
-                : (chatWidth + (event.key === "ArrowLeft" ? -24 : 24)) / available,
-            );
-          }}
-        />
-      )}
-      <Tabs
-        value={view.activeId ?? ""}
-        onValueChange={selectTool}
-        activationMode="automatic"
-        className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
-        style={{ display: open ? undefined : "none" }}
-      >
-        {inTitlebar ? (
-          open ? (
-            <SlotContent name={TITLEBAR_END_SLOT}>
-              <div
-                className="flex h-full shrink-0 items-center gap-1 px-2"
-                style={{ width: toolsWidth }}
-              >
-                {header}
-              </div>
-            </SlotContent>
-          ) : null
-        ) : (
-          <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
-            {header}
-          </div>
-        )}
-        <div className="relative min-h-0 flex-1">
-          {placements.length === 0 && (
-            <EmptyState className="h-full" role="region">
-              <EmptyStateIcon>
-                <LayoutGrid />
-              </EmptyStateIcon>
-              <EmptyStateTitle>{t("chat.emptyAppsTitle")}</EmptyStateTitle>
-              <EmptyStateDescription>{t("chat.emptyAppsDescription")}</EmptyStateDescription>
-              <EmptyStateAction>
-                <WidgetPicker onSelect={addWidget} placements={placements}>
-                  <Button data-coach="add-widget" variant="outline">
-                    <Plus data-icon="inline-start" />
-                    {t("chat.add")}
-                  </Button>
-                </WidgetPicker>
-              </EmptyStateAction>
-            </EmptyState>
-          )}
-          {/* Moving an iframe's DOM node reloads it. Keep content in a stable
-                order when loading a saved layout. */}
-          {[...placements]
-            .sort((a, b) => a.id.localeCompare(b.id))
-            .map((widget) => (
-              <TabsContent
-                key={widget.id}
-                value={widget.id}
-                forceMount
-                inert={widget.id !== view.activeId}
-                aria-hidden={widget.id !== view.activeId}
-                style={{ display: widget.id === view.activeId ? undefined : "none" }}
-                className="absolute inset-0 overflow-auto overscroll-y-contain pb-safe md:pb-0"
-              >
-                {content(widget, resizing)}
-              </TabsContent>
-            ))}
+        >
+          <ToolTasksContext.Provider value={tasksHost}>{children}</ToolTasksContext.Provider>
         </div>
-      </Tabs>
-      {resizing && <div className="absolute inset-0 z-30 cursor-col-resize" />}
-    </div>
+        {open && !compact && (
+          <div
+            role="separator"
+            tabIndex={0}
+            aria-label={t("chat.resizeTools")}
+            aria-orientation="vertical"
+            aria-valuemin={MIN_PANE_WIDTH}
+            aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
+            aria-valuenow={Math.round(chatWidth)}
+            data-resizing={resizing || undefined}
+            className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-ring/50 focus-visible:after:w-1 data-[resizing]:after:w-1"
+            onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setResizing(true);
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const left = rootRef.current?.getBoundingClientRect().left ?? 0;
+              changeRatio(
+                Math.max(
+                  MIN_PANE_WIDTH,
+                  Math.min(available - MIN_PANE_WIDTH, event.clientX - left),
+                ) / available,
+              );
+            }}
+            onPointerUp={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              setResizing(false);
+            }}
+            onLostPointerCapture={() => setResizing(false)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+              event.preventDefault();
+              changeRatio(
+                event.key === "Home"
+                  ? DEFAULT_RATIO
+                  : (chatWidth + (event.key === "ArrowLeft" ? -24 : 24)) / available,
+              );
+            }}
+          />
+        )}
+        <Tabs
+          value={traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : (view.activeId ?? "")}
+          onValueChange={pickTab}
+          activationMode="automatic"
+          className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
+          style={{ display: open ? undefined : "none" }}
+        >
+          {inTitlebar ? (
+            open ? (
+              <SlotContent name={TITLEBAR_END_SLOT}>
+                <div
+                  className="flex h-full shrink-0 items-center gap-1 px-2"
+                  style={{ width: toolsWidth }}
+                >
+                  {header}
+                </div>
+              </SlotContent>
+            ) : null
+          ) : (
+            <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+              {header}
+            </div>
+          )}
+          <div className="relative min-h-0 flex-1">
+            {placements.length === 0 && !builtinActive && (
+              <EmptyState className="h-full" role="region">
+                <EmptyStateIcon>
+                  <LayoutGrid />
+                </EmptyStateIcon>
+                <EmptyStateTitle>{t("chat.emptyAppsTitle")}</EmptyStateTitle>
+                <EmptyStateDescription>{t("chat.emptyAppsDescription")}</EmptyStateDescription>
+                <EmptyStateAction>
+                  <WidgetPicker onSelect={addAndShow} placements={placements}>
+                    <Button data-coach="add-widget" variant="outline">
+                      <Plus data-icon="inline-start" />
+                      {t("chat.add")}
+                    </Button>
+                  </WidgetPicker>
+                </EmptyStateAction>
+              </EmptyState>
+            )}
+            {/* Moving an iframe's DOM node reloads it. Keep content in a stable
+              order when loading a saved layout. */}
+            {[...placements]
+              .sort((a, b) => a.id.localeCompare(b.id))
+              .map((widget) => (
+                <TabsContent
+                  key={widget.id}
+                  value={widget.id}
+                  forceMount
+                  inert={builtinActive || widget.id !== view.activeId}
+                  aria-hidden={builtinActive || widget.id !== view.activeId}
+                  style={{
+                    display: !builtinActive && widget.id === view.activeId ? undefined : "none",
+                  }}
+                  className="absolute inset-0 overflow-auto overscroll-y-contain pb-safe md:pb-0"
+                >
+                  {content(widget, resizing)}
+                </TabsContent>
+              ))}
+            {/* Kept mounted while the trace exists, and hidden with `visibility`
+            rather than `display`, so its scroll position and live following
+            survive switching to an app tab. `display: none` would reset the
+            scroller. The panel is absolutely positioned, so hiding it takes
+            no layout space, and a hidden element takes no pointer events. The
+            trace's owner portals its body into the outlet. */}
+            {trace && (
+              <TabsContent
+                value={TRACE_TAB_ID}
+                forceMount
+                inert={!traceActive}
+                aria-hidden={!traceActive}
+                style={{ visibility: traceActive ? undefined : "hidden" }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <div ref={setOutlet} className="flex h-full min-h-0 flex-col" />
+              </TabsContent>
+            )}
+            {tasksOpen && (
+              <TabsContent
+                value={TASKS_TAB_ID}
+                forceMount
+                inert={!tasksActive}
+                aria-hidden={!tasksActive}
+                style={{ display: tasksActive ? undefined : "none" }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <ConciergeTaskPanel />
+              </TabsContent>
+            )}
+          </div>
+        </Tabs>
+        {resizing && <div className="absolute inset-0 z-30 cursor-col-resize" />}
+      </div>
+    </ToolTraceContext.Provider>
   );
 }

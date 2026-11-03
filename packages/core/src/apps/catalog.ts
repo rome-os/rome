@@ -197,6 +197,7 @@ export class AppCatalog {
           displayName: resolveResult.displayName,
           iconAbsolutePath: resolveResult.iconAbsolutePath,
           includeSource: resolveResult.manifest.includeSource === true,
+          hideInLauncher: resolveResult.manifest.hideInLauncher === true,
           artifacts: resolveResult.artifacts,
           web: resolveResult.web,
           api: resolveResult.api,
@@ -229,6 +230,7 @@ export class AppCatalog {
         view.displayName = metadataResult.displayName;
         view.iconAbsolutePath = metadataResult.iconAbsolutePath;
         view.includeSource = metadataResult.includeSource;
+        view.hideInLauncher = metadataResult.hideInLauncher;
       }
     }
 

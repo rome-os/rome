@@ -9,20 +9,22 @@ const telegramBot: ConnectionSlot = {
   key: "bot",
   connectionId: null,
   grant: "bot",
-  state: "unauthorized",
+  state: null,
   display: null,
   identity: null,
   activeSetupCid: null,
+  link: "own_account",
 };
 
 const telegramSession: ConnectionSlot = {
   key: "session",
   connectionId: null,
   grant: "session",
-  state: "unauthorized",
+  state: null,
   display: null,
   identity: null,
   activeSetupCid: null,
+  link: "delegate",
 };
 
 const meta = {
@@ -62,7 +64,7 @@ export const ConnectedBot: Story = {
     slot: {
       ...telegramBot,
       connectionId: "storybook-telegram",
-      state: "authorized",
+      state: "working",
       identity: "@rome_bot",
     },
     state: "connected",

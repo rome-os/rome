@@ -1,8 +1,8 @@
-import type { IpcRpc } from "./ipc.js";
+import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
-import { backingConnection } from "../channels/channels-service.js";
+import { emailConnection } from "../channels/channels-service.js";
 import type { ChannelOf } from "../channels/connection-ports.js";
 import type {
   BackendTurnRunner,
@@ -27,14 +27,25 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
 import type { AgentNamesService } from "../channels/agent-names.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
+import type {
+  AppConnectionBrokerPort,
+  AppConnectionBrokerResult,
+} from "../connections/app-connections.js";
 
 const AppIdSchema = z.string().min(1);
 
+// An app names one of Rome's accounts, or a channel by its name.
+const AccountOrChannel = z.union([
+  z.string().min(1),
+  z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
+]);
+
 const ChannelsSendParams = z.object({
-  channel: z.string().min(1),
+  channel: AccountOrChannel,
   chatId: z.string(),
   message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
     message: "message must be an object",
@@ -45,9 +56,10 @@ const ChannelsSendParams = z.object({
 // request naming one is refused rather than answered from another account.
 const ChannelsQueryParams = z
   .object({
-    channel: z.string().min(1),
+    channel: AccountOrChannel,
     chatId: z.string().optional(),
     since: z.string().datetime().optional(),
+    after: z.string().optional(),
     limit: z.number().int().positive().optional(),
   })
   .strict();
@@ -156,6 +168,7 @@ const EventsPublishParams = z.object({
 const EventsSearchCatalogParams = z.object({
   query: z.string().default(""),
   limit: z.number().int().positive().max(50).default(10),
+  match: z.record(z.string(), z.string()).optional(),
 });
 
 const SessionContinueParams = z.object({
@@ -167,6 +180,25 @@ const SessionContinueParams = z.object({
   prompt: z.string(),
 });
 
+const AppConnectionsListParams = z
+  .object({
+    cursor: z.string().optional(),
+    limit: z.number().int().positive().max(50).optional(),
+  })
+  .strict();
+const AppConnectionsIdentityParams = z
+  .object({ connectionId: z.string().min(1), identity: z.string().min(1) })
+  .strict();
+const AppConnectionsOperationsParams = AppConnectionsIdentityParams.extend({
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(50).optional(),
+}).strict();
+const AppConnectionsInvokeParams = AppConnectionsIdentityParams.extend({
+  operation: z.string().min(1),
+  input: z.unknown().optional(),
+  requestId: z.string().optional(),
+}).strict();
+
 function parseParams<T extends z.ZodType>(method: string, schema: T, params: unknown): z.infer<T> {
   const result = schema.safeParse(params);
   if (result.success) return result.data;
@@ -174,6 +206,25 @@ function parseParams<T extends z.ZodType>(method: string, schema: T, params: unk
     .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
     .join("; ");
   throw new Error(`${method}: invalid params — ${issues}`);
+}
+
+function parseAppConnectionParams<T extends z.ZodType>(
+  method: string,
+  schema: T,
+  params: unknown,
+): AppConnectionBrokerResult<z.infer<T>> {
+  try {
+    return { ok: true, value: parseParams(method, schema, params) };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    };
+  }
 }
 
 export interface WorkerRpcServices {
@@ -230,15 +281,23 @@ export interface WorkerRpcServices {
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
   feedback: FeedbackService;
+  /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
+  cloudProfile: CloudProfileService;
   /** System-only: how `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
+  appConnections: AppConnectionBrokerPort;
+  /** Resolve the owner from the action that the Core IPC boundary captured. */
+  appIdForAction: (actionName: string) => string | null;
 }
 
 export class WorkerRpcServer {
-  private readonly handlers: ReadonlyMap<string, (params: unknown) => unknown>;
+  private readonly handlers: ReadonlyMap<
+    string,
+    (params: unknown, context?: IpcCallContext) => unknown
+  >;
 
   constructor(private services: WorkerRpcServices) {
-    this.handlers = new Map<string, (params: unknown) => unknown>(
+    this.handlers = new Map<string, (params: unknown, context?: IpcCallContext) => unknown>(
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
         "channels.send": (params) => this.handleChannelsSend(params),
@@ -289,6 +348,7 @@ export class WorkerRpcServer {
         "session.continue": (params) => this.handleSessionContinue(params),
         "feedback.send": (params) =>
           this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
+        "cloudProfile.get": () => this.services.cloudProfile.get(),
         "notify.send": (params) => {
           // The sender reads token/origin from main-process state; the only wire
           // param is the optional body. Preserve the no-body call shape
@@ -296,6 +356,14 @@ export class WorkerRpcServer {
           const { body } = parseParams("notify.send", NotifySendParams, params);
           return this.services.notify.send(body !== undefined ? { body } : undefined);
         },
+        "connections.app.list": (params, context) =>
+          this.handleAppConnections("list", params, context),
+        "connections.app.describe": (params, context) =>
+          this.handleAppConnections("describe", params, context),
+        "connections.app.operations": (params, context) =>
+          this.handleAppConnections("operations", params, context),
+        "connections.app.invoke": (params, context) =>
+          this.handleAppConnections("invoke", params, context),
       }),
     );
   }
@@ -303,7 +371,7 @@ export class WorkerRpcServer {
   /** Serve every method on a worker's IPC channel. */
   register(rpc: IpcRpc): void {
     for (const [method, handler] of this.handlers) {
-      rpc.handle(method, async (params) => await handler(params));
+      rpc.handle(method, async (params, context) => await handler(params, context));
     }
   }
 
@@ -317,6 +385,67 @@ export class WorkerRpcServer {
     const handler = this.handlers.get(method);
     if (!handler) throw new Error(`Unknown WorkerRPC method: ${method}`);
     return await handler(params);
+  }
+
+  private async handleAppConnections(
+    method: "list" | "describe" | "operations" | "invoke",
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<unknown> {
+    const actionName = context?.callerActionName;
+    const appId = actionName ? this.services.appIdForAction(actionName) : null;
+    if (!appId) {
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "Connection access requires an App-owned action context.",
+          retryable: false,
+        },
+      };
+    }
+    switch (method) {
+      case "list": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.list",
+          AppConnectionsListParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.list(appId, parsed.value);
+      }
+      case "describe": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.describe",
+          AppConnectionsIdentityParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.describe(appId, parsed.value);
+      }
+      case "operations": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.operations",
+          AppConnectionsOperationsParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.operations(appId, parsed.value);
+      }
+      case "invoke": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.invoke",
+          AppConnectionsInvokeParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.invoke(
+          appId,
+          parsed.value,
+          context?.callerActionContext,
+        );
+      }
+    }
   }
 
   private async handleAppsCreate(params: unknown): Promise<unknown> {
@@ -387,7 +516,7 @@ export class WorkerRpcServer {
   }
 
   private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, chatId, since, limit } = parseParams(
+    const { channel, chatId, since, after, limit } = parseParams(
       "channels.query",
       ChannelsQueryParams,
       params,
@@ -395,6 +524,7 @@ export class WorkerRpcServer {
     return await this.services.channelsService.query(channel, {
       ...(chatId ? { chatId: chatId as ChatId } : {}),
       ...(since ? { since: new Date(since) } : {}),
+      ...(after ? { after } : {}),
       ...(limit ? { limit } : {}),
     });
   }
@@ -405,11 +535,7 @@ export class WorkerRpcServer {
       EmailIngestInboundParams,
       params,
     );
-    const email = backingConnection(
-      this.services.connectionRegistry,
-      "email",
-      this.services.channelOf,
-    );
+    const email = emailConnection(this.services.connectionRegistry, this.services.channelOf);
     if (!email) return { status: "skipped", reason: "channel_inactive" };
     return (await this.services.connectionRegistry.ingest(email.id, {
       rawBody,
@@ -489,7 +615,11 @@ export class WorkerRpcServer {
   }
 
   private async handleEventsSearchCatalog(params: unknown): Promise<unknown> {
-    const { query, limit } = parseParams("events.searchCatalog", EventsSearchCatalogParams, params);
-    return await this.services.eventService.search(query, limit);
+    const { query, limit, match } = parseParams(
+      "events.searchCatalog",
+      EventsSearchCatalogParams,
+      params,
+    );
+    return await this.services.eventService.search(query, limit, match ? { match } : {});
   }
 }

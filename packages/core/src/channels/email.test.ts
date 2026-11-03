@@ -8,13 +8,12 @@ import { EmailAdapter, type EmailInboxCoordinates } from "./email.js";
 import type {
   MailProvider,
   RomeMailEvent,
-  RomeMailListItem,
   RomeMailMessage,
   SendMailInput,
   SendMailResult,
 } from "../lib/rome-cloud-mail.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
 const GUARDIAN = "guardian@example.com";
@@ -66,7 +65,7 @@ function makeAdapter(
   return new EmailAdapter({
     provider,
     settingsRepo: {} as unknown as SettingsRepository,
-    personMappingRepo: {} as unknown as PersonMappingRepository,
+    peopleRepo: {} as unknown as PeopleRepository,
     // The adapter runs on the provisioned coordinates (the `inbox` grant
     // material); guardianEmail is durable settings config, sourced in start().
     config: {
@@ -274,10 +273,11 @@ describe("EmailAdapter.send", () => {
         get: async () => ({ enabled: true, guardianEmail: GUARDIAN }),
         set: async () => {},
       } as unknown as SettingsRepository,
-      personMappingRepo: {
-        findByChannelUser: async () => null,
-        findByBondLevel: async () => [],
-      } as unknown as PersonMappingRepository,
+      peopleRepo: {
+        byAccount: async () => null,
+        isDismissed: async () => false,
+        byBondLevel: async () => [],
+      } as unknown as PeopleRepository,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
     });
     await adapter.start();
@@ -332,22 +332,24 @@ describe("EmailAdapter.send", () => {
     expect(provider.sent[0].text).toContain("Safe");
   });
 
-  it("receipts the conversation it was asked for when nothing is sent", async () => {
+  it("refuses a message with nothing to send, and calls no provider", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const receipt = await adapter.send("t-empty" as ChatId, { text: "   " });
+    await expect(adapter.send("t-empty" as ChatId, { text: "   " })).rejects.toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "empty",
+    });
 
     expect(provider.sent).toHaveLength(0);
     expect(provider.listMessages).not.toHaveBeenCalled();
-    expect(receipt).toEqual({ chatId: "t-empty" });
   });
 
-  it("skips a parts-only approval card without a provider call or an error", async () => {
+  it("refuses an approval card it cannot show, and calls no provider", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const receipt = await adapter.send("t-approval" as ChatId, {
+    const sent = adapter.send("t-approval" as ChatId, {
       parts: [
         {
           type: "approval_card",
@@ -359,7 +361,10 @@ describe("EmailAdapter.send", () => {
       ],
     });
 
-    expect(receipt).toEqual({ chatId: "t-approval" });
+    await expect(sent).rejects.toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "part_unsupported",
+    });
     expect(provider.send).not.toHaveBeenCalled();
     expect(provider.listMessages).not.toHaveBeenCalled();
   });
@@ -503,16 +508,17 @@ describe("EmailAdapter.start guardian resolution", () => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
-    const personMappingRepo = {
-      findByChannelUser: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      addChannelMapping: rs.fn(async () => {}),
-    } as unknown as PersonMappingRepository;
+    const peopleRepo = {
+      byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
+      byBondLevel: rs.fn(async () => []),
+      linkStated: rs.fn(async () => {}),
+    } as unknown as PeopleRepository;
 
     const adapter = new EmailAdapter({
       provider,
       settingsRepo,
-      personMappingRepo,
+      peopleRepo,
       // No guardianEmail in settings → self-heal resolves it from Rome Cloud.
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
       ownerEmailResolver: async () => "Owner@Example.com",
@@ -520,7 +526,7 @@ describe("EmailAdapter.start guardian resolution", () => {
 
     await adapter.start();
 
-    // start() never provisions (route-driven conferral).
+    // start() never provisions (route-driven grant).
     expect(provider.provision).not.toHaveBeenCalled();
     // Normalized (lowercased) and persisted back into the email setting.
     expect(settingsRepo.set).toHaveBeenCalledWith(
@@ -528,7 +534,10 @@ describe("EmailAdapter.start guardian resolution", () => {
       expect.objectContaining({ guardianEmail: "owner@example.com" }),
     );
     // The resolved address is used to seed the guardian channel mapping.
-    expect(personMappingRepo.findByChannelUser).toHaveBeenCalledWith("email", "owner@example.com");
+    expect(peopleRepo.byAccount).toHaveBeenCalledWith({
+      platform: "email",
+      id: "owner@example.com",
+    });
   });
 
   it("keeps a settings-configured guardian email and never calls the cloud resolver", async () => {
@@ -539,17 +548,18 @@ describe("EmailAdapter.start guardian resolution", () => {
       get: rs.fn(async () => ({ enabled: true, guardianEmail: "set@example.com" })),
       set: rs.fn(async () => {}),
     } as unknown as SettingsRepository;
-    const personMappingRepo = {
-      findByChannelUser: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      addChannelMapping: rs.fn(async () => {}),
-    } as unknown as PersonMappingRepository;
+    const peopleRepo = {
+      byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
+      byBondLevel: rs.fn(async () => []),
+      linkStated: rs.fn(async () => {}),
+    } as unknown as PeopleRepository;
     const resolver = rs.fn(async () => "owner@example.com");
 
     const adapter = new EmailAdapter({
       provider,
       settingsRepo,
-      personMappingRepo,
+      peopleRepo,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
       ownerEmailResolver: resolver,
     });
@@ -557,7 +567,10 @@ describe("EmailAdapter.start guardian resolution", () => {
     await adapter.start();
 
     expect(resolver).not.toHaveBeenCalled();
-    expect(personMappingRepo.findByChannelUser).toHaveBeenCalledWith("email", "set@example.com");
+    expect(peopleRepo.byAccount).toHaveBeenCalledWith({
+      platform: "email",
+      id: "set@example.com",
+    });
   });
 
   it("resolves guardianEmail from Rome Cloud on a later boot when it was unresolvable at connect", async () => {
@@ -570,11 +583,12 @@ describe("EmailAdapter.start guardian resolution", () => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
-    const personMappingRepo = {
-      findByChannelUser: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      addChannelMapping: rs.fn(async () => {}),
-    } as unknown as PersonMappingRepository;
+    const peopleRepo = {
+      byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
+      byBondLevel: rs.fn(async () => []),
+      linkStated: rs.fn(async () => {}),
+    } as unknown as PeopleRepository;
 
     // Rome Cloud can't answer yet at connect-time boot.
     let ownerEmail: string | undefined;
@@ -582,7 +596,7 @@ describe("EmailAdapter.start guardian resolution", () => {
       new EmailAdapter({
         provider,
         settingsRepo,
-        personMappingRepo,
+        peopleRepo,
         config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
         ownerEmailResolver: async () => ownerEmail,
       });
@@ -596,299 +610,9 @@ describe("EmailAdapter.start guardian resolution", () => {
     ownerEmail = "Owner@Example.com";
     await bootAdapter().start();
     expect((stored.email as { guardianEmail?: string }).guardianEmail).toBe("owner@example.com");
-    expect(personMappingRepo.findByChannelUser).toHaveBeenLastCalledWith(
-      "email",
-      "owner@example.com",
-    );
-  });
-});
-
-describe("EmailAdapter.fetchHistory", () => {
-  function listItem(overrides: Partial<RomeMailListItem> = {}): RomeMailListItem {
-    return {
-      providerMessageId: "m1",
-      threadId: "tA",
-      from: "Alice <alice@example.com>",
-      subject: "Earlier",
-      preview: "preview-1",
-      receivedAt: new Date(1000).toISOString(),
-      labels: ["received"],
-      ...overrides,
-    };
-  }
-
-  function fullMessage(
-    id: string,
-    body: string,
-    overrides: Partial<RomeMailMessage> = {},
-  ): RomeMailMessage {
-    return {
-      id,
-      threadId: "tA",
-      receivedAt: new Date(0).toISOString(),
-      body: { markdown: body },
-      attachments: [],
-      hasAttachment: false,
-      provider: "agentmail",
-      providerMessageId: id,
-      mailboxAddress: "slug@mail.romeos.cc",
-      direction: "inbound",
-      authentication: { authenticated: true, spam: false, blocked: false },
-      labels: [],
-      ...overrides,
-    };
-  }
-
-  it("lists by time window, hydrates each body, and returns oldest-first", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [
-          listItem({
-            providerMessageId: "m2",
-            threadId: "tB",
-            from: "Bob <bob@example.com>",
-            receivedAt: new Date(2000).toISOString(),
-          }),
-          listItem({ providerMessageId: "m1", receivedAt: new Date(1000).toISOString() }),
-        ],
-        nextPageToken: undefined,
-      })),
-      getMessage: rs.fn(async (id: string) =>
-        fullMessage(id, `body-${id}`, {
-          from: [{ name: id === "m1" ? "Alice" : "Bob", email: `${id}@example.com` }],
-        }),
-      ),
+    expect(peopleRepo.byAccount).toHaveBeenLastCalledWith({
+      platform: "email",
+      id: "owner@example.com",
     });
-    const adapter = makeAdapter(provider);
-
-    const messages = await adapter.fetchHistory(null, 24);
-
-    // `after` is the window cutoff, newest-first paging.
-    const listArgs = (provider.listMessages as ReturnType<typeof rs.fn>).mock.calls[0][0];
-    expect(listArgs.ascending).toBe(false);
-    expect(new Date(listArgs.after).getTime()).toBeLessThanOrEqual(
-      Date.now() - 24 * 60 * 60 * 1000 + 1000,
-    );
-    // Body hydrated per message; oldest (m1) first.
-    expect(messages.map((m) => m.messageId)).toEqual(["m1", "m2"]);
-    expect(messages[0].text).toBe("body-m1");
-    expect(messages[0].senderDisplayName).toBe("Alice");
-    expect(provider.getMessage).toHaveBeenCalledTimes(2);
-  });
-
-  it("recognises its own sends however the inbox address is written", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [
-          listItem({ providerMessageId: "mine", labels: ["sent"], from: "slug@mail.romeos.cc" }),
-          listItem({ providerMessageId: "theirs", receivedAt: new Date(2000).toISOString() }),
-        ],
-      })),
-      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
-    });
-    // The configured address in display-name form, with capitals.
-    const adapter = makeAdapter(provider, { address: "Rome <Slug@Mail.RomeOS.cc>" });
-
-    const messages = await adapter.fetchHistory(null, 24);
-
-    expect(messages.map((m) => [m.messageId, m.direction])).toEqual([
-      ["mine", "outbound"],
-      ["theirs", "inbound"],
-    ]);
-  });
-
-  it("counts a line labelled sent as its own even with no address to match", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [listItem({ providerMessageId: "sent", labels: ["sent"], from: "" })],
-      })),
-      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
-    });
-    const adapter = makeAdapter(provider, { address: "" });
-
-    const [line] = await adapter.fetchHistory(null, 24);
-
-    expect(line?.direction).toBe("outbound");
-  });
-
-  it("filters to a single thread when threadId is given", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [
-          listItem({ providerMessageId: "m1", threadId: "tA" }),
-          listItem({
-            providerMessageId: "m2",
-            threadId: "tB",
-            receivedAt: new Date(2000).toISOString(),
-          }),
-        ],
-      })),
-      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
-    });
-    const adapter = makeAdapter(provider);
-
-    const messages = await adapter.fetchHistory("tA", 24);
-
-    expect(messages.map((m) => m.messageId)).toEqual(["m1"]);
-    expect(provider.getMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps paging for a thread match past the cap of non-matching messages", async () => {
-    // The target thread sits *after* more than HISTORY_MAX_MESSAGES (200) newer
-    // messages in other threads. Because the cap counts matches (not raw volume),
-    // the fetch must page past the noise and still find it — the regression this
-    // guards is the cap being applied to the global stream before the filter.
-    const NOISE = 250;
-    const pages: { messages: RomeMailListItem[]; nextPageToken?: string }[] = [];
-    for (let i = 0; i < NOISE; i += 100) {
-      pages.push({
-        messages: Array.from({ length: Math.min(100, NOISE - i) }, (_, j) =>
-          listItem({ providerMessageId: `noise-${i + j}`, threadId: "tNoise" }),
-        ),
-        nextPageToken: `p${pages.length + 1}`,
-      });
-    }
-    pages.push({
-      messages: [listItem({ providerMessageId: "wanted", threadId: "tWanted" })],
-      nextPageToken: undefined,
-    });
-
-    let call = 0;
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => pages[call++]),
-      getMessage: rs.fn(async (id: string) =>
-        fullMessage(id, `body-${id}`, { threadId: "tWanted" }),
-      ),
-    });
-    const adapter = makeAdapter(provider);
-
-    const messages = await adapter.fetchHistory("tWanted", 24);
-
-    expect(messages.map((m) => m.messageId)).toEqual(["wanted"]);
-    // Only the one match is hydrated; the 250 noise messages never are.
-    expect(provider.getMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it("terminates on an empty page that carries a non-null cursor (no infinite loop)", async () => {
-    // A misbehaving provider: every page is empty but advertises more. The scan
-    // cap counts messages (0 here), so the empty-page guard is what must stop us.
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({ messages: [], nextPageToken: "always-more" })),
-      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
-    });
-    const adapter = makeAdapter(provider);
-
-    const messages = await adapter.fetchHistory("tWanted", 24);
-
-    expect(messages).toEqual([]);
-    // Stopped on the first empty page rather than following the cursor forever.
-    expect(provider.listMessages).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls back to the list preview when body hydration fails", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [listItem({ providerMessageId: "m1", preview: "the preview body" })],
-      })),
-      getMessage: rs.fn(async () => {
-        throw new Error("pull failed");
-      }),
-    });
-    const adapter = makeAdapter(provider);
-
-    const messages = await adapter.fetchHistory(null, 24);
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].text).toBe("the preview body");
-  });
-
-  it("keeps history read-only: a later reply resolves its target independently", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [listItem({ providerMessageId: "m1", threadId: "tA" })],
-      })),
-      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
-    });
-    const adapter = makeAdapter(provider);
-
-    await adapter.fetchHistory(null, 24);
-    expect(provider.sent).toHaveLength(0);
-    (provider.listMessages as ReturnType<typeof rs.fn>).mockResolvedValue({
-      messages: [listItem({ providerMessageId: "m2", threadId: "tA" })],
-    });
-    await adapter.send("tA" as ChatId, {
-      kind: "email",
-      to: "alice@example.com",
-      text: "hello",
-    });
-
-    expect(provider.sent).toHaveLength(1);
-    expect(provider.sent[0].inReplyToMessageId).toBe("m2");
-    expect(provider.sent[0].to).toBeUndefined();
-    expect(provider.listMessages).toHaveBeenCalledTimes(2);
-    expect(provider.getMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it("attributes outbound (sent) messages to Rome, keeping a two-sided transcript", async () => {
-    // A thread with one received message and one Rome-sent reply. The sent one is
-    // labeled "sent" and its `from` is our own inbox. It must be attributed to
-    // Rome, not to the counterparty — otherwise the transcript misreads our own
-    // replies as theirs.
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [
-          listItem({
-            providerMessageId: "out",
-            threadId: "tA",
-            from: "slug@mail.romeos.cc",
-            labels: ["sent"],
-            receivedAt: new Date(2000).toISOString(),
-          }),
-          listItem({
-            providerMessageId: "in",
-            threadId: "tA",
-            from: "Alice <alice@example.com>",
-            labels: ["received"],
-            receivedAt: new Date(1000).toISOString(),
-          }),
-        ],
-      })),
-      getMessage: rs.fn(async (id: string) =>
-        fullMessage(id, `body-${id}`, {
-          from:
-            id === "out"
-              ? [{ email: "slug@mail.romeos.cc" }]
-              : [{ name: "Alice", email: "alice@example.com" }],
-        }),
-      ),
-    });
-    const adapter = makeAdapter(provider);
-
-    const messages = await adapter.fetchHistory("tA", 24);
-
-    expect(messages.map((m) => m.messageId)).toEqual(["in", "out"]);
-    // Inbound → counterparty; outbound → Rome's own address.
-    expect(messages[0].senderId).toBe("alice@example.com");
-    expect(messages[0].senderDisplayName).toBe("Alice");
-    expect(messages[1].senderId).toBe("slug@mail.romeos.cc");
-    expect(messages[1].senderDisplayName).toBe("slug@mail.romeos.cc");
-  });
-
-  it("clamps an invalid windowHours to the default look-back", async () => {
-    const provider = makeProvider({
-      listMessages: rs.fn(async () => ({ messages: [], nextPageToken: undefined })),
-    });
-    const adapter = makeAdapter(provider);
-
-    for (const bad of [NaN, Infinity, -5, 0]) {
-      (provider.listMessages as ReturnType<typeof rs.fn>).mockClear();
-      await adapter.fetchHistory(null, bad);
-      const listArgs = (provider.listMessages as ReturnType<typeof rs.fn>).mock.calls[0][0];
-      // Falls back to a finite 24h cutoff rather than throwing or inverting it.
-      const afterMs = new Date(listArgs.after).getTime();
-      expect(Number.isFinite(afterMs)).toBe(true);
-      expect(afterMs).toBeLessThanOrEqual(Date.now() - 24 * 60 * 60 * 1000 + 2000);
-      expect(afterMs).toBeGreaterThan(Date.now() - 25 * 60 * 60 * 1000);
-    }
   });
 });

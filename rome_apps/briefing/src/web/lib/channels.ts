@@ -13,6 +13,9 @@ interface HostConnection {
   connectionKind?: string;
   /** The kind of connection, as a host from before the rename names it. */
   service?: string;
+  /** Working or broken, or null with no access. A host from before connection
+   *  states omits it and sends `grants` alone. */
+  state?: "working" | "broken" | null;
   grants?: Record<string, string>;
 }
 
@@ -22,11 +25,12 @@ export async function fetchChannelConnectivity(): Promise<ChannelConnectivity | 
     if (!res.ok) return null;
     const data = (await res.json()) as { connections?: HostConnection[] };
     const whatsapp = data.connections?.find((c) => (c.connectionKind ?? c.service) === "whatsapp");
-    // Conferred (authorized or degraded) counts as set up — mirrors the
-    // dashboard's registry-native "configured" reading.
-    const conferred = Object.values(whatsapp?.grants ?? {}).some(
-      (state) => state !== "unauthorized",
-    );
+    // Working or broken counts as set up — mirrors the dashboard's
+    // registry-native "configured" reading.
+    const conferred =
+      whatsapp?.state !== undefined
+        ? whatsapp.state !== null
+        : Object.values(whatsapp?.grants ?? {}).some((state) => state !== "unauthorized");
     return {
       email: true,
       whatsapp: conferred,

@@ -397,18 +397,17 @@ The CLI daemon accepts a response only from the selected target with the matchin
 
 ## Rome desktop
 
-The macOS app connects its computer as a device when it opens a Rome from Rome
-Cloud. It runs `connectHost()` in its main process with the app's own Rome Cloud
+The macOS app opens a Rome from Rome Cloud and connects its computer as a device.
+It runs `connectHost()` in its main process with the app's own Rome Cloud
 sign-in, so the one browser approval that opens the Rome also connects the computer.
 Cloud keeps that sign-in and the device as one record. Revoking the device signs
 the app out, and signing out of the app disconnects the device. The app never
 starts a second authorization: a rejected credential signs it out instead.
 
 The connection runs while the app runs, with or without a window, and ends when
-the app quits. A launch that opens the private VM does not connect the computer.
-Programs run as the user who runs the app. Before it connects, the app adopts the
-PATH of the user's login shell, because an app opened from Finder or the Dock
-gets only the system directories.
+the app quits. Programs run as the user who runs the app. Before it connects,
+the app adopts the PATH of the user's login shell, because an app opened from
+Finder or the Dock gets only the system directories.
 
 The user can turn the computer off as a device and on again. The choice persists
 across restarts: while it is off, the app stays signed in and opens the Rome, but
@@ -417,6 +416,14 @@ a "This device" card whose menu has Connect or Disconnect, only inside the app.
 The menu cannot remove this computer. It links to Rome Cloud, which can. The app answers the
 card's requests only from the top frame of that Rome's origin. Other pages in its
 window, and the Rome in a browser, cannot read or change the device.
+
+While the computer is on as a device, the app keeps its display from sleeping,
+and macOS does not idle-sleep while the display stays on. A lost connection keeps
+the hold for 30 minutes, because a computer that sleeps during an outage does not
+reconnect on its own. After that the app releases the hold and takes it again
+once the device reconnects. Turning the device off, signing out, Rome Cloud
+revoking the device, or quitting the app releases it at once. Closing the lid or
+choosing Sleep still sleeps the computer.
 
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate
@@ -641,6 +648,36 @@ aborts every transfer on that side. A host accepts at most four concurrent
 transfers and replies `busy` to more. Each transfer accepts frames only from the
 peer that opened it. Host frames from an earlier connection never go out on a
 replacement connection.
+
+## Screen control on macOS
+
+The host offers no screen action. On a macOS device, a caller controls the
+screen by running the system tools through `exec` and copying the screenshot
+back with `rome-node cp`.
+
+```json
+{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}
+{"command":"cliclick","args":["c:640,400"]}
+{"command":"cliclick","args":["t:hello"]}
+{"command":"osascript","args":["-e","tell application \"System Events\" to keystroke \"hello\""]}
+```
+
+`screencapture -x` saves the screen without the shutter sound. Copy the file
+with `rome-node cp <device-id>:/tmp/rome-screen.png ./screen.png` to read it.
+`cliclick` clicks and types at screen coordinates, and Homebrew installs it.
+`osascript` with System Events types into the frontmost app without extra installs.
+
+A screenshot of a Retina display has twice as many pixels as the screen has
+points. `cliclick` and System Events take points, so divide the image
+coordinates by the display's scale factor before clicking.
+
+macOS grants Screen Recording and Accessibility to the app that started the
+host, either the terminal running `rome-node connect` or the Rome desktop app.
+Grant both in System Settings → Privacy & Security on the Mac itself. Without
+Screen Recording, the screenshot leaves out other apps' windows. Without
+Accessibility, clicks and keystrokes fail. The first `osascript` call to System
+Events also asks for Automation permission. The Mac must stay awake and unlocked,
+because a locked screen shows only the lock screen.
 
 ## Failure and shutdown
 

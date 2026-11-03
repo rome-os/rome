@@ -9,6 +9,7 @@ import {
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
+import { SpokenRecapsSection } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -136,10 +137,10 @@ type FeishuStreamingStyle = "message" | "card";
 interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
-  enableFable?: boolean;
   enableImpersonation?: boolean;
   enableReplyStreaming?: boolean;
   feishuReplyStreamingStyle?: FeishuStreamingStyle;
+  experimentalConcierge?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -1025,6 +1026,7 @@ function AdvancedSection({
             />
           </FormRows>
         </Section>
+        <SpokenRecapsSection />
         <ComputerUseSection />
         <PresentationModeSection />
         <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
@@ -1117,7 +1119,6 @@ function DeveloperSettingsSection({
       </summary>
       <Section className="mt-3">
         <FormRows>
-          <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
@@ -1126,35 +1127,6 @@ function DeveloperSettingsSection({
         {open && <RelayHealthSection />}
       </Section>
     </details>
-  );
-}
-
-function FableAdvancedSection({
-  settings,
-  onSave,
-  saving,
-}: {
-  settings: SettingsData;
-  onSave: (p: Record<string, unknown>) => Promise<void>;
-  saving: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.enableFable ?? false);
-
-  function toggle(next: boolean) {
-    setEnabled(next);
-    void onSave({ enableFable: next });
-  }
-
-  return (
-    <SettingsToggleRow
-      title={t("advanced.fable.title")}
-      description={t("advanced.fable.description")}
-      label={t("advanced.fable.toggleLabel")}
-      checked={enabled}
-      onChange={toggle}
-      disabled={saving}
-    />
   );
 }
 
@@ -1251,9 +1223,6 @@ function TierModelMappingsAdvancedSection({
           );
         })}
       </FormRows>
-      <p className="mt-2 text-aux text-muted-foreground">
-        {t("advanced.tierModelMappings.fableNote")}
-      </p>
       <Button type="button" size="sm" className="mt-3" onClick={save} disabled={saving}>
         {t("advanced.tierModelMappings.save")}
       </Button>
@@ -1552,7 +1521,8 @@ function ImpersonationAdvancedSection({
  *  Reply streaming is the first: with it off, Rome sends each reply whole. The
  *  setting is `enableReplyStreaming`, read by the host on every reply.
  *  `feishuReplyStreamingStyle` chooses how a reply streams to Feishu, cards
- *  unless it says messages, read for each message a reply creates. */
+ *  unless it says messages, read for each message a reply creates.
+ *  `experimentalConcierge` shows the Concierge chat under Chats. */
 function ExperimentalFeaturesSection({
   settings,
   onSave,
@@ -1567,6 +1537,7 @@ function ExperimentalFeaturesSection({
   const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
     settings.feishuReplyStreamingStyle === "message" ? "message" : "card",
   );
+  const [concierge, setConcierge] = useState(settings.experimentalConcierge ?? false);
 
   function toggleReplyStreaming(next: boolean) {
     setReplyStreaming(next);
@@ -1576,6 +1547,11 @@ function ExperimentalFeaturesSection({
   function chooseFeishuStyle(next: FeishuStreamingStyle) {
     setFeishuStyle(next);
     void onSave({ feishuReplyStreamingStyle: next });
+  }
+
+  function toggleConcierge(next: boolean) {
+    setConcierge(next);
+    void onSave({ experimentalConcierge: next });
   }
 
   return (
@@ -1619,6 +1595,14 @@ function ExperimentalFeaturesSection({
             />
           </FormRowControl>
         </FormRow>
+        <SettingsToggleRow
+          title={t("advanced.experimental.concierge.title")}
+          description={t("advanced.experimental.concierge.description")}
+          label={t("advanced.experimental.concierge.toggleLabel")}
+          checked={concierge}
+          onChange={toggleConcierge}
+          disabled={saving}
+        />
       </FormRows>
     </Section>
   );

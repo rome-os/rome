@@ -17,7 +17,7 @@
     "accounts": "Accounts"
   },
   "kinds": {
-    "own": "Own account",
+    "own_account": "Own account",
     "delegate": "Delegate",
     "yours": "your account"
   },
@@ -74,7 +74,6 @@
     "delegateOnDescription": "<agent>{{agent}}</agent> answers from your own account on your behalf. People in your chats see your name, not the agent's.",
     "unavailable": "No new account can be connected on this platform.",
     "linkFailed": "The account is connected, but linking {{agent}} to it failed. Link an agent under Connected, no agent.",
-    "notFound": "The account is connected, but Envoys could not find it to link {{agent}}. Check its agent in Envoys.",
-    "linkFailedKept": "The account is connected, but linking {{agent}} to it failed, and {{kept}} still answers on it. Change its agent in {{kept}}'s Settings."
+    "notFound": "The account is connected, but Envoys could not find it to link {{agent}}. Check its agent in Envoys."
   }
 }

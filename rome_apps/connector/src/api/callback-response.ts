@@ -1,13 +1,11 @@
 import type { ConnectOrigin } from "./csrf.js";
 
-const APP_ID = "connector";
-
 /**
  * The OAuth authorize tab is always opened with `window.open`, so where it lands
  * after Composio redirects back depends on who started the connect:
  *
- * - `dashboard` — redirect to the connector dashboard with the result in the
- *   query string; the dashboard surfaces the "<app> connected" notice.
+ * - `dashboard` — redirect to Settings › Connections with the result in the
+ *   query string; Settings surfaces the "<app> connected" notice.
  * - `webchat` — an inline card in the chat transcript started the flow and is
  *   already polling for the connection, so the tab has no dashboard to return
  *   to. Land it on a terminal confirmation that nudges the guardian back to
@@ -22,8 +20,8 @@ export function buildCallbackResponse(
     return connectedTabResponse(ok);
   }
   const status = ok ? "ACTIVE" : "failed";
-  const dashboardUrl = `/apps/${APP_ID}?connector=${encodeURIComponent(provider)}&status=${encodeURIComponent(status)}`;
-  return new Response(null, { status: 302, headers: { location: dashboardUrl } });
+  const settingsUrl = `/settings/connections?connector=${encodeURIComponent(provider)}&status=${encodeURIComponent(status)}`;
+  return new Response(null, { status: 302, headers: { location: settingsUrl } });
 }
 
 function connectedTabResponse(ok: boolean): Response {

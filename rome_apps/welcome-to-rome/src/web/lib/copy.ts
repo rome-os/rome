@@ -1,5 +1,8 @@
 import { formatMessage, messagesFor, type WelcomeMessages } from "../../i18n/locales/index.js";
 
+/** The steps the landing screen lists, in order. */
+export type WelcomeStep = "names" | "ai" | "question" | "ideas";
+
 interface WelcomeWebCopy {
   landing: {
     greeting(agentName: string): string;
@@ -7,6 +10,19 @@ interface WelcomeWebCopy {
     start: string;
     opening: string;
     openError: string;
+    resumeGreeting(step: string): string;
+    resumeGreetingNoChat: string;
+    doneGreeting: string;
+    steps: Record<WelcomeStep, string>;
+    stepSkipped: string;
+    stepDone: string;
+    stepCurrent: string;
+    resume: string;
+    restart: string;
+    newChat: string;
+    openWelcomeChat: string;
+    loadError: string;
+    retry: string;
   };
   names: {
     guardianLabel: string;
@@ -59,6 +75,7 @@ export function getWelcomeCopy(locale: string | undefined): WelcomeWebCopy {
     landing: {
       ...copy.landing,
       greeting: (agentName) => formatMessage(copy.landing.greeting, { agentName }),
+      resumeGreeting: (step) => formatMessage(copy.landing.resumeGreeting, { step }),
     },
     names: {
       ...copy.names,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { runComposioLogin, runComposioLogout } from "@/lib/connection-connect";
 
-// Connect and reconnect run through the conferral setup (`useSetup`), while
+// Connect and reconnect run through the setup (`useSetup`), while
 // disconnect is a registry-native grant revoke. Only the Composio account
 // ceremonies remain here.
 

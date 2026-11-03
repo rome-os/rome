@@ -25,6 +25,7 @@ import {
 } from "../lib/session-actor.js";
 import type { RomeAppViewer } from "../lib/visitor-session.js";
 import type { FavorService } from "../favors/types.js";
+import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 const log = createLogger("app-websocket");
 
@@ -52,6 +53,7 @@ export interface AppWebSocketDeps {
   routinesRepo?: RoutinesRepository;
   appRuntimeRepositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  appConnections?: AppConnectionsContextFactory;
 }
 
 interface MatchedPath {
@@ -150,6 +152,7 @@ export function attachAppWebSocket(server: Server, deps: AppWebSocketDeps): { cl
     routinesRepo: deps.routinesRepo,
     repositories: deps.appRuntimeRepositories,
     favorService: deps.favorService,
+    appConnections: deps.appConnections,
   });
 
   // Live connections, keyed by appId, so a catalog change can close them all.

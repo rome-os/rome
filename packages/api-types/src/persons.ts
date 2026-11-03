@@ -8,42 +8,18 @@
 // and that client read one function instead of two that agree until the first
 // punctuation edge case.
 
-/**
- * The sentinel person every sender the guardian dismisses is mapped onto.
- *
- * Core seeds the row at boot and the dismiss verb points mappings at it. It is
- * a real row in the persons table — `GET /api/people` withholds it and
- * `GET /api/people/:id` answers 404 for its id — so every reader that goes
- * under the contract to the table has to know to leave it out.
- */
-export const STRANGER_PERSON_ID = "__STRANGER__";
-
-/** The sentinel's display name. A separate constant that happens to equal the
- *  id — a reader that assumes they are the same value breaks the day one moves. */
-export const STRANGER_PERSON_DISPLAY_NAME = "__STRANGER__";
-
 /** Why a person row refuses a guardian's edit. */
-export type ProtectedPersonReason = "guardian" | "stranger-sentinel";
+export type ProtectedPersonReason = "guardian";
 
 /**
- * Why this person row refuses to be moved along the ladder or merged away, or
- * null when it accepts both.
- *
- * Two rows in the persons table are structure rather than people. The guardian
- * anchors the ladder. The stranger sentinel is the row every dismissal maps
- * onto, so merging it away reclassifies everyone already dismissed and leaves
- * the next dismissal nowhere to land. Stranger is a mapping rather than a
- * stored bond, which is why the sentinel has no place on the ladder to move to.
+ * Why this person refuses to be moved along the ladder or merged away, or null
+ * when they accept both. The guardian anchors the ladder.
  *
  * Every write that reassigns or removes a person reads this — the route and the
- * dashboard's mock backend alike — so the two cannot disagree on which rows are
- * off limits. The caller phrases its own message from the reason.
+ * dashboard's mock backend alike — so the two cannot disagree on who is off
+ * limits. The caller phrases its own message from the reason.
  */
-export function protectedPersonReason(person: {
-  id: string;
-  bondLevel: string;
-}): ProtectedPersonReason | null {
-  if (person.id === STRANGER_PERSON_ID) return "stranger-sentinel";
+export function protectedPersonReason(person: { bondLevel: string }): ProtectedPersonReason | null {
   return person.bondLevel === "guardian" ? "guardian" : null;
 }
 

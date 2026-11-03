@@ -20,6 +20,7 @@
     "status": {
       "connected": "已连接",
       "configured": "已配置",
+      "broken": "需重新连接",
       "awaiting": "待验证",
       "disconnected": "未连接",
       "alwaysOn": "始终在线"

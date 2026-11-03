@@ -13,7 +13,13 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import type { ChannelMessage, ChatId, OutgoingMessage } from "@rome-os/app-runtime";
+import {
+  type ChannelMessage,
+  type ChatId,
+  ChannelSendRefused,
+  type OutgoingMessage,
+} from "@rome-os/app-runtime";
+import { refuseUnshownParts } from "../../channels/send-refusals.js";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -144,17 +150,17 @@ export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
 
 function agentsScheme(client: AgentMessagingClient): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connect setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connect setup");
     },
     // The instance token is the real credential and Cloud renews nothing here.
     // A token Cloud still refuses needs the guardian, so renewal only confirms
     // it works; returning it unchanged would rebuild a talker that faults again.
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       try {
         await client.agents();
       } catch (err) {
-        if (isRejectedToken(err)) return "re-confer";
+        if (isRejectedToken(err)) return "needs-fix";
       }
       return cred;
     },
@@ -262,13 +268,17 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       // Cloud carries text and data only. Refusing here keeps a partial send
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
-        throw new Error("Agent messages carry text only; send the files another way.");
+        throw new ChannelSendRefused(
+          "attachment_unsupported",
+          "Agent messages carry text only; send the files another way.",
+        );
       }
+      refuseUnshownParts("agents", msg);
       if (!isAgentId(chatId)) {
         throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
       const text = outgoingText(msg);
-      if (!text.trim()) throw new Error("An agent message needs text.");
+      if (!text.trim()) throw new ChannelSendRefused("empty", "An agent message needs text.");
       try {
         const sent = await client.send({
           to: chatId,
@@ -293,11 +303,13 @@ export function makeAgentsDescriptor(
 ): ConnectionDescriptor {
   return {
     connectionKind: AGENTS_KIND,
-    reviveProfile: (_grant, record) => reviveAgentsProfile(record),
-    auth: { cloud: agentsScheme(client) },
+    reviveProfile: (record) => reviveAgentsProfile(record),
+    // The agent Rome Cloud assigned this Rome.
+    accountIdOf: (record) => (typeof record.agentId === "string" && record.agentId) || null,
+    grant: "cloud",
+    auth: agentsScheme(client),
     capabilities: {
       talker: {
-        needs: ["cloud"] as const,
         build: () => createAgentsTalker(client),
       },
     },

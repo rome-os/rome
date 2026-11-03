@@ -20,7 +20,6 @@ const ConnectPage = lazy(() => import("./pages/ConnectPage"));
 const OnboardPage = lazy(() => import("./pages/OnboardPage"));
 const CallbackPage = lazy(() => import("./pages/CallbackPage"));
 const SharePage = lazy(() => import("./pages/share/SharePage"));
-const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const PeoplePage = lazy(() => import("./pages/PeoplePage"));
 const EnvoysPage = lazy(() => import("./pages/envoys/EnvoysPage"));
 // The /people redirect lives with the views it forwards to, so the paths are
@@ -153,7 +152,9 @@ export default function App() {
           >
             <Route path="/" element={<Navigate to="/chat" replace />} />
             <Route path="/chat/*" element={<FreePage />} />
-            <Route path="/activity" element={<ActivityPage />} />
+            {/* The event log is a tab of the Activity page, which keeps the
+                Sessions address. */}
+            <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
             <Route path="/assistants" element={<AssistantsPage />} />
             {/* The two People views are routes, so each is linkable and back
                 steps between them. The dossier takes its own segment rather

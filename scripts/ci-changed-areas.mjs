@@ -33,6 +33,8 @@ export const AREA_PATHS = {
     "infra/",
   ],
   web: [
+    "packages/app-web-sdk/",
+    "rome_apps/system/",
     "packages/web/",
     "packages/ui/",
     "packages/web-content/",

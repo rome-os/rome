@@ -43,7 +43,7 @@ Goals:
 
 ```
 GitHub Actions (job: mock)
-  └─ tests/midscene (standalone npm package)
+  └─ tests/midscene (private pnpm workspace package)
        ├─ midscene.config.ts           # Playwright + Midscene config
        │    └─ project setup
        │         ├─ pnpm --filter rome-web dev:mock:e2e   # strict MSW mode, localhost:3200
@@ -56,17 +56,16 @@ GitHub Actions (job: mock)
                  └─ in-memory MSW state reset with the context
 ```
 
-### 2.1 Why a standalone npm package
+### 2.1 Test workspace package
 
-`tests/midscene` sits outside the pnpm workspace globs (`packages/*`,
-`rome_apps/*`, `example_apps/*`) and installs `@midscene/test`,
-`@midscene/web` and `playwright` via its own `package-lock.json`:
+`tests/midscene` is a private pnpm workspace package. It declares its own
+Midscene and browser dependencies, resolved by the root `pnpm-lock.yaml`.
 
-- Midscene's dependency tree never enters Rome's product dependencies or
-  affects production builds.
-- CI caches test dependencies and product dependencies separately.
-- `npm ci --strict-allow-scripts` runs only the approved `esbuild` and `sharp`
-  scripts. The optional `fsevents` script is denied. New scripts fail CI.
+- One root install prepares the product and test packages.
+- The backend CI job installs only the Midscene package with `pnpm --filter`.
+- Dependency scripts follow the root `allowBuilds` policy. CI installs with
+  scripts disabled, then rebuilds `esbuild` and `sharp` for Midscene.
+- The runtime workspace excludes the test package.
 
 ### 2.2 Test Harness (`midscene.config.ts`)
 
@@ -88,7 +87,7 @@ GitHub Actions (job: mock)
   entry point serves local single-case iteration and the CI job.
 
 The harness registers two custom nodes used by committed cases. Each case
-uses one `app.open`. Run `npm run nodes` in `tests/midscene` to generate a
+uses one `app.open`. Run `pnpm run nodes` in `tests/midscene` to generate a
 local reference for the full node list.
 
 | Node | Purpose |
@@ -156,11 +155,10 @@ reasons behind them.
   the workflow under a `pull_request` trigger.
 - **Runtime**: Ubuntu + Node.js 24. Pnpm is enabled (reading the root
   `packageManager` version) **before** `setup-node`, whose `cache: pnpm`
-  requires pnpm to already exist on a clean runner. Product dependencies
+  requires pnpm to already exist on a clean runner. Workspace dependencies
   install with `pnpm install --frozen-lockfile --ignore-scripts`. The
-  `tests/midscene` package installs with `npm ci --strict-allow-scripts` against a lockfile whose
-  `resolved` URLs all point at the public `registry.npmjs.org`, followed by
-  `playwright install --with-deps chromium`.
+  backend job filters this install to `rome-midscene-e2e`. Both jobs rebuild
+  `esbuild` and `sharp`, then run `pnpm exec playwright install --with-deps chromium`.
 - **Secret handling and trust boundary**: the four `MIDSCENE_MODEL_*` values
   come from repository secrets and are scoped only to the steps that actually
   call the model (configuration check, `midscene-test model verify`, suite
@@ -312,11 +310,12 @@ real external services.
 See `tests/midscene/README.md`. In short:
 
 ```bash
+pnpm install --frozen-lockfile   # from the repo root
 cd tests/midscene                # setup starts the mock server on localhost:3200
-npm install && npx playwright install chromium
+pnpm exec playwright install chromium
 cp .env.example .env             # fill in model credentials; .env is gitignored
-npm test
-MIDSCENE_INCLUDE_TAGS=poc npm test   # PoC stories only
+pnpm test
+MIDSCENE_INCLUDE_TAGS=poc pnpm test   # PoC stories only
 ```
 
 ## 8. Authoring and Maintenance Conventions

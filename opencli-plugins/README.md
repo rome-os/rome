@@ -71,6 +71,17 @@ Remote browsers can reach the daemon through a private SSH tunnel.
 Agents pick up new/changed commands automatically: the `browser-automation` skill has them run
 `opencli <site> --help` before use, and plugin commands appear there like any built-in.
 
+## User plugins
+
+Per-user scripts live in `~/.rome/<profile>/projects/browser-automation/<site>/`, visible and editable in the Projects UI.
+Use the same flat layout as the Rome plugins above, but name the plugin `user-<site>` and list its commands and overrides in a README.
+Run `opencli plugin install <dir>` once for a new site folder. Source edits are live on the next invocation.
+Both startup install loops also register these folders across all profiles.
+
+Plugins load after built-ins and user adapters. With the OpenCLI sequential-discovery fix released and pinned in Rome's Dockerfiles,
+`user-*` plugins load after `rome-*` and win on command conflicts. Only the matching `site/name` command is replaced.
+The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Dockerfile bump must wait for the fork release containing the fix.
+
 ## Rome-owned commands
 
 - `opencli aa flights FROM TO DEPART [--return DATE] [--miles]` — searches American Airlines cash fares
@@ -100,17 +111,24 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   optional follow-back guard.
 - `opencli twitter follow-network <username> <followers|following> [--limit N]` — follows accounts
   directly from a user's followers or following page and returns only the accounts newly followed.
-- `opencli linkedin contact-info <profile>` — opens a LinkedIn profile's Contact info section and
+- `opencli linkedin contact-info <profile>` — reads a LinkedIn profile's Contact info section and
   returns every field visible to the signed-in account, including websites, email addresses,
   phone numbers, addresses, birthdays, connected dates, and other displayed contact fields.
 - `opencli linkedin thread-snapshot --thread-url URL [--limit N]` — returns the latest messages
   from one exact LinkedIn thread with sender, timestamp, profile, participant id, and reaction
-  metadata.
+  metadata. Message text keeps its line breaks.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
 - `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
   With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
+  Line breaks are sent as line feeds. The receipt's `text` is the body LinkedIn stored, and
+  `text_matches` says whether it kept the sent text's line breaks and words, or is null when no
+  body came back. A `false` there is still a sent message, so check LinkedIn rather than sending
+  again.
   Without `--send`, it only verifies the destination.
+- `opencli linkedin connections [--limit N] [--offset N]` lists first-degree connections in
+  LinkedIn's API order. Every row carries `total`, `coverage`, and `next_offset`, so a partial list
+  is distinguishable from the whole list.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across
@@ -190,19 +208,62 @@ opencli twitter follow-network @realYunfanYe following --limit 10
 
 The LinkedIn plugin adds a browser-backed, read-only contact reader for the signed-in LinkedIn
 account. It accepts a full `/in/` profile URL, `/in/` path, `@public-id`, bare public identifier, or
-`me`, then opens that profile's Contact info overlay. Each visible contact value is returned as a
+`me`, then reads that profile's contact details. Each visible contact value is returned as a
 typed row with its display label and safe link where one exists.
 
+The reader tries three sources in order and stops at the first that answers: a Contact info section
+already on the profile page, the profile's Contact info link, and the Contact info overlay URL. Each wait is bounded, and the reader stops trying once
+too little of OpenCLI's command timeout (`OPENCLI_BROWSER_COMMAND_TIMEOUT`, 60 seconds by default)
+remains, so a section that never opens returns a status row instead of `TIMEOUT`.
+
 LinkedIn controls which fields the signed-in account may see. A profile with no shared contact
-details, a private contact section, or a missing/restricted profile returns a status row instead of
-failing or pretending that hidden data is available. Authentication walls still produce the
-standard OpenCLI authentication error.
+details returns `no_visible_contact_info`. A private contact section returns
+`contact_info_restricted`. A section that never opens returns `contact_info_unavailable`, and its
+message says when the time limit cut the attempts short. A missing or restricted profile returns
+`profile_unavailable`. Authentication walls and browser connection failures still produce the
+standard OpenCLI errors.
 
 ```bash
 opencli linkedin contact-info satyanadella -f json
 opencli linkedin contact-info @satyanadella
 opencli linkedin contact-info "https://www.linkedin.com/in/satyanadella/" -f yaml
 opencli linkedin contact-info me -f json
+```
+
+### LinkedIn Connections
+
+The LinkedIn plugin replaces the built-in `connections` command. The built-in stopped at the first
+page shorter than it requested and returned bare rows, so a partial list looked like the whole list.
+
+The command reads LinkedIn's connections API in pages of up to 40. A short page does not end the
+read. The read ends at `--limit` (1 to 500, default 20), at an empty page, or when `--offset` plus
+the connections returned reaches the total LinkedIn reports. Entries repeated across pages appear
+once.
+
+Rows follow LinkedIn's API order, and `rank` is the position in this result. That order is not
+guaranteed to match the connections page's "Recently added" sort. Sort by `connected_at`, the
+connection time in epoch milliseconds, when recency matters.
+
+Every row carries the same coverage fields:
+
+- `total`: the connection count LinkedIn reports, or `null` when the response carries none. A
+  total smaller than the connections LinkedIn has already returned is stale, so the command reports
+  `null` and stops trusting LinkedIn's totals for the rest of the read.
+- `coverage`: `complete` when `--offset` plus the connections returned equals LinkedIn's reported
+  total. `exhausted_unverified` when LinkedIn returned an empty page without a total to confirm the
+  end, so the list may be whole or LinkedIn may have stopped early. `limit` when the read stopped
+  at `--limit` and more connections remain or may remain. `partial` when LinkedIn stopped returning
+  connections before its reported total, or the read hit its request budget.
+- `next_offset`: the `--offset` that continues the read, or `null` when `coverage` is `complete`.
+
+Any coverage other than `complete` also prints a one-line notice on stderr, leaving stdout as the
+rows. Authentication walls and failed or malformed responses fail the command instead of returning
+the rows read so far. A read whose `--offset` is past the last connection LinkedIn returns fails
+with an empty result that names the offset.
+
+```bash
+opencli linkedin connections --limit 500 -f json
+opencli linkedin connections --limit 500 --offset "$NEXT_OFFSET" -f json
 ```
 
 ### LinkedIn Thread Snapshot

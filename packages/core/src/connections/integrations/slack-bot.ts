@@ -327,14 +327,15 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
   return {
     connectionKind: SLACK_BOT_KIND,
     severalAccounts: true,
-    reviveProfile: (_grant, record) => reviveSlackBotProfile(record),
-    accountIdOf: (_grant, record) => slackBotAccountId(record),
-    auth: { bot: botScheme },
+    reviveProfile: (record) => reviveSlackBotProfile(record),
+    accountIdOf: (record) => slackBotAccountId(record),
+    link: "own_account",
+    grant: "bot",
+    auth: botScheme,
     capabilities: {
       talker: {
-        needs: ["bot"] as const,
-        build(creds): Talker {
-          const material = botMaterial(creds.bot.material);
+        build(cred): Talker {
+          const material = botMaterial(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (cause: unknown): void => {
             faultSink?.(

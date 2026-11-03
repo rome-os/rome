@@ -70,7 +70,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setState(next);
       if (next.status === "done" && !doneFiredRef.current) {
         doneFiredRef.current = true;
-        onDone?.(next.conferral?.connectionId ?? null);
+        onDone?.(next.grant?.connectionId ?? null);
       }
     },
     [onDone],

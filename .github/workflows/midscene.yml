@@ -100,28 +100,26 @@ jobs:
           test -n "$MIDSCENE_MODEL_BASE_URL"
           test -n "$MIDSCENE_MODEL_FAMILY"
 
-      - name: Install Midscene test dependencies
-        # allowScripts for esbuild/sharp is declared in this package.json, so
-        # npm ci runs their (approved) install scripts non-interactively.
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Prepare Midscene dependencies and Chromium
         working-directory: tests/midscene
         run: |
-          npm ci --strict-allow-scripts
-          npx playwright install --with-deps chromium
+          pnpm rebuild esbuild sharp
+          pnpm exec playwright install --with-deps chromium
 
       - name: Verify the Midscene model
         working-directory: tests/midscene
         env: *model-env
-        run: npm run check:model
+        run: pnpm run check:model
 
       - name: Type-check Midscene custom nodes
-        # npm test loads midscene.config.ts via tsx/esbuild without semantic
-        # TS checks, so run the standalone package's tsc before the expensive
+        # pnpm test loads midscene.config.ts via tsx/esbuild without semantic
+        # TS checks, so run the test package's tsc before the expensive
         # browser run.
         working-directory: tests/midscene
-        run: npm run typecheck
-
-      - name: Install Rome workspace dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+        run: pnpm run typecheck
 
       # Project setup starts dev:mock:e2e, waits for it, and checks the browser
       # network boundary before the first case; its log lands in midscene_run/.
@@ -134,7 +132,7 @@ jobs:
           MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
           MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
           MIDSCENE_RETRY: "2"
-        run: timeout --signal=TERM --kill-after=60s 80m npm test
+        run: timeout --signal=TERM --kill-after=60s 80m pnpm test
 
       - name: Upload the suite report
         if: always()
@@ -177,12 +175,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Enable pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+
       - name: Activate Node.js 24
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: tests/midscene/package-lock.json
+          cache: pnpm
 
       - name: Require Midscene and Rome model configuration
         env:
@@ -205,20 +205,23 @@ jobs:
           }
           NODE
 
-      - name: Install Midscene test dependencies
+      - name: Install Midscene workspace dependencies
+        run: pnpm --filter rome-midscene-e2e install --frozen-lockfile --ignore-scripts
+
+      - name: Prepare Midscene dependencies and Chromium
         working-directory: tests/midscene
         run: |
-          npm ci --strict-allow-scripts
-          npx playwright install --with-deps chromium
+          pnpm rebuild esbuild sharp
+          pnpm exec playwright install --with-deps chromium
 
       - name: Verify the Midscene model
         working-directory: tests/midscene
         env: *model-env
-        run: npm run check:model
+        run: pnpm run check:model
 
       - name: Type-check Midscene custom nodes
         working-directory: tests/midscene
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Pull the published image
         run: |
@@ -238,7 +241,7 @@ jobs:
           MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
           MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
           ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
-        run: timeout --signal=TERM --kill-after=60s 35m npm run test:backend
+        run: timeout --signal=TERM --kill-after=60s 35m pnpm run test:backend
 
       - name: Collect the container log and anomalies
         if: always()

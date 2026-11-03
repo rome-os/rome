@@ -35,8 +35,8 @@ function useLinkAgent() {
   const { t } = useTranslation("envoys");
   const refetch = useRefetchAccounts();
   return useMutation({
-    mutationFn: (vars: { channel: string; agent: string | null }) =>
-      linkAccountAgent(vars.channel, vars.agent, t("change.failed")),
+    mutationFn: (vars: { connectionId: string; agent: string | null }) =>
+      linkAccountAgent(vars.connectionId, vars.agent, t("change.failed")),
     onSuccess: refetch,
   });
 }
@@ -98,7 +98,7 @@ export function AgentChange({
     const agent = value === NO_AGENT ? null : value;
     // `mutateAsync` settles even once the refetch has moved this row away, so
     // the page still hears about the change. Its error shows through `link.error`.
-    link.mutateAsync({ channel: account.channel, agent }).then(
+    link.mutateAsync({ connectionId: account.connectionId, agent }).then(
       () => {
         setPending(null);
         onChanged(agent);

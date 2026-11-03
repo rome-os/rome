@@ -74,7 +74,7 @@ export function normalizeShopifyShopDomain(value: string | null | undefined): st
 }
 
 /** Providers whose expiring grants Rome Cloud can refresh. Any other provider's
- *  expiring grant answers "re-confer" without a round trip, and degrades at
+ *  expiring grant answers "needs-fix" without a round trip, and degrades at
  *  expiry until the guardian reconnects. */
 export const ROME_CLOUD_REFRESHABLE_PROVIDERS: ReadonlySet<OAuthProvider> = new Set(["shopify"]);
 

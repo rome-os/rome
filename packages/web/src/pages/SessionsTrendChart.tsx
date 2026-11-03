@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import { ModelProviderIcon } from "@/components/brand-icons/ai-tool-icons";
 import { cn } from "@/lib/utils";
-import { formatCompactNumber, formatCost } from "./sessions-format";
+import { formatCompactNumber, formatCost, metricGroupLabel } from "./sessions-format";
 
 const SERIES_COLORS = [
   "#bfdbfe",
@@ -136,7 +136,7 @@ function TrendTooltip({
                   style={{ backgroundColor: colorForSeries(entry) }}
                 />
                 <ModelSeriesIcon series={entry} />
-                <span className="truncate">{entry.label}</span>
+                <span className="truncate">{metricGroupLabel(entry)}</span>
               </span>
               <span className="tabular-nums text-foreground">
                 {formatMetric(numeric, metric)}{" "}
@@ -262,7 +262,7 @@ export function SessionsTrendChart({
               <Area
                 key={entry.key}
                 dataKey={dataKey}
-                name={entry.label}
+                name={metricGroupLabel(entry)}
                 type="monotone"
                 stackId="usage"
                 fill={color}
@@ -304,7 +304,7 @@ export function SessionsTrendChart({
           <button
             key={entry.key}
             type="button"
-            aria-label={`Filter Sessions by ${entry.label}`}
+            aria-label={`Filter Sessions by ${metricGroupLabel(entry)}`}
             className={cn(
               "flex shrink-0 items-center gap-2 text-aux text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
@@ -319,7 +319,7 @@ export function SessionsTrendChart({
               style={{ backgroundColor: colorForSeries(entry) }}
             />
             <ModelSeriesIcon series={entry} />
-            <span>{entry.label}</span>
+            <span>{metricGroupLabel(entry)}</span>
             {entry.dimension.dimension !== "model" &&
             entry.description &&
             entry.description !== entry.label ? (

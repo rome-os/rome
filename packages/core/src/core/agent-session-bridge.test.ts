@@ -19,7 +19,10 @@ import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb } from "../test/helpers.js";
+import { ChatEvents } from "../chats/events.js";
+import { StoredMessages } from "../chats/message-repository.js";
+import type { DrizzleDb } from "../db/index.js";
+import { createTestDb, testChatRepository } from "../test/helpers.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -567,6 +570,7 @@ describe("AgentSessionBridge reply streaming", () => {
       replies: replacement,
       transport: own,
       repo,
+      db,
       named = true,
     }: {
       streamReply: boolean;
@@ -579,6 +583,8 @@ describe("AgentSessionBridge reply streaming", () => {
       transport?: DeliveryTransport;
       /** The repository the turn and its reply are recorded in. */
       repo?: WebChatRepository;
+      /** The database under `repo`, which the reply finds its place in. */
+      db?: DrizzleDb;
       /** Whether the caller names the conversation. Otherwise the thread does. */
       named?: boolean;
     },
@@ -606,7 +612,12 @@ describe("AgentSessionBridge reply streaming", () => {
             channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
-          ...(repo ? { chats: repo } : {}),
+          ...(repo && db
+            ? {
+                messages: new StoredMessages(repo, new ChatEvents(), { channelsOn: () => [] }),
+                places: testChatRepository(db),
+              }
+            : {}),
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -849,7 +860,7 @@ describe("AgentSessionBridge reply streaming", () => {
   });
 
   it("writes nothing when the worker disconnects while the reply opens, and records the answer as usual", async () => {
-    const { repo, answers, close } = await recorded();
+    const { repo, db, answers, close } = await recorded();
     try {
       let read!: (on: boolean) => void;
       const setting = new Promise<boolean>((resolve) => (read = resolve));
@@ -859,6 +870,7 @@ describe("AgentSessionBridge reply streaming", () => {
         on: setting,
         interrupt,
         repo,
+        db,
       });
 
       workerGone();
@@ -882,20 +894,22 @@ describe("AgentSessionBridge reply streaming", () => {
       type: "channel",
       name: "telegram:chat-1",
       agentName: null,
+      sourceChannel: "telegram",
+      sourceThreadId: "chat-1",
     });
     const answers = async () =>
       (await repo.getMessages("conversation-1"))
         .filter((message) => message.role === "assistant")
         .map((message) => message.content);
-    return { repo, answers, close: () => testDb.close() };
+    return { repo, db: testDb.db, answers, close: () => testDb.close() };
   }
 
   it("records a streamed reply as the turn's one answer, under the message a quote of the answer names", async () => {
-    const { repo, answers, close } = await recorded();
+    const { repo, db, answers, close } = await recorded();
     try {
       const { written, turnEnd } = run(
         turnEvents({ type: "text", content: "Looking." }, ...answer),
-        { streamReply: true, repo },
+        { streamReply: true, repo, db },
       );
 
       await rs.waitFor(() => expect(turnEnd()).toBeDefined());
@@ -910,11 +924,12 @@ describe("AgentSessionBridge reply streaming", () => {
   });
 
   it("finds the recorded answer from a quote of any message the reply wrote", async () => {
-    const { repo, close } = await recorded();
+    const { repo, db, close } = await recorded();
     try {
       const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
         streamReply: true,
         repo,
+        db,
       });
 
       await rs.waitFor(() => expect(turnEnd()).toBeDefined());
@@ -927,7 +942,7 @@ describe("AgentSessionBridge reply streaming", () => {
   });
 
   it("records only what a reply that failed partway showed", async () => {
-    const { repo, answers, close } = await recorded();
+    const { repo, db, answers, close } = await recorded();
     try {
       const transport: DeliveryTransport = {
         capabilities: { maxPartLength: 100, edit: true, budget },
@@ -941,6 +956,7 @@ describe("AgentSessionBridge reply streaming", () => {
       const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
         streamReply: true,
         repo,
+        db,
         transport,
       });
 
@@ -955,7 +971,7 @@ describe("AgentSessionBridge reply streaming", () => {
   });
 
   it("records the answer of a reply whose create may have landed, which its caller does not send", async () => {
-    const { repo, answers, close } = await recorded();
+    const { repo, db, answers, close } = await recorded();
     try {
       const transport: DeliveryTransport = {
         capabilities: { maxPartLength: 100, edit: true, budget },
@@ -965,7 +981,7 @@ describe("AgentSessionBridge reply streaming", () => {
         },
         async edit() {},
       };
-      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, transport });
+      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, db, transport });
 
       await rs.waitFor(() => expect(turnEnd()).toBeDefined());
       expect(JSON.stringify(turnEnd())).toContain(
@@ -978,9 +994,9 @@ describe("AgentSessionBridge reply streaming", () => {
   });
 
   it("records a streamed reply in the conversation its turn is recorded in, when the caller names none", async () => {
-    const { repo, answers, close } = await recorded();
+    const { repo, db, answers, close } = await recorded();
     try {
-      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, named: false });
+      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, db, named: false });
 
       await rs.waitFor(() => expect(turnEnd()).toBeDefined());
       expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);

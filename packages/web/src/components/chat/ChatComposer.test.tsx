@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { createRef, type Ref } from "react";
+import { createRef, useState, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,12 +12,24 @@ import {
   type NewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
+import * as coarsePointerModule from "@/hooks/use-coarse-pointer" with { rstest: "importActual" };
 import {
   ChatComposer,
   type ChatComposerHandle,
   type ChatComposerProps,
   type ChatComposerSendControls,
 } from "./ChatComposer";
+import { ReplyDraftHarness } from "./reply/reply-draft-harness";
+import type { ReplyTarget } from "./reply/reply-draft";
+
+// The composer reads this once each time it renders.
+const composerRenders = rs.hoisted(() => ({ count: 0 }));
+rs.mock("@/hooks/use-coarse-pointer", () => ({
+  useCoarsePointer: () => {
+    composerRenders.count += 1;
+    return coarsePointerModule.useCoarsePointer();
+  },
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -66,12 +78,9 @@ interface RenderComposerOptions {
   people?: PersonResource[];
 }
 
-function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-  const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
-    input: RequestInfo | URL,
-  ) => {
+/** Answers the requests a mounted composer makes. */
+function mockComposerFetch(options: RenderComposerOptions = {}) {
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === "/api/settings") {
       const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
@@ -107,6 +116,12 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
     }
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
+}
+
+function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  const fetchSpy = mockComposerFetch(options);
 
   return {
     fetchSpy,
@@ -296,6 +311,88 @@ describe("composer Enter key", () => {
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][0].text).toBe("hello");
+  });
+});
+
+describe("composer lock", () => {
+  const reason = "Answer the card above to continue.";
+
+  it("replaces the box with a locked strip that says why, while a card is the only way to answer", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ onSend, lockedReason: reason });
+
+    expect(screen.getByRole("status").textContent).toBe(reason);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Upload files" })).toBeNull();
+  });
+
+  it("brings the box back with the draft intact once the lock lifts", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const { rerender } = renderComposer({ onSend });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "build me X" } });
+    // Same tree as renderComposer, so the composer keeps its state across the
+    // prop change.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const withLock = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer onSend={onSend} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    rerender(withLock(reason));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe(reason);
+
+    rerender(withLock(null));
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("build me X");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].text).toBe("build me X");
+  });
+
+  it("closes an open menu as the lock engages", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const { rerender } = renderComposer({ onSend });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "/" } });
+    expect(await screen.findByText("Scoped App")).toBeTruthy();
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer onSend={onSend} lockedReason={reason} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.queryByText("Scoped App")).toBeNull());
+  });
+
+  it("sends once the lock lifts even when the draft changed while locked", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const ref = createRef<ChatComposerHandle>();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const withLock = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer ref={ref} onSend={onSend} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(withLock(reason));
+
+    act(() => ref.current?.insertText("build me Y"));
+    rerender(withLock(null));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].text).toBe("build me Y");
   });
 });
 
@@ -1170,5 +1267,149 @@ describe("New chat draft", () => {
     expect(input().value).toBe(draft.text);
     expect(loadNewChatDraft()).toEqual(draft);
     expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+  });
+});
+
+describe("composer model picker in an open chat", () => {
+  it("shows and changes the chat's own pick, and sends without one", async () => {
+    stubCoarsePointer(false);
+    const user = userEvent.setup();
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const onChange = rs.fn();
+    const { fetchSpy } = renderComposer(
+      {
+        onSend,
+        showModelSelector: true,
+        chatModelSelection: { value: "gpt-6-luna", onChange },
+      },
+      { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
+    );
+
+    const trigger = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect(trigger.textContent).toContain("GPT-6 Luna"));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: /Opus 5\.5/ }));
+
+    expect(onChange).toHaveBeenCalledWith("claude-opus-5-5");
+    // The chat stores its pick; the default for new chats is left alone.
+    expect(fetchSpy.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(
+      false,
+    );
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBeUndefined();
+  });
+
+  it("sends a draft's pick with its first message", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer(
+      { onSend, showModelSelector: true },
+      { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
+    );
+    const trigger = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect(trigger.textContent).toContain("Opus 5.5"));
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBe("claude-opus-5-5");
+  });
+});
+
+describe("composer reply", () => {
+  const reply: ReplyTarget = { messageId: "a1", author: "agent", preview: "Fly to Lisbon." };
+
+  function renderWithReply(onSend: ChatComposerProps["onSend"]) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
+      String(input) === "/api/settings"
+        ? Response.json({})
+        : Response.json({}, { status: 404 })) as typeof fetch);
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ReplyDraftHarness initial={reply}>
+            <ChatComposer onSend={onSend} />
+          </ReplyDraftHarness>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the chip, sends the reply with the message, then clears it", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderWithReply(onSend);
+    expect(await screen.findByText("Fly to Lisbon.")).toBeTruthy();
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "and then?", replyTo: reply });
+    await waitFor(() => expect(screen.queryByText("Fly to Lisbon.")).toBeNull());
+  });
+
+  it("puts the reply back when the send fails", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockRejectedValue(new Error("offline"));
+    renderWithReply(onSend);
+    await screen.findByText("Fly to Lisbon.");
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Fly to Lisbon.")).toBeTruthy();
+  });
+
+  it("drops the reply on Escape from the textarea", async () => {
+    stubCoarsePointer(false);
+    renderWithReply(rs.fn());
+    await screen.findByText("Fly to Lisbon.");
+
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+
+    expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
+  });
+});
+
+describe("ChatComposer when the chat around it renders", () => {
+  it("is not drawn again for a render that hands it the same props", async () => {
+    mockComposerFetch();
+    const props: ChatComposerProps = { onSend: rs.fn(), isStreaming: true, onStop: rs.fn() };
+    function Chat() {
+      const [renders, setRenders] = useState(0);
+      return (
+        <>
+          <button type="button" onClick={() => setRenders((count) => count + 1)}>
+            {`chat render ${renders}`}
+          </button>
+          <ChatComposer {...props} />
+        </>
+      );
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Chat />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("textbox");
+    composerRenders.count = 0;
+
+    for (let i = 0; i < 20; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /chat render/ }));
+    }
+
+    expect(screen.getByRole("button", { name: "chat render 20" })).toBeTruthy();
+    expect(composerRenders.count).toBe(0);
   });
 });

@@ -9,8 +9,11 @@ import { emitAgentMessage } from "./runtime-events.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { noAccountLinks } from "../channels/account-links.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
+import { appPersonMapping } from "../people/app-person-mapping.js";
+import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -31,13 +34,18 @@ import {
   NotifyServiceProxy,
   AgentNamesProxy,
   FeedbackServiceProxy,
+  CloudProfileProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
+  AppConnectionsProxy,
 } from "./service-proxies.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import { ChatRepository } from "../chats/chat-repository.js";
+import { ChatEvents } from "../chats/events.js";
+import { StoredMessages } from "../chats/message-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -105,13 +113,23 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await actionLoader.loadFromCatalog(appCatalog);
   await skillCatalog.loadFromCatalog(appCatalog);
 
-  const channelRecords = new ChannelRecordsRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
-  const sentinelLogRepo = new SentinelLogRepository(db);
+  const peopleRepo = new PeopleRepository(db);
+  const sentinelLogRepo = new SentinelLogRepository(db, (name) =>
+    channelRecords.platformOfChannel(name),
+  );
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  // An action records the messages it sent. Nothing in the worker reads a
+  // place's history or hears what was said, so it keeps no channels to read
+  // under and its events go nowhere.
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    chatRepo: new ChatRepository(db, channelRecords),
+    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+  });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -157,7 +175,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,
       capabilityDiscovery,
-      personMappingRepo,
+      personMappingRepo: appPersonMapping(peopleRepo, (name) =>
+        channelRecords.platformOfChannel(name),
+      ),
+      people: appPeople(peopleRepo),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
@@ -195,11 +216,13 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       actionEngine,
       routinesRepo,
       repositories: appRuntimeRepositories,
+      appConnections: new AppConnectionsProxy(),
       hostExecution: new HostExecutionService({
         socketPath: config.hostExecutionSocket,
         enabled: config.hostExecutionEnabled,
       }),
       feedback: new FeedbackServiceProxy(),
+      cloudProfile: new CloudProfileProxy(),
       agentNames: new AgentNamesProxy(),
     },
   );

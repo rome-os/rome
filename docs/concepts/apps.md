@@ -7,6 +7,7 @@ Apps are the extension system. An app bundles related [agents](agents.md), [acti
 - Only manifest-declared artifacts are loaded. An artifact not listed in the manifest does not exist as far as the runtime is concerned.
 - Disabling an app removes its artifacts (agents, actions, skills, hooks) from the running registries. Enabling it puts them back.
 - First-party apps (shipped with Rome) are required and immutable to users: they cannot be uninstalled or replaced, and enable/disable is the only user control — except the system app, which cannot be disabled either ([boot convergence](../architecture/app-lifecycle.md#boot-convergence)).
+- `app.yaml#hideInLauncher: true` keeps an app off the dashboard's launcher surfaces: the Apps page, the sidebar, search, and the app picker. The app still loads, and its pages still open by URL or from a chat link.
 
 **Not to be confused with:**
 
@@ -99,6 +100,74 @@ The caller is the request identity an app observes: the [guardian](people.md#gua
 **Not to be confused with:**
 
 - **[Actor](actions.md#actor)** — the actor is stamped on every action execution in the chain. The caller is what one app observes for the request it handles.
+
+## Connection access
+
+An app uses an existing [Connection](../domains/connections.md#connection) through
+`ctx.connections`. Core brokers the call. The app never receives the provider
+credential, client, or unrestricted transport. Provider grants say what the guardian
+has let Rome access. App access says which installed app may use one granted
+identity for one operation.
+
+**Contracts:**
+
+- Access defaults to denied. A Core-owned policy names the app, Connection, identity,
+  operation, side-effect classification, approval mode, optional input constraints, and
+  optional expiry. A descriptor change from read to write requires a new policy. Disabling
+  or removing the app revokes its policies. The policy is bound to the provider
+  grant's current epoch. Reconnecting the Connection creates a new epoch and requires
+  new App access. Fixing or otherwise giving its grant again does the same. Automatic
+  renewal keeps the current epoch. Guardian policy listings label a replaced grant
+  instead of presenting its policy as current.
+- A provider operation is invisible until its Connection descriptor explicitly opts it
+  into app access. A policy cannot expose an arbitrary HTTP request, provider client,
+  credential read, or global Connection mutation.
+- `list`, `describe`, and `operations` reveal only Connections and identities covered by
+  the app's active policies. Their pages and payloads are bounded. `operations`
+  distinguishes provider support from permission to invoke. Each `list` summary names
+  the identity the App passes to the other calls.
+- The host worker runtime stamps the executing Action from Core-owned execution context,
+  and Core maps that registered Action to its owning App. App request fields cannot
+  select an App id. In a cross-app Action call, the callee runs with the callee App's
+  access. Caller fields do not transfer the caller's access or let it claim the callee's
+  id. A system Action has no App connection access unless Core built a context for a
+  concrete App entry point. This binding assumes the trusted-plugin model described
+  below, not a hostile worker process.
+- Core validates the operation schema and every policy constraint before execution. A
+  resource constraint that cannot be resolved from the input denies the call instead of
+  broadening it.
+- Invocation uses the Action engine for approval and execution. A write requires a
+  stable request id. Request ids on reads are ignored. Write operations declare the
+  bounded, non-secret fields Core may show in an approval preview. Core persists that
+  safe preview with the approval and delivers it to the originating conversation when
+  one exists. Reusing a request id within the seven-day retention
+  window never repeats the effect, and an interrupted write whose provider outcome is
+  unknown is not retried automatically. Records become eligible for pruning after that
+  window and are removed by Core's periodic cleanup even when the App is idle. Disabling
+  or removing an App also rejects its pending invocations and clears their stored input.
+  Startup preserves a pending invocation only when its durable approval exists. A duplicate
+  of a failed invocation includes the original structured error code.
+- Read operations execute synchronously and cannot use deferred approval. An
+  approval-gated write returns `pending_approval`. Its later provider output is not
+  delivered to the App. Providers should expose a follow-up read when the App needs to
+  resolve the created resource.
+- Core rechecks the policy revision and the provider grant immediately before calling
+  the live capability. Revocation, expiry, degradation, or replacement cannot leave a
+  captured authority usable. Startup reconciles persisted policies against the current
+  App catalog before the broker accepts work.
+- The audit trail records attribution, authorization and approval outcomes, an execution
+  id, and a hash of the request id. It does not record credentials, operation input, or
+  provider output. This first version retains audit rows for the same bounded seven-day
+  window as invocation records.
+- This boundary governs supported runtime paths in the trusted-plugin model. It is not
+  a sandbox against arbitrary code already executing in the Core process.
+
+**Not to be confused with:**
+
+- **Provider grant** — the guardian's authorization for Rome to reach an external
+  identity. App access neither duplicates nor owns that credential.
+- **Connection setup** — the guardian flow that creates or repairs a provider grant.
+  Apps cannot start setup through `ctx.connections`.
 
 ## Lockfile
 
@@ -237,3 +306,20 @@ An app sets up the state it depends on, such as a routine it must always have, w
 
 - **[Action](actions.md)** — a hook reacts to a system event and routes into an action. The action is what runs.
 - **[Routine](data.md#routines)** — a routine is a guardian- or agent-authored trigger→action binding managed as data. A hook is app-owned code declared in the app's manifest.
+
+## Event sources
+
+An event source is an app's declaration, under `eventSources` in its manifest, that it delivers a family of event-bus events and can subscribe to them at the provider. Each entry names the event-name glob (`events`, one `*`), the event `types` that fill the `*`, the filter fields that pick the subscription target (`keys`), and the action that checks or creates the subscription (`ensureAction`). The connector app declares `provider:event:github.*`, keyed by `repository.full_name` or `organization.login`.
+
+**Contracts:**
+
+- A `defer` on a declared event calls the `ensureAction` before it creates the wait, and fails with the action's reason when the subscription cannot be made. The filter must cover every field of one `keys` entry.
+- A `defer` on an event no app declares always creates the wait. When nothing has emitted the event since Rome started, the result carries a warning, because the event catalog starts empty on every start and cannot tell a misspelled name from an event that has not happened yet.
+- Rome runs one subscribing call per event source at a time, because a provider subscription can be shared state that two concurrent calls would overwrite.
+- Rome never removes a subscription that a wait created, because other routines may depend on it.
+- `search_event_catalog` lists every declared type, even one not yet emitted, with `subscribable` and `keys`. Its `match` input calls the `ensureAction` in check-only mode (`dryRun`) and reports `active` per type. Without `match` it makes no provider calls.
+- The `ensureAction` takes `{ eventName, filter, dryRun }` and returns `subscription`: `existing` or `created`, or with `dryRun`, `active` or `inactive`.
+
+**Not to be confused with:**
+
+- **[Hook](#hooks)** — a hook is app code that reacts to a Rome event. An event source tells Rome which provider events an app can deliver onto the bus.

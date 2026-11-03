@@ -42,6 +42,14 @@ describe("parseLinkedInReply", () => {
     }
   });
 
+  it("keeps the stored text's line breaks and whether it matched the sent text", () => {
+    const text = "See https://example.com/demo\n\nExample signature";
+    expect(
+      parseLinkedInReply(ok(JSON.stringify([{ ...receipt, text, text_matches: false }])), "thread"),
+    ).toMatchObject({ text, textMatches: false });
+    expect(parseLinkedInReply(ok(JSON.stringify([receipt])), "thread").textMatches).toBeNull();
+  });
+
   it("reports killed commands and malformed output as unknown, while preserving auth failures", () => {
     expect(() =>
       parseLinkedInReply({ code: null, stdout: "", stderr: "timeout" }, "thread"),

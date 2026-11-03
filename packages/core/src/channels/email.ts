@@ -8,8 +8,10 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
+import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { refuseUnshownParts } from "./send-refusals.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
 import { InboundDedup } from "./inbound-dedup.js";
 import {
@@ -20,8 +22,6 @@ import {
 import type {
   MailProvider,
   RomeMailEvent,
-  RomeMailMessage,
-  RomeMailListItem,
   SendMailResult,
   EmailAddress,
   EmailBodyPart,
@@ -70,7 +70,7 @@ export interface EmailInboxCoordinates {
 export interface EmailAdapterDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   config: EmailInboxCoordinates;
   /**
    * Resolve the account owner's (guardian's) email from Rome Cloud when none is
@@ -100,53 +100,6 @@ function firstAddress(list: EmailAddress[] | undefined): EmailAddress | undefine
   return list && list.length > 0 ? list[0] : undefined;
 }
 
-// Pull the display-name out of an RFC 5322 From string (`"Ray" <ray@x>` →
-// `Ray`). Only used on the history fallback path, where a body hydration miss
-// leaves us with the list item's raw `from` string instead of AgentMail's
-// parsed name/email pair.
-function parseDisplayName(value: string | undefined): string {
-  if (!value) return "";
-  const match = value.match(/^\s*"?([^"<]+?)"?\s*</u);
-  return match ? match[1].trim() : "";
-}
-
-// Bounded-concurrency map, preserving input order. Hydrates history message
-// bodies without firing one request per message at once against the mail API.
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let i = cursor++; i < items.length; i = cursor++) {
-      results[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
-// Default look-back when the caller's window is missing or invalid (matches the
-// other history adapters, e.g. webchat).
-const DEFAULT_HISTORY_WINDOW_HOURS = 24;
-// History fetch bounds: cap total matched messages so an unbounded window can't
-// pull the whole mailbox, page in chunks, and hydrate a few bodies at a time.
-const HISTORY_MAX_MESSAGES = 200;
-const HISTORY_PAGE_LIMIT = 100;
-const HISTORY_HYDRATE_CONCURRENCY = 5;
-// AgentMail's list has no server-side thread filter, so a thread-scoped fetch
-// narrows client-side. This bounds how many messages we'll scan looking for
-// matches before giving up, so a sparse thread in a busy inbox can't make us
-// page the entire mailbox. Only relevant when threadId is set (otherwise the
-// message cap is reached first).
-const HISTORY_MAX_SCAN = 2000;
-// Hard backstop on paging iterations. The scan cap counts *messages*, so it
-// can't bound a misbehaving provider that returns empty pages with a non-null
-// cursor (0 messages ⇒ scan count never advances). This caps the number of
-// list calls regardless of what each page contains, guaranteeing termination.
-const HISTORY_MAX_PAGES = 50;
 const REPLY_TARGET_CACHE_SIZE = 2000;
 
 function attachmentTypeFromMime(mime: string | undefined): Attachment["type"] {
@@ -194,7 +147,7 @@ function textFromParts(parts: OutgoingMessage["parts"]): string {
 export class EmailAdapter {
   private readonly provider: MailProvider;
   private readonly settingsRepo: SettingsRepository;
-  private readonly personMappingRepo: PersonMappingRepository;
+  private readonly peopleRepo: PeopleRepository;
   private readonly ownerEmailResolver: () => Promise<string | undefined>;
   private readonly inboundDedup = new InboundDedup();
 
@@ -219,7 +172,7 @@ export class EmailAdapter {
   constructor(deps: EmailAdapterDeps) {
     this.provider = deps.provider;
     this.settingsRepo = deps.settingsRepo;
-    this.personMappingRepo = deps.personMappingRepo;
+    this.peopleRepo = deps.peopleRepo;
     this.address = deps.config.address;
     this.inboundSecret = deps.config.inboundSecret;
     // guardianEmail is durable settings config, resolved from the settings row
@@ -235,7 +188,7 @@ export class EmailAdapter {
 
   async start(): Promise<void> {
     // Provisioning is route-driven: the connect ceremony calls
-    // MailProvider.provision() and confers the `inbox` grant directly, so the
+    // MailProvider.provision() and grants the `inbox` grant directly, so the
     // registry only ever builds this adapter from complete grant material —
     // there is no secretless start here to self-provision.
 
@@ -280,13 +233,11 @@ export class EmailAdapter {
     // known address lands on the trusted path. The inbound gate still enforces
     // authentication before honoring this mapping (see ingestInbound).
     if (this.guardianEmail) {
-      await mapGuardianToChannel(this.personMappingRepo, "email", this.guardianEmail).catch(
-        (err) => {
-          log.warn("failed to preset guardian email mapping", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        },
-      );
+      await mapGuardianToChannel(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
+        log.warn("failed to preset guardian email mapping", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
 
     log.info("email channel started", { address: this.address });
@@ -334,9 +285,7 @@ export class EmailAdapter {
    * back to the newest message Rome sent for a thread nobody else wrote in.
    */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const outcome = await this.sendMail(chatId, message);
-    if (!outcome) return { chatId };
-    const { sent, startedThread } = outcome;
+    const { sent, startedThread } = await this.sendMail(chatId, message);
     // An explicit reply on an uncached thread says nothing about whether the
     // thread has inbound mail, so only a new or cached thread records the send.
     if (startedThread || this.threadReplyTarget.has(sent.threadId)) {
@@ -396,19 +345,25 @@ export class EmailAdapter {
   private async sendMail(
     threadId: string,
     message: OutgoingMessage,
-  ): Promise<{ sent: SendMailResult; startedThread: boolean } | undefined> {
+  ): Promise<{ sent: SendMailResult; startedThread: boolean }> {
     // The mail transport has no attachment field. Reject before sending a body
     // that would falsely appear to deliver the requested files.
     if (message.attachments?.length) {
-      throw new Error(
+      throw new ChannelSendRefused(
+        "attachment_unsupported",
         "Email attachments are not supported by the mail transport. No email was sent.",
       );
     }
+    refuseUnshownParts("email", message);
     const email = message.kind === "email" ? message : undefined;
     if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
-      throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+      throw new ChannelSendRefused(
+        "reply_unaddressable",
+        "Email inReplyToMessageId must not be blank. No email was sent.",
+      );
     }
-    const bodyText = (message.text ?? textFromParts(message.parts)).trim();
+    // Blank text says nothing, so the text parts speak, as on every channel.
+    const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.
@@ -426,9 +381,10 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
-      if (email) throw new Error("Email requires non-empty text or HTML. No email was sent.");
-      log.debug("skipping empty outbound email", { threadId: threadId || null });
-      return undefined;
+      throw new ChannelSendRefused(
+        "empty",
+        "Email requires non-empty text or HTML. No email was sent.",
+      );
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
@@ -657,142 +613,6 @@ export class EmailAdapter {
       trusted: claimsGuardian && authenticated,
     });
     return { status: "dispatched" };
-  }
-
-  /**
-   * Read-only history fetch (powers `fetch_channel_history` for email). Pages the
-   * provider's `list` (newest-first, server-side filtered by `after` and with
-   * spam/blocked/unauthenticated excluded by default), optionally narrows to one
-   * thread, hydrates each message's full body via the on-demand pull path, and
-   * returns ChannelMessages oldest-first. A line this inbox sent has direction
-   * `outbound`. Each line's `raw` is the provider's message, or its list item
-   * when the body pull failed. This path is pure: unlike `ingestInbound` it
-   * records no dedup, mutates no reply-target/attachment state, and
-   * dispatches nothing — it only reads and shapes.
-   */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-    // `fetch_channel_history` accepts arbitrary numeric input from agents, so a
-    // NaN/Infinity/negative window would throw on `toISOString()` or invert the
-    // window into the future. Clamp to the default first, matching the other
-    // history adapters.
-    const effectiveWindowHours =
-      Number.isFinite(windowHours) && windowHours > 0 ? windowHours : DEFAULT_HISTORY_WINDOW_HOURS;
-    const afterIso = new Date(Date.now() - effectiveWindowHours * 60 * 60 * 1000).toISOString();
-
-    // 1. Page newest-first, applying the optional thread filter *per page* so the
-    //    cap counts matching messages, not raw mailbox volume. Without this, a
-    //    thread-scoped fetch in a busy inbox could exhaust the cap on the newest
-    //    200 messages overall — none of them in the requested thread — and return
-    //    nothing even though the thread has messages in the window. Stop when we've
-    //    collected enough matches, the cursor is exhausted, or we hit the scan
-    //    ceiling (the latter only bites a sparse thread in a huge mailbox).
-    const matched: RomeMailListItem[] = [];
-    let pageToken: string | undefined;
-    let scanned = 0;
-    let pages = 0;
-    let capHit = false;
-    let scanCapHit = false;
-    do {
-      const page = await this.provider.listMessages({
-        after: afterIso,
-        limit: HISTORY_PAGE_LIMIT,
-        ascending: false,
-        pageToken,
-      });
-      pages += 1;
-      scanned += page.messages.length;
-      for (const m of page.messages) {
-        if (threadId && m.threadId !== threadId) continue;
-        matched.push(m);
-        if (matched.length >= HISTORY_MAX_MESSAGES) {
-          capHit = true;
-          break;
-        }
-      }
-      pageToken = page.nextPageToken;
-      if (capHit) break;
-      // Termination guards. An empty page means nothing more to collect, so stop
-      // regardless of the cursor. The scan/page caps bound the worst case even
-      // if the provider keeps handing back a non-null cursor — the loop can't run
-      // away on a misbehaving list API.
-      if (page.messages.length === 0) break;
-      if (scanned >= HISTORY_MAX_SCAN || pages >= HISTORY_MAX_PAGES) {
-        scanCapHit = true;
-        break;
-      }
-    } while (pageToken);
-
-    // Truncated only if we stopped early with more pages still available.
-    if (capHit || (scanCapHit && Boolean(pageToken))) {
-      log.warn("email history truncated", {
-        reason: capHit ? "message-cap" : "scan-cap",
-        cap: HISTORY_MAX_MESSAGES,
-        scanCap: HISTORY_MAX_SCAN,
-        scanned,
-        matched: matched.length,
-        windowHours: effectiveWindowHours,
-        threadId: threadId ?? null,
-      });
-    }
-
-    // 2. Hydrate full bodies (bounded concurrency); a pull miss falls back to the
-    //    list preview rather than dropping the message.
-    const lines = await mapWithConcurrency(matched, HISTORY_HYDRATE_CONCURRENCY, (item) =>
-      this.historyItemToLine(item),
-    );
-
-    // 3. Oldest-first, matching the other channels' fetchHistory contract.
-    return lines.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }
-
-  // Shape one listed message into a ChannelMessage, hydrating its body. No side
-  // effects — see fetchHistory.
-  private async historyItemToLine(item: RomeMailListItem): Promise<ChannelMessage> {
-    let text = (item.preview ?? "").trim();
-    let full: RomeMailMessage | undefined;
-    try {
-      full = await this.provider.getMessage(item.providerMessageId);
-      text = inboundBodyToMarkdown(full.body, item.preview);
-    } catch (err) {
-      log.warn("failed to hydrate email history body; falling back to preview", {
-        messageId: item.providerMessageId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    const fromContact = firstAddress(full?.from);
-    const fromAddress = normalizeAddress(fromContact?.email ?? item.from);
-    const fromName = fromContact?.name?.trim() || parseDisplayName(item.from) || fromAddress;
-
-    // A thread mixes inbound (counterparty) mail and outbound mail Rome itself
-    // sent. Attributing outbound to Rome (rather than to the recipient) keeps
-    // the transcript a readable two-sided conversation: received lines show the
-    // counterparty, sent lines show Rome — mirroring the telegram-user adapter.
-    const selfAddress = normalizeAddress(this.address);
-    const isOutbound = this.isOwnMessage(item.labels, fromAddress);
-    const senderId = isOutbound ? selfAddress : fromAddress;
-    const senderDisplayName = isOutbound ? selfAddress : fromName;
-
-    // Surface attachment metadata only (no lazy-download wiring on the read path).
-    const parts = downloadableParts(full?.attachments ?? []);
-    const attachments: Attachment[] = attachmentsFromParts(parts);
-
-    const threadName = full?.subject ?? item.subject;
-    return {
-      channel: "email",
-      direction: isOutbound ? "outbound" : "inbound",
-      messageId: item.providerMessageId,
-      chatId: item.threadId as ChatId,
-      // The list already excludes unauthenticated mail, so no `unauthenticated:`
-      // namespacing is needed here (unlike ingestInbound).
-      senderId,
-      senderDisplayName,
-      text,
-      attachments,
-      timestamp: new Date(item.receivedAt || full?.receivedAt || Date.now()),
-      thread: { kind: "dm", ...(threadName ? { name: threadName } : {}) },
-      raw: full ?? item,
-    };
   }
 
   private verifySignature(rawBody: string, signature: string): boolean {

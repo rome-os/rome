@@ -20,6 +20,16 @@ import { findScrollableYAncestor } from "@/lib/scroll-container";
 // overflowing wrapper is skipped in favour of the real bounded scroller above
 // it). Pass `scrollRef` to name the container explicitly and skip detection.
 
+/**
+ * Dispatched (bubbling) from inside the content by a control that is about to
+ * resize it on the reader's behalf and keeps the reading position itself, such
+ * as a button that expands a long message. While it settles, the hook neither
+ * re-pins nor snaps back to the bottom. When it has settled, the view is
+ * pinned again only if it ended at the bottom, so expanding the last message
+ * of a pinned chat leaves the reader where they were.
+ */
+export const HOLD_STICK_EVENT = "rome:hold-stick";
+
 export interface UseStickToBottomOptions {
   /** Whether to begin pinned to the bottom. Default true. */
   initialStuck?: boolean;
@@ -94,6 +104,8 @@ export function useStickToBottom({
   // scroll-away (release the pin) from a programmatic one like an interactive
   // component autofocusing an input mid-card (which must NOT release the pin).
   const lastUserGestureRef = useRef(0);
+  // True while a control holds the position (see HOLD_STICK_EVENT).
+  const holdRef = useRef(false);
 
   const scrollRef = useCallback((node: HTMLElement | null) => {
     explicitScrollRef.current = node;
@@ -178,6 +190,8 @@ export function useStickToBottom({
       const atBottom = distanceToBottom(metrics) <= STUCK_THRESHOLD_PX;
       const movedUp = lastScrollTop !== null && metrics.scrollTop < lastScrollTop - 0.5;
       lastScrollTop = metrics.scrollTop;
+      // The control that holds the position moves the scroller itself.
+      if (holdRef.current) return;
       const userDriven = performance.now() - lastUserGestureRef.current <= USER_INTENT_WINDOW_MS;
       if (userDriven) {
         // The user is scrolling: they may release the pin or scroll back to re-engage.
@@ -206,12 +220,30 @@ export function useStickToBottom({
   useEffect(() => {
     if (!contentEl && !explicitScrollEl) return;
     const observer = new ResizeObserver(() => {
-      if (stuckRef.current) jumpToBottom("auto");
+      if (stuckRef.current && !holdRef.current) jumpToBottom("auto");
     });
     if (contentEl) observer.observe(contentEl);
     if (explicitScrollEl) observer.observe(explicitScrollEl);
     return () => observer.disconnect();
   }, [contentEl, explicitScrollEl, jumpToBottom]);
+
+  // A control holds the position for two frames, long enough for its layout
+  // change and the correction it makes to land; then the pin follows where the
+  // view ended up.
+  useEffect(() => {
+    if (!contentEl) return;
+    const hold = () => {
+      holdRef.current = true;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          holdRef.current = false;
+          setStuck(distanceToBottom(readMetrics(resolveScroller())) <= STUCK_THRESHOLD_PX);
+        }),
+      );
+    };
+    contentEl.addEventListener(HOLD_STICK_EVENT, hold);
+    return () => contentEl.removeEventListener(HOLD_STICK_EVENT, hold);
+  }, [contentEl, resolveScroller, setStuck]);
 
   return { scrollRef, contentRef, isAtBottom, scrollToBottom };
 }

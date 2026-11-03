@@ -170,6 +170,19 @@ describe("normalizeRoutineDraftForCard", () => {
     expect(result.ok).toBe(false);
   });
 
+  // Intl.supportedValuesOf lists canonical names only, so a resolvable alias
+  // such as Etc/UTC is missing from it.
+  it.each([
+    "UTC",
+    "Etc/UTC",
+    "America/Los_Angeles",
+  ])("accepts the resolvable timezone %s", (tzid) => {
+    const result = normalizeRoutineDraftForCard({ ...validSchedule, tzid });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.draft.trigger).toMatchObject({ type: "schedule", tzid });
+  });
+
   it("rejects an unknown IANA timezone", () => {
     const result = normalizeRoutineDraftForCard({ ...validSchedule, tzid: "Mars/Olympus" });
     expect(result.ok).toBe(false);

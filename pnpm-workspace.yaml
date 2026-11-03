@@ -11,6 +11,7 @@ packages:
   - "packages/*"
   - "rome_apps/*"
   - "example_apps/*"
+  - "tests/midscene"
 linkWorkspacePackages: true
 preferWorkspacePackages: true
 
@@ -26,6 +27,7 @@ preferWorkspacePackages: true
 allowBuilds:
   bcrypt: true
   esbuild: true
+  fsevents: false
   node-pty: true
   protobufjs: true
   sharp: true

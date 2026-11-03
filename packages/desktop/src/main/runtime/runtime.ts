@@ -1,9 +1,10 @@
 import type { RuntimeStatus } from "./provider";
 
 /**
- * What the shell needs from whichever Rome the main window opens: the local
- * VM (`RuntimeManager`) or a hosted instance (`RemoteRuntime`). Tray, pill,
- * deep links, IPC, and the quit path depend on this, never on the VM.
+ * What the shell needs from whichever Rome the main window opens: a hosted
+ * instance (`RemoteRuntime`), or a dev URL (`DevUrlRuntime`). Tray, pill, deep
+ * links and IPC depend on this. Nothing runs on this computer, so quitting
+ * stops nothing.
  */
 export interface Runtime {
   getStatus(): RuntimeStatus;
@@ -12,15 +13,12 @@ export interface Runtime {
   ensureReady(): Promise<void>;
   /** Checks for real, unlike `isReady()`, and never starts anything. */
   isServing(): Promise<boolean>;
-  stopForQuit(): Promise<void>;
-  upgradeRuntime(): Promise<void>;
-  openInstallPage(): Promise<void>;
-  startRuntimeApp(): Promise<void>;
-  openRuntimeFolder(): Promise<void>;
+  /** Opens the user's Rome Cloud dashboard in the browser. */
+  openCloud(): Promise<void>;
   openLogs(): Promise<void>;
-  /** The main window failed to load the dashboard. Only a remote Rome reports it. */
-  reportLoadFailure?(detail: string): void;
-  /** Stops background work when this runtime is swapped out. */
+  /** The main window failed to load the dashboard. */
+  reportLoadFailure(detail: string): void;
+  /** Stops background work when this runtime is swapped out or the app quits. */
   dispose?(): void;
   on(event: "status", listener: (status: RuntimeStatus) => void): this;
   removeListener(event: "status", listener: (status: RuntimeStatus) => void): this;

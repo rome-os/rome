@@ -47,9 +47,7 @@ const api = {
     chooseInstance: (instanceId: string): Promise<RuntimeStatus> =>
       ipcRenderer.invoke("runtime:chooseInstance", instanceId),
     ensureReady: (): Promise<RuntimeStatus> => ipcRenderer.invoke("runtime:ensureReady"),
-    openInstallPage: (): Promise<void> => ipcRenderer.invoke("runtime:openInstallPage"),
-    startRuntimeApp: (): Promise<void> => ipcRenderer.invoke("runtime:startRuntimeApp"),
-    openRuntimeFolder: (): Promise<void> => ipcRenderer.invoke("runtime:openRuntimeFolder"),
+    openCloud: (): Promise<void> => ipcRenderer.invoke("runtime:openCloud"),
     openLogs: (): Promise<void> => ipcRenderer.invoke("runtime:openLogs"),
   },
 
@@ -60,13 +58,6 @@ const api = {
     install: (): Promise<UpdateStatus> => ipcRenderer.invoke("updater:install"),
     setAutoUpdateEnabled: (enabled: boolean): Promise<UpdateStatus> =>
       ipcRenderer.invoke("updater:setAutoUpdateEnabled", enabled),
-  },
-
-  romeImage: {
-    getStatus: (): Promise<ImageUpdateStatus> => ipcRenderer.invoke("rome-image:getStatus"),
-    check: (): Promise<ImageUpdateStatus> => ipcRenderer.invoke("rome-image:check"),
-    setAutoUpdateEnabled: (enabled: boolean): Promise<ImageUpdateStatus> =>
-      ipcRenderer.invoke("rome-image:setAutoUpdateEnabled", enabled),
   },
 
   // One-way on purpose: the pill never needs an answer, and the main process
@@ -83,12 +74,7 @@ const api = {
   },
 
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    const validChannels = [
-      "updater:status",
-      "runtime:status",
-      "rome-image:status",
-      "device:status",
-    ];
+    const validChannels = ["updater:status", "runtime:status", "device:status"];
     if (validChannels.includes(channel)) {
       const listener = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args);
       ipcRenderer.on(channel, listener);
@@ -127,23 +113,7 @@ interface RuntimeStatus {
   detail: string;
   primaryAction: string;
   dashboardUrl: string;
-  healthUrl: string;
-  installDir: string;
-  image: string;
-  containerName: string;
-  provider: "lima" | "remote";
-  runtimeInstalled: boolean;
-  runtimeRunning: boolean;
-  runtimeInstallUrl: string;
   lastError: string | null;
-  pullProgress: {
-    percent: number | null;
-    status: string;
-    currentBytes: number;
-    totalBytes: number;
-    layersCompleted: number;
-    layersTotal: number;
-  } | null;
 }
 
 interface UpdateStatus {
@@ -169,32 +139,21 @@ interface UpdateStatus {
   } | null;
 }
 
-interface ImageUpdateStatus {
-  state: "idle" | "checking" | "up-to-date" | "available" | "updating" | "error" | "unsupported";
-  image: string;
-  currentDigest: string | null;
-  latestDigest: string | null;
-  autoUpdateEnabled: boolean;
-  lastCheckedAt: string | null;
-  message: string;
-  error: string | null;
+interface RuntimeTarget {
+  kind: "remote";
+  instance: { id: string; name: string; origin: string } | null;
 }
-
-type RuntimeTarget =
-  | { kind: "local" }
-  | { kind: "remote"; instance: { id: string; name: string; origin: string } | null };
 
 type DeviceStatus =
   | { state: "off" }
   | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
 
 interface CloudState {
-  available: boolean;
   signedIn: boolean;
-  cloudOrigin: string | null;
+  cloudOrigin: string;
   activeTarget: RuntimeTarget;
   savedTarget: RuntimeTarget;
-  localVm: { supported: boolean; reason: string | null };
+  legacyRuntimeDir: string | null;
   device: DeviceStatus;
 }
 

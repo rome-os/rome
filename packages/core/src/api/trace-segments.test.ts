@@ -369,6 +369,21 @@ describe("buildTraceSnapshot — summary", () => {
     expect(snap.summary.invocationCounts).toEqual({ files: 2, terminal: 1, browser: 1 });
   });
 
+  it("names the model from the turn's terminal accounting, and forgets it when the next turn starts", () => {
+    const builder = createSegmentBuilder({ idPrefix: "t", resolver: testResolver });
+    builder.push({
+      type: "result",
+      content: "done",
+      agent: "main",
+      accounting: accounting({ model: "gpt-6-luna" }),
+    });
+    expect(builder.snapshot().summary.model).toBeUndefined();
+    builder.push(turnEnd(500));
+    expect(builder.snapshot().summary.model).toBe("gpt-6-luna");
+    builder.push(turnStart());
+    expect(builder.snapshot().summary.model).toBeUndefined();
+  });
+
   it("empty trace produces empty snapshot", () => {
     const snap = buildTraceSnapshot({
       idPrefix: "t",

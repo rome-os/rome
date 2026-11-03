@@ -79,7 +79,6 @@ setCurrentActionContextRunner(async <T>(patch: CurrentActionContextPatch, fn: ()
   return await actionExecutionContext.run(
     {
       ...store,
-      ...patch,
       sharedContext: mergeSharedContext(store, patch),
     },
     fn,

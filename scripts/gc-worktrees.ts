@@ -27,7 +27,8 @@
  *     skipped, because GC'ing it would surprise a user who's about to
  *     start work.
  *
- * Slug derivation matches scripts/worktree-slug.sh.
+ * It names a worktree's stack after the worktree directory (#1314), and skips
+ * one that another checkout started (scripts/gc-stack-guard.ts).
  */
 
 import { spawnSync } from "node:child_process";
@@ -37,6 +38,8 @@ import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import { checkbox } from "@inquirer/prompts";
+
+import { slugify, startedElsewhere } from "./gc-stack-guard.js";
 
 // Types
 
@@ -164,14 +167,29 @@ const USAGE = `Usage: pnpm gc:worktrees [-y|--yes] [--include-locked] [--force]
                     untracked/modified file safety check).
 `;
 
-// slugify (mirrors scripts/worktree-slug.sh)
+// Stack lookup. A worktree's stack is looked up by its directory name (#1314)
+// and left alone when another checkout started it (gc-stack-guard.ts).
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 63);
+/** The compose working directory of each container in the stack `slug`, or
+ *  null when Docker could not be asked. */
+function stackOwnerDirs(slug: string): string[] | null {
+  const r = run("docker", [
+    "ps",
+    "-a",
+    "--filter",
+    `label=com.docker.compose.project=${slug}`,
+    "--format",
+    '{{.Label "com.docker.compose.project.working_dir"}}',
+  ]);
+  if (!r.ok) return null;
+  return [
+    ...new Set(
+      r.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 // Worktree discovery
@@ -314,8 +332,9 @@ function classify(wt: Worktree, ctx: Ctx): Classified {
   if (state === "UNMERGED") return skip("UNMERGED");
 
   const slug = slugify(base);
-  const hasCompose = existsSync(join(wt.path, "compose.dev.yml"));
-  const rmRomeHome = existsSync(join(homedir(), ".rome-worktrees", slug));
+  const keep = startedElsewhere(stackOwnerDirs(slug), wt.path);
+  const hasCompose = !keep && existsSync(join(wt.path, "compose.dev.yml"));
+  const rmRomeHome = !keep && existsSync(join(homedir(), ".rome-worktrees", slug));
   const actions =
     (wt.locked ? "L" : "·") + (hasCompose ? "D" : "·") + (rmRomeHome ? "H" : "·") + "WB";
 
@@ -560,8 +579,9 @@ function dirtyToEligible(s: Skipped): Eligible {
     throw new Error("dirtyToEligible: not a dirty worktree with a branch");
   }
   const slug = slugify(s.base);
-  const hasCompose = existsSync(join(s.worktree.path, "compose.dev.yml"));
-  const rmRomeHome = existsSync(join(homedir(), ".rome-worktrees", slug));
+  const keep = startedElsewhere(stackOwnerDirs(slug), s.worktree.path);
+  const hasCompose = !keep && existsSync(join(s.worktree.path, "compose.dev.yml"));
+  const rmRomeHome = !keep && existsSync(join(homedir(), ".rome-worktrees", slug));
   const actions =
     (s.worktree.locked ? "L" : "·") + (hasCompose ? "D" : "·") + (rmRomeHome ? "H" : "·") + "WB";
   return {

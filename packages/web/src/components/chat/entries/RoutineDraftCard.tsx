@@ -151,7 +151,15 @@ export function RoutineDraftCard({
   const error = state.kind === "error" ? state.message : actionError;
 
   return (
-    <div className="mb-3 overflow-hidden rounded-12 border border-border bg-surface">
+    <div
+      tabIndex={-1}
+      data-chat-pending-card={
+        state.kind === "draft" || state.kind === "error" || state.kind === "creating"
+          ? ""
+          : undefined
+      }
+      className="mb-3 overflow-hidden rounded-12 border border-border bg-surface"
+    >
       <div className="flex items-center justify-between gap-2 border-b border-border bg-surface-muted px-4 py-2">
         <Badge variant={badgeVariant} className="gap-2">
           <TriggerIcon aria-hidden />

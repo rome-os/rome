@@ -154,7 +154,7 @@ describe("proveIdentity", () => {
 
     expect(await proveIdentity({ fetch: http.fetch })).toEqual({
       status: "ok",
-      identity: { accountId: "acct-789", instanceId: "inst-123" },
+      identity: { accountId: "acct-789", instanceId: "inst-123", profile: { id: "acct-789" } },
     });
     expect(http.calls).toHaveLength(1);
     expect(http.calls[0].headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
@@ -168,7 +168,7 @@ describe("proveIdentity", () => {
 
     await expect(proveIdentity({ fetch: http.fetch, bootVersion: "1.2.3" })).resolves.toEqual({
       status: "ok",
-      identity: { accountId: "acct-789", instanceId: "inst-123" },
+      identity: { accountId: "acct-789", instanceId: "inst-123", profile: { id: "acct-789" } },
     });
     expect(http.calls).toHaveLength(1);
     expect(http.calls[0].headers.get("content-type")).toBe("application/json");
@@ -195,7 +195,12 @@ describe("proveIdentity", () => {
 
     expect(await proveIdentity({ fetch: http.fetch })).toEqual({
       status: "ok",
-      identity: { accountId: "acct-789", instanceId: "inst-123", email: "owner@example.com" },
+      identity: {
+        accountId: "acct-789",
+        instanceId: "inst-123",
+        email: "owner@example.com",
+        profile: { id: "acct-789", email: "owner@example.com" },
+      },
     });
   });
 
@@ -217,8 +222,23 @@ describe("proveIdentity", () => {
         instanceId: "inst-123",
         email: "owner@example.com",
         avatarUrl: "https://example.com/avatar.png",
+        profile: {
+          id: "acct-789",
+          email: "owner@example.com",
+          avatarUrl: "https://example.com/avatar.png",
+        },
       },
     });
+  });
+
+  it("keeps the whole whoami account as the guardian's profile", async () => {
+    const account = { id: "acct-789", displayName: "Ada", survey: { buildGoals: ["Orders"] } };
+    const http = createFetchRecorder();
+    http.when("GET", WHOAMI_URL).reply(200, { instanceId: "inst-123", account });
+
+    const result = await proveIdentity({ fetch: http.fetch });
+
+    expect(result.status === "ok" && result.identity.profile).toEqual(account);
   });
 
   it("maps 401 to unknown (terminal)", async () => {

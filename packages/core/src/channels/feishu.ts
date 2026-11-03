@@ -1,3 +1,4 @@
+import { platformOf } from "./platform.js";
 import {
   createLarkChannel,
   type CardActionEvent,
@@ -16,7 +17,8 @@ import { preserveMentionOnlyText } from "./mention-only.js";
 import { isLinkCodeMessage } from "./guardian-link-code.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { refuseAttachments, replyToShaped, textToSend } from "./send-refusals.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type {
   ChannelMessage,
   ChatDescriptor,
@@ -29,6 +31,8 @@ import type {
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
+/** A Feishu or Lark message id, such as `om_dc13264520392913993dd051dba21dcf`. */
+const FEISHU_MESSAGE_ID = /^om_[\w-]+$/;
 /** How long a group message waits on its name lookup. */
 const CHAT_NAME_TIMEOUT_MS = 5_000;
 /** How long a failed name lookup stands before the next message retries it. */
@@ -46,7 +50,7 @@ export interface FeishuConfig {
   chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  personMappingRepo?: PersonMappingRepository;
+  peopleRepo?: PeopleRepository;
   listAgents?: () => string[];
   /** The agent linked to this adapter's channel, as `accountAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
@@ -143,7 +147,7 @@ export class FeishuAdapter {
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  private readonly personMappingRepo?: PersonMappingRepository;
+  private readonly peopleRepo?: PeopleRepository;
   private readonly listAgents?: () => string[];
   private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
@@ -159,6 +163,9 @@ export class FeishuAdapter {
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
+  /** The platform this app's senders are accounts on: Lark for a Lark app,
+   *  Feishu otherwise. */
+  private readonly platform: string;
 
   constructor(
     config: FeishuConfig,
@@ -177,9 +184,10 @@ export class FeishuAdapter {
       }),
   ) {
     this.channel = createChannel(config);
+    this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.personMappingRepo = config.personMappingRepo;
+    this.peopleRepo = config.peopleRepo;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
@@ -218,23 +226,21 @@ export class FeishuAdapter {
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    if (!message.text) return { chatId };
+    refuseAttachments("feishu", message);
+    const text = textToSend("feishu", message);
+    const replyTo = replyToShaped("feishu", message.replyToMessageId, FEISHU_MESSAGE_ID);
     const threadId: string = chatId;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
-    const opts = message.replyToMessageId
+    const opts = replyTo
       ? {
-          replyTo: message.replyToMessageId,
+          replyTo,
           replyInThread: await this.repliesInThread(threadId),
         }
       : undefined;
 
     try {
-      const sent = (await this.channel.send(
-        threadId,
-        { markdown: message.text },
-        opts,
-      )) as unknown as {
+      const sent = (await this.channel.send(threadId, { markdown: text }, opts)) as unknown as {
         messageId?: string;
         message_id?: string;
       };
@@ -340,7 +346,7 @@ export class FeishuAdapter {
       messageId: m.messageId,
       chatId: m.chatId as ChatId,
       senderId: m.senderId,
-      senderDisplayName: m.senderName ?? "Feishu User",
+      ...(m.senderName ? { senderDisplayName: m.senderName } : {}),
       text,
       attachments: [],
       timestamp: new Date(m.createTime),
@@ -539,8 +545,8 @@ export class FeishuAdapter {
   }
 
   private async isGuardian(channelUserId: string): Promise<boolean> {
-    if (!this.personMappingRepo) return false;
-    const person = await this.personMappingRepo.findByChannelUser("feishu", channelUserId);
+    if (!this.peopleRepo) return false;
+    const person = await this.peopleRepo.byAccount({ platform: this.platform, id: channelUserId });
     return person?.bondLevel === "guardian";
   }
 

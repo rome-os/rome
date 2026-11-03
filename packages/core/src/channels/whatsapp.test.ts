@@ -15,7 +15,6 @@ import type {
 
 const mockSendMessage = rs.fn();
 const mockEnd = rs.fn();
-const mockRequestPairingCode = rs.fn();
 const mockDownloadMediaMessage = rs.hoisted(() => rs.fn());
 const profileMemoryDir = rs.hoisted(() => ({ value: "" }));
 
@@ -33,7 +32,6 @@ const mockSock = {
     }),
   },
   sendMessage: mockSendMessage,
-  requestPairingCode: mockRequestPairingCode,
   end: mockEnd,
   user: { id: "1234567890@s.whatsapp.net" } as {
     id: string;
@@ -511,34 +509,17 @@ describe("WhatsAppAdapter", () => {
   });
 
   describe("connection handling", () => {
-    it("waits for the registration QR event before requesting a pairing code", async () => {
-      rs.useFakeTimers();
-      mockRequestPairingCode.mockResolvedValue("ABCD1234");
+    it("hands each linking QR to the onQr sink", async () => {
+      const qrs: string[] = [];
+      adapter.onQr((qr) => qrs.push(qr));
       await adapter.start();
 
-      const code = adapter.requestPairingCode("14155550134");
-      expect(mockRequestPairingCode).not.toHaveBeenCalled();
+      eventHandlers["connection.update"]({ qr: "qr-1" });
+      eventHandlers["connection.update"]({ connection: "connecting" });
+      eventHandlers["connection.update"]({ qr: "qr-2" });
 
-      eventHandlers["connection.update"]({ qr: "registration-ready" });
-      await rs.advanceTimersByTimeAsync(750);
-
-      await expect(code).resolves.toBe("ABCD1234");
-      expect(mockRequestPairingCode).toHaveBeenCalledWith("14155550134");
-    });
-
-    it("rejects pairing-code requests for credentials that are already registered", async () => {
-      const registeredAdapter = new WhatsAppAdapter({
-        authProvider: async () => ({
-          state: { creds: { registered: true }, keys: {} } as never,
-          saveCreds: rs.fn(),
-        }),
-      });
-      await registeredAdapter.start();
-
-      await expect(registeredAdapter.requestPairingCode("14155550134")).rejects.toThrow(
-        "This WhatsApp session is already paired; use the normal connection flow",
-      );
-      expect(mockRequestPairingCode).not.toHaveBeenCalled();
+      expect(qrs).toEqual(["qr-1", "qr-2"]);
+      expect(adapter.getConnectionState().qr).toBe("qr-2");
     });
 
     it("reconnects on non-logout disconnect", async () => {

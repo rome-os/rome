@@ -1,4 +1,12 @@
 // @rstest-environment jsdom
+import type { ComponentProps } from "react";
+import type { ChatRow } from "@/components/chat/chat-view";
+import type { LiveTextStore } from "@/hooks/live-text";
+import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
+import * as traceDrawerModule from "@/components/agent-trace/TraceDrawer" with {
+  rstest: "importActual",
+};
+import i18n from "@/i18n";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   MemoryRouter,
@@ -9,6 +17,7 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
 import {
@@ -23,8 +32,10 @@ import {
 } from "@/lib/chat-api";
 import SessionsPage from "./SessionsPage";
 
+const realTraceDrawer = rs.hoisted(() => ({ enabled: false }));
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
-  TraceDrawer: () => null,
+  TraceDrawer: (props: ComponentProps<typeof traceDrawerModule.TraceDrawer>) =>
+    realTraceDrawer.enabled ? <traceDrawerModule.TraceDrawer {...props} /> : null,
   traceDrawerContentInsetClass: () => "",
 }));
 
@@ -57,9 +68,11 @@ rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({
     live,
     rows,
+    onOpenStoredTrace,
   }: {
-    live: { isStreaming: boolean; text: string };
-    rows: { kind: string; key: string }[];
+    live: { isStreaming: boolean; textStore: LiveTextStore };
+    rows: ChatRow[];
+    onOpenStoredTrace: (target: TraceDrawerTarget) => void;
   }) => (
     <div
       data-testid="session-messages"
@@ -69,7 +82,28 @@ rs.mock("@/components/chat/MessageList", () => ({
         .map((row) => row.key)
         .join(",")}
     >
-      {live.text}
+      {live.textStore.get().text}
+      {realTraceDrawer.enabled
+        ? rows.map((row) =>
+            row.kind === "trace" && row.message.traceSummary ? (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() =>
+                  onOpenStoredTrace({
+                    kind: "stored",
+                    messageId: row.message.id,
+                    sessionId: row.message.sessionId,
+                    turnId: row.message.turnId ?? null,
+                    summary: row.message.traceSummary!,
+                  })
+                }
+              >
+                Open stored steps
+              </button>
+            ) : null,
+          )
+        : null}
     </div>
   ),
 }));
@@ -168,17 +202,26 @@ function OpenMissingTileSession() {
 
 function renderDetail(initialEntry = "/sessions/feedback-fork-session", container?: HTMLElement) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      {container ? <OpenMissingTileSession /> : null}
-      <Routes>
-        <Route path="/sessions/*" element={<SessionsPage />} />
-        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
-        <Route path="/chat" element={<ChatHomeProbe />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        {container ? <OpenMissingTileSession /> : null}
+        <Routes>
+          <Route path="/sessions/*" element={<SessionsPage />} />
+          <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+          <Route path="/chat" element={<ChatHomeProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
     { container },
   );
 }
+
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+/** Approvals the Activity page's pending banner and Events tab read. */
+let approvals: Record<string, unknown>[] = [];
 
 function setRouterHistoryIndex(idx: number) {
   window.history.replaceState({ ...window.history.state, idx }, "");
@@ -186,27 +229,40 @@ function setRouterHistoryIndex(idx: number) {
 
 function renderIndex(initialEntry = "/sessions") {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/sessions/*" element={<SessionsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 /** The shell-less mount: /full/apps/sessions/* routes outside RomeShellLayout. */
 function renderFullMode(initialEntry: string) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
   setRouterHistoryIndex(0);
+  approvals = [];
+  const realFetch = globalThis.fetch;
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url === "/api/approvals") return Response.json(approvals);
+    if (url.startsWith("/api/action-executions") || url.startsWith("/api/webhook-invocations"))
+      return Response.json([]);
+    return realFetch(input, init);
+  });
   rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
   rs.mocked(listRomeSessions).mockResolvedValue({
     sessions: [],
@@ -234,8 +290,39 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  realTraceDrawer.enabled = false;
   rs.restoreAllMocks();
   rs.clearAllMocks();
+});
+
+describe("Sessions viewer archived traces", () => {
+  it("shows the archived note instead of an error and Retry for a stale trace button", async () => {
+    await i18n.changeLanguage("en");
+    realTraceDrawer.enabled = true;
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "old-trace",
+        sessionId: FORK_SESSION.id,
+        turnId: "old-turn",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-09-24T12:00:00Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    const fetchTrace = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ trace: null, traceArchived: true })));
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "Open stored steps" }));
+    expect(await screen.findByText("Steps from this turn are archived.")).toBeTruthy();
+    expect(fetchTrace).toHaveBeenCalledWith(
+      "/api/sessions/messages/old-trace/content?includeSubagentUsage=true",
+      { credentials: "include" },
+    );
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
 });
 
 describe("SessionsPage missing sessions", () => {
@@ -352,14 +439,16 @@ describe("SessionsPage live fork details", () => {
     setRouterHistoryIndex(1);
 
     render(
-      <MemoryRouter
-        initialEntries={["/sessions/all", "/sessions/feedback-fork-session"]}
-        initialIndex={1}
-      >
-        <Routes>
-          <Route path="/sessions/*" element={<SessionsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter
+          initialEntries={["/sessions/all", "/sessions/feedback-fork-session"]}
+          initialIndex={1}
+        >
+          <Routes>
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
@@ -373,12 +462,14 @@ describe("SessionsPage live fork details", () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     render(
-      <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
-        <Routes>
-          <Route path="/sessions" element={<div>Sessions index</div>} />
-          <Route path="/sessions/*" element={<SessionsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
+          <Routes>
+            <Route path="/sessions" element={<div>Sessions index</div>} />
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
 
@@ -767,5 +858,95 @@ describe("SessionsPage explorer", () => {
       ),
     );
     expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+  });
+});
+
+describe("Activity page tabs", () => {
+  function PathProbe() {
+    const location = useLocation();
+    return (
+      <output data-testid="path">
+        {location.pathname}
+        {location.search}
+      </output>
+    );
+  }
+
+  function renderWithProbe(initialEntry: string) {
+    return render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+          <PathProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("switches to Events, which holds the event log", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe("/sessions/all");
+    const events = await screen.findByRole("radio", { name: "Events" });
+    expect(screen.getByRole("radio", { name: "Overview" })).toBeTruthy();
+    fireEvent.click(events);
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/sessions/events"));
+    expect(await screen.findByRole("radiogroup", { name: "Activity status" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Events" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("says a pending approval waits on the other tabs, and Review opens it on Events", async () => {
+    await i18n.changeLanguage("en");
+    approvals = [
+      {
+        id: "a1",
+        type: "action_execution",
+        status: "pending",
+        requestedBy: "main",
+        description: "Approval needing a decision",
+        createdAt: new Date().toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        payload: null,
+      },
+    ];
+    renderWithProbe("/sessions/all");
+    const review = await screen.findByRole("button", { name: /1 pending approval/ });
+    fireEvent.click(review);
+    await waitFor(() =>
+      expect(screen.getByTestId("path").textContent).toBe("/sessions/events?status=pending"),
+    );
+    const filters = await screen.findByRole("radiogroup", { name: "Activity status" });
+    expect(filters.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe(
+      "Pending",
+    );
+  });
+
+  it("shows no pending banner while nothing waits", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe("/sessions/all");
+    await screen.findByRole("radio", { name: "Events" });
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/approvals", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: /pending approval/ })).toBeNull();
+  });
+
+  it("gives the full-mode Events tab one main with the safe-area frame", async () => {
+    await i18n.changeLanguage("en");
+    const view = render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/full/apps/sessions/events"]}>
+          <Routes>
+            <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("radiogroup", { name: "Activity status" });
+    const mains = view.container.querySelectorAll("main");
+    expect(mains.length).toBe(1);
+    expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
   });
 });

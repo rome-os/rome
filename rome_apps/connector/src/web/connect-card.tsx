@@ -9,7 +9,8 @@ import {
 import {
   CATALOG_BY_SLUG,
   isRomeSettingsLink,
-  romeManagedGrantsUsable,
+  romeManagedConnectionWorking,
+  type RegistryConnectionStatus,
   titleCase,
   type ConnectedAccount,
 } from "@/lib/connections";
@@ -72,11 +73,7 @@ interface CredentialStatusAdapter {
   isConnected(): Promise<boolean>;
 }
 
-interface ConnectionStatus {
-  connectionKind?: string;
-  /** The kind of connection, as a host from before the rename names it. */
-  service?: string;
-  grants: Record<string, string>;
+interface ConnectionStatus extends RegistryConnectionStatus {
   connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
 }
 
@@ -124,7 +121,7 @@ function createRomeManagedAdapter(slug: string, name: string): CredentialStatusA
     },
     async isConnected() {
       const status = await loadStatus();
-      return romeManagedGrantsUsable(status?.grants);
+      return romeManagedConnectionWorking(status);
     },
   };
 }

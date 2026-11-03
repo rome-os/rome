@@ -111,6 +111,8 @@ export interface InstalledAppCard {
   canUninstall: boolean;
   /** Projection of the installed app.yaml flag. Missing means false. */
   includeSource?: boolean;
+  /** Projection of the installed app.yaml flag. Missing means false. */
+  hideInLauncher?: boolean;
   /** UI capability hint only; the publish endpoint still enforces store policy. */
   canPublish: boolean;
   accessMode: AppAccessMode;

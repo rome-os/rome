@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelApiResult } from "../../channels/api-request.js";
-import type { GrantState } from "../../connections/types.js";
+import type { ConnectionState } from "../../connections/types.js";
 import { CredentialRejected } from "../../connections/errors.js";
 import { anotherAccountKey } from "../../connections/setup/manager.js";
 import type { ApiDeps } from "../deps.js";
@@ -16,7 +16,7 @@ function appWith(
   execute?: (request: unknown) => Promise<ChannelApiResult>,
   opts: {
     activeSetup?: "placeholder" | "another" | "existing";
-    botGrantState?: GrantState;
+    botState?: ConnectionState;
   } = {},
 ) {
   return discordCliRoutes(
@@ -28,7 +28,7 @@ function appWith(
           } as NonNullable<ApiDeps["setupManager"]>)
         : undefined,
       connectionRegistry:
-        execute || opts.activeSetup === "existing" || opts.botGrantState
+        execute || opts.activeSetup === "existing" || opts.botState
           ? ({
               find: (service: string) =>
                 service === "discord"
@@ -36,9 +36,7 @@ function appWith(
                       {
                         id: "discord-1",
                         isUnlocked: (capability: string) => capability === "act" && !!execute,
-                        auth: {
-                          grants: () => ({ bot: opts.botGrantState ?? "unauthorized" }),
-                        },
+                        state: () => opts.botState ?? null,
                         act: execute
                           ? {
                               operations: () => [
@@ -95,8 +93,8 @@ describe("Discord CLI loopback broker routes", () => {
     });
   });
 
-  it("keeps a degraded Discord bot grant distinguishable from missing auth", async () => {
-    const response = await appWith(undefined, { botGrantState: "degraded" }).request(
+  it("keeps a broken Discord bot distinguishable from missing auth", async () => {
+    const response = await appWith(undefined, { botState: "broken" }).request(
       "/_internal/discord/auth",
     );
 

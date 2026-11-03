@@ -24,7 +24,7 @@ import type {
   ModelToolDefinition,
   SkillMcpDefinition,
 } from "./agent-runner.js";
-import type { HandbackSpec, RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeToolDef, HandbackSpec, RoutineActivationGate } from "./mcp-facade.js";
 import {
   createRomeMcpServer,
   type RomeMcpGroup,
@@ -53,8 +53,12 @@ interface BuildAnthropicMcpServersParams {
   interactiveSurfaceDetached?: boolean;
   /** See FacadeParams.executeDefer. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.sessionTools. */
+  sessionTools?: FacadeToolDef[];
   /** See FacadeParams.routineActivation. */
   routineActivation?: RoutineActivationGate;
+  /** See FacadeParams.textPrivate. */
+  textPrivate?: boolean;
 }
 
 export type AnthropicMcpServers = Record<
@@ -112,7 +116,9 @@ export function buildAnthropicMcpServers({
   supportsInteractiveSurface,
   interactiveSurfaceDetached,
   executeDefer,
+  sessionTools,
   routineActivation,
+  textPrivate,
 }: BuildAnthropicMcpServersParams): AnthropicMcpServers {
   const server = createRomeMcpServer({
     getActionCatalog,
@@ -125,7 +131,9 @@ export function buildAnthropicMcpServers({
     supportsInteractiveSurface,
     interactiveSurfaceDetached,
     executeDefer,
+    sessionTools,
     routineActivation,
+    textPrivate,
   });
 
   // The actions + skills MCP servers always register so the agent can list

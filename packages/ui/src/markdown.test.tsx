@@ -95,6 +95,14 @@ describe("Markdown", () => {
     );
   });
 
+  it("loads images lazily and decodes them off the main thread", () => {
+    render(<Markdown>{"![Preview](/preview.png)"}</Markdown>);
+
+    const image = screen.getByRole("img", { name: "Preview" });
+    expect(image.getAttribute("loading")).toBe("lazy");
+    expect(image.getAttribute("decoding")).toBe("async");
+  });
+
   it("tags the root with rome-markdown, the hook hosts style prose through", () => {
     const { container } = renderMd("hello");
     const root = container.querySelector(".rome-markdown");
@@ -312,6 +320,24 @@ describe("Markdown Mermaid theme", () => {
     });
 
     expect(spy.mock.calls.length).toBe(single);
+  });
+
+  it("keeps the resolved theme when only the root's inline style changes", async () => {
+    render(
+      <>
+        {Array.from({ length: 5 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    await act(async () => {
+      document.documentElement.style.setProperty("--rome-viewport-height", "512px");
+    });
+    document.documentElement.style.removeProperty("--rome-viewport-height");
+
+    expect(spy.mock.calls.length).toBe(0);
   });
 
   it("re-validates a theme resolved by a render that never committed", async () => {

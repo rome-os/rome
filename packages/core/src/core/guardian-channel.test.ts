@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { createTestDb, recordedConnectionKindOf, type TestDb } from "../test/helpers.js";
+import {
+  createTestDb,
+  recordedConnectionKindOf,
+  type TestDb,
+  testAccountLinkOf,
+} from "../test/helpers.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 
 const NOW = new Date("2026-10-15T00:00:00.000Z");
@@ -14,8 +19,8 @@ describe("isGuardianFacingChannel", () => {
 
   it("reads a service's second channel, keyed by an opaque id, as that service", () => {
     testDb = createTestDb();
-    const records = new ChannelRecordsRepository(testDb.db);
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, NOW);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, NOW, { id: "telegram" });
     const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, NOW).id;
     const connectionKindOf = recordedConnectionKindOf(testDb.db);
 

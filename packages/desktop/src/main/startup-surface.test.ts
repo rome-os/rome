@@ -1,7 +1,37 @@
 import { describe, expect, it } from "@rstest/core";
-import { shouldReturnToDashboard } from "./startup-surface";
+import {
+  chooseStartupSurface,
+  shouldAutoOpenDashboard,
+  shouldReturnToDashboard,
+} from "./startup-surface";
 
-const DASHBOARD = "http://127.0.0.1:47823";
+const DASHBOARD = "https://ray.romeos.cc";
+const ONBOARDING =
+  "file:///Applications/Rome.app/Contents/Resources/app.asar/src/renderer/onboarding.html";
+
+// There is no Rome on this computer to wait for: the window shows the welcome
+// page until the hosted Rome is ready, then the Rome itself.
+describe("chooseStartupSurface", () => {
+  it("shows the welcome page while the Rome is not ready", () => {
+    expect(chooseStartupSurface(DASHBOARD, false)).toEqual({ kind: "onboarding" });
+  });
+
+  it("opens the Rome once it is ready", () => {
+    expect(chooseStartupSurface(DASHBOARD, true)).toEqual({ kind: "dashboard", url: DASHBOARD });
+  });
+});
+
+describe("shouldAutoOpenDashboard", () => {
+  it("leaves the welcome page and a blank window for the Rome", () => {
+    expect(shouldAutoOpenDashboard(ONBOARDING, ONBOARDING, DASHBOARD)).toBe(true);
+    expect(shouldAutoOpenDashboard("", ONBOARDING, DASHBOARD)).toBe(true);
+  });
+
+  // A provider's sign-in page is mid-flow; yanking it away would strand the user.
+  it("leaves any other page alone", () => {
+    expect(shouldAutoOpenDashboard("https://github.com/login", ONBOARDING, DASHBOARD)).toBe(false);
+  });
+});
 
 describe("shouldReturnToDashboard", () => {
   // The case the menu item exists for: a provider's OAuth page owns the whole
@@ -26,9 +56,9 @@ describe("shouldReturnToDashboard", () => {
     expect(shouldReturnToDashboard(`${DASHBOARD}/settings/connections`, DASHBOARD)).toBe(false);
   });
 
-  // A different local port is somebody else's server, not Rome's.
-  it("navigates away from another loopback port", () => {
-    expect(shouldReturnToDashboard("http://127.0.0.1:3000/", DASHBOARD)).toBe(true);
+  // Another instance is somebody else's Rome.
+  it("navigates away from another origin", () => {
+    expect(shouldReturnToDashboard("https://work.romeos.cc/", DASHBOARD)).toBe(true);
   });
 
   // The dashboard sits in the user-info, so the host is evil.example. A prefix

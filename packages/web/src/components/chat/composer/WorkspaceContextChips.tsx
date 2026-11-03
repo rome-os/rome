@@ -9,11 +9,12 @@
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import type { TFunction } from "i18next";
 import { Chrome, FolderKanban } from "lucide-react";
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApps } from "@/hooks/use-apps";
+import { appDisplayName } from "@/lib/app-display-name";
 import {
   useWorkspaceContextRegistry,
   type WorkspaceContextBuiltin,
@@ -23,15 +24,6 @@ import { ComposerChip } from "./ComposerChip";
 const NO_OP = () => () => {};
 const ZERO_VERSION = () => 0;
 const VISIBLE_LIMIT = 3;
-
-function useAppsCatalog(): Record<string, InstalledAppCard> {
-  const { apps } = useApps();
-  return useMemo(() => {
-    const map: Record<string, InstalledAppCard> = {};
-    for (const app of apps ?? []) map[app.id] = app;
-    return map;
-  }, [apps]);
-}
 
 interface ChipModel {
   key: string;
@@ -92,10 +84,11 @@ function desktopChip(
 function appChip(
   appId: string,
   placementId: string,
-  catalog: Record<string, InstalledAppCard>,
+  apps: InstalledAppCard[] | null,
+  placeholder: string,
 ): ChipModel {
-  const info = catalog[appId];
-  const displayName = info?.displayName ?? appId;
+  const info = apps?.find((app) => app.id === appId);
+  const displayName = appDisplayName(appId, apps, placeholder);
   const icon = info?.iconUrl ? (
     <img src={info.iconUrl} alt="" className="size-3.5 shrink-0 rounded-4" />
   ) : (
@@ -114,7 +107,7 @@ function appChip(
 export function WorkspaceContextChips() {
   const { t } = useTranslation("common");
   const registry = useWorkspaceContextRegistry();
-  const catalog = useAppsCatalog();
+  const { apps } = useApps();
   const [expanded, setExpanded] = useState(false);
 
   useSyncExternalStore(
@@ -129,7 +122,9 @@ export function WorkspaceContextChips() {
     ...registry
       .getBuiltins()
       .map((b) => (b.kind === "projects" ? projectsChip(b, t) : desktopChip(b, t))),
-    ...registry.listApps().map(({ placementId, appId }) => appChip(appId, placementId, catalog)),
+    ...registry
+      .listApps()
+      .map(({ placementId, appId }) => appChip(appId, placementId, apps, t("nav.apps"))),
   ];
 
   if (chips.length === 0) return null;

@@ -27,7 +27,13 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import { cn } from "@/lib/utils";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import { SessionsTrendChart } from "./SessionsTrendChart";
-import { costCoverage, formatCompactNumber, formatCost, formatOutcome } from "./sessions-format";
+import {
+  costCoverage,
+  formatCompactNumber,
+  formatCost,
+  formatOutcome,
+  metricGroupLabel,
+} from "./sessions-format";
 
 const METRIC_LABELS: Record<SessionsMetric, string> = {
   runs: "Runs",
@@ -86,7 +92,7 @@ function OverviewIdentity({
         </Avatar>
       )}
       <div className="min-w-0">
-        <div className="truncate text-ui text-foreground">{group.label}</div>
+        <div className="truncate text-ui text-foreground">{metricGroupLabel(group)}</div>
         {group.description && !model ? (
           <div className="truncate text-aux text-muted-foreground">{group.description}</div>
         ) : null}

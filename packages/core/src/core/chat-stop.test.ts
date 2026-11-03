@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { stopActiveConversationTurn } from "./chat-stop.js";
+import { stopActiveConversationTurn, stopSenderPlatform } from "./chat-stop.js";
 
 const ref = {
   connectionId: "connection:discord",
@@ -62,5 +62,25 @@ describe("stopActiveConversationTurn", () => {
     await expect(
       stopActiveConversationTurn({ ref, service: "discord", senderId: "owner" }, options),
     ).resolves.toEqual({ status: "idle" });
+  });
+});
+
+describe("stopSenderPlatform", () => {
+  const OPAQUE = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
+  const platformOfChannel = (channel: string) => (channel === OPAQUE ? "lark" : channel);
+
+  it("takes the platform of the account the chat's connection reaches", () => {
+    expect(
+      stopSenderPlatform(ref, OPAQUE, {
+        accountOf: () => ({ platform: "feishu", id: "cli_rome" }),
+        platformOfChannel,
+      }),
+    ).toBe("feishu");
+  });
+
+  it("reads an opaque channel as a channel while the grant names no account", () => {
+    expect(stopSenderPlatform(ref, OPAQUE, { accountOf: () => null, platformOfChannel })).toBe(
+      "lark",
+    );
   });
 });

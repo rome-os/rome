@@ -10,6 +10,7 @@
 // never touches a message store to learn who exists.
 
 import { compareCodePoints } from "@rome/api-types/people";
+import type { Account } from "@rome-os/app-runtime";
 import type { Accounts } from "./accounts.js";
 
 /**
@@ -24,26 +25,22 @@ import type { Accounts } from "./accounts.js";
  * (channel-list.ts) rather than another special case above.
  */
 export interface FoldedAccount {
-  channel: string;
-  /**
-   * The account's own address — what a link or a stored row should name.
-   *
-   * Named `channelUserId` because that is the wire field and the database
-   * column; the noun is the account's own address (docs/concepts/people.md).
-   */
-  channelUserId: string;
-  /** Every address the account answers to, `channelUserId` included. */
+  /** The platform the account lives on, which its address book is filed
+   *  under (`addressBooks`). */
+  platform: string;
+  /** The account's own address: what a link or a stored row should name. */
+  id: string;
+  /** Every address the account answers to, `id` included. */
   aliases: string[];
   /** What the channel calls the account, or null when it holds no name. */
   name: string | null;
 }
 
-/** Key a (channel, address) pair for the maps a fold is built out of. */
-export const addressKey = (channel: string, channelUserId: string) =>
-  `${channel}\n${channelUserId}`;
+/** Key a (platform, address) pair for the maps a fold is built out of. */
+export const addressKey = (platform: string, address: string) => `${platform}\n${address}`;
 
 /**
- * The channels a fold reads, each behind its own address book.
+ * The platforms a fold reads, each behind its own address book.
  *
  * An address book is read as its listing gives it — each account carrying its
  * own address set — so the whole book arrives as accounts rather than as a map
@@ -52,18 +49,15 @@ export const addressKey = (channel: string, channelUserId: string) =>
 export type AddressBooks = Readonly<Record<string, Accounts>>;
 
 /** An address a caller already holds, wherever it holds it — a link, a
- *  sentinel row — so a channel can be asked about the ones its address book
- *  does not cover. */
-export interface StoredAddress {
-  channel: string;
-  channelUserId: string;
-}
+ *  sentinel row — so a platform's address book can be asked about the ones it
+ *  does not list. */
+export type StoredAddress = Account;
 
 /**
  * Every account the address books hold, folded so that one account answers
  * under every address it is reachable at.
  *
- * Built by {@link foldAccounts}. A caller asks it questions about a (channel,
+ * Built by {@link foldAccounts}. A caller asks it questions about a (platform,
  * address) pair and never has to know which of them the channel considers
  * canonical. Nothing here is about what anybody said: a `Messages` store is
  * what answers that, for the callers that ask.
@@ -85,20 +79,20 @@ export class AccountFold {
    * sender (a sentinel row under another) — two rows a caller cannot merge and
    * the guardian cannot tell apart.
    */
-  canonical(channel: string, channelUserId: string): string {
-    return this.byAddress.get(addressKey(channel, channelUserId))?.channelUserId ?? channelUserId;
+  canonical(platform: string, address: string): string {
+    return this.byAddress.get(addressKey(platform, address))?.id ?? address;
   }
 
   /** The key every map in a fold is keyed by: the account, not the address the
    *  caller happened to name. */
-  key(channel: string, channelUserId: string): string {
-    return addressKey(channel, this.canonical(channel, channelUserId));
+  key(platform: string, address: string): string {
+    return addressKey(platform, this.canonical(platform, address));
   }
 
   /** The channel's account for an address, or undefined on a channel that holds
    *  no address book. */
-  accountFor(channel: string, channelUserId: string): FoldedAccount | undefined {
-    return this.byAddress.get(this.key(channel, channelUserId));
+  accountFor(platform: string, address: string): FoldedAccount | undefined {
+    return this.byAddress.get(this.key(platform, address));
   }
 }
 
@@ -134,20 +128,20 @@ async function readAddressBooks(
   books: AddressBooks,
   storedAddresses: readonly StoredAddress[],
 ): Promise<{ accounts: FoldedAccount[]; byAddress: Map<string, FoldedAccount> }> {
-  // One entry per (channel, address): the sources overlap — a link and a
+  // One entry per (platform, address): the sources overlap — a link and a
   // sentinel row routinely name the same address — and each one asks its
-  // channel a question.
+  // platform's book a question.
   const stored = new Map<string, StoredAddress>();
   for (const address of storedAddresses) {
-    stored.set(addressKey(address.channel, address.channelUserId), address);
+    stored.set(addressKey(address.platform, address.id), address);
   }
 
   const reads = await Promise.all(
-    Object.entries(books).map(([channel, book]) =>
+    Object.entries(books).map(([platform, book]) =>
       readAddressBook(
-        channel,
+        platform,
         book,
-        [...stored.values()].filter((address) => address.channel === channel),
+        [...stored.values()].filter((address) => address.platform === platform),
       ),
     ),
   );
@@ -164,7 +158,7 @@ async function readAddressBooks(
 /** One channel's address book, projected and indexed under every address its
  *  accounts answer to. */
 async function readAddressBook(
-  channel: string,
+  platform: string,
   book: Accounts,
   stored: readonly StoredAddress[],
 ): Promise<{ accounts: FoldedAccount[]; byAddress: Map<string, FoldedAccount> }> {
@@ -177,7 +171,7 @@ async function readAddressBook(
   // whole address book.
   const [listing, resolved] = await Promise.all([
     book.listAccounts({ limit: WHOLE_LISTING }),
-    Promise.all(stored.map((address) => book.resolve(address.channelUserId))),
+    Promise.all(stored.map((address) => book.resolve(address.id))),
   ]);
 
   const accounts: FoldedAccount[] = [];
@@ -185,8 +179,8 @@ async function readAddressBook(
   const byId = new Map<string, FoldedAccount>();
   for (const account of listing.accounts) {
     const folded: FoldedAccount = {
-      channel,
-      channelUserId: account.id,
+      platform,
+      id: account.id,
       // The account's own address set, as the channel gave it. An account
       // carries all of them because a search reads them: an omitted address is
       // a contact the guardian cannot reach by the phone number they know. An
@@ -198,7 +192,7 @@ async function readAddressBook(
     };
     accounts.push(folded);
     byId.set(account.id, folded);
-    for (const alias of folded.aliases) byAddress.set(addressKey(channel, alias), folded);
+    for (const alias of folded.aliases) byAddress.set(addressKey(platform, alias), folded);
   }
 
   // A stored address no listed account named. Left unfolded, a link written in
@@ -206,10 +200,10 @@ async function readAddressBook(
   // half their history hangs off it. The address stays as the caller gave it:
   // this is the fold, not a new alias to publish.
   stored.forEach((address, i) => {
-    if (byAddress.has(addressKey(channel, address.channelUserId))) return;
+    if (byAddress.has(addressKey(platform, address.id))) return;
     const found = resolved[i];
     const account = found && byId.get(found.id);
-    if (account) byAddress.set(addressKey(channel, address.channelUserId), account);
+    if (account) byAddress.set(addressKey(platform, address.id), account);
   });
 
   return { accounts, byAddress };

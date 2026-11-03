@@ -20,7 +20,7 @@ Browse by domain:
 
 Terms used on multiple surfaces with no entry yet. Chats, accounts, agents in chats and connections are defined in [`../domains/`](../domains/README.md), not here. Each needs a full pass through the [admission bar](../authoring/concepts.md#admission) before it becomes an entry. They are listed here so recurring confusion has a place to land. Format: term — surfaces — suspected contract.
 
-- **Setup (conferral setup)** — connection setup runtime, dashboard setup renderer, [`architecture/channels.md`](../architecture/channels.md) — a server-owned resumable connect protocol with a closed verb set. Any surface can render any setup.
+- **Setup** — connection setup runtime, dashboard setup renderer, [`architecture/channels.md`](../architecture/channels.md) — a server-owned resumable connect protocol with a closed verb set. Any surface can render any setup.
 - **Trace** — per-turn evidence storage, dashboard trace drawer, replay app agent prompt — append-only per-turn evidence stream, distinct from OTEL spans, which docs never disambiguate.
 - **Seat (guardian seat)** — guardian auth state, [`actions.md#actor`](actions.md#actor), [`architecture/access-control.md`](../architecture/access-control.md) — the single per-instance guardian record, stable across login methods. [`people.md#guardian`](people.md#guardian) covers the role, not the record.
 - **Webchat** — webchat runtime, dashboard chat, agent prompts, several concepts entries use it undefined — the dashboard-native channel and the only interactive surface.

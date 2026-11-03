@@ -319,7 +319,7 @@ describe("CallbackPage identity routing", () => {
     renderCallbackAndTrackLanding("?handoff=h-ext&state=s-ext");
 
     // A matched setup is typically still `presenting` while it redeems, and the
-    // redeem or the conferral can still fail — so this page must not claim the
+    // redeem or the grant can still fail — so this page must not claim the
     // connection exists. It cannot wait for `done` either: `/api/setups/:cid`
     // stays private, so an anonymous browser has nothing to poll.
     expect(await screen.findByText("Authorization received")).toBeTruthy();

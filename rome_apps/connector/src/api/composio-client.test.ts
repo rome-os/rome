@@ -79,6 +79,31 @@ describe("Composio credential rejection", () => {
   });
 });
 
+describe("proxyTool query serialization", () => {
+  afterEach(() => rs.restoreAllMocks());
+
+  it("sends boolean and number query values as strings", async () => {
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ status: 200, data: {}, headers: {} }));
+    const client = new ComposioClient({ apiKey: "ak_test" });
+
+    await client.proxyTool({
+      connectedAccountId: "acc_1",
+      endpoint: "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+      method: "GET",
+      query: { singleEvents: true, showDeleted: false, maxResults: 10 },
+    });
+
+    const init = fetch.mock.calls[0]?.[1];
+    expect(JSON.parse(String(init?.body)).parameters).toEqual([
+      { name: "singleEvents", type: "query", value: "true" },
+      { name: "showDeleted", type: "query", value: "false" },
+      { name: "maxResults", type: "query", value: "10" },
+    ]);
+  });
+});
+
 /** A connected-account row in the shape Composio's list endpoint returns. */
 function accountRow(id: string, slug: string, status: string, alias: string | null = null) {
   return { id, toolkit: { slug }, status, alias };

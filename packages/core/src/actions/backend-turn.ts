@@ -28,6 +28,8 @@ import type {
   ChatRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
+import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
+import type { MessageRepository } from "../chats/message-repository.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
@@ -40,7 +42,17 @@ const log = createLogger("backend-turn");
  * not depend on the API layer — same pattern as `ApprovalSessionStreamHost`.
  */
 export interface WebchatSessionStreamHost {
-  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
+  enqueueSessionTask(
+    sessionId: string,
+    task: BackendSessionTask,
+    options?: BackendTurnOptions,
+  ): Promise<void>;
+}
+
+export interface BackendTurnOptions {
+  /** The turn is housekeeping for the agent: a chat that draws a typing
+   *  indicator for a running turn holds it back until the agent speaks. */
+  quiet?: boolean;
 }
 
 export interface BackendEmitOptions {
@@ -64,12 +76,18 @@ export type BackendSessionTask = (helpers: {
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
 export interface MainBackendTurnRunner extends BackendTurnRunner {
+  runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void>;
   setWebchatRuntime(runtime: WebchatSessionStreamHost): void;
   /** Run `task` in the session for (channel, threadId). For webchat it queues
    * behind any in-flight browser turn and its emitted reply rides the SSE push;
    * for other channels (or when no webchat runtime is wired) it runs the task
    * with a no-op emit — delivery, if any, is the task's own responsibility. */
-  runBackendSessionTask(channel: string, threadId: string, task: BackendSessionTask): Promise<void>;
+  runBackendSessionTask(
+    channel: string,
+    threadId: string,
+    task: BackendSessionTask,
+    options?: BackendTurnOptions,
+  ): Promise<void>;
 }
 
 export interface BackendTurnRunnerDeps {
@@ -89,8 +107,15 @@ export interface BackendTurnRunnerDeps {
     channel: string,
     threadId: string,
   ) => Promise<ThreadContext["deviceFolder"] | undefined>;
-  /** Durable conversation projection used to attach provider delivery ids. */
+  /** Opens the chat a delivered reply is recorded in. */
   chats?: ChatRepository;
+  /** Where a delivered reply is put on record, in the place its chat's row
+   *  stands for. Absent, nothing records it. */
+  messages?: Pick<MessageRepository, "recordSent">;
+  places?: Pick<ChatsByKey, "placeOfRecord">;
+  /** Whether the agent's session policy keeps its text private, so its turn
+   * delivers no reply. Absent ⇒ every agent's reply is delivered. */
+  isTextPrivate?: (agentName: string) => boolean;
 }
 
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
@@ -129,11 +154,12 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     channel: string,
     threadId: string,
     task: BackendSessionTask,
+    options?: BackendTurnOptions,
   ): Promise<void> => {
     if (channel === "webchat" && webchatRuntime) {
       // Queue behind any in-flight browser turn; the runtime captures the task's
       // emitted reply and pushes it over the session's SSE stream.
-      await webchatRuntime.enqueueSessionTask(threadId, task);
+      await webchatRuntime.enqueueSessionTask(threadId, task, options);
       return;
     }
     if (channel === "webchat") {
@@ -151,7 +177,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
 
     runBackendSessionTask,
 
-    async runAndDeliver(params: BackendTurnParams): Promise<void> {
+    async runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void> {
       // Resolve the continued session's project dir up front so the resumed turn
       // runs where its SDK transcript lives (defer/timer fire on a fresh stack
       // that never carried it). Undefined ⇒ keep the default-dir fallback.
@@ -167,21 +193,26 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         // keeps its transcript itself, so the runner writes no transcript rows.
         const send = deps.channel(params.channel)?.send;
         if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
-        await runBackendSessionTask(params.channel, params.threadId, async ({ emit }) => {
-          let reply = "";
-          let turnId: string | undefined;
-          const trace = { persistTrace: true, persistTranscript: false };
-          for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
-            if (msg.type === "turn_start") turnId = msg.turnId;
-            if (msg.type === "result") reply = msg.content;
-            await emit({ ...msg, agent: params.agentName }, { recorded: true });
-          }
-          if (!reply.trim()) return;
-          await send.send(params.threadId as ChatId, {
-            text: reply,
-            ...(turnId ? { turnId } : {}),
-          });
-        });
+        await runBackendSessionTask(
+          params.channel,
+          params.threadId,
+          async ({ emit }) => {
+            let reply = "";
+            let turnId: string | undefined;
+            const trace = { persistTrace: true, persistTranscript: false };
+            for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
+              if (msg.type === "turn_start") turnId = msg.turnId;
+              if (msg.type === "result") reply = msg.content;
+              await emit({ ...msg, agent: params.agentName }, { recorded: true });
+            }
+            if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
+            await send.send(params.threadId as ChatId, {
+              text: reply,
+              ...(turnId ? { turnId } : {}),
+            });
+          },
+          options,
+        );
         return;
       }
 
@@ -193,7 +224,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }
-      if (!reply.trim()) {
+      if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) {
         log.info("backend turn produced no reply; nothing to deliver", {
           channel: params.channel,
           threadId: params.threadId,
@@ -206,22 +237,27 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         text: reply,
         ...(turnId ? { turnId } : {}),
       });
-      if (deps.chats) {
+      const { chats, messages, places } = deps;
+      if (chats && messages && places) {
         try {
-          const conversation = await deps.chats.ensureChannelChat({
+          const conversation = await chats.ensureChannelChat({
             channel: params.channel,
             threadId: params.threadId,
             agentName: params.agentName,
           });
-          await deps.chats.recordOutboundMessage({
-            sessionId: conversation.id,
-            content: JSON.stringify([{ type: "text", content: reply }]),
-            platformMessageId: delivery?.messageId,
-            senderId: "rome",
-            senderName: "Rome",
-            ...(turnId ? { turnId } : {}),
-            knownToProvider: true,
-          });
+          const at = places.placeOfRecord(conversation.id);
+          if (!at) throw new Error(`No place for conversation ${conversation.id}`);
+          await messages.recordSent(
+            {
+              direction: "fromRome",
+              place: at.place,
+              parts: [{ type: "text", content: reply }],
+              ...(delivery?.messageId ? { platformMessageId: delivery.messageId } : {}),
+              ...(turnId ? { turnId } : {}),
+              turnAnswer: true,
+            },
+            { channel: at.channel },
+          );
         } catch (err) {
           // Delivery already succeeded. A persistence failure must not make the
           // continuation retry and send the same provider message twice.

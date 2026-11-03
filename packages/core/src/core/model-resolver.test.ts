@@ -5,18 +5,14 @@ import {
   type AIToolStateProbes,
   type AIToolStateValue,
 } from "./ai-tool-state.js";
-import {
-  createModelResolver,
-  ENABLE_FABLE_SETTING_KEY,
-  TIER_MODEL_MAPPINGS_SETTING_KEY,
-} from "./model-resolver.js";
+import { createModelResolver, TIER_MODEL_MAPPINGS_SETTING_KEY } from "./model-resolver.js";
 
 const codex = { id: "openai", displayName: "Codex" } as ModelProvider;
 const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
 
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
-  settings: { enableFable?: unknown; tierModelMappings?: unknown } = {},
+  settings: { tierModelMappings?: unknown } = {},
   usingRomeCredits = false,
   servedModels: readonly string[] | null = null,
 ) {
@@ -30,11 +26,9 @@ function resolver(
     providers: [claude, codex],
     settingsRepo: {
       get: async <T = unknown>(key: string): Promise<T | null> =>
-        (key === ENABLE_FABLE_SETTING_KEY
-          ? (settings.enableFable ?? null)
-          : key === TIER_MODEL_MAPPINGS_SETTING_KEY
-            ? (settings.tierModelMappings ?? null)
-            : null) as T | null,
+        (key === TIER_MODEL_MAPPINGS_SETTING_KEY
+          ? (settings.tierModelMappings ?? null)
+          : null) as T | null,
     },
     romeCreditsPayer: {
       isUsingRomeCredits: () => usingRomeCredits,
@@ -445,72 +439,8 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: claude });
   });
 
-  it("routes large models to Fable when enabled", async () => {
-    const settings: { enableFable?: boolean } = {};
-    const r = resolver({}, settings);
-
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
-      modelProvider: codex,
-      model: "gpt-6.1-sol",
-    });
-
-    settings.enableFable = true;
-
-    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
-      modelProvider: claude,
-      model: "claude-fable-5-1[1m]",
-    });
-    await expect(
-      r.getModelProvider({ tier: "large", providerId: "anthropic" }),
-    ).resolves.toMatchObject({
-      modelProvider: claude,
-      model: "claude-fable-5-1[1m]",
-    });
-    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
-      modelProvider: codex,
-      model: "gpt-6.1-sol",
-    });
-  });
-
-  it("uses an Anthropic large mapping instead of Fable's model ID", async () => {
-    await expect(
-      resolver(
-        {},
-        {
-          enableFable: true,
-          tierModelMappings: { anthropic: { large: "custom-claude-large" } },
-        },
-      ).getModelProvider({ tier: "large" }),
-    ).resolves.toMatchObject({
-      // Fable still selects Claude as the preferred provider for a large tier.
-      modelProvider: claude,
-      model: "custom-claude-large",
-    });
-  });
-
-  it("falls back to Codex when Fable is enabled but Claude is unavailable", async () => {
-    await expect(
-      resolver(
-        { claude: { loggedIn: false, quotaExhausted: false } },
-        { enableFable: true },
-      ).getModelProvider({ tier: "large" }),
-    ).resolves.toMatchObject({
-      modelProvider: codex,
-      model: "gpt-6.1-sol",
-    });
-  });
-
-  it("does not route large models to Fable through an Anthropic-compatible provider", async () => {
-    const r = resolver(
-      {
-        claude: {
-          loggedIn: true,
-          quotaExhausted: false,
-          authMethod: "stored-compatible",
-        },
-      },
-      { enableFable: true },
-    );
+  it("keeps Codex preferred for a large tier when Claude large is mapped", async () => {
+    const r = resolver({}, { tierModelMappings: { anthropic: { large: "claude-fable-5-1[1m]" } } });
 
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
@@ -520,7 +450,7 @@ describe("ModelResolver", () => {
       r.getModelProvider({ tier: "large", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
-      model: "claude-opus-5-5[1m]",
+      model: "claude-fable-5-1[1m]",
     });
   });
 
@@ -748,19 +678,12 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-terra" });
   });
 
-  it("keeps a Fable pin running regardless of the Fable setting", async () => {
-    // enableFable is off: tier resolution would never produce Fable, the pin still runs it.
+  it("runs an exact pin to a model no tier resolves to", async () => {
     await expect(
       resolver().getModelProvider({
         exact: { providerId: "anthropic", model: "claude-fable-5-1[1m]" },
       }),
     ).resolves.toMatchObject({ modelProvider: claude, model: "claude-fable-5-1[1m]" });
-    // enableFable is on: an exact non-Fable pin is not rerouted to Fable.
-    await expect(
-      resolver({}, { enableFable: true }).getModelProvider({
-        exact: { providerId: "anthropic", model: "claude-opus-4-8[1m]" },
-      }),
-    ).resolves.toMatchObject({ modelProvider: claude, model: "claude-opus-4-8[1m]" });
   });
 
   it("fails an exact request closed when its provider is logged out, and refreshes it", async () => {

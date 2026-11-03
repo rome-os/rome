@@ -8,9 +8,9 @@
 //
 // This module is the pure logic half: parse the input, compute the absolute
 // fire instant, and shape the `create_routine` args. The side effects
-// (reading the live thread context, calling create_routine through the action
-// engine) are injected by the caller (`agent-session.ts`) so this stays
-// testable without a running engine.
+// (reading the live thread context, subscribing to the event's source,
+// calling create_routine through the action engine) are injected by the
+// caller (`agent-session.ts`) so this stays testable without a running engine.
 
 import { z } from "zod";
 import type { ThreadContext } from "./types.js";
@@ -37,6 +37,17 @@ export interface DeferDeps {
    * (or throws on a domain error). Injected so this module never touches the
    * action engine directly. */
   createRoutine: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Make sure an event wait can fire: subscribe through the app that
+   * declares the event, or confirm an undeclared event is known. Called
+   * before the routine is created; on `ok: false` no routine is created.
+   * Absent = no check. */
+  prepareEventWait?: (
+    eventName: string,
+    filter: { field: string; equals: string }[],
+  ) => Promise<
+    | { ok: true; subscription?: "existing" | "created"; warning?: string }
+    | { ok: false; error: string }
+  >;
   /** Wall-clock `Date.now()` for the running turn, injected for testability. */
   now: number;
 }
@@ -55,6 +66,12 @@ export type DeferResult =
       name: string;
       /** The event type the wakeup waits for. */
       waitingFor: string;
+      /** For an app-declared event: whether the provider subscription was
+       * already there or was created for this wait. */
+      subscription?: "existing" | "created";
+      /** Set when the wait was created but may never fire, e.g. nothing has
+       * emitted the event since boot. */
+      warning?: string;
       routineId?: string;
     };
 
@@ -200,6 +217,11 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
 
   if (parsed.kind === "event") {
     const { eventName, sourcePattern, filter } = parsed.event;
+    // Subscribe first: a routine on an event nothing delivers would wait forever.
+    const prepared = deps.prepareEventWait
+      ? await deps.prepareEventWait(eventName, filter ?? [])
+      : { ok: true as const };
+    if (!prepared.ok) throw new Error(prepared.error);
     const data = await deps.createRoutine({
       name: parsed.name,
       trigger: {
@@ -221,6 +243,8 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
       ok: true,
       name: parsed.name,
       waitingFor: eventName,
+      ...(prepared.subscription ? { subscription: prepared.subscription } : {}),
+      ...(prepared.warning ? { warning: prepared.warning } : {}),
       ...(routineId ? { routineId } : {}),
     };
   }

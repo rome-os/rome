@@ -15,21 +15,21 @@ import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Connection, StreamFault, Talker } from "../types.js";
 import { isTelegramAuthError, makeTelegramDescriptor } from "./telegram.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 // A macrotask flush: lets the registry's async `void handle…` fault flows
@@ -145,7 +145,7 @@ class FaultBotFactory {
 
 /** Build a real registry with the telegram descriptor over the given factory. */
 function setup(factory: FaultBotFactory): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   registry.register(makeTelegramDescriptor({ createBot: factory.createBot }));
   return registry;
 }
@@ -178,8 +178,7 @@ describe("telegram descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeTelegramDescriptor();
     expect(desc.connectionKind).toBe("telegram");
-    expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
+    expect(desc.grant).toBe("bot");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -187,14 +186,11 @@ describe("telegram descriptor shape", () => {
   it("exposes an awaitable stop() and forwards saveIncomingAttachments", () => {
     const factory = new FaultBotFactory(true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "telegram-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     // stop() returns the adapter's drain promise so registry.stopAll can await
     // grammy's bot.stop() letting in-flight sends / the long-poll finish.
     talker.start(
@@ -220,14 +216,11 @@ describe("telegram descriptor shape", () => {
   it("offers reply delivery over the one bot it sends with", async () => {
     const factory = new FaultBotFactory(true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "telegram-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     factory.sendMessage = () => ({
       ok: true,
       result: { message_id: 7, date: 0, chat: { id: 55, type: "private", first_name: "c" } },
@@ -251,23 +244,23 @@ describe("telegram descriptor shape", () => {
     expect(factory.tokens).toEqual(["bot-token"]);
   });
 
-  it("reports needs-auth for talk before the bot grant is conferred", async () => {
+  it("reports needs-auth for talk before the bot grant is granted", async () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk once the bot grant is imported and delivers inbound", async () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    await registry.importCredential(conn.id, "bot", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     const received: string[] = [];
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     conn.hearTalker(async (msg) => {
       received.push(`${msg.chatId}:${msg.text}`);
       return;
@@ -295,14 +288,11 @@ describe("telegram inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "telegram-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: unknown[] = [];
     talker.start(
       (msg) => delivered.push(msg),
@@ -371,14 +361,11 @@ function buildTalker(factory: FaultBotFactory): {
   start: () => void;
 } {
   const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-  const talker = desc.capabilities.talker!.build(
-    { bot: validCred() },
-    {
-      connectionId: "telegram-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "telegram-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -447,36 +434,36 @@ describe("telegram Talker fault mapping", () => {
 });
 
 describe("telegram send-401 drives renew-once-then-degrade", () => {
-  it("relocks talk after a send() 401 (tokenPaste renew answers re-confer)", async () => {
+  it("relocks talk after a send() 401 (tokenPaste renew answers fix)", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     factory.sendMessage = () => ({ ok: false, error_code: 401, description: "Unauthorized" });
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    await registry.importCredential(conn.id, "bot", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
-    // the async grant flow: tokenPaste.renew() → "re-confer" → degrade "bot".
+    // the async grant flow: tokenPaste.renew() → "needs-fix" → degrade "bot".
     await expect(sendThrough(conn, "999" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
       CredentialRejected,
     );
     await flush();
 
     // Talk relocked; bot grant degraded (tokenPaste cannot renew headlessly).
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(conn.auth.grants().bot).toBe("degraded");
 
-    // Re-importing a credential re-unlocks talk (re-confer path).
+    // Re-importing a credential re-unlocks talk (fix path).
     let reUnlocked: Connection | null = null;
-    registry.onUnlocked("talk", (c) => {
+    registry.onUnlocked("chat", (c) => {
       reUnlocked = c;
     });
-    await registry.importCredential(conn.id, "bot", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", {
       material: { token: "fresh-token" },
       expiresAt: "never",
     });
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });
 });

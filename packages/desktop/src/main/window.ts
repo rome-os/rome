@@ -2,143 +2,87 @@ import { BrowserWindow, session, shell } from "electron";
 import path from "path";
 import { pathToFileURL } from "url";
 import { isQuitting } from "./lifecycle";
-import { ROME_CLOUD_ORIGIN, ROME_CLOUD_PRODUCTION_ORIGIN } from "./rome-cloud";
-import type { ProviderKind } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 import {
   chooseStartupSurface,
-  shouldAutoOpenLocalDashboard,
+  shouldAutoOpenDashboard,
   shouldReturnToDashboard,
 } from "./startup-surface";
 
 const PRELOAD_PATH = path.join(__dirname, "..", "preload", "index.js");
 const SETTINGS_HTML = path.join(__dirname, "..", "..", "src", "renderer", "settings.html");
 const ONBOARDING_HTML = path.join(__dirname, "..", "..", "src", "renderer", "onboarding.html");
-const QUITTING_HTML = path.join(__dirname, "..", "..", "src", "renderer", "quitting.html");
 const ONBOARDING_URL = pathToFileURL(ONBOARDING_HTML).toString();
 
 /**
- * The Rome Cloud sources to name in the CSP.
- *
- * Production is always listed, because the dashboard's own copy of the origin
- * is baked into the image at web build time and does not follow this process's
- * override. A configured origin joins it only if it parses as an http(s)
- * origin: this value reaches a security header verbatim, where a path turns it
- * into a path-prefix that stops matching /store, and a `;` writes a directive
- * of its own.
- *
- * An unusable value is dropped rather than replaced. Substituting the default
- * would leave a build that thinks it is on staging quietly permitted to reach
- * production, and the raw value still goes to the runtime env, where a mistake
- * fails where it can be seen.
- */
-export function cspSourcesForRomeCloud(configured: string): string {
-  const sources = [ROME_CLOUD_PRODUCTION_ORIGIN];
-  try {
-    const url = new URL(configured);
-    if ((url.protocol === "http:" || url.protocol === "https:") && !sources.includes(url.origin)) {
-      sources.push(url.origin);
-    }
-  } catch {
-    // Not a URL: production alone.
-  }
-  return sources.join(" ");
-}
-
-/**
  * Whether a response carries a document this app serves, and so should be given
- * the policy below.
+ * the policy below: the packaged welcome, settings and pill pages, all `file:`.
  *
- * The header went on every response in the session, so a third party the window
- * had navigated to ended up carrying two policies. A resource has to satisfy
- * both, and ours names github.githubassets.com nowhere, so GitHub's sign-in
- * page arrived as unstyled HTML — Slack, favor authorization and the recharge
- * checkout all reach the window the same way. Remote documents are left alone
- * now.
- *
- * The proxy binds 127.0.0.1 and refuses every other Host, so no dashboard
- * document is ever served from `localhost`. `file:` is the packaged onboarding
- * and settings surface.
+ * The Rome the window opens is a website with its own headers, served the same
+ * way to a browser, and so are the provider sign-in pages it navigates to. A
+ * second policy on top of theirs only breaks them: GitHub's sign-in page lost
+ * its stylesheet that way.
  */
 export function policyAppliesTo(url: string): boolean {
   try {
-    const { protocol, hostname } = new URL(url);
-    return protocol === "file:" || hostname === "127.0.0.1";
+    return new URL(url).protocol === "file:";
   } catch {
     return false;
   }
 }
 
 /**
- * The policy this app's own documents carry.
- *
- * Assembled apart from the handler so the directives this file exists to get
- * right can be asserted directly — dropping `frame-src`, or interpolating the
- * cloud sources into only one of the two, is otherwise invisible to tests.
+ * The policy this app's own pages carry. They load only their bundled files
+ * and talk to the main process over IPC, so nothing else is allowed.
  */
-export function contentSecurityPolicy(cloudSources: string): string {
+export function contentSecurityPolicy(): string {
   return (
-    "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* https://www.googletagmanager.com; " +
-    "img-src 'self' data: blob: http://localhost:* http://127.0.0.1:* https://*; " +
+    "default-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; " +
     "font-src 'self' data:; " +
-    `connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://100.*:* https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com ${cloudSources}; ` +
-    `frame-src 'self' ${cloudSources};`
+    "connect-src 'self'; " +
+    "frame-src 'none'; " +
+    "object-src 'none';"
   );
 }
 
 /**
  * What the main window does when a load fails.
  *
- * A hosted Rome's dashboard that does not load is reported, and the window
- * shows the status page, which stays put until the user retries. The VM's
- * dashboard keeps its own rule: on ERR_CONNECTION_REFUSED (-102) or
- * ERR_INTERNET_DISCONNECTED (-106), try again after a pause, since the VM may
- * be restarting while still reported ready; anything else is left alone.
- * -3 is a load another navigation replaced, never a failure.
+ * A dashboard that does not load is reported, and the window shows the status
+ * page, which stays put until the user retries. Subframes and pages off the
+ * dashboard, such as a provider's sign-in, are left alone. -3 is a load
+ * another navigation replaced, never a failure.
  */
 export function loadFailureAction(failure: {
-  provider: ProviderKind;
   errorCode: number;
   isMainFrame: boolean;
   onDashboard: boolean;
-}): "report" | "retry" | "ignore" {
-  if (failure.provider === "remote") {
-    return failure.isMainFrame && failure.errorCode !== -3 && failure.onDashboard
-      ? "report"
-      : "ignore";
-  }
-  return failure.errorCode === -102 || failure.errorCode === -106 ? "retry" : "ignore";
+}): "report" | "ignore" {
+  return failure.isMainFrame && failure.errorCode !== -3 && failure.onDashboard
+    ? "report"
+    : "ignore";
 }
 
-async function loadStartupSurface(win: BrowserWindow, runtimeManager: Runtime): Promise<void> {
-  const startupSurface = chooseStartupSurface(
-    runtimeManager.getDashboardUrl(),
-    runtimeManager.isReady(),
-  );
+async function loadStartupSurface(win: BrowserWindow, runtime: Runtime): Promise<void> {
+  const startupSurface = chooseStartupSurface(runtime.getDashboardUrl(), runtime.isReady());
   if (startupSurface.kind === "onboarding") {
-    await loadOnboarding(win);
+    await win.loadFile(ONBOARDING_HTML);
     return;
   }
 
   await win.loadURL(startupSurface.url);
 }
 
-export async function loadOnboarding(win: BrowserWindow): Promise<void> {
-  await win.loadFile(ONBOARDING_HTML);
-}
-
-export async function loadLocalDashboard(win: BrowserWindow, url: string): Promise<void> {
+export async function loadDashboard(win: BrowserWindow, url: string): Promise<void> {
   await win.loadURL(url);
 }
 
-export function shouldNavigateToLocalDashboard(
-  currentUrl: string,
-  localDashboardUrl: string,
-): boolean {
-  return shouldAutoOpenLocalDashboard(currentUrl, ONBOARDING_URL, localDashboardUrl);
+export function shouldNavigateToDashboard(currentUrl: string, dashboardUrl: string): boolean {
+  return shouldAutoOpenDashboard(currentUrl, ONBOARDING_URL, dashboardUrl);
 }
 
-export async function createMainWindow(runtimeManager: Runtime): Promise<BrowserWindow> {
+export async function createMainWindow(runtime: Runtime): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -157,45 +101,7 @@ export async function createMainWindow(runtimeManager: Runtime): Promise<Browser
     },
   });
 
-  // The gtag loader rides default-src — there is
-  // deliberately no explicit script-src, because adding one would stop scripts
-  // falling back to default-src and every local origin would have to be
-  // repeated there or the dashboard breaks. Collection beacons need the GA
-  // endpoints in connect-src; img-src already admits https://* for the
-  // image-ping fallback.
-  //
-  // Rome Cloud appears in two directives because the dashboard reaches it two
-  // ways: Rome News is a fetch, and the App Store sheet is an iframe of
-  // /store. Without connect-src the news row renders empty; without frame-src
-  // — which had no entry at all, so frames fell back to default-src — the
-  // sheet opens blank.
-  //
-  // Both the configured origin and the production default are listed. They
-  // are not the same knob: the dashboard's copy is baked into the image at web
-  // build time from PANTHEON_HOST, while ROME_DESKTOP_PANTHEON_ORIGIN is read
-  // here at process start. Pointing only this one at staging while running a
-  // stock image would allow an origin the bundle never calls and block the one
-  // it does — reproducing the blank panes this exists to fix.
-  //
-  // A framed page cannot reach window.rome: preload attaches to the WebContents
-  // and nodeIntegrationInSubFrames is off, so no subframe gets one. It can
-  // still navigate the top frame, which does carry the bridge. That belongs to
-  // the frame — a sandbox without allow-top-navigation, the way FileView
-  // already sandboxes its own — not here: refusing remote top-level navigation
-  // from this side breaks cloud login, enrollment, visitor login and every
-  // provider OAuth redirect, all of which reach Rome Cloud that way on purpose.
-  //
-  // Naming frame-src drops the loopback wildcards frames used to inherit from
-  // default-src. Fine today: every dashboard iframe is same-origin or Rome
-  // Cloud, and both are named.
-  //
-  // Scoping this to our own documents gives the /store frame back its own
-  // policy, which is none — romeos.cc sends no CSP. What it loses is thin: this
-  // one permits 'unsafe-inline', 'unsafe-eval' and img-src https://*, so it
-  // stopped remote script files and nothing else. A header from romeos.cc is
-  // where that belongs, and it would cover browser users too.
-  const cloudSources = cspSourcesForRomeCloud(ROME_CLOUD_ORIGIN);
-  const policy = contentSecurityPolicy(cloudSources);
+  const policy = contentSecurityPolicy();
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     if (!policyAppliesTo(details.url)) {
       callback({});
@@ -217,8 +123,8 @@ export async function createMainWindow(runtimeManager: Runtime): Promise<Browser
     return { action: "deny" };
   });
 
-  // Tray-resident app: closing the window only hides it, the Lima VM and
-  // Rome agent keep running. The window comes back via the tray, dock, or
+  // Tray-resident app: closing the window only hides it, and this computer
+  // stays connected as a device. The window comes back via the tray, dock, or
   // the activate handler. A real quit goes through lifecycle.requestStopAndQuit
   // which flips isQuitting() first, so the close goes through.
   win.on("close", (event) => {
@@ -227,63 +133,19 @@ export async function createMainWindow(runtimeManager: Runtime): Promise<Browser
     win.hide();
   });
 
-  await loadStartupSurface(win, runtimeManager);
+  await loadStartupSurface(win, runtime);
 
-  // Retry loading if the web server isn't ready
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, url, isMainFrame) => {
-    const status = runtimeManager.getStatus();
     const action = loadFailureAction({
-      provider: status.provider,
       errorCode,
       isMainFrame,
-      onDashboard: !shouldReturnToDashboard(url, runtimeManager.getDashboardUrl()),
+      onDashboard: !shouldReturnToDashboard(url, runtime.getDashboardUrl()),
     });
     if (action === "report") {
-      runtimeManager.reportLoadFailure?.(`${errorDescription} (${errorCode})`);
-      void loadStartupSurface(win, runtimeManager);
-      return;
-    }
-    if (action === "retry") {
-      setTimeout(() => {
-        if (!win.isDestroyed()) {
-          void loadStartupSurface(win, runtimeManager);
-        }
-      }, 2000);
+      runtime.reportLoadFailure(`${errorDescription} (${errorCode})`);
+      void loadStartupSurface(win, runtime);
     }
   });
-
-  return win;
-}
-
-export function createQuittingWindow(): BrowserWindow {
-  const win = new BrowserWindow({
-    width: 320,
-    height: 140,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    focusable: false,
-    title: "Rome",
-    frame: false,
-    show: false,
-    center: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    webPreferences: {
-      preload: PRELOAD_PATH,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-
-  win.once("ready-to-show", () => {
-    if (!win.isDestroyed()) win.show();
-  });
-
-  void win.loadFile(QUITTING_HTML);
 
   return win;
 }

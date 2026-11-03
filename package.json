@@ -16,7 +16,6 @@
     "build:web:mock": "pnpm --filter rome-web build:mock",
     "storybook": "pnpm --filter rome-web storybook",
     "build:storybook": "pnpm --filter rome-web build:storybook",
-    "desktop:image:local": "pnpm --filter rome-desktop image:local",
     "start:cdp": "pnpm --filter rome-cdp-client start",
     "dev:all": "scripts/dev-up.sh",
     "dev:desktop": "pnpm --filter rome-desktop dev",

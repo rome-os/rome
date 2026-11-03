@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
-import { startStream, updateAssistantText, updateSnapshot } from "@/hooks/use-streaming-sessions";
+import { startStream, updateAssistantBlock, updateSnapshot } from "@/hooks/use-streaming-sessions";
 import { LiveTurnActivity } from "./LiveTurnActivity";
 import "@/i18n";
 
@@ -22,9 +22,12 @@ const snapshot = (...segments: TraceSegment[]): TraceSnapshot => ({
 describe("transient turn activity", () => {
   it("replaces thinking, dismisses it on text, and does not revive it on a boundary or summary update", () => {
     let state = startStream(new Map(), "session", "turn");
+    // The live text is not in the stream's state; the row that shows it tells
+    // the activity whether there is any.
+    let hasText = false;
     const view = () => {
       const stream = state.get("session")!;
-      return <LiveTurnActivity {...stream} hasText={!!stream.assistantText} />;
+      return <LiveTurnActivity {...stream} hasText={hasText} />;
     };
     state = updateSnapshot(
       state,
@@ -45,10 +48,12 @@ describe("transient turn activity", () => {
     expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.getByText("Checking results")).toBeTruthy();
 
-    state = updateAssistantText(state, "session", "turn", 0, "The results");
+    state = updateAssistantBlock(state, "session", "turn", 0, true);
+    hasText = true;
     rerender(view());
     expect(screen.queryByRole("status")).toBeNull();
-    state = updateAssistantText(state, "session", "turn", 1, "");
+    state = updateAssistantBlock(state, "session", "turn", 1, false);
+    hasText = false;
     state = updateSnapshot(state, "session", "turn", {
       ...next,
       summary: { ...next.summary, totalSteps: 2 },
@@ -62,7 +67,7 @@ describe("transient turn activity", () => {
       "turn",
       snapshot(...next.segments, thinking(2, "Verifying output")),
     );
-    state = updateAssistantText(state, "session", "turn", 2, "");
+    state = updateAssistantBlock(state, "session", "turn", 2, false);
     rerender(view());
     expect(screen.getByText("Verifying output")).toBeTruthy();
   });

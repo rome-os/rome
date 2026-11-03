@@ -4,8 +4,8 @@ import { desktopDevice, type DesktopDeviceStatus } from "@/lib/electron-shell";
 
 /**
  * The Mac app's computer and its switch, when the dashboard runs inside the app. Null in a
- * browser, in the private VM, or while the app is signed out, because the app answers only the
- * Rome it opened from Rome Cloud. Undefined inside the app until it answers, which a page that
+ * browser or while the app is signed out, because the app answers only the Rome it opened from
+ * Rome Cloud. Undefined inside the app until it answers, which a page that
  * places this computer first waits for.
  *
  * `onChange` runs after the app applied a change, so the host can read the devices again.

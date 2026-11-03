@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, it, expect, rs } from "@rstest/core";
 import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
@@ -18,6 +19,7 @@ import {
 } from "../core/hook-recursion.js";
 import type { ActionResult } from "./types.js";
 import type { ActionWorkerPayload } from "./worker-protocol.js";
+import { actionExecutionContext } from "./context.js";
 import {
   ACTION_ROOT_DISPATCH_METHOD,
   ActionWorkerCoordinator,
@@ -80,6 +82,7 @@ function makeServer(
     routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
+    eventService?: EventService;
     appManager?: { setEnabled: ReturnType<typeof rs.fn>; install?: ReturnType<typeof rs.fn> };
     appStore?: {
       listListings: ReturnType<typeof rs.fn>;
@@ -93,6 +96,8 @@ function makeServer(
     channelsService?: unknown;
     connectionRegistry?: unknown;
     agentNames?: unknown;
+    appConnections?: unknown;
+    appIdForAction?: (actionName: string) => string | null;
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -112,7 +117,7 @@ function makeServer(
   const services = {
     routineEngine,
     routinesRepo: overrides.routinesRepo,
-    eventService: new EventService(eventBus, eventCatalog),
+    eventService: overrides.eventService ?? new EventService(eventBus, eventCatalog),
     // catalog/db are only touched by uninstall --purge, which these tests don't
     // exercise, so stub them.
     appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
@@ -130,6 +135,8 @@ function makeServer(
     connectionRegistry: overrides.connectionRegistry,
     channelOf: (connection: { service: string }) => connection.service,
     agentNames: overrides.agentNames,
+    appConnections: overrides.appConnections,
+    appIdForAction: overrides.appIdForAction ?? (() => null),
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -141,6 +148,121 @@ function makeServer(
     routineEngine,
   };
 }
+
+describe("WorkerRpcServer App connection identity", () => {
+  it("derives the App from the Core-captured action and rejects a spoofed App id", async () => {
+    const list = rs.fn(async (appId: string) => ({
+      ok: true,
+      value: { connections: [{ connectionId: appId }] },
+    }));
+    const invoke = rs.fn(async () => ({
+      ok: true,
+      value: { status: "ok", executionId: "connection-execution" },
+    }));
+    const appConnections = {
+      list,
+      describe: rs.fn(),
+      operations: rs.fn(),
+      invoke,
+    };
+    const { server } = makeServer({
+      appConnections,
+      appIdForAction: (actionName) => (actionName === "app-b:work" ? "app-b" : null),
+    });
+    const worker = connect(server);
+    const store = {
+      actionName: "app-b:work",
+      executionId: "execution-1",
+      rootExecutionId: "execution-1",
+      initiator: "app:app-a",
+      actor: { kind: "guardian", userId: "guardian", via: "cookie" } as const,
+      channelContext: { channel: "webchat", threadId: "thread-1", channelUserId: "guardian" },
+      sessionId: "session-1",
+      turnId: "turn-1",
+      agentName: "main",
+      channelThreadKey: "webchat:thread-1",
+    };
+
+    const result = await actionExecutionContext.run(store, () =>
+      worker.call("connections.app.list", { limit: 1 }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      value: { connections: [{ connectionId: "app-b" }] },
+    });
+    expect(list).toHaveBeenCalledWith("app-b", { limit: 1 });
+
+    const spoofed = await actionExecutionContext.run(store, () =>
+      rpc(worker, "connections.app.list", { limit: 1, callerAppId: "app-a" }),
+    );
+    expect(spoofed.result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    });
+    expect(list).toHaveBeenCalledTimes(1);
+
+    const contextSpoof = await actionExecutionContext.run(store, () =>
+      runWithCurrentActionContext({ actionName: "app-a:work", callerAppId: "app-a" } as never, () =>
+        worker.call("connections.app.list", { limit: 1 }),
+      ),
+    );
+    expect(contextSpoof).toEqual({
+      ok: true,
+      value: { connections: [{ connectionId: "app-b" }] },
+    });
+    expect(list).toHaveBeenLastCalledWith("app-b", { limit: 1 });
+
+    expect(
+      await actionExecutionContext.run(store, () =>
+        worker.call("connections.app.list", { limit: 0 }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+
+    await actionExecutionContext.run(store, () =>
+      worker.call("connections.app.invoke", {
+        connectionId: "connection-1",
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-1",
+      }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      "app-b",
+      expect.objectContaining({ operation: "documents.create" }),
+      expect.objectContaining({
+        actor: store.actor,
+        channelContext: store.channelContext,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        agentName: "main",
+        channelThreadKey: "webchat:thread-1",
+      }),
+    );
+  });
+
+  it("denies a connection RPC outside an App-owned action", async () => {
+    const list = rs.fn();
+    const { server } = makeServer({
+      appConnections: { list, describe: rs.fn(), operations: rs.fn(), invoke: rs.fn() },
+      appIdForAction: () => null,
+    });
+    const result = await connect(server).call("connections.app.list", {});
+    expect(result).toMatchObject({ ok: false, error: { code: "access_denied" } });
+    expect(list).not.toHaveBeenCalled();
+  });
+});
 
 describe("WorkerRpcServer param validation", () => {
   it("forwards a pinned Store source to create without an install call", async () => {
@@ -265,12 +387,34 @@ describe("WorkerRpcServer param validation", () => {
       });
     });
 
+    it("sends and reads by account, and refuses an account missing its id", async () => {
+      const service = {
+        send: rs.fn(async () => ({ messageId: "m1" })),
+        query: rs.fn(async () => []),
+      };
+      const { server } = makeServer({ channelsService: service });
+      const fake = connect(server);
+      const account = { platform: "telegram", id: "8123" };
+
+      await rpc(fake, "channels.send", { channel: account, chatId: "c1", message: { text: "hi" } });
+      await rpc(fake, "channels.query", { channel: account });
+      const refused = await rpc(fake, "channels.query", { channel: { platform: "telegram" } });
+
+      expect(service.send).toHaveBeenCalledWith(account, "c1", { text: "hi" });
+      expect(service.query).toHaveBeenCalledWith(account, {});
+      expect(refused.error).toMatch(/channels\.query: invalid params/);
+      expect(service.query).toHaveBeenCalledTimes(1);
+    });
+
     it("ingests inbound email through the email Connection, and skips without one", async () => {
       const ingest = rs.fn(async () => ({ status: "accepted" }));
+      // Its record has an opaque id, as for an account connected after
+      // another was removed, so it is found by its connection kind.
       const email = {
         id: "email-1",
-        service: "email",
-        status: () => ({ talk: { state: "unlocked" } }),
+        service: "4f1c",
+        connectionKind: "email",
+        status: () => ({ chat: { state: "unlocked" } }),
       };
       const withEmail = makeServer({ connectionRegistry: { all: () => [email], ingest } });
       const without = makeServer({ connectionRegistry: { all: () => [], ingest } });
@@ -953,6 +1097,25 @@ describe("WorkerRpcServer event discovery", () => {
       ],
       total: 1,
     });
+  });
+
+  it("passes events.searchCatalog's match through to the event service", async () => {
+    const eventService = new EventService(new EventBus(), new EventCatalog());
+    const search = rs
+      .spyOn(eventService, "search")
+      .mockResolvedValue({ entries: [], total: 0, matchError: "not connected" });
+    const { server } = makeServer({ eventService });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "events.searchCatalog", {
+      query: "github",
+      match: { "repository.full_name": "acme/widgets" },
+    });
+
+    expect(search).toHaveBeenCalledWith("github", 10, {
+      match: { "repository.full_name": "acme/widgets" },
+    });
+    expect(response.result).toEqual({ entries: [], total: 0, matchError: "not connected" });
   });
 
   it("rejects events.searchCatalog with a non-positive limit", async () => {

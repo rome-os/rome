@@ -1,10 +1,10 @@
 import type { Assistant, AssistantList } from "@rome/api-types/assistants";
-import type { OutboxMessage, TimelinePage } from "@rome/api-types/people";
+import type { SentMessage, TimelinePage } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
 
 // Assistants: a Dot, Muse or another Rome talking to Rome through Rome Cloud,
 // each one chat (docs/domains/chats.md#assistant). The server reads their
-// history and sends through the same timeline and outbox as People.
+// history and sends through the same timeline and send as People.
 
 /** The search parameter on `/assistants` naming the open chat. */
 export const ASSISTANT_PARAM = "id";
@@ -34,12 +34,12 @@ export function readAssistantMessages(
   });
 }
 
-/** Write to the assistant as the guardian. Resolves to the outbox row, whose
- *  `state` says whether the channel took it. */
-export function sendToAssistant(agentId: string, text: string, id: string): Promise<OutboxMessage> {
-  return fetchJson<OutboxMessage>(`${apiPath(agentId)}/messages`, {
+/** Write to the assistant as the guardian. Resolves once the channel took the
+ *  message, and rejects with the channel's own words when it refused. */
+export function sendToAssistant(agentId: string, text: string): Promise<SentMessage> {
+  return fetchJson<SentMessage>(`${apiPath(agentId)}/messages`, {
     method: "POST",
-    json: { text, id },
+    json: { text },
     fallback: "Could not send",
   });
 }

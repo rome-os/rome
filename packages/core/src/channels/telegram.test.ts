@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -368,10 +368,12 @@ describe("TelegramAdapter", () => {
     });
 
     it("sends attachments via appropriate API methods", async () => {
+      const file = join(sandboxHome, "file.pdf");
+      await writeFile(file, "%PDF-1.4");
       const outgoing: OutgoingMessage = {
         attachments: [
           { type: "image", source: "https://example.com/pic.png", caption: "pic" },
-          { type: "document", source: "/tmp/file.pdf" },
+          { type: "document", source: file },
         ],
       };
       await adapter.send(CHAT, outgoing);
@@ -387,6 +389,24 @@ describe("TelegramAdapter", () => {
       const document = telegram.sent[1].payload.document;
       expect(document).toBeInstanceOf(InputFile);
       expect((document as InputFile).filename).toBe("file.pdf");
+    });
+  });
+
+  describe("send() with blank text", () => {
+    it("sends an attachment beside blank text parts alone, quoting on the attachment", async () => {
+      await adapter.send(CHAT, {
+        parts: [{ type: "text", content: "  " }],
+        attachments: [{ type: "image", source: "https://example.com/pic.png" }],
+        replyToMessageId: "41",
+      });
+
+      expect(telegram.sent).toHaveLength(1);
+      expect(telegram.sent[0]?.method).toBe("sendPhoto");
+      expect(telegram.sent[0]?.payload).toMatchObject({
+        chat_id: "chat-99",
+        photo: "https://example.com/pic.png",
+        reply_parameters: { message_id: 41 },
+      });
     });
   });
 

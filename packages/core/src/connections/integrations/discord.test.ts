@@ -34,8 +34,6 @@ const fakeState: {
   typedThread?: string;
   inbound?: (msg: ChannelMessage) => Promise<void>;
   sent: Array<{ chatId: ChatId; message: unknown }>;
-  historyCalls: Array<{ threadId: string | null; windowHours: number }>;
-  historyMessages: ChannelMessage[];
   apiRequests: ChannelApiRequest[];
   apiResult: ChannelApiResult;
   stopCalls: number;
@@ -50,8 +48,6 @@ const fakeState: {
 } = {
   startError: null,
   sent: [],
-  historyCalls: [],
-  historyMessages: [],
   apiRequests: [],
   apiResult: { response: { status: 200, headers: {}, body: { ok: true } } },
   stopCalls: 0,
@@ -87,10 +83,6 @@ rs.mock("../../channels/discord.js", () => ({
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
     }
-    async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-      fakeState.historyCalls.push({ threadId, windowHours });
-      return fakeState.historyMessages;
-    }
     async notifyTyping(threadId: string): Promise<void> {
       fakeState.typedThread = threadId;
     }
@@ -113,7 +105,7 @@ function flush(): Promise<void> {
 
 const deps = {
   chatSettings: {} as never,
-  personMappingRepo: { findByChannelUser: rs.fn(async () => null) } as never,
+  peopleRepo: { byAccount: rs.fn(async () => null) } as never,
   listAgents: () => [],
   validateToken: async () => {},
 };
@@ -135,14 +127,11 @@ function buildTalker(startError: unknown = null): {
 } {
   fakeState.startError = startError;
   const desc = makeDiscordDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
-    { bot: validCred() },
-    {
-      connectionId: "discord-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "discord-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -161,8 +150,6 @@ beforeEach(() => {
   fakeState.typedThread = undefined;
   fakeState.inbound = undefined;
   fakeState.sent = [];
-  fakeState.historyCalls = [];
-  fakeState.historyMessages = [];
   fakeState.apiRequests = [];
   fakeState.apiResult = { response: { status: 200, headers: {}, body: { ok: true } } };
   fakeState.stopCalls = 0;
@@ -183,16 +170,14 @@ describe("discord descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeDiscordDescriptor(deps);
     expect(desc.connectionKind).toBe("discord");
-    expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
-    expect(desc.capabilities.actor?.needs).toEqual(["bot"]);
+    expect(desc.grant).toBe("bot");
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("runs the injected token validator on confer", async () => {
+  it("runs the injected token validator on grant", async () => {
     const validate = rs.fn(async () => {});
     const desc = makeDiscordDescriptor({ ...deps, validateToken: validate });
-    await desc.auth.bot.confer({
+    await desc.auth.obtain({
       prompt: async () => ({ token: "abc" }),
     });
     expect(validate).toHaveBeenCalledWith("abc");
@@ -224,21 +209,21 @@ describe("discord descriptor shape", () => {
     const findByChannelUser = rs.fn(async () => guardian);
     const desc = makeDiscordDescriptor({
       ...deps,
-      personMappingRepo: { findByChannelUser } as never,
+      peopleRepo: { byAccount: findByChannelUser } as never,
     });
-    desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    desc.capabilities.talker!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     await expect(fakeState.lastConfig?.resolveDiscordPerson?.("guardian-777")).resolves.toEqual(
       guardian,
     );
-    expect(findByChannelUser).toHaveBeenCalledWith("discord", "guardian-777");
+    expect(findByChannelUser).toHaveBeenCalledWith({
+      platform: "discord",
+      id: "guardian-777",
+    });
   });
 
   it("passes the opaque conversation id to the adapter and returns its receipt", async () => {
@@ -253,37 +238,6 @@ describe("discord descriptor shape", () => {
 
   it("offers reply delivery through the adapter's bot", () => {
     expect(buildTalker().talker.replyDelivery).toBe(FAKE_REPLY_DELIVERY);
-  });
-
-  // The flag is what gives the channel a \`messages\` port; the feature is what
-  // answers it. A Talk offering one without the other is unreachable or broken.
-  it("declares the history its Talk offers", () => {
-    expect(makeDiscordDescriptor(deps).capabilities.talker?.history).toBe(true);
-  });
-
-  it("exposes provider-neutral history", async () => {
-    fakeState.historyMessages = [
-      {
-        channel: "discord",
-        direction: "inbound",
-        messageId: "message-1",
-        chatId: "chan-1" as ChatId,
-        senderId: "user-1",
-        senderDisplayName: "User",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date("2026-01-01T00:00:00.000Z"),
-        thread: { kind: "group" },
-      },
-    ];
-    const h = buildTalker();
-    h.start();
-    await expect(
-      h.talker.history?.query({
-        chatId: "chan-1" as ChatId,
-      }),
-    ).resolves.toMatchObject([{ messageId: "message-1", text: "hello" }]);
-    expect(fakeState.historyCalls).toEqual([{ threadId: "chan-1", windowHours: 24 }]);
   });
 
   it("exposes provider-neutral activity", async () => {
@@ -386,14 +340,11 @@ describe("discord descriptor shape", () => {
 
   it("exposes Discord REST through Act", async () => {
     const desc = makeDiscordDescriptor(deps);
-    const actor = desc.capabilities.actor!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const actor = desc.capabilities.actor!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const request: ChannelApiRequest = {
       method: "GET",
       path: "/users/@me",
@@ -414,14 +365,11 @@ describe("discord descriptor shape", () => {
     fakeState.apiResult = {
       response: { status: 401, headers: {}, body: { message: "Unauthorized" } },
     };
-    const actor = makeDiscordDescriptor(deps).capabilities.actor!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const actor = makeDiscordDescriptor(deps).capabilities.actor!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     const request = actor.invoke({
       operation: "discord.api.request",
@@ -444,14 +392,11 @@ describe("discord descriptor shape", () => {
 describe("discord inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const desc = makeDiscordDescriptor(deps);
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: ChannelMessage[] = [];
     talker.start(
       (msg) => delivered.push(msg),

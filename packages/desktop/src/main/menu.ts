@@ -10,8 +10,8 @@ export function setupApplicationMenu(
 ): void {
   const isMac = process.platform === "darwin";
 
-  // Tray-resident model: ⌘Q is the only quit, and it stops the agent on its
-  // way out. `role: "close"` closes the focused window, which window.ts
+  // Tray-resident model: ⌘Q is the only quit, and it disconnects this
+  // computer on its way out. `role: "close"` closes the focused window, which window.ts
   // intercepts and turns into a hide unless lifecycle.isQuitting() is true.
   const quitItem: Electron.MenuItemConstructorOptions = {
     label: "Quit Rome",
@@ -61,8 +61,8 @@ export function setupApplicationMenu(
 
     // File menu. On macOS this is Electron's own `fileMenu` role spelled out:
     // one Close. Not the role itself, because its non-mac branch is
-    // `role: "quit"`, which calls app.quit() directly and would skip stopping
-    // the runtime.
+    // `role: "quit"`, which calls app.quit() directly and would skip
+    // disconnecting this computer.
     //
     // Windows and Linux have no app menu, so what lives there on a Mac hangs
     // here — unchanged from before this commit, since nothing builds for them.
@@ -70,17 +70,7 @@ export function setupApplicationMenu(
       label: "File",
       submenu: [
         { role: "close" },
-        ...(isMac
-          ? []
-          : [
-              { type: "separator" as const },
-              settingsItem,
-              {
-                label: "Stop agent and quit",
-                accelerator: "Shift+CmdOrCtrl+Q",
-                click: () => requestStopAndQuit(),
-              } as Electron.MenuItemConstructorOptions,
-            ]),
+        ...(isMac ? [] : [{ type: "separator" as const }, settingsItem, quitItem]),
       ],
     },
 

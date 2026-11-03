@@ -49,6 +49,12 @@ import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js
 import { createLogger } from "../logger.js";
 import { discordTransport } from "./delivery/transports/discord.js";
 import type { DeliveryTransport } from "./delivery/types.js";
+import {
+  ALL_ATTACHMENT_TYPES,
+  attachmentsToSend,
+  replyToShaped,
+  textToSend,
+} from "./send-refusals.js";
 import { saveUrlAttachments } from "./attachment-files.js";
 import { createReadStream } from "node:fs";
 import { basename, extname } from "node:path";
@@ -61,14 +67,6 @@ import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./a
 import { preserveMentionOnlyText } from "./mention-only.js";
 import { isLinkCodeMessage } from "./guardian-link-code.js";
 
-interface DiscordRestMessage {
-  id: string;
-  content: string;
-  author: { id: string; username: string; global_name?: string | null; bot?: boolean };
-  timestamp: string;
-  attachments: { filename: string; title?: string; url: string; content_type?: string }[];
-}
-
 /**
  * The human-readable attachment name as the uploader saw it. Discord sanitizes
  * filenames that contain non-ASCII characters (e.g. "腾讯会议录制转写文件.txt"
@@ -80,58 +78,6 @@ function discordAttachmentName(filename: string, title?: string | null): string 
   if (!title) return filename;
   const ext = extname(filename);
   return ext && !title.toLowerCase().endsWith(ext.toLowerCase()) ? `${title}${ext}` : title;
-}
-
-interface DiscordRestChannel {
-  id: string;
-  name?: string;
-  /** 0=GUILD_TEXT, 5=GUILD_ANNOUNCEMENT, 11=PUBLIC_THREAD, 12=PRIVATE_THREAD */
-  type: number;
-}
-
-interface DiscordRestGuild {
-  id: string;
-  name: string;
-}
-
-const HISTORY_CHANNEL_TYPES = new Set([0, 5, 11, 12]);
-
-function timestampToSnowflake(timestampMs: number): string {
-  const discordEpoch = 1420070400000n;
-  return ((BigInt(Math.floor(timestampMs)) - discordEpoch) << 22n).toString();
-}
-
-function restMessageToChannelMessage(
-  msg: DiscordRestMessage,
-  guildName: string,
-  channelId: string,
-  channelName: string,
-): ChannelMessage {
-  const attachments: Attachment[] = msg.attachments.map((a) => {
-    const mime = a.content_type;
-    const fileName = discordAttachmentName(a.filename, a.title);
-    if (mime?.startsWith("image/")) return { type: "image", url: a.url, fileName };
-    if (mime?.startsWith("video/")) return { type: "video", url: a.url, mimeType: mime, fileName };
-    if (mime?.startsWith("audio/")) return { type: "audio", url: a.url, mimeType: mime, fileName };
-    return { type: "document", url: a.url, mimeType: mime ?? undefined, fileName };
-  });
-
-  // The read leaves bot messages out, so every line is one a person wrote and
-  // Rome was told.
-  return {
-    channel: "discord",
-    direction: "inbound",
-    messageId: msg.id,
-    chatId: channelId as ChatId,
-    senderId: msg.author.id,
-    senderDisplayName: msg.author.global_name ?? msg.author.username,
-    senderUsername: msg.author.username,
-    text: msg.content,
-    attachments,
-    timestamp: new Date(msg.timestamp),
-    thread: { kind: "group", name: `${guildName}/#${channelName}` },
-    raw: msg,
-  };
 }
 
 const log = createLogger("discord");
@@ -383,7 +329,6 @@ export class DiscordAdapter {
   };
   private connectionId?: string;
   private slashCommandsRegistered = false;
-  private maxMessagesPerChannel: number;
   /**
    * Returns the names of all agents currently loaded in the catalog. Used by
    * `/channel agent set <name>` to validate the guardian's input and reject
@@ -419,7 +364,6 @@ export class DiscordAdapter {
     chatSettings?: ChatSettingsControl & {
       observe?(descriptor: ChatDescriptor): void;
     };
-    maxMessagesPerChannel?: number;
     listAgents?: () => string[];
     /** The agent linked to this adapter's channel, as `accountAgentResolver`
      *  answers it. Absent, the channel reads as one that takes no link. */
@@ -438,7 +382,6 @@ export class DiscordAdapter {
   }) {
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
@@ -757,6 +700,22 @@ export class DiscordAdapter {
       }
       if (!interaction.isChatInputCommand()) return;
       await this.handleSlashCommand(interaction);
+    });
+
+    // discord.js 14 builds a DM's channel only from a message whose channel
+    // it has cached, and a bot's READY caches none, so a person's first DM
+    // would be dropped. The raw event runs before the message's handler, so
+    // the DM is cached here, partial, with its sender as the recipient.
+    this.client.on("raw", (packet: { t?: string; d?: Record<string, unknown> }) => {
+      const data = packet.d;
+      if (packet.t !== "MESSAGE_CREATE" || !data || "guild_id" in data) return;
+      const channelId = data.channel_id;
+      if (typeof channelId !== "string" || this.client.channels.cache.has(channelId)) return;
+      (
+        this.client.channels as unknown as {
+          _add(data: { id: string; type: ChannelType; recipients: unknown[] }): unknown;
+        }
+      )._add({ id: channelId, type: ChannelType.DM, recipients: [data.author] });
     });
 
     this.client.on("messageCreate", async (message: Message) => {
@@ -1421,12 +1380,29 @@ Use \`/channel agent clear\` to undo.`,
     log.info("bot stopped");
   }
 
+  /** The Discord channel at `address`: the channel itself, or the DM channel
+   *  with the user it names. */
+  private async channelOf(address: string): Promise<string> {
+    const channel = await this.client.channels.fetch(address).catch(() => null);
+    if (channel) return address;
+    return this.directConversationFor(address);
+  }
+
   async directConversationFor(channelUserId: string): Promise<string> {
     return (await this.client.users.createDM(channelUserId)).id;
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const threadId: string = chatId;
+    // A direct message is addressed by the other party's user id, which Chats
+    // keys it by (docs/architecture/channels.md#direct-messages): Discord's
+    // DM channel for that user is opened, or found, here.
+    const text = textToSend("discord", message);
+    const replyTo = replyToShaped("discord", message.replyToMessageId, DISCORD_SNOWFLAKE);
+    const attachments = await attachmentsToSend("discord", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: true,
+    });
+    const threadId: string = await this.channelOf(chatId);
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Channel ${threadId} is not a text channel`);
@@ -1434,22 +1410,22 @@ Use \`/channel agent clear\` to undo.`,
 
     const targetChannel = await this.replyChannel(
       channel as SendableChannel,
-      message.replyToMessageId,
+      replyTo,
     );
 
     try {
       let messageId: string | undefined;
-      if (message.text) {
+      if (text) {
         // Discord natively supports markdown; send as-is
         // Discord has a 2000 character limit per message
-        const chunks = splitMessage(message.text);
+        const chunks = splitMessage(text);
         for (const chunk of chunks) {
           const sent = await targetChannel.send({ content: chunk });
           messageId ??= sent.id;
         }
       }
 
-      for (const att of message.attachments ?? []) {
+      for (const att of attachments) {
         const attachmentMessageId = await this.sendAttachment(targetChannel, att);
         messageId ??= attachmentMessageId;
       }
@@ -1544,101 +1520,6 @@ Use \`/channel agent clear\` to undo.`,
     return saveUrlAttachments({ ...message, channel: "discord" });
   }
 
-  /**
-   * Fetch recent Discord messages via the REST API (no live gateway needed).
-   *
-   * - `threadId = null`  → all text channels across all guilds
-   * - `threadId = <id>`  → only that specific channel
-   */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
-    const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
-    const afterSnowflake = timestampToSnowflake(cutoffMs);
-    const maxPerChannel = Math.min(this.maxMessagesPerChannel, 100);
-
-    if (threadId !== null) {
-      // Single-channel fetch — normalize consistently with the all-guilds path:
-      // reverse to chronological order and filter out bot messages.
-      const messages = await this.fetchChannelMessages(
-        this.rest,
-        threadId,
-        afterSnowflake,
-        maxPerChannel,
-      );
-      messages.reverse();
-      return messages
-        .filter((m) => !m.author.bot)
-        .map((m) => restMessageToChannelMessage(m, "discord", threadId, threadId));
-    }
-
-    // All-guilds fetch — channels and messages are fetched in parallel across guilds
-    const guilds = (await this.rest.get(Routes.userGuilds())) as DiscordRestGuild[];
-    log.info("fetchHistory: guilds found", { count: guilds.length });
-
-    const perGuild = await Promise.all(
-      guilds.map(async (guild) => {
-        let channels: DiscordRestChannel[];
-        try {
-          channels = (await this.rest.get(Routes.guildChannels(guild.id))) as DiscordRestChannel[];
-        } catch (err) {
-          log.warn("fetchHistory: failed to list channels", {
-            guild: guild.name,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return [];
-        }
-
-        const readable = channels.filter((c) => HISTORY_CHANNEL_TYPES.has(c.type));
-
-        const perChannel = await Promise.all(
-          readable.map(async (channel) => {
-            const channelName = channel.name ?? channel.id;
-            let messages: DiscordRestMessage[];
-            try {
-              messages = await this.fetchChannelMessages(
-                this.rest,
-                channel.id,
-                afterSnowflake,
-                maxPerChannel,
-              );
-            } catch (err) {
-              if ((err as { status?: number }).status !== 403) {
-                log.warn("fetchHistory: failed to read channel", {
-                  guild: guild.name,
-                  channel: channelName,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-              return [] as ChannelMessage[];
-            }
-
-            // Discord returns newest-first; reverse to chronological order
-            messages.reverse();
-            return messages
-              .filter((m) => !m.author.bot)
-              .map((m) => restMessageToChannelMessage(m, guild.name, channel.id, channelName));
-          }),
-        );
-
-        return perChannel.flat();
-      }),
-    );
-
-    const allMessages = perGuild.flat();
-    log.info("fetchHistory: complete", { messageCount: allMessages.length, windowHours });
-    return allMessages;
-  }
-
-  private async fetchChannelMessages(
-    rest: REST,
-    channelId: string,
-    afterSnowflake: string,
-    limit: number,
-  ): Promise<DiscordRestMessage[]> {
-    return (await rest.get(Routes.channelMessages(channelId), {
-      query: new URLSearchParams({ after: afterSnowflake, limit: String(limit) }),
-    })) as DiscordRestMessage[];
-  }
-
   async notifyTyping(threadId: string): Promise<void> {
     try {
       const channel = await this.client.channels.fetch(threadId);
@@ -1688,6 +1569,9 @@ Use \`/channel agent clear\` to undo.`,
     return sent.id;
   }
 }
+
+/** A Discord message id: a snowflake, a decimal number. */
+const DISCORD_SNOWFLAKE = /^\d{1,20}$/;
 
 function answersLine(agent: string | null): string {
   return agent

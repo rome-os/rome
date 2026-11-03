@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@rome-os/ui/spinner";
+import { ComposioWebhookRow } from "@/components/connections/composio-services";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
@@ -19,6 +20,11 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
  * This surface may be retired soon; the conversion is intentionally minimal —
  * behaviour is unchanged from the original inline section.
  */
+function openLogin(url: string) {
+  const popup = window.open(url, "_blank", "noopener,noreferrer");
+  if (popup) popup.opener = null;
+}
+
 export function ComposioConnectionSection({
   card,
   slot,
@@ -36,6 +42,10 @@ export function ComposioConnectionSection({
 }) {
   const { t } = useTranslation("settings");
   const [pending, setPending] = useState<"connect" | "disconnect" | null>(null);
+  // The sign-in tab opens only after the request returns, which a strict popup
+  // blocker (iOS Safari) can refuse. Kept while the sign-in runs, so Open tab
+  // can open it again from a click of its own.
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
 
   const installed = Boolean(composio?.installed);
   const loggedIn = Boolean(composio?.loggedIn);
@@ -44,9 +54,9 @@ export function ComposioConnectionSection({
     setPending("connect");
     try {
       const result = await runComposioLogin({
-        onLoginUrl: (loginUrl) => {
-          const popup = window.open(loginUrl, "_blank", "noopener,noreferrer");
-          if (popup) popup.opener = null;
+        onLoginUrl: (url) => {
+          setLoginUrl(url);
+          openLogin(url);
         },
       });
       if (!result.ok) {
@@ -56,6 +66,7 @@ export function ComposioConnectionSection({
       onRefresh();
     } finally {
       setPending(null);
+      setLoginUrl(null);
     }
   }
 
@@ -111,8 +122,10 @@ export function ComposioConnectionSection({
       icon={<ConnectionBrandBadge connection={card.service} />}
       action={disconnectAction}
     >
-      {loggedIn ? null : (
-        <div>
+      {loggedIn ? (
+        <ComposioWebhookRow onFlash={onFlash} />
+      ) : (
+        <div className="flex flex-wrap gap-2">
           <Button
             disabled={pending !== null || Boolean(composio?.loginPending)}
             aria-label={
@@ -125,6 +138,11 @@ export function ComposioConnectionSection({
             )}
             {t("common.connect")}
           </Button>
+          {loginUrl ? (
+            <Button variant="outline" onClick={() => openLogin(loginUrl)}>
+              {t("connections.composioServices.openTab")}
+            </Button>
+          ) : null}
         </div>
       )}
     </ConnectionSlotCard>

@@ -47,23 +47,23 @@ suite.
   goal. Related page states share a case only when they belong to that goal.
 - The package registers `app.open` for isolated setup and
   `app.expectRenameConflict` for FILE-03's transient response. Run
-  `npm run nodes` to generate a local node reference with their parameters.
+  `pnpm run nodes` to generate a local node reference with their parameters.
 - All mock cases live in `cases/**/*.yaml`, organized by topic file, with
   topic tags. The directory decides the suite.
 
 ## Prerequisites
 
-- Node.js 24 (the repo pins it via fnm: `eval "$(fnm env)" && fnm use 24`)
+- Node.js 24 and pnpm from `nix develop`
 - Rome dependencies installed (`pnpm install` at the repo root)
 - Credentials for the visual model Midscene uses (an OpenAI-compatible API)
 
 ## Running Locally
 
 ```bash
-# 1. Install test dependencies (first time only)
+# 1. Install workspace dependencies and Chromium (from the repo root)
+pnpm install --frozen-lockfile
 cd tests/midscene
-npm ci --strict-allow-scripts
-npx playwright install chromium
+pnpm exec playwright install chromium
 
 # 2. Configure model credentials (first time only; .env is gitignored — never commit it)
 cp .env.example .env
@@ -71,11 +71,11 @@ cp .env.example .env
 
 # 3. Check the model, then run the full suite. Setup starts the mock server on
 #    port 3200, or uses one you already started with `pnpm start:web:mock:e2e`.
-npm run check:model
-npm test
+pnpm run check:model
+pnpm test
 ```
 
-`npm run check:model` runs `midscene-test model verify`. When it fails, it
+`pnpm run check:model` runs `midscene-test model verify`. When it fails, it
 prints a `curl` command that contains the API key, so do not paste its output
 into an issue or chat.
 
@@ -86,22 +86,22 @@ Tag filtering is controlled through environment variables (read in
 
 ```bash
 # PoC stories only
-MIDSCENE_INCLUDE_TAGS=poc npm test
+MIDSCENE_INCLUDE_TAGS=poc pnpm test
 
 # One topic (a case can carry multiple tags)
-MIDSCENE_INCLUDE_TAGS=routines npm test
+MIDSCENE_INCLUDE_TAGS=routines pnpm test
 
 # Multiple tags are OR-combined, comma-separated
-MIDSCENE_INCLUDE_TAGS=auth,settings npm test
+MIDSCENE_INCLUDE_TAGS=auth,settings pnpm test
 
 # Exclude slow cases
-MIDSCENE_EXCLUDE_TAGS=story npm test
+MIDSCENE_EXCLUDE_TAGS=story pnpm test
 
 # Adjust retries (default 2)
-MIDSCENE_RETRY=0 npm test
+MIDSCENE_RETRY=0 pnpm test
 
 # Headed mode for debugging
-HEADLESS=false npm test
+HEADLESS=false pnpm test
 ```
 
 ### Tag Conventions
@@ -149,7 +149,7 @@ requests do not trigger it. The `mock` job runs first and the `backend` job
 after it, because both share the Midscene endpoint's rate limit. The `backend`
 job tests `zoolsher/rome:latest`, the image published from `main` twice a day.
 
-Before changing this package, run `npm run typecheck` and a tagged subset of
+Before changing this package, run `pnpm run typecheck` and a tagged subset of
 cases locally; each suite job type-checks the package before its cases run.
 See the
 [CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)

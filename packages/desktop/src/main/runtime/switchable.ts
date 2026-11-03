@@ -4,9 +4,8 @@ import type { Runtime } from "./runtime";
 
 /**
  * The one runtime every part of the shell holds, standing in for whichever
- * Rome is open now. The welcome screen can hand it a different runtime (the
- * private VM, or another hosted Rome) without a relaunch, because nothing has
- * started yet at that point.
+ * Rome is open now. The welcome screen can hand it a different hosted Rome
+ * without a relaunch, because nothing has opened yet at that point.
  */
 export class SwitchableRuntime extends EventEmitter implements Runtime {
   private readonly forward = (status: RuntimeStatus) => this.emit("status", status);
@@ -48,24 +47,8 @@ export class SwitchableRuntime extends EventEmitter implements Runtime {
     return this.current.isServing();
   }
 
-  stopForQuit(): Promise<void> {
-    return this.current.stopForQuit();
-  }
-
-  upgradeRuntime(): Promise<void> {
-    return this.current.upgradeRuntime();
-  }
-
-  openInstallPage(): Promise<void> {
-    return this.current.openInstallPage();
-  }
-
-  startRuntimeApp(): Promise<void> {
-    return this.current.startRuntimeApp();
-  }
-
-  openRuntimeFolder(): Promise<void> {
-    return this.current.openRuntimeFolder();
+  openCloud(): Promise<void> {
+    return this.current.openCloud();
   }
 
   openLogs(): Promise<void> {
@@ -73,6 +56,10 @@ export class SwitchableRuntime extends EventEmitter implements Runtime {
   }
 
   reportLoadFailure(detail: string): void {
-    this.current.reportLoadFailure?.(detail);
+    this.current.reportLoadFailure(detail);
+  }
+
+  dispose(): void {
+    this.current.dispose?.();
   }
 }

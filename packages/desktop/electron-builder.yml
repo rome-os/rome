@@ -27,16 +27,10 @@ extraResources:
     to: native/
     filter:
       - "*.node"
-  - from: lima/
-    to: lima/
-    filter:
-      - "**/*"
   - from: build/tray/
     to: tray/
     filter:
       - "*.png"
-beforePack: build/beforePack.mjs
-afterPack: build/afterPack.mjs
 
 protocols:
   - name: Rome
@@ -53,10 +47,8 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # Pre-signed by build/afterPack.mjs with Lima-specific entitlements; keep
-  # electron-builder's signing pass from overwriting that signature.
-  signIgnore:
-    - "lima/bin/limactl$"
   category: public.app-category.productivity
   extendInfo:
-    NSLocalNetworkUsageDescription: Rome needs local network access to reach the local Rome runtime container.
+    # Programs Rome runs on this Mac as a device count as the app's own
+    # traffic, so reaching a printer or another computer on the LAN asks here.
+    NSLocalNetworkUsageDescription: Rome runs programs you ask for on this Mac, and some of them reach devices on your local network.

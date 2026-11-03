@@ -34,9 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          lfs: true
-          # The resolver walks the v* tags merged into HEAD, which needs commit
-          # history. fetch-tags alone is not enough.
+          # The version check compares against every desktop-v* tag.
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v5
@@ -48,7 +46,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Resolve release version and runtime image
+      - name: Resolve release version
         id: release
         shell: bash
         run: |
@@ -57,7 +55,7 @@ jobs:
           semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$'
 
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
-            echo "Not a tag build — keeping package.json's version and the moving image tag."
+            echo "Not a tag build — keeping package.json's version."
             exit 0
           fi
 
@@ -78,87 +76,22 @@ jobs:
 
           # The triggering tag is itself in the list, so being the newest is the
           # check. Rejected tags survive in the repo, hence the strict pattern.
-          # This comparator and the one below read 1.0.3-rc.1 as 1.0.3; the two
-          # prerelease refusals are what keep them fed plain triples.
+          # This comparator reads 1.0.3-rc.1 as 1.0.3; the prerelease refusal
+          # above is what keeps it fed plain triples.
           highest="$(git tag --list 'desktop-v*' | sed -nE 's/^desktop-v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
           if [ "$highest" != "$app_version" ]; then
             echo "::error::desktop tag ${app_version} is not the newest desktop release (${highest} exists)"
             exit 1
           fi
 
-          # One shared sequence: a release reuses the number of the image it pins,
-          # and takes the next free one when it ships without a new backend. Highest
-          # reachable, not graph-nearest — a merged backport sits closer but older.
-          image_version="$(git tag --list 'v[0-9]*' --merged HEAD | sed -nE 's/^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
-          if [ -z "$image_version" ]; then
-            echo "::error::No stable v* release tag is reachable from this commit"
-            exit 1
-          fi
-          image="yunfanye/rome:${image_version}"
-
-          # The desktop number is never below the image's.
-          if [ "$(printf '%s\n%s\n' "$app_version" "$image_version" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" != "$image_version" ]; then
-            echo "::error::desktop tag ${app_version} is below the image it pins (${image_version})"
-            exit 1
-          fi
-
-          # A v* tag is not evidence of a published image, and pinning an unpublished
-          # one ships an app that dies at its first pull. Never fall back to :latest.
-          # Over the registry API because macos-15 ships no Docker CLI; `|| code=000`
-          # keeps DNS and TLS failures on the message path under set -e.
-          repo="yunfanye/rome"
-          code="$(curl -sS -o token.json -w '%{http_code}' \
-            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull")" || code=000
-          if [ "$code" != "200" ]; then
-            echo "::error::Docker Hub returned ${code} for the pull token — rerun, or authenticate the check"
-            exit 1
-          fi
-          token="$(jq -r .token token.json)"
-          code="$(curl -sS -o manifest.json -w '%{http_code}' \
-            -H "Authorization: Bearer ${token}" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json' \
-            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
-            "https://registry-1.docker.io/v2/${repo}/manifests/${image_version}")" || code=000
-          case "$code" in
-            200) ;;
-            404) echo "::error::${image} is not published — resolve or republish it before tagging a desktop release"; exit 1 ;;
-            # Anonymous pulls are limited per IP, so this is not "not published".
-            429) echo "::error::Docker Hub rate-limited the manifest check for ${image} — rerun, or authenticate the check"; exit 1 ;;
-            401|403) echo "::error::Not authorised to read ${image}"; exit 1 ;;
-            *) echo "::error::Unexpected ${code} from the registry for ${image}"; exit 1 ;;
-          esac
-          # os and architecture together: the index also carries attestation entries.
-          if ! jq -e '.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "arm64")' manifest.json >/dev/null; then
-            echo "::error::${image} has no linux/arm64 entry"
-            exit 1
-          fi
-
-          echo "Pinning ${app_version} to ${image}"
+          echo "Releasing ${app_version}"
           echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
-          echo "image=${image}" >> "$GITHUB_OUTPUT"
 
       - name: Build desktop app
         working-directory: packages/desktop
         run: pnpm build
         env:
           ROME_DESKTOP_NATIVE_ARCH: ${{ matrix.arch }}
-          ROME_RUNTIME_IMAGE: ${{ steps.release.outputs.image }}
-
-      # The version gets cross-checked after packaging; the image is the point of
-      # the whole pipeline and had nothing. A misnamed env — ROME_DESKTOP_IMAGE is
-      # one word away and is the runtime override — bakes null and builds clean,
-      # shipping a pinned-looking app that follows :latest. Verified locally: the
-      # literal is present with the right name and absent with the wrong one.
-      - name: Verify the runtime image was baked in
-        if: ${{ steps.release.outputs.image }}
-        env:
-          IMAGE: ${{ steps.release.outputs.image }}
-        run: |
-          set -euo pipefail
-          if ! grep -qF "$IMAGE" packages/desktop/dist/main/index.js; then
-            echo "::error::${IMAGE} is not in the built bundle — the build-time define did not land"
-            exit 1
-          fi
 
       - name: Check macOS signing identity
         id: mac-signing

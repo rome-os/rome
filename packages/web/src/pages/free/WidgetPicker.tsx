@@ -12,6 +12,7 @@ import {
 import { EmptyState, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useApps } from "@/hooks/use-apps";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import type { WidgetPlacement, WidgetType } from "./use-free-cells";
 
 interface WidgetPickerProps {
@@ -26,7 +27,10 @@ export function WidgetPicker({ onSelect, children, placements }: WidgetPickerPro
   const [query, setQuery] = useState("");
   const { apps: allApps } = useApps();
   const apps = useMemo(
-    () => (allApps ?? []).filter((a) => a.hasFrontend && a.status === "active"),
+    () =>
+      (allApps ?? []).filter(
+        (a) => a.hasFrontend && a.status === "active" && !isHiddenInLauncher(a),
+      ),
     [allApps],
   );
 

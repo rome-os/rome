@@ -1,6 +1,5 @@
 import { app } from "electron";
 import { createLogger } from "./logger";
-import type { Runtime } from "./runtime/runtime";
 
 type AppWithUpdateQuitEvent = typeof app & {
   on(event: "before-quit-for-update", listener: () => void): typeof app;
@@ -8,20 +7,18 @@ type AppWithUpdateQuitEvent = typeof app & {
 
 const log = createLogger("lifecycle");
 
-// Upper bound for the whole quit dance (container SIGTERM + VM stop +
-// fallbacks). If the runtime is still wedged after this we hard-exit so
-// the user never sits looking at a half-quit Dock icon.
-const SHUTDOWN_HARD_TIMEOUT_MS = 45_000;
+// Disconnecting this computer as a device only closes a socket, so quit waits
+// for it briefly and then goes anyway: a quit must never hang on the network.
+const SHUTDOWN_TIMEOUT_MS = 3_000;
 
 let shutdownPromise: Promise<void> | null = null;
 let shutdownComplete = false;
 let quittingForUpdate = false;
 let quitting = false;
-let runtimeManagerRef: Runtime | null = null;
-let onShutdownStartRef: (() => void) | null = null;
+let onShutdownRef: (() => Promise<void>) | null = null;
 
 /**
- * True once a real quit is in progress (Cmd+Q/app-menu Quit, Stop and quit,
+ * True once a real quit is in progress (Cmd+Q/app-menu Quit, the tray's Quit,
  * SIGINT/SIGTERM, auto-update). The window 'close' interceptor reads this
  * to decide whether to hide the window or let it actually close.
  */
@@ -35,52 +32,43 @@ export function prepareForUpdateInstall(): Promise<void> {
   return shutdown();
 }
 
-async function shutdown(): Promise<void> {
-  if (shutdownComplete) return;
-  if (shutdownPromise) return shutdownPromise;
-
-  try {
-    onShutdownStartRef?.();
-  } catch (error) {
-    log.error("onShutdownStart callback threw", error);
-  }
-
-  shutdownPromise = doShutdown().finally(() => {
+function shutdown(): Promise<void> {
+  if (shutdownComplete) return Promise.resolve();
+  shutdownPromise ??= runShutdown(onShutdownRef).finally(() => {
     shutdownComplete = true;
   });
   return shutdownPromise;
 }
 
-async function doShutdown(): Promise<void> {
-  if (!runtimeManagerRef) return;
-
-  // Race the runtime stop against a hard upper bound. Whichever wins, we
-  // proceed to app.quit() — quit must never be blocked by a wedged VM.
-  let timeoutHandle: NodeJS.Timeout | null = null;
+/** Runs the shutdown work, bounded by `timeoutMs`; never rejects. */
+export async function runShutdown(
+  work: (() => Promise<void>) | null,
+  timeoutMs = SHUTDOWN_TIMEOUT_MS,
+): Promise<void> {
+  if (!work) return;
+  let timer: NodeJS.Timeout | null = null;
   const timeout = new Promise<void>((resolve) => {
-    timeoutHandle = setTimeout(() => {
-      log.warn(`Shutdown exceeded ${SHUTDOWN_HARD_TIMEOUT_MS}ms; abandoning runtime stop`);
+    timer = setTimeout(() => {
+      log.warn(`Shutdown exceeded ${timeoutMs}ms; quitting anyway`);
       resolve();
-    }, SHUTDOWN_HARD_TIMEOUT_MS);
+    }, timeoutMs);
   });
-
   try {
-    await Promise.race([runtimeManagerRef.stopForQuit(), timeout]);
+    await Promise.race([work(), timeout]);
   } catch (error) {
-    log.error("runtime stopForQuit threw during shutdown", error);
+    log.error("Shutdown work threw", error);
   } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (timer) clearTimeout(timer);
   }
 }
 
 export interface SetupLifecycleOptions {
-  runtimeManager: Runtime;
-  onShutdownStart?: () => void;
+  /** Work to finish before the app exits: disconnecting this computer as a device. */
+  onShutdown: () => Promise<void>;
 }
 
 export function setupLifecycle(options: SetupLifecycleOptions): void {
-  runtimeManagerRef = options.runtimeManager;
-  onShutdownStartRef = options.onShutdownStart ?? null;
+  onShutdownRef = options.onShutdown;
 
   app.on("before-quit", async (event) => {
     if (shutdownComplete || quittingForUpdate) return;
@@ -110,9 +98,9 @@ export function setupLifecycle(options: SetupLifecycleOptions): void {
 }
 
 /**
- * Called from UI surfaces (⌘Q / app-menu Quit, tray "Stop agent and quit") to
- * start the full shutdown path. Idempotent — the before-quit handler runs the
- * actual shutdown.
+ * Called from UI surfaces (⌘Q / app-menu Quit, tray and floating icon "Quit
+ * Rome") to start the shutdown path. Idempotent — the before-quit handler runs
+ * the actual shutdown.
  */
 export function requestStopAndQuit(): void {
   quitting = true;

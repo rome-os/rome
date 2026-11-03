@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import type { Account, ChatId } from "@rome-os/app-runtime";
 import {
   compareAssistants,
   listsAsAssistant,
@@ -6,24 +7,28 @@ import {
   type Assistant,
   type AssistantList,
 } from "@rome/api-types/assistants";
-import { parseMessageCursor } from "@rome/api-types/message";
-import { sendRefusalMessage, timelinePageLimit, type SendRefusal } from "@rome/api-types/people";
+import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
+import { timelinePageLimit, type TimelinePage } from "@rome/api-types/people";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
 import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
-import { discardSend, readOutbox, sendToAccount } from "../../people/outbox.js";
-import { readPersonTimeline } from "../../people/timeline.js";
-import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
+import type { SaidMessage } from "../../chats/message.js";
+import type { MessageCursor, MessagePage } from "../../chats/message-repository.js";
+import { chatKey, placeIn } from "../../chats/place.js";
+import { send } from "../../chats/send.js";
+import { directPlace } from "../../people/send.js";
 import type { ApiDeps } from "../deps.js";
+import { respondToSend } from "./people.js";
 
 const log = createLogger("assistants-api");
 
 // The assistants surface: each agent Rome Cloud lists for this Rome, as one
-// chat (docs/domains/chats.md#assistant). The chat is the agent's address on
-// the agents channel, so its history, sends and outbox are the People
-// surface's, read for that one address instead of for a person's accounts.
-// What the guardian writes goes out through the outbox, which starts no agent
-// turn, so main answers the assistant and never the guardian here.
+// chat (docs/domains/chats.md#assistant). The chat is the direct message keyed
+// by the agent's address on the agents channel: its history is read from that
+// place, and the guardian's lines are sent into it as on the People surface.
+// What the guardian
+// writes goes straight to the channel and starts no agent turn, so main
+// answers the assistant and never the guardian here.
 
 export function assistantsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -46,54 +51,47 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Rome Cloud could not be reached" }, 503);
     }
 
-    const groups = agents.map((agent) => [{ channel: AGENTS_KIND, channelUserId: agent.agentId }]);
-    const accounts = await timelineAccounts(deps, groups);
-    const stores = personMessageStores(deps);
     const assistants = await Promise.all(
-      agents.map(async (agent, index): Promise<Assistant> => {
-        const { entries } = await readPersonTimeline(stores, accounts[index] ?? [], { limit: 1 });
+      agents.map(async (agent): Promise<Assistant> => {
+        const [last] = await newest(deps, { platform: AGENTS_KIND, id: agent.agentId }, 1);
         return {
           agentId: agent.agentId,
           name: agent.name,
           kind: agent.kind,
           account: agent.account,
           sameAccount: agent.sameAccount,
-          lastMessageAt: entries[0]?.timestamp ?? null,
+          lastMessageAt: last?.timestamp ?? null,
         };
       }),
     );
     return c.json({ assistants: assistants.sort(compareAssistants) } satisfies AssistantList);
   });
 
+  /** The assistant's chat, newest first, read from its place
+   *  (docs/domains/chats.md#message). A chat nothing was said in yet reads
+   *  as empty. */
   app.get("/assistants/:agentId/messages", async (c) => {
     const address = addressOf(c);
     if (!address) return unknownAssistant(c);
 
     const rawCursor = c.req.query("cursor");
     const cursor = parseMessageCursor(rawCursor);
-    if (rawCursor != null && rawCursor !== "" && cursor === null) {
+    const before = cursor && positionOf(cursor);
+    if (rawCursor != null && rawCursor !== "" && !before) {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
-    const [accounts = []] = await timelineAccounts(deps, [[address]]);
-    const stores = personMessageStores(deps);
-    // Reading the outbox is what clears a send once it is on the timeline
-    // (people/outbox.ts). The page reads the chat after every send and while
-    // it is open, so a delivered send leaves the outbox here.
-    await readOutbox(deps, stores, accounts);
-    return c.json(
-      await readPersonTimeline(stores, accounts, {
-        cursor,
-        limit: timelinePageLimit(c.req.query("limit")),
-      }),
-    );
+    const page = await messagesAt(deps, address, timelinePageLimit(c.req.query("limit")), before);
+    const entries = page.messages.map(timelineEntry).reverse();
+    const oldest = entries.at(-1);
+    return c.json({
+      entries,
+      nextCursor: page.older && oldest ? messageCursor(oldest) : null,
+    } satisfies TimelinePage);
   });
 
-  /** Write to the assistant as the guardian. 202, as on the People surface:
-   *  the channel taking a message is not the message arriving. A send the
-   *  channel refused is answered as failed and discarded at once: this page
-   *  shows the error and sends a retry as a new message, so the row would
-   *  only linger in the outbox. Its answer stays on record, so the same id
-   *  replays the refusal. */
+  /** Write to the assistant as the guardian, answered as on the People
+   *  surface: 200 once the channel took it, and the channel's own error when
+   *  it refused, so the page shows the error and the guardian sends again. */
   app.post("/assistants/:agentId/messages", async (c) => {
     const address = addressOf(c);
     if (!address) return unknownAssistant(c);
@@ -101,17 +99,10 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     const parsed = parseAssistantSendRequest(await c.req.json().catch(() => null));
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
-    const result = await sendToAccount(deps, address, parsed.request.text, parsed.request.id);
-    if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
-    if (result.ok && result.message.state === "failed") {
-      await discardSend(deps, [address], result.message.id);
-    }
-    return result.ok
-      ? c.json(result.message, 202)
-      : c.json(
-          { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
-          409,
-        );
+    // The assistant's chat is the direct message that reaches its address.
+    const found = await directPlace(deps, address);
+    if (!found.ok) return respondToSend(c, found);
+    return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, found.as));
   });
 
   return app;
@@ -119,11 +110,63 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
 
 /** The assistant's address on the agents channel. Only an agent id is one, so
  *  a name or a typo answers 404 rather than reaching the channel. */
-function addressOf(c: Context): { channel: string; channelUserId: string } | null {
+function addressOf(c: Context): Account | null {
   const agentId = c.req.param("agentId") ?? "";
-  return isAgentId(agentId) ? { channel: AGENTS_KIND, channelUserId: agentId } : null;
+  return isAgentId(agentId) ? { platform: AGENTS_KIND, id: agentId } : null;
 }
 
 function unknownAssistant(c: Context) {
   return c.json({ error: "Unknown assistant" }, 404);
+}
+
+/** The prefix a timeline gives Rome's transcript rows, so a message keeps the
+ *  ref the People timeline gave it. */
+const REF_PREFIX = "agent:";
+
+/** A message as the timeline wire shows it. */
+function timelineEntry(message: SaidMessage): Message {
+  const inbound = message.direction === "toRome";
+  return {
+    source: message.place.chat.platform,
+    timestamp: Math.floor(message.at.getTime() / 1000),
+    body: message.body.text === "" ? null : message.body.text,
+    direction: inbound ? "inbound" : "outbound",
+    ref: `${REF_PREFIX}${message.id}`,
+    ...(inbound && (message.saidBy || message.senderName !== undefined)
+      ? {
+          sender: {
+            id: message.saidBy?.account.id ?? null,
+            name: message.senderName ?? null,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Where a timeline cursor stands in the chat's messages, or null when it
+ *  names no message of Rome's transcript. */
+function positionOf(cursor: Message): MessageCursor | null {
+  if (!cursor.ref.startsWith(REF_PREFIX)) return null;
+  return { at: new Date(cursor.timestamp * 1000), id: cursor.ref.slice(REF_PREFIX.length) };
+}
+
+/** The assistant's chat read back from `before`, or from its newest message.
+ *  Each assistant is one direct message, keyed by the assistant's own id, so
+ *  its history reads the same whether or not Rome can send there now. */
+function messagesAt(
+  deps: ApiDeps,
+  address: Account,
+  limit: number,
+  before?: MessageCursor | null,
+): Promise<MessagePage> {
+  const place = placeIn(chatKey(address.platform, address.id as ChatId));
+  return before
+    ? deps.chatMessages.before(place, before, limit)
+    : deps.chatMessages.recent(place, limit);
+}
+
+/** The newest `limit` messages of the assistant's chat, newest first. */
+async function newest(deps: ApiDeps, address: Account, limit: number): Promise<Message[]> {
+  const page = await messagesAt(deps, address, limit);
+  return page.messages.map(timelineEntry).reverse();
 }

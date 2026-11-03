@@ -78,6 +78,38 @@ describe("useUpgradeStatus", () => {
     unmount();
   });
 
+  it("stops polling while the tab is hidden and polls again as it is shown", async () => {
+    const fetchMock = rs.fn().mockResolvedValue(jsonResponse(idleStatus));
+    rs.stubGlobal("fetch", fetchMock);
+    const setVisibility = (state: "visible" | "hidden") => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    try {
+      const { unmount } = renderHook(() => useUpgradeStatus());
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      act(() => setVisibility("hidden"));
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS * 4);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      act(() => setVisibility("visible"));
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      unmount();
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+
   it("shows the countdown and speeds up polling when a countdown is discovered", async () => {
     const fetchMock = rs.fn().mockResolvedValue(jsonResponse(countdownStatus()));
     rs.stubGlobal("fetch", fetchMock);

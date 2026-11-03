@@ -148,6 +148,8 @@ async function compileAppCss(root) {
     .sort();
   const css = [
     '@import "@rome-os/app-web-sdk/styles";',
+    // External apps can still use this legacy token after its last first-party consumer is removed.
+    '@source inline("text-brand-fg");',
     `@source "${join(root, "packages", "ui", "src")}";`,
     ...templateSources.map((directory) => `@source "${directory}";`),
     ...appSources.map((directory) => `@source "${directory}";`),

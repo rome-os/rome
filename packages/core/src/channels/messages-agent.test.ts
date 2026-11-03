@@ -8,7 +8,7 @@ import {
   WHOLE_HISTORY,
   type MessagesContractSubject,
 } from "./messages-contract.js";
-import { agentMessages } from "./messages-agent.js";
+import { agentMessages, messageContentText } from "./messages-agent.js";
 
 // `rome_agent_messages` read as an `AccountMessages` store, holding exactly what
 // `agentMessagesSource` holds today: the roles that carry conversation, on
@@ -309,6 +309,26 @@ describe("agentMessages", () => {
     expect(here.map((entry) => entry.ref)).not.toContain("agent:m-elsewhere");
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
   });
+
+  // A link keyed by a service names the service, and the transcript keys a
+  // conversation by the account's own channel id, which may be opaque.
+  it("reads an account under the channel it is stored under, and under none", async () => {
+    await session(db, "s-opaque", { threadId: DIRECT, channel: "tg-opaque" });
+    await message(db, "m-opaque", { sessionId: "s-opaque", role: "user", at: 450 });
+
+    expect(await refs()).not.toContain("agent:m-opaque");
+    const opaque = await agentMessages(db).read({
+      accounts: [{ ...account, storedUnder: ["tg-opaque"] }],
+      limit: WHOLE_HISTORY,
+    });
+    // Named by the account's own channel, the link's platform, as a reader asked.
+    expect(opaque.map((entry) => [entry.ref, entry.source])).toEqual([["agent:m-opaque", CHANNEL]]);
+    const none = await agentMessages(db).read({
+      accounts: [{ ...account, storedUnder: [] }],
+      limit: WHOLE_HISTORY,
+    });
+    expect(none).toEqual([]);
+  });
 });
 
 // One seeded database for the whole suite: every assertion in it reads, so a
@@ -326,4 +346,16 @@ testAccountMessagesContract("agentMessages", () => {
     };
   })();
   return enrolled;
+});
+
+describe("messageContentText", () => {
+  it("reads a dashboard answer without the narration that led to it", () => {
+    const content = JSON.stringify([
+      { type: "text", content: "Checking the fares.", turnPhase: "commentary" },
+      { type: "task_chat", chatId: "task-1", title: "Flights" },
+      { type: "text", content: "3 options", turnPhase: "final" },
+    ]);
+
+    expect(messageContentText(content)).toBe("3 options");
+  });
 });

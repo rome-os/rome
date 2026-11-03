@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
 import { listChatAgents } from "@/lib/chat-api";
+import { CONCIERGE_AGENT_ID } from "@/hooks/use-concierge";
 import type { AgentCatalogEntry, AgentCatalogGroup, AgentMention } from "@/lib/chat-types";
 import {
   AppGroupedPickerMenu,
@@ -53,7 +54,13 @@ export const AgentMentionMenu = forwardRef<AgentMentionMenuHandle, AgentMentionM
       listChatAgents()
         .then((data) => {
           if (cancelled) return;
-          setGroups(data);
+          // Concierge has its own chat; it is not an agent to start a chat with.
+          setGroups(
+            data.map((group) => ({
+              ...group,
+              agents: group.agents.filter((agent) => agent.name !== CONCIERGE_AGENT_ID),
+            })),
+          );
           setError(null);
         })
         .catch(() => {

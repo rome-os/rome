@@ -18,14 +18,11 @@ class FakeRuntime extends EventEmitter {
   ensureReady = rs.fn(async () => {});
   getStatus = () => ({ phase: this.ready ? "ready" : "starting_rome" }) as RuntimeStatus;
   isReady = () => this.ready;
-  getDashboardUrl = () => "http://127.0.0.1:47823";
+  getDashboardUrl = () => "http://127.0.0.1:4141";
   isServing = async () => this.ready;
-  stopForQuit = async () => {};
-  upgradeRuntime = async () => {};
-  openInstallPage = async () => {};
-  startRuntimeApp = async () => {};
-  openRuntimeFolder = async () => {};
+  openCloud = async () => {};
   openLogs = async () => {};
+  reportLoadFailure = () => {};
 }
 
 function controller(
@@ -39,7 +36,6 @@ function controller(
 ) {
   const writes: RuntimeTarget[] = [];
   const relaunch = rs.fn();
-  const local = new FakeRuntime();
   const signOut = rs.fn(async () => {});
   const account = { signOut } as unknown as CloudAccount;
   const created: RemoteRuntime[] = [];
@@ -47,7 +43,6 @@ function controller(
     cloudAccount: account,
     savedTarget: saved,
     writeTarget: (target) => writes.push(target),
-    createLocal: () => local as unknown as Runtime,
     createRemote: (instance, onSelect) => {
       const remote = new RemoteRuntime(instance, {
         account: {
@@ -67,39 +62,44 @@ function controller(
     relaunch,
     override: options.override,
   });
-  return { subject, writes, relaunch, local, signOut, created };
+  return { subject, writes, relaunch, signOut, created };
 }
 
 const welcome: RuntimeTarget = { kind: "remote", instance: null };
+const ray: RuntimeTarget = {
+  kind: "remote",
+  instance: { id: "i", name: "ray", origin: "https://ray.romeos.cc" },
+};
+const other: RuntimeTarget = {
+  kind: "remote",
+  instance: { id: "j", name: "work", origin: "https://work.romeos.cc" },
+};
 
 describe("RuntimeController", () => {
-  it("switches from the welcome screen to the VM without a relaunch", () => {
-    const { subject, writes, relaunch, local } = controller(welcome);
-    expect(subject.setTarget({ kind: "local" })).toBe("switched");
-    expect(writes).toEqual([{ kind: "local" }]);
-    expect(relaunch).not.toHaveBeenCalled();
-    expect(subject.runtime.inner).toBe(local);
-    expect(local.ensureReady).toHaveBeenCalled();
-    expect(subject.activeTarget()).toEqual({ kind: "local" });
+  it("opens the saved hosted Rome", () => {
+    const { subject, created } = controller(ray);
+    expect(created).toHaveLength(1);
+    expect(subject.runtime.inner).toBe(created[0]);
+    expect(subject.activeTarget()).toEqual(ray);
   });
 
-  it("relaunches to leave the VM", () => {
-    const { subject, relaunch, local } = controller({ kind: "local" });
-    expect(subject.setTarget(welcome)).toBe("relaunching");
-    expect(relaunch).toHaveBeenCalled();
-    expect(subject.runtime.inner).toBe(local);
+  it("switches from the welcome screen to another Rome without a relaunch", () => {
+    const { subject, writes, relaunch, created } = controller(welcome);
+    expect(subject.setTarget(ray)).toBe("switched");
+    expect(writes).toEqual([ray]);
+    expect(relaunch).not.toHaveBeenCalled();
+    expect(subject.runtime.inner).toBe(created[1]);
+    expect(subject.activeTarget()).toEqual(ray);
   });
 
   it("relaunches to leave an open hosted Rome", () => {
-    const { subject, relaunch } = controller(
-      { kind: "remote", instance: { id: "i", name: "ray", origin: "https://ray.romeos.cc" } },
-      { remoteReady: true },
-    );
-    expect(subject.setTarget({ kind: "local" })).toBe("relaunching");
+    const { subject, relaunch, created } = controller(ray, { remoteReady: true });
+    expect(subject.setTarget(other)).toBe("relaunching");
     expect(relaunch).toHaveBeenCalled();
+    expect(subject.runtime.inner).toBe(created[0]);
   });
 
-  it("returns to the welcome screen on sign-out, never to the VM", async () => {
+  it("returns to the welcome screen on sign-out", async () => {
     const { subject, writes, signOut, created } = controller(welcome);
     await subject.signOut();
     expect(signOut).toHaveBeenCalled();
@@ -107,13 +107,7 @@ describe("RuntimeController", () => {
     expect(subject.runtime.inner).toBe(created[1]);
   });
 
-  it("leaves a VM target alone on sign-out", async () => {
-    const { subject, writes } = controller({ kind: "local" });
-    await subject.signOut();
-    expect(writes).toEqual([]);
-  });
-
-  it("keeps the VM when a replaced Rome Cloud lookup answers late", async () => {
+  it("does not save a pick from a Rome the user already switched away from", async () => {
     let answer: (instances: CloudInstance[]) => void = () => {};
     const { subject, writes } = controller(welcome, {
       signedIn: true,
@@ -121,29 +115,27 @@ describe("RuntimeController", () => {
     });
     const connecting = subject.runtime.ensureReady();
     await new Promise((resolve) => setImmediate(resolve));
-    expect(subject.setTarget({ kind: "local" })).toBe("switched");
+    expect(subject.setTarget(other)).toBe("switched");
     answer([
       { id: "i", name: "ray", slug: "ray", origin: "https://ray.romeos.cc", status: "running" },
     ]);
     await connecting;
-    expect(writes).toEqual([{ kind: "local" }]);
-    expect(subject.activeTarget()).toEqual({ kind: "local" });
+    expect(writes).toEqual([other]);
+    expect(subject.activeTarget()).toEqual(other);
   });
 
   it("opens an override instead of the saved target, and saves a pick for the next launch", () => {
     const override = new FakeRuntime();
     override.ready = true;
-    const { subject, writes, relaunch, local, created } = controller(
-      { kind: "local" },
-      { override: override as unknown as Runtime },
-    );
+    const { subject, writes, relaunch, created } = controller(ray, {
+      override: override as unknown as Runtime,
+    });
     expect(subject.runtime.inner).toBe(override);
     expect(created).toEqual([]);
 
-    expect(subject.setTarget(welcome)).toBe("relaunching");
-    expect(writes).toEqual([welcome]);
+    expect(subject.setTarget(other)).toBe("relaunching");
+    expect(writes).toEqual([other]);
     expect(relaunch).toHaveBeenCalled();
     expect(subject.runtime.inner).toBe(override);
-    expect(local.ensureReady).not.toHaveBeenCalled();
   });
 });

@@ -2,10 +2,17 @@
 
 When an agent takes part in a chat: what wakes it, what it reads, and where it speaks. Participation reads the record [Chats](chats.md) keeps and speaks back into it, and starts a turn of an [agent](agents.md). The pattern both ways is the same: Chats keeps the record and offers it, the agent judges what to read and where to speak, and a guardrail bounds the speaking.
 
+## Speaker
+
+A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is read off the agent's session, not stored.
+
+- A session is in a chat when it has a speaker there. The session keeps its own id. No table holds speakers and nothing names one by an id of its own.
+
 ## Wake
 
 The moment a message is judged to need the agent and the agent starts a turn. The chat's [reply rule](chats.md#reply-rule) decides it.
 
+- The wake is decided on a message already recorded in its chat. A message that wakes no agent stays in the record, and the agent reads it when it next catches up. Until its wake is decided, no turn catches up on it, since it may yet start a turn of its own.
 - Not every message wakes the agent. Under "when it is needed" a lightweight check decides whether the message needs the agent, and a mention always does.
 - What the guardian writes in an [assistant's](chats.md#assistant) chat wakes no agent. It goes to the assistant, and main wakes on the assistant's answer.
 - A woken agent first catches up on what it has not seen, then acts.
@@ -26,7 +33,7 @@ The agent's working memory of a chat: a view built from the chat's messages, not
 What the agent says back after a wake, through the account it was woken on.
 
 - The agent decides where in the chat a reply goes: the thread the message was said in, the chat itself, or another of its threads.
-- A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it.
+- A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it. A message from one of the guardian's dashboard chats into another needs no card: the guardian is the only other participant in both, so nothing leaves their sight. Concierge hands work to its task chats this way.
 - A reply is a message like any other, said by the agent as its own account or on the guardian's behalf under theirs, as the kind of link says.
 
 ## Decided against

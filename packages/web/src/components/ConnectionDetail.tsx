@@ -4,7 +4,6 @@ import { StatusIndicator } from "@/lib/connection-status";
 import { AvailableToAddLabel, SoleSlotScope } from "@/components/connection-slot-card";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
 import { ComposioConnectionSection } from "@/components/connections/composio-connection-section";
-import { WebchatConnectionCard } from "@/components/connections/webchat-connection-card";
 import { AccountControls } from "@/components/connections/account-controls";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 import type { ComposioCliStatus } from "@/lib/provider-types";
@@ -42,17 +41,6 @@ export function ConnectionDetailBody({
    *  account" connected it. Without it, the add button is hidden. */
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
-  // Always-on (webchat) has its own card — connected, ✓ bullets, no ceremony.
-  if (card.alwaysOn) {
-    return (
-      <SoleSlotScope>
-        <div className="space-y-4">
-          <WebchatConnectionCard card={card} />
-        </div>
-      </SoleSlotScope>
-    );
-  }
-
   // A slot is "secondary" (an add-on shown under "Available to add") when it
   // follows the primary slot. Telegram is the only multi-slot connection in
   // v1: its personal-account slot is always secondary to the bot.
@@ -61,7 +49,7 @@ export function ConnectionDetailBody({
     <div className="space-y-6">
       {card.slots.map((slot, index) => {
         const isSecondary = index > 0;
-        const showAvailableToAdd = isSecondary && slot.state === "unauthorized";
+        const showAvailableToAdd = isSecondary && slot.state === null;
         const role = isSecondary ? "secondary" : "primary";
         return (
           <div key={slot.key} className="space-y-2">
@@ -152,7 +140,7 @@ function SlotEntry({
   }
 
   // The only remaining kind is composio (channel services + oauth are all
-  // handled above; webchat's alwaysOn card is rendered before SlotEntry).
+  // handled above).
   return (
     <ComposioConnectionSection
       card={card}

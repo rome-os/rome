@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@rstest/core";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
-import { AnthropicProvider, CLAUDE_AGENT_SDK_ENV } from "./anthropic-provider.js";
+import {
+  AnthropicProvider,
+  CLAUDE_AGENT_SDK_ENV,
+  CLAUDE_AGENT_SDK_SETTINGS,
+} from "./anthropic-provider.js";
 import { createRomeMcpServer, type RomeMcpGroup } from "./mcp/server.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "./model-selector.js";
 
@@ -78,6 +82,7 @@ describe("bundled Claude Code", () => {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         settingSources: [],
+        settings: CLAUDE_AGENT_SDK_SETTINGS,
         cwd: home,
       },
     });

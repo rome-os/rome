@@ -5,7 +5,7 @@ import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { linkedInMemberIdFromProfileUrl, type LinkedInHistoryMessage } from "./linkedin-sync.js";
 
 /**
- * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
+ * The `links.account_id` a LinkedIn message resolves through.
  *
  * The bare member id is the address the mirror keys on — `linkedin_participants`
  * is primary-keyed by it and promotion writes it into the mapping — so a promoted
@@ -13,7 +13,7 @@ import { linkedInMemberIdFromProfileUrl, type LinkedInHistoryMessage } from "./l
  *
  * The stored profile URL stays the fallback rather than being replaced by one:
  * a URL carrying no member id is a vanity handle (`/in/ada-lovelace`), which is
- * the form the guardian's own mapping is conferred in at connect time. Narrowing
+ * the form the guardian's own mapping is granted in at connect time. Narrowing
  * to the member id alone would strand it.
  */
 function linkedInChannelUserId(row: LinkedInHistoryMessage): string {

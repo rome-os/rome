@@ -12,8 +12,6 @@ import {
 } from "@/components/ui/context-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AppStoreSheet } from "@/components/AppStoreSheet";
-import { APP_STORE_BROWSE_URL } from "@/lib/app-store-url";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
@@ -23,7 +21,7 @@ import { useApps, useInvalidateApps } from "@/hooks/use-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
-import { isCarrierApp } from "@/lib/chat-helpers";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
 import {
@@ -81,9 +79,26 @@ function parsePins(raw: unknown): PinnedEntry[] | null {
   return valid;
 }
 
+// Builtin pages folded into another one. A pin saved under the old id opens
+// the page that replaced it.
+const MERGED_BUILTIN_PINS: Readonly<Record<string, string>> = { sessions: "activity" };
+
 export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
   const requiredIds = new Set(REQUIRED_BUILTIN_PINS.map((pin) => pin.id));
-  const rest = pins.filter((pin) => !(pin.type === "builtin" && requiredIds.has(pin.id)));
+  const seen = new Set<string>();
+  const rest: PinnedEntry[] = [];
+  for (const pin of pins) {
+    const entry =
+      pin.type === "builtin" && MERGED_BUILTIN_PINS[pin.id]
+        ? { type: pin.type, id: MERGED_BUILTIN_PINS[pin.id] }
+        : pin;
+    if (entry.type === "builtin" && requiredIds.has(entry.id)) continue;
+    // Both old pages pinned leave one pin, not two.
+    const key = `${entry.type}:${entry.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rest.push(entry);
+  }
   return [...REQUIRED_BUILTIN_PINS, ...rest];
 }
 
@@ -108,7 +123,7 @@ function readLocalApps(): CachedApp[] {
     const stored = localStorage.getItem(APPS_CACHE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed.filter((app) => !isCarrierApp(app?.id)) : [];
+    return Array.isArray(parsed) ? parsed.filter((app) => app && !isHiddenInLauncher(app)) : [];
   } catch {
     return [];
   }
@@ -166,7 +181,6 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   );
   const [installedApps, setInstalledApps] =
     useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
-  const [storeOpen, setStoreOpen] = useState(false);
   const labelled = useContext(RailLabelsContext);
   const tileClass = railLinkClass(labelled);
   // A labelled row already names itself, so its tooltip would only repeat it.
@@ -207,8 +221,8 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   useEffect(() => {
     if (!appsFromQuery) return;
-    // Carriers (e.g. user-skills) are plumbing, never a pin or a recent app.
-    const sidebarApps = appsFromQuery.filter((app) => !isCarrierApp(app.id));
+    // Hidden apps (e.g. the user-skills carrier) are never a pin or a recent app.
+    const sidebarApps = appsFromQuery.filter((app) => !isHiddenInLauncher(app));
     setInstalledApps(sidebarApps);
     writeLocalApps(sidebarApps);
   }, [appsFromQuery]);
@@ -283,8 +297,8 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   // Rome's own surfaces sit in the same pin list as apps, so their rows answer
   // a right-click the same way. Split view is the one app action they lack:
-  // the chat's side panel hosts app widgets only. The store row already leaves
-  // the page, so it offers just Unpin, and the required pins offer no Unpin.
+  // the chat's side panel hosts app widgets only. The required pins offer no
+  // Unpin.
   const withBuiltinContextMenu = (
     entry: BuiltinNavEntry,
     trigger: React.ReactNode,
@@ -292,7 +306,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     const canUnpin = !isRequiredBuiltinPin(entry.id);
     // Without tabs the open item is a plain Open, which a menu earns only
     // beside Unpin; alone it would repeat a click and take over a long-press.
-    const canOpen = entry.id !== "store" && (canOpenNewTab || canUnpin);
+    const canOpen = canOpenNewTab || canUnpin;
     if (!canOpen && !canUnpin) return trigger;
     return (
       <ContextMenu>
@@ -373,59 +387,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
 
-  // The App Store lives on Rome Cloud. A browser opens it in a new tab, which
-  // is what a tab is for; the Mac app (see `inDesktopApp`) swaps to the embedded
-  // sheet instead.
-  const storeSheet = inDesktopApp ? (
-    <AppStoreSheet
-      open={storeOpen}
-      onClose={() => setStoreOpen(false)}
-      onInstalled={() => {
-        void invalidateApps.list();
-        void invalidateApps.updates();
-      }}
-    />
-  ) : null;
-
   const renderPin = (pin: PinnedEntry): React.ReactNode => {
     if (pin.type === "builtin") {
       const entry = builtinMap.get(pin.id);
       if (!entry) return null;
       const label = t(entry.labelKey);
-      if (entry.id === "store") {
-        return (
-          <Tooltip key={`builtin-${pin.id}`}>
-            {withBuiltinContextMenu(
-              entry,
-              <TooltipTrigger asChild>
-                {inDesktopApp ? (
-                  <button
-                    type="button"
-                    onClick={() => setStoreOpen(true)}
-                    aria-label={label}
-                    className={`${tileClass} ${IDLE_CLASS}`}
-                  >
-                    {renderBuiltinIcon(entry)}
-                    {labelled ? <RailLabel>{label}</RailLabel> : null}
-                  </button>
-                ) : (
-                  <a
-                    href={APP_STORE_BROWSE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={label}
-                    className={`${tileClass} ${IDLE_CLASS}`}
-                  >
-                    {renderBuiltinIcon(entry)}
-                    {labelled ? <RailLabel>{label}</RailLabel> : null}
-                  </a>
-                )}
-              </TooltipTrigger>,
-            )}
-            {tip(label)}
-          </Tooltip>
-        );
-      }
       const active = isEntryActive(location.pathname, entry.href);
       if (entry.id === "chat" && chatPeek) {
         return (
@@ -498,7 +464,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   const fixedCount = REQUIRED_BUILTIN_PINS.length;
   return (
-    <TooltipProvider delayDuration={150}>
+    // A labelled tile renders no tooltip content, and Radix closes a hoverable
+    // tooltip from that content, not the trigger. Hovering labelled tiles would
+    // leave each one open, and they would all show when the rail collapses.
+    // Without hoverable content, leaving the trigger closes the tooltip.
+    <TooltipProvider delayDuration={150} disableHoverableContent={labelled}>
       <nav
         className={`flex shrink-0 flex-col gap-1 px-3 pb-2 ${labelled ? "items-stretch" : "items-center"}`}
       >
@@ -537,7 +507,6 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
           }
         />
       </nav>
-      {storeSheet}
     </TooltipProvider>
   );
 }

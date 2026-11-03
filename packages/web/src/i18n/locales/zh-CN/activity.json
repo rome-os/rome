@@ -108,6 +108,7 @@
     "payload": "请求内容"
   },
   "trace": {
+    "archived": "此轮对话的步骤已归档。",
     "loading": "正在加载追踪…",
     "retry": "重试",
     "failedWithReason": "错误: {{reason}}",

@@ -45,7 +45,11 @@ export function ApprovalCard({
     status === "pending" ? t("approvals.headerPending") : t("approvals.headerResolved");
 
   return (
-    <div className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60">
+    <div
+      tabIndex={-1}
+      data-chat-pending-card={record && status === "pending" ? "approval" : undefined}
+      className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60"
+    >
       <div className="flex items-center justify-between border-b border-warning-border bg-warning-bg px-4 py-2">
         <div className="flex items-center gap-2 text-ui text-warning-fg">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

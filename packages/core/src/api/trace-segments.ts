@@ -118,6 +118,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   let stoppedByUser = false;
   let terminalError: string | undefined;
   let latestPlan: TraceSummary["plan"];
+  let turnModel: string | undefined;
   /** Most recent result/error block; the turn's own `turn_end` reads it to
    *  derive the summary (stop/error state). */
   let lastTerminal: (TraceEventDto & { type: "result" | "error" }) | undefined;
@@ -195,6 +196,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
         stoppedByUser = false;
         terminalError = undefined;
         latestPlan = undefined;
+        turnModel = undefined;
         lastTerminal = undefined;
         return changed;
       }
@@ -213,6 +215,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
           block.status === "error" && lastTerminal?.type === "error"
             ? lastTerminal.error
             : undefined;
+        turnModel = lastTerminal?.accounting?.model || undefined;
         lastTerminal = undefined;
         return changed;
       }
@@ -348,6 +351,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
           invocationCounts: { ...invocationCounts },
           ...(stoppedByUser ? { stoppedByUser: true } : {}),
           ...(terminalError ? { terminalError } : {}),
+          ...(turnModel ? { model: turnModel } : {}),
           ...(latestPlan
             ? {
                 plan: {

@@ -85,7 +85,7 @@ describe("connector_tool_execute result mapping", () => {
     });
   });
 
-  it("routes an unconnected Rome-managed toolkit to Settings, not connector_connect", async () => {
+  it("routes GitHub tool execution to its native API and connect card", async () => {
     loadConnectorClient.mockResolvedValueOnce({
       findActiveConnectedAccount: async () => ({ kind: "none" }),
       executeTool: async () => {
@@ -100,7 +100,19 @@ describe("connector_tool_execute result mapping", () => {
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/settings/i);
-    expect(result.error).not.toMatch(/connector_connect/);
+    expect(result.error).toContain('connector_connect({"toolkit":"github"})');
+    expect(result.error).not.toMatch(/can.t be connected from here/);
+  });
+
+  it("routes Shopify tool execution to its native API and connect card", async () => {
+    loadConnectorClient.mockClear();
+    const result = await run({ toolkit: "shopify", slug: "SHOPIFY_GET_PRODUCTS", args: {} });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`got ${result.status}`);
+    expect(result.error).toContain("connector_proxy");
+    expect(result.error).toContain('connector_connect({"toolkit":"shopify"})');
+    expect(result.error).not.toMatch(/can.t be connected from here/);
+    expect(loadConnectorClient).not.toHaveBeenCalled();
   });
 
   it("redirects a Rome-managed toolkit without a shell (Slack) to connector_proxy, before Composio", async () => {

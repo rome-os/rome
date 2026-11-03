@@ -744,19 +744,25 @@ export function createMessageHandlerAction(
             : undefined;
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
+        // The host recorded the message before this action ran, as said while
+        // the agent was away. Waking the agent makes it the turn's prompt.
+        const recorded =
+          typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
         if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
-          const stored = await conversations.addMessage({
-            sessionId: conversation.id,
-            role: "notification",
-            content: messageContent,
-            platformMessageId,
-            senderId: channelUserId,
-            senderName: displayName,
-            replyToPlatformMessageId,
-            createdAt,
-          });
+          const stored = recorded
+            ? { inserted: true }
+            : await conversations.addMessage({
+                sessionId: conversation.id,
+                role: "notification",
+                content: messageContent,
+                platformMessageId,
+                senderId: channelUserId,
+                senderName: displayName,
+                replyToPlatformMessageId,
+                createdAt,
+              });
           if (!stored.inserted) {
             return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
           }
@@ -791,16 +797,21 @@ export function createMessageHandlerAction(
 
         const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
         const triggersTargetAgent = trusted || policy.action === "allow";
-        const stored = await conversations.addMessage({
-          sessionId: conversation.id,
-          role: triggersTargetAgent ? "user" : "notification",
-          content: messageContent,
-          platformMessageId,
-          senderId: channelUserId,
-          senderName: displayName,
-          replyToPlatformMessageId,
-          createdAt,
-        });
+        if (recorded && triggersTargetAgent) {
+          await conversations.promoteMessageToUser(conversation.id, platformMessageId);
+        }
+        const stored = recorded
+          ? { inserted: true }
+          : await conversations.addMessage({
+              sessionId: conversation.id,
+              role: triggersTargetAgent ? "user" : "notification",
+              content: messageContent,
+              platformMessageId,
+              senderId: channelUserId,
+              senderName: displayName,
+              replyToPlatformMessageId,
+              createdAt,
+            });
         if (!stored.inserted) {
           return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
         }

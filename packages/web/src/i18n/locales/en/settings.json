@@ -52,6 +52,58 @@
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",
     "emptyTitle": "No connections available",
+    "connect": "Connect",
+    "search": {
+      "placeholder": "Search connections",
+      "clear": "Clear search",
+      "noMatch": {
+        "connected": "No connected service matches “{{query}}”.",
+        "available": "No available service matches “{{query}}”."
+      }
+    },
+    "tabs": {
+      "label": "Connections",
+      "connected": "Connected",
+      "available": "Available",
+      "empty": {
+        "connected": "Nothing is connected yet.",
+        "available": "Everything here is connected."
+      },
+      "show": {
+        "connected": "Show {{count}} in Connected",
+        "available": "Show {{count}} in Available"
+      }
+    },
+    "groups": {
+      "messaging": "Messaging",
+      "accounts": "Accounts and tools",
+      "other": "Other"
+    },
+    "composioServices": {
+      "group": "Via Composio",
+      "via": "via Composio",
+      "viaLong": "Rome reaches this service through your Composio account.",
+      "signInBanner": "Sign in to Composio to connect these services.",
+      "signIn": "Sign in",
+      "authorize": "Authorize {{name}} in the new tab, then come back.",
+      "alreadyConnected": "{{name}} is already connected.",
+      "openTab": "Open tab",
+      "returnConnected": "{{name}} connected.",
+      "returnFailed": "Couldn't finish connecting {{name}}. Try again.",
+      "connectFailed": "Couldn't start the connection. Try again.",
+      "reconnect": "Reconnect",
+      "disconnectConfirm": "Disconnect {{name}}? Rome can't reach it until you connect it again.",
+      "disconnected": "{{name}} disconnected.",
+      "loadFailed": "Couldn't load the Composio services.",
+      "webhook": {
+        "title": "Event delivery",
+        "ready": "Ready",
+        "notReady": "Needs setup",
+        "unavailable": "Unavailable on this instance",
+        "setUp": "Set up again",
+        "done": "Event delivery is set up."
+      }
+    },
     "loadFailedFallback": "Failed to load connections.",
     "accounts": {
       "add": "Add another account",
@@ -59,7 +111,8 @@
       "newAccount": "New account",
       "noAgent": "None. Rome does not listen to this account.",
       "changeInEnvoys": "Change in Envoys",
-      "agentAnswers": "Answers messages on this account",
+      "agentSpeaksAs": "Speaks as this account",
+      "agentAnswersForYou": "Answers for you from this account",
       "noAgentTitle": "No agent",
       "agentNone": "Rome does not listen to this account"
     },
@@ -197,15 +250,6 @@
             "reply": "Your dots message your agent through Rome Cloud",
             "start": "Your agent messages a dot when something needs its attention"
           }
-        }
-      },
-      "webchat": {
-        "bot": {
-          "title": "Dashboard chat",
-          "bullets": {
-            "chat": "Chat with your agent right here in the dashboard"
-          },
-          "alwaysOn": "Always on — nothing to configure."
         }
       },
       "github": {
@@ -728,6 +772,11 @@
         "description": "Applies to the guardian's direct chats on Telegram, Feishu, and Discord. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
         "toggleLabel": "Stream replies as they are written"
       },
+      "concierge": {
+        "title": "Concierge",
+        "description": "Adds one chat under Chats where your agent texts with you in short messages and hands longer work to task chats you can open.",
+        "toggleLabel": "Show Concierge in Chats"
+      },
       "feishuStreamingStyle": {
         "title": "Feishu streaming style",
         "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",
@@ -737,11 +786,6 @@
     },
     "developerSettings": {
       "title": "Developer Settings"
-    },
-    "fable": {
-      "title": "Fable",
-      "description": "Only applies when Claude is available.",
-      "toggleLabel": "Route large models to Fable"
     },
     "tierModelMappings": {
       "title": "Model ID mappings",
@@ -756,7 +800,6 @@
         "medium": "Claude medium model ID",
         "small": "Claude small model ID"
       },
-      "fableNote": "A Claude large mapping replaces Fable's model ID while Fable still prefers Claude for large tiers.",
       "save": "Save mappings"
     },
     "modelSelector": {
@@ -880,6 +923,37 @@
         "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
         "toggleLabel": "Allow agent reports"
       }
+    },
+    "spokenRecaps": {
+      "title": "Spoken recaps",
+      "description": "A short summary after substantial chat turns, with optional audio to listen hands-free. Recaps appear in the chat.",
+      "enabled": {
+        "title": "Create recaps",
+        "description": "Each recap uses an extra model call. Off by default. Turning recaps off stops new summaries and audio, but keeps existing recaps."
+      },
+      "threshold": {
+        "title": "Length threshold",
+        "description": "Based on response length and tool activity, not recap length.",
+        "short": "Shorter turns",
+        "medium": "Substantial turns",
+        "long": "Longer turns only"
+      },
+      "createAudio": {
+        "title": "Create audio",
+        "description": "Send recap text to Microsoft Edge Text to Speech to create a playable recording."
+      },
+      "audioSpeed": {
+        "title": "Audio speed",
+        "description": "Applies to newly created recordings.",
+        "slower": "Slower (−15%)",
+        "normal": "Normal",
+        "faster": "Faster (+15%)",
+        "fastest": "Fastest (+30%)"
+      },
+      "loadFailed": "Recap settings could not be saved or loaded. Try again.",
+      "loading": "Loading recap settings…",
+      "saving": "Saving…",
+      "retry": "Try again"
     }
   },
   "system": {

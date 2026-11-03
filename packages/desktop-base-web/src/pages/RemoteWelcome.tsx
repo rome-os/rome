@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
  */
 export function RemoteWelcome({ status }: { status: RuntimeStatus }) {
   const [cloud, setCloud] = useState<CloudState | null>(null);
-  const [busy, setBusy] = useState<"sign-in" | "choose" | "local" | null>(null);
+  const [busy, setBusy] = useState<"sign-in" | "choose" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,17 +36,6 @@ export function RemoteWelcome({ status }: { status: RuntimeStatus }) {
       const message = errorMessage(err);
       if (!/cancelled/i.test(message)) setError(message);
     } finally {
-      setBusy(null);
-    }
-  }, []);
-
-  const useLocalVm = useCallback(async () => {
-    setError(null);
-    setBusy("local");
-    try {
-      await romeApi.runtime.setTarget({ kind: "local" });
-    } catch (err) {
-      setError(errorMessage(err));
       setBusy(null);
     }
   }, []);
@@ -121,7 +110,7 @@ export function RemoteWelcome({ status }: { status: RuntimeStatus }) {
           <Button
             className="w-full"
             onClick={() => {
-              romeApi.runtime.openInstallPage().catch(console.error);
+              romeApi.runtime.openCloud().catch(console.error);
             }}
           >
             Open Rome Cloud
@@ -158,13 +147,14 @@ export function RemoteWelcome({ status }: { status: RuntimeStatus }) {
         </p>
       )}
 
-      <Advanced
-        localVm={cloud?.localVm ?? null}
-        busy={busy === "local"}
-        onUseLocalVm={() => {
-          useLocalVm().catch(console.error);
-        }}
-      />
+      {cloud?.legacyRuntimeDir && (
+        // Builds before this one could run a private Rome on this Mac. The app
+        // no longer opens it, and never deletes it; this says where it is.
+        <p className="border-t pt-4 text-xs text-muted-foreground">
+          Your earlier Rome on this Mac no longer opens here. Its data stays in{" "}
+          <span className="break-all">{cloud.legacyRuntimeDir}</span>.
+        </p>
+      )}
     </div>
   );
 }
@@ -213,50 +203,5 @@ function InstanceChooser({
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * The private VM is for people who want Rome to run on this Mac. It is a
- * separate Rome, so the copy says so before anyone downloads gigabytes
- * expecting to see their Rome Cloud chats.
- */
-function Advanced({
-  localVm,
-  busy,
-  onUseLocalVm,
-}: {
-  localVm: CloudState["localVm"] | null;
-  busy: boolean;
-  onUseLocalVm: () => void;
-}) {
-  return (
-    <details className="group border-t pt-4">
-      <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-        <ChevronRight className="size-3 transition-transform group-open:rotate-90" />
-        Advanced
-      </summary>
-      <div className="mt-3 space-y-3 rounded-md border p-4">
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Run a private Rome on this Mac</p>
-          <p className="text-xs text-muted-foreground">
-            A separate Rome in a Linux VM on this computer. It does not share chats, memory, or apps
-            with your Rome Cloud Rome. The first start downloads a few GB.
-          </p>
-        </div>
-        {localVm && !localVm.supported && (
-          <p className="text-xs text-destructive">{localVm.reason}</p>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || !localVm?.supported}
-          onClick={onUseLocalVm}
-        >
-          {busy && <Loader2 className="animate-spin" />}
-          Use a private VM
-        </Button>
-      </div>
-    </details>
   );
 }

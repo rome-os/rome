@@ -2,7 +2,7 @@
  * Message parts only the host may author. A routine card can create, pause and
  * delete routines, so only the webchat drain writes one (directly to the
  * repository). Every outbound path that stores sender-supplied parts —
- * `send_message`, `channels.send`, the outbox — strips them, so a forged card
+ * `send_message`, `channels.send`, a People send — strips them, so a forged card
  * can't bind those controls to a routine or schedule an arbitrary action.
  */
 const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set(["routine_draft_card"]);

@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { cn } from "@/lib/utils";
-import { DirectoryRow, UnknownRow } from "./rows";
+import { DirectoryRow, StrangerRow } from "./rows";
 import { levelLabelKey } from "./rows";
 import { TransferConfirm } from "./transfer";
 import { usePeopleWrites } from "./use-writes";
@@ -40,7 +40,7 @@ import type { LinkTarget, PeopleRow, PeopleView } from "./people-model";
 // contract (`./writes.ts`), because they are several different writes: placing
 // a sender creates a person or links onto one, dismissing it is a decision
 // about the account, and the dismissed end of the ladder has a way back.
-// Dismissal is a state an account is in rather than a merge into a sentinel, so
+// Dismissal is a state an account is in rather than a person it moves to, so
 // there is no target list to enumerate and nothing here has to know which moves
 // a row admits.
 //
@@ -267,7 +267,7 @@ function LinkForm({
  * row in that view is, and the gestures sit behind a `⋯` menu at the end of it.
  */
 function entryRow(variant: PeopleView) {
-  return variant === "directory" ? DirectoryRow : UnknownRow;
+  return variant === "directory" ? DirectoryRow : StrangerRow;
 }
 
 /**
@@ -277,7 +277,7 @@ function entryRow(variant: PeopleView) {
  * invalidating the reads and resolves once they have landed, so the row stands
  * until the listing that no longer holds it has arrived.
  */
-export function UnknownEntry({
+export function StrangerEntry({
   row,
   people,
   variant,
@@ -373,7 +373,7 @@ export function UnknownEntry({
   const Row = entryRow(variant);
   // The verbs wear the shape their view has room for. The stream is the triage
   // surface, a handful of senders waiting on a decision, so its dense row
-  // carries the three as buttons. The directory's Unknown group is everyone
+  // carries the three as buttons. The directory's Stranger group is everyone
   // Rome has not placed — a synced address book can put hundreds of rows in it
   // — and three buttons per contact would out-shout the roster the view exists
   // to read, so there they fold into one quiet row menu.
@@ -398,11 +398,7 @@ export function UnknownEntry({
         onClick={() => setConfirmingDismiss(true)}
         disabled={acting}
       >
-        <BusyLabel
-          idle={t("actions.markStranger")}
-          busy={t("actions.markingStranger")}
-          isBusy={acting}
-        />
+        <BusyLabel idle={t("actions.dismiss")} busy={t("actions.dismissing")} isBusy={acting} />
       </Button>
     </span>
   );
@@ -433,7 +429,7 @@ export function UnknownEntry({
             that opens the confirm and the button that carries it out promise
             the same thing. */}
         <DropdownMenuItem variant="destructive" onSelect={() => setConfirmingDismiss(true)}>
-          {t("actions.markStranger")}
+          {t("actions.dismiss")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -470,17 +466,17 @@ export function UnknownEntry({
       <RomeConfirmDialog
         open={confirmingDismiss}
         destructive
-        title={t("strangerConfirm.title", { name })}
+        title={t("dismissConfirm.title", { name })}
         // A dismissal does not take the account off the directory — it moves it
-        // to the Stranger end of the ladder, which has a chip of its own — so
+        // to the Dismissed end of the ladder, which has a chip of its own — so
         // the copy names the listing it leaves.
-        description={t("strangerConfirm.description", {
+        description={t("dismissConfirm.description", {
           name,
-          section: t("levels.unknown"),
+          section: t("levels.stranger"),
         })}
         // Deliberately the same words as the trigger: the button that opens the
         // confirm and the button that carries it out promise the same thing.
-        confirmLabel={t("actions.markStranger")}
+        confirmLabel={t("actions.dismiss")}
         cancelLabel={t("actions.cancel")}
         onCancel={() => setConfirmingDismiss(false)}
         onConfirm={() => void handleDismiss()}
@@ -503,7 +499,7 @@ export function UnknownEntry({
 /**
  * An account the guardian dismissed, with the gesture that undoes it.
  *
- * The same row the Unknown view uses in whichever view it is in, because the
+ * The same row the Stranger view uses in whichever view it is in, because the
  * decision runs on the same evidence. No confirmation — a restore only puts the
  * account back where a decision is still owed.
  */

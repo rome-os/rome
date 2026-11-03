@@ -333,30 +333,6 @@ describe("pinned built-in page context menu", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByRole("menu")).toBeNull();
   });
-
-  it.each([
-    ["in the browser", false],
-    ["in the Mac app", true],
-  ] as const)("offers only unpin on the App Store row %s", async (_name, inDesktopApp) => {
-    if (inDesktopApp) window.rome = {};
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ type: "builtin", id: "store" }]));
-    renderSidebar();
-
-    let trigger: Element | null = null;
-    await waitFor(() => {
-      trigger = document.querySelector('nav [aria-label="App Store"]');
-      expect(trigger).toBeTruthy();
-    });
-    expect((trigger as unknown as Element).tagName).toBe(inDesktopApp ? "BUTTON" : "A");
-    fireEvent.contextMenu(trigger as unknown as Element);
-
-    const menu = await screen.findByRole("menu");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Unpin from sidebar"]);
-  });
 });
 
 describe("rail search", () => {

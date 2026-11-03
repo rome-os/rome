@@ -1,4 +1,9 @@
-import { ChevronDownIcon, ChevronRightIcon, Pencil2Icon } from "@radix-ui/react-icons";
+import {
+  ChatBubbleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  Pencil2Icon,
+} from "@radix-ui/react-icons";
 import {
   Archive,
   ArchiveRestore,
@@ -29,20 +34,22 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
+import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
+import {
+  CONCIERGE_AGENT_ID,
+  TASK_CHAT_TRIGGER_KIND,
+  useConciergeChatId,
+} from "@/hooks/use-concierge";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import {
-  emitSessionsChanged,
-  useArchiveSession,
-  usePinSession,
-  useSessionsChanged,
-} from "@/lib/session-events";
+import { ConciergeEntry } from "./ConciergeEntry";
+import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -78,27 +85,24 @@ const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolea
 function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
   if (status === "running") {
     return (
-      <svg
-        viewBox="0 0 16 16"
-        fill="none"
-        className="h-4 w-4 animate-spin text-running motion-reduce:animate-none"
-        aria-hidden
-      >
-        <circle
-          cx="8"
-          cy="8"
-          r="5.5"
-          stroke="currentColor"
-          strokeOpacity="0.2"
-          strokeWidth="1.75"
-        />
-        <path
-          d="M8 2.5A5.5 5.5 0 1 1 2.5 8"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          strokeLinecap="round"
-        />
-      </svg>
+      <span className="rome-status-spin flex h-4 w-4">
+        <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-running" aria-hidden>
+          <circle
+            cx="8"
+            cy="8"
+            r="5.5"
+            stroke="currentColor"
+            strokeOpacity="0.2"
+            strokeWidth="1.75"
+          />
+          <path
+            d="M8 2.5A5.5 5.5 0 1 1 2.5 8"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
+        </svg>
+      </span>
     );
   }
   if (status === "failed") {
@@ -172,8 +176,8 @@ const DATE_BUCKETS = [
 type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
 
 function readScope(): SessionScope {
-  if (typeof window === "undefined") return "all";
-  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "mine" ? "mine" : "all";
+  if (typeof window === "undefined") return "mine";
+  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
 }
 
 function readGroupMode(): GroupMode {
@@ -254,7 +258,18 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  marker,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  /** Names who started the chat, shown as a small mark after the name. */
+  marker?: string;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -287,6 +302,13 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           <span ref={nameRef} className="truncate">
             {name}
           </span>
+          {marker ? (
+            <ChatBubbleIcon
+              role="img"
+              aria-label={marker}
+              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
+            />
+          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -314,8 +336,6 @@ export function RecentChats({
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [phase, setPhase] = useState<LoadPhase>("loading");
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
@@ -332,35 +352,58 @@ export function RecentChats({
   const renamingRef = useRef(false);
   const activeSessionId = activeSessionFromPath(location.pathname);
 
-  // The newest running state the status stream has reported per chat. A list
-  // response can be older than an event that arrived while it was in flight,
-  // so the stream's word wins over the row's.
+  const {
+    sessions: cachedSessions,
+    isError,
+    refetch,
+    invalidate,
+    update: updateSessions,
+  } = useChatSessions(statusFilter, scope);
+  // Cached rows show at once and a failed refetch keeps them, so the skeleton
+  // is only for a list that has never loaded.
+  const phase: LoadPhase = isError ? "error" : cachedSessions ? "ready" : "loading";
+
+  // The newest running state the status stream has reported per chat, applied
+  // over every list response: one can be older than an event that arrived
+  // while it was in flight. Per mount, since events stop while unmounted; the
+  // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // Only the latest request may update the list or phase, including event-driven refetches.
-  const listRequest = useRef(0);
-  const loadSessions = useCallback(async () => {
-    const request = ++listRequest.current;
-    try {
-      const data = await listSessions(statusFilter, scope);
-      if (request !== listRequest.current) return;
-      setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
-      setPhase("ready");
-    } catch {
-      if (request !== listRequest.current) return;
-      setPhase("error");
+  // The Concierge chat has its own entry above the list.
+  const sessions = useMemo(
+    () =>
+      (cachedSessions ?? [])
+        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID)
+        .map((s) => withLiveRunning(s, liveRunning.current)),
+    [cachedSessions],
+  );
+  const conciergeChatId = useConciergeChatId();
+
+  // A chat that starts running before the list has it, such as a task chat
+  // Concierge just started, would show only when its first turn ends. The
+  // list is asked again once per such chat. A chat that is still not in it
+  // after that, such as one on another filter or page, is remembered, so its
+  // running state never asks again.
+  const listedIds = useRef(new Set<string>());
+  listedIds.current = new Set((cachedSessions ?? []).map((s) => s.id));
+  const refetchedFor = useRef(new Set<string>());
+  const absentAfterRefetch = useRef(new Set<string>());
+  const refetchForUnknown = (sessionId: string) => {
+    if (
+      listedIds.current.has(sessionId) ||
+      refetchedFor.current.has(sessionId) ||
+      absentAfterRefetch.current.has(sessionId)
+    ) {
+      return;
     }
-  }, [statusFilter, scope]);
-
-  useEffect(() => {
-    void loadSessions();
-    return () => {
-      listRequest.current += 1;
-    };
-  }, [loadSessions]);
-
-  useSessionsChanged(() => {
-    void loadSessions();
-  });
+    refetchedFor.current.add(sessionId);
+    void refetch()
+      .then((result) => {
+        if (!result.data?.some((s) => s.id === sessionId)) {
+          absentAfterRefetch.current.add(sessionId);
+        }
+      })
+      .finally(() => refetchedFor.current.delete(sessionId));
+  };
 
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
@@ -371,10 +414,11 @@ export function RecentChats({
         schema: sessionRunningSchema,
         fn: ({ sessionId, running }) => {
           liveRunning.current.set(sessionId, running);
-          setSessions((prev) =>
+          updateSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
           );
-          if (!running) void loadSessions();
+          if (!running) void invalidate();
+          else refetchForUnknown(sessionId);
         },
       },
     },
@@ -383,7 +427,7 @@ export function RecentChats({
       // and the snapshot the new connection sends.
       onReconnect: () => {
         liveRunning.current.clear();
-        void loadSessions();
+        void invalidate();
       },
     },
   );
@@ -572,7 +616,7 @@ export function RecentChats({
         // Server unchanged — leave the list as-is and skip the optimistic flip.
         return;
       }
-      setSessions((prev) => {
+      updateSessions((prev) => {
         // Drop the row when it no longer matches the active filter (archiving
         // under "active", unarchiving under "archived"); otherwise reflect the
         // new flag in place (the "all" view). Archiving never forces navigation.
@@ -584,7 +628,7 @@ export function RecentChats({
         );
       });
     },
-    [archiveMutation, statusFilter],
+    [archiveMutation, statusFilter, updateSessions],
   );
 
   const handleUnarchive = useCallback(
@@ -601,7 +645,7 @@ export function RecentChats({
       } catch {
         return;
       }
-      setSessions((prev) =>
+      updateSessions((prev) =>
         prev.map((session) =>
           session.id === id
             ? { ...session, pinnedAt: pinned ? new Date().toISOString() : null }
@@ -609,7 +653,7 @@ export function RecentChats({
         ),
       );
     },
-    [pinMutation],
+    [pinMutation, updateSessions],
   );
 
   const handleDelete = useCallback(
@@ -619,13 +663,13 @@ export function RecentChats({
       } catch {
         // ignore — refetch anyway
       }
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+      updateSessions((prev) => prev.filter((s) => s.id !== id));
       emitSessionsChanged();
       if (activeSessionId === id) {
         navigate("/chat");
       }
     },
-    [activeSessionId, navigate],
+    [activeSessionId, navigate, updateSessions],
   );
 
   const startRename = useCallback((session: ChatSession) => {
@@ -655,7 +699,7 @@ export function RecentChats({
       }
       setEditingId(null);
       setEditingValue("");
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+      updateSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
       try {
         await renameSession(id, name);
       } catch {
@@ -663,7 +707,7 @@ export function RecentChats({
       }
       emitSessionsChanged();
     },
-    [editingValue, sessions, cancelRename],
+    [editingValue, sessions, cancelRename, updateSessions],
   );
 
   // Focus and select the rename field as soon as it mounts.
@@ -724,7 +768,16 @@ export function RecentChats({
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink
+            id={session.id}
+            name={session.name}
+            nested={nested}
+            marker={
+              session.triggerKind === TASK_CHAT_TRIGGER_KIND
+                ? t("recentChats.startedByConcierge")
+                : undefined
+            }
+          />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -1107,6 +1160,9 @@ export function RecentChats({
             </span>
             <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
           </Link>
+          {conciergeChatId ? (
+            <ConciergeEntry chatId={conciergeChatId} active={activeSessionId === conciergeChatId} />
+          ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">
           {hasPinned ? (
@@ -1165,7 +1221,7 @@ export function RecentChats({
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => void loadSessions()}
+                  onClick={() => void refetch()}
                 >
                   {t("recentChats.searchRetry")}
                 </Button>

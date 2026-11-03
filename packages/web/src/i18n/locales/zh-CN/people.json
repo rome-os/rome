@@ -21,12 +21,12 @@
     "days": "{{count}} 天前"
   },
   "levels": {
-    "unknown": "未知",
+    "stranger": "陌生人",
     "guardian": "守护者",
     "innerCircle": "核心圈",
     "acquaintance": "熟人",
     "other": "其他",
-    "stranger": "陌生人"
+    "dismissed": "已忽略"
   },
   "channels": {
     "telegram": "Telegram",
@@ -51,7 +51,8 @@
     "noActivity": "暂无动态"
   },
   "guardian": {
-    "meta": "这是你本人，拥有所有界面的完整权限。"
+    "you": "你本人",
+    "noAccounts": "这是你本人。还没有关联任何账号，可用“关联我的账号”添加。"
   },
   "actions": {
     "select": "选择 {{name}}",
@@ -63,15 +64,18 @@
     "close": "关闭",
     "create": "创建",
     "link": "关联",
-    "markStranger": "视为陌生人",
+    "dismiss": "忽略",
     "createProfile": "创建资料",
     "creating": "创建中…",
     "linkSubmit": "关联",
     "linking": "关联中…",
-    "markingStranger": "标记中…",
+    "dismissing": "忽略中…",
     "restore": "恢复",
     "restoring": "恢复中…",
-    "transfer": "移到这里"
+    "transfer": "移到这里",
+    "deletePerson": "删除人物…",
+    "delete": "删除",
+    "deleting": "删除中…"
   },
   "bulk": {
     "selected": "已选择",
@@ -83,11 +87,15 @@
   },
   "merge": {
     "title": "合并到另一位人物",
-    "description": "他们的渠道会转移到你选择的人物名下，重复的条目将被移除。",
+    "description": "他们的账号会转移到你选择的人物名下，重复的条目将被移除。",
     "selectLabel": "要合并到的人物",
     "confirm": "合并",
     "searchPlaceholder": "按姓名、电话或账号搜索",
     "noCandidates": "没有符合该搜索的人。"
+  },
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "{{name}} 将从人物中移除。其账号会重新成为陌生人，每个聊天都保留其历史记录。"
   },
   "errors": {
     "requestFailed": "出了点问题，更改未保存。",
@@ -122,9 +130,10 @@
     "composerLabel": "消息内容",
     "composerPlaceholder": "给 {{name}} 发消息…",
     "missingTitle": "找不到这个人",
-    "missingBody": "该人物可能已被合并到其他人名下。返回人物页面即可找到他们。",
+    "missingBody": "该人物可能已被合并到其他人名下或已被删除。返回人物页面即可找到他们。",
     "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
-    "noAccounts": "暂无账号"
+    "noAccounts": "暂无账号",
+    "delegate": "代理"
   },
   "send": {
     "to": "发送至",
@@ -136,13 +145,11 @@
     "submit": "发送",
     "retry": "重试",
     "discard": "放弃这条消息",
-    "outbox": {
-      "label": "发件箱"
+    "pending": {
+      "label": "未发送"
     },
     "state": {
-      "sending": "发送中",
-      "unconfirmed": "已发出，尚未确认",
-      "stopped": "Rome 已停止尝试发送这条消息"
+      "sending": "发送中"
     },
     "refusal": {
       "notConnected": "{{channel}} 未连接，Rome 无法从这里发送。请在设置中连接。",
@@ -176,9 +183,9 @@
       "heldBy": "当前归属"
     }
   },
-  "strangerConfirm": {
-    "title": "将 {{name}} 视为陌生人？",
-    "description": "{{name}} 将不再出现在{{section}}中。随时可在“陌生人”视图中恢复。"
+  "dismissConfirm": {
+    "title": "忽略 {{name}}？",
+    "description": "{{name}} 将不再出现在{{section}}中。随时可在“已忽略”视图中恢复。"
   },
   "transfer": {
     "title": "移动这个账号？",

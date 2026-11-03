@@ -1,4 +1,4 @@
-// Connection conferral setup contracts. Vocabulary: docs/domains/connections.md.
+// Connection setup contracts. Vocabulary: docs/domains/connections.md.
 //
 // A setup is a server-owned coroutine that walks a guardian through
 // connecting one grant of one connection kind. Builders write linear async code
@@ -12,7 +12,7 @@
 //
 // Content payloads are the HARD RULE: they are semantically complete
 // (copy authored server-side, next to the setup), so any surface — the
-// dashboard, a chat-driven conferral — can narrate any setup from the payload
+// dashboard, a chat-driven grant — can narrate any setup from the payload
 // alone. Custom per-`(connectionKind, state)` components override RENDERING only.
 
 import type { Credential, ProfileRecord } from "../types.js";
@@ -77,7 +77,7 @@ export interface SetupView {
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL. First-class
-   *  because QR conferral recurs across connection kinds (WeChat, WhatsApp): the server
+   *  because QR grant recurs across connection kinds (WeChat, WhatsApp): the server
    *  renders the image once and every surface — dashboard `<img>`, a chat
    *  message — presents it without its own QR encoder. The raw content string
    *  rides along in `links` so a surface that prefers a tappable link has it. */
@@ -88,15 +88,15 @@ export interface SetupView {
 
 /**
  * The one durable outcome a setup coroutine returns — the terminal
- * conferral. The runtime performs a SINGLE ledger write from it (credential +
+ * grant. The runtime performs a SINGLE ledger write from it (credential +
  * profile), plus an optional guardian channel mapping, only once the coroutine
- * returns; nothing half-conferred is ever observable. Abandoning or cancelling a
+ * returns; nothing half-granted is ever observable. Abandoning or cancelling a
  * setup runs no write at all.
  */
-export interface SetupConferral {
+export interface SetupGrant {
   /** The proven credential for this grant. */
   credential: Credential;
-  /** The non-secret conferral outcome written in the same update as the
+  /** The non-secret grant outcome written in the same update as the
    *  credential. Omit when there is no identity to record. */
   profile?: ProfileRecord;
   /** The guardian's own identity on this connection kind's channel to auto-map in the
@@ -117,15 +117,15 @@ export type SetupState =
   | { status: "awaiting-input"; form: SetupForm; error?: string }
   | { status: "awaiting-redirect"; url: string }
   | { status: "presenting"; view: SetupView }
-  | { status: "done"; conferral: SetupDoneView }
+  | { status: "done"; grant: SetupDoneView }
   | { status: "failed"; reason: string }
   | { status: "cancelled" };
 
-/** The client-visible half of a terminal conferral — the summary view only.
+/** The client-visible half of a terminal grant — the summary view only.
  *  The credential and raw profile never cross to the client. */
 export interface SetupDoneView {
   summary?: SetupView;
-  /** The connection the conferral wrote, so a setup for a new account can
+  /** The connection the grant wrote, so a setup for a new account can
    *  name the account it made. */
   connectionId?: string;
 }
@@ -163,14 +163,14 @@ export interface SetupContext {
   /** The setup's cancellation signal — aborts when the guardian cancels. */
   readonly signal: AbortSignal;
   /** The setup renews a connection that already names its account, so only
-   *  that same account can confer. A flow that always creates a new account
+   *  that same account can grant. A flow that always creates a new account
    *  has nothing to offer here. */
   readonly renewing?: boolean;
 }
 
 /**
  * A builder-written setup coroutine. Linear async code that suspends at the
- * verbs and returns its terminal conferral. Lives on the integration descriptor
- * next to the grant it confers.
+ * verbs and returns its terminal grant. Lives on the integration descriptor
+ * next to the grant it grants.
  */
-export type SetupFn = (interact: SetupInteraction, ctx: SetupContext) => Promise<SetupConferral>;
+export type SetupFn = (interact: SetupInteraction, ctx: SetupContext) => Promise<SetupGrant>;

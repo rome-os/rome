@@ -84,7 +84,11 @@ export function PageHeader({
           )}
         </div>
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+      {/* Capped at the header's width, so actions too wide for one line wrap
+          instead of running off a phone screen. */}
+      {actions ? (
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+      ) : null}
     </header>
   );
 }

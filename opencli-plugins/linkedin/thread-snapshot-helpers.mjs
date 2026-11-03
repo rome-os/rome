@@ -16,6 +16,18 @@ export function normalizeThreadText(value) {
     : "";
 }
 
+// A message body keeps its line breaks. Folding them into spaces as metadata does joins a URL to
+// the next line for any reader that later drops the space.
+export function normalizeThreadBodyText(value) {
+  return typeof value === "string"
+    ? value
+        .replace(/\r\n?/g, "\n")
+        .replace(/[\u00a0\u202f]/g, " ")
+        .replace(/[^\S\n]+$/gm, "")
+        .trim()
+    : "";
+}
+
 export function unwrapThreadBrowserResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) {
     return payload.data;
@@ -230,11 +242,15 @@ function participantTypeMetadata(participant) {
   return { name: "", type: "unknown", profile_url: "", headline: "", is_self: false };
 }
 
+function attributedBodyText(value) {
+  return normalizeThreadBodyText(typeof value === "string" ? value : value?.text);
+}
+
 function messageText(message) {
   return (
-    attributedText(message?.body) ||
-    attributedText(message?.renderContentFallbackText) ||
-    attributedText(message?.subject)
+    attributedBodyText(message?.body) ||
+    attributedBodyText(message?.renderContentFallbackText) ||
+    attributedBodyText(message?.subject)
   );
 }
 

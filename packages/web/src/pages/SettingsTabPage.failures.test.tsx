@@ -143,13 +143,13 @@ describe("SettingsPage failures", () => {
           }
           return response(true, 200, { success: true });
         }
-        return response(true, 200, { enableFable: false });
+        return response(true, 200, { enableModelSelector: false });
       }
       return defaultResponse(url);
     }) as typeof fetch);
 
     renderSettings();
-    await userEvent.click(await screen.findByText("Route large models to Fable"));
+    await userEvent.click(await screen.findByText("Enable model selector in chat"));
 
     await waitFor(() =>
       expect(rs.mocked(toast.error)).toHaveBeenCalledWith(

@@ -1,7 +1,7 @@
 // The Feishu descriptor. Layers under test:
 //   1. isFeishuAuthError / descriptor shape — pure, no transport.
-//   2. credentialsPaste confer: a transient connect validates the pasted app
-//      credentials (bad creds → connect rejects → confer refuses).
+//   2. credentialsPaste grant: a transient connect validates the pasted app
+//      credentials (bad creds → connect rejects → grant refuses).
 //   3. Talker fault mapping via a fake LarkChannel (injected through
 //      createChannel): a bad-credential connect at start → CredentialRejected,
 //      an `error` event → CredentialRejected (auth) or Disconnected (transport).
@@ -17,11 +17,11 @@ import {
   type SendInput,
   type SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import { isFeishuAuthError } from "../../channels/feishu.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Connection, StreamFault, Talker } from "../types.js";
 import { createFeishuDescriptor, feishuRegistrationAddons } from "./feishu.js";
@@ -31,10 +31,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -122,12 +122,13 @@ class FakeLarkChannel {
   }
 }
 
-function fakePersonRepo(): PersonMappingRepository {
+function fakePersonRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-    addChannelMapping: async () => "id",
-  } as unknown as PersonMappingRepository;
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [],
+    linkStated: async () => "id",
+  } as unknown as PeopleRepository;
 }
 
 function makeDescriptor(channel: FakeLarkChannel) {
@@ -150,7 +151,7 @@ function makeDescriptor(channel: FakeLarkChannel) {
         supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
       }),
     } as never,
-    personMappingRepo: fakePersonRepo(),
+    peopleRepo: fakePersonRepo(),
     listAgents: () => ["main"],
     createChannel: () => channel as never,
   });
@@ -182,8 +183,7 @@ describe("feishu descriptor shape", () => {
   it("declares one `app` grant and a talker needing it", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
     expect(desc.connectionKind).toBe("feishu");
-    expect(Object.keys(desc.auth)).toEqual(["app"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["app"]);
+    expect(desc.grant).toBe("app");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -195,9 +195,9 @@ describe("feishu descriptor shape", () => {
   it("validates pasted credentials via a transient connect (bad creds refused)", async () => {
     const channel = new FakeLarkChannel();
     channel.connectError = new LarkChannelError("permission_denied", "bad app secret");
-    const scheme = makeDescriptor(channel).auth.app;
+    const scheme = makeDescriptor(channel).auth;
     await expect(
-      scheme.confer({
+      scheme.obtain({
         prompt: async () => ({ appId: "cli_x", appSecret: "wrong", domain: "feishu" }),
       }),
     ).rejects.toBeInstanceOf(LarkChannelError);
@@ -205,10 +205,10 @@ describe("feishu descriptor shape", () => {
     expect(channel.connected).toBe(false);
   });
 
-  it("confers a non-expiring credential from a good connect", async () => {
+  it("grants a non-expiring credential from a good connect", async () => {
     const channel = new FakeLarkChannel();
-    const scheme = makeDescriptor(channel).auth.app;
-    const cred = await scheme.confer({
+    const scheme = makeDescriptor(channel).auth;
+    const cred = await scheme.obtain({
       prompt: async () => ({ appId: "cli_x", appSecret: "s3cr3t", domain: "feishu" }),
     });
     expect(cred).toEqual({
@@ -221,14 +221,14 @@ describe("feishu descriptor shape", () => {
 describe("feishu talk lifecycle", () => {
   it("unlocks talk, connects the channel, and delivers inbound once the grant is imported", async () => {
     const channel = new FakeLarkChannel();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["app"] });
 
-    await registry.importCredential(conn.id, "app", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "app", validCred());
     await flush();
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(channel.connected).toBe(true);
 
     const received: string[] = [];
@@ -265,14 +265,11 @@ describe("feishu talk lifecycle", () => {
 describe("feishu inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const channel = new FakeLarkChannel();
-    const talker = makeDescriptor(channel).capabilities.talker!.build(
-      { app: validCred() },
-      {
-        connectionId: "feishu-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
+      connectionId: "feishu-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: unknown[] = [];
     talker.start(
       (msg) => {
@@ -319,14 +316,11 @@ describe("feishu inbound delivery", () => {
 describe("feishu reply delivery", () => {
   it("offers reply delivery over the channel's client, placing replies as the chat says", async () => {
     const channel = new FakeLarkChannel();
-    const talker = makeDescriptor(channel).capabilities.talker!.build(
-      { app: validCred() },
-      {
-        connectionId: "feishu-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
+      connectionId: "feishu-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 3500, edit: true });
     // The chat's settings put replies in a thread, so later messages join it.
@@ -351,14 +345,11 @@ describe("feishu reply delivery", () => {
 
 // Direct-Talker harness for the raw start()/fault() contract.
 function buildTalker(channel: FakeLarkChannel): { talker: Talker; faults: StreamFault[] } {
-  const talker = makeDescriptor(channel).capabilities.talker!.build(
-    { app: validCred() },
-    {
-      connectionId: "feishu-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
+    connectionId: "feishu-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   talker.start(
     () => {},
@@ -400,33 +391,33 @@ describe("feishu Talker fault mapping", () => {
 });
 
 describe("feishu app-auth fault drives renew-once-then-degrade", () => {
-  it("relocks talk after an auth error (credentialsPaste renew answers re-confer)", async () => {
+  it("relocks talk after an auth error (credentialsPaste renew answers fix)", async () => {
     const channel = new FakeLarkChannel();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
-    await registry.importCredential(conn.id, "app", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "app", validCred());
     await flush();
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
 
     channel.emitError(new LarkChannelError("permission_denied", "revoked"));
     await flush();
 
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["app"] });
     expect(conn.auth.grants().app).toBe("degraded");
 
     let reUnlocked: Connection | null = null;
-    registry.onUnlocked("talk", (c) => {
+    registry.onUnlocked("chat", (c) => {
       reUnlocked = c;
     });
     channel.connectError = null;
-    await registry.importCredential(conn.id, "app", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "app", {
       material: { appId: "cli_x", appSecret: "fresh", domain: "feishu" },
       expiresAt: "never",
     });
     await flush();
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });
 });

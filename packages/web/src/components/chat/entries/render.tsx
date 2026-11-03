@@ -12,6 +12,7 @@ import { HandoffCard } from "./HandoffCard";
 import { QuestionCard } from "./QuestionCard";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
+import { TaskChatCard } from "./TaskChatCard";
 import { TextBlock } from "./TextBlock";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolResultBlock } from "./ToolResultBlock";
@@ -101,6 +102,7 @@ export function renderSingleEntry(
           sessionId={block.sessionId}
           turnId={block.turnId}
           status="running"
+          startedAt={block.startedAt}
           live={options.live}
         />
       );
@@ -262,6 +264,8 @@ export function renderSingleEntry(
           onResolved={onApprovalResolved ?? (() => {})}
         />
       );
+    case "task_chat":
+      return <TaskChatCard key={key} chatId={block.chatId} title={block.title} />;
     case "result":
       return block.accounting ? <UsageSummaryView key={key} accounting={block.accounting} /> : null;
     case "error":
@@ -340,6 +344,7 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
           output={paired?.status === "completed" ? paired.output : undefined}
           error={paired && paired.status !== "completed" ? paired.error : undefined}
           durationMs={subagentCallDurationMs(block, paired)}
+          startedAt={block.startedAt}
           live={live}
         />,
       );

@@ -14,12 +14,14 @@ import {
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
+  proveIdentity,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
-import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
+import { CloudProfileClient } from "./lib/cloud-profile.js";
+import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
@@ -77,25 +79,39 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { SessionsRepository } from "./db/repositories/sessions.js";
-import { PersonMappingRepository } from "./db/repositories/person-mapping.js";
+import { PeopleRepository } from "./db/repositories/people.js";
+import { appPersonMapping } from "./people/app-person-mapping.js";
+import { appPeople } from "./people/app-people.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
-import { OutboxRepository } from "./db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
+import { AccountProfiles, refreshingAfter } from "./channels/account-profiles.js";
+import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
+import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
-import { claimChannels } from "./channels/claim-channels.js";
-import { domainOf, domainOfGrants } from "./channels/platform.js";
-import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
+import { storedOn } from "./channels/channel.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
+import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
+import { domainOf, domainOfGrant } from "./channels/platform.js";
+import {
+  AccountListening,
+  accountAgentResolver,
+  byAccount,
+  byChannel,
+} from "./channels/account-agents.js";
+import { romeAccounts } from "./channels/rome-accounts.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
+import { accountLinkOf, connectionKindOf } from "./channels/account-links.js";
 import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
 import { ReplyStreams } from "./channels/delivery/streams.js";
 import { replyStreamingSwitch } from "./channels/delivery/streaming-switch.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
-import { backingConnection, createChannelsService } from "./channels/channels-service.js";
+import { createChannelsService, emailConnection } from "./channels/channels-service.js";
 import { createAgentNames } from "./channels/agent-names.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
@@ -109,8 +125,8 @@ import { PoliciesRepository } from "./db/repositories/policies.js";
 import { WebChatRepository } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
+import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { ensureSentinelPersons } from "./db/ensure-sentinel-persons.js";
 import { AgentLoader } from "./core/agent-loader.js";
 import { SessionManager } from "./core/session-manager.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
@@ -135,14 +151,21 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
+import { resolveSessionPolicy } from "./core/session-policy.js";
+import { ConciergeService } from "./concierge/service.js";
+import { ConciergeTasks } from "./concierge/tasks.js";
+import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
+import { buildConciergeTools } from "./concierge/tools.js";
+import { startConciergeEvents } from "./concierge/events.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
-import { stopActiveConversationTurn } from "./core/chat-stop.js";
+import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
+import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
@@ -182,6 +205,7 @@ import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
+import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
@@ -214,20 +238,28 @@ import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
 import { createAppRuntimeRepositories } from "./apps/repositories.js";
+import { ChatRepository } from "./chats/chat-repository.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
-import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
+import { ConnectionRegistry, DrizzleConnectionsRepository } from "./connections/index.js";
 import { startExpiringCredentialRenewal } from "./connections/expiring-renewal.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
+import { recordGrantAccounts } from "./connections/grant-accounts.js";
+import {
+  APP_CONNECTION_WRITE_ACTION,
+  APP_CONNECTION_RETENTION_MS,
+  AppConnectionBroker,
+  createAppConnectionAccessLifecycle,
+  reconcileAppConnectionAccess,
+} from "./connections/app-connections.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
-import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
@@ -245,6 +277,9 @@ import {
 } from "./relay/settings.js";
 import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
+import { ChatEvents } from "./chats/events.js";
+import { inboundRecording } from "./chats/inbound.js";
+import { StoredMessages } from "./chats/message-repository.js";
 import {
   syncFavorActionRequirementsForCatalogEvent,
   syncFavorActionRequirementsFromCatalog,
@@ -288,20 +323,42 @@ async function main() {
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const channelRecords = new ChannelRecordsRepository(db);
+  // Read on each call, so the registry built below answers it.
+  const channelRecords = new ChannelRecordsRepository(db, (kind) =>
+    accountLinkOf(connectionRegistry)(kind),
+  );
+  const connectedAccounts = new ConnectedAccountsRepository(db);
+  // Read on each call, so the registry built below answers it.
+  const accountAgents = {
+    kindOf: (connectionId: string) => connectionKindOf(connectionRegistry)(connectionId),
+    linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
+    accounts: connectedAccounts,
+  };
   // Rome listens to an account of a linkable connection kind only while it has an
-  // agent: each channel's inbound port reads this, and a link tells it.
-  const accountListening = new AccountListening(channelRecords);
+  // agent: each inbound port reads this by connection, and a link tells it.
+  const accountListening = new AccountListening(accountAgents);
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
-  // as a descriptor, a channel policy, or a person's link, reads it.
+  // as a descriptor or a channel policy, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
+  // The platform a channel's accounts live on, for a row that still names a
+  // channel. People keys its links by platform, and reads every such row
+  // through this.
+  const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
+  const peopleRepo = new PeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
-  const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
-  const sentinelLogRepo = new SentinelLogRepository(db);
+  const sentinelLogRepo = new SentinelLogRepository(db, platformOfChannel);
+  // What each platform says about the accounts Rome meets. The two address
+  // books fill it after each sync and once now, so a dropped cache is rebuilt.
+  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db));
+  const refreshWhatsAppProfiles = () =>
+    accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
+  const refreshLinkedInProfiles = () =>
+    accountProfiles.refresh(platformOf("linkedin"), linkedInAccounts);
+  refreshWhatsAppProfiles();
+  refreshLinkedInProfiles();
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
   // The channel list and the Connection's Talk share this one client runtime.
@@ -344,16 +401,29 @@ async function main() {
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
+  const chatRepo = new ChatRepository(db, channelRecords);
+  // What was said in each place (docs/domains/chats.md#message). Reads find a
+  // platform's chats under every channel it is kept under, built or released.
+  // `channels` is built further down, before anything reads.
+  const chatEvents = new ChatEvents();
+  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
+    channelsOn: (platform) =>
+      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
+    accountOf: (channel) => channelRecords.accountOf(channel),
+  });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
+    chatRepo,
+    chatMessages,
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
+  const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
@@ -367,34 +437,59 @@ async function main() {
     log.warn("Ended runs a stopped Rome process left running", interrupted);
   }
 
-  await ensureSentinelPersons(personMappingRepo);
-
   // Connection registry (use side). Descriptors are registered here at boot, but
   // the load()/import that hydrate + rebuild live connections run LATER — after
-  // the message hook exists, so the first Talk unlock can attach its subscription.
+  // the message hook exists, so the first chat unlock can attach its subscription.
   // Each Connection of a connection kind with a Talk backs one channel, recorded and
-  // released in the same transaction as the Connection.
+  // released in the same transaction as the Connection. A newly connected
+  // account of a linkable connection kind gets an opaque id, so it never shares an id
+  // with an account that came before it.
   const talks = (connectionKind: string) =>
     connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
+  const connectionsRepository = new DrizzleConnectionsRepository(db);
+  // Rome's accounts, by the platform and the platform's id, and the
+  // connections that reach them.
+  const accounts = romeAccounts(connectionsRepository);
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
-    ledger: new DrizzleGrantLedger(db),
-    onMint: (tx, record, profile) => {
-      if (!talks(record.connectionKind)) return;
-      channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
+    repository: connectionsRepository,
+    onEvent: (tx, event) => {
+      const { connection } = event;
+      switch (event.kind) {
+        case "connected": {
+          const record = event.connection;
+          if (!talks(record.connectionKind)) return;
+          const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
+          channelRecords.claim(tx, claimed, record.createdAt);
+          connectedAccounts.add(tx, record.id);
+          return;
+        }
+        case "fixed":
+          if (!talks(connection.connectionKind) || !event.account) return;
+          channelRecords.ensureAccount(tx, connection, event.account, new Date());
+          connectedAccounts.add(tx, connection.id);
+          return;
+        case "revoked":
+          channelRecords.forget();
+          return;
+        case "disconnected":
+          channelRecords.vacate(tx, connection.id);
+          connectedAccounts.remove(tx, connection.id);
+          return;
+      }
     },
-    onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
   const linkAgentToGuardian = createAgentsGuardianLink({
-    personMappingRepo,
+    peopleRepo,
     settingsRepo,
-    channel: AGENTS_KIND,
+    platform: AGENTS_KIND,
   });
   const guardianLinkCodes = new GuardianLinkCodes();
   const linkCodeAdmission = createGuardianLinkAdmission({
     codes: guardianLinkCodes,
-    personMappingRepo,
+    peopleRepo,
     registry: connectionRegistry,
+    accountOf: (connectionId) => accounts.accountOf(connectionId),
   });
   // Every sender is admitted: Rome never asks a sender to pair
   // (docs/domains/people.md#stranger). Only the guardian's link code is taken
@@ -420,29 +515,34 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    chats: webchatRepo,
+    messages: chatMessages,
+    places: chatRepo,
   });
+  // The dashboard chat is Rome's own channel, which no Connection backs.
+  const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
     channels: () => builtChannels,
+    own: [webchat],
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
     pacing: replyPacing,
+    accounts,
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
-    isConnected: () => connectionRegistry.find(AGENTS_KIND).some((conn) => conn.isUnlocked("talk")),
+    isConnected: () => connectionRegistry.find(AGENTS_KIND).some((conn) => conn.isUnlocked("chat")),
   });
   const agentNameResolver = createAgentNames(listedAgents);
-  // Conferral setups: in-memory session store keyed per grant,
+  // Grant setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
   // routes; created here so descriptors registered later expose their setup.
   const setupManager = new SetupManager({
     registry: connectionRegistry,
-    personMappingRepo,
+    peopleRepo,
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime
@@ -461,21 +561,33 @@ async function main() {
   const appsLog = createLogger("apps-domain");
   const romeCloudListings = createRomeCloudListingClient();
   const appBundleFetcher = createBundleFetcher();
-  const { catalog: appCatalog, manager: appManager } = createAppDomain({
-    lockfilePath: getProfileAppsLockfilePath(),
-    installedRoot: getProfileInstalledAppsDir(),
-    bundleFetcher: appBundleFetcher,
-    romeCloudListings,
-  });
-  const appStore = createAppStoreService({ appCatalog });
-
-  // Subscribers ordered agentLoader → actionLoader → skillCatalog →
-  // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
   const artifactIdentity = {
     legacyBindings: parseLegacyArtifactBindings(
       await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
     ),
   };
+  // Boot removal matches qualified names and legacy bindings before actions register.
+  // Only the DB flag changes until the engine exists; routineEngine.start() skips paused rows.
+  let deactivateRoutine: ((id: string) => Promise<void>) | undefined;
+  const { catalog: appCatalog, manager: appManager } = createAppDomain({
+    lockfilePath: getProfileAppsLockfilePath(),
+    installedRoot: getProfileInstalledAppsDir(),
+    bundleFetcher: appBundleFetcher,
+    romeCloudListings,
+    routines: {
+      repository: routinesRepo,
+      legacyBindings: artifactIdentity.legacyBindings,
+      engine: {
+        deactivate: async (id) => {
+          await deactivateRoutine?.(id);
+        },
+      },
+    },
+  });
+  const appStore = createAppStoreService({ appCatalog });
+
+  // Subscribers ordered agentLoader → actionLoader → skillCatalog →
+  // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
   const agentLoader = new AgentLoader(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
@@ -540,6 +652,7 @@ async function main() {
       onError: (err) => appsLog.warn("runtime-status write failed", { error: err.message }),
     }),
   );
+  appCatalog.subscribe(createAppConnectionAccessLifecycle(appConnectionAccessRepo));
   // Social card image per installed web app. Registered before boot() so the
   // replay covers apps installed while the daemon was down.
   const ogImageStore = createOgImageStore();
@@ -549,8 +662,11 @@ async function main() {
       host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
     }),
   );
+  let appBootConverged = false;
+  let appConnectionAccessReady = false;
   try {
     const bootResult = await appManager.boot();
+    appBootConverged = true;
     appsLog.info("AppManager.boot completed", {
       appCount: bootResult.appCount,
       sweptStaging: bootResult.sweptStaging,
@@ -561,6 +677,14 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  if (appBootConverged) {
+    await reconcileAppConnectionAccess(appCatalog, appConnectionAccessRepo);
+    appConnectionAccessReady = true;
+  } else {
+    appsLog.warn(
+      "App connection access remains unavailable after failed App boot; restart after fixing App boot",
+    );
+  }
 
   // Install / refresh ALL first-party apps from the packed artifacts in
   // `dist/first-party-artifacts/` (`pnpm build:apps`, folded into `pnpm build`).
@@ -569,6 +693,7 @@ async function main() {
   // control (preserved across boot reinstalls). Then assert that every app the
   // core agents reference is in that set — a core agent pointing at an unpacked
   // app must fail boot loudly, not surface later as "unknown subagent".
+  await preserveRecapOptOutAtBoot(appManager, settingsRepo);
   const firstPartyBoot = await installFirstPartyAppsAtBoot({
     appManager,
     appCatalog,
@@ -647,6 +772,40 @@ async function main() {
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
+  const appConnections = new AppConnectionBroker(
+    connectionRegistry,
+    appConnectionAccessRepo,
+    actionEngine,
+    { isReady: () => appConnectionAccessReady },
+  );
+  appConnections.registerActions(actionRegistry);
+  const appConnectionCleanupLog = createLogger("app-connection-cleanup");
+  const activeAppConnectionApprovalInvocationIds = (
+    await approvalsRepo.findActiveActionArgs(APP_CONNECTION_WRITE_ACTION)
+  ).flatMap((args) => (typeof args.invocationId === "string" ? [args.invocationId] : []));
+  const recoveredAppConnectionInvocations =
+    await appConnectionAccessRepo.recoverInterruptedInvocations(
+      activeAppConnectionApprovalInvocationIds,
+    );
+  if (recoveredAppConnectionInvocations > 0) {
+    appConnectionCleanupLog.warn("interrupted App connection invocations recovered", {
+      invocations: recoveredAppConnectionInvocations,
+    });
+  }
+  const runAppConnectionCleanup = async () => {
+    try {
+      const result = await appConnectionAccessRepo.pruneExpiredData(
+        new Date(Date.now() - APP_CONNECTION_RETENTION_MS),
+      );
+      appConnectionCleanupLog.info("App connection cleanup completed", result);
+    } catch (err) {
+      appConnectionCleanupLog.error("App connection cleanup failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  await runAppConnectionCleanup();
+  const appConnectionCleanupInterval = setInterval(runAppConnectionCleanup, 6 * 60 * 60 * 1000);
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
@@ -711,6 +870,7 @@ async function main() {
     routinesRepo,
     repositories: appRuntimeRepositories,
     favorService,
+    appConnections,
   };
   const lifecycleDispatcher = createAgentLifecycleDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
@@ -734,6 +894,7 @@ async function main() {
     30_000,
     systemClock,
   );
+  deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
     resolveGuardianTimezone(settingsRepo),
   );
@@ -757,9 +918,24 @@ async function main() {
   // action depends on. The same instances back both the in-process action path
   // (injected into appActionDeps) and the WorkerRPC handlers, so a worker's
   // proxy and a main-process call resolve to identical behavior.
-  const eventService = new EventService(eventBus, eventCatalog);
+  // Event types apps declare in app.yaml (`eventSources`). `defer` subscribes
+  // through them; catalog search lists their types before the first emission
+  // and, given `match`, probes them as the system.
+  const eventSources = new EventSources({
+    listSources: () =>
+      appCatalog
+        .listResolved()
+        .flatMap((app) =>
+          (app.manifest.eventSources ?? []).map((source) => ({ ...source, appId: app.appId })),
+        ),
+    isKnownEventType: (eventName) => eventCatalog.get(eventName) !== undefined,
+  });
+  const eventService = new EventService(eventBus, eventCatalog, {
+    sources: eventSources,
+    run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
+  });
   const chatSettings = new ChatSettingsService({
-    repository: new ChatSettingsRepository(db),
+    repository: new ChatSettingsRepository(db, chatRepo),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,
@@ -801,8 +977,13 @@ async function main() {
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
-      isGuardian: async (channel, senderId) =>
-        (await personMappingRepo.findByChannelUser(channel, senderId))?.bondLevel === "guardian",
+      isGuardian: async (service, senderId) => {
+        const platform = stopSenderPlatform(input.ref, service, {
+          accountOf: (connectionId) => accounts.accountOf(connectionId),
+          platformOfChannel,
+        });
+        return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
+      },
     });
   const subagentExecutionService = createSubagentExecutionService({
     webchatRepo,
@@ -843,6 +1024,19 @@ async function main() {
       return access ? credentialFingerprint(access.token) : null;
     },
   });
+  // Concierge (rome-os/rome#1344). Its backend turns run through the runner
+  // created below, by the time any turn finishes. The API layer attaches the
+  // dashboard it runs task chats on.
+  const concierge = new ConciergeService({
+    settingsRepo,
+    webchatRepo,
+    sessionManager,
+    aiToolState,
+    messages: chatMessages,
+    tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
+    approvals: approvalsRepo,
+    runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
+  });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -857,6 +1051,8 @@ async function main() {
       skillCatalog,
       lifecycleDispatcher,
       webchatRepo,
+      chatMessages,
+      platformOfChannel,
       subagentExecutionService,
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
@@ -864,11 +1060,14 @@ async function main() {
         (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
       channelSurface: (channel) => {
+        if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
         const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
           ?.capabilities.talker;
         return talker ? talkerChannelSurface(talker) : null;
       },
       connectionKindOfChannel,
+      eventSources,
+      sessionTools: (context) => buildConciergeTools(concierge, context),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -935,7 +1134,14 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
+    messages: chatMessages,
+    places: chatRepo,
+    isTextPrivate: (agentName) =>
+      agentLoader.has(agentName) &&
+      resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
   });
+
+  startConciergeEvents(concierge, lifecycleDispatcher);
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -944,6 +1150,7 @@ async function main() {
     agentRunner,
     backendTurnRunner,
     resolveContinuationWorkingDir,
+    appConnections,
   );
 
   // Real push sender in the main process (holds the durable instance token);
@@ -959,6 +1166,7 @@ async function main() {
       assembleDiagnosticBundle({ settingsRepo, channelsService, appCatalog, bootVersionReport }),
     agentReportsEnabled: async () => (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
   });
+  const cloudProfileClient = new CloudProfileClient(() => proveIdentity());
   const resolveArtifactReference = createArtifactReferenceResolver({
     agentLoader,
     actionRegistry,
@@ -976,7 +1184,8 @@ async function main() {
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
     capabilityDiscovery,
-    personMappingRepo,
+    personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
+    people: appPeople(peopleRepo),
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
@@ -997,7 +1206,7 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const email = backingConnection(connectionRegistry, "email", channelOf);
+        const email = emailConnection(connectionRegistry, channelOf);
         if (!email) return { status: "skipped", reason: "channel_inactive" };
         return (await connectionRegistry.ingest(email.id, {
           rawBody,
@@ -1042,8 +1251,10 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      appConnections,
       hostExecution,
       feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
   );
@@ -1055,8 +1266,10 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      appConnections,
       hostExecution,
       feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     }),
   );
@@ -1087,6 +1300,7 @@ async function main() {
     routinesRepo,
     repositories: appRuntimeRepositories,
     favorService,
+    appConnections,
   });
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
     const res = await relayDispatcher.dispatch(
@@ -1205,37 +1419,48 @@ async function main() {
   }
 
   // NO channel adapter is constructed here. Every Talk channel
-  // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user, webchat)
+  // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
-  // to the channel ports.
+  // to the channel ports. Webchat is Rome's own channel, built above.
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
-  const accountAgentOf = accountAgentResolver(channelRecords, agentLoader);
+  const accountAgentOf = accountAgentResolver(accountAgents, agentLoader);
+  // A hook names the account a message arrived on, or its channel on a host
+  // that predates accounts.
+  const channelAgentOf = byChannel(channelRecords, accountAgentOf);
+  const hookAgentOf = byAccount(accounts, accountAgentOf, channelAgentOf);
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,
     chatSettings,
     chatStop,
-    personMappingRepo,
-    webchatRepo,
-    whatsAppSyncSink: whatsAppStoreRepo,
-    linkedInSyncSink: linkedInStoreRepo,
+    peopleRepo,
+    whatsAppSyncSink: refreshingAfter(
+      whatsAppStoreRepo,
+      ["upsertContacts", "upsertChats"],
+      refreshWhatsAppProfiles,
+    ),
+    linkedInSyncSink: refreshingAfter(
+      linkedInStoreRepo,
+      [
+        "replaceThreadParticipantMembership",
+        "upsertParticipantProfile",
+        "backfillParticipantsFromMessages",
+      ],
+      refreshLinkedInProfiles,
+    ),
     linkedinPoll: {
       minIntervalMs: config.linkedinPollMinMinutes * 60_000,
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
     listAgents: () => Array.from(agentLoader.getAll().keys()),
     hasAgent: (name) => agentLoader.has(name),
-    // A Connection with no channel record backs no channel, so nothing answers it.
-    accountAgentOf: (connectionId) => {
-      const channel = channelRecords.idOf(connectionId);
-      return channel === null ? null : accountAgentOf(channel);
-    },
+    accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
-      mapGuardianToChannel(personMappingRepo, "whatsapp", selfJid).catch((err) => {
+      mapGuardianToChannel(peopleRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {
           error: err instanceof Error ? err.message : String(err),
         });
@@ -1247,7 +1472,7 @@ async function main() {
     onEmailAdapterBuilt: (adapter) => {
       emailAdapterRef = adapter;
     },
-    // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
+    // The Rome Cloud-OAuth grant setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
     // The personal WeChat connection is opt-in: its runtime exists only when
@@ -1268,6 +1493,8 @@ async function main() {
       channelOf,
       pacing: replyPacing,
       listening: accountListening,
+      accountOf: (connectionId) => accounts.accountOf(connectionId),
+      heard: (message) => accountProfiles.heard(message),
     },
     connectionAccounts: {
       [AGENTS_KIND]: agentsAccounts(listedAgents),
@@ -1284,13 +1511,33 @@ async function main() {
           talks(record.connectionKind),
       )
       .map((record) => ({ name: record.id, connectionKind: record.connectionKind })),
+    own: [webchat],
   });
   builtChannels = channels;
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
+  const accountNames = createAccountNames({
+    channels,
+    sentinelLogRepo,
+    platformOfChannel,
+    profiles: accountProfiles,
+  });
 
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
   const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  // Every message the channels deliver is put on record in its chat before the
+  // hook hears it (docs/domains/participation.md#wake). It records through the
+  // hook's channels, so the hook's trace covers recording as well.
+  webchatRepo.leaveOutOfCatchUp((id) => chatMessages.isWakeUndecided(id));
+  const inboundRecorder = inboundRecording(
+    {
+      chats: webchatRepo,
+      messages: chatMessages,
+      events: chatEvents,
+      platformOfChannel,
+      listens: (connectionId) => accountListening.listens(connectionId),
+    },
+    hookChannels,
+  );
   const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
@@ -1304,8 +1551,9 @@ async function main() {
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
         channels: hookChannels,
-        accountAgentOf,
-        linkedAgentOf: accountAgentOf,
+        messagesSaid: inboundRecorder.messagesSaid,
+        accountAgentOf: hookAgentOf,
+        linkedAgentOf: hookAgentOf,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1346,8 +1594,9 @@ async function main() {
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
           channels: hookChannels,
-          accountAgentOf,
-          linkedAgentOf: accountAgentOf,
+          messagesSaid: inboundRecorder.messagesSaid,
+          accountAgentOf: hookAgentOf,
+          linkedAgentOf: hookAgentOf,
         },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
@@ -1360,7 +1609,7 @@ async function main() {
   // A later channel minted at runtime (a second Feishu bot) joins the channel
   // list when its Connection first unlocks Talk, before its stream starts, and
   // a hook that takes added channels subscribes to it.
-  connectionRegistry.onUnlocked("talk", (connection) => {
+  connectionRegistry.onUnlocked("chat", (connection) => {
     const channel = joinLaterChannel(
       {
         registry: connectionRegistry,
@@ -1368,6 +1617,8 @@ async function main() {
         channelOf,
         pacing: replyPacing,
         listening: accountListening,
+        accountOf: (connectionId) => accounts.accountOf(connectionId),
+        heard: (message) => accountProfiles.heard(message),
         channels,
       },
       connection,
@@ -1375,6 +1626,7 @@ async function main() {
     if (!channel) return;
     const added = legacyChatIdChannels(withInboundSpans([channel], "channel-message"));
     hookChannels.push(...added);
+    inboundRecorder.addChannels(added);
     const hook = messageHook;
     // A hook without `addChannels` re-registers, as the app-keys reloader
     // does, and its register() reads the grown channel list. Events waiting
@@ -1409,20 +1661,26 @@ async function main() {
   });
 
   // Hydrate connection/grant state without starting provider transports, so
-  // the zero-grant connections exist before any Talk epoch can admit messages.
+  // the boot passes below finish before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
   // An account exists only while connected, so one an earlier version left
   // unconnected goes before any channel is recorded for it.
   await removeUnconnectedAccounts(connectionRegistry);
+  // A grant from before grants named their account learns it now, so the next
+  // connect of that account is refused.
+  await recordGrantAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
   // connection kind held one, so each takes its connection kind's name.
   await claimChannels(
     db,
     channelRecords,
+    connectedAccounts,
     connectionRegistry.all().filter((c) => talks(c.connectionKind)),
-    async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
+    async (id) => domainOfGrant(await connectionRegistry.grantOf(id)),
   );
-  await ensureZeroGrantConnections(connectionRegistry);
+  // A channel recorded before channels knew their account learns it from its
+  // connection's grant.
+  await recordChannelAccounts(db, channelRecords, connectionRegistry);
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.
@@ -1485,7 +1743,13 @@ async function main() {
     backendTurnRunner,
     notify: notifyClient,
     feedback: feedbackClient,
+    cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,
+    appConnections,
+    appIdForAction: (actionName) => {
+      const metadata = actionRegistry.getMetadata(actionName);
+      return metadata?.ownerType === "app" ? metadata.ownerId : null;
+    },
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
@@ -1580,37 +1844,46 @@ async function main() {
     gateOverrides,
   });
 
+  const connectEmailWithoutClick = async (trigger: "seat-created" | "boot") => {
+    try {
+      const connected = await autoConnectEmail({
+        registry: connectionRegistry,
+        provision: () => mailProvider.provision(),
+        settings: settingsRepo,
+      });
+      if (connected) log.info("email connected without a click", { trigger });
+    } catch (err) {
+      log.warn("email auto-connect failed; the guardian can connect it in settings", {
+        trigger,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      appConnectionAccessRepo,
+      concierge,
       feedback: feedbackClient,
       provisionNodeCaller,
-      autoConnectEmail: async () => {
-        try {
-          const connected = await autoConnectEmail({
-            registry: connectionRegistry,
-            provision: () => mailProvider.provision(),
-            settings: settingsRepo,
-          });
-          if (connected) log.info("email connected on first cloud sign-in");
-        } catch (err) {
-          log.warn("email auto-connect failed; the guardian can connect it in settings", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
+      autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       nodeDevices,
       channelsService,
       chatSettings,
       actionEngine,
       actionLoader,
-      personMappingRepo,
+      peopleRepo,
       guardianLinkCodes,
-      outboxRepo,
       channels,
+      platformOfChannel,
+      recordedOn: (platform: string) => channelRecords.namesOn(platform),
+      sendersOn: (platform: string) => channelRecords.sendersOn(platform),
+      accountOf: (channel: string) => channelRecords.accountOf(channel),
       accountNames,
       assistants: listedAgents,
       webchatRepo,
+      chatMessages,
       webhookInvocationsRepo,
       approvalsRepo,
       approvalHandler,
@@ -1652,6 +1925,7 @@ async function main() {
       relayDrainer,
       bootVersionReport,
       favorService,
+      appConnections,
       systemUpgradeService,
       isCloudAuthEnabled,
       loginUsage: usageRecorder,
@@ -1778,9 +2052,22 @@ async function main() {
   // bumps the server's lastSeen without ever blocking or failing boot. The same
   // prove result records the bound account onto the guardian seat — no second
   // prove.
-  void logInstanceIdentityAtBoot(getBuildInfo().version).then((identity) =>
-    recordResolvedAccount(db, identity),
-  );
+  //
+  // It also gates connecting email for a seat created before sign-in connected
+  // it: only an enrolled instance can provision an inbox, and a warm-pool
+  // instance with no seat has no owner to provision one for.
+  void logInstanceIdentityAtBoot(getBuildInfo().version)
+    .then(async (identity) => {
+      await recordResolvedAccount(db, identity);
+      if (identity.status !== "ok") return;
+      if (!(await getGuardianAuthState(db)).exists) return;
+      await connectEmailWithoutClick("boot");
+    })
+    .catch((err) => {
+      log.warn("boot-time email auto-connect check failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
   // Beyond the boot-time prove, re-verify the instance token every 15 minutes so
   // a mid-session revocation is noticed within one interval. On a terminal
@@ -1888,6 +2175,9 @@ async function main() {
 
     clearInterval(journalCleanupInterval);
     shutdownLog.info("journal cleanup timer stopped");
+
+    clearInterval(appConnectionCleanupInterval);
+    shutdownLog.info("App connection cleanup timer stopped");
 
     favorDispatchRunner.stop();
     shutdownLog.info("favor dispatch runner stopped");

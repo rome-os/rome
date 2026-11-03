@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -8,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
-import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
@@ -48,6 +48,8 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import { ReplyBar } from "./reply/ReplyBar";
+import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
 import {
   COMPOSER_HINT_KEYS,
   composerHints,
@@ -85,6 +87,9 @@ export interface ChatComposerSnapshot {
   // Resending an unchanged draft after a failure reuses it, so a turn the server
   // accepted before the failure is returned rather than recorded twice.
   inputId?: string;
+  // The message this turn replies to, sent as `replyToMessageId` (and
+  // `replyQuote` for a selection).
+  replyTo?: ReplyTarget;
 }
 
 export interface ChatComposerSendControls {
@@ -129,8 +134,12 @@ export interface ChatComposerProps {
   persistNewChatDraft?: boolean;
   // Whether the project picker is shown (typically only in draft mode).
   showProjectSelector?: boolean;
-  // Whether the large-model picker is shown (typically only in draft mode).
+  // Whether the large-model picker is shown.
   showModelSelector?: boolean;
+  // An open chat's own model pick. When set, the picker shows and changes it,
+  // and sends carry no selection: the chat stores it. A draft leaves it unset,
+  // so the picker edits the default for new chats.
+  chatModelSelection?: { value: string; onChange: (next: string) => void };
   // Seed for the draft project name. Honored once at mount and again when it
   // changes from undefined → defined (i.e., transitioning into a new draft).
   initialProjectName?: string;
@@ -168,6 +177,12 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
+  // Why typing is off right now: a card in the transcript is the only way to
+  // answer. While set, a locked strip with this text stands where the box
+  // was, so the state reads at a glance. Null or undefined keeps the composer
+  // open. The box stays mounted but hidden, so its draft and measurements
+  // survive the lock.
+  lockedReason?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
@@ -207,11 +222,12 @@ function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
   el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
-export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
+const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
   {
     persistNewChatDraft = false,
     showProjectSelector = false,
     showModelSelector = false,
+    chatModelSelection,
     initialProjectName,
     initialDeviceFolder,
     pinnedAgentMention = null,
@@ -221,6 +237,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onStop,
     streamError,
     designingInteraction = null,
+    lockedReason = null,
     boxClassName,
     textOnly = false,
     placeholder,
@@ -229,6 +246,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   ref,
 ) {
   const { t } = useTranslation("chat");
+  const replyDraft = useReplyDraft();
 
   const [{ storedDraft, authEpoch }] = useState(() => {
     const authEpoch = persistNewChatDraft ? currentAuthEpoch() : null;
@@ -409,11 +427,26 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // box would otherwise stay at its previous (potentially maxed-out) height
   // and not shrink back to a single line. We mirror the onInput math here
   // and let React re-apply it after every value change.
+  // A hidden box measures zero, so a locked composer waits and resizes again
+  // once the lock lifts.
+  const locked = lockedReason !== null && lockedReason !== undefined;
   useLayoutEffect(() => {
     const el = textareaRef.current;
-    if (!el) return;
+    if (!el || locked) return;
     clampTextareaHeight(el, textareaMaxHeight);
-  }, [inputText, textareaMaxHeight]);
+  }, [inputText, textareaMaxHeight, locked]);
+
+  // The composer's menus render outside the box, so hiding it leaves an open
+  // one on screen. Close them as the lock engages.
+  useEffect(() => {
+    if (!locked) return;
+    setMentionMenuOpen(false);
+    setSlashMenuOpen(false);
+    setImpersonationMenuOpen(false);
+    setModelMenuOpen(false);
+    setReasoningMenuOpen(false);
+    setDraftProjectMenuOpen(false);
+  }, [locked]);
 
   // Whether the textarea held focus when the current Send press began.
   const textareaFocusedAtPressRef = useRef(false);
@@ -474,6 +507,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     setSelectedPersonId("");
     setImpersonationMenuOpen(false);
   }, [settings, impersonationEnabled]);
+
+  // Only a draft's first send carries the pick; an open chat has stored it.
+  const draftModelSelection =
+    showModelSelector && modelSelectorEnabled && !chatModelSelection
+      ? largeModelSelection
+      : undefined;
 
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
@@ -610,8 +649,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           text: trimmed,
           uploads: pendingUploads,
           personaId,
-          largeModelSelection:
-            showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
+          largeModelSelection: draftModelSelection,
           reasoningEffort,
           projectPath: draftProjectName,
           deviceFolder: draftDeviceFolder ?? undefined,
@@ -640,9 +678,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       reasoningEffort,
       draftSkill,
       pendingUploads,
-      showModelSelector,
-      modelSelectorEnabled,
-      largeModelSelection,
+      draftModelSelection,
       draftProjectName,
       draftDeviceFolder,
       draftAgentMention,
@@ -673,7 +709,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const runSend = useCallback(async () => {
-    if (uploadInFlight || uploadInFlightRef.current) return;
+    if (locked || uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -693,8 +729,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       text,
       uploads,
       personaId,
-      largeModelSelection:
-        showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
+      largeModelSelection: draftModelSelection,
       reasoningEffort,
       projectPath: draftProjectName,
       deviceFolder: draftDeviceFolder ?? undefined,
@@ -703,6 +738,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       agentMention: draftAgentMention ?? undefined,
       skillName: skill?.name,
       inputId,
+      replyTo: replyDraft?.target ?? undefined,
     };
 
     // A text-only turn clears optimistically — it is accepted or rejected in
@@ -712,7 +748,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // text the user may still be reading (or about to cancel) reads as loss.
     // It clears only once the server has accepted the turn.
     const clearsOptimistically = uploads.length === 0;
-    if (textareaRef.current && text) recordSendOrigin(inputId, textareaRef.current);
     if (persistNewChatDraft) {
       clearNewChatDraft();
       skipNextDraftSaveRef.current = clearsOptimistically && (inputText !== "" || skill !== null);
@@ -721,12 +756,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setInputText("");
       setPendingUploads([]);
       setDraftSkill(null);
+      replyDraft?.clear();
     }
     setHint((current) => pickComposerHint(hints, current));
     try {
       await invokeOnSend(snapshot, persistNewChatDraft);
       failedSendRef.current = null;
       if (!clearsOptimistically) {
+        replyDraft?.clear();
         const sentIds = new Set(uploads.map((upload) => upload.id));
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
         setDraftSkill((current) => (current === skill ? null : current));
@@ -735,7 +772,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText((current) => (current === rawText ? "" : current));
       }
     } catch {
-      discardSendOrigin(inputId);
       failedSendRef.current = { inputId, text, uploads, skill };
       if (
         persistNewChatDraft &&
@@ -761,6 +797,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText(persistNewChatDraft ? rawText : text);
         setPendingUploads(uploads);
         setDraftSkill(skill);
+        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.
@@ -772,9 +809,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     pendingUploads,
     draftSkill,
     personaId,
-    showModelSelector,
-    modelSelectorEnabled,
-    largeModelSelection,
+    draftModelSelection,
     reasoningEffort,
     draftProjectName,
     draftDeviceFolder,
@@ -782,6 +817,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     uploadInFlight,
     invokeOnSend,
     hints,
+    locked,
+    replyDraft,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -1019,6 +1056,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         return;
       }
     }
+    if (e.key === "Escape" && replyDraft?.target) {
+      e.preventDefault();
+      replyDraft.clear();
+      return;
+    }
     if (shouldSubmitOnEnter(e, { enterSends: !coarsePointer })) {
       e.preventDefault();
       void runSend();
@@ -1127,7 +1169,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         )}
         {textOnly ? null : <WorkspaceContextChips />}
       </div>
-      <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
+      {locked ? (
+        <div
+          role="status"
+          data-chat-composer-locked
+          className="relative z-10 flex items-center gap-3 rounded-16 border border-border bg-muted px-4 py-3 text-ui text-foreground"
+        >
+          <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1">{lockedReason}</span>
+        </div>
+      ) : null}
+      <div
+        data-chat-composer-box
+        hidden={locked}
+        className={cn("@container/composer relative z-10", boxClassName)}
+      >
         {composerError && (
           <Alert variant="destructive" className="mb-3 px-3 py-2">
             <AlertDescription>{composerError}</AlertDescription>
@@ -1140,6 +1196,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           className="hidden"
           onChange={handleFileSelection}
         />
+        <ReplyBar />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
@@ -1318,8 +1375,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <ModelSelectorMenu
                 open={modelMenuOpen}
                 onOpenChange={setModelMenuOpen}
-                value={largeModelSelection}
-                onChange={(next) => void updateLargeModelSelection(next)}
+                value={chatModelSelection?.value ?? largeModelSelection}
+                onChange={(next) =>
+                  chatModelSelection
+                    ? chatModelSelection.onChange(next)
+                    : void updateLargeModelSelection(next)
+                }
                 disabled={uploadInFlight}
               />
             )}
@@ -1407,3 +1468,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     </>
   );
 });
+
+// Memoized: the chat around it renders for trace updates, a finished turn and
+// the like, and none of that is the composer's. Chat holds its props stable.
+export const ChatComposer = memo(ChatComposerImpl);

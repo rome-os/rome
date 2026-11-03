@@ -1,7 +1,7 @@
 // The shipped auth-scheme builders. `credentialsPaste` is the
 // multi-field general case; `tokenPaste` is its single-`token` specialization.
-// Both confer through a headless `GuardianInteraction` fake that echoes canned
-// form answers, and both answer "re-confer" from renew().
+// Both grant through a headless `GuardianInteraction` fake that echoes canned
+// form answers, and both answer "needs-fix" from renew().
 
 import { describe, expect, it, rs } from "@rstest/core";
 import { credentialsPaste, romeCloudOAuth, tokenPaste } from "./schemes.js";
@@ -41,7 +41,7 @@ describe("credentialsPaste", () => {
       domain: "feishu",
     });
 
-    const cred = await scheme.confer(interact);
+    const cred = await scheme.obtain(interact);
 
     expect(forms).toEqual([
       {
@@ -76,16 +76,16 @@ describe("credentialsPaste", () => {
     });
     const { interact } = fakeInteract({ appId: "cli_x" });
 
-    await expect(scheme.confer(interact)).rejects.toThrow("bad app credentials");
+    await expect(scheme.obtain(interact)).rejects.toThrow("bad app credentials");
     expect(seen).toEqual([{ appId: "cli_x" }]);
   });
 
-  it("answers re-confer from renew (no headless renewal)", async () => {
+  it("answers fix from renew (no headless renewal)", async () => {
     const scheme = credentialsPaste({
       fields: [{ name: "appId", label: "App ID" }],
       validate: async () => {},
     });
-    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("re-confer");
+    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("needs-fix");
   });
 });
 
@@ -98,7 +98,7 @@ describe("tokenPaste", () => {
     });
     const { interact, forms } = fakeInteract({ token: "abc123" });
 
-    const cred = await scheme.confer(interact);
+    const cred = await scheme.obtain(interact);
 
     expect(forms).toEqual([
       {
@@ -120,13 +120,13 @@ describe("tokenPaste", () => {
     });
     const { interact } = fakeInteract({ token: "abc123" });
 
-    await expect(scheme.confer(interact)).rejects.toThrow("nope");
+    await expect(scheme.obtain(interact)).rejects.toThrow("nope");
     expect(seen).toEqual(["abc123"]);
   });
 
-  it("answers re-confer from renew", async () => {
+  it("answers fix from renew", async () => {
     const scheme = tokenPaste({ label: "Bot token", validate: async () => {} });
-    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("re-confer");
+    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("needs-fix");
   });
 });
 
@@ -141,20 +141,20 @@ describe("romeCloudOAuth", () => {
     "github",
     "slack",
     "google",
-  ])("throws from confer — conferral is driven by the oauth redeem route (%s)", async (provider) => {
+  ])("throws from obtain — the grant is given by the oauth redeem route (%s)", async (provider) => {
     const scheme = romeCloudOAuth({ provider });
-    await expect(scheme.confer(fakeInteract2)).rejects.toThrow(/oauth redeem route/);
-    await expect(scheme.confer(fakeInteract2)).rejects.toThrow(provider);
+    await expect(scheme.obtain(fakeInteract2)).rejects.toThrow(/oauth redeem route/);
+    await expect(scheme.obtain(fakeInteract2)).rejects.toThrow(provider);
   });
 
-  it("answers re-confer from renew when no refresh is wired", async () => {
+  it("answers fix from renew when no refresh is wired", async () => {
     const scheme = romeCloudOAuth({ provider: "github" });
     await expect(
       scheme.renew({
         material: { accessToken: "gho_x", refreshToken: "ghr_y" },
         expiresAt: "never",
       }),
-    ).resolves.toBe("re-confer");
+    ).resolves.toBe("needs-fix");
   });
 
   it("renews through the wired refresh with the credential's refresh token", async () => {
@@ -171,13 +171,13 @@ describe("romeCloudOAuth", () => {
     expect(refresh).toHaveBeenCalledWith("shprt_old");
   });
 
-  it("answers re-confer when the credential carries no refresh token", async () => {
+  it("answers fix when the credential carries no refresh token", async () => {
     const refresh = rs.fn(async () => ({ material: {}, expiresAt: "never" as const }));
     const scheme = romeCloudOAuth({ provider: "shopify", refresh });
 
     await expect(
       scheme.renew({ material: { accessToken: "shpat_old" }, expiresAt: new Date(0) }),
-    ).resolves.toBe("re-confer");
+    ).resolves.toBe("needs-fix");
     expect(refresh).not.toHaveBeenCalled();
   });
 });

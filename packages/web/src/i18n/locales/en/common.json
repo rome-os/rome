@@ -12,7 +12,6 @@
     "sessions": "Sessions",
     "routines": "Routines",
     "apps": "Apps",
-    "store": "App Store",
     "desktop": "Browser",
     "settings": "Settings",
     "openSidebar": "Open sidebar",
@@ -43,6 +42,14 @@
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",
+    "concierge": "Concierge",
+    "conciergeUnread_one": "Concierge, {{label}} unread message",
+    "conciergeUnread_other": "Concierge, {{label}} unread messages",
+    "conciergeUnreadBadge_one": "{{label}} unread message",
+    "conciergeUnreadBadge_other": "{{label}} unread messages",
+    "conciergeNeedsYou_one": "{{count}} task needs you",
+    "conciergeNeedsYou_other": "{{count}} tasks need you",
+    "startedByConcierge": "Started by Concierge",
     "rowStatus": {
       "waiting": "Waiting for you",
       "running": "Replying now",
@@ -200,7 +207,8 @@
   "desktop": {
     "iframeTitle": "Rome Desktop",
     "namedIframeTitle": "Rome desktop “{{name}}”",
-    "notFound": "There is no desktop called “{{name}}”."
+    "notFound": "There is no desktop called “{{name}}”.",
+    "reconnecting": "Reconnecting…"
   },
   "wechatApp": {
     "loading": "Checking WeChat…",
@@ -254,7 +262,10 @@
     "toolUpdated": "New content",
     "openToolNewTab": "Open {{name}} in new tab",
     "closeTool": "Close {{name}}",
+    "tasksTab": "Tasks",
     "allTools": "All open apps",
+    "allToolsHidden_one": "All open apps, {{count}} more",
+    "allToolsHidden_other": "All open apps, {{count}} more",
     "collapseTools": "Hide apps",
     "expandTools": "Show apps",
     "resizeTools": "Resize chat and apps",
@@ -310,8 +321,6 @@
     "empty": "No messages with {{name}} yet.",
     "noText": "No text",
     "placeholder": "Message {{name}}",
-    "sendFailed": "Not sent",
-    "stillSending": "Still sending",
     "loadOlderFailed": "Failed to load older messages"
   }
 }

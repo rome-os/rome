@@ -28,12 +28,14 @@ import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
 import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
-import { channelAccountsRoutes } from "./routes/channel-accounts.js";
+import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
+import { send } from "../chats/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
+import { conciergeRoutes } from "./routes/concierge.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -78,9 +80,12 @@ import { routinesRoutes } from "./routes/routines.js";
 import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
+import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { readAccountAgent } from "../channels/account-agents.js";
+import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+import { accountLinkOf, connectionKindOf } from "../channels/account-links.js";
+import { byChannel, readAccountAgent } from "../channels/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -98,7 +103,13 @@ export function buildApp(
   app.route(
     "/",
     discordCliRoutes(
-      { ...deps, channelRecords: new ChannelRecordsRepository(deps.db) },
+      {
+        ...deps,
+        channelRecords: new ChannelRecordsRepository(
+          deps.db,
+          accountLinkOf(deps.connectionRegistry),
+        ),
+      },
       config.host,
     ),
   );
@@ -157,7 +168,8 @@ export function buildApp(
   api.route("/", appApiPublicRoutes(deps));
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
-  api.route("/", channelAccountsRoutes(deps));
+  api.route("/", appConnectionAccessRoutes(deps));
+  api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());
@@ -178,6 +190,7 @@ export function buildApp(
   api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", conciergeRoutes(deps));
   api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
@@ -195,12 +208,22 @@ export function buildApp(
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
-  const sessionChannelRecords = new ChannelRecordsRepository(deps.db);
+  const sessionChannelRecords = new ChannelRecordsRepository(
+    deps.db,
+    accountLinkOf(deps.connectionRegistry),
+  );
+  const sessionAccountAgents = {
+    kindOf: connectionKindOf(deps.connectionRegistry),
+    linkOf: accountLinkOf(deps.connectionRegistry),
+    accounts: new ConnectedAccountsRepository(deps.db),
+  };
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
-    accountAgentOf: (channel) => readAccountAgent(sessionChannelRecords, deps.agentLoader, channel),
+    accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
+      readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),
+    ),
     // A channel with no record answers no agent, so the records are every
     // channel that can.
     channelNames: () => sessionChannelRecords.all().map((record) => record.id),
@@ -214,6 +237,12 @@ export function buildApp(
   // buildApp runs, so the runtime is bound after the fact, like the rest of the
   // post-setup wiring.
   deps.backendTurnRunner.setWebchatRuntime(webchatRuntime);
+  // Concierge is built before the API layer too. Its sends are Chats' own,
+  // with the dashboard taking those into its chats.
+  deps.concierge?.attachDashboard({
+    chats: webchatRuntime,
+    send: (place, body, as) => send({ ...deps, dashboard: webchatRuntime }, place, body, as),
+  });
 
   app.route("/api", api);
 
@@ -318,6 +347,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+          subscribeConciergeTasks: (emit) =>
+            deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
         },
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);

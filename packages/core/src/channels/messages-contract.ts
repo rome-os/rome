@@ -12,7 +12,12 @@ import {
   type Message,
 } from "@rome/api-types/message";
 import type { ChatId } from "@rome-os/app-runtime";
-import type { AccountMessages, MessageAccount, Messages } from "./messages.js";
+import {
+  channelMessageOrder,
+  type AccountMessages,
+  type MessageAccount,
+  type Messages,
+} from "./messages.js";
 
 /** A limit large enough to hold any history a store can answer — what
  *  messages.ts calls the full read. */
@@ -219,6 +224,40 @@ export function testMessagesQueryContract(
       expect(recent.length).toBeGreaterThan(0);
       expect(recent.length).toBeLessThan(held.length);
       expect(recent.every((entry) => entry.timestamp.getTime() >= since.getTime())).toBe(true);
+    });
+
+    it("answers only messages older than `after`", async () => {
+      const store = await subject();
+      const first = await store.messages.query({ chatId: store.conversation, limit: 1 });
+      const cursor = first[0]!;
+      const older = await store.messages.query({
+        chatId: store.conversation,
+        after: channelMessageOrder(cursor),
+        limit: WHOLE_QUERY,
+      });
+      expect(older.length).toBeGreaterThan(0);
+      expect(older.some((entry) => entry.messageId === cursor.messageId)).toBe(false);
+      expect(older.every((entry) => entry.timestamp.getTime() <= cursor.timestamp.getTime())).toBe(
+        true,
+      );
+    });
+
+    it("pages back with `after` over exactly the full query", async () => {
+      const store = await subject();
+      const full = await store.messages.query({ chatId: store.conversation, limit: WHOLE_QUERY });
+      const walked: string[] = [];
+      let after: Message | undefined;
+      for (let page = 0; page <= full.length; page++) {
+        const entries = await store.messages.query({
+          chatId: store.conversation,
+          ...(after ? { after } : {}),
+          limit: 2,
+        });
+        if (entries.length === 0) break;
+        walked.push(...entries.map((entry) => entry.messageId));
+        after = channelMessageOrder(entries.at(-1)!);
+      }
+      expect(walked).toEqual(full.map((entry) => entry.messageId));
     });
 
     // An empty list rather than a failure: a conversation the store has never

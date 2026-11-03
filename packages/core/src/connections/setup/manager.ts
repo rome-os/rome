@@ -9,56 +9,57 @@
 // stays reachable by `cid` for a final poll, but no longer counts as the grant's
 // active setup, so the next start begins fresh.
 //
-// The manager owns the terminal write: when a coroutine returns its conferral,
-// the manager hands it to `registry.confer` inside the registry's per-(connection kind,
-// grant) critical section. `confer` resolves the ADDRESSED connection (never
+// The manager owns the terminal write: when a coroutine returns its grant,
+// the manager hands it to `registry.giveGrant` inside the registry's per-(connection kind,
+// grant) critical section. `grant` resolves the ADDRESSED connection (never
 // blindly `find()[0]`, which could clobber a different connection of the same
 // connection kind), mints the placeholder for the offerable flow, persists the
 // credential + profile, and runs the guardian channel mapping — ALL in one DB
 // transaction. A mapping failure rolls the credential and the mint back with it,
-// so a failed conferral leaves zero residual state instead of a credential
+// so a failed grant leaves zero residual state instead of a credential
 // authorized while the setup reports `failed`.
 
 import { randomUUID } from "node:crypto";
 import type { DrizzleTx } from "../../db/index.js";
+import { platformOf } from "@rome/api-types/platform";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
 } from "../../channels/guardian-mapping.js";
-import type { ConferOptions } from "../registry.js";
+import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
-import type { SetupConferral, SetupState } from "./types.js";
+import type { SetupGrant, SetupState } from "./types.js";
 
 /** The narrow registry surface the manager drives — every real
  *  `ConnectionRegistry` satisfies it structurally, and tests fake it directly. */
 export interface SetupRegistry {
   getDescriptor(connectionKind: string): ConnectionDescriptor | null;
   withGrantSection<T>(connectionKind: string, grant: string, fn: () => Promise<T>): Promise<T>;
-  /** The atomic terminal conferral: resolve/mint the addressed connection,
+  /** The atomic terminal grant: resolve/mint the addressed connection,
    *  persist the credential + profile, and run `opts.inTx` (the guardian mapping)
-   *  in ONE transaction, then start the adapter. See `ConnectionRegistry.confer`. */
-  confer(
+   *  in ONE transaction, then start the adapter. See `ConnectionRegistry.giveGrant`. */
+  giveGrant(
     connectionKind: string,
     connectionId: string | undefined,
     grant: string,
     credential: Credential,
     profile: ProfileRecord | undefined,
-    opts?: ConferOptions,
+    opts?: GiveGrantOptions,
   ): Promise<Connection>;
 }
 
 export interface SetupManagerDeps {
   registry: SetupRegistry;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
 }
 
 /** What a setup addresses: the connection kind, plus the connection id when the route
  *  targeted an existing connection (absent for an offerable placeholder — the
- *  terminal conferral mints the row). `another` asks for a new account of the
- *  connection kind, minted by the terminal conferral like a placeholder's, so an
+ *  terminal grant mints the row). `another` asks for a new account of the
+ *  connection kind, minted by the terminal grant like a placeholder's, so an
  *  abandoned setup leaves no account behind. */
 export interface SetupTarget {
   connectionKind: string;
@@ -72,7 +73,7 @@ export class NoSetupError extends Error {
     readonly connectionKind: string,
     readonly grant: string,
   ) {
-    super(`No conferral setup for grant "${grant}" of connection kind "${connectionKind}".`);
+    super(`No setup for grant "${grant}" of connection kind "${connectionKind}".`);
     this.name = "NoSetupError";
   }
 }
@@ -138,7 +139,7 @@ export class SetupManager {
   /** Per-key serialization for start(): the whole lookup/cancel/create sequence
    *  runs to completion before the next start on the same key begins, so two
    *  concurrent `force` starts cannot both cancel the same session and then each
-   *  install a fresh one (which would leave two conferrable sessions live).
+   *  install a fresh one (which would leave two grantable sessions live).
    *  Keyed by `${idOrKind} ${grant}`; entries evict when idle. */
   readonly #startMutex = new KeyedMutex();
 
@@ -171,13 +172,14 @@ export class SetupManager {
       }
     }
 
-    const fn = this.#deps.registry.getDescriptor(target.connectionKind)?.auth[grant]?.setup;
+    const descriptor = this.#deps.registry.getDescriptor(target.connectionKind);
+    const fn = descriptor?.grant === grant ? descriptor.auth.setup : undefined;
     if (!fn) throw new NoSetupError(target.connectionKind, grant);
 
     const cid = randomUUID();
     const session = new SetupSession({
       fn,
-      commit: (conferral, signal) => this.#commit(target, grant, conferral, signal),
+      commit: (given, signal) => this.#commit(target, grant, given, signal),
       renewing: target.connectionId !== undefined,
     });
     const managed: Managed = { cid, target, grant, session };
@@ -303,7 +305,7 @@ export class SetupManager {
     return managed.session.cancel();
   }
 
-  /** The terminal write: hand the conferral to `registry.confer`, which mints
+  /** The terminal write: hand the setup's grant to `registry.giveGrant`, which mints
    *  the addressed placeholder if needed, persists the credential + profile, and
    *  runs the guardian mapping — ALL in one transaction, so a mapping failure
    *  rolls the credential (and the mint) back with it rather than leaving a
@@ -314,20 +316,19 @@ export class SetupManager {
   async #commit(
     target: SetupTarget,
     grant: string,
-    conferral: SetupConferral,
+    given: SetupGrant,
     signal: AbortSignal,
   ): Promise<string> {
     return this.#deps.registry.withGrantSection(target.connectionKind, grant, async () => {
       // A cancel that landed while the write waited for the section wins, so
       // an abandoned setup leaves nothing behind.
       if (signal.aborted) throw new SetupAbortError();
-      const channelUserId = conferral.guardianChannelUserId;
+      const channelUserId = given.guardianChannelUserId;
+      // The kinds that report the guardian's own address have no domain to
+      // tell a platform apart by, so the kind names it.
+      const platform = platformOf(target.connectionKind);
       const plan = channelUserId
-        ? await planGuardianMapping(
-            this.#deps.personMappingRepo,
-            target.connectionKind,
-            channelUserId,
-          )
+        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId)
         : null;
       const opts = {
         ...(plan && channelUserId
@@ -335,8 +336,8 @@ export class SetupManager {
               inTx: (tx: DrizzleTx) =>
                 applyGuardianMappingWithinTx(
                   tx,
-                  this.#deps.personMappingRepo,
-                  target.connectionKind,
+                  this.#deps.peopleRepo,
+                  platform,
                   channelUserId,
                   plan,
                 ),
@@ -344,12 +345,12 @@ export class SetupManager {
           : {}),
         ...(target.another ? { another: true } : {}),
       };
-      const connection = await this.#deps.registry.confer(
+      const connection = await this.#deps.registry.giveGrant(
         target.connectionKind,
         target.connectionId,
         grant,
-        conferral.credential,
-        conferral.profile,
+        given.credential,
+        given.profile,
         Object.keys(opts).length > 0 ? opts : undefined,
       );
       return connection.id;

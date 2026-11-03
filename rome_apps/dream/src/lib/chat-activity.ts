@@ -1,15 +1,15 @@
 import { type SQL, sql } from "drizzle-orm";
 import type { AppDbContext } from "@rome-os/app-runtime";
 
-// The connection kinds an agent can be linked to (`LINKABLE_KINDS` in
-// @rome/api-types, which an app cannot import), less the guardian's own
-// signed-in Telegram. A test keeps the two in step. Every other channel
+// The connection kinds whose accounts are an agent's own, as each kind's
+// descriptor in core declares it (`link: "own_account"`), which an app cannot
+// read. A core test keeps the two in step. Every other channel
 // carries the guardian's own accounts (a linked WhatsApp, a WeChat login) or
 // Rome's own traffic, and stays out of Dream.
 export const ACCOUNT_KINDS = ["feishu", "telegram", "discord", "slack_bot"];
 
-/** Linkable connection kinds that are the guardian's own account, which Dream
- *  leaves alone as it does their other personal accounts. */
+/** Connection kinds whose agent is a delegate on the guardian's own account,
+ *  which Dream leaves alone as it does their other personal accounts. */
 export const GUARDIAN_OWN_KINDS = ["telegram_user"];
 
 /** A dashboard chat, over the `rome_sessions` row named `session`. The

@@ -1,11 +1,16 @@
 import {
   Client,
+  createLarkChannel,
   DefaultCache,
   defaultHttpInstance,
+  Domain,
   type HttpInstance,
   LoggerLevel,
 } from "@larksuiteoapi/node-sdk";
+import { FeishuAdapter } from "../../../channels/feishu.js";
+import type { WebSocket } from "ws";
 import { exemplar, loadCapture } from "./capture.js";
+import { decodeFrame, encodeFrame, FRAME_CONTROL, FRAME_DATA } from "./feishu-ws.js";
 import postCapture from "./captures/feishu-post.capture.json" with { type: "json" };
 import {
   type MessageChange,
@@ -20,7 +25,31 @@ import {
 /** The group chat the capture was recorded in. */
 export const FEISHU_CHAT = "oc_fixture_chat";
 export const FEISHU_APP_ID = "cli_0123456789abcdef";
+/** The one person the app can reach directly, and their p2p chat with it. */
+export const FEISHU_USER = "ou_fixture_user";
+export const FEISHU_P2P = "oc_fixture_p2p";
+/** The app's bot, as its own messages' sender names it. */
+export const FEISHU_BOT = "ou_fixture_bot";
+/** A second app, as a second of Rome's accounts, in the group and in no p2p
+ *  chat. Its event frames are synthetic, as the first app's are. */
+export const FEISHU_SECOND_APP_ID = "cli_fedcba9876543210";
+export const FEISHU_SECOND_BOT = "ou_fixture_bot_2";
+/** The next pushed message's number, process-wide. */
+let nextInbound = 1;
+/** The long connection's settings: no reconnect, so a closed peer ends it. */
+const CLIENT_CONFIG = {
+  PingInterval: 120,
+  ReconnectCount: 0,
+  ReconnectInterval: 120,
+  ReconnectNonce: 30,
+};
+const SERVICE_ID = 1;
 const TOKEN = "t-fixture";
+/** Each app the peer models: its bot, token and long connection path. */
+const APPS = new Map([
+  [FEISHU_APP_ID, { bot: FEISHU_BOT, token: TOKEN, socket: "/ws" }],
+  [FEISHU_SECOND_APP_ID, { bot: FEISHU_SECOND_BOT, token: "t-fixture-2", socket: "/ws/2" }],
+]);
 /** Where the SDK sends a client's requests for the Feishu domain. */
 const FEISHU_ORIGIN = "https://open.feishu.cn";
 
@@ -70,11 +99,20 @@ export interface PeerCard {
  * text counts as an edit of the message.
  */
 export class FeishuPeer implements Peer {
-  readonly server = new PeerServer((request) => this.route(request));
+  readonly server = new PeerServer(
+    (request) => this.route(request),
+    (socket, path) => this.longConnection(socket, path),
+  );
   private readonly store = new MessageStore();
+  /** The SDK's open long connections, which events are pushed down. */
+  /** Each open long connection, and the app that opened it. */
+  private readonly sockets = new Map<WebSocket, string>();
+  /** What the app answered each pushed event with, by the event's frame id. */
+  readonly acks = new Map<string, Record<string, unknown>>();
+  private nextFrame = 1;
   private readonly cards = new Map<string, PeerCard>();
   private nextCardId = 1;
-  private readonly chats = new Set([FEISHU_CHAT]);
+  private readonly chats = new Set([FEISHU_CHAT, FEISHU_P2P]);
   /** Each message's answer content, as Feishu echoes what it holds. */
   private readonly contents = new Map<string, string>();
   private readonly times = new Map<string, { create_time: string; update_time: string }>();
@@ -143,6 +181,22 @@ export class FeishuPeer implements Peer {
     });
   }
 
+  /** Rome's Feishu adapter, its SDK's requests and long connection sent here. */
+  createAdapter(appId = FEISHU_APP_ID): FeishuAdapter {
+    return new FeishuAdapter({ appId, appSecret: "fixture-secret" }, (config) =>
+      createLarkChannel({
+        appId: config.appId,
+        appSecret: config.appSecret,
+        domain: Domain.Feishu,
+        transport: "websocket",
+        httpInstance: this.redirected(),
+        outbound: { markdownConverter: "builtin" },
+        includeRawEvent: true,
+        loggerLevel: LoggerLevel.fatal,
+      }),
+    );
+  }
+
   private redirected(): HttpInstance {
     const http = defaultHttpInstance as unknown as HttpInstance;
     const here = (url = "") => {
@@ -168,6 +222,145 @@ export class FeishuPeer implements Peer {
     return this.store.add({ id: this.messageId(), conversation: chatId, from: "user", text });
   }
 
+  /**
+   * A person's text message, pushed to the app over every open long
+   * connection as Feishu pushes `im.message.receive_v1`: in the p2p chat from
+   * the one person modelled, unless `chatId` names a group. The event frame
+   * is synthetic until a capture covers it.
+   */
+  emitMessage(
+    text: string,
+    chatId = FEISHU_P2P,
+    /** Whom the message names: the first app's bot, or every bot in the chat. */
+    options: { mentionsBot?: boolean; mentionsEveryBot?: boolean } = {},
+    // A p2p chat is with the first app alone; a group has every app in it.
+  ): VisibleMessage {
+    if (!this.sockets.size) throw new Error("No Feishu long connection is open");
+    this.chats.add(chatId);
+    // Unique across the process: the SDK remembers every message id it
+    // handed over, in a cache every client shares.
+    const message = this.store.add({
+      id: `om_in_${process.pid}_${nextInbound++}`,
+      conversation: chatId,
+      from: "user",
+      text,
+    });
+    const now = String(Date.now());
+    this.times.set(message.id, { create_time: now, update_time: now });
+    const hearing = chatId === FEISHU_P2P ? [FEISHU_APP_ID] : [...APPS.keys()];
+    const named = options.mentionsEveryBot ? hearing : options.mentionsBot ? [FEISHU_APP_ID] : [];
+    const mentions = named.map((app, i) => ({
+      key: `@_user_${i + 1}`,
+      id: { open_id: APPS.get(app)!.bot, union_id: `on_${APPS.get(app)!.bot}`, user_id: "" },
+      name: "Rome",
+      tenant_key: "fixture_tenant",
+    }));
+    const mentionKeys = mentions.map((mention) => mention.key).join(" ");
+    const event = {
+      schema: "2.0",
+      header: {
+        event_id: `ev_${message.id}`,
+        event_type: "im.message.receive_v1",
+        create_time: now,
+        token: "",
+        app_id: FEISHU_APP_ID,
+        tenant_key: "fixture_tenant",
+      },
+      event: {
+        sender: {
+          sender_id: { open_id: FEISHU_USER, union_id: "on_fixture_user", user_id: "fixture_user" },
+          sender_type: "user",
+          tenant_key: "fixture_tenant",
+        },
+        message: {
+          message_id: message.id,
+          create_time: now,
+          update_time: now,
+          chat_id: chatId,
+          chat_type: chatId === FEISHU_P2P ? "p2p" : "group",
+          message_type: "text",
+          content: JSON.stringify({ text: named.length ? `${mentionKeys} ${text}` : text }),
+          ...(named.length ? { mentions } : {}),
+        },
+      },
+    };
+    // Each app in the chat gets the event under its own app id, and the one
+    // message id.
+    for (const [socket, app] of this.sockets) {
+      if (!hearing.includes(app)) continue;
+      const frameId = String(this.nextFrame++);
+      const own = { ...event, header: { ...event.header, app_id: app } };
+      socket.send(
+        encodeFrame({
+          seqId: Number(frameId),
+          logId: Number(frameId),
+          service: SERVICE_ID,
+          method: FRAME_DATA,
+          headers: { type: "event", message_id: frameId, sum: "1", seq: "0", trace_id: frameId },
+          payload: new TextEncoder().encode(JSON.stringify(own)),
+        }),
+      );
+    }
+    return message;
+  }
+
+  /** The endpoint the SDK asks where to open its long connection. */
+  private endpoint(body: Record<string, unknown>): Reply | undefined {
+    const app = APPS.get(String(body.AppID));
+    if (!app) return undefined;
+    return {
+      body: {
+        code: 0,
+        msg: "ok",
+        data: {
+          URL: `${this.server.socketUrl(app.socket)}?device_id=fixture_device&service_id=${SERVICE_ID}`,
+          ClientConfig: CLIENT_CONFIG,
+        },
+      },
+      source: "synthetic",
+    };
+  }
+
+  /** A long connection the SDK opened: it pings, and answers each event. */
+  private longConnection(socket: WebSocket, path: string): void {
+    const app = [...APPS].find(([, { socket: at }]) => at === path)?.[0];
+    if (!app) {
+      this.server.errors.push(`Unmodeled long connection path ${path}`);
+      socket.close();
+      return;
+    }
+    this.sockets.set(socket, app);
+    socket.on("close", () => this.sockets.delete(socket));
+    socket.on("message", (data: Buffer) => {
+      const frame = decodeFrame(new Uint8Array(data));
+      if (frame.method === FRAME_CONTROL && frame.headers.type === "ping") {
+        // A pong carries the connection's settings, which the SDK adopts.
+        socket.send(
+          encodeFrame({
+            ...frame,
+            headers: { type: "pong" },
+            payload: new TextEncoder().encode(JSON.stringify(CLIENT_CONFIG)),
+          }),
+        );
+        return;
+      }
+      if (frame.method === FRAME_DATA && frame.payload) {
+        this.acks.set(
+          frame.headers.message_id ?? "",
+          JSON.parse(new TextDecoder().decode(frame.payload)) as Record<string, unknown>,
+        );
+        return;
+      }
+      this.server.errors.push(`Unmodeled long connection frame ${JSON.stringify(frame.headers)}`);
+    });
+  }
+
+  /** The app whose token `headers` carry, or undefined for none. */
+  private appOf(headers: Headers): { bot: string } | undefined {
+    const auth = headers.get("authorization");
+    return [...APPS.values()].find((app) => auth === `Bearer ${app.token}`);
+  }
+
   /** The user recalls their message, so a reply to it is refused. */
   recall(messageId: string): void {
     this.recalled.add(messageId);
@@ -181,8 +374,30 @@ export class FeishuPeer implements Peer {
   private route({ method, path, query, headers, body }: PeerRequest): Reply | undefined {
     if (method === "POST" && path === "/open-apis/auth/v3/tenant_access_token/internal")
       return this.token(body);
+    if (method === "POST" && path === "/callback/ws/endpoint") return this.endpoint(body);
+    if (method === "GET" && path === "/open-apis/bot/v3/info") {
+      const app = this.appOf(headers);
+      if (!app) return undefined;
+      return {
+        body: {
+          code: 0,
+          msg: "ok",
+          bot: { activate_status: 2, app_name: "Rome", avatar_url: "", open_id: app.bot },
+        },
+        source: "synthetic",
+      };
+    }
+    // A group's name, which the adapter looks up when it first hears the
+    // group. Synthetic until a capture covers it.
+    if (method === "GET" && path === `/open-apis/im/v1/chats/${FEISHU_CHAT}`) {
+      if (!this.appOf(headers)) return undefined;
+      return {
+        body: { code: 0, msg: "success", data: { name: "Launch", chat_mode: "group" } },
+        source: "synthetic",
+      };
+    }
     if (!path.startsWith(MESSAGES) && !path.startsWith(CARDS)) return undefined;
-    if (headers.get("authorization") !== `Bearer ${TOKEN}`)
+    if (!this.appOf(headers))
       return refusal(
         99991663,
         "Invalid access token for authorization. Please make a request with token attached.",
@@ -198,19 +413,23 @@ export class FeishuPeer implements Peer {
   }
 
   private token(body: Record<string, unknown>): Reply | undefined {
-    if (body.app_id !== FEISHU_APP_ID) return undefined;
+    const app = APPS.get(String(body.app_id));
+    if (!app) return undefined;
     // The SDK reads a token from a 200 answer and throws on one without it.
     if (this.credentialRefused)
       return { body: { code: 10014, msg: "app secret invalid" }, source: "synthetic" };
     return {
-      body: { code: 0, msg: "ok", tenant_access_token: TOKEN, expire: 7200 },
+      body: { code: 0, msg: "ok", tenant_access_token: app.token, expire: 7200 },
       source: "synthetic",
     };
   }
 
   private create(query: URLSearchParams, body: Record<string, unknown>): Reply | undefined {
-    const chat = String(body.receive_id);
-    if (query.get("receive_id_type") !== "chat_id" || !this.chats.has(chat)) return undefined;
+    // A message to the one person modelled goes to their p2p chat with the app.
+    const byUser = query.get("receive_id_type") === "open_id" && body.receive_id === FEISHU_USER;
+    const chat = byUser ? FEISHU_P2P : String(body.receive_id);
+    if (!byUser && (query.get("receive_id_type") !== "chat_id" || !this.chats.has(chat)))
+      return undefined;
     return this.post(body, (text) =>
       this.store.add({ id: this.messageId(), conversation: chat, from: "rome", text }),
     );

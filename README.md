@@ -67,6 +67,10 @@ available as a preview.
 
 [Join the preview →](https://romeos.cc/login)
 
+The Mac app signs in to Rome Cloud, opens your Rome in its window, and connects
+the Mac as a device your Rome can run programs on. It does not run Rome itself.
+To run Rome on your own machine, use Docker.
+
 ### Run with Docker
 
 One script checks for Docker, pulls the published image, and starts Rome:
@@ -304,7 +308,7 @@ Rome is a pnpm monorepo.
 | --- | --- |
 | [`packages/core/`](packages/core/) | Agent runtime, sessions, actions, events, channels, policies, memory, and persistence |
 | [`packages/web/`](packages/web/) | Guardian-only web dashboard |
-| [`packages/desktop/`](packages/desktop/) | Electron shell and local Rome runtime |
+| [`packages/desktop/`](packages/desktop/) | Mac app: opens a Rome Cloud Rome and connects the Mac as a device |
 | [`rome_apps/`](rome_apps/) | First-party Rome Apps loaded through the same app model |
 | [`packages/app-runtime-sdk/`](packages/app-runtime-sdk/) | Public backend SDK for Rome Apps |
 | [`packages/app-web-sdk/`](packages/app-web-sdk/) | Public web SDK and app build tooling |

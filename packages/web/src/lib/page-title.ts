@@ -96,8 +96,8 @@ function fileBrowserDetail(pathname: string): string | null {
  * them owns it — a page outside the nav names itself through useDocumentTitle,
  * and the auth screens keep the bare site name.
  *
- * The longest matching href wins, so /apps/store beats /apps whatever order
- * the registry is written in. Matching is on segment boundaries, so /peopled
+ * The longest matching href wins, so a nested href beats its parent whatever
+ * order the registry is written in. Matching is on segment boundaries, so /peopled
  * never resolves to /people.
  */
 export function routeTitle(

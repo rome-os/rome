@@ -29,10 +29,11 @@ function unconnected(grant: string): ConnectionSlot {
     key: "bot",
     connectionId: null,
     grant,
-    state: "unauthorized",
+    state: null,
     display: null,
     identity: null,
     activeSetupCid: null,
+    link: "own_account",
   };
 }
 
@@ -41,12 +42,13 @@ function connected(grant: string, identity: string | null): ConnectionSlot {
     key: "bot",
     connectionId: "conn-1",
     grant,
-    state: "authorized",
+    state: "working",
     display: identity
       ? { displayName: null, handle: identity, email: null, avatarUrl: null }
       : null,
     identity,
     activeSetupCid: null,
+    link: "own_account",
   };
 }
 
@@ -81,10 +83,9 @@ function stubFetch(overrides: (url: string, init?: RequestInit) => Response | nu
       }
       if (url.includes("/api/setups/") && url.endsWith("/input")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({ accepted: true, state: { status: "done", conferral: {} } }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ accepted: true, state: { status: "done", grant: {} } }), {
+            status: 200,
+          }),
         );
       }
       return Promise.resolve(
@@ -117,7 +118,7 @@ it("renews a degraded account in place instead of only offering Disconnect", asy
   renderCard(
     <ChannelConnectCard
       config={CHANNEL_CONFIGS.discord}
-      slot={{ ...connected("bot", "@rome_helper"), state: "degraded" }}
+      slot={{ ...connected("bot", "@rome_helper"), state: "broken" }}
       role="primary"
       onRefresh={() => {}}
     />,
@@ -136,7 +137,7 @@ it("renews a degraded account in place instead of only offering Disconnect", asy
 
 it("offers Reconnect again when a renewed account degrades a second time", async () => {
   stubFetch();
-  const degraded = { ...connected("bot", "@rome_helper"), state: "degraded" as const };
+  const degraded = { ...connected("bot", "@rome_helper"), state: "broken" as const };
   const card = (slot: ConnectionSlot) => (
     <MemoryRouter>
       <ChannelConnectCard
@@ -294,12 +295,29 @@ describe("ChannelConnectCard — config variations", () => {
     }
   });
 
+  it("disconnects an account of a kind that takes no agent without asking", async () => {
+    const fetchMock = stubFetch();
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.email}
+        slot={{ ...connected("inbox", "agent@rome.computer"), link: null }}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true),
+    );
+  });
+
   it("shows no guardian note for email when connected", () => {
     stubFetch();
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.email}
-        slot={connected("inbox", "agent@rome.computer")}
+        slot={{ ...connected("inbox", "agent@rome.computer"), link: null }}
         role="primary"
         onRefresh={() => {}}
       />,
@@ -313,7 +331,7 @@ describe("ChannelConnectCard — config variations", () => {
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.telegram_user}
-        slot={{ ...connected("session", null) }}
+        slot={{ ...connected("session", null), link: "delegate" }}
         role="secondary"
         onRefresh={() => {}}
       />,

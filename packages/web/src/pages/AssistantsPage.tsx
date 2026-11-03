@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Bot, Check, ChevronDown, CircleAlert } from "lucide-react";
@@ -32,16 +32,10 @@ import {
   sendToAssistant,
 } from "@/lib/assistants-api";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
-import { randomUUID } from "@/lib/random-uuid";
 
 /** How often the open chat is read again, so an assistant's message and main's
  *  answer appear without a reload. */
 const POLL_MS = 5_000;
-
-/** How a replayed send still on its way is followed: how many more times it
- *  is asked about, and how long apart. */
-const SENDING_CHECKS = 10;
-const SENDING_CHECK_MS = 1_000;
 
 /** How often the list of assistants is read again. */
 const LIST_POLL_MS = 30_000;
@@ -206,11 +200,6 @@ function AssistantChat({
   );
 
   const [sendError, setSendError] = useState<string | null>(null);
-  // The id of a send whose outcome is unknown, kept with its text. A retry of
-  // the same text reuses it, so a send the server took before its answer was
-  // lost is replayed rather than sent twice. A confirmed refusal or success,
-  // or a changed draft, starts a new id.
-  const pendingSend = useRef<{ text: string; id: string } | null>(null);
 
   return (
     <>
@@ -272,7 +261,15 @@ function AssistantChat({
           </div>
         </div>
 
-        <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
+        {/* Below md the floor paints the canvas and takes pointer events. Its
+            side gutters and bottom padding sit outside the box's blur, and on a
+            phone a transparent strip there shows the transcript beside and
+            below the box, and lets a tap land on a link it hides. From md up
+            it stays transparent, so messages scroll visibly under the box. */}
+        <div
+          data-chat-floor
+          className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]"
+        >
           <div className="pointer-events-auto mx-auto max-w-5xl">
             <ChatComposer
               textOnly
@@ -282,33 +279,9 @@ function AssistantChat({
               boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
               onSend={async (snapshot) => {
                 setSendError(null);
-                // Only a retry takes over an earlier id, and it takes it away,
-                // so a second message with the same text sent while one is in
-                // flight goes out as its own message.
-                const earlier = pendingSend.current;
-                pendingSend.current = null;
-                const id = earlier?.text === snapshot.text ? earlier.id : randomUUID();
-                let settled = false;
                 try {
-                  let row = await sendToAssistant(agentId, snapshot.text, id);
-                  // A replay of a send still on its way answers "sending".
-                  // Asking again under the same id reads where it stands, until
-                  // the channel has taken it or refused it.
-                  for (let check = 0; row.state === "sending" && check < SENDING_CHECKS; check++) {
-                    await new Promise((resolve) => setTimeout(resolve, SENDING_CHECK_MS));
-                    row = await sendToAssistant(agentId, snapshot.text, id);
-                  }
-                  // Still unknown: the draft comes back with its id kept.
-                  if (row.state === "sending") throw new Error(t("assistantChat.stillSending"));
-                  settled = true;
-                  // The server has already discarded a refused send, and its
-                  // id replays the refusal, so the retry is a new message.
-                  if (row.state === "failed") {
-                    throw new Error(row.error ?? t("assistantChat.sendFailed"));
-                  }
+                  await sendToAssistant(agentId, snapshot.text);
                 } catch (error) {
-                  // The server may have taken it: the retry asks under this id.
-                  if (!settled) pendingSend.current = { text: snapshot.text, id };
                   setSendError(error instanceof Error ? error.message : String(error));
                   // Rejecting gives the draft back to the composer.
                   throw error;

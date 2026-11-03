@@ -78,7 +78,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
         if (account.kind === "ambiguous") {
           return {
             status: "error",
-            error: `Toolkit "${toolkit}" has ${account.ids.length} active managed connections — resolve the duplicate in the Connector dashboard before executing tools.`,
+            error: `Toolkit "${toolkit}" has ${account.ids.length} active managed connections — resolve the duplicate in Settings › Connections before executing tools.`,
           };
         }
         const result = await client.executeTool({

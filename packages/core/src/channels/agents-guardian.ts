@@ -4,7 +4,9 @@
  * person has signed in to Rome Cloud from ChatGPT, and it is Cloud, not the
  * sender, that marks a message `sameAccount`. So the first message from such an agent
  * links its `agents` account to the guardian before the inbox resolves the
- * sender, and the dot speaks as the guardian from that message on.
+ * sender, and the dot speaks as the guardian from that message on. The link is
+ * a delegate link (docs/domains/people.md#delegate-link), so a reader knows it
+ * is the guardian's agent talking and not the guardian.
  *
  * Only an account nobody has decided about is linked. A link to anyone, a
  * dismissal, or an earlier automatic link the guardian has since removed all
@@ -14,7 +16,7 @@
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
@@ -30,12 +32,10 @@ function isSameAccount(message: ChannelMessage): boolean {
 }
 
 export function createAgentsGuardianLink(deps: {
-  personMappingRepo: Pick<
-    PersonMappingRepository,
-    "findByChannelUser" | "findByBondLevel" | "addChannelMapping"
-  >;
+  peopleRepo: Pick<PeopleRepository, "byAccount" | "isDismissed" | "byBondLevel" | "linkDelegate">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
-  channel: string;
+  /** The platform the agents' accounts live on. */
+  platform: string;
 }) {
   // Admission takes different senders at once, and the record of linked
   // agents is one setting, so its read and write run one sender at a time.
@@ -43,21 +43,19 @@ export function createAgentsGuardianLink(deps: {
 
   async function link(message: ChannelMessage): Promise<void> {
     const agent = message.senderId;
-    if (await deps.personMappingRepo.findByChannelUser(deps.channel, agent)) return;
+    const account = { platform: deps.platform, id: agent };
+    // Never over the guardian's own decision, a link or a dismissal.
+    if (await deps.peopleRepo.byAccount(account)) return;
+    if (await deps.peopleRepo.isDismissed(account)) return;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
     if (linked.includes(agent)) return;
-    const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
+    const [guardian] = await deps.peopleRepo.byBondLevel("guardian");
     if (!guardian) return;
     // The record goes first. If the link then fails, the agent stays
     // unlinked, which is the guardian's call to change. The other order could
     // leave a link that the guardian's unlink does not keep removed.
     await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, agent]);
-    await deps.personMappingRepo.addChannelMapping(
-      guardian.id,
-      deps.channel,
-      agent,
-      message.senderDisplayName,
-    );
+    await deps.peopleRepo.linkDelegate(account, guardian.id);
     log.info("linked a same-account agent to the guardian", { agentId: agent });
   }
 

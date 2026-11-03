@@ -37,10 +37,10 @@ export class DuplicateKindConnectionsError extends Error {
 }
 
 /**
- * `ConnectionRegistry.confer` refuses a conferral whose account another
+ * `ConnectionRegistry.giveGrant` refuses a grant whose account another
  * Connection of the connection kind already holds, because two Connections of one bot
  * run two transports that conflict. The message reads to the guardian on a
- * failed setup, and the conferral writes nothing.
+ * failed setup, and the grant writes nothing.
  */
 export class AccountAlreadyConnectedError extends Error {
   readonly connectionKind: string;
@@ -99,10 +99,10 @@ export class Disconnected extends Error {
 }
 
 /**
- * `ConnectionRegistry.confer` refuses to put a different account onto a
+ * `ConnectionRegistry.giveGrant` refuses to put a different account onto a
  * Connection whose grant still names its own, because the new account would
  * take over that account's channel, history and agent. The message reads to
- * the guardian on a failed setup, and the conferral writes nothing.
+ * the guardian on a failed setup, and the grant writes nothing.
  */
 export class DifferentAccountError extends Error {
   readonly connectionKind: string;

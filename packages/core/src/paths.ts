@@ -127,6 +127,15 @@ export function getExampleAppsDir(projectRoot: string = getProjectRoot()): strin
 }
 
 /**
+ * Rome's own documentation (`docs/`). The main agent reads it to answer the
+ * guardian's questions about what Rome supports. Shipped into the Docker runtime
+ * workspace by `scripts/docker/prepare-runtime-workspace.mjs`.
+ */
+export function getRepoDocsDir(projectRoot: string = getProjectRoot()): string {
+  return join(projectRoot, "docs");
+}
+
+/**
  * Build-output location of a first-party app's pre-packed artifact. Produced by
  * `pnpm build:apps` at build time and installed (not packed) at boot. Lives
  * under `dist/` so it is gitignored / dockerignored as build output.

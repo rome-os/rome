@@ -139,6 +139,7 @@ function toInstalledAppCard(
     // rejects the uninstall too); enable/disable remains available above.
     canUninstall: view.appId !== SYSTEM_APP_ID && !view.firstParty,
     includeSource: view.includeSource === true,
+    hideInLauncher: view.hideInLauncher === true,
     canPublish:
       view.state === "installed" &&
       view.appId !== SYSTEM_APP_ID &&

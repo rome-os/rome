@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
-import { WebChatAdapter } from "./webchat.js";
+import { readWebchatMessages, WebChatAdapter } from "./webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { romeAgentMessages } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+
+/** The instant `hours` before the test's fixed clock. */
+function hoursAgo(hours: number): Date {
+  return new Date(Date.now() - hours * 3_600_000);
+}
 
 describe("WebChatAdapter", () => {
   let testDb: TestDb;
@@ -67,7 +72,7 @@ describe("WebChatAdapter", () => {
       .set({ createdAt: new Date("2030-01-01T00:00:00.000Z") })
       .where(eq(romeAgentMessages.id, "msg-old"));
 
-    const messages = await adapter.fetchHistory("sess-1", 2);
+    const messages = await readWebchatMessages(repo, "sess-1", hoursAgo(2));
 
     expect(messages).toHaveLength(2);
     expect(messages.map((m) => m.messageId)).toEqual(["msg-user", "msg-assistant"]);
@@ -118,7 +123,7 @@ describe("WebChatAdapter", () => {
       .set({ createdAt: new Date("2030-01-01T11:30:00.000Z") })
       .where(eq(romeAgentMessages.id, "msg-b"));
 
-    const messages = await adapter.fetchHistory(null, 24);
+    const messages = await readWebchatMessages(repo, null, hoursAgo(24));
 
     expect(messages.map((m) => [m.messageId, m.thread?.name, m.text])).toEqual([
       ["msg-a", "Alpha", "First session"],
@@ -151,28 +156,16 @@ describe("WebChatAdapter", () => {
       JSON.stringify([{ type: "text", content: "Hidden specialist context" }]),
     );
 
-    await expect(adapter.fetchHistory(null, 24)).resolves.toEqual([
+    await expect(readWebchatMessages(repo, null, hoursAgo(24))).resolves.toEqual([
       expect.objectContaining({ messageId: "msg-parent", chatId: "sess-parent" }),
     ]);
-    await expect(adapter.fetchHistory("sess-child", 24)).resolves.toEqual([
+    await expect(readWebchatMessages(repo, "sess-child", hoursAgo(24))).resolves.toEqual([
       expect.objectContaining({
         messageId: "msg-child",
         chatId: "sess-child",
         text: "Hidden specialist context",
       }),
     ]);
-  });
-
-  it("falls back to the default history window for invalid windowHours", async () => {
-    await repo.createSession("sess-1", "Fallback");
-    await repo.addMessage(
-      "msg-recent",
-      "sess-1",
-      "user",
-      JSON.stringify([{ type: "text", content: "Recent" }]),
-    );
-
-    await expect(adapter.fetchHistory("sess-1", Number.NaN)).resolves.toHaveLength(1);
   });
 
   it("persists the WebChat text-block identity in transcript content", async () => {
@@ -210,10 +203,10 @@ describe("WebChatAdapter", () => {
   });
 
   // Routine cards carry routine controls, so only the webchat drain writes them.
-  it("drops routine_draft_card parts a sender supplies", async () => {
+  it("refuses routine_draft_card parts a sender supplies, and persists nothing", async () => {
     await repo.createSession("sess-forged", "Forged card");
 
-    await adapter.send("sess-forged" as ChatId, {
+    const forged = adapter.send("sess-forged" as ChatId, {
       text: "fallback",
       parts: [
         {
@@ -233,7 +226,7 @@ describe("WebChatAdapter", () => {
         { type: "text", content: "Hello" },
       ],
     });
-    await adapter.send("sess-forged" as ChatId, {
+    const cardOnly = adapter.send("sess-forged" as ChatId, {
       text: "Only a card was sent",
       parts: [
         {
@@ -252,23 +245,28 @@ describe("WebChatAdapter", () => {
       ],
     });
 
-    const contents = (await repo.getMessages("sess-forged")).map((m) => JSON.parse(m.content));
-    // Same-second rows have no guaranteed order.
-    expect(contents).toHaveLength(2);
-    expect(contents).toEqual(
-      expect.arrayContaining([
-        [{ type: "text", content: "Hello" }],
-        [{ type: "text", content: "Only a card was sent" }],
-      ]),
-    );
+    for (const send of [forged, cardOnly]) {
+      await expect(send).rejects.toMatchObject({
+        name: "ChannelSendRefused",
+        reason: "part_unsupported",
+      });
+    }
+    await expect(repo.getMessages("sess-forged")).resolves.toEqual([]);
   });
 
-  it("returns a receipt without a messageId when there is nothing to persist", async () => {
+  it("refuses a message with nothing to persist", async () => {
     await repo.createSession("sess-empty", "Empty");
 
-    await expect(adapter.send("sess-empty" as ChatId, {})).resolves.toStrictEqual({
-      chatId: "sess-empty",
-    });
+    for (const blank of [
+      {},
+      { text: "   " },
+      { parts: [{ type: "text" as const, content: "" }] },
+    ]) {
+      await expect(adapter.send("sess-empty" as ChatId, blank)).rejects.toMatchObject({
+        name: "ChannelSendRefused",
+        reason: "empty",
+      });
+    }
     await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);
   });
 });

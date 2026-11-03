@@ -1,12 +1,12 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import { makeFeishuSetup, reviveFeishuProfile } from "./feishu.js";
 
 describe("Feishu credential setup", () => {
-  it("validates manual credentials and confers without granting guardian authority", async () => {
+  it("validates manual credentials and grants without granting guardian authority", async () => {
     const probeCredentials = rs.fn(async () => {});
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeFeishuSetup({
         probeCredentials,
@@ -30,7 +30,7 @@ describe("Feishu credential setup", () => {
   });
 
   it("renews an account by its own app's credentials, never by registering a new app", async () => {
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeFeishuSetup({
         probeCredentials: async () => {},
@@ -52,7 +52,7 @@ describe("Feishu credential setup", () => {
   });
 
   it("records the bot's name, which the account then shows", async () => {
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeFeishuSetup({
         probeCredentials: async () => {},
@@ -76,7 +76,7 @@ describe("Feishu credential setup", () => {
   });
 
   it("finishes without a name when the bot's name cannot be read", async () => {
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeFeishuSetup({
         probeCredentials: async () => {},
@@ -100,7 +100,7 @@ describe("Feishu credential setup", () => {
 
   it("commits nothing when cancelled while the bot's name is read", async () => {
     const fetchBotName = rs.fn(() => new Promise<never>(() => {}));
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeFeishuSetup({
         probeCredentials: async () => {},
@@ -127,7 +127,7 @@ describe("Feishu credential setup", () => {
           signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         }),
     );
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeFeishuSetup({
         probeCredentials: async () => {},

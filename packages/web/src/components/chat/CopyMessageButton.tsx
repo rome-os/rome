@@ -7,7 +7,15 @@ import { cn } from "@/lib/utils";
 // Under-message copy affordance: copies the turn's raw text (the markdown
 // source, not the rendered HTML). Swaps to a check for a beat as feedback,
 // mirroring ShareBar's copy timing.
-export function CopyMessageButton({ text, className }: { text: string; className?: string }) {
+export function CopyMessageButton({
+  text,
+  size = "sm",
+  className,
+}: {
+  text: string;
+  size?: "xs" | "sm";
+  className?: string;
+}) {
   const { t } = useTranslation("chat");
   const [copied, setCopied] = useState(false);
 
@@ -23,7 +31,7 @@ export function CopyMessageButton({ text, className }: { text: string; className
 
   return (
     <IconButton
-      size="sm"
+      size={size}
       label={copied ? t("message.copied", "Copied") : t("message.copy", "Copy message")}
       icon={copied ? <Check /> : <Copy />}
       onClick={handleCopy}

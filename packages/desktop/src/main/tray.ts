@@ -4,7 +4,7 @@ import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import type { FloatingPill } from "./floating-pill";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
-import type { RuntimeStatus } from "./runtime/manager";
+import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 
 const log = createLogger("tray");
@@ -55,35 +55,19 @@ function resolveTrayIcon(): Electron.NativeImage {
   return fallback;
 }
 
-function statusLabel(status: RuntimeStatus | null): string {
+export function statusLabel(status: RuntimeStatus | null): string {
   if (!status) return "Status: Starting…";
-  if (status.provider === "remote" && status.phase === "waiting_for_user") {
-    return status.primaryAction === "sign_in" ? "Status: Not signed in" : "Status: Waiting for you";
-  }
-  if (status.provider === "remote" && status.phase !== "ready" && status.phase !== "failed") {
-    return "Status: Connecting…";
-  }
   switch (status.phase) {
     case "ready":
       return "Status: Ready";
-    case "checking_host":
-      return "Status: Checking…";
-    case "installing_runtime":
-      return "Status: Install required";
-    case "starting_runtime":
-      return "Status: Starting runtime…";
-    case "pulling_image":
-      return "Status: Downloading Rome…";
-    case "starting_rome":
-      return "Status: Starting Rome…";
-    case "waiting_for_health":
-      return "Status: Finishing setup…";
-    case "stopping":
-      return "Status: Stopping…";
+    case "waiting_for_user":
+      return status.primaryAction === "sign_in"
+        ? "Status: Not signed in"
+        : "Status: Waiting for you";
     case "failed":
       return `Status: Failed${status.lastError ? ` — ${status.lastError}` : ""}`;
     default:
-      return "Status: …";
+      return "Status: Connecting…";
   }
 }
 
@@ -91,13 +75,13 @@ export interface SetupTrayOptions {
   getMainWindow: () => BrowserWindow | null;
   ensureMainWindow: () => Promise<BrowserWindow> | BrowserWindow;
   openSettings: () => void;
-  runtimeManager: Runtime;
+  runtime: Runtime;
   /** Null where the pill does not exist (every platform but macOS). */
   floatingPill: FloatingPill | null;
 }
 
 export function setupTray(options: SetupTrayOptions): Tray {
-  const { getMainWindow, ensureMainWindow, openSettings, runtimeManager, floatingPill } = options;
+  const { getMainWindow, ensureMainWindow, openSettings, runtime, floatingPill } = options;
 
   tray = new Tray(resolveTrayIcon());
   tray.setToolTip("Rome");
@@ -116,7 +100,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
   const rebuildMenu = (status: RuntimeStatus | null): void => {
     if (!tray) return;
 
-    const stopping = isQuitting() || status?.phase === "stopping";
+    const quitting = isQuitting();
     const template: Electron.MenuItemConstructorOptions[] = [
       {
         label: "Show Rome",
@@ -126,7 +110,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
       },
       { type: "separator" },
       {
-        label: stopping ? "Status: Stopping…" : statusLabel(status),
+        label: quitting ? "Status: Quitting…" : statusLabel(status),
         enabled: false,
       },
       { type: "separator" },
@@ -149,21 +133,12 @@ export function setupTray(options: SetupTrayOptions): Tray {
       { type: "separator" },
       {
         // No accelerator: tray menus cannot register shortcuts of their own,
-        // so one printed here only advertises a key. ⌘⇧Q used to be that key
-        // and no longer exists — the app menu's ⌘Q is the one quit, and it
-        // stops the agent on its way out.
-        // A hosted Rome keeps running after the app quits; only the VM stops.
-        label:
-          status?.provider === "remote"
-            ? "Quit Rome"
-            : stopping
-              ? "Stopping agent…"
-              : "Stop agent and quit",
-        enabled: !stopping,
+        // so one printed here only advertises a key. The app menu's ⌘Q is the
+        // other way out. The Rome keeps running in Rome Cloud; quitting only
+        // disconnects this computer.
+        label: "Quit Rome",
+        enabled: !quitting,
         click: () => {
-          if (tray) {
-            tray.setToolTip("Rome: stopping…");
-          }
           requestStopAndQuit();
         },
       },
@@ -172,10 +147,10 @@ export function setupTray(options: SetupTrayOptions): Tray {
     tray.setContextMenu(Menu.buildFromTemplate(template));
   };
 
-  rebuildMenu(runtimeManager.getStatus());
-  runtimeManager.on("status", (status: RuntimeStatus) => rebuildMenu(status));
+  rebuildMenu(runtime.getStatus());
+  runtime.on("status", (status: RuntimeStatus) => rebuildMenu(status));
   // Hiding the pill from its own menu has to untick the box here.
-  floatingPill?.onEnabledChange(() => rebuildMenu(runtimeManager.getStatus()));
+  floatingPill?.onEnabledChange(() => rebuildMenu(runtime.getStatus()));
 
   tray.on("click", () => {
     void showWindow();

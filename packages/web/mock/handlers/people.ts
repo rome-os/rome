@@ -1,9 +1,4 @@
-import {
-  generatePersonSlug,
-  nextAvailablePersonId,
-  STRANGER_PERSON_DISPLAY_NAME,
-  STRANGER_PERSON_ID,
-} from "@rome/api-types/persons";
+import { generatePersonSlug, nextAvailablePersonId } from "@rome/api-types/persons";
 import { whatsAppDisplayName } from "@rome/api-types/people";
 import { compareMessages, type Message } from "@rome/api-types/message";
 
@@ -111,7 +106,7 @@ interface PersonFixture {
   id: string;
   displayName: string;
   bondLevel: string;
-  channelMappings: { channel: string; channelUserId: string }[];
+  channelMappings: { channel: string; channelUserId: string; delegate?: true }[];
 }
 
 /**
@@ -144,7 +139,19 @@ export const persons: PersonFixture[] = [
     id: "mock-guardian",
     displayName: "Mock Guardian",
     bondLevel: "guardian",
-    channelMappings: [],
+    // The guardian's own accounts: a signed-in Telegram, WhatsApp and email, which
+    // are theirs the moment they connect, and a Feishu account linked by code. The
+    // directory row lists them under the name.
+    channelMappings: [
+      { channel: "telegram_user", channelUserId: "201447" },
+      { channel: "whatsapp", channelUserId: "15550100999@s.whatsapp.net" },
+      { channel: "feishu", channelUserId: "ou_7c3e19d2aa" },
+      // Longer than a phone row, so the row's wrapping is exercised.
+      { channel: "email", channelUserId: "guardian.work.account@example-company.com" },
+      // One of the guardian's own Rome Cloud agents, which Rome links to them
+      // as a delegate link.
+      { channel: "agents", channelUserId: "agt_atlas", delegate: true },
+    ],
   },
   {
     id: "ray-oster",
@@ -205,17 +212,20 @@ export const persons: PersonFixture[] = [
     bondLevel: "inner-circle",
     channelMappings: [],
   },
-  {
-    // The sentinel row core seeds at boot, carrying one already-dismissed
-    // sender. `/api/people` withholds it and `/api/accounts` surfaces its
-    // holdings as dismissed rows — it is here to keep those honest, not to be
-    // looked at.
-    id: STRANGER_PERSON_ID,
-    displayName: STRANGER_PERSON_DISPLAY_NAME,
-    bondLevel: "other",
-    channelMappings: [{ channel: "telegram", channelUserId: "770144238" }],
-  },
 ];
+
+// Accounts the guardian dismissed: decided to belong to nobody they track. One
+// already-dismissed sender keeps the dismissed rows of `/api/accounts` honest.
+export const dismissedAccounts: { channel: string; channelUserId: string }[] = [
+  { channel: "telegram", channelUserId: "770144238" },
+];
+
+/** The index of the account's dismissal, or -1 when it is not dismissed. */
+export function dismissalOf(channel: string, channelUserId: string): number {
+  return dismissedAccounts.findIndex(
+    (account) => account.channel === channel && account.channelUserId === channelUserId,
+  );
+}
 
 // Senders seen in `sentinel_log`. `?state=unlinked` on the account directory
 // is the half of these with no row in `channel_mappings`, so this list is the
@@ -617,19 +627,12 @@ export function accountTimeline(ref: AccountRef): Message[] {
 }
 
 /**
- * What Rome has said through the send route and the channel has since surfaced.
- *
- * The mock's stand-in for the store a real channel's mirror would put a
- * delivered message into. It is a store of its own rather than a flag on an
- * outbox row for the reason the contract gives: an outbox row is exactly a send
- * whose message is not on the timeline yet, so the outbox read has to be able
- * to look the message up here and find it — the same comparison the route runs,
- * rather than a delivery bit someone remembered to set.
+ * What Rome has said through the send route: the mock's stand-in for Rome's
+ * own transcript of a send the channel took.
  */
 const deliveredEntries: (Message & { channelUserId: string })[] = [];
 
-/** Put a sent message where the timeline will find it. The `ref` is the one the
- *  outbox row is waiting on, which is what clears the row. */
+/** Put a sent message where the timeline will find it. */
 export function recordDelivered(
   account: AccountRef,
   entry: Omit<Message, "source" | "direction">,

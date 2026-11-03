@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/hooks/use-theme";
 import en from "@/i18n/locales/en/chat.json";
 import zh from "@/i18n/locales/zh-CN/chat.json";
 import { CompactTextBlock } from "./entries/TextBlock";
+import { ChatBubble } from "./ChatBubble";
 import ChatMarkdown from "./ChatMarkdown";
 
 const i18n = createInstance();
@@ -109,6 +110,47 @@ describe("ChatMarkdown hexadecimal color previews", () => {
 
     expect(container.querySelector("[data-chat-color-preview]")).toBeNull();
     expect(container.querySelector('[data-streamdown="inline-code"]')?.textContent).toBe("#fdfcf9");
+  });
+});
+
+describe("ChatMarkdown fenced blocks in the sent bubble", () => {
+  // The sent bubble re-maps the ink tokens onto the primary foreground
+  // (globals.css `.rome-bubble-on-primary > *`) and a fenced block answers
+  // with its own on-surface ink (`.rome-bubble-on-primary
+  // [data-chat-code-block]`), or its label, its plain fences and its action
+  // buttons render near-white on the card's near-white page surface (#1328).
+  // The restore only binds while the card stays a descendant of a bubble
+  // carrying the class, so the DOM contract is what must hold.
+  function SentMessage({ text }: { text: string }) {
+    return (
+      <I18nextProvider i18n={i18n}>
+        <ThemeProvider>
+          <MemoryRouter>
+            <ChatBubble tone="sent">
+              <ChatMarkdown>{text}</ChatMarkdown>
+            </ChatBubble>
+          </MemoryRouter>
+        </ThemeProvider>
+      </I18nextProvider>
+    );
+  }
+
+  it("keeps the fenced card a descendant of the on-primary bubble the ink restore targets", () => {
+    const { container } = render(<SentMessage text={"```js\nconst one = 1;\n```"} />);
+
+    const card = container.querySelector('.rome-bubble-on-primary [data-chat-code-block="code"]');
+    expect(card).not.toBeNull();
+    // The label whose ink the remap washed out, and the code body it flows to.
+    expect(card?.querySelector("button .text-muted-foreground")).not.toBeNull();
+    expect(card?.querySelector('[data-streamdown="code-block-body"] code')).not.toBeNull();
+  });
+
+  it("keeps inline code outside the fenced card so the bubble's own ink still covers it", () => {
+    const { container } = render(<SentMessage text={"`path` and\n\n```\nplain code\n```"} />);
+
+    const inline = container.querySelector('[data-streamdown="inline-code"]');
+    expect(inline).not.toBeNull();
+    expect(inline?.closest("[data-chat-code-block]")).toBeNull();
   });
 });
 

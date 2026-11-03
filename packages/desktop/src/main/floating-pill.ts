@@ -18,7 +18,6 @@ import {
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import { createLogger } from "./logger";
 import { preventActivation } from "./prevent-activation";
-import type { Runtime } from "./runtime/runtime";
 
 const log = createLogger("pill");
 
@@ -28,7 +27,6 @@ const PILL_HTML = path.join(__dirname, "..", "..", "src", "renderer", "pill.html
 export interface FloatingPillOptions {
   showMainWindow: () => void | Promise<void>;
   openSettings: () => void;
-  runtimeManager: Runtime;
 }
 
 export interface FloatingPill {
@@ -62,7 +60,7 @@ function writeSetting(key: string, value: string): void {
 }
 
 export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
-  const { showMainWindow, openSettings, runtimeManager } = options;
+  const { showMainWindow, openSettings } = options;
 
   let win: BrowserWindow | null = null;
   let size: Size = { width: PILL_DEFAULT_WIDTH, height: PILL_DEFAULT_HEIGHT };
@@ -233,7 +231,7 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
   ipcMain.on("pill:contextMenu", (event) => {
     if (!fromPill(event) || !win) return;
     dragOffset = null;
-    const stopping = isQuitting() || runtimeManager.getStatus().phase === "stopping";
+    const quitting = isQuitting();
     Menu.buildFromTemplate([
       { label: "Open Rome", click: () => void showMainWindow() },
       { type: "separator" },
@@ -242,8 +240,8 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
       { type: "separator" },
       // Same wording as the tray, which is the other place this quit lives.
       {
-        label: stopping ? "Stopping agent…" : "Stop agent and quit",
-        enabled: !stopping,
+        label: "Quit Rome",
+        enabled: !quitting,
         click: () => requestStopAndQuit(),
       },
     ]).popup({ window: win });

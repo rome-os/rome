@@ -6,7 +6,7 @@ import {
   linkedInHistoryRow,
 } from "../db/repositories/linkedin-store.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
-import { channelMessageDetail, queryLimit, querySince, type Messages } from "./messages.js";
+import { channelMessageDetail, queryPage, readQueryWindow, type Messages } from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 
 /**
@@ -36,10 +36,13 @@ import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 export function linkedInMessages(db: DrizzleDb): Messages {
   const mirror = new LinkedInStoreRepository(db);
   return {
-    async query({ chatId, since, limit }) {
-      const rows = await mirror.fetchHistory(chatId ?? null, querySince(since), queryLimit(limit));
-      // The mirror answers oldest first; the port answers newest first.
-      return rows.reverse().slice(0, queryLimit(limit)).map(linkedInHistoryMessage);
+    async query({ chatId, since, after, limit }) {
+      const chat = chatId ?? null;
+      const rows = await readQueryWindow(
+        (from, count, until) => mirror.fetchHistory(chat, from, count, until),
+        { since, after, limit },
+      );
+      return queryPage(rows.map(linkedInHistoryMessage), { after, limit });
     },
     byAccount: sqlMessages({
       channel: "linkedin",

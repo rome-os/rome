@@ -30,8 +30,7 @@ function refOf(instance: CloudInstance): RemoteInstanceRef {
 }
 
 /**
- * A hosted Rome from the user's Rome Cloud account, opened instead of the
- * local VM. Getting ready means: be signed in, settle on an instance (the only
+ * A hosted Rome from the user's Rome Cloud account. Getting ready means: be signed in, settle on an instance (the only
  * one picks itself), wait for it to run, install a fresh instance session in
  * the window's cookies, and see it answer. A state only the user can change
  * is `waiting_for_user`, and the ones Rome Cloud resolves by itself are polled.
@@ -104,19 +103,9 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
     this.clearPoll();
   }
 
-  async stopForQuit(): Promise<void> {
-    this.dispose();
-  }
-
-  async upgradeRuntime(): Promise<void> {}
-
-  openInstallPage(): Promise<void> {
+  openCloud(): Promise<void> {
     return this.deps.openCloud();
   }
-
-  async startRuntimeApp(): Promise<void> {}
-
-  async openRuntimeFolder(): Promise<void> {}
 
   openLogs(): Promise<void> {
     return this.deps.openLogs();
@@ -306,23 +295,13 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
     detail: string,
     primaryAction: RuntimeAction,
   ): RuntimeStatus {
-    const dashboardUrl = this.getDashboardUrl();
     return {
       phase,
       title,
       detail,
       primaryAction,
-      dashboardUrl,
-      healthUrl: `${dashboardUrl}/api/health`,
-      installDir: "",
-      image: "",
-      containerName: "",
-      provider: "remote",
-      runtimeInstalled: true,
-      runtimeRunning: phase === "ready",
-      runtimeInstallUrl: "",
+      dashboardUrl: this.getDashboardUrl(),
       lastError: phase === "failed" ? detail : null,
-      pullProgress: null,
     };
   }
 

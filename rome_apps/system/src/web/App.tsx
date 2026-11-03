@@ -1,32 +1,27 @@
-import type { CSSProperties } from "react";
+import { navigateRome } from "@rome-os/app-web-sdk";
+import { Button } from "@rome-os/ui/button";
+import { UiScaleProvider } from "@rome-os/ui/ui-scale";
+import "./styles.css";
 
-const shellStyle = {
-  minHeight: "100vh",
-  padding: "32px",
-  fontFamily:
-    'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  color: "#171717",
-  background: "#fafafa",
-} satisfies CSSProperties;
-
-const panelStyle = {
-  maxWidth: "720px",
-  border: "1px solid #e5e5e5",
-  borderRadius: "var(--rome-radius-8)",
-  padding: "24px",
-  background: "#ffffff",
-} satisfies CSSProperties;
-
+// `rome build` needs a web entry, so System keeps this page. It stays off the
+// launcher, and its spoken recaps settings live in Settings › Advanced.
 export default function App() {
   return (
-    <main style={shellStyle}>
-      <section style={panelStyle}>
-        <h1>System</h1>
-        <p>
-          Core Rome actions for app lifecycle, scheduling, messaging, approvals, and subagent
-          orchestration.
-        </p>
-      </section>
-    </main>
+    <UiScaleProvider>
+      <main className="min-h-screen bg-app-canvas px-4 py-6 font-sans text-foreground md:px-8 md:py-8">
+        <div className="mx-auto max-w-3xl space-y-4">
+          <h1 className="text-title">System</h1>
+          <p className="text-ui text-muted-foreground">
+            Spoken recaps settings have moved to Settings › Advanced.
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => navigateRome({ path: "settings", tab: "advanced" })}
+          >
+            Open Settings
+          </Button>
+        </div>
+      </main>
+    </UiScaleProvider>
   );
 }

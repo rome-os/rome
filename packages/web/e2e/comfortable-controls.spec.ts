@@ -14,7 +14,7 @@ for (const { width, height, hasTouch } of [
       page,
     }) => {
       await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
-      await page.goto("/activity");
+      await page.goto("/sessions/events");
       const heading = page.getByRole("heading", { name: "Activity", exact: true });
       await expect(heading).toBeVisible();
       await expect(heading).toHaveCSS("font-size", width < 768 ? "28px" : "18px");
@@ -118,7 +118,7 @@ for (const hasTouch of [false, true]) {
       await expect(button).toHaveCSS("height", hasTouch ? "44px" : "24px");
       await choices.getByRole("radio", { name: "Large", exact: true }).click();
       await page.evaluate(() => {
-        window.history.pushState({}, "", "/activity");
+        window.history.pushState({}, "", "/sessions/events");
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
       await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();

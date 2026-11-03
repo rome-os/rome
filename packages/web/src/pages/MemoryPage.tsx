@@ -1,6 +1,14 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, Fingerprint, FolderOpen, NotebookPen, Users } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  BrainCircuit,
+  ChevronRight,
+  Fingerprint,
+  FolderOpen,
+  NotebookPen,
+  Users,
+} from "lucide-react";
 import { FileBrowserPage } from "@/components/file-browser-page";
 import { SyncStatusPanel } from "@/components/sync/SyncStatusPanel";
 
@@ -39,7 +47,7 @@ function MemoryCategory({ icon, label }: { icon: ReactNode; label: string }) {
 
 /** Shown in the folder-panel area (when no file is open): a centered intro to
  * Memory plus the GitHub backup / sync status. */
-function MemoryFolderPanel() {
+export function MemoryFolderPanel() {
   const { t } = useTranslation("files");
   return (
     <div className="flex flex-1 flex-col items-center overflow-y-auto bg-background px-6 py-10">
@@ -70,6 +78,25 @@ function MemoryFolderPanel() {
               label={t("memory.home.categoryProjects")}
             />
           </div>
+        </section>
+
+        {/* Dream rewrites memory, apps and skills while the guardian is away.
+            Its page is off the launcher, so this is where they find what it
+            changed. */}
+        <section className="space-y-2">
+          <h3 className="px-1 text-section text-foreground">{t("memory.home.dreamHeading")}</h3>
+          <Link
+            to="/apps/dream"
+            className="flex flex-col gap-2 rounded-12 border border-border bg-surface px-4 py-3 text-ui transition-colors hover:bg-accent sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+          >
+            <span className="min-w-0 text-muted-foreground">
+              {t("memory.home.dreamDescription")}
+            </span>
+            <span className="flex shrink-0 items-center gap-1 text-primary">
+              {t("memory.home.dreamLink")}
+              <ChevronRight className="size-4" aria-hidden />
+            </span>
+          </Link>
         </section>
 
         <section className="space-y-2">

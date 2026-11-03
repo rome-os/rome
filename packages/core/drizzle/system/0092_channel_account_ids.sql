@@ -1,0 +1,2 @@
+ALTER TABLE `channels` ADD `platform_account_id` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `uq_channels_platform_account` ON `channels` (`platform`,`platform_account_id`) WHERE "channels"."platform_account_id" IS NOT NULL;
