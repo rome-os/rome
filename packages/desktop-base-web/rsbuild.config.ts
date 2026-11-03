@@ -10,6 +10,7 @@ const ENTRY_TITLES: Record<string, string> = {
   onboarding: "Rome",
   settings: "Rome Settings",
   pill: "Rome",
+  audit: "Rome Audit Log",
 };
 
 export default defineConfig({
@@ -24,6 +25,7 @@ export default defineConfig({
       onboarding: resolve(srcDir, "entries/onboarding.tsx"),
       settings: resolve(srcDir, "entries/settings.tsx"),
       pill: resolve(srcDir, "entries/pill.tsx"),
+      audit: resolve(srcDir, "entries/audit.tsx"),
     },
   },
   html: {

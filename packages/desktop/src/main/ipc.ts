@@ -19,6 +19,7 @@ import {
 
 interface IpcHandlerOptions {
   openSettingsWindow: () => void;
+  openAuditWindow: () => void;
   cloudAccount: CloudAccount;
   /** This computer as a device of the signed-in account. */
   device: {
@@ -125,6 +126,12 @@ export function registerIpcHandlers(
   const instanceOrigin = (): string | null => controller.activeTarget().instance?.origin ?? null;
 
   handleFromAppOrInstance("device:get", instanceOrigin, () => options.device.status());
+
+  // Only opens the local window. The log is read there through the `audit:*` channels, which
+  // answer the app's own `file:` pages and nothing else.
+  handleFromAppOrInstance("device:openAuditLog", instanceOrigin, () => {
+    options.openAuditWindow();
+  });
 
   handleFromAppOrInstance("device:setEnabled", instanceOrigin, async (_event, value) => {
     await options.device.setEnabled(z.boolean().parse(value));

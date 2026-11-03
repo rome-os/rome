@@ -4,6 +4,15 @@ import { CloudError } from "./cloud.js";
 import * as cloudModule from "./cloud.js" with { rstest: "importActual" };
 import type { GatewayClientOptions } from "./client.js";
 
+/** Records nothing. Tests of the audit log itself use a real AuditStore. */
+const noAudit = {
+  hint: "",
+  start: async () => 1,
+  end: () => {},
+  host: () => {},
+  status: async () => ({ state: "ok" as const }),
+};
+
 const mocks = rs.hoisted(() => ({
   read: rs.fn(),
   write: rs.fn(),
@@ -26,6 +35,7 @@ function runHost(signal: AbortSignal) {
     signal,
     credentials: { load: mocks.read, save: mocks.write, clear: mocks.remove },
     authorize: mocks.login,
+    audit: noAudit,
   });
 }
 

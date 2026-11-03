@@ -14,8 +14,8 @@ export async function readPrivateJson(path: string): Promise<unknown> {
   }
 }
 
-export async function writePrivateJson(path: string, value: unknown): Promise<void> {
-  const dir = dirname(path);
+/** Creates `dir` readable only by this OS user: mode 0700, or an owner-only ACL on Windows. */
+export async function ensurePrivateDirectory(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
   if (process.platform === "win32") {
     const run = promisify(execFile);
@@ -36,6 +36,10 @@ export async function writePrivateJson(path: string, value: unknown): Promise<vo
       `*${sid}:(OI)(CI)F`,
     ]);
   } else await chmod(dir, 0o700);
+}
+
+export async function writePrivateJson(path: string, value: unknown): Promise<void> {
+  await ensurePrivateDirectory(dirname(path));
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });

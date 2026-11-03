@@ -269,6 +269,70 @@ from the dashboard. A host mounts `<NodeDevices />` for the overview and
 `<NodeDeviceActivity />` for one device, with the WebSocket URL of a forwarding
 backend, the device list, and its own routing.
 
+## Device audit log
+
+The activity log above belongs to the caller. A host keeps its own record of the
+remote requests it handles: `rome-node connect` in `<configDir>/audit/audit.db`,
+and the Rome desktop app in `~/.rome-desktop/audit/audit.db`. The two never share
+a file. The folder has mode 0700 and the file 0600. The log is written with
+`node:sqlite`, never uploaded, and never sent to Rome Cloud.
+
+Every request except `system.info` is recorded before it runs. The `start` record
+is committed with WAL and `synchronous=FULL`, and on macOS also `fullfsync`,
+before the program starts, the folder is read, or a push creates its part file.
+If that commit fails, the host replies `audit_unavailable` and runs nothing. The
+message tells the caller where to look: `rome-node audit status` for the CLI, and
+**Rome → Audit Log…** for the app. `system.info` changes nothing and answers as
+usual, with `audit: { state: "ok" | "unavailable", code?, message? }`, so Settings →
+Devices can show why a device refuses requests. The `end` record is written after
+the action and before the reply. A failed `end` stays in memory and is written
+first by the next request's transaction. If that fails too, the request is refused.
+
+| Record | Written | Holds |
+| --- | --- | --- |
+| `host` | The log opens or closes, or the connection status changes | Process id, version, entry (`cli` or `desktop`), working directory, connection status, device id and name |
+| `start` | Before a request runs | Request id, `from`, transport, connection generation, action, the arguments as sent, environment variable names (not values), stdin |
+| `end` | After a request, before its reply | Outcome, duration, child pid, exit code, signal, error code, reply size, stdout and stderr. `fs.list` adds the path and entries. A transfer adds the direction, path, size, SHA-256, the acknowledged bytes of a pull, and the file a push replaced |
+| `prune` | After retention deleted something | What was deleted and the hash it chains from |
+
+The outcome is `ok`, `exit_nonzero`, `error`, or `interrupted`, which means the
+connection was replaced and no reply went out. A `start` with no `end` means the
+host stopped while the request ran. Each host process writes only its own `end`
+records, so several processes on one folder never mislabel each other.
+
+`from` is the sender the Gateway reported. It is recorded for information only
+and decides nothing. Before storage, the host's device token is masked in every
+field and payload, as in replies. stdout and stderr keep their first 32 MiB, the
+most one response frame carries, with the full size and SHA-256. A pushed file
+up to 10 MiB is stored. A larger one, and every pull, keeps only its size and
+SHA-256. Payloads live in a `content` table written in the same transaction, and
+each record carries their sizes and hashes.
+
+Each record's hash covers every column and the previous record's hash. The log
+keeps 30 days or 1 GiB, whichever limit is reached first. Over the size, the
+oldest payloads go first while their records stay, then the oldest records. Each
+deletion appends a `prune` record, so the chain still verifies. Nothing else
+deletes data. A file that cannot be read, or that a newer version wrote, makes
+the log unavailable, and is never renamed, deleted, or replaced. The host tries
+again at most every 5 seconds when a request arrives. To start over, move the
+file away.
+
+`rome-node audit status|tail|show|search|verify|export` read the CLI's log, or
+any other with `--db`. `rome-node help audit` lists the options. `verify` checks
+the chain, the payloads, and SQLite's integrity, and `export` writes a snapshot
+with SQLite's backup API that `verify --db` can check. The desktop app shows its
+log in **Rome → Audit Log…**, also in the tray menu, and Settings → Devices in the
+Rome it opened offers **View audit log** in this computer's menu. That window is a
+local page of the app with the device pages' layout. The Rome's page can only ask
+the app to open it (`device.openAuditLog`). The log is read through channels that
+answer the app's own `file:` pages, so remote pages never receive any of it.
+
+The chain shows a change to a record. It cannot show a log that was deleted,
+rolled back to an older copy, rewritten in full, or cut at the end, because no
+copy of it exists anywhere else. The log is plain text protected by file
+permissions, and it does not see what a program did inside, or background
+processes that outlive a request.
+
 ## Authorization and transport
 
 After startup and either browser enrollment flow, Rome calls `authorizeServer()`

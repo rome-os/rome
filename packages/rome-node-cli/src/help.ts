@@ -16,6 +16,7 @@ Commands:
   cp               Copy a file to or from a device.
   watch            Stream caller connection snapshots and changes as JSON lines.
   daemon           Manage the caller's background connection.
+  audit            Read this computer's local log of the remote requests it ran.
 
 Agent workflow:
   1. Run rome-node device and choose a device ID from items.
@@ -51,7 +52,8 @@ Use --device-code over SSH or on a headless computer to approve from another dev
 This mode prints a URL and user code without opening a browser or callback listener.
 Stored credentials are reused in either mode. SSH is not detected automatically.
 The process stays in the foreground. Ctrl+C disconnects and preserves authorization.
-Programs run as the OS user who starts connect.
+Programs run as the OS user who starts connect. Every request is recorded in the
+local audit log first (rome-node help audit); if it cannot be, the request is refused.
 
 Options:
   --cloud <origin>  Cloud origin (default: https://romeos.cc).
@@ -258,6 +260,36 @@ Output:
   A copy failure prints {"type":"response","ok":false,"error":{...}} to stdout
   and exits 1. Argument errors print to stderr and exit 1.
 `,
+  audit: `Usage:
+  rome-node audit status [--json]
+  rome-node audit tail [-n 20] [-f] [--json]
+  rome-node audit show <seq> [--content stdin|stdout|stderr|file] [--json]
+  rome-node audit search [--since <time>] [--until <time>] [--action <name>]
+                         [--outcome ok|exit_nonzero|error|interrupted|no_end] [--text <s>] [--json]
+  rome-node audit verify [--json]
+  rome-node audit export --out <file>
+
+While rome-node connect runs, it records every remote request in a local,
+append-only, hash-chained log before running it: argv, cwd, environment
+variable names (not values), stdin, stdout and stderr (first 32 MiB each, with
+the full size and SHA-256), exit code, duration, and pushed files up to 10 MiB.
+system.info is not recorded. If the log cannot be written, connect refuses every
+request except system.info, which reports why. The log is kept for 30 days or
+1 GiB, whichever comes first, and never leaves this computer.
+
+  status  Path, state and reason, size, record counts, oldest and newest record.
+  tail    The latest records, one per line. -f follows new records each second.
+  show    One request, start and end together. --content writes raw bytes to stdout.
+  search  Filter by time, action, outcome, or a substring such as a request ID.
+  verify  Check the hash chain, stored content, and SQLite integrity.
+          Exits 0 when intact, 1 with the first bad seq otherwise.
+  export  Write a consistent snapshot to a new local file. verify --db checks it.
+
+from is the sender the Gateway reported. It is shown for information only.
+Every command opens the log read-only. --db <path> reads another log, for
+example the Rome app's: --db ~/.rome-desktop/audit/audit.db
+Default: <config dir>/audit/audit.db (see ROME_NODE_CONFIG_DIR).
+`,
   daemon: `Usage: rome-node daemon [start|status|stop|serve]
 
   start   Start the background caller daemon if needed (default).
@@ -287,6 +319,7 @@ export function commandHelp(positionals: string[], explicitTopic: boolean): stri
     ["start", "status", "stop", "serve"].includes(positionals[1])
   )
     return commands.daemon;
+  if (positionals[0] === "audit" && positionals.length === 2) return commands.audit;
   if (!explicitTopic) {
     const command = positionals.slice(0, 2).join(" ");
     if (Object.hasOwn(commands, command)) return commands[command];

@@ -34,6 +34,28 @@ it("distinguishes replies, unavailable targets, timeouts, and revoked devices", 
   expect(run).toHaveBeenCalledWith("online", "system.info", {}, 3000);
 });
 
+it("passes on the audit status each device reports in system.info", async () => {
+  const reader = new DeviceStatusReader({
+    getStatus: () => "online",
+    list: async () => ({ items: [{ id: "a" }, { id: "b" }, { id: "old" }] }),
+    run: async (id: string): Promise<ActionResponse> => ({
+      type: "response",
+      ok: true,
+      result:
+        id === "a"
+          ? { audit: { state: "unavailable", code: "io", message: "read-only" } }
+          : id === "b"
+            ? { audit: { state: "ok" } }
+            : {},
+    }),
+  });
+  expect((await reader.read()).devices.map((device) => device.audit)).toEqual([
+    { state: "unavailable", code: "io", message: "read-only" },
+    { state: "ok" },
+    undefined,
+  ]);
+});
+
 describe("shared device checks", () => {
   it("coalesces clients, limits concurrency, and invalidates cached results on connection loss", async () => {
     let connection: ConnectionStatus = "online";

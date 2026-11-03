@@ -529,6 +529,9 @@ importers:
       '@radix-ui/react-switch':
         specifier: ^1.2.6
         version: 1.2.6(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@rome-os/node-ui':
+        specifier: workspace:*
+        version: link:../rome-node-ui
       '@rome-os/ui':
         specifier: workspace:*
         version: link:../ui
