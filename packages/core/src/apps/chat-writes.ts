@@ -8,7 +8,12 @@
 // Chats switch adds them to the app repositories and moves the inbox and
 // `send_message` onto them.
 
-import type { Channel, ChatRepository, MessagePart } from "@rome-os/app-runtime";
+import type {
+  Channel,
+  ChatRepository,
+  MessagePart,
+  OutgoingAttachment,
+} from "@rome-os/app-runtime";
 import {
   stripHostOnlyPartsFromContent,
   withoutHostOnlyParts,
@@ -43,14 +48,14 @@ export interface AppChatWritesDeps {
   /** Moves a session's activity up when a line reaches its chat. */
   webchatRepo: Pick<WebChatRepository, "advanceSessionActivity">;
   chats: Pick<Chats, "start">;
-  messages: Pick<MessageRepository, "record" | "send">;
+  messages: Pick<MessageRepository, "record" | "send" | "chatHolding">;
   speakers: Pick<Speakers, "speakerOf">;
   /** What a speaker says, recorded and linked to its turn. */
   replies: Pick<SpeakerReplies, "send">;
   links: Pick<TurnLinks, "prompt" | "answer">;
   /** The lines an app names by the platform's ids. */
   lines: Pick<SpeakerLines, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
-  adapters: Pick<ChatAdapters, "of" | "addressAt">;
+  adapters: Pick<ChatAdapters, "of" | "addressAt" | "accountOn">;
   /** The live channel named `name`, whose adapter a speaker says its
    *  messages through, or null when Rome holds none by that name. */
   channel(name: string): Channel | null;
@@ -71,6 +76,18 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     const speaker = deps.speakers.speakerOf(sessionId);
     if (!speaker) throw new Error(`Session ${sessionId} stands in no chat`);
     return speaker;
+  };
+
+  /** The address of the email thread holding the email the provider calls
+   *  `messageId`. Refuses one Rome holds no thread for, since sending it as
+   *  a new email would answer nothing. */
+  const threadHolding = (channelName: string, messageId: string): string => {
+    const account = deps.adapters.accountOn(channelName);
+    const chat = deps.messages.chatHolding(account.platform, messageId);
+    if (!chat) {
+      throw new Error(`Rome holds no email thread with message ${messageId}. No email was sent.`);
+    }
+    return deps.adapters.addressAt(channelName, placeIn(chat));
   };
 
   /**
@@ -180,7 +197,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         },
         {
           ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
-          ...(input.content ? { recorded: recordedOf(input.content) } : {}),
+          recorded: input.content
+            ? recordedOf(input.content)
+            : withNotes(parts ?? [{ type: "text", content: input.text ?? "" }], input.attachments),
         },
       );
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
@@ -208,7 +227,14 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         ...(html ? { html } : {}),
       };
       const turnId = input.knownToProvider ? input.turnId : undefined;
-      if (!input.threadId && !input.sessionId) {
+      // A reply names its thread by the email it answers, when the caller
+      // names neither.
+      const threadId =
+        input.threadId ??
+        (input.sessionId || inReplyToMessageId === undefined
+          ? undefined
+          : threadHolding(channel.name, inReplyToMessageId));
+      if (!threadId && !input.sessionId) {
         return await startThread(
           channel,
           { to: to ?? [], ...(cc ? { cc } : {}), ...(bcc ? { bcc } : {}) },
@@ -226,7 +252,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           await deps.open({
             channel: input.channel,
             // Checked above: a send names a thread or a session.
-            threadId: input.threadId as string,
+            threadId: threadId as string,
             agentName: "main",
             threadType: "group",
           })
@@ -262,6 +288,19 @@ function replyToIn(
   if (!speaker || !platformMessageId) return {};
   const id = deps.lines.idIn(speaker, platformMessageId);
   return { replyTo: id ?? { key: deps.lines.keyIn(speaker, platformMessageId) } };
+}
+
+/** `parts` with a note for each attachment, which Chats keeps no file of. */
+function withNotes(
+  parts: readonly MessagePart[],
+  attachments: readonly OutgoingAttachment[] | undefined,
+): MessagePart[] {
+  const notes = (attachments ?? []).map(
+    (attachment) => `[${attachment.type}${attachment.caption ? `: ${attachment.caption}` : ""}]`,
+  );
+  if (!notes.length) return [...parts];
+  const said = parts.filter((part) => part.type !== "text" || part.content.trim());
+  return [...said, { type: "text", content: notes.join("\n") }];
 }
 
 /** An app's `content`, the line as it goes on record, without the parts only

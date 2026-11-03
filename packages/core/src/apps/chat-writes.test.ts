@@ -104,6 +104,8 @@ describe("appChatWrites", () => {
       adapters: {
         of: adapterOf,
         addressAt: (_channel, place) => (place.threadId ?? "thread-1") as ChatId,
+        accountOn: (name) =>
+          name === "mail" ? { platform: "email", id: "rome@example.com" } : BOT,
       },
       channel: (name) => (name === "mail" ? mail : name === "telegram" ? TELEGRAM : null),
       open: async (input) => {
@@ -257,6 +259,17 @@ describe("appChatWrites", () => {
       expect(sends[0]?.out.text).toBe("From parts");
     });
 
+    it("notes an attachment-only message's attachments on record", async () => {
+      await writes.send({
+        sessionId: "s1",
+        channel: "telegram",
+        attachments: [{ type: "image", source: "https://example.com/a.png", caption: "Chart" }],
+        knownToProvider: false,
+      });
+
+      expect(said().at(-1)!.text).toContain("[image: Chart]");
+    });
+
     it("records nothing when the platform refuses", async () => {
       refuse = true;
 
@@ -342,6 +355,40 @@ describe("appChatWrites", () => {
         cc: ["ann@example.com"],
         bcc: ["boss@example.com"],
       });
+    });
+
+    it("replies in the thread holding the email it names by id alone", async () => {
+      await writes.sendEmail({
+        channel: "mail",
+        text: "Plans",
+        email: { to: "wei@example.com", subject: "Plans" },
+        knownToProvider: false,
+      });
+
+      await writes.sendEmail({
+        channel: "mail",
+        text: "Re",
+        email: { inReplyToMessageId: "m1" },
+        knownToProvider: false,
+      });
+
+      expect(opened).toEqual(["thread-1", "thread-1"]);
+      expect(mailSent[1]).toMatchObject({
+        to: "thread-1",
+        message: { text: "Re", inReplyToMessageId: "m1" },
+      });
+    });
+
+    it("refuses to reply to an email Rome holds no thread with", async () => {
+      await expect(
+        writes.sendEmail({
+          channel: "mail",
+          text: "Re",
+          email: { inReplyToMessageId: "unknown" },
+          knownToProvider: false,
+        }),
+      ).rejects.toThrow("Rome holds no email thread with message unknown");
+      expect(mailSent).toEqual([]);
     });
 
     it("refuses a blank message to reply to before anything goes out", async () => {
