@@ -10,9 +10,9 @@
 // no adapter writes it yet.
 
 import type { Account } from "@rome-os/app-runtime";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { chatAddresses } from "../db/schema/system.js";
+import { chatAddresses, chats } from "../db/schema/system.js";
 
 /** The thread a chat's own address is kept under. */
 const CHAT = "";
@@ -55,6 +55,32 @@ export class ChatAddresses {
         )
         .get()?.address ?? null
     );
+  }
+
+  /**
+   * Key the chat keyed `from` on `account`'s platform `to` instead, with
+   * every address kept for it: a direct message Rome reached at its address
+   * before it knew the other end, once it does. False, changing nothing,
+   * when a chat already holds `to`.
+   */
+  rekey(account: Account, from: string, to: string): boolean {
+    return this.db.transaction((tx) => {
+      const taken = tx
+        .select({ id: chats.id })
+        .from(chats)
+        .where(and(eq(chats.platform, account.platform), eq(chats.key, to)))
+        .get();
+      if (taken) return false;
+      tx.update(chats)
+        .set({ key: to })
+        .where(and(eq(chats.platform, account.platform), eq(chats.key, from)))
+        .run();
+      tx.run(sql`
+        UPDATE OR REPLACE chat_addresses SET chat_key = ${to}
+        WHERE platform = ${account.platform} AND chat_key = ${from}
+      `);
+      return true;
+    });
   }
 
   /** The key of the chat `account` reaches at `address`, or null when it

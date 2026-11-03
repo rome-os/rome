@@ -12,6 +12,7 @@ import { Pacer } from "../channels/delivery/pacer.js";
 import { type DeliveryTransport, plainText } from "../channels/delivery/types.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
+import { chats } from "../db/schema.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import {
   addressOf,
@@ -272,6 +273,7 @@ describe("channelAdapter", () => {
         },
         addressOf: () => null,
         keyAt: () => null,
+        rekey: () => false,
         bindThread: () => {},
         threadChatAt: () => null,
       },
@@ -648,6 +650,24 @@ describe("ChatAdapters", () => {
     expect(adapters.chatAt("telegram", "bob", "dm")).toEqual(
       chatAt("telegram", "bob", { romeEnd: "rome_bot" }),
     );
+  });
+
+  it("move a direct message reached at its address to its other end's key once that is known", () => {
+    // Rome sent to the address before it knew who was there.
+    const early = adapters.chatAt("telegram", "dm-address-2", "dm");
+    addresses.bind(ROME, early.externalId, "dm-address-2");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: early.externalId, kind: "dm", startedAt: new Date() })
+      .run();
+
+    const dm = adapters.directMessageReached("telegram", "carol", "dm-address-2");
+
+    expect(dm).toEqual(chatAt("telegram", "dm-address-2", { romeEnd: "rome_bot", other: "carol" }));
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([
+      { key: dm.externalId },
+    ]);
+    expect(adapters.chatAt("telegram", "dm-address-2", "dm")).toEqual(dm);
   });
 });
 

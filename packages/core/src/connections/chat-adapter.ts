@@ -177,7 +177,10 @@ export interface ChannelAdapterDeps {
   platformOfChannel(channel: string): string;
   /** The channels layer's address store, where a chat the platform reaches
    *  at an id other than its key is reached. */
-  addresses?: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt" | "bindThread" | "threadChatAt">;
+  addresses?: Pick<
+    ChatAddresses,
+    "bind" | "addressOf" | "keyAt" | "rekey" | "bindThread" | "threadChatAt"
+  >;
 }
 
 /** How an adapter keys the chat a platform message was said in, and its
@@ -333,9 +336,11 @@ export function channelAdapter(
   // address lands in that chat even where the key names the address.
   const keyed: ChatKeying = (heardBy, message) => {
     const found = keying(heardBy, message);
-    if (found.kind !== "dm" || message.parentChatId !== undefined) return found;
-    const bound = deps.addresses?.keyAt(heardBy, message.chatId) ?? null;
-    return bound === null ? found : { key: chatKey(heardBy.platform, bound as ChatId), kind: "dm" };
+    if (found.kind !== "dm" || message.parentChatId !== undefined || !deps.addresses) return found;
+    return {
+      key: settledDirectMessage(deps.addresses, heardBy, message.chatId, found.key),
+      kind: "dm",
+    };
   };
   let unsubscribe: (() => void) | null = null;
   let started = false;
@@ -667,7 +672,10 @@ export class ChatAdapters {
   directMessageReached(channel: string, other: string, address: string): ChatKey {
     const account = this.accountOn(channel);
     const chat = chatAt(account.platform, address, { romeEnd: account.id, other });
-    if (address !== other) this.deps.addresses.bind(account, chat.externalId, address);
+    if (address !== other) {
+      settledDirectMessage(this.deps.addresses, account, address, chat);
+      this.deps.addresses.bind(account, chat.externalId, address);
+    }
     return chat;
   }
 
@@ -715,6 +723,25 @@ function outgoing(out: Outbound, replyTo: string | undefined): OutgoingMessage {
     ...(out.turnId ? { turnId: out.turnId } : {}),
     ...(replyTo ? { replyToMessageId: replyTo } : {}),
   };
+}
+
+/**
+ * The direct message `account` reaches at `address`, now that its key is
+ * known to be `key`. One Rome reached there before it knew the other end is
+ * keyed by the address, and takes `key` from here on, so its history stays
+ * in the one chat. Another already held there stays the one.
+ */
+function settledDirectMessage(
+  addresses: Pick<ChatAddresses, "keyAt" | "rekey">,
+  account: Account,
+  address: string,
+  key: ChatKey,
+): ChatKey {
+  const bound = addresses.keyAt(account, address);
+  if (bound === null || bound === key.externalId) return key;
+  const provisional = chatAt(account.platform, address, { romeEnd: account.id }).externalId;
+  if (bound === provisional && addresses.rekey(account, bound, key.externalId)) return key;
+  return chatKey(account.platform, bound as ChatId);
 }
 
 /** The direct message `account` has at platform address `address`: the one
