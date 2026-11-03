@@ -164,7 +164,7 @@ describe("GET /concierge/tasks", () => {
   });
 
   it("carries the source message's id while the message exists, and null after it is gone", async () => {
-    const chats = webchatRepo;
+    const chats = new ChatsWebChatRepository(testDb.db);
     await chats.createSession("concierge", "Concierge");
     const { id } = await chats.addBackendMessage("concierge", "turn-1", [
       { type: "text", content: "Which account?" },
