@@ -31,7 +31,6 @@ import {
 } from "@rome-os/app-runtime/chats";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
 import { DeliveryFailure } from "../channels/delivery/types.js";
-import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
@@ -89,7 +88,9 @@ async function send(
   // A thread is opened by answering its anchor, which the adapter refuses
   // when the sender holds no platform id for it.
   const key = deps.adapters.keyOf(chat.ref);
-  const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
+  // A part the channel does not show, a host-only one among them, is the
+  // adapter's to refuse.
+  const given = out.parts ?? [];
   // The text an adapter shows: `text` when it says anything, else the text
   // parts. A message with no words, such as a card, goes to the adapter as
   // it is: one that cannot show it refuses it, and so does one given nothing.
