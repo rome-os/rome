@@ -16,6 +16,7 @@ import type {
   OutgoingAttachment,
 } from "@rome-os/app-runtime";
 import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
+import { v7 as uuidv7 } from "uuid";
 import { messageContentText } from "../channels/messages-agent.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
@@ -39,7 +40,7 @@ const log = createLogger("app-chat-writes");
 
 export type ChatWrites = Pick<
   Required<ChatRepository>,
-  "addMessage" | "promoteMessageToUser" | "send" | "sendEmail"
+  "addMessage" | "promoteMessageToUser" | "send" | "sendEmail" | "recordOutboundMessage"
 >;
 
 export interface AppChatWritesDeps {
@@ -201,6 +202,33 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       if (input.role === "user") deps.links.prompt(recorded.id, input.sessionId);
       deps.webchatRepo.advanceSessionActivity(input.sessionId, recorded.at);
       return { inserted: true };
+    },
+
+    // An app built before `send` sends on its own and then names what went
+    // out. It goes on record in Chats as the speaker's, as a send would put
+    // it, so Chats' readers see it.
+    async recordOutboundMessage(input) {
+      const speaker = speakerOf(input.sessionId);
+      const key = input.platformMessageId
+        ? deps.lines.keyIn(speaker, input.platformMessageId)
+        : `rome:${uuidv7()}`;
+      const sent = await deps.messages.send(
+        {
+          direction: "fromRome",
+          place: speaker.place,
+          saidBy: {
+            account: { platform: speaker.place.chat.platform, id: speaker.accountId },
+            agent: agentOf(deps, input.turnId).agent ?? speaker.agent,
+          },
+          parts: recordedOf(input.content),
+          ...replyToIn(deps, speaker, input.replyToPlatformMessageId),
+        },
+        // Delivered already: recording says so.
+        async () => ({ key }),
+      );
+      if (sent.id !== null && input.knownToProvider && input.turnId)
+        deps.links.answer(sent.id, input.sessionId, input.turnId);
+      active(input.sessionId, sent.at);
     },
 
     async promoteMessageToUser(sessionId, platformMessageId) {

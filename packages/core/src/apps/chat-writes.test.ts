@@ -239,6 +239,23 @@ describe("appChatWrites", () => {
     });
   });
 
+  describe("recordOutboundMessage", () => {
+    it("puts what an older app sent on record in Chats as the speaker's and the turn's answer", async () => {
+      await writes.recordOutboundMessage({
+        sessionId: "s1",
+        content: JSON.stringify([{ type: "text", content: "Sent by hand" }]),
+        platformMessageId: "202",
+        turnId: "turn-1",
+        knownToProvider: true,
+      });
+
+      expect(sends).toEqual([]);
+      const [line] = said();
+      expect(line).toMatchObject({ key: lines.keyIn(speakerAt(), "202"), text: "Sent by hand" });
+      expect(linkOf("s1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
+    });
+  });
+
   describe("send", () => {
     it("sends through the session's adapter, records it as the turn's answer, and answers the platform's id", async () => {
       const result = await writes.send({
