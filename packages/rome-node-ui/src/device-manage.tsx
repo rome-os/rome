@@ -18,7 +18,7 @@ import {
 import { Field, FieldDescription, FieldLabel, FormError } from "@rome-os/ui/field";
 import { IconButton } from "@rome-os/ui/icon-button";
 import { Input } from "@rome-os/ui/input";
-import { Ellipsis, ExternalLink, Pencil, Plug, Trash2, Unplug } from "lucide-react";
+import { Ellipsis, ExternalLink, Pencil, Plug, ScrollText, Trash2, Unplug } from "lucide-react";
 import { format, type NodeUiMessages } from "./messages.js";
 import type {
   NodeDevice,
@@ -82,6 +82,12 @@ export function DeviceMenu({
                 >
                   <Unplug className="size-4" aria-hidden />
                   {m.manage.disconnect}
+                </DropdownMenuItem>
+              )}
+              {self.openAuditLog && (
+                <DropdownMenuItem onSelect={() => self.openAuditLog?.()}>
+                  <ScrollText className="size-4" aria-hidden />
+                  {m.manage.auditLog}
                 </DropdownMenuItem>
               )}
               {self.removeUrl && (

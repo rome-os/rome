@@ -6,6 +6,7 @@ const DOCS_URL = "https://romeos.cc/docs/rome";
 export function setupApplicationMenu(
   showDashboard: () => void,
   openSettings: () => BrowserWindow,
+  openAuditLog: () => BrowserWindow,
   checkForUpdates: () => void | Promise<unknown>,
 ): void {
   const isMac = process.platform === "darwin";
@@ -23,6 +24,12 @@ export function setupApplicationMenu(
     label: "Settings…",
     accelerator: "CmdOrCtrl+,",
     click: () => openSettings(),
+  };
+
+  // This computer's record of the remote requests it ran. Local only: no page can open it.
+  const auditItem: Electron.MenuItemConstructorOptions = {
+    label: "Audit Log…",
+    click: () => openAuditLog(),
   };
 
   const checkForUpdatesItem: Electron.MenuItemConstructorOptions = {
@@ -46,6 +53,7 @@ export function setupApplicationMenu(
               checkForUpdatesItem,
               { type: "separator" as const },
               settingsItem,
+              auditItem,
               { type: "separator" as const },
               { role: "services" as const },
               { type: "separator" as const },
@@ -70,7 +78,7 @@ export function setupApplicationMenu(
       label: "File",
       submenu: [
         { role: "close" },
-        ...(isMac ? [] : [{ type: "separator" as const }, settingsItem, quitItem]),
+        ...(isMac ? [] : [{ type: "separator" as const }, settingsItem, auditItem, quitItem]),
       ],
     },
 

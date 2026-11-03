@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -12,9 +12,20 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { AuditStore } from "./audit.js";
 import { createExecutor, FS_LIST_LIMIT, redactBytes } from "./executor.js";
 import { decodeMeta, encodeMeta, FRAME_TYPE, MAX_FRAME_BYTES, type Frame } from "./frame.js";
 import type { OutboundEnvelope } from "./protocol.js";
+
+/** Records nothing. Tests of the audit log itself use a real AuditStore. */
+const noAudit = {
+  hint: "",
+  start: async () => 1,
+  end: () => {},
+  host: () => {},
+  status: async () => ({ state: "ok" as const }),
+};
 
 const requestId = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const caller = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -26,7 +37,7 @@ afterEach(async () => {
 
 async function execute(action: string, args: unknown = {}) {
   const replies: OutboundEnvelope[] = [];
-  const executor = createExecutor("Test computer", (reply) => {
+  const executor = createExecutor("Test computer", noAudit, (reply) => {
     replies.push(reply);
     return true;
   });
@@ -49,6 +60,7 @@ async function executeFrame(
   const texts: OutboundEnvelope[] = [];
   const executor = createExecutor(
     "Test computer",
+    noAudit,
     (reply) => {
       texts.push(reply);
       return true;
@@ -169,6 +181,7 @@ describe("computer actions over binary frames", () => {
     const frames: Frame[] = [];
     const executor = createExecutor(
       "Test",
+      noAudit,
       () => true,
       [],
       (frame) => {
@@ -210,6 +223,7 @@ describe("computer actions over binary frames", () => {
     const frames: Frame[] = [];
     const executor = createExecutor(
       "Test",
+      noAudit,
       () => true,
       [],
       (frame) => {
@@ -259,6 +273,7 @@ describe("file transfers over binary frames", () => {
     const frames: Frame[] = [];
     const executor = createExecutor(
       "Test",
+      noAudit,
       () => true,
       [],
       (frame) => {
@@ -420,7 +435,7 @@ describe("computer actions", () => {
   });
   it("terminates direct children and never sends their result after disconnect", async () => {
     const replies: OutboundEnvelope[] = [];
-    const executor = createExecutor("Test", (reply) => {
+    const executor = createExecutor("Test", noAudit, (reply) => {
       replies.push(reply);
       return true;
     });
@@ -530,5 +545,273 @@ describe("fs.list", () => {
     const { response, body } = await executeFrame("fs.list", { path: dir });
     expect(response).toMatchObject({ ok: true, result: { path: dir, entries: [] } });
     expect(body.byteLength).toBe(0);
+  });
+});
+
+describe("audit log", () => {
+  async function auditedExecutor(options: { failStarts?: boolean; secrets?: string[] } = {}) {
+    const dir = await mkdtemp(join(tmpdir(), "rome-node-executor-audit-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const audit = await AuditStore.open({
+      path: join(dir, "audit", "audit.db"),
+      entry: "cli",
+      hint: "Run rome-node audit status on that computer.",
+    });
+    cleanups.push(async () => audit.close());
+    if (options.failStarts) {
+      const db = new DatabaseSync(audit.path);
+      db.exec(
+        "CREATE TRIGGER fail BEFORE INSERT ON events WHEN NEW.kind = 'start' BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+      );
+      db.close();
+    }
+    const replies: OutboundEnvelope[] = [];
+    const frames: Frame[] = [];
+    const executor = createExecutor(
+      "Test",
+      audit,
+      (reply) => {
+        replies.push(reply);
+        return true;
+      },
+      options.secrets ?? [],
+      (frame) => {
+        frames.push(frame);
+        return true;
+      },
+    );
+    cleanups.push(async () => executor.disconnect());
+    const json = (id: string, action: string, args: unknown = {}) =>
+      executor.receive({ id, from: caller, payload: { type: "request", action, args } });
+    const frame = (meta: unknown, body: Uint8Array = new Uint8Array(), id = requestId): Frame => ({
+      type: FRAME_TYPE.request,
+      id,
+      peer: caller,
+      meta: encodeMeta(meta),
+      body,
+    });
+    const requests = () => audit.list({ limit: 1000 }).filter((item) => item.kind === "start");
+    return { dir, audit, executor, replies, frames, json, frame, requests };
+  }
+  const node = (code: string) => ({ command: process.execPath, args: ["-e", code] });
+
+  it("refuses to run anything it cannot record, and system.info says why", async () => {
+    const { dir, json, replies, executor, frame, frames, requests } = await auditedExecutor({
+      failStarts: true,
+    });
+    const marker = join(dir, "marker");
+    await json("a", "exec", node(`require("fs").writeFileSync(${JSON.stringify(marker)}, "x")`));
+    expect(replies[0].payload).toMatchObject({
+      ok: false,
+      error: {
+        code: "audit_unavailable",
+        message: expect.stringContaining("rome-node audit status"),
+      },
+    });
+    await executor.receiveFrame(
+      frame({
+        type: "request",
+        action: "transfer.open",
+        args: { direction: "push", path: join(dir, "pushed"), size: 1 },
+      }),
+    );
+    expect(decodeMeta(frames[0].meta)).toMatchObject({
+      ok: false,
+      error: { code: "audit_unavailable" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await readdir(dir)).sort()).toEqual(["audit"]);
+    await json("b", "system.info");
+    expect(replies[1].payload).toMatchObject({
+      ok: true,
+      result: { audit: { state: "unavailable", code: "io" } },
+    });
+    expect(requests()).toEqual([]);
+  });
+
+  it("records exec before it runs and its result after, without environment values", async () => {
+    const { json, replies, audit, requests } = await auditedExecutor();
+    process.env.ROME_AUDIT_TEST_VALUE = "visible-value-not-recorded";
+    cleanups.push(() => Promise.resolve(delete process.env.ROME_AUDIT_TEST_VALUE));
+    await json("a", "exec", {
+      ...node("console.log('hello'); console.error('oops'); process.exit(3)"),
+      cwd: tmpdir(),
+    });
+    await json("b", "system.info");
+    await json("c", "nosuch.action");
+    await json("d", "exec", { command: "" });
+    expect(replies.map((reply) => reply.payload)).toMatchObject([
+      { ok: true, result: { exitCode: 3 } },
+      { ok: true, result: { audit: { state: "ok" } } },
+      { ok: false, error: { code: "unsupported_action" } },
+      { ok: false, error: { code: "invalid_args" } },
+    ]);
+    const [invalid, unsupported, exec] = requests();
+    expect(exec.record).toMatchObject({
+      action: "exec",
+      requestId: "a",
+      from: caller,
+      transport: "json",
+      args: { command: process.execPath, cwd: tmpdir() },
+    });
+    expect(exec.record.envKeys).toContain("ROME_AUDIT_TEST_VALUE");
+    expect(JSON.stringify(audit.list())).not.toContain("visible-value-not-recorded");
+    expect(exec.end).toMatchObject({
+      outcome: "exit_nonzero",
+      record: { exitCode: 3, signal: null },
+    });
+    expect(exec.end!.record.pid).toBeTypeOf("number");
+    expect(exec.end!.record.durationMs).toBeTypeOf("number");
+    expect(audit.content(exec.end!.seq, "stdout")!.toString()).toBe("hello\n");
+    expect(audit.content(exec.end!.seq, "stderr")!.toString()).toBe("oops\n");
+    expect(unsupported.end).toMatchObject({
+      outcome: "error",
+      record: { errorCode: "unsupported_action" },
+    });
+    expect(invalid.end).toMatchObject({ outcome: "error", record: { errorCode: "invalid_args" } });
+  });
+
+  it("stores binary stdin and the first 32 MiB of output that did not fit in a frame", async () => {
+    const { executor, frame, frames, audit, requests } = await auditedExecutor();
+    const size = 40 * 1024 * 1024;
+    await executor.receiveFrame(
+      frame(
+        {
+          type: "request",
+          action: "exec",
+          args: node(`process.stdin.resume(); process.stdout.write(Buffer.alloc(${size}, 65))`),
+        },
+        Buffer.from("the input"),
+      ),
+    );
+    expect(decodeMeta(frames[0].meta)).toMatchObject({
+      ok: false,
+      error: { code: "output_too_large" },
+    });
+    const [exec] = requests();
+    expect(audit.content(exec.seq, "stdin")!.toString()).toBe("the input");
+    expect(exec.end).toMatchObject({
+      outcome: "error",
+      record: {
+        errorCode: "output_too_large",
+        exitCode: 0,
+        content: {
+          stdout: {
+            size,
+            sha256: createHash("sha256").update(Buffer.alloc(size, 65)).digest("hex"),
+            storedBytes: MAX_FRAME_BYTES,
+          },
+        },
+      },
+    });
+  });
+
+  it("marks a request cut off by a replaced connection as interrupted and sends nothing", async () => {
+    const { json, replies, executor, requests } = await auditedExecutor();
+    const pending = json("a", "exec", node("setInterval(() => {}, 1000)"));
+    await until(() => requests().length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    executor.disconnect();
+    await pending;
+    expect(replies).toEqual([]);
+    expect(requests()[0].end).toMatchObject({ outcome: "interrupted", record: { replyBytes: 0 } });
+  });
+
+  it("lets a stopping host wait until cut-off requests have written their end records", async () => {
+    const { json, executor, requests } = await auditedExecutor();
+    void json("a", "exec", node("setInterval(() => {}, 1000)"));
+    await until(() => requests().length === 1);
+    executor.disconnect();
+    await executor.idle();
+    expect(requests()[0].end).toMatchObject({ outcome: "interrupted" });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "writes the end record even when a background process holds the pipes after disconnect",
+    async () => {
+      const { json, executor, requests } = await auditedExecutor();
+      void json("a", "exec", { command: "sh", args: ["-c", "sleep 3 & echo hi"] });
+      await until(() => requests().length === 1);
+      const started = Date.now();
+      executor.disconnect();
+      await executor.idle();
+      expect(Date.now() - started).toBeLessThan(2500);
+      expect(requests()[0].end).toMatchObject({ outcome: "interrupted" });
+    },
+  );
+
+  it("records pushes with content up to 10 MiB, the replaced file, and acknowledged pull bytes", async () => {
+    const { dir, executor, frame, frames, audit, requests } = await auditedExecutor();
+    const push = async (id: string, path: string, data: Buffer) => {
+      frames.length = 0;
+      const digest = createHash("sha256").update(data).digest("hex");
+      await executor.receiveFrame(
+        frame(
+          {
+            type: "request",
+            action: "transfer.open",
+            args: { direction: "push", path, size: data.byteLength },
+          },
+          undefined,
+          id,
+        ),
+      );
+      await until(() => frames.length === 1);
+      await executor.receiveFrame(frame({ type: "transfer", kind: "data", offset: 0 }, data, id));
+      await executor.receiveFrame(
+        frame(
+          { type: "transfer", kind: "end", size: data.byteLength, sha256: digest },
+          undefined,
+          id,
+        ),
+      );
+      await until(() => requests().find((item) => item.record.requestId === id)?.end != null);
+      return { digest, item: requests().find((item) => item.record.requestId === id)! };
+    };
+    const target = join(dir, "pushed.bin");
+    await writeFile(target, "old");
+    const small = randomBytes(5 * 1024 * 1024);
+    const first = await push("0f8fad5b-d9cb-469f-a165-70867728950a", target, small);
+    expect(first.item.end!.record).toMatchObject({
+      direction: "push",
+      path: target,
+      bytes: small.byteLength,
+      sha256: first.digest,
+      replaced: { size: 3 },
+      content: { file: { size: small.byteLength, sha256: first.digest } },
+    });
+    expect(audit.content(first.item.end!.seq, "file")!.equals(small)).toBe(true);
+    const large = randomBytes(11 * 1024 * 1024);
+    const second = await push(
+      "0f8fad5b-d9cb-469f-a165-70867728950b",
+      join(dir, "large.bin"),
+      large,
+    );
+    expect(second.item.end!.record).toMatchObject({
+      bytes: large.byteLength,
+      sha256: second.digest,
+      replaced: null,
+    });
+    expect(second.item.end!.record.content).toBeUndefined();
+
+    frames.length = 0;
+    const pullId = "0f8fad5b-d9cb-469f-a165-70867728950c";
+    await executor.receiveFrame(
+      frame(
+        { type: "request", action: "transfer.open", args: { direction: "pull", path: target } },
+        undefined,
+        pullId,
+      ),
+    );
+    await until(() => frames.length >= 2);
+    await executor.receiveFrame(
+      frame({ type: "transfer", kind: "ack", offset: 1024 }, undefined, pullId),
+    );
+    executor.disconnect();
+    await until(() => requests().find((item) => item.record.requestId === pullId)?.end != null);
+    expect(requests().find((item) => item.record.requestId === pullId)!.end).toMatchObject({
+      outcome: "interrupted",
+      record: { direction: "pull", ackedBytes: 1024, errorCode: "connection_lost" },
+    });
   });
 });

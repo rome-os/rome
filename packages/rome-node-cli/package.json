@@ -28,12 +28,16 @@
     "test": "pnpm build && ../../scripts/test-env.sh rstest"
   },
   "dependencies": {
-    "@rome-os/node-core": "workspace:^"
+    "@rome-os/node-core": "workspace:^",
+    "ink": "^7.1.1",
+    "react": "^19.2.6"
   },
   "devDependencies": {
     "@rstest/core": "^0.11.11",
     "@types/node": "25.2.3",
+    "@types/react": "^19.2.15",
     "@types/ws": "^8.18.0",
+    "ink-testing-library": "^4.0.0",
     "typescript": "^5.9.3",
     "ws": "^8.18.0"
   },
