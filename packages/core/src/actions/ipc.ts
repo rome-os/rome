@@ -6,13 +6,18 @@
 //
 // Wire format (5 message types):
 //   - rpc_request  { reqId, method, params, traceCarrier? }
-//   - rpc_response { reqId, result?, error? }
+//   - rpc_response { reqId, result?, error?, refusal? }
 //   - stream_open  { channelId, name }
 //   - sent_event   { channelId, value }
 //   - stream_close { channelId, reason?, error? }
 
 import { randomUUID } from "node:crypto";
 import { context, propagation, ROOT_CONTEXT } from "@opentelemetry/api";
+import {
+  ChannelSendRefused,
+  type ChannelSendRefusal,
+  isChannelSendRefused,
+} from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 
@@ -51,6 +56,9 @@ export interface IpcResponseMessage {
   reqId: string;
   result?: unknown;
   error?: string;
+  /** The reason a channel refused a send, when `error` is that refusal, so
+   *  the caller gets a ChannelSendRefused back rather than a bare Error. */
+  refusal?: ChannelSendRefusal;
 }
 
 export interface IpcStreamOpenMessage {
@@ -387,6 +395,7 @@ export class IpcRpc {
         type: "rpc_response",
         reqId: message.reqId,
         error: err instanceof Error ? err.message : String(err),
+        ...(isChannelSendRefused(err) ? { refusal: err.reason } : {}),
       });
     }
   }
@@ -397,7 +406,11 @@ export class IpcRpc {
     if (pending.timeout) clearTimeout(pending.timeout);
     this.pending.delete(message.reqId);
     if (message.error !== undefined) {
-      pending.reject(new Error(message.error));
+      pending.reject(
+        message.refusal === undefined
+          ? new Error(message.error)
+          : new ChannelSendRefused(message.refusal, message.error),
+      );
     } else {
       pending.resolve(message.result);
     }

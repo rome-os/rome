@@ -8,6 +8,8 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
+import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { refuseUnshownParts } from "./send-refusals.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
@@ -283,9 +285,7 @@ export class EmailAdapter {
    * back to the newest message Rome sent for a thread nobody else wrote in.
    */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const outcome = await this.sendMail(chatId, message);
-    if (!outcome) return { chatId };
-    const { sent, startedThread } = outcome;
+    const { sent, startedThread } = await this.sendMail(chatId, message);
     // An explicit reply on an uncached thread says nothing about whether the
     // thread has inbound mail, so only a new or cached thread records the send.
     if (startedThread || this.threadReplyTarget.has(sent.threadId)) {
@@ -345,14 +345,16 @@ export class EmailAdapter {
   private async sendMail(
     threadId: string,
     message: OutgoingMessage,
-  ): Promise<{ sent: SendMailResult; startedThread: boolean } | undefined> {
+  ): Promise<{ sent: SendMailResult; startedThread: boolean }> {
     // The mail transport has no attachment field. Reject before sending a body
     // that would falsely appear to deliver the requested files.
     if (message.attachments?.length) {
-      throw new Error(
+      throw new ChannelSendRefused(
+        "attachment_unsupported",
         "Email attachments are not supported by the mail transport. No email was sent.",
       );
     }
+    refuseUnshownParts("email", message);
     const email = message.kind === "email" ? message : undefined;
     if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
       throw new Error("Email replyToMessageId must not be blank. No email was sent.");
@@ -375,9 +377,10 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
-      if (email) throw new Error("Email requires non-empty text or HTML. No email was sent.");
-      log.debug("skipping empty outbound email", { threadId: threadId || null });
-      return undefined;
+      throw new ChannelSendRefused(
+        "empty",
+        "Email requires non-empty text or HTML. No email was sent.",
+      );
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;

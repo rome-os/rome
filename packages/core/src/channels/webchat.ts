@@ -4,6 +4,7 @@ import type { StoredWebchatHistoryMessage, WebChatRepository } from "../db/repos
 import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../logger.js";
+import { ChannelSendRefused } from "@rome-os/app-runtime";
 import { withoutHostOnlyParts } from "./host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import { DEFAULT_BOT_DISPLAY_NAME } from "./mention-only.js";
@@ -67,8 +68,9 @@ export class WebChatAdapter {
     log.info("webchat adapter stopped");
   }
 
-  /** Persist an assistant reply into the session. A message with no text,
-   *  parts or attachments writes nothing, and its receipt has no `messageId`. */
+  /** Persist an assistant reply into the session. A message that shows
+   *  nothing, with no nonblank text, no other part and no attachment, is
+   *  refused and writes nothing. */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = chatId;
     // Only the host authors routine cards (see host-only-parts.ts).
@@ -76,10 +78,11 @@ export class WebChatAdapter {
     if (message.parts && given.length < message.parts.length) {
       log.warn("dropped routine_draft_card parts from a sent message", { threadId });
     }
+    const shown = given.filter((part) => part.type !== "text" || part.content.trim());
     const parts =
-      given.length > 0
-        ? given
-        : message.text
+      shown.length > 0
+        ? shown
+        : message.text?.trim()
           ? [{ type: "text" as const, content: message.text }]
           : [];
 
@@ -88,7 +91,12 @@ export class WebChatAdapter {
       parts.push({ type: "text" as const, content: `[${att.type}] ${label}` });
     }
 
-    if (parts.length === 0) return { chatId };
+    if (parts.length === 0) {
+      throw new ChannelSendRefused(
+        "empty",
+        "A dashboard message needs text, parts or an attachment",
+      );
+    }
 
     const messageId = uuid();
     await this.webchatRepo.addSentMessage(messageId, threadId, parts, message.turnId ?? null);

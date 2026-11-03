@@ -45,6 +45,7 @@ import type {
   Talker,
 } from "../types.js";
 import { createLogger } from "../../logger.js";
+import { refuseAttachments, refuseReplies, textToSend } from "../../channels/send-refusals.js";
 
 const log = createLogger("linkedin-reply");
 
@@ -309,15 +310,10 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               poller.stop();
             },
             async send(chatId: ChatId, msg) {
-              if (
-                !msg.text?.trim() ||
-                msg.attachments?.length ||
-                msg.replyToMessageId ||
-                msg.kind === "email" ||
-                msg.parts?.length
-              ) {
-                throw new Error("LinkedIn replies support plain text only");
-              }
+              if (msg.kind === "email") throw new Error("LinkedIn replies support plain text only");
+              refuseAttachments("linkedin", msg);
+              refuseReplies("linkedin", msg);
+              const text = textToSend("linkedin", msg);
               const target = await deps.syncSink.findReplyTarget?.({ threadId: chatId });
               if (!target)
                 throw new Error("No verified LinkedIn direct conversation for this reply");
@@ -341,7 +337,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                       "--expected-self",
                       target.selfParticipantId,
                       "--message",
-                      msg.text,
+                      text,
                       "--send",
                     ],
                     { timeoutMs: 180_000 },
