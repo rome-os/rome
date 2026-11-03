@@ -169,6 +169,25 @@ describe("SpeakerReplies", () => {
     expect(links.linkOf("speaker-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-3" });
   });
 
+  it("move the session's activity up to a streamed reply once it settles", async () => {
+    const moved: Array<[string, number]> = [];
+    const reply = await new SpeakerReplies({
+      speakers,
+      adapters: {
+        of: () => adapter,
+        keyOf: (ref) => chatKey(ref.platform, "-1001234567890123" as ChatId),
+      },
+      messages,
+      links,
+      activity: (sessionId, at) => moved.push([sessionId, at.getTime()]),
+    }).stream("speaker-1", CHANNEL, { turnId: "turn-5", policy: POLICY, clock: systemClock });
+
+    await reply!.settle(false);
+
+    const [line] = messages.read(placeIn(chat)).messages;
+    expect(moved).toEqual([["speaker-1", line!.at.getTime()]]);
+  });
+
   it("put a streamed reply on record as the agent whose turn wrote it", async () => {
     // The session still names the agent it opened with; the account's own
     // agent ran the turn.

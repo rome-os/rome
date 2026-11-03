@@ -23,6 +23,8 @@ export interface SpeakerRepliesDeps {
   adapters: Pick<ChatAdapters, "of" | "keyOf">;
   messages: Pick<MessageRepository, "send" | "byIds">;
   links: Pick<TurnLinks, "answer">;
+  /** Moves session `sessionId`'s activity up to `at`, when it is later. */
+  activity?: (sessionId: string, at: Date) => void;
 }
 
 /** Delivers a message on the speaker's channel to the chat its adapter keys
@@ -105,6 +107,7 @@ export class SpeakerReplies {
       },
       async (target) => ({ key: await deliver(speaker, target.chat) }),
     );
+    this.active(sessionId, sent.at);
     if (sent.id === null) return { id: null, at: sent.at };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
     return { id: sent.id, at: sent.at };
@@ -151,6 +154,7 @@ export class SpeakerReplies {
         return { key: messageKey, ...landed(speaker, out.threadId) };
       },
     );
+    this.active(sessionId, sent.at);
     if (sent.id === null) return { id: null, at: sent.at, sent: messageKey, speaker, landedIn };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
     return { id: sent.id, at: sent.at, sent: messageKey, speaker, landedIn };
@@ -210,6 +214,7 @@ export class SpeakerReplies {
               },
               async () => ({ key, ...landed(speaker, threadId) }),
             );
+            this.active(sessionId, sent.at);
             if (sent.id !== null) this.answered(sent.id, sessionId, options.turnId);
           } catch (error) {
             // The messages are already on the platform. A failed record must
@@ -225,6 +230,19 @@ export class SpeakerReplies {
         return settled;
       },
     };
+  }
+
+  /** Move the session's activity up to a message it said. The message is
+   *  out already, so a failure is logged, as for a turn link. */
+  private active(sessionId: string, at: Date): void {
+    try {
+      this.deps.activity?.(sessionId, at);
+    } catch (error) {
+      log.warn("reply sent but its session's activity could not move", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** Make message `messageId` turn `turnId`'s answer. The message is out

@@ -167,6 +167,20 @@ function joinChat(tx: DrizzleTx, from: number, into: number): void {
     JOIN chat_messages i ON i.chat_id = ${into} AND i.key = f.key
     WHERE f.chat_id = ${from}
   `);
+  // Where only the moving copy knows Rome said it, as when the other account
+  // heard Rome's send as an echo, the kept copy takes who said it.
+  tx.run(sql`
+    UPDATE chat_messages
+    SET sender_account_id = (
+          SELECT f.sender_account_id FROM joined_chat_messages j
+          JOIN chat_messages f ON f.id = j.from_id WHERE j.into_id = chat_messages.id),
+        sender_agent = (
+          SELECT f.sender_agent FROM joined_chat_messages j
+          JOIN chat_messages f ON f.id = j.from_id WHERE j.into_id = chat_messages.id)
+    WHERE sender_agent IS NULL AND id IN (
+      SELECT j.into_id FROM joined_chat_messages j
+      JOIN chat_messages f ON f.id = j.from_id WHERE f.sender_agent IS NOT NULL)
+  `);
   tx.run(sql`
     UPDATE OR IGNORE agent_turn_messages
     SET message_id = (SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = message_id)
