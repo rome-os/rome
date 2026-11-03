@@ -10,6 +10,8 @@ import type {
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
 import { ChatEvents } from "../chats/storage/events.js";
+import { messageToRome } from "../chats/storage/message.js";
+import { chatKey, placeIn } from "../chats/storage/place.js";
 import { inboundRecording } from "../connections/inbound-recording.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
@@ -21,9 +23,8 @@ import type { TurnLinks } from "./turn-links.js";
 // these pin: a message is on record in its chat before the hook hears it, the
 // hook hears it through the session of the account that heard it, a
 // redelivery is neither recorded nor heard twice, even after a restart, a
-// line reaches each account once whatever its session has read, a message is
-// held out of catch-up until every account and every hook that heard it
-// decided its wake, a place's messages are heard one at a time whichever account
+// message is held out of catch-up until every hook that heard it decided its
+// wake, a session catches up on what its account said there before it, a place's messages are heard one at a time whichever account
 // heard them, and nothing is recorded until a hook subscribes.
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
@@ -418,6 +419,34 @@ describe("messagesSaid", () => {
       "Hello",
     ]);
   });
+  it("catches a session up on what its account said there before anyone wrote to it", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    // Rome's send started the chat, two minutes before the first reply.
+    const chat = wiring.chats.start(chatKey("telegram", GROUP), "group", "Team");
+    wiring.messages.record(
+      messageToRome({
+        key: "rome-bot:tg-0",
+        place: placeIn(chat.ref),
+        saidBy: { account: BOT, agent: "main" },
+        body: { text: "Lunch at noon?" },
+        at: new Date(Date.now() - 120_000),
+      }),
+    );
+    await telegram.deliver(message({ timestamp: new Date() }));
+    await settled();
+    const [event] = heard;
+    if (!event) throw new Error("not heard");
+
+    await said.decided(event.recorded);
+    expect(wiring.links.unseen(event.recorded.chatRecordId).map((line) => line.text)).toEqual([
+      "Lunch at noon?",
+      "Hello",
+    ]);
+  });
+
   it("catches a group's session up on a line that woke no agent when a later line wakes one", async () => {
     const heard: SaidInboundEvent[] = [];
     said.subscribe(async (event) => {

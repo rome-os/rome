@@ -1076,8 +1076,18 @@ export class WebChatRepository {
         input.parentThreadId && input.parentThreadId !== input.threadId ? input.threadId : null;
       // A session first standing in its chat starts just before the line
       // that opened it, so a catch-up, which reads what was said after the
-      // session's second, reads that line too once it wakes no agent.
-      const heardSecond = Math.floor(speaker.at.getTime() / 1000);
+      // session's second, reads that line too once it wakes no agent. Where
+      // the account spoke there first, as a send that started the chat, the
+      // session starts before that line instead, so it reads what it said.
+      const firstOwn = this.db.all<{ at: number | null }>(sql`
+        SELECT min(said_at) AS at FROM chat_messages
+        WHERE chat_id = ${speaker.chat.id} AND thread_id IS ${thread}
+          AND sender_account_id = ${speaker.accountId}
+      `)[0]?.at;
+      const heardSecond = Math.min(
+        Math.floor(speaker.at.getTime() / 1000),
+        firstOwn ?? Number.POSITIVE_INFINITY,
+      );
       await this.db
         .update(romeSessions)
         .set({
