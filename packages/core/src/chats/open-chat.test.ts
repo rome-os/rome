@@ -120,4 +120,3 @@ describe("openChannelChat as a speaker", () => {
     expect(wired.speakers.speakerOf(again.id)).toEqual(placed);
   });
 });
-
