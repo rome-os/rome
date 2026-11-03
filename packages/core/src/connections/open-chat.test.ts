@@ -6,6 +6,7 @@ import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.j
 import type { ChatRepository } from "../chats/chat-repository.js";
 import { chatsWiring } from "../chats-wiring.js";
 import { ChannelWithoutAccount } from "./chat-adapter.js";
+import { ChatAddresses } from "./chat-addresses.js";
 import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
 import { chatKey } from "../chats/place.js";
 
@@ -119,6 +120,22 @@ describe("openChannelChat as a speaker", () => {
     });
 
     expect(wired.speakers.speakerOf(record.id)?.place.threadId).toBe("-100:7");
+  });
+
+  it("stands a session opened at a thread Rome knows in that thread of its chat", async () => {
+    // A streamed reply opened thread T in group G before anything was heard
+    // in it, so only the thread's address is named.
+    new ChatAddresses(testDb.db).bindThread({ platform: "telegram", id: "111" }, "T", "G");
+
+    const record = await openChannelChat(deps, {
+      channel: "telegram",
+      threadId: "T",
+      agentName: "main",
+    });
+
+    const speaker = wired.speakers.speakerOf(record.id);
+    expect(speaker?.place.threadId).toBe("T");
+    expect(speaker && wired.adapters.keyOf(speaker.place.chat).externalId).toBe("G");
   });
 
   it("keeps a session that already stands somewhere where it stands", async () => {

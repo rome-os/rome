@@ -731,6 +731,14 @@ export class ChatAdapters {
     if (kind === "group") return chatAt(account.platform, address);
     return chatAt(account.platform, address, { romeEnd: account.id });
   }
+
+  /** The chat of the thread `channel`'s account heard, or Rome opened, at
+   *  platform address `address`, or null when it knows no thread there. */
+  threadChatAt(channel: string, address: string): ChatKey | null {
+    const account = this.accountOn(channel);
+    const key = this.deps.addresses.threadChatAt(account, address);
+    return key === null ? null : chatKey(account.platform, key as ChatId);
+  }
 }
 
 /**
