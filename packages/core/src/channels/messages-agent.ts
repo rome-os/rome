@@ -9,7 +9,7 @@ import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
-import { directMessageAddress, directMessageAt } from "../connections/chat-adapter.js";
+import { chatAt, directMessageAddress } from "../connections/chat-adapter.js";
 import { ChatAddresses } from "../connections/chat-addresses.js";
 import { chatKey } from "../connections/chat-ids.js";
 
@@ -143,16 +143,39 @@ export function chatsAgentMessages(
     db,
     view(scope) {
       if (scope.keys.length === 0) return null;
-      const rows = sql.join(
+      // Rome's account once per channel, and the scope as one JSON value, so
+      // a batch binds one variable however many keys it holds.
+      const accounts = new Map<string, Account>();
+      const on = (channel: string) => {
+        let account = accounts.get(channel);
+        if (!account) accounts.set(channel, (account = accountOn(channel)));
+        return account;
+      };
+      const pairs = JSON.stringify(
         scope.keys.map(({ channel, key }) => {
-          const account = accountOn(channel);
-          const chat = directMessageAt(account, key, addresses).externalId;
-          return sql`(${channel}, ${account.platform}, ${account.id}, ${key}, ${chat})`;
+          const account = on(channel);
+          // The direct message the address names before Rome's account has
+          // heard it anywhere else; the address store below has the last word.
+          const named = chatAt(account.platform, key, { romeEnd: account.id }).externalId;
+          return [channel, account.platform, account.id, key, named];
         }),
-        sql`, `,
       );
       return sql`
-        WITH v(channel, platform, account, key, chat) AS (VALUES ${rows})
+        WITH v(channel, platform, account, key, named) AS (
+          SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+            json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]')
+          FROM json_each(${pairs})
+        ),
+        -- The direct message each address names: the one Rome's account heard
+        -- there, else the one with the party the address names.
+        dm(channel, platform, account, key, chat) AS (
+          SELECT v.channel, v.platform, v.account, v.key, coalesce((
+            SELECT a.chat_key FROM chat_addresses a
+            WHERE a.platform = v.platform AND a.account_id = v.account
+              AND a.address = v.key AND a.thread_id = ''
+          ), v.named)
+          FROM v
+        )
         SELECT
           v.channel AS source,
           v.key AS key,
@@ -161,7 +184,7 @@ export function chatsAgentMessages(
           'agent:' || m.id AS ref,
           m.parts AS body,
           json_array(m.id, v.account) AS detail_key
-        FROM v
+        FROM dm v
         JOIN ${CHATS} c ON c.platform = v.platform AND c.key = v.chat
         JOIN ${CHAT_LINES} m ON m.chat_id = c.id AND m.thread_id IS NULL
         WHERE c.kind = 'dm' AND c.platform <> 'webchat'`;

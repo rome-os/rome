@@ -322,6 +322,50 @@ describe("chatsAgentMessages", () => {
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
   });
 
+  /** How many statements `read` runs against the database. */
+  async function statementsRun(read: () => Promise<unknown>): Promise<number> {
+    type Statement = Record<"all" | "get" | "run", (...values: unknown[]) => unknown>;
+    const client = (db as unknown as { $client: { prepare(sql: string): Statement } }).$client;
+    const prepare = client.prepare.bind(client);
+    let runs = 0;
+    client.prepare = (text: string) => {
+      const statement = prepare(text);
+      for (const verb of ["all", "get", "run"] as const) {
+        const call = statement[verb].bind(statement);
+        statement[verb] = (...values: unknown[]) => {
+          runs += 1;
+          return call(...values);
+        };
+      }
+      return statement;
+    };
+    try {
+      await read();
+    } finally {
+      client.prepare = prepare;
+    }
+    return runs;
+  }
+
+  it("reads a thousand addresses in one statement, not one per address", async () => {
+    const addresses = Array.from({ length: 1_000 }, (_, i) => `tg-nobody-${i}`);
+    const runs = await statementsRun(() =>
+      read(db).read({ accounts: [{ channel: CHANNEL, addresses }], limit: WHOLE_HISTORY }),
+    );
+    expect(runs).toBe(1);
+  });
+
+  it("answers a batch of more accounts than SQLite binds variables for", async () => {
+    const messages = read(db);
+    const heads = await Promise.all(
+      Array.from({ length: 6_000 }, (_, i) =>
+        messages.latest([{ channel: CHANNEL, addresses: [i === 0 ? DIRECT : `tg-nobody-${i}`] }]),
+      ),
+    );
+    expect(heads[0]).toMatchObject({ ref: "agent:m-later" });
+    expect(heads.slice(1).every((head) => head === null)).toBe(true);
+  });
+
   // A link keyed by a service names the service, and the transcript keys a
   // conversation by the account's own channel id, which may be opaque.
   it("reads an account under the channel it is stored under, and under none", async () => {

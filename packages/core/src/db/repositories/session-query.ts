@@ -278,19 +278,20 @@ function rawStats(row: RawSessionStats): RawSessionStats {
 export type SessionLines = "legacy" | "chats";
 
 /**
- * How many lines the transcript of session `id` holds, read from Chats: the
+ * How many lines the transcript of each session `where` selects holds, as
+ * rows of its `id` and `count`, read from Chats: the
  * messages said where its speaker stands since it joined, plus its own rows
  * in `rome_agent_messages` that Chats does not hold. A session in a chat
  * keeps only traces there; one in no chat keeps its prompts and answers too.
  */
-function chatsLineCount(id: SQL | string): SQL {
-  return sql`SELECT (
+function chatsLineCounts(where: SQL): SQL {
+  return sql`SELECT s.id AS id, (
     (SELECT count(*) FROM rome_agent_messages t
       WHERE t.session_id = s.id
         AND (s.chat_id IS NULL OR t.role NOT IN ('user', 'assistant', 'notification')))
     + (SELECT count(*) FROM ${CHAT_LINES} m
       WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id AND m.said_at >= s.created_at)
-  ) AS count FROM rome_sessions s WHERE s.id = ${id}`;
+  ) AS count FROM rome_sessions s WHERE ${where}`;
 }
 
 export class SessionQueryRepository {
@@ -298,6 +299,21 @@ export class SessionQueryRepository {
     private db: DrizzleDb,
     private readonly lines: SessionLines = "legacy",
   ) {}
+
+  /** `rows` with each session's line count read from Chats, in one statement
+   *  over just these sessions. */
+  private withChatsLineCounts<T extends { id: string; messageCount: number }>(rows: T[]): T[] {
+    if (rows.length === 0) return rows;
+    const ids = JSON.stringify(rows.map((row) => row.id));
+    const counts = new Map(
+      this.db
+        .all<{ id: string; count: number }>(
+          chatsLineCounts(sql`s.id IN (SELECT value FROM json_each(${ids}))`),
+        )
+        .map((row) => [row.id, Number(row.count)]),
+    );
+    return rows.map((row) => ({ ...row, messageCount: counts.get(row.id) ?? 0 }));
+  }
 
   private runStats(scope: SessionQueryStorageScope) {
     return this.db
@@ -356,11 +372,11 @@ export class SessionQueryRepository {
       .from(romeAgentMessages)
       .groupBy(romeAgentMessages.sessionId)
       .as("session_query_message_counts");
-    // Read from Chats, each session on the page counts its own lines, so the
-    // count is never taken over the whole table.
+    // Read from Chats, the page is cut first and only its sessions count
+    // their lines, so the count is never taken over the whole table.
     const messageCount =
       this.lines === "chats"
-        ? sql<number>`(${chatsLineCount(sql`${romeSessions.id}`)})`.mapWith(Number)
+        ? sql<number>`0`.mapWith(Number)
         : sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number);
     const predicates = [
       ...sessionPredicates(query.scope, query.search, query.searchAgentNames),
@@ -399,7 +415,7 @@ export class SessionQueryRepository {
       .from(romeSessions)
       .innerJoin(runStats, eq(runStats.sessionId, romeSessions.id))
       .$dynamic();
-    const rows = await (this.lines === "chats"
+    const cut = await (this.lines === "chats"
       ? page
       : page.leftJoin(messageCounts, eq(messageCounts.sessionId, romeSessions.id))
     )
@@ -407,6 +423,7 @@ export class SessionQueryRepository {
       .orderBy(primaryOrder, desc(romeSessions.createdAt), desc(romeSessions.id))
       .limit(query.limit)
       .offset(query.offset);
+    const rows = this.lines === "chats" ? this.withChatsLineCounts(cut) : cut;
 
     const totalRows = await this.db
       .select({ count: count() })
@@ -529,7 +546,7 @@ export class SessionQueryRepository {
     const session = withSessionKind(rows[0]);
     const [messageCountRows, parentRows, childRows] = await Promise.all([
       this.lines === "chats"
-        ? this.db.all<{ count: number }>(chatsLineCount(id))
+        ? this.db.all<{ count: number }>(chatsLineCounts(sql`s.id = ${id}`))
         : this.db
             .select({ count: count() })
             .from(romeAgentMessages)

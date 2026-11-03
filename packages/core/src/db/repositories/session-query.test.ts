@@ -124,6 +124,40 @@ describe("SessionQueryRepository", () => {
       expect((await repository.getSessionDetailRows("sub"))?.messageCount).toBe(3);
     });
 
+    it("counts lines only for the sessions on the page", async () => {
+      seededChat();
+      seededSubagent();
+      type Statement = { all(...values: unknown[]): unknown[] };
+      const client = (testDb.db as unknown as { $client: { prepare(sql: string): Statement } })
+        .$client;
+      const prepare = client.prepare.bind(client);
+      const counted: unknown[][] = [];
+      client.prepare = (text: string) => {
+        const statement = prepare(text);
+        const all = statement.all.bind(statement);
+        statement.all = (...values: unknown[]) => {
+          if (text.includes("FROM chat_messages")) counted.push(values);
+          return all(...values);
+        };
+        return statement;
+      };
+      try {
+        const page = await new SessionQueryRepository(testDb.db, "chats").querySessionPage({
+          scope: { from: null, to: at(10_000) },
+          sort: { field: "activity", direction: "desc" },
+          offset: 0,
+          limit: 1,
+        });
+        expect(page.rows).toHaveLength(1);
+      } finally {
+        client.prepare = prepare;
+      }
+
+      // One count, over the one session the page shows.
+      expect(counted).toHaveLength(1);
+      expect(JSON.parse(String(counted[0]?.[0]))).toHaveLength(1);
+    });
+
     it("counts the session's own rows when it reads the legacy tables", async () => {
       seededChat();
       const repository = new SessionQueryRepository(testDb.db);
