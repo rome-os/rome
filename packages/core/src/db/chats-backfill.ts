@@ -290,6 +290,14 @@ WHERE id IN (SELECT s.session_id FROM legacy_chat_speakers s)
   AND created_at >= (
     SELECT min(m.created_at) FROM rome_agent_messages m WHERE m.session_id = rome_sessions.id);
 --> statement-breakpoint
+-- A Concierge task points back to the message its legacy source row became.
+UPDATE concierge_tasks SET
+  source_message_id = (
+    SELECT i.message_id FROM legacy_chat_line_ids i
+    WHERE i.legacy_id = concierge_tasks.legacy_source_message_id),
+  legacy_source_message_id = NULL
+WHERE legacy_source_message_id IN (SELECT legacy_id FROM legacy_chat_line_ids);
+--> statement-breakpoint
 DROP VIEW legacy_chat_line_rows;
 --> statement-breakpoint
 DROP VIEW legacy_chat_speakers;

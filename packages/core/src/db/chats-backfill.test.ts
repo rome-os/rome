@@ -256,6 +256,13 @@ describe("Chats backfill", () => {
          VALUES ('dm-2', 'dm', 'om_3'), ('g-3', 'g-sales', '7')`,
       )
       .run();
+    // Concierge tasks pointing back to a legacy row, and to one long gone.
+    const task = sqlite.prepare(
+      `INSERT INTO concierge_tasks (id, title, state, legacy_source_message_id, created_at, updated_at)
+       VALUES (?, ?, 'next', ?, 1, 1)`,
+    );
+    task.run("task-1", "Answer", "out-1");
+    task.run("task-2", "Gone", "deleted-row");
     // The thread's first message reached Rome after the platform dated it.
     sqlite.prepare("UPDATE rome_sessions SET created_at = 550 WHERE id = 'thread'").run();
     // Support's first message came in the second its session was made.
@@ -404,6 +411,18 @@ describe("Chats backfill", () => {
   it("resolves a quote of a later part of a reply to the reply's line", () => {
     const quote = line("om_4") as { reply_to_message_id: number };
     expect(quote.reply_to_message_id).toBe((line("om_2") as { id: number }).id);
+  });
+
+  it("points a Concierge task at the message its legacy row became", () => {
+    expect(
+      all(
+        `SELECT t.id, m.key, t.legacy_source_message_id AS legacy FROM concierge_tasks t
+         LEFT JOIN chat_messages m ON m.id = t.source_message_id ORDER BY t.id`,
+      ),
+    ).toEqual([
+      { id: "task-1", key: "out-1", legacy: null },
+      { id: "task-2", key: null, legacy: "deleted-row" },
+    ]);
   });
 
   it("keys a line the platform gave no id by one of Rome's own", () => {
