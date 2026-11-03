@@ -275,7 +275,7 @@ describe("channelAdapter", () => {
         },
         addressOf: () => null,
         keyAt: () => null,
-        rekey: () => false,
+        rekey: () => {},
         bindThread: () => {},
         threadChatAt: () => null,
       },

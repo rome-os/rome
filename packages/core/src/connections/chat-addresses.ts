@@ -11,7 +11,7 @@
 
 import type { Account } from "@rome-os/app-runtime";
 import { and, eq, ne, sql } from "drizzle-orm";
-import type { DrizzleDb } from "../db/index.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { chatAddresses, chats } from "../db/schema/system.js";
 
 /** The thread a chat's own address is kept under. */
@@ -62,25 +62,34 @@ export class ChatAddresses {
    * every address kept for it: a direct message Rome reached at its address
    * before it knew the other end, once it does, or one Rome took for a
    * direct message once a group message is heard there, which also names it
-   * `kind`. False, changing nothing, when a chat already holds `to`.
+   * `kind`. Where a chat already holds `to`, as when another of Rome's
+   * accounts heard the group first, the chat keyed `from` joins it: its
+   * messages, its speakers and their turns' links move there, and a message
+   * both hold is kept once, as the one the chat keyed `to` holds.
    */
-  rekey(account: Account, from: string, to: string, kind?: "group" | "dm"): boolean {
-    return this.db.transaction((tx) => {
-      const taken = tx
-        .select({ id: chats.id })
-        .from(chats)
-        .where(and(eq(chats.platform, account.platform), eq(chats.key, to)))
-        .get();
-      if (taken) return false;
-      tx.update(chats)
-        .set({ key: to, ...(kind ? { kind } : {}) })
-        .where(and(eq(chats.platform, account.platform), eq(chats.key, from)))
-        .run();
+  rekey(account: Account, from: string, to: string, kind?: "group" | "dm"): void {
+    this.db.transaction((tx) => {
+      const keyed = (key: string) =>
+        tx
+          .select({ id: chats.id })
+          .from(chats)
+          .where(and(eq(chats.platform, account.platform), eq(chats.key, key)))
+          .get()?.id;
+      const taken = keyed(to);
+      const moving = keyed(from);
+      if (taken === undefined) {
+        tx.update(chats)
+          .set({ key: to, ...(kind ? { kind } : {}) })
+          .where(and(eq(chats.platform, account.platform), eq(chats.key, from)))
+          .run();
+      } else if (moving !== undefined) {
+        joinChat(tx, moving, taken);
+        if (kind) tx.update(chats).set({ kind }).where(eq(chats.id, taken)).run();
+      }
       tx.run(sql`
         UPDATE OR REPLACE chat_addresses SET chat_key = ${to}
         WHERE platform = ${account.platform} AND chat_key = ${from}
       `);
-      return true;
     });
   }
 
@@ -138,4 +147,47 @@ export class ChatAddresses {
         .get()?.chatKey ?? null
     );
   }
+}
+
+/** Move every message and speaker of chat `from` into chat `into`, and
+ *  delete `from`. A message `into` already holds by its key stays once, as
+ *  `into`'s, and whatever named the other copy names it. */
+function joinChat(tx: DrizzleTx, from: number, into: number): void {
+  // Each message both chats hold, by its id in each.
+  tx.run(sql`
+    CREATE TEMP TABLE IF NOT EXISTS joined_chat_messages (
+      from_id integer PRIMARY KEY NOT NULL,
+      into_id integer NOT NULL
+    )
+  `);
+  tx.run(sql`DELETE FROM joined_chat_messages`);
+  tx.run(sql`
+    INSERT INTO joined_chat_messages (from_id, into_id)
+    SELECT f.id, i.id FROM chat_messages f
+    JOIN chat_messages i ON i.chat_id = ${into} AND i.key = f.key
+    WHERE f.chat_id = ${from}
+  `);
+  tx.run(sql`
+    UPDATE OR IGNORE agent_turn_messages
+    SET message_id = (SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = message_id)
+    WHERE message_id IN (SELECT from_id FROM joined_chat_messages)
+  `);
+  tx.run(sql`
+    UPDATE chat_messages
+    SET reply_to_message_id = (
+      SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = reply_to_message_id)
+    WHERE reply_to_message_id IN (SELECT from_id FROM joined_chat_messages)
+  `);
+  tx.run(sql`
+    UPDATE concierge_tasks
+    SET source_message_id = (
+      SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = source_message_id)
+    WHERE source_message_id IN (SELECT from_id FROM joined_chat_messages)
+  `);
+  // A link the copy kept already stood on the message; it goes with the copy.
+  tx.run(sql`DELETE FROM chat_messages WHERE id IN (SELECT from_id FROM joined_chat_messages)`);
+  tx.run(sql`DELETE FROM joined_chat_messages`);
+  tx.run(sql`UPDATE chat_messages SET chat_id = ${into} WHERE chat_id = ${from}`);
+  tx.run(sql`UPDATE rome_sessions SET chat_id = ${into} WHERE chat_id = ${from}`);
+  tx.run(sql`DELETE FROM chats WHERE id = ${from}`);
 }
