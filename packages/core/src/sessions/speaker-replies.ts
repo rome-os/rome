@@ -168,29 +168,32 @@ export class SpeakerReplies {
       stop: () => reply.stop(),
       settle: async (stopped) => {
         const settled = await reply.settle(stopped);
-        if (settled.key === null) return settled;
-        const { key, threadId } = settled;
-        try {
-          // Delivered already: recording says so.
-          const sent = await this.deps.messages.send(
-            {
-              direction: "fromRome",
-              place: speaker.place,
-              saidBy: { account, agent: options.agent ?? speaker.agent },
-              parts: [{ type: "text", content: settled.text }],
-              ...(replyTo === undefined ? {} : { replyTo }),
-            },
-            async () => ({ key, ...landed(speaker, threadId) }),
-          );
-          if (sent.id !== null) this.answered(sent.id, sessionId, options.turnId);
-        } catch (error) {
-          // The messages are already on the platform. A failed record must
-          // not make anything send them again.
-          log.warn("reply delivered but recording failed", {
-            sessionId,
-            turnId: options.turnId,
-            error: error instanceof Error ? error.message : String(error),
-          });
+        // Each message the platform shows is the turn's answer, in order. The
+        // first answers the message the reply quotes.
+        for (const [i, { text, key, threadId }] of settled.shown.entries()) {
+          try {
+            // Delivered already: recording says so.
+            const sent = await this.deps.messages.send(
+              {
+                direction: "fromRome",
+                place: speaker.place,
+                saidBy: { account, agent: options.agent ?? speaker.agent },
+                parts: [{ type: "text", content: text }],
+                ...(i > 0 || replyTo === undefined ? {} : { replyTo }),
+              },
+              async () => ({ key, ...landed(speaker, threadId) }),
+            );
+            if (sent.id !== null) this.answered(sent.id, sessionId, options.turnId);
+          } catch (error) {
+            // The messages are already on the platform. A failed record must
+            // not make anything send them again.
+            log.warn("reply delivered but recording failed", {
+              sessionId,
+              turnId: options.turnId,
+              key,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
         return settled;
       },

@@ -423,7 +423,7 @@ describe("channelAdapter", () => {
     ).toBeNull();
   });
 
-  it("settle a streamed reply to the text shown and its first message's key, as the account holds it", async () => {
+  it("settle a streamed reply to the message shown and its key, as the account holds it", async () => {
     const created: string[] = [];
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
@@ -445,7 +445,36 @@ describe("channelAdapter", () => {
     const settled = await reply.settle(false);
 
     expect(created).toEqual(["All done."]);
-    expect(settled).toMatchObject({ text: "All done.", key: "rome_bot:s1", threadId: null });
+    expect(settled.shown).toEqual([{ text: "All done.", key: "rome_bot:s1", threadId: null }]);
+  });
+
+  it("settle a reply the platform split to each message shown, each keyed by its own id", async () => {
+    const created: string[] = [];
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 20, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async (conversation, text) => {
+        created.push(text);
+        return { messageId: `s${created.length}`, chatId: conversation };
+      },
+    };
+    const { channel } = fakeChannel(transport);
+    const adapter = channelAdapter(channel, deps());
+    const reply = adapter.stream?.("-42", null, {
+      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      clock: systemClock,
+    });
+    if (!reply) throw new Error("expected a stream");
+
+    const text = "one two three four five six seven eight";
+    reply.accept({ type: "text", content: text });
+    const { shown } = await reply.settle(false);
+
+    expect(created.length).toBeGreaterThan(1);
+    expect(shown.map((message) => message.key)).toEqual(
+      created.map((_, i) => `rome_bot:s${i + 1}`),
+    );
+    expect(shown.map((message) => message.text).join("")).toBe(text);
   });
 
   it("open no thread with a first direct message, and reach the chat where it opened", async () => {
@@ -491,7 +520,7 @@ describe("channelAdapter", () => {
     );
     if (!reply) throw new Error("expected a stream");
     reply.accept({ type: "text", content: "hi" });
-    expect(await reply.settle(false)).toMatchObject({ key: "s1", threadId: null });
+    expect((await reply.settle(false)).shown).toEqual([{ text: "hi", key: "s1", threadId: null }]);
   });
 
   it("settle a first streamed direct message to no thread, and reach the chat where it opened", async () => {
@@ -511,11 +540,11 @@ describe("channelAdapter", () => {
 
     reply.accept({ type: "text", content: "hi" });
 
-    expect(await reply.settle(false)).toMatchObject({ threadId: null });
+    expect((await reply.settle(false)).shown).toMatchObject([{ threadId: null }]);
     expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-78");
   });
 
-  it("settle a streamed reply to the thread its first message landed in", async () => {
+  it("settle a streamed reply to the thread its message landed in", async () => {
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
       codec: plainText,
@@ -531,7 +560,7 @@ describe("channelAdapter", () => {
 
     reply.accept({ type: "text", content: "All done." });
 
-    expect(await reply.settle(false)).toMatchObject({ key: "s1", threadId: "thread-8" });
+    expect((await reply.settle(false)).shown).toMatchObject([{ key: "s1", threadId: "thread-8" }]);
   });
 });
 

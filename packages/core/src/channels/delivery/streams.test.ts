@@ -282,9 +282,7 @@ describe("ReplyStreams", () => {
     const telegram = { name: "telegram" } as unknown as Channel;
     const settled = {
       outcome: { status: "delivered" as const, parts: [] },
-      text: "hi",
-      key: "k",
-      threadId: null,
+      shown: [{ text: "hi", key: "k", threadId: null }],
     };
 
     it("opens the speaker's reply on the channel, answering the line by its id", async () => {

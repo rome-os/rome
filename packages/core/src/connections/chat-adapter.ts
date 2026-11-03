@@ -128,11 +128,10 @@ export interface ChatAdapter {
   /**
    * Open a reply in the chat keyed `chatKey` that is written as the agent's
    * run goes, or null where the channel cannot stream. It is sent as the
-   * platform allows, maybe in several messages, and settles to one line: the
-   * text the user was shown and the adapter's key for its first message, or
-   * null when nothing showed. `replyTo` is the adapter's key of the message
-   * it answers, and one the account has no platform id for throws
-   * `ChannelSendRefused`.
+   * platform allows, maybe in several messages, and settles to each message
+   * the user was shown, or may have been, in order: none when nothing showed.
+   * `replyTo` is the adapter's key of the message it answers, and one the
+   * account has no platform id for throws `ChannelSendRefused`.
    */
   stream?(
     chatKey: string,
@@ -157,15 +156,19 @@ export interface StreamedReply {
   accept(event: StreamAgentEvent): void;
   /** Stop writing at once. */
   stop(): void;
-  /** Finish the reply, or stop it when the run was stopped, and answer what
-   *  the user was shown, and the thread its first message landed in, as
-   *  {@link Sent} names it. */
+  /** Finish the reply, or stop it when the run was stopped, and answer each
+   *  message the user was shown, in order. */
   settle(stopped: boolean): Promise<{
     readonly outcome: ReplyOutcome;
-    readonly text: string;
-    readonly key: string | null;
-    readonly threadId: ChatId | null;
+    readonly shown: readonly ShownMessage[];
   }>;
+}
+
+/** One message of a streamed reply the platform shows: its text, and where
+ *  it landed as {@link Sent} names it. A long reply is several of them, each
+ *  a message of its own that can be quoted by its own key. */
+export interface ShownMessage extends Sent {
+  readonly text: string;
 }
 
 export interface ChannelAdapterDeps {
@@ -527,26 +530,16 @@ export function channelAdapter(
         async settle(stopped) {
           const outcome = await (stopped ? delivery.stop() : delivery.finish());
           // Every part showed or may have: a create whose result is unknown
-          // most likely landed, and nothing sends it again. A block's parts
-          // split its source, and each block is a message of its own.
-          const shown = outcome.parts;
-          const text = shown
-            .map(
-              (part, i) =>
-                (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source,
-            )
-            .join("");
-          if (shown.length === 0) return { outcome, text, key: null, threadId };
-          // A reply the platform split settles to its first message's key. A
-          // message whose create is unknown has no id, so the first one with
-          // an id stands in.
-          const first = shown.find((part) => part.receipt)?.receipt;
-          return {
-            outcome,
-            text,
-            key: sentLineId(ref, own.id, first?.messageId || undefined),
-            threadId: landedIn(ref, address, threadId, first?.chatId),
-          };
+          // most likely landed, and nothing sends it again. Each part is a
+          // message of its own on the platform, so it is one in Chats too,
+          // keyed by its own id; one whose create is unknown has no id and
+          // takes one of Rome's.
+          const shown = outcome.parts.map((part) => ({
+            text: part.source,
+            key: sentLineId(ref, own.id, part.receipt?.messageId || undefined),
+            threadId: landedIn(ref, address, threadId, part.receipt?.chatId),
+          }));
+          return { outcome, shown };
         },
       };
     },

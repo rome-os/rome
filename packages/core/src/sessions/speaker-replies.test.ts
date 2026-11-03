@@ -29,7 +29,7 @@ describe("SpeakerReplies", () => {
   let sends: Array<{ chat: string; threadId: ChatId | null; out: Outbound }>;
   let landsIn: ChatId | null;
   let refuse: boolean;
-  let streamed: { text: string; key: string | null; threadId: ChatId | null };
+  let streamed: { text: string; key: string; threadId: ChatId | null }[];
 
   const adapter = {
     account: { platform: "telegram", id: "rome_bot" },
@@ -42,7 +42,7 @@ describe("SpeakerReplies", () => {
       return {
         accept: () => {},
         stop: () => {},
-        settle: async () => ({ outcome: {} as never, ...streamed }),
+        settle: async () => ({ outcome: {} as never, shown: streamed }),
       };
     },
   } as unknown as ChannelChatAdapter;
@@ -78,7 +78,7 @@ describe("SpeakerReplies", () => {
     sends = [];
     landsIn = null;
     refuse = false;
-    streamed = { text: "All done.", key: "s1", threadId: null };
+    streamed = [{ text: "All done.", key: "s1", threadId: null }];
     speaker("speaker-1", null);
   });
   afterEach(() => testDb.close());
@@ -155,7 +155,7 @@ describe("SpeakerReplies", () => {
   });
 
   it("put a streamed reply on record as the turn's answer once it settles, where it landed", async () => {
-    streamed = { text: "All done.", key: "s1", threadId: "topic-8" as ChatId };
+    streamed = [{ text: "All done.", key: "s1", threadId: "topic-8" as ChatId }];
     const reply = await replies().stream("speaker-1", CHANNEL, {
       turnId: "turn-3",
       policy: POLICY,
@@ -185,8 +185,43 @@ describe("SpeakerReplies", () => {
     expect(line?.saidBy).toMatchObject({ agent: "support" });
   });
 
+  it("record each message of a reply the platform split as its own, each the turn's answer", async () => {
+    streamed = [
+      { text: "First half, ", key: "s1", threadId: null },
+      { text: "second half.", key: "s2", threadId: null },
+    ];
+    const quoted = messages.record({
+      direction: "toRome",
+      key: "7",
+      place: placeIn(chat),
+      saidBy: { account: { platform: "telegram", id: "wei" } },
+      body: { text: "q" },
+      at: new Date(),
+    })!.id;
+    const reply = await replies().stream("speaker-1", CHANNEL, {
+      turnId: "turn-5",
+      replyTo: quoted,
+      policy: POLICY,
+      clock: systemClock,
+    });
+
+    await reply!.settle(false);
+
+    const said = messages.read(placeIn(chat)).messages.filter((m) => m.direction === "fromRome");
+    expect(said.map((m) => [m.key, m.body.text, m.replyTo ?? null])).toEqual([
+      ["s1", "First half, ", quoted],
+      ["s2", "second half.", null],
+    ]);
+    for (const message of said) {
+      expect(links.linkOf("speaker-1", message.id)).toMatchObject({
+        role: "answer",
+        turnId: "turn-5",
+      });
+    }
+  });
+
   it("record nothing for a streamed reply that showed nothing", async () => {
-    streamed = { text: "", key: null, threadId: null };
+    streamed = [];
     const reply = await replies().stream("speaker-1", CHANNEL, {
       turnId: "turn-3",
       policy: POLICY,
