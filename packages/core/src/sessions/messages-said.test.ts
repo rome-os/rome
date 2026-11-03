@@ -192,7 +192,7 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
   });
 
-  it("raises a line two of Rome's accounts heard once for each, recorded once", async () => {
+  it("raises a line two of Rome's accounts heard for the first to hear it, recorded once", async () => {
     const heard: SaidInboundEvent[] = [];
     said.subscribe(async (event) => {
       heard.push(event);
@@ -204,10 +204,10 @@ describe("messagesSaid", () => {
     await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
     await settled();
 
+    // Which of Rome's accounts heard a message is not kept yet, so the
+    // second account hears nothing.
     expect(lines()).toHaveLength(1);
-    expect(heard.map((event) => event.message.channel)).toEqual(["telegram", "telegram-2"]);
-    expect(new Set(heard.map((event) => event.recorded.messageId)).size).toBe(1);
-    expect(new Set(heard.map((event) => event.recorded.chatRecordId)).size).toBe(2);
+    expect(heard.map((event) => event.message.channel)).toEqual(["telegram"]);
   });
 
   it("decides the wake of a message whose session could not be opened", async () => {
@@ -286,29 +286,6 @@ describe("messagesSaid", () => {
     expect(lines()).toHaveLength(1);
   });
 
-  it("holds a line two accounts heard until both have decided its wake", async () => {
-    const heard: SaidInboundEvent[] = [];
-    said.subscribe(async (event) => {
-      heard.push(event);
-    });
-    const supergroup = {
-      chatId: "-1001234567890" as ChatId,
-      timestamp: new Date(Date.now() + 60_000),
-    };
-    await telegram.deliver(message(supergroup));
-    await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
-    await settled();
-    const [first, other] = heard;
-    if (!first || !other) throw new Error("not heard by both");
-
-    await said.decided(first.recorded);
-    expect(wiring.links.unseen(first.recorded.chatRecordId)).toHaveLength(0);
-    await said.decided(other.recorded);
-    expect(wiring.links.unseen(first.recorded.chatRecordId).map((line) => line.text)).toEqual([
-      "Hello",
-    ]);
-  });
-
   it("hears a place's messages one at a time, whichever account heard them", async () => {
     const blocked = gate();
     const firstHeard = gate();
@@ -361,34 +338,6 @@ describe("messagesSaid", () => {
     expect(reloaded).toEqual(["tg-3"]);
     expect(lines()).toHaveLength(2);
   });
-  it("hears a line an account's session already caught up on, when it first reaches that account", async () => {
-    const heard: SaidInboundEvent[] = [];
-    said.subscribe(async (event) => {
-      heard.push(event);
-    });
-    const supergroup = { chatId: "-1001234567890" as ChatId };
-    const viaSecond = { ...supergroup, account: SECOND, channel: "telegram-2" };
-    await second.deliver(message({ ...viaSecond, messageId: "tg-0" }));
-    await settled();
-    await telegram.deliver(message({ ...supergroup, messageId: "tg-1" }));
-    await settled();
-    const [secondSession, first] = heard;
-    if (!secondSession || !first) throw new Error("not heard");
-    wiring.links.seen(
-      [Number(first.recorded.messageId)],
-      secondSession.recorded.chatRecordId,
-      "turn-1",
-    );
-
-    await second.deliver(message({ ...viaSecond, messageId: "tg-1" }));
-    await settled();
-    expect(heard.map((event) => [event.message.channel, event.message.messageId])).toEqual([
-      ["telegram-2", "tg-0"],
-      ["telegram", "tg-1"],
-      ["telegram-2", "tg-1"],
-    ]);
-  });
-
   it("holds a line until every hook hearing it has decided its wake", async () => {
     const first: SaidInboundEvent[] = [];
     const other: SaidInboundEvent[] = [];
@@ -469,7 +418,7 @@ describe("messagesSaid", () => {
       "Hello",
     ]);
   });
-  it("raises a shared line with its quote for every account that hears it", async () => {
+  it("raises a shared line with its quote, once", async () => {
     said.subscribe(async () => undefined);
     const quotes: (number | undefined)[] = [];
     events.subscribe((event) => {
@@ -486,7 +435,7 @@ describe("messagesSaid", () => {
 
     const quoted = lines().find((line) => line.key.endsWith("tg-0"))?.id;
     expect(quoted).toBeDefined();
-    expect(quotes).toEqual([undefined, quoted, quoted]);
+    expect(quotes).toEqual([undefined, quoted]);
   });
 
   it("hands nothing to a hook that left while its session opened", async () => {
