@@ -44,6 +44,10 @@ export function useThisDevice(onChange?: () => void): NodeThisDevice | null | un
     state: status.state,
     busy,
     removeUrl: `${import.meta.env.ROME_CLOUD_ORIGIN}/dashboard/settings`,
+    // The app opens its own window; the log never reaches this page.
+    openAuditLog: bridge.openAuditLog
+      ? () => void bridge.openAuditLog?.().catch(() => undefined)
+      : undefined,
     onEnabledChange(enabled) {
       setBusy(true);
       bridge

@@ -7,13 +7,13 @@ import { placeIn, type ChatRef } from "../chats/storage/place.js";
 import { Speakers } from "../sessions/speakers.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { chatKey } from "./chat-ids.js";
-import { runLines, SpeakerLines } from "./speaker-lines.js";
+import { runLines, SpeakerMessages } from "./speaker-messages.js";
 
-describe("SpeakerLines", () => {
+describe("SpeakerMessages", () => {
   let testDb: TestDb;
   let chat: ChatRef;
   let messages: MessageRepository;
-  let lines: SpeakerLines;
+  let lines: SpeakerMessages;
 
   function heard(key: string, text: string) {
     return messages.record({
@@ -28,7 +28,7 @@ describe("SpeakerLines", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    // A basic group, where each of Rome's accounts numbers its own lines.
+    // A basic group, where each of Rome's accounts numbers its own messages.
     chat = new ChatRepository(testDb.db).start(
       { platform: "telegram", externalId: "-42" as ChatId },
       "group",
@@ -39,7 +39,7 @@ describe("SpeakerLines", () => {
       VALUES ('speaker-1', 'Speaker', 'channel', ${chat.id}, 'telegram', 'rome_bot', 0, 0)
     `);
     messages = new MessageRepository(testDb.db);
-    lines = new SpeakerLines({
+    lines = new SpeakerMessages({
       speakers: new Speakers(testDb.db),
       messages,
       adapters: { keyOf: () => chatKey("telegram", "-42" as ChatId) },
@@ -47,7 +47,7 @@ describe("SpeakerLines", () => {
   });
   afterEach(() => testDb.close());
 
-  it("turn a platform id into the line the speaker's account holds, and back", () => {
+  it("turn a platform id into the message the speaker's account holds, and back", () => {
     const speaker = { place: placeIn(chat), accountId: "rome_bot" };
     const id = heard("rome_bot:7", "hi");
     heard("other_bot:7", "else");
@@ -60,7 +60,7 @@ describe("SpeakerLines", () => {
     expect(lines.platformIdIn(speaker, "rome:0190")).toBeNull();
   });
 
-  it("find the lines a run names by platform id where its session stands", async () => {
+  it("find the messages a run names by platform id where its session stands", async () => {
     const asked = heard("rome_bot:7", "what now?");
     heard("rome_bot:6", "earlier");
 

@@ -624,21 +624,6 @@ export const chatMessages = sqliteTable(
   ],
 );
 
-// Which of Rome's accounts each line reached, one row per line per account.
-// A line Rome records once can reach two of its accounts in one group; a
-// redelivery to an account it already reached, even after a restart, is
-// heard no more.
-export const chatMessageDeliveries = sqliteTable(
-  "chat_message_deliveries",
-  {
-    messageId: integer("message_id")
-      .notNull()
-      .references(() => chatMessages.id, { onDelete: "cascade" }),
-    accountId: text("account_id").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.messageId, table.accountId] })],
-);
-
 // Agents' link from a turn to a chat message: the message prompted the turn,
 // was its answer, or was caught up on by it. One row per message per speaker, so
 // two of Rome's agents in one group each keep their own.
@@ -706,10 +691,19 @@ export const conciergeTasks = sqliteTable(
     rank: integer("rank"),
     sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
     /**
-     * The Concierge chat message the row points back to. Not a foreign key: the
-     * message may be gone, and the panel then offers no jump. The text is never copied.
+     * The Concierge chat message the row points back to, in Chats. Cleared when
+     * the message goes, and the panel then offers no jump. The text is never
+     * copied.
      */
-    sourceMessageId: text("source_message_id"),
+    sourceMessageId: integer("source_message_id").references(() => chatMessages.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * The legacy chat row the row pointed back to before the Chats switch,
+     * until the switch's backfill finds that row's message in Chats. Dropped
+     * with the legacy rows.
+     */
+    legacySourceMessageId: text("legacy_source_message_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */

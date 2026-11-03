@@ -1,5 +1,10 @@
 import { Api, TelegramClient } from "telegram";
-import { numericReplyTo, textToSend } from "./send-refusals.js";
+import {
+  ALL_ATTACHMENT_TYPES,
+  attachmentsToSend,
+  numericReplyTo,
+  textToSend,
+} from "./send-refusals.js";
 import { NewMessage, type NewMessageEvent } from "telegram/events/NewMessage.js";
 import { StringSession } from "telegram/sessions/StringSession.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
@@ -192,6 +197,10 @@ export class TelegramUserAdapter {
     const entity = entityFromThreadId(threadId);
     const text = textToSend("telegram_user", message);
     const replyTo = numericReplyTo("telegram_user", message.replyToMessageId);
+    const attachments = await attachmentsToSend("telegram_user", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: true,
+    });
 
     let messageId: string | undefined;
     if (text) {
@@ -204,7 +213,7 @@ export class TelegramUserAdapter {
 
     // With no text, the first attachment carries the quote.
     let quote = text ? undefined : replyTo;
-    for (const attachment of message.attachments ?? []) {
+    for (const attachment of attachments) {
       await this.client.sendMessage(entity, {
         message: attachment.caption,
         file: attachment.source,

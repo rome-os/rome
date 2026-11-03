@@ -20,6 +20,14 @@ export const devicesStatusSchema = z.object({
       name: z.string(),
       platform: z.string().nullable(),
       status: z.enum(["connected", "not_connected", "unknown", "revoked"]),
+      /** The device's own audit log. While unavailable, the device refuses remote actions. */
+      audit: z
+        .object({
+          state: z.enum(["ok", "unavailable"]),
+          code: z.string().optional(),
+          message: z.string().optional(),
+        })
+        .optional(),
     }),
   ),
 });

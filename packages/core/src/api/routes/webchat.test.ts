@@ -8,7 +8,7 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import {
@@ -30,7 +30,7 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { guardianAuth, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -53,6 +53,34 @@ async function readSseUntil(
 describe("Webchat API", () => {
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
   let testDb: TestDb;
+
+  /**
+   * Moves what `where` names, every row when it names nothing, back to `at`:
+   * the session's own rows and its chat's lines alike. A session sees what
+   * was said in its chat since it was made, so it moves back with them.
+   */
+  function backdate(where: { id?: string; sessionId?: string }, at: Date): void {
+    const secs = Math.floor(at.getTime() / 1000);
+    const db = testDb.db;
+    const rows =
+      where.id !== undefined
+        ? sql`id = ${where.id}`
+        : where.sessionId !== undefined
+          ? sql`session_id = ${where.sessionId}`
+          : sql`1`;
+    db.run(sql`UPDATE rome_agent_messages SET created_at = ${secs} WHERE ${rows}`);
+    const lines =
+      where.id !== undefined
+        ? sql`key = ${where.id}`
+        : where.sessionId !== undefined
+          ? sql`EXISTS (SELECT 1 FROM rome_sessions s WHERE s.id = ${where.sessionId}
+              AND s.chat_id = chat_messages.chat_id AND s.thread_id IS chat_messages.thread_id)`
+          : sql`1`;
+    db.run(sql`UPDATE chat_messages SET said_at = ${secs} WHERE ${lines}`);
+    db.run(sql`UPDATE rome_sessions SET created_at = min(created_at, ${secs})
+      WHERE chat_id IN (SELECT chat_id FROM chat_messages WHERE said_at = ${secs})
+        OR id = ${where.sessionId ?? null}`);
+  }
   let deps: TestDeps;
   let baseline: BaselineIds;
   let projectsRoot: string;
@@ -253,7 +281,9 @@ describe("Webchat API", () => {
         name: "lin@example.com",
         avatarUrl: null,
       },
-      unattributed: undefined,
+      // Chats records a dashboard line with no recorded sender as the
+      // guardian's.
+      unattributed: { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
     });
   });
 
@@ -344,11 +374,12 @@ describe("Webchat API", () => {
         (message) => message.role === "user",
       );
       expect(inputs).toHaveLength(2);
-      const stored = await testDb.db
-        .select({ actor: romeAgentMessages.actor })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id));
-      expect(stored).toEqual([{ actor }, { actor }]);
+      // The visitor is the sender of each line, by their account and email.
+      const stored = testDb.db.all<{ sender_account_id: string; sender_name: string }>(
+        sql`SELECT sender_account_id, sender_name FROM chat_messages ORDER BY rowid`,
+      );
+      const sender = { sender_account_id: "visitor:sender", sender_name: "sender@example.com" };
+      expect(stored).toEqual([sender, sender]);
       expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
       expect(inputs.find((message) => message.id === b)).toMatchObject({
         inputState: "consumed",
@@ -466,11 +497,14 @@ describe("Webchat API", () => {
 
       expect(posted).toMatchObject({ ok: true });
       expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
-      const stored = await testDb.db
-        .select({ role: romeAgentMessages.role, senderId: romeAgentMessages.senderId })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id));
-      expect(stored).toEqual([{ role: "user", senderId: "core:concierge" }]);
+      // Said as the agent's dashboard account, which wakes the chat's agent.
+      const inputs = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      expect(inputs).toHaveLength(1);
+      expect(
+        testDb.db.all(
+          sql`SELECT sender_account_id FROM chat_messages WHERE key = ${inputs[0]!.id}`,
+        ),
+      ).toEqual([{ sender_account_id: "agent:core:concierge" }]);
       expect(runtime.isRunning(id)).toBe(true);
       expect(runtime.activeTurns(id)).toEqual(["task-1"]);
       await runtime.interruptTurn("task-1");
@@ -567,10 +601,7 @@ describe("Webchat API", () => {
     const sessionId = `retention-${variant}`;
     await deps.webchatRepo.createSession("idle-source", "Idle source");
     await deps.webchatRepo.addMessage("source-message", "idle-source", "user", "Old source");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-10T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "source-message"));
+    backdate({ id: "source-message" }, new Date("2026-10-10T12:00:00Z"));
     await deps.webchatRepo.ensureRomeSession({
       id: sessionId,
       parentSessionId: "idle-source",
@@ -600,7 +631,7 @@ describe("Webchat API", () => {
         `${sessionId}-${turnId}-user`,
         sessionId,
         "user",
-        "My question",
+        JSON.stringify([{ type: "text", content: "My question" }]),
         turnId,
       );
       await deps.webchatRepo.appendTraceBlocks({
@@ -624,10 +655,7 @@ describe("Webchat API", () => {
         turnId,
       );
     }
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
-      .where(eq(romeAgentMessages.sessionId, sessionId));
+    backdate({ sessionId: sessionId }, new Date("2026-09-24T12:00:00Z"));
     await deps.webchatRepo.addMessage(
       `${sessionId}-latest`,
       sessionId,
@@ -642,10 +670,7 @@ describe("Webchat API", () => {
       ["2026-10-17T12:00:00Z", true],
       ["2026-10-17T12:00:01Z", false],
     ] as const) {
-      await testDb.db
-        .update(romeAgentMessages)
-        .set({ createdAt: new Date(lastMessageAt) })
-        .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+      backdate({ id: `${sessionId}-latest` }, new Date(lastMessageAt));
       const activityQuery = rs.spyOn(deps.webchatRepo, "getTraceArchivedSessionIds");
       const response = await app.request(`/sessions/${sessionId}/messages`);
       expect(activityQuery).toHaveBeenCalledTimes(1);
@@ -663,7 +688,9 @@ describe("Webchat API", () => {
         expect(Boolean(trace?.traceSummary)).toBe(!archived);
       }
       expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
-      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
+      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe(
+        JSON.stringify([{ type: "text", content: "My question" }]),
+      );
       for (const endpoint of [
         `/sessions/messages/${sessionId}-old/content`,
         `/chat/messages/${sessionId}-old/content`,
@@ -685,10 +712,7 @@ describe("Webchat API", () => {
           messages,
         );
     }
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+    backdate({ id: `${sessionId}-latest` }, new Date("2026-10-16T12:00:00Z"));
     expect(await (await app.request(`/chat/messages/${sessionId}-old/content`)).json()).toEqual({
       trace: null,
       traceArchived: true,
@@ -816,12 +840,18 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    // The turn's prompt, so the turn is in the chat: the transcript lists the
+    // turns lines were said in, and reads their traces apart.
+    await deps.webchatRepo.addMessage(
+      "parent-summary-ask",
+      parentSessionId,
+      "user",
+      "Plan and research it",
+      parentTurnId,
+    );
+    backdate({}, new Date("2026-09-24T12:00:00Z"));
     await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    backdate({ id: "root-latest" }, new Date("2026-10-23T12:00:00Z"));
     const app = createWebchatRuntime(deps).routes;
     const getTraceContentsByTurns = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
     const getTraceContentByTurn = rs.spyOn(deps.webchatRepo, "getTraceContentByTurn");
@@ -858,10 +888,7 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(
       "traceSummary",
     );
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    backdate({ id: "root-latest" }, new Date("2026-10-16T12:00:00Z"));
     for (const sessionId of [parentSessionId, childSessionId, secondChildSessionId]) {
       const history = (await (
         await app.request(`/sessions/${sessionId}/messages`)
@@ -987,12 +1014,9 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
-    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    backdate({}, new Date("2026-09-24T12:00:00Z"));
     await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "root-latest"));
+    backdate({ id: "root-latest" }, new Date("2026-10-23T12:00:00Z"));
     const app = createWebchatRuntime(deps).routes;
     const readAccounting = async (path: string) => {
       const response = await app.request(path);
@@ -3467,9 +3491,9 @@ describe("Webchat API", () => {
     expect(emptyRes.status).toBe(400);
   });
 
-  describe("suspensions (handoff + inline pending_interaction)", () => {
+  describe("suspensions (inline pending_interaction)", () => {
     // Drive the drain loop with a scripted event stream per turn so we can
-    // observe what the route does when an action returns a handoff / inline
+    // observe what the route does when an action returns an inline
     // tool_result, and how a later interaction_result re-drives the agent.
     function mockScriptedManager() {
       const sentTurns: AgentTurnInput[] = [];
@@ -3540,8 +3564,7 @@ describe("Webchat API", () => {
           (p) =>
             p &&
             typeof p === "object" &&
-            ((p as { type?: unknown }).type === "pending_interaction" ||
-              (p as { type?: unknown }).type === "handoff") &&
+            (p as { type?: unknown }).type === "pending_interaction" &&
             (p as { toolUseId?: unknown }).toolUseId === toolUseId,
         );
         if (card) return card as Record<string, unknown>;
@@ -3645,7 +3668,7 @@ describe("Webchat API", () => {
       expect(missing.status).toBe(404);
     });
 
-    const handoffEvents = (toolUseId: string) =>
+    const parkedEvents = (toolUseId: string) =>
       async function* () {
         // Mirror the real MCP facade tool_result shape: the action's JSON is
         // wrapped in a `[{ type: "text", text }]` content block, not handed back
@@ -3658,9 +3681,9 @@ describe("Webchat API", () => {
             {
               type: "text",
               text: JSON.stringify({
-                handoff: true,
-                appId: "workflow-studio",
-                agentName: "workflow-studio:workflow-planner",
+                pendingInteraction: true,
+                appId: "ask-user",
+                render: { kind: "inline", componentId: "question-card", props: {} },
               }),
             },
           ],
@@ -3668,197 +3691,9 @@ describe("Webchat API", () => {
         yield { type: "result", content: "" };
       };
 
-    it("snapshots a handoff card when an action returns a handoff", async () => {
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-1"));
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-
-      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "build me a daily digest workflow" }),
-      });
-      expect(res.status).toBe(200);
-
-      const card = await findCard(sessionId, "tu-park-1");
-      expect(card).toMatchObject({
-        type: "handoff",
-        toolUseId: "tu-park-1",
-        appId: "workflow-studio",
-        agentName: "workflow-studio:workflow-planner",
-      });
-    });
-
-    it("keeps real handoff history on its own clock without including it in parent summaries or cost reads", async () => {
-      rs.useFakeTimers({ toFake: ["Date"] });
-      rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-child-1"));
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-
-      const send = await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-      await drainTurn(app, send);
-      const card = await findCard(sessionId, "tu-child-1");
-      const childSessionId = card?.childSessionId as string;
-      expect(typeof childSessionId).toBe("string");
-      expect(childSessionId).not.toBe(sessionId);
-      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
-        type: "webchat_handoff",
-        parentSessionId: null,
-        agentName: "workflow-studio:workflow-planner",
-      });
-      await deps.webchatRepo.appendTraceBlocks({
-        messageId: "handoff-child-trace",
-        sessionId: childSessionId,
-        turnId: "child-turn",
-        startSeq: 0,
-        blocks: [{ type: "thinking", content: "Child-only trace payload" }],
-      });
-      await testDb.db
-        .update(romeAgentMessages)
-        .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
-        .where(eq(romeAgentMessages.sessionId, childSessionId));
-
-      const traceReads = rs.spyOn(deps.webchatRepo, "getTraceContents");
-      const descendantReads = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
-      const history = (await (
-        await app.request(`/chat/sessions/${sessionId}/messages`)
-      ).json()) as Array<{ id: string; role: string; content: string }>;
-      expect(JSON.stringify(history)).toContain(childSessionId);
-      expect(traceReads.mock.calls.map(([id]) => id)).toEqual([sessionId]);
-      const parentTrace = history.find((row) => row.role === "trace");
-      expect(parentTrace).toBeDefined();
-      await app.request(`/chat/messages/${parentTrace!.id}/content?includeSubagentUsage=true`);
-      expect(descendantReads.mock.calls.flatMap(([refs]) => refs)).toEqual([]);
-      traceReads.mockRestore();
-      descendantReads.mockRestore();
-
-      const childHistory = await (
-        await app.request(`/chat/sessions/${childSessionId}/messages`)
-      ).json();
-      expect(childHistory).toContainEqual(
-        expect.objectContaining({
-          id: "handoff-child-trace",
-          traceArchived: true,
-        }),
-      );
-      expect(
-        await (await app.request("/chat/messages/handoff-child-trace/content")).json(),
-      ).toEqual({ trace: null, traceArchived: true });
-    });
-
-    it("gives the handoff child the parent chat's device folder", async () => {
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-folder-child"));
-      const app = createWebchatRuntime(deps).routes;
-      const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
-      await deps.webchatRepo.createSession(
-        "folder-parent",
-        "Folder chat",
-        undefined,
-        "default",
-        null,
-        "default",
-        null,
-        "webchat",
-        null,
-        {},
-        folder,
-      );
-
-      await app.request("/chat/sessions/folder-parent/turns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-
-      const card = await findCard("folder-parent", "tu-folder-child");
-      const child = await deps.webchatRepo.getSession(card?.childSessionId as string);
-      expect(child?.type).toBe("webchat_handoff");
-      expect(child?.deviceFolder).toEqual(folder);
-    });
-
-    it("inherits handoff ownership without branch lineage and accepts its first send with a model selection", async () => {
-      await deps.settingsRepo.set("enableModelSelector", true);
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-owned-child"));
-      const app = createWebchatRuntime(deps).routes;
-      const owner = {
-        kind: "visitor" as const,
-        accountId: "handoff-owner",
-        email: "owner@example.com",
-      };
-      const sessionId = await runWithSessionActor(owner, () => newSession(app));
-      const parentSend = await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-      expect(parentSend.status).toBe(200);
-      await drainTurn(app, parentSend);
-      const card = await findCard(sessionId, "tu-owned-child");
-      const childSessionId = card?.childSessionId as string;
-      expect(typeof childSessionId).toBe("string");
-      expect(await deps.webchatRepo.getSessionOwnerKey(childSessionId)).toBe(
-        "visitor:handoff-owner",
-      );
-
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      const findReusableSession = rs
-        .spyOn(deps.sessionManager, "findReusableSession")
-        .mockResolvedValue(undefined);
-      ctl.setEvents(async function* () {
-        yield { type: "result", content: "Ready to plan." };
-      });
-      const childSend = await app.request(`/chat/sessions/${childSessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "start planning", largeModelSelection: "gpt-5-6-sol" }),
-      });
-      expect(childSend.status).toBe(200);
-      expect(findReusableSession).not.toHaveBeenCalled();
-      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
-        expect.objectContaining({ agentName: "workflow-studio:workflow-planner" }),
-        expect.objectContaining({ selectionId: "gpt-5-6-sol" }),
-      );
-      await drainTurn(app, childSend);
-      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
-        type: "webchat_handoff",
-        parentSessionId: null,
-        largeModelSelection: "gpt-5-6-sol",
-      });
-    });
-
-    it("keeps spawned handoff sessions out of the top-level session list", async () => {
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-hidden-1"));
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-
-      await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-      const card = await findCard(sessionId, "tu-hidden-1");
-      const childSessionId = card?.childSessionId as string;
-      expect(childSessionId).toBeDefined();
-
-      const listRes = await app.request("/chat/sessions");
-      const ids = ((await listRes.json()) as Array<{ id: string }>).map((s) => s.id);
-      expect(ids).toContain(sessionId);
-      expect(ids).not.toContain(childSessionId);
-    });
-
     it("re-drives the calling agent with the artifact when the surface resolves", async () => {
       const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-2"));
+      ctl.setEvents(parkedEvents("tu-park-2"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
@@ -3911,7 +3746,7 @@ describe("Webchat API", () => {
 
     it("ignores a reply on an interaction resolution", async () => {
       const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-reply"));
+      ctl.setEvents(parkedEvents("tu-park-reply"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
       await app.request(`/chat/sessions/${sessionId}/turns`, {
@@ -3942,7 +3777,7 @@ describe("Webchat API", () => {
 
     it("frames a dismissal so the agent does not retry", async () => {
       const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-3"));
+      ctl.setEvents(parkedEvents("tu-park-3"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
@@ -4095,9 +3930,8 @@ describe("Webchat API", () => {
       );
     });
 
-    // An inline component goes through the same suspension lifecycle as a
-    // handoff — toolUseId-keyed card and resolution — but keeps its own
-    // `pending_interaction` part type and spawns no child session.
+    // An app's inline component: a toolUseId-keyed `pending_interaction` card
+    // the guardian resolves in place.
     const inlineRenderEvents = (
       toolUseId: string,
       appId: string,
@@ -4154,7 +3988,7 @@ describe("Webchat API", () => {
       );
     });
 
-    it("snapshots an inline pending_interaction card with no child session", async () => {
+    it("snapshots an inline pending_interaction card", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(inlineRenderEvents("tu-inline-1", "ask-user", "question-card"));
       const app = createWebchatRuntime(deps).routes;
@@ -4173,8 +4007,6 @@ describe("Webchat API", () => {
         appId: "ask-user",
         render: { kind: "inline", componentId: "question-card" },
       });
-      // Inline interactions resolve in-place — no spawned design session.
-      expect(card?.childSessionId).toBeUndefined();
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {

@@ -19,12 +19,19 @@ import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
 import { adhocSessionKey } from "./agent-session-key.js";
+import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 
 const log = createLogger("rpc-agent-runner");
 
 export class RpcAgentRunner implements AgentRunnerInterface {
-  /** `ipc` is injectable for tests; production uses the worker singleton. */
-  constructor(private readonly ipc?: IpcRpc) {}
+  /** `ipc` is injectable for tests; production uses the worker singleton.
+   *  `replies` notes which agent runs each turn, so a send this worker makes
+   *  for the turn's result is credited to that agent: main notes it in its
+   *  own process, which this worker cannot read. */
+  constructor(
+    private readonly ipc?: IpcRpc,
+    private readonly replies?: Pick<SpeakerReplies, "runs">,
+  ) {}
 
   private getIpc(): IpcRpc {
     return this.ipc ?? getWorkerIpc();
@@ -94,6 +101,8 @@ export class RpcAgentRunner implements AgentRunnerInterface {
       yield { type: "error", error: err instanceof Error ? err.message : String(err) };
       return;
     }
+
+    this.replies?.runs(response.turnId, params.agentName);
 
     log.debug("agent turn started", {
       turnId: response.turnId,

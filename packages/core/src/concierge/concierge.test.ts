@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { Account, AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
+import type {
+  Account,
+  AgentTurnFinishedEvent,
+  BackendTurnParams,
+  ChatId,
+} from "@rome-os/app-runtime";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessagePage } from "../chats/message-repository.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
-import type { Body, SendResult } from "../chats/send.js";
+import type { Body, SendResult } from "../connections/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
+import { ChatRepository as StoredChats } from "../chats/storage/chat-repository.js";
+import { MessageRepository as StoredMessages } from "../chats/storage/message-repository.js";
+import { placeIn } from "../chats/storage/place.js";
+import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -84,7 +93,34 @@ function setup(
 ) {
   const testDb = createTestDb();
   opened.push(testDb);
-  const taskRepo = new ConciergeTasksRepository(testDb.db);
+  // The Concierge chat's messages in Chats, each recorded the first time a
+  // row points to it, as the fakes here hold its lines elsewhere.
+  const sourceChat = new StoredChats(testDb.db).start(
+    chatKey("webchat", CONCIERGE_CHAT as ChatId),
+    "dm",
+    null,
+  ).ref;
+  const sourceLines = new StoredMessages(testDb.db);
+  const taskRepo = new ConciergeTasksRepository(testDb.db, {
+    idOf: (key) =>
+      sourceLines.idOf(sourceChat, key) ??
+      sourceLines.record({
+        direction: "toRome",
+        key,
+        place: placeIn(sourceChat),
+        saidBy: { account: { platform: "webchat", id: "guardian" } },
+        body: { text: "" },
+        at: new Date(),
+      })?.id ??
+      null,
+    keysOf: (ids) =>
+      new Map(
+        sourceLines
+          .byIds(ids)
+          .filter((message) => message.place.chat.id === sourceChat.id)
+          .map((message) => [message.id, message.key]),
+      ),
+  });
   const tasks = new ConciergeTasks(taskRepo);
   /** The real chat rows the task rows link to. */
   const storedChats = new WebChatRepository(testDb.db);
@@ -738,7 +774,7 @@ describe("Concierge task list tools", () => {
 describe("Concierge task anchors", () => {
   const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
   const anchorOf = async (s: ReturnType<typeof setup>, taskId: string) =>
-    (await s.taskRepo.get(taskId))?.sourceMessageId;
+    (await s.taskRepo.getWithChat(taskId))?.sourceMessageId;
   const created = async (s: ReturnType<typeof setup>, entry: Record<string, unknown>) =>
     text(await s.tool("task_upsert", { tasks: [{ title: "Pay rent", ...entry }] })).tasks[0].id;
 

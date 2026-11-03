@@ -24,7 +24,7 @@ import type {
   ModelToolDefinition,
   SkillMcpDefinition,
 } from "./agent-runner.js";
-import type { FacadeToolDef, HandbackSpec, RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeToolDef, RoutineActivationGate } from "./mcp-facade.js";
 import {
   createRomeMcpServer,
   type RomeMcpGroup,
@@ -38,7 +38,6 @@ interface BuildAnthropicMcpServersParams {
   /** See FacadeParams.getSkillCatalog. */
   getSkillCatalog: () => SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  handback?: HandbackSpec;
   externalMcpServers?: Record<string, McpServerConfig>;
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
@@ -46,7 +45,6 @@ interface BuildAnthropicMcpServersParams {
     input: unknown,
     context: ModelToolCallContext,
   ) => Promise<unknown>;
-  executeSubmitOutput?: (input: unknown) => Promise<unknown>;
   /** See FacadeParams.supportsInteractiveSurface. */
   supportsInteractiveSurface?: boolean;
   /** See FacadeParams.interactiveSurfaceDetached. */
@@ -108,11 +106,9 @@ export function buildAnthropicMcpServers({
   getActionCatalog,
   getSkillCatalog,
   subagentTools,
-  handback,
   externalMcpServers,
   executeAction,
   executeSubagent,
-  executeSubmitOutput,
   supportsInteractiveSurface,
   interactiveSurfaceDetached,
   executeDefer,
@@ -124,10 +120,8 @@ export function buildAnthropicMcpServers({
     getActionCatalog,
     getSkillCatalog,
     subagentTools,
-    handback,
     executeAction,
     executeSubagent,
-    executeSubmitOutput,
     supportsInteractiveSurface,
     interactiveSurfaceDetached,
     executeDefer,
@@ -168,14 +162,6 @@ export function buildAnthropicMcpServers({
     mcpServers.subagents = createSdkMcpServer({
       name: "subagents",
       tools: subagentToolsBundle.map((toolDef) => wrapFacadeTool(server, "subagents", toolDef)),
-    });
-  }
-
-  const outputTools = server.listTools("output");
-  if (outputTools.length > 0) {
-    mcpServers.output = createSdkMcpServer({
-      name: "output",
-      tools: outputTools.map((toolDef) => wrapFacadeTool(server, "output", toolDef)),
     });
   }
 

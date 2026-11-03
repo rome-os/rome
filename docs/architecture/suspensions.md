@@ -1,10 +1,10 @@
 # Suspensions
 
-How a [suspension](../concepts/actions.md#suspensions) crosses the seam between the agent runtime, the server, and the host: which component owns the card, the child session, and the resolution, and the correlation and trust rules that hold across reload and restart. The contracts callers observe — the suspension kinds, resolution outcomes, artifact ownership, and the off-webchat fallback — live on the [suspension concept](../concepts/actions.md#suspensions) and are not restated here.
+How a [suspension](../concepts/actions.md#suspensions) crosses the seam between the agent runtime, the server, and the host: which component owns the card and the resolution, and the correlation and trust rules that hold across reload and restart. The contracts callers observe — resolution outcomes, artifact ownership, and the off-webchat fallback — live on the [suspension concept](../concepts/actions.md#suspensions) and are not restated here.
 
 ```
 action result ─► agent runtime ─► server ─► card in the caller's transcript ─► host
-                 (caller parks)     │ handoff: mints the child session          │
+                 (caller parks)     │                                          │
                                     ▼                                          ▼
 caller resumes ◄─ outcome prompt ◄─ server ◄──── resolution turn ◄──── commit or dismissal
 ```
@@ -23,14 +23,5 @@ caller resumes ◄─ outcome prompt ◄─ server ◄──── resolution tu
 
 - Resolution is fail-closed: a resolution citing no open card is rejected, so a stale, duplicate, or forged resolution never reaches the parked caller.
 - The caller resumes on a server-built outcome prompt. The resolution turn carries only the artifact — the host never authors the text that re-drives the caller.
-- Suspension is fail-closed: a card lands only when the owning app is installed and, for an inline interaction, the app [declares the component](../concepts/apps.md). The host's built-in question card is the one card with no owning app.
+- Suspension is fail-closed: a card lands only when the owning app is installed and [declares the component](../concepts/apps.md). The host's built-in question card is the one card with no owning app.
 - Dismissal is not a separate channel. A cancel affordance posts the same resolution message with a dismissal artifact, so it passes the same guard and lands in the same transcript.
-
-## Handoff sessions
-
-### Invariants
-
-- The child session runs exactly the agent fixed when it is minted, and the parent session never reroutes a turn to the summoned agent.
-- The card is the only parent–child link. Rendering and resolution derive the association from the card, never from a session-level relation.
-- The handback contract is stamped on the child session when it is minted and survives a restart. No child turn depends on process memory to know it.
-- Seeding the child session is idempotent. Already-seeded is derived from the child having messages, so a reload never seeds twice and a failed seed retries.

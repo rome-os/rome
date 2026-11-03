@@ -7,13 +7,7 @@ import {
 } from "../mcp/server.js";
 import type { DynamicToolCallResponse, DynamicToolSpec } from "./app-server-protocol.js";
 
-const DYNAMIC_TOOL_GROUPS: readonly RomeMcpGroup[] = [
-  "actions",
-  "subagents",
-  "skills",
-  "output",
-  "ask_user",
-];
+const DYNAMIC_TOOL_GROUPS: readonly RomeMcpGroup[] = ["actions", "subagents", "skills", "ask_user"];
 
 export interface RomeDynamicToolCallResult {
   response: DynamicToolCallResponse;

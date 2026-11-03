@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction } from "./index.js";
 
 const actionConfig = {
@@ -326,5 +327,36 @@ describe("get_webchat_conversations against the system schema", () => {
     const data = result.data as { content: string };
     expect(data.content).toContain("from a");
     expect(data.content).not.toContain("from b");
+  });
+});
+
+describe("get_webchat_conversations through Chats", () => {
+  it("reads the guardian's dashboard chats, leaving out a visitor's and Rome's notes", async () => {
+    const now = new Date();
+    const reads = fakeChatReads([
+      {
+        chat: { sessionId: "s1", name: "Plans" },
+        lines: [
+          { role: "user", content: "hello", createdAt: now },
+          { role: "notification", content: "fyi", createdAt: now },
+          { role: "assistant", content: "hi there", createdAt: now },
+        ],
+      },
+      {
+        chat: { sessionId: "s2", name: "Visitor" },
+        lines: [{ role: "user", content: "secret", createdAt: now, senderId: "visitor:v1" }],
+      },
+    ]);
+    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
+
+    const result = await createAction(actionConfig, deps).execute({ windowHours: 1 });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { messageCount: number; content: string };
+    expect(data.messageCount).toBe(2);
+    expect(data.content).toContain("### Conversation: Plans");
+    expect(data.content).toContain("**Guardian**: hello");
+    expect(data.content).toContain("**Agent**: hi there");
+    expect(data.content).not.toContain("secret");
   });
 });

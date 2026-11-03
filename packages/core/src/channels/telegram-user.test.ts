@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -153,10 +153,12 @@ describe("TelegramUserAdapter", () => {
 
   it("answers an attachment-only send with no message id", async () => {
     internals.client = { sendMessage: rs.fn().mockResolvedValue({ id: 1 }) };
+    const file = join(sandboxHome, "a.pdf");
+    await writeFile(file, "%PDF-1.4");
 
     await expect(
       adapter.send("123" as ChatId, {
-        attachments: [{ type: "document", source: "/tmp/a.pdf" }],
+        attachments: [{ type: "document", source: file }],
       }),
     ).resolves.toStrictEqual({ chatId: "123" });
   });

@@ -11,6 +11,8 @@ const device = {
   /** A folder on this computer from the system dialog, or null when the user cancels. */
   pickFolder: (defaultPath?: string): Promise<{ path: string; home: string } | null> =>
     ipcRenderer.invoke("device:pickFolder", defaultPath),
+  /** Opens this computer's audit log in the app's own window. Returns nothing from the log. */
+  openAuditLog: (): Promise<void> => ipcRenderer.invoke("device:openAuditLog"),
   onStatus: (callback: (status: DeviceStatus) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: DeviceStatus) => callback(status);
     ipcRenderer.on("device:status", listener);
@@ -19,11 +21,28 @@ const device = {
 };
 
 /**
+ * This computer's local audit log, for the app's own audit window. Never part of what
+ * other pages get below: main also refuses these channels to any page that is not `file:`.
+ */
+const audit = {
+  status: (): Promise<unknown> => ipcRenderer.invoke("audit:status"),
+  list: (query?: unknown): Promise<unknown> => ipcRenderer.invoke("audit:list", query),
+  get: (seq: number): Promise<unknown> => ipcRenderer.invoke("audit:get", seq),
+  counts: (): Promise<unknown> => ipcRenderer.invoke("audit:counts"),
+  stats: (since: number, until: number, bucketMs: number): Promise<unknown> =>
+    ipcRenderer.invoke("audit:stats", since, until, bucketMs),
+  content: (seq: number, name: string): Promise<unknown> =>
+    ipcRenderer.invoke("audit:content", seq, name),
+  reveal: (): Promise<void> => ipcRenderer.invoke("audit:reveal"),
+};
+
+/**
  * Exposed API for renderer processes.
  * Accessed via `window.rome` in the renderer.
  */
 const api = {
   device,
+  audit,
 
   settings: {
     get: (key: string): Promise<string | null> => ipcRenderer.invoke("settings:get", key),

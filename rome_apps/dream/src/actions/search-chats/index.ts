@@ -9,6 +9,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
+import { chatReadsOf, guardianChats, type ChatHistory } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("search_chats");
@@ -116,29 +117,118 @@ function formatHit(chat: ChatHit, wordCount: number, now: number): string {
   ].join("\n");
 }
 
+/** A guardian request said at `line` in `chat`, as a row. */
+function requestRow(chat: ChatHistory, line: ChatHistory["lines"][number]): RequestRow {
+  return {
+    session_id: chat.sessionId,
+    session_name: chat.name,
+    content: line.content,
+    created_at: Math.floor(line.createdAt.getTime() / 1000),
+  };
+}
+
+/** The second a chat's first line was said, by session. */
+type ChatStarts = (sessionIds: string[]) => Map<string, number>;
+
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
-  const { connection } = deps.appContext.db;
+  const { appContext } = deps;
+
+  /** The opening request of every chat active since `cutoff`, most
+   *  recently active first, read through Chats when the host offers it. */
+  async function openingRows(cutoff: number): Promise<RequestRow[]> {
+    const reads = chatReadsOf(appContext);
+    if (!reads) {
+      return appContext.db.connection.all(sql`
+        SELECT session_id, session_name, content, created_at FROM (
+          SELECT m.session_id, s.name AS session_name, m.content, m.created_at,
+            ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at, m.id) AS n,
+            MAX(m.created_at) OVER (PARTITION BY m.session_id) AS last_at
+          FROM rome_agent_messages m
+          JOIN rome_sessions s ON s.id = m.session_id
+          WHERE m.role = 'user'
+            AND ${inDashboardChat("s")}
+            AND ${guardianOnlyChat("s")}
+        )
+        WHERE n = 1 AND last_at >= ${cutoff}
+        ORDER BY last_at DESC
+      `) as RequestRow[];
+    }
+    const rows: RequestRow[] = [];
+    for (const chat of await guardianChats(reads, new Date(cutoff * 1000))) {
+      const opening = chat.lines.find((line) => line.role === "user");
+      if (opening) rows.push(requestRow(chat, opening));
+    }
+    return rows;
+  }
+
+  /** The newest guardian requests since `cutoff` holding any of `words`,
+   *  with when each chat started, read through Chats when the host offers
+   *  it. */
+  async function matchingRows(
+    words: string[],
+    cutoff: number,
+  ): Promise<{ rows: RequestRow[]; startsOf: ChatStarts }> {
+    const reads = chatReadsOf(appContext);
+    if (!reads) {
+      const rows = appContext.db.connection.all(sql`
+        SELECT m.session_id, s.name AS session_name, m.content, m.created_at
+        FROM rome_agent_messages m
+        JOIN rome_sessions s ON s.id = m.session_id
+        WHERE m.role = 'user'
+          AND m.created_at >= ${cutoff}
+          AND ${inDashboardChat("s")}
+          AND ${guardianOnlyChat("s")}
+          AND (${sql.join(
+            words.map((word) => sql`lower(m.content) LIKE ${likePattern(word)} ESCAPE '\\'`),
+            sql` OR `,
+          )})
+        ORDER BY m.created_at DESC
+        LIMIT ${MAX_ROWS}
+      `) as RequestRow[];
+      const startsOf: ChatStarts = (sessionIds) => {
+        const starts = appContext.db.connection.all(sql`
+          SELECT session_id, MIN(created_at) AS started_at FROM rome_agent_messages
+          WHERE session_id IN (${sql.join(
+            sessionIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})
+          GROUP BY session_id
+        `) as Array<{ session_id: string; started_at: number }>;
+        return new Map(starts.map((row) => [row.session_id, row.started_at]));
+      };
+      return { rows, startsOf };
+    }
+    const histories = await guardianChats(reads, new Date(cutoff * 1000));
+    const rows: RequestRow[] = [];
+    for (const chat of histories) {
+      for (const line of chat.lines) {
+        if (line.role !== "user" || line.createdAt.getTime() / 1000 < cutoff) continue;
+        const content = line.content.toLowerCase();
+        if (words.some((word) => content.includes(word))) rows.push(requestRow(chat, line));
+      }
+    }
+    rows.sort((a, b) => b.created_at - a.created_at);
+    rows.splice(MAX_ROWS);
+    const startsOf: ChatStarts = (sessionIds) => {
+      const starts = new Map<string, number>();
+      for (const chat of histories) {
+        const first = chat.lines[0];
+        if (first && sessionIds.includes(chat.sessionId)) {
+          starts.set(chat.sessionId, Math.floor(first.createdAt.getTime() / 1000));
+        }
+      }
+      return starts;
+    };
+    return { rows, startsOf };
+  }
 
   /**
    * The opening request of every chat active in the period, most recently
    * active first. A chat resumed in the period opens with its first request
    * ever, which can predate the period.
    */
-  function listOpenings(cutoff: number, days: number, limit: number): ActionResult {
-    const rows = connection.all(sql`
-      SELECT session_id, session_name, content, created_at FROM (
-        SELECT m.session_id, s.name AS session_name, m.content, m.created_at,
-          ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at, m.id) AS n,
-          MAX(m.created_at) OVER (PARTITION BY m.session_id) AS last_at
-        FROM rome_agent_messages m
-        JOIN rome_sessions s ON s.id = m.session_id
-        WHERE m.role = 'user'
-          AND ${inDashboardChat("s")}
-          AND ${guardianOnlyChat("s")}
-      )
-      WHERE n = 1 AND last_at >= ${cutoff}
-      ORDER BY last_at DESC
-    `) as RequestRow[];
+  async function listOpenings(cutoff: number, days: number, limit: number): Promise<ActionResult> {
+    const rows = await openingRows(cutoff);
     const now = Math.floor(Date.now() / 1000);
     const lines = rows
       .slice(0, limit)
@@ -162,36 +252,19 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
   }
 
   /** Chats whose guardian requests contain the most query words. */
-  function search(words: string[], cutoff: number, days: number, limit: number): ActionResult {
-    const rows = connection.all(sql`
-      SELECT m.session_id, s.name AS session_name, m.content, m.created_at
-      FROM rome_agent_messages m
-      JOIN rome_sessions s ON s.id = m.session_id
-      WHERE m.role = 'user'
-        AND m.created_at >= ${cutoff}
-        AND ${inDashboardChat("s")}
-        AND ${guardianOnlyChat("s")}
-        AND (${sql.join(
-          words.map((word) => sql`lower(m.content) LIKE ${likePattern(word)} ESCAPE '\\'`),
-          sql` OR `,
-        )})
-      ORDER BY m.created_at DESC
-      LIMIT ${MAX_ROWS}
-    `) as RequestRow[];
+  async function search(
+    words: string[],
+    cutoff: number,
+    days: number,
+    limit: number,
+  ): Promise<ActionResult> {
+    const { rows, startsOf } = await matchingRows(words, cutoff);
     const ranked = rankChats(rows, words);
     const top = ranked.slice(0, limit);
     if (top.length > 0) {
-      const starts = connection.all(sql`
-        SELECT session_id, MIN(created_at) AS started_at FROM rome_agent_messages
-        WHERE session_id IN (${sql.join(
-          top.map((chat) => sql`${chat.sessionId}`),
-          sql`, `,
-        )})
-        GROUP BY session_id
-      `) as Array<{ session_id: string; started_at: number }>;
-      for (const { session_id, started_at } of starts) {
-        const chat = top.find((c) => c.sessionId === session_id);
-        if (chat) chat.startedAt = Math.min(chat.startedAt, started_at);
+      for (const [sessionId, startedAt] of startsOf(top.map((chat) => chat.sessionId))) {
+        const chat = top.find((c) => c.sessionId === sessionId);
+        if (chat) chat.startedAt = Math.min(chat.startedAt, startedAt);
       }
     }
     const now = Math.floor(Date.now() / 1000);
@@ -248,8 +321,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       try {
         return words.length > 0
-          ? search(words, cutoff, days, limit)
-          : listOpenings(cutoff, days, limit);
+          ? await search(words, cutoff, days, limit)
+          : await listOpenings(cutoff, days, limit);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         log.error("failed to search chats", { error });

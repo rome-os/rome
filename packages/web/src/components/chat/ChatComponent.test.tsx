@@ -28,8 +28,8 @@ function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatPr
       <button type="button" onClick={() => onSessionNotFound?.(sessionId ?? "")}>
         Missing session
       </button>
-      <button type="button" onClick={() => onSessionNotFound?.("missing-child")}>
-        Missing child
+      <button type="button" onClick={() => onSessionNotFound?.("missing-other")}>
+        Missing other
       </button>
     </>
   );
@@ -65,9 +65,6 @@ rs.mock("@/components/chat/entries", () => ({
 
 rs.mock("@/components/chat/MessageList", () => ({
   MessageList: () => <div data-testid="message-list" />,
-  findActiveSubmission: () => null,
-  findLastSubmission: () => null,
-  hasPendingApprovalConfirmation: () => false,
 }));
 
 function LocationProbe() {
@@ -313,7 +310,7 @@ describe("ChatComponent missing sessions", () => {
     expect(screen.getByTestId("chat-location").textContent).toBe(`/chat${search} REPLACE`);
   });
 
-  it("keeps the parent chat open when a handoff child is missing", () => {
+  it("keeps the chat open when another session is missing", () => {
     const onSessionNotFound = rs.fn();
     renderChatComponent(
       { sessionId: "session-1", onSessionNotFound },
@@ -321,7 +318,7 @@ describe("ChatComponent missing sessions", () => {
       "/chat/session-1",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Missing child" }));
+    fireEvent.click(screen.getByRole("button", { name: "Missing other" }));
 
     expect(onSessionNotFound).not.toHaveBeenCalled();
     expect(screen.getByTestId("chat-location").textContent).toBe("/chat/session-1 POP");

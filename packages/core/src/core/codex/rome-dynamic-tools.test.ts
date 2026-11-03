@@ -16,7 +16,7 @@ function fakeServer(definitions: Partial<Record<RomeMcpGroup, readonly string[]>
     },
     callTool: rs.fn(async (_group, name) => ({
       content: [{ type: "text" as const, text: `${name} result` }],
-      isError: name === "submit_output",
+      isError: name === "ask_question",
     })),
   };
 }
@@ -27,7 +27,6 @@ describe("Rome dynamic tools", () => {
       actions: ["execute_action"],
       subagents: ["researcher"],
       skills: ["read_skill"],
-      output: ["submit_output"],
       ask_user: ["ask_question"],
     });
     const tools = createRomeDynamicToolsFromServer(server);
@@ -36,7 +35,6 @@ describe("Rome dynamic tools", () => {
       "execute_action",
       "researcher",
       "read_skill",
-      "submit_output",
       "ask_question",
     ]);
     expect(tools.definitions[0]).toMatchObject({
@@ -46,22 +44,22 @@ describe("Rome dynamic tools", () => {
     });
 
     const result = await tools.callTool(
-      "submit_output",
+      "ask_question",
       { value: 1 },
-      { toolUseId: "call-output" },
+      { toolUseId: "call-question" },
     );
     expect(server.callTool).toHaveBeenCalledWith(
-      "output",
-      "submit_output",
+      "ask_user",
+      "ask_question",
       { value: 1 },
-      { toolUseId: "call-output" },
+      { toolUseId: "call-question" },
     );
     expect(result.response).toEqual({
-      contentItems: [{ type: "inputText", text: "submit_output result" }],
+      contentItems: [{ type: "inputText", text: "ask_question result" }],
       success: false,
     });
     expect(result.traceOutput).toEqual({
-      content: [{ type: "text", text: "submit_output result" }],
+      content: [{ type: "text", text: "ask_question result" }],
       isError: true,
     });
   });

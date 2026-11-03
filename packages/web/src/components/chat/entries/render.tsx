@@ -8,7 +8,6 @@ import { AgentCallView } from "./AgentCallView";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
 import { ErrorRunView } from "./ErrorEventView";
-import { HandoffCard } from "./HandoffCard";
 import { QuestionCard } from "./QuestionCard";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
@@ -176,13 +175,6 @@ export function renderSingleEntry(
           routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
         />
       );
-    case "submission_card":
-      // The borrowed agent's submit_output is not rendered in the conversation
-      // flow — the result already lives on the app's own surface beside the
-      // chat, and the approval gate is the composer's Approve button. The block
-      // stays in the message stream only as the signal that a submission is
-      // pending (read by findActiveSubmission to drive that button).
-      return null;
     case "pending_interaction": {
       // Host built-in components (the ask_question card, the connect_ai card):
       // rendered directly by rome-web, no app bundle to mount. They resolve
@@ -222,33 +214,9 @@ export function renderSingleEntry(
         />
       );
     }
-    case "handoff": {
-      // The @mention seam in the flat transcript; the specialist's turns render
-      // inline as ordinary rows right below it (their child session is merged in
-      // by Chat). The brief is shown here as the calling agent's mention.
-      const agentLabel =
-        typeof block.payload?.agentLabel === "string" ? block.payload.agentLabel : undefined;
-      const summary =
-        typeof block.payload?.summary === "string" ? block.payload.summary : undefined;
-      // Open until its interaction_result lands; that output then tells completed
-      // (a plan handed back) from cancelled (dismissed, `{ dismissed: true }`).
-      const result = resultFor(block.toolUseId);
-      const status = !result ? "open" : result.dismissed === true ? "cancelled" : "completed";
-      return (
-        <HandoffCard
-          key={`handoff-${block.toolUseId}`}
-          appId={block.appId}
-          agentName={block.agentName}
-          agentLabel={agentLabel}
-          summary={summary}
-          status={status}
-        />
-      );
-    }
     case "interaction_result":
       // The resolution turn's user-side part adds nothing to the bubble — an
-      // inline component re-renders read-only from its stored result, and a
-      // handoff's visible outcome is the calling agent's reply.
+      // inline component re-renders read-only from its stored result.
       return null;
     case "approval_card":
       // Keying on approvalId rather than index keeps internal state

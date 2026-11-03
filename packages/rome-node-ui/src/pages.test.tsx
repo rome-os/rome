@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { NodeDeviceActivity } from "./device-activity.js";
+import { NodeActivityView, NodeDeviceActivity } from "./device-activity.js";
 import { NodeDeviceCard, NodeDevices } from "./devices-overview.js";
 import type { NodeActionRow, NodeConnectionStatus, NodeStatus } from "./protocol.js";
 import type {
@@ -180,6 +180,24 @@ describe("NodeDevices", () => {
     expect(screen.queryByText("Old phone")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /Revoked/ }));
     expect(screen.getByText("Old phone")).toBeTruthy();
+  });
+
+  it("says on a device's card when its audit log is unavailable", async () => {
+    serve([]);
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={[
+          { ...devices[0]!, audit: { state: "unavailable", message: "read-only" } },
+          { ...devices[1]!, audit: { state: "ok" } },
+        ]}
+        navigation={navigation()}
+      />,
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("audit log is unavailable");
+    expect(alert.getAttribute("title")).toBe("read-only");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   it("shows no card for activity from a device the account does not list", async () => {
@@ -366,6 +384,40 @@ describe("this device", () => {
     expect(within(dialog).getByText(/connect it again here at any time/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(false);
+  });
+
+  it("offers the local audit log only when the app provides it", async () => {
+    serve([]);
+    const openAuditLog = rs.fn();
+    const { unmount } = render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={more}
+        navigation={navigation()}
+        thisDevice={self({ openAuditLog })}
+      />,
+    );
+    await screen.findByText("Build server");
+    await userEvent.click(
+      within(screen.getAllByRole("listitem")[0]!).getByRole("button", { name: "Device actions" }),
+    );
+    await userEvent.click(await screen.findByRole("menuitem", { name: "View audit log" }));
+    expect(openAuditLog).toHaveBeenCalledTimes(1);
+    unmount();
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={more}
+        navigation={navigation()}
+        thisDevice={self()}
+      />,
+    );
+    await screen.findByText("Build server");
+    await userEvent.click(
+      within(screen.getAllByRole("listitem")[0]!).getByRole("button", { name: "Device actions" }),
+    );
+    await screen.findByRole("menuitem", { name: "Disconnect" });
+    expect(screen.queryByRole("menuitem", { name: "View audit log" })).toBeNull();
   });
 
   it("puts it first even when other devices are busier", async () => {
@@ -594,5 +646,74 @@ describe("device menu", () => {
       within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove" }),
     );
     expect(actions.remove).toHaveBeenCalledWith("dev-2");
+  });
+});
+
+describe("NodeActivityView", () => {
+  const base = {
+    device: { id: "this-mac", name: "Audit log", platform: "macos" },
+    now: Date.now(),
+    result: "all" as const,
+    onResult: rs.fn(),
+    bucket: null,
+    onBucket: rs.fn(),
+    search: "",
+    onSearch: rs.fn(),
+    searching: false,
+    loading: false,
+    hasMore: false,
+    onLoadMore: rs.fn(),
+    selectedId: null,
+    selectedRow: null,
+    onSelect: rs.fn(),
+  };
+
+  it("lists the host's rows and asks it for the selected row's detail", async () => {
+    const rows = [row(2, { exitCode: 3 }), row(1, { command: "uname", args: ["-a"] })];
+    const onSelect = rs.fn();
+    const { rerender } = render(
+      <NodeActivityView
+        {...base}
+        title="Audit log"
+        subtitle="This Mac"
+        actions={<button type="button">Audit log actions</button>}
+        rows={rows}
+        counts={{ all: 9, running: 0, succeeded: 7, failed: 1, no_result: 1 }}
+        onSelect={onSelect}
+        renderDetail={(item) => <p>detail of {item.id}</p>}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Audit log" })).toBeTruthy();
+    expect(screen.getByText("This Mac")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Audit log actions" })).toBeTruthy();
+    expect(screen.getByText("uname -a")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /No result\s*1/ })).toBeTruthy();
+    await userEvent.click(screen.getByText("uname -a"));
+    expect(onSelect).toHaveBeenCalledWith(1);
+    rerender(
+      <NodeActivityView
+        {...base}
+        rows={rows}
+        selectedId={1}
+        selectedRow={rows[1]!}
+        renderDetail={(item) => <p>detail of {item.id}</p>}
+      />,
+    );
+    expect(screen.getAllByText("detail of 1").length).toBeGreaterThan(0);
+  });
+
+  it("shows only the header and the notice when there is no activity to read", () => {
+    render(
+      <NodeActivityView
+        {...base}
+        rows={[row(1)]}
+        hideActivity
+        notice={<div role="alert">The audit log cannot be read.</div>}
+        renderDetail={() => null}
+      />,
+    );
+    expect(screen.getByRole("alert").textContent).toContain("cannot be read");
+    expect(screen.queryByText("git status")).toBeNull();
+    expect(screen.queryByRole("searchbox")).toBeNull();
   });
 });

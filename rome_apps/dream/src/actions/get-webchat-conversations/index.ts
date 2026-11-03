@@ -7,6 +7,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
+import { chatReadsOf, guardianChats } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_webchat_conversations");
@@ -87,8 +88,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // channel row addressed by its own id; both filters below match either.
       // Same rule as `isWebchatChat` in packages/core/src/db/session-kind.ts.
       let rows: MessageRow[] = [];
+      const reads = chatReadsOf(appContext);
       try {
-        if (sessionId) {
+        if (reads) {
+          const since = new Date(cutoffSeconds * 1000);
+          for (const chat of await guardianChats(reads, since, sessionId)) {
+            for (const line of chat.lines) {
+              if (line.createdAt < since || line.role === "notification") continue;
+              rows.push({
+                session_id: chat.sessionId,
+                session_name: chat.name,
+                role: line.role,
+                content: line.content,
+                created_at: Math.floor(line.createdAt.getTime() / 1000),
+              });
+            }
+          }
+        } else if (sessionId) {
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at

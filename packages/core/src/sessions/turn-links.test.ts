@@ -73,7 +73,7 @@ describe("TurnLinks", () => {
     expect(links.linkOf("speaker-1", ask)?.inputState).toBe("unknown");
   });
 
-  it("make a line caught up on the session's prompt when it later wakes a turn", () => {
+  it("make a message caught up on the session's prompt when it later wakes a turn", () => {
     const line = heard("m1", 5);
     links.seen([line], "speaker-1", "turn-1");
     links.prompt(line, "speaker-1", "turn-2");
@@ -81,7 +81,7 @@ describe("TurnLinks", () => {
     expect(links.linkOf("speaker-1", line)).toMatchObject({ role: "prompt", turnId: "turn-2" });
   });
 
-  it("queue a line caught up on as a prompt without the turn that caught up on it", () => {
+  it("queue a message caught up on as a prompt without the turn that caught up on it", () => {
     const line = heard("m1", 5);
     links.seen([line], "speaker-1", "turn-1");
     links.prompt(line, "speaker-1", null, "queued");
@@ -93,7 +93,7 @@ describe("TurnLinks", () => {
     });
   });
 
-  it("read two alike lines with their own keys as two lines", () => {
+  it("read two alike messages with their own keys as two messages", () => {
     const first = heard("m1", 5, { body: { text: "ok" } });
     const second = heard("m2", 5, { body: { text: "ok" } });
 
@@ -102,7 +102,7 @@ describe("TurnLinks", () => {
     expect(links.unseen("speaker-1").map((line) => line.id)).toEqual([second]);
   });
 
-  it("read one copy of a line two of Rome's accounts each hold, and none once one is seen", () => {
+  it("read one copy of a message two of Rome's accounts each hold, and none once one is seen", () => {
     const mine = heard("rome_bot:5", 5, { body: { text: "ok" } });
     const theirs = heard("other_bot:9", 5, { body: { text: "ok" } });
 
@@ -113,7 +113,7 @@ describe("TurnLinks", () => {
     expect(links.linkOf("speaker-1", mine)).toMatchObject({ role: "seen", turnId: null });
   });
 
-  it("read a second alike line as its own, once a copy of the first is seen", () => {
+  it("read a second alike message as its own, once a copy of the first is seen", () => {
     const mine = heard("rome_bot:5", 5, { body: { text: "ok" } });
     const theirs = heard("other_bot:9", 5, { body: { text: "ok" } });
     const again = heard("rome_bot:6", 5, { body: { text: "ok" } });
@@ -123,7 +123,7 @@ describe("TurnLinks", () => {
     expect(links.unseen("speaker-1").map((line) => line.id)).toEqual([again]);
   });
 
-  it("hold every copy of an undecided line out of catch-up, and read one once it is decided", () => {
+  it("hold every copy of an undecided message out of catch-up, and read one once it is decided", () => {
     const mine = heard("rome_bot:5", 5, { body: { text: "ok" } });
     heard("other_bot:9", 5, { body: { text: "ok" } });
     links.wakeUndecided(mine);
@@ -149,7 +149,7 @@ describe("TurnLinks", () => {
     expect(links.unseen("speaker-1")).toEqual([]);
   });
 
-  it("read alike lines whose keys only look per-account as their own outside a basic group", () => {
+  it("read alike messages whose keys only look per-account as their own outside a basic group", () => {
     chat = new ChatRepository(testDb.db).start(
       { platform: "telegram", externalId: "-1001234567890123" as ChatId },
       "group",
@@ -167,7 +167,7 @@ describe("TurnLinks", () => {
     expect(links.unseen("speaker-2").map((line) => line.id)).toEqual([second]);
   });
 
-  it("answer each message's prompt or answer turn, leaving out lines only caught up on", () => {
+  it("answer each message's prompt or answer turn, leaving out messages only caught up on", () => {
     const ask = heard("m1", 5);
     const reply = heard("m2", 6, { saidBy: { account: ROME, agent: "main" } });
     const aside = heard("m3", 7);
@@ -225,13 +225,13 @@ describe("TurnLinks", () => {
     expect(links.unseen("speaker-1").every((line) => !line.quotesOutside)).toBe(true);
   });
 
-  it("read a line of Rome's that kept no name as Rome's", () => {
+  it("read a message of Rome's that kept no name as Rome's", () => {
     heard("m1", 5, { saidBy: { account: ROME, agent: "main" } });
 
     expect(links.unseen("speaker-1")[0]).toMatchObject({ senderName: "Rome", fromRome: true });
   });
 
-  it("hold a line out of catch-up while its wake is undecided", () => {
+  it("hold a message out of catch-up while its wake is undecided", () => {
     const line = heard("m1", 5);
     links.wakeUndecided(line);
     expect(links.unseen("speaker-1")).toEqual([]);

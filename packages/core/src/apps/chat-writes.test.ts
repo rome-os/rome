@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Channel, ChatId, ChatRecord, OutgoingMessage } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
+import { actionExecutionContext } from "../actions/context.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef } from "../chats/storage/place.js";
@@ -10,7 +11,7 @@ import { ChatAddresses } from "../connections/chat-addresses.js";
 import type { ChannelChatAdapter, Outbound } from "../connections/chat-adapter.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { emailChatAdapter } from "../connections/email-chat-adapter.js";
-import { SpeakerLines } from "../connections/speaker-lines.js";
+import { SpeakerMessages } from "../connections/speaker-messages.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
@@ -27,7 +28,7 @@ describe("appChatWrites", () => {
   let fixture: ReturnType<typeof speakerFixture>;
   let messages: MessageRepository;
   let links: TurnLinks;
-  let lines: SpeakerLines;
+  let lines: SpeakerMessages;
   let group: ChatRef;
   let sends: Array<{ chat: string; threadId: ChatId | null; out: Outbound }>;
   let refuse: boolean;
@@ -97,7 +98,7 @@ describe("appChatWrites", () => {
       });
       return email;
     };
-    lines = new SpeakerLines({ speakers, messages, adapters: { keyOf } });
+    lines = new SpeakerMessages({ speakers, messages, adapters: { keyOf } });
     group = fixture.chat("telegram", "-100", "group", "ops");
     fixture.speaker({ id: "s1", chat: group, accountId: BOT.id });
     sends = [];
@@ -158,7 +159,7 @@ describe("appChatWrites", () => {
   const speakerAt = () => ({ place: placeIn(group), accountId: BOT.id });
 
   describe("addMessage", () => {
-    it("records a line keyed as its account hears it, as the session's prompt, once", async () => {
+    it("records a message keyed as its account hears it, as the session's prompt, once", async () => {
       const input = {
         sessionId: "s1",
         role: "user" as const,
@@ -205,7 +206,7 @@ describe("appChatWrites", () => {
       expect(linkOf("s1", line!.id)).toMatchObject({ role: "prompt" });
     });
 
-    it("makes a line its account already heard the session's prompt", async () => {
+    it("makes a message its account already heard the session's prompt", async () => {
       const heard = messages.record({
         direction: "toRome",
         key: lines.keyIn(speakerAt(), "43"),
@@ -238,6 +239,23 @@ describe("appChatWrites", () => {
     });
   });
 
+  describe("recordOutboundMessage", () => {
+    it("puts what an older app sent on record in Chats as the speaker's and the turn's answer", async () => {
+      await writes.recordOutboundMessage({
+        sessionId: "s1",
+        content: JSON.stringify([{ type: "text", content: "Sent by hand" }]),
+        platformMessageId: "202",
+        turnId: "turn-1",
+        knownToProvider: true,
+      });
+
+      expect(sends).toEqual([]);
+      const [line] = said();
+      expect(line).toMatchObject({ key: lines.keyIn(speakerAt(), "202"), text: "Sent by hand" });
+      expect(linkOf("s1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
+    });
+  });
+
   describe("send", () => {
     it("sends through the session's adapter, records it as the turn's answer, and answers the platform's id", async () => {
       const result = await writes.send({
@@ -257,7 +275,50 @@ describe("appChatWrites", () => {
       expect(result).toEqual({ messageId: "101" });
     });
 
-    it("quotes a line by the platform's id, records what the app hands over, and keeps host-only parts out", async () => {
+    it("puts a send where another session in the chat catches up on it", async () => {
+      // send_message without streaming: the reply goes out through the
+      // host's Chats writes, never the legacy writer.
+      fixture.speaker({ id: "s2", chat: group, accountId: BOT.id, agentName: "support" });
+
+      await writes.send({
+        sessionId: "s1",
+        channel: "telegram",
+        text: "Deploy done",
+        turnId: "turn-1",
+        knownToProvider: true,
+      });
+
+      expect(links.unseen("s2")).toMatchObject([{ text: "Deploy done", fromRome: true }]);
+      expect(links.unseen("s1")).toEqual([]);
+    });
+
+    it("says a send as the agent the running action names for its turn, as in a worker", async () => {
+      // A worker starts no turn, so only the action running in it knows that
+      // the account's own agent runs this one.
+      await actionExecutionContext.run(
+        {
+          executionId: "x1",
+          rootExecutionId: "x1",
+          initiator: "agent",
+          turnId: "turn-9",
+          agentName: "support",
+        },
+        () =>
+          writes.send({
+            sessionId: "s1",
+            channel: "telegram",
+            text: "On it",
+            turnId: "turn-9",
+            knownToProvider: true,
+          }),
+      );
+
+      expect(
+        testDb.db.all<{ agent: string }>(sql`SELECT sender_agent AS agent FROM chat_messages`),
+      ).toEqual([{ agent: "support" }]);
+    });
+
+    it("quotes a message by the platform's id, records what the app hands over, and keeps host-only parts off record", async () => {
       await writes.addMessage({
         sessionId: "s1",
         role: "user",
@@ -276,9 +337,10 @@ describe("appChatWrites", () => {
         knownToProvider: false,
       });
 
+      // The channel's adapter is the one to refuse a part it does not show.
       expect(sends[0]?.out).toEqual({
         text: "Sure",
-        parts: [{ type: "text", content: "Sure" }],
+        parts: [{ type: "text", content: "Sure" }, card],
         replyTo: lines.keyIn(speakerAt(), "41"),
       });
       expect(JSON.parse(said().at(-1)!.parts)).toEqual([
@@ -369,6 +431,30 @@ describe("appChatWrites", () => {
       expect(line).toMatchObject({ text: "Plans" });
       expect(linkOf("mail-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
       expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+    });
+
+    it("credits a new thread's first email to the agent its turn runs, answer or not", async () => {
+      await actionExecutionContext.run(
+        {
+          executionId: "x2",
+          rootExecutionId: "x2",
+          initiator: "agent",
+          turnId: "turn-9",
+          agentName: "support",
+        },
+        () =>
+          writes.sendEmail({
+            channel: "mail",
+            text: "Plans",
+            email: { to: "wei@example.com", subject: "Plans" },
+            turnId: "turn-9",
+            knownToProvider: false,
+          }),
+      );
+
+      expect(
+        testDb.db.all<{ agent: string }>(sql`SELECT sender_agent AS agent FROM chat_messages`),
+      ).toEqual([{ agent: "support" }]);
     });
 
     it("answers an email that went out even when main cannot join its new thread", async () => {
@@ -550,19 +636,59 @@ describe("appChatWrites", () => {
       expect(said()).toEqual([]);
     });
 
-    it("refuses to reply to an email Rome holds no thread with", async () => {
-      await expect(
-        writes.sendEmail({
-          channel: "mail",
-          text: "Re",
-          email: { inReplyToMessageId: "unknown" },
-          knownToProvider: false,
-        }),
-      ).rejects.toThrow("Rome holds no email thread with message unknown");
-      expect(mailSent).toEqual([]);
+    it("replies to an email Rome holds no thread with through the provider, and records it in the thread it names", async () => {
+      // As one fetched from the mailbox directly: its thread is the
+      // provider's, and Rome learns it from the receipt.
+      fixture.chat("email", "thread-1", "group", "Invoice");
+
+      const result = await writes.sendEmail({
+        channel: "mail",
+        text: "Re",
+        email: { inReplyToMessageId: "unknown" },
+        turnId: "turn-1",
+        knownToProvider: true,
+      });
+
+      expect(mailSent).toEqual([
+        { to: "", message: expect.objectContaining({ text: "Re", inReplyToMessageId: "unknown" }) },
+      ]);
+      expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(opened).toEqual(["thread-1"]);
+      const [line] = said();
+      expect(line).toMatchObject({ text: "Re" });
+      expect(linkOf("mail-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
     });
 
-    it("refuses a blank message to reply to before anything goes out", async () => {
+    it("replies to an email Rome holds no thread with where the provider sends it, whatever session is named", async () => {
+      fixture.chat("email", "thread-1", "group", "Invoice");
+
+      const result = await writes.sendEmail({
+        channel: "mail",
+        sessionId: "s1",
+        text: "Re",
+        email: { inReplyToMessageId: "unknown" },
+        knownToProvider: false,
+      });
+
+      expect(mailSent).toHaveLength(1);
+      expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(said().map((line) => line.text)).toEqual(["Re"]);
+    });
+
+    it("records an HTML-only email as its HTML reads, though its composed content is empty", async () => {
+      await writes.sendEmail({
+        channel: "mail",
+        content: "[]",
+        email: { to: "wei@example.com", subject: "Plans", html: "<p>See you <b>Friday</b></p>" },
+        knownToProvider: false,
+      });
+
+      const [line] = said();
+      expect(line?.text).toContain("See you");
+      expect(JSON.parse(line!.parts)).not.toEqual([]);
+    });
+
+    it("refuses a blank message to reply to, since no thread holds it, before anything goes out", async () => {
       await expect(
         writes.sendEmail({
           channel: "mail",
@@ -571,7 +697,7 @@ describe("appChatWrites", () => {
           email: { inReplyToMessageId: " " },
           knownToProvider: false,
         }),
-      ).rejects.toThrow("must not be blank");
+      ).rejects.toThrow("Rome holds no email thread with message");
       expect(mailSent).toEqual([]);
     });
   });

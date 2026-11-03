@@ -55,7 +55,7 @@ describe("MessageRepository", () => {
     expect(messages.idOf(chat, "m1")).toBe(recorded!.id);
   });
 
-  it("records the line a message quotes by its id, and nothing for a line Rome never held", () => {
+  it("records the message a message quotes by its id, and nothing for a message Rome never held", () => {
     const at = new Date("2026-10-29T01:00:00Z");
     const first = messages.record(heard("m1", at))!;
     const quoting = messages.record({ ...heard("m2", at), replyTo: "m1" });
@@ -175,7 +175,59 @@ describe("MessageRepository", () => {
     expect(delivered).toBe(false);
   });
 
-  it("links a send quoting a line by key once Rome holds that line, even one heard while sending", async () => {
+  it("records a send as Rome's where another of its accounts heard it first", async () => {
+    const quoted = messages.record(heard("m0", new Date("2026-10-29T01:00:00Z")))!;
+    const sent = await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "hi back" }],
+        replyTo: quoted.id,
+      },
+      async () => {
+        // Another of Rome's accounts in the chat hears the reply before the
+        // send is on record, as said by this account.
+        messages.record({
+          direction: "toRome",
+          key: "tg-9",
+          place: placeIn(chat),
+          saidBy: { account: ROME, name: "Rome" },
+          body: { text: "hi back" },
+          at: new Date(),
+        });
+        return { key: "tg-9" };
+      },
+    );
+
+    expect(messages.byIds([sent.id!])[0]).toMatchObject({
+      key: "tg-9",
+      direction: "fromRome",
+      saidBy: { account: ROME, agent: "main" },
+      replyTo: quoted.id,
+    });
+  });
+
+  it("leaves a message someone else said under a key a send answers", async () => {
+    const theirs = messages.record(heard("tg-9", new Date(), "theirs"))!;
+    await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "mine" }],
+      },
+      async () => ({ key: "tg-9" }),
+    );
+
+    expect(messages.byIds([theirs.id])[0]).toMatchObject({
+      direction: "toRome",
+      saidBy: { account: ALICE },
+      body: { text: "theirs" },
+    });
+  });
+
+  it("links a send quoting a message by key once Rome holds that message, even one heard while sending", async () => {
     const sent = await messages.send(
       {
         direction: "fromRome",
@@ -194,7 +246,7 @@ describe("MessageRepository", () => {
     expect(messages.byIds([sent.id!])[0]?.replyTo).toBe(messages.idOf(chat, "m0"));
   });
 
-  it("quotes by key what the platform shows, and links nothing for a line Rome never held", async () => {
+  it("quotes by key what the platform shows, and links nothing for a message Rome never held", async () => {
     const sent = await messages.send(
       {
         direction: "fromRome",
@@ -209,7 +261,7 @@ describe("MessageRepository", () => {
     expect(messages.byIds([sent.id!])[0]?.replyTo).toBeUndefined();
   });
 
-  it("quotes nothing on a send whose quoted line is in another chat", async () => {
+  it("quotes nothing on a send whose quoted message is in another chat", async () => {
     const other = new ChatRepository(testDb.db).start(
       { platform: "telegram", externalId: "chat-2" as ChatId },
       "group",

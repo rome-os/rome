@@ -19,7 +19,7 @@ export type Direction = "toRome" | "fromRome";
 export interface SaidBy {
   readonly account: Account;
   /** What the sender was called on the message, as the platform showed it.
-   *  The account profile is the lasting name. This is only what the line
+   *  The account profile is the lasting name. This is only what the message
    *  carried. */
   readonly name?: string;
   readonly agent?: string;
@@ -54,7 +54,7 @@ export interface InboundMessage {
 export type Message = InboundMessage;
 
 /** A message once it is on record: the id Chats gave it, and the id of the
- *  line it quotes when Rome holds that line. */
+ *  message it quotes when Rome holds that message. */
 export type RecordedMessage = Omit<Message, "replyTo"> & {
   readonly id: number;
   readonly replyTo?: number;
@@ -79,7 +79,7 @@ export interface OutboundMessage {
 /**
  * A message as a read of its place finds it, either way it went. It is from
  * Rome when `saidBy.agent` is set. `saidBy` is absent when the record kept no
- * account for it, as on some older lines. `senderName` is what the line
+ * account for it, as on some older messages. `senderName` is what the message
  * called its sender, kept even then. `parts` is the message as composed, as
  * JSON, for readers that draw its widgets. `key` is its adapter's key for it.
  */

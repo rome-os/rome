@@ -764,6 +764,16 @@ export class WebChatRepository {
 
   constructor(protected readonly db: DrizzleDb) {}
 
+  /** How many lines a listed session holds, as a column of its row. */
+  protected readonly messageCountColumn: SQL<number> = sessionSelectFields.messageCount;
+  /** Whether a listed session waits on the guardian, as a column of its row. */
+  protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
+
+  /** The columns a listed session is read with. */
+  protected sessionFields() {
+    return { ...sessionSelectFields, messageCount: this.messageCountColumn };
+  }
+
   /** Set by {@link leaveOutOfCatchUp}. */
   private wakeUndecided: (messageId: string) => boolean = () => false;
 
@@ -1066,8 +1076,28 @@ export class WebChatRepository {
         input.parentThreadId && input.parentThreadId !== input.threadId ? input.threadId : null;
       // A session first standing in its chat starts just before the line
       // that opened it, so a catch-up, which reads what was said after the
-      // session's second, reads that line too once it wakes no agent.
-      const heardSecond = Math.floor(speaker.at.getTime() / 1000);
+      // session's second, reads that line too once it wakes no agent. Where
+      // the account spoke there first, as a send that started the chat, the
+      // session starts before that line instead, so it reads what it said.
+      // Asked only while the session stands nowhere yet: once placed, its
+      // start no longer moves, and every message heard asks this again.
+      const placed = this.db
+        .select({ chatId: romeSessions.chatId })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, opened.id))
+        .get()?.chatId;
+      const firstOwn =
+        placed == null
+          ? this.db.all<{ at: number | null }>(sql`
+              SELECT min(said_at) AS at FROM chat_messages
+              WHERE chat_id = ${speaker.chat.id} AND thread_id IS ${thread}
+                AND sender_account_id = ${speaker.accountId}
+            `)[0]?.at
+          : null;
+      const heardSecond = Math.min(
+        Math.floor(speaker.at.getTime() / 1000),
+        firstOwn ?? Number.POSITIVE_INFINITY,
+      );
       await this.db
         .update(romeSessions)
         .set({
@@ -1879,9 +1909,9 @@ export class WebChatRepository {
           : undefined;
     return this.db
       .select({
-        ...sessionSelectFields,
+        ...this.sessionFields(),
         lastTurnFailed: sessionLastTurnFailed,
-        awaitingGuardian: sessionAwaitingGuardian,
+        awaitingGuardian: this.awaitingGuardianColumn,
       })
       .from(romeSessions)
       .where(
@@ -1908,6 +1938,15 @@ export class WebChatRepository {
    * message — ordered by message recency, capped at `sessionLimit` sessions.
    */
   async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
+    return this.searchSessionRows(query, options, ["user", "assistant", "notification"]);
+  }
+
+  /** {@link searchSessionMessages} over the sessions' own rows of `roles`. */
+  protected async searchSessionRows(
+    query: string,
+    options: { sessionLimit?: number },
+    roles: readonly ("user" | "assistant" | "notification")[],
+  ) {
     const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
@@ -1919,16 +1958,10 @@ export class WebChatRepository {
         sql`lower(${romeAgentMessages.content}) LIKE ${`%${escapeSqlLikePattern(term)}%`} ESCAPE ${SQL_LIKE_ESCAPE}`,
     );
     const rows = await this.db
-      .select({ message: webchatMessageSelectFields, session: sessionSelectFields })
+      .select({ message: webchatMessageSelectFields, session: this.sessionFields() })
       .from(romeAgentMessages)
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
-      .where(
-        and(
-          isWebchatChat,
-          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          ...likePredicates,
-        ),
-      )
+      .where(and(isWebchatChat, inArray(romeAgentMessages.role, [...roles]), ...likePredicates))
       .orderBy(desc(romeAgentMessages.createdAt), desc(romeAgentMessages.id))
       .limit(SEARCH_MESSAGE_SCAN_LIMIT);
 
@@ -2024,7 +2057,7 @@ export class WebChatRepository {
     const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
 
     const rows = await this.db
-      .select(sessionSelectFields)
+      .select(this.sessionFields())
       .from(romeSessions)
       .where(and(...predicates))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id))
@@ -2068,7 +2101,7 @@ export class WebChatRepository {
     const predicates = [isWebchatChat, cursorPredicate];
 
     const rows = await this.db
-      .select(sessionSelectFields)
+      .select(this.sessionFields())
       .from(romeSessions)
       .where(and(...predicates))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id))

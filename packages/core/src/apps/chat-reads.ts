@@ -10,8 +10,8 @@
 import type { ChatLine, ChatReads, RecentChat, SessionTrace } from "@rome-os/app-runtime/chats";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import { platformOf } from "@rome/api-types/platform";
-import { DASHBOARD_PLATFORM } from "../chats/send.js";
-import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
+import { DASHBOARD_PLATFORM } from "../connections/send.js";
+import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { romeAgentMessages } from "../db/schema/system.js";
@@ -112,7 +112,7 @@ function recentChats(
     LEFT JOIN channels ch ON ch.platform = c.platform
       AND coalesce(ch.platform_account_id, ch.id) = s.account_id
     LEFT JOIN connected_accounts ca ON ca.connection_id = ch.connection_id
-    JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+    JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id
     ORDER BY max(m.said_at) DESC, max(m.seq) DESC

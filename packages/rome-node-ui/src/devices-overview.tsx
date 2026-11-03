@@ -141,6 +141,15 @@ function Identity({
         <span className="block truncate text-aux text-muted-foreground">
           {[platform, statusText].filter(Boolean).join(" · ")}
         </span>
+        {device.audit?.state === "unavailable" && (
+          <span
+            role="alert"
+            title={device.audit.message}
+            className="block text-aux text-destructive"
+          >
+            {m.card.auditUnavailable}
+          </span>
+        )}
       </span>
     </span>
   );

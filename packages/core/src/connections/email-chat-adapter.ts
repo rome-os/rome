@@ -14,7 +14,7 @@ import { v7 as uuidv7 } from "uuid";
 import {
   channelAdapter,
   quotable,
-  sentLineId,
+  sentMessageKey,
   type ChannelAdapterDeps,
   type ChannelChatAdapter,
   type ChatAdapters,
@@ -185,7 +185,7 @@ export function emailChatAdapter(
             });
           }
           return {
-            key: sentLineId(ref, own.id, receipt.messageId?.trim() || undefined),
+            key: sentMessageKey(ref, own.id, receipt.messageId?.trim() || undefined),
             threadId: null,
           };
         })();
@@ -207,7 +207,7 @@ export function emailChatAdapter(
         ...(out.bcc?.length ? { bcc: [...out.bcc] } : {}),
         ...(replyTo ? { inReplyToMessageId: replyTo } : {}),
       });
-      return { key: sentLineId(ref, own.id, receipt.messageId || undefined), threadId: null };
+      return { key: sentMessageKey(ref, own.id, receipt.messageId || undefined), threadId: null };
     },
   };
 }

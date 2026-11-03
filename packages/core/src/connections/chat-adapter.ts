@@ -109,7 +109,7 @@ export interface ChatAdapter {
    * messages come in the platform's order; a chat's threads are addresses of
    * their own and keep only their own order. It
    * answers the id Chats recorded the message under, or null when it was on
-   * record already. Rome's own lines never come through here. `fault`
+   * record already. Rome's own messages never come through here. `fault`
    * reports a message the adapter could not hand over.
    */
   start(deliver: (message: Inbound) => Promise<number | null>, fault: (error: Error) => void): void;
@@ -128,11 +128,10 @@ export interface ChatAdapter {
   /**
    * Open a reply in the chat keyed `chatKey` that is written as the agent's
    * run goes, or null where the channel cannot stream. It is sent as the
-   * platform allows, maybe in several messages, and settles to one line: the
-   * text the user was shown and the adapter's key for its first message, or
-   * null when nothing showed. `replyTo` is the adapter's key of the message
-   * it answers, and one the account has no platform id for throws
-   * `ChannelSendRefused`.
+   * platform allows, maybe in several messages, and settles to each message
+   * the user was shown, or may have been, in order: none when nothing showed.
+   * `replyTo` is the adapter's key of the message it answers, and one the
+   * account has no platform id for throws `ChannelSendRefused`.
    */
   stream?(
     chatKey: string,
@@ -157,15 +156,19 @@ export interface StreamedReply {
   accept(event: StreamAgentEvent): void;
   /** Stop writing at once. */
   stop(): void;
-  /** Finish the reply, or stop it when the run was stopped, and answer what
-   *  the user was shown, and the thread its first message landed in, as
-   *  {@link Sent} names it. */
+  /** Finish the reply, or stop it when the run was stopped, and answer each
+   *  message the user was shown, in order. */
   settle(stopped: boolean): Promise<{
     readonly outcome: ReplyOutcome;
-    readonly text: string;
-    readonly key: string | null;
-    readonly threadId: ChatId | null;
+    readonly shown: readonly ShownMessage[];
   }>;
+}
+
+/** One message of a streamed reply the platform shows: its text, and where
+ *  it landed as {@link Sent} names it. A long reply is several of them, each
+ *  a message of its own that can be quoted by its own key. */
+export interface ShownMessage extends Sent {
+  readonly text: string;
 }
 
 export interface ChannelAdapterDeps {
@@ -174,7 +177,10 @@ export interface ChannelAdapterDeps {
   platformOfChannel(channel: string): string;
   /** The channels layer's address store, where a chat the platform reaches
    *  at an id other than its key is reached. */
-  addresses?: Pick<ChatAddresses, "bind" | "addressOf" | "keyAt" | "bindThread" | "threadChatAt">;
+  addresses?: Pick<
+    ChatAddresses,
+    "bind" | "addressOf" | "keyAt" | "rekey" | "bindThread" | "threadChatAt"
+  >;
 }
 
 /** How an adapter keys the chat a platform message was said in, and its
@@ -229,23 +235,23 @@ export function kindNamedBy(platform: string, address: string): "group" | "dm" |
   return null;
 }
 
-/** Which of Rome's accounts holds a line, by the line's key: the account's
- *  platform id, or null for a line no one account holds. */
-export type LineHolder = (lineKey: string) => string | null;
+/** Which of Rome's accounts holds a message, by the message's key: the account's
+ *  platform id, or null for a message no one account holds. */
+export type MessageHolder = (messageKey: string) => string | null;
 
 /**
- * Which of Rome's accounts holds each line of the chat keyed `key` on
+ * Which of Rome's accounts holds each message of the chat keyed `key` on
  * `platform`, or null when the chat does not number its messages per member
  * account. Where it does, each of Rome's accounts there holds its own copy of
- * a message, and only this adapter reads which one from a line's key.
+ * a message, and only this adapter reads which one from a message's key.
  */
-export function lineHolder(platform: string, key: string): LineHolder | null {
+export function messageHolder(platform: string, key: string): MessageHolder | null {
   const chat = chatKey(platform, key as ChatId);
   if (ownedBy(chat, "_", "") === "") return null;
-  // Such a chat's line keys carry the holding account in front (ownedBy).
-  return (lineKey) => {
-    const at = lineKey.indexOf(":");
-    return at > 0 ? lineKey.slice(0, at) : null;
+  // Such a chat's message keys carry the holding account in front (ownedBy).
+  return (messageKey) => {
+    const at = messageKey.indexOf(":");
+    return at > 0 ? messageKey.slice(0, at) : null;
   };
 }
 
@@ -256,28 +262,32 @@ export function isDirectMessage(key: ChatKey): boolean {
 
 /** The key of the message the platform calls `platformMessageId` in the chat
  *  keyed `chat`, as Rome's account `romeEnd` heard or sent it. */
-export function lineAt(chat: ChatKey, romeEnd: string, platformMessageId: string): string {
+export function messageKeyAt(chat: ChatKey, romeEnd: string, platformMessageId: string): string {
   return ownedBy(chat, romeEnd, platformMessageId);
 }
 
-/** The platform's id for the line keyed `lineKey` in the chat keyed `chat`,
- *  which Rome's account `romeEnd` sent or heard, or null for a line the
+/** The platform's id for the message keyed `messageKey` in the chat keyed `chat`,
+ *  which Rome's account `romeEnd` sent or heard, or null for a message the
  *  platform gave no id or that only another of Rome's accounts holds. */
-export function platformIdOfLine(chat: ChatKey, romeEnd: string, lineKey: string): string | null {
-  if (lineKey.startsWith("rome:")) return null;
-  // Where each account numbers its own lines, a line another account holds
+export function platformIdOfMessage(
+  chat: ChatKey,
+  romeEnd: string,
+  messageKey: string,
+): string | null {
+  if (messageKey.startsWith("rome:")) return null;
+  // Where each account numbers its own messages, a message another account holds
   // has no id this one can quote.
   const owned = ownedBy(chat, romeEnd, "");
-  if (owned !== "" && !lineKey.startsWith(owned)) return null;
-  return notOwnedBy(chat, romeEnd, lineKey);
+  if (owned !== "" && !messageKey.startsWith(owned)) return null;
+  return notOwnedBy(chat, romeEnd, messageKey);
 }
 
 /**
- * The key a line Rome sent into the chat keyed `chat` through Rome's account
+ * The key a message Rome sent into the chat keyed `chat` through Rome's account
  * `romeEnd` is recorded under: the platform's id for it, or one the adapter
  * gives it when the platform answered none.
  */
-export function sentLineId(
+export function sentMessageKey(
   chat: ChatKey,
   romeEnd: string,
   platformMessageId: string | undefined,
@@ -320,11 +330,36 @@ export function channelAdapter(
   deps: ChannelAdapterDeps,
   keying: ChatKeying = (account, message) => chatOf(account.platform, account.id, message),
 ): ChannelChatAdapter {
-  const account = (): Account =>
-    deps.accountOf(channel.name) ?? {
-      platform: deps.platformOfChannel(channel.name),
-      id: channel.name,
+  const account = (): Account => {
+    const known = deps.accountOf(channel.name);
+    if (!known) throw new ChannelWithoutAccount(channel.name);
+    return known;
+  };
+  // A direct message is the chat the account already reaches at its
+  // address, so a reply to a direct message Rome opened by sending to an
+  // address lands in that chat even where the key names the address.
+  const keyed: ChatKeying = (heardBy, message) => {
+    const found = keying(heardBy, message);
+    if (!deps.addresses) return found;
+    if (found.kind === "group") {
+      // A group Rome took for a direct message, as a send opened it, is a
+      // group once a group message is heard there, or in one of its threads:
+      // the chat moves to its key, or into the group another of Rome's
+      // accounts heard there first.
+      const bound = deps.addresses.keyAt(heardBy, message.parentChatId ?? message.chatId);
+      if (bound !== null && bound !== found.key.externalId) {
+        const held = chatKey(heardBy.platform, bound as ChatId);
+        if (isDirectMessage(held))
+          deps.addresses.rekey(heardBy, bound, found.key.externalId, "group");
+      }
+      return found;
+    }
+    if (found.kind !== "dm") return found;
+    return {
+      key: settledDirectMessage(deps.addresses, heardBy, message.chatId, found.key),
+      kind: "dm",
     };
+  };
   let unsubscribe: (() => void) | null = null;
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
@@ -402,7 +437,7 @@ export function channelAdapter(
       const handOver = async (event: InboundEvent) => {
         if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
         const saved = await materialized(channel, event);
-        const inbound = toInbound(channel.name, saved.message.account ?? account(), saved, keying);
+        const inbound = toInbound(channel.name, saved.message.account ?? account(), saved, keyed);
         // A direct message is reached where it was heard, which on some
         // platforms is an id of its own rather than the other end.
         if (inbound.chatKind === "dm" && inbound.thread === null) {
@@ -447,7 +482,18 @@ export function channelAdapter(
         // order the port hands it over, and returns: the adapter hands a
         // chat's messages over one at a time, and none waits behind another
         // thread's at the port. The queue is bounded as the port's is.
-        const chat = keying(event.message.account ?? account(), event.message).key.externalId;
+        // A channel whose record knows no account is not active: what reaches
+        // it keys no chat, whatever account the event names.
+        const recorded = deps.accountOf(channel.name);
+        const heardBy = recorded ? (event.message.account ?? recorded) : null;
+        if (!heardBy) {
+          log.error("inbound message dropped: channel knows no account", {
+            channel: channel.name,
+            messageId: event.message.messageId,
+          });
+          return;
+        }
+        const chat = keyed(heardBy, event.message).key.externalId;
         const waiting = queues.get(chat);
         if (waiting) {
           if (waiting.length >= QUEUE_CAPACITY) {
@@ -501,7 +547,7 @@ export function channelAdapter(
       const address = addressIn(ref, threadId);
       const receipt = await send.send(address, outgoing(out, replyTo));
       return {
-        key: sentLineId(ref, own.id, receipt.messageId || undefined),
+        key: sentMessageKey(ref, own.id, receipt.messageId || undefined),
         threadId: landedIn(ref, address, threadId, receipt.chatId),
       };
     },
@@ -527,30 +573,37 @@ export function channelAdapter(
         async settle(stopped) {
           const outcome = await (stopped ? delivery.stop() : delivery.finish());
           // Every part showed or may have: a create whose result is unknown
-          // most likely landed, and nothing sends it again. A block's parts
-          // split its source, and each block is a message of its own.
-          const shown = outcome.parts;
-          const text = shown
-            .map(
-              (part, i) =>
-                (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source,
-            )
-            .join("");
-          if (shown.length === 0) return { outcome, text, key: null, threadId };
-          // A reply the platform split settles to its first message's key. A
-          // message whose create is unknown has no id, so the first one with
-          // an id stands in.
-          const first = shown.find((part) => part.receipt)?.receipt;
-          return {
-            outcome,
-            text,
-            key: sentLineId(ref, own.id, first?.messageId || undefined),
-            threadId: landedIn(ref, address, threadId, first?.chatId),
-          };
+          // most likely landed, and nothing sends it again. Each part is a
+          // message of its own on the platform, so it is one in Chats too,
+          // keyed by its own id; one whose create is unknown has no id and
+          // takes one of Rome's. A part whose receipt names no chat went where
+          // the parts before it went, as the delivery sends each after the last.
+          let lastLanded = threadId;
+          const shown = outcome.parts.map((part) => {
+            if (part.receipt?.chatId)
+              lastLanded = landedIn(ref, address, threadId, part.receipt.chatId);
+            return {
+              text: part.source,
+              key: sentMessageKey(ref, own.id, part.receipt?.messageId || undefined),
+              threadId: lastLanded,
+            };
+          });
+          return { outcome, shown };
         },
       };
     },
   };
+}
+
+/**
+ * A channel whose record knows no account. It is not active: it keys no
+ * chat, what reaches it is dropped, and a send through it is refused.
+ */
+export class ChannelWithoutAccount extends Error {
+  constructor(readonly channel: string) {
+    super(`Channel ${channel} knows no account, so it is not active`);
+    this.name = "ChannelWithoutAccount";
+  }
 }
 
 /** A platform's own adapter over one of its channels. */
@@ -590,15 +643,24 @@ export class ChatAdapters {
     return adapter;
   }
 
-  /** Rome's account on channel `channel`: its record's, else the channel's
-   *  name on its platform while the record knows none. */
+  /** Rome's account on channel `channel`, as its record knows it. Throws
+   *  {@link ChannelWithoutAccount} for a channel that knows none, which is
+   *  not active: nothing is keyed by a channel's name. */
   accountOn(channel: string): Account {
-    return (
-      this.deps.accountOf(channel) ?? {
-        platform: this.deps.platformOfChannel(channel),
-        id: channel,
-      }
-    );
+    const account = this.deps.accountOf(channel);
+    if (!account) throw new ChannelWithoutAccount(channel);
+    return account;
+  }
+
+  /** Rome's account on channel `channel`, or null while it knows none. */
+  knownAccountOn(channel: string): Account | null {
+    return this.deps.accountOf(channel);
+  }
+
+  /** The platform channel `channel` is on, whether or not it knows its
+   *  account. */
+  platformOn(channel: string): string {
+    return this.deps.platformOfChannel(channel);
   }
 
   /** The channel Rome's account `account` speaks through, or null when no
@@ -607,7 +669,7 @@ export class ChatAdapters {
     return (
       this.deps
         .channelsOn(account.platform)
-        .find((channel) => this.accountOn(channel).id === account.id) ?? null
+        .find((channel) => this.knownAccountOn(channel)?.id === account.id) ?? null
     );
   }
 
@@ -628,6 +690,21 @@ export class ChatAdapters {
   }
 
   /**
+   * Note that `channel`'s account reaches the direct message keyed `key` at
+   * `address`, as one Rome opened there before it knew the other end. The
+   * first message from the other end then moves the chat to its key
+   * ({@link settledDirectMessage}) rather than starting a second one. An
+   * address already kept stays as it is, as does the one kept for the chat,
+   * which is where the platform last placed it.
+   */
+  openedDirectMessageAt(channel: string, address: string, key: ChatKey): void {
+    const account = this.accountOn(channel);
+    if (this.deps.addresses.keyAt(account, address) !== null) return;
+    if (this.deps.addresses.addressOf(account, key.externalId) !== null) return;
+    this.deps.addresses.bind(account, key.externalId, address);
+  }
+
+  /**
    * The direct message channel `channel`'s account has with `other`, which
    * the channel reaches at `address`. The address is kept, so a send there
    * goes where the channel answered, as for a direct message it heard.
@@ -635,7 +712,10 @@ export class ChatAdapters {
   directMessageReached(channel: string, other: string, address: string): ChatKey {
     const account = this.accountOn(channel);
     const chat = chatAt(account.platform, address, { romeEnd: account.id, other });
-    if (address !== other) this.deps.addresses.bind(account, chat.externalId, address);
+    if (address !== other) {
+      settledDirectMessage(this.deps.addresses, account, address, chat);
+      this.deps.addresses.bind(account, chat.externalId, address);
+    }
     return chat;
   }
 
@@ -651,24 +731,32 @@ export class ChatAdapters {
     if (kind === "group") return chatAt(account.platform, address);
     return chatAt(account.platform, address, { romeEnd: account.id });
   }
+
+  /** The chat of the thread `channel`'s account heard, or Rome opened, at
+   *  platform address `address`, or null when it knows no thread there. */
+  threadChatAt(channel: string, address: string): ChatKey | null {
+    const account = this.accountOn(channel);
+    const key = this.deps.addresses.threadChatAt(account, address);
+    return key === null ? null : chatKey(account.platform, key as ChatId);
+  }
 }
 
 /**
- * The platform's id for the line keyed `lineKey` that account `romeEnd`
+ * The platform's id for the message keyed `messageKey` that account `romeEnd`
  * answers in the chat keyed `chat`, or undefined when it answers none.
- * Refuses a line it has no id for, since the reply would land unquoted.
+ * Refuses a message it has no id for, since the reply would land unquoted.
  */
 export function quotable(
   chat: ChatKey,
   romeEnd: string,
-  lineKey: string | undefined,
+  messageKey: string | undefined,
 ): string | undefined {
-  if (lineKey === undefined) return undefined;
-  const id = platformIdOfLine(chat, romeEnd, lineKey);
+  if (messageKey === undefined) return undefined;
+  const id = platformIdOfMessage(chat, romeEnd, messageKey);
   if (id === null) {
     throw new ChannelSendRefused(
       "reply_unaddressable",
-      `Account ${romeEnd} holds no platform id for line ${lineKey}, so it cannot answer it`,
+      `Account ${romeEnd} holds no platform id for message ${messageKey}, so it cannot answer it`,
     );
   }
   return id;
@@ -683,6 +771,26 @@ function outgoing(out: Outbound, replyTo: string | undefined): OutgoingMessage {
     ...(out.turnId ? { turnId: out.turnId } : {}),
     ...(replyTo ? { replyToMessageId: replyTo } : {}),
   };
+}
+
+/**
+ * The direct message `account` reaches at `address`, now that its key is
+ * known to be `key`. One Rome reached there before it knew the other end is
+ * keyed by the address, and takes `key` from here on, so its history stays
+ * in the one chat. Another already held there stays the one.
+ */
+function settledDirectMessage(
+  addresses: Pick<ChatAddresses, "keyAt" | "rekey">,
+  account: Account,
+  address: string,
+  key: ChatKey,
+): ChatKey {
+  const bound = addresses.keyAt(account, address);
+  if (bound === null || bound === key.externalId) return key;
+  const provisional = chatAt(account.platform, address, { romeEnd: account.id }).externalId;
+  if (bound !== provisional) return chatKey(account.platform, bound as ChatId);
+  addresses.rekey(account, bound, key.externalId);
+  return key;
 }
 
 /** The direct message `account` has at platform address `address`: the one
@@ -759,7 +867,11 @@ function chatOf(
   if (message.parentChatId !== undefined) {
     return { key: chatKey(platform, message.parentChatId), kind: "group" };
   }
-  if (message.thread?.kind !== "dm")
+  // Where the address says which it is, it wins over the message's hint: a
+  // Telegram account's live message names no kind, so it reads as a group
+  // even in a private chat.
+  const named = platform === "telegram" ? kindNamedBy(platform, message.chatId) : null;
+  if ((named ?? message.thread?.kind) !== "dm")
     return { key: chatKey(platform, message.chatId), kind: "group" };
   return {
     key: directMessageOn(platform, romeEnd, message.chatId, message.senderId),

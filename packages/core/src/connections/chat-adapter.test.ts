@@ -9,22 +9,26 @@ import type {
 } from "@rome-os/app-runtime";
 import { ChatBuffers } from "../channels/conversation-buffer.js";
 import { Pacer } from "../channels/delivery/pacer.js";
-import { type DeliveryTransport, plainText } from "../channels/delivery/types.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "../channels/delivery/types.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
+import { chats } from "../db/schema.js";
+import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { startChannelChat } from "./channel-chat.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import {
   addressOf,
   ChatAdapters,
   chatAt,
   channelAdapter,
+  ChannelWithoutAccount,
   type Inbound,
   isDirectMessage,
-  lineAt,
-  lineHolder,
+  messageKeyAt,
+  messageHolder,
   kindNamedBy,
-  platformIdOfLine,
-  sentLineId,
+  platformIdOfMessage,
+  sentMessageKey,
 } from "./chat-adapter.js";
 import { chatKey } from "./chat-ids.js";
 
@@ -90,35 +94,35 @@ describe("chat adapter keys", () => {
     expect(addressOf(group)).toBe("-1001234567890123");
   });
 
-  it("key a basic group's lines by the account that heard them, and back", () => {
+  it("key a basic group's messages by the account that heard them, and back", () => {
     const basic = chatAt("telegram", "-42");
-    expect(lineAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
-    expect(platformIdOfLine(basic, "rome_bot", "rome_bot:7")).toBe("7");
-    expect(sentLineId(basic, "rome_bot", "8")).toBe("rome_bot:8");
+    expect(messageKeyAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
+    expect(platformIdOfMessage(basic, "rome_bot", "rome_bot:7")).toBe("7");
+    expect(sentMessageKey(basic, "rome_bot", "8")).toBe("rome_bot:8");
   });
 
-  it("name the account holding each line only where each account holds its own copy", () => {
-    const holder = lineHolder("telegram", "-42");
-    expect(holder?.(lineAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
+  it("name the account holding each message only where each account holds its own copy", () => {
+    const holder = messageHolder("telegram", "-42");
+    expect(holder?.(messageKeyAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
     expect(holder?.("7")).toBeNull();
-    expect(lineHolder("telegram", "-1001234567890123")).toBeNull();
-    expect(lineHolder("telegram", "dm:rome_bot:alice")).toBeNull();
-    expect(lineHolder("discord", "-42")).toBeNull();
+    expect(messageHolder("telegram", "-1001234567890123")).toBeNull();
+    expect(messageHolder("telegram", "dm:rome_bot:alice")).toBeNull();
+    expect(messageHolder("discord", "-42")).toBeNull();
   });
 
-  it("quote no line in a basic group that only another of Rome's accounts holds", () => {
+  it("quote no message in a basic group that only another of Rome's accounts holds", () => {
     const basic = chatAt("telegram", "-42");
-    expect(platformIdOfLine(basic, "rome_bot", "other_bot:7")).toBeNull();
-    expect(platformIdOfLine(basic, "rome_bot", "7")).toBeNull();
+    expect(platformIdOfMessage(basic, "rome_bot", "other_bot:7")).toBeNull();
+    expect(platformIdOfMessage(basic, "rome_bot", "7")).toBeNull();
     const group = chatAt("telegram", "-1001234567890123");
-    expect(platformIdOfLine(group, "rome_bot", "7")).toBe("7");
+    expect(platformIdOfMessage(group, "rome_bot", "7")).toBe("7");
   });
 
-  it("key a line the platform gave no id by one of Rome's, which names no platform line", () => {
+  it("key a message the platform gave no id by one of Rome's, which names no platform message", () => {
     const group = chatAt("telegram", "-1001234567890123");
-    const key = sentLineId(group, "rome_bot", undefined);
+    const key = sentMessageKey(group, "rome_bot", undefined);
     expect(key).toMatch(/^rome:/);
-    expect(platformIdOfLine(group, "rome_bot", key)).toBeNull();
+    expect(platformIdOfMessage(group, "rome_bot", key)).toBeNull();
   });
 });
 
@@ -271,6 +275,7 @@ describe("channelAdapter", () => {
         },
         addressOf: () => null,
         keyAt: () => null,
+        rekey: () => {},
         bindThread: () => {},
         threadChatAt: () => null,
       },
@@ -334,6 +339,84 @@ describe("channelAdapter", () => {
     expect(adapter.threadAt("topic-2")).toBeNull();
   });
 
+  it("hear a direct message in the chat the account already reaches at its address", async () => {
+    // Rome opened this direct message by sending to its address, before it
+    // knew the other end.
+    addresses.bind(ROME, "dm:rome_bot:oc_p2p", "oc_p2p");
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "oc_p2p", senderId: "ou_person", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["dm:rome_bot:oc_p2p"]);
+  });
+
+  it("move a group Rome took for a direct message to its key once a group message is heard there", async () => {
+    // A send opened the group as private, so Rome keyed it as a direct
+    // message with the one person who wrote there.
+    addresses.bind(ROME, "dm:rome_bot:alice", "grp_1");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: "dm:rome_bot:alice", kind: "dm", startedAt: new Date() })
+      .run();
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "grp_1", senderId: "bob", messageId: "4", thread: { kind: "group" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["grp_1"]);
+    expect(testDb.db.select({ key: chats.key, kind: chats.kind }).from(chats).all()).toEqual([
+      { key: "grp_1", kind: "group" },
+    ]);
+  });
+
+  it("move a group Rome took for a direct message once a message is heard in one of its threads", async () => {
+    addresses.bind(ROME, "dm:rome_bot:alice", "grp_2");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: "dm:rome_bot:alice", kind: "dm", startedAt: new Date() })
+      .run();
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({
+      chatId: "topic-9",
+      parentChatId: "grp_2" as ChatId,
+      senderId: "bob",
+      messageId: "5",
+      thread: { kind: "topic", name: "Plans" },
+    });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["grp_2"]);
+    expect(testDb.db.select({ key: chats.key, kind: chats.kind }).from(chats).all()).toEqual([
+      { key: "grp_2", kind: "group" },
+    ]);
+  });
+
   it("send to a direct message where it was heard, quoting the platform's id", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
@@ -359,7 +442,28 @@ describe("channelAdapter", () => {
     expect(landed).toEqual({ key: "p1", threadId: null });
   });
 
-  it("refuse to answer a line the account holds no platform id for, and send nothing", async () => {
+  it("keep a Telegram private chat a direct message when its message names a group", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    // A Telegram account's live message names no kind and reads as a group;
+    // the other party's positive id says it is a direct message.
+    await hear({ chatId: "42", senderId: "42", messageId: "5", thread: { kind: "group" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => [message.chat.externalId, message.chatKind])).toEqual([
+      ["dm:rome_bot:42", "dm"],
+    ]);
+  });
+
+  it("refuse to answer a message the account holds no platform id for, and send nothing", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
     const delivered: Inbound[] = [];
@@ -412,6 +516,28 @@ describe("channelAdapter", () => {
     expect(listening()).toBe(false);
   });
 
+  it("drop what reaches a channel that knows no account, and refuse its sends", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, { ...deps(), accountOf: () => null });
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return null;
+      },
+      () => {},
+    );
+
+    await hear({ chatId: "-42", messageId: "7" });
+    // An event that names its account is dropped too: the record decides.
+    await hear({ chatId: "-42", messageId: "8", account: ROME });
+    await adapter.settled();
+
+    expect(delivered).toEqual([]);
+    await expect(adapter.send("-42", null, { text: "hi" })).rejects.toThrow(ChannelWithoutAccount);
+    expect(sent).toEqual([]);
+  });
+
   it("open no stream on a channel that cannot stream", () => {
     const { channel } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
@@ -423,7 +549,7 @@ describe("channelAdapter", () => {
     ).toBeNull();
   });
 
-  it("settle a streamed reply to the text shown and its first message's key, as the account holds it", async () => {
+  it("settle a streamed reply to the message shown and its key, as the account holds it", async () => {
     const created: string[] = [];
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
@@ -445,7 +571,36 @@ describe("channelAdapter", () => {
     const settled = await reply.settle(false);
 
     expect(created).toEqual(["All done."]);
-    expect(settled).toMatchObject({ text: "All done.", key: "rome_bot:s1", threadId: null });
+    expect(settled.shown).toEqual([{ text: "All done.", key: "rome_bot:s1", threadId: null }]);
+  });
+
+  it("settle a reply the platform split to each message shown, each keyed by its own id", async () => {
+    const created: string[] = [];
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 20, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async (conversation, text) => {
+        created.push(text);
+        return { messageId: `s${created.length}`, chatId: conversation };
+      },
+    };
+    const { channel } = fakeChannel(transport);
+    const adapter = channelAdapter(channel, deps());
+    const reply = adapter.stream?.("-42", null, {
+      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      clock: systemClock,
+    });
+    if (!reply) throw new Error("expected a stream");
+
+    const text = "one two three four five six seven eight";
+    reply.accept({ type: "text", content: text });
+    const { shown } = await reply.settle(false);
+
+    expect(created.length).toBeGreaterThan(1);
+    expect(shown.map((message) => message.key)).toEqual(
+      created.map((_, i) => `rome_bot:s${i + 1}`),
+    );
+    expect(shown.map((message) => message.text).join("")).toBe(text);
   });
 
   it("open no thread with a first direct message, and reach the chat where it opened", async () => {
@@ -491,7 +646,7 @@ describe("channelAdapter", () => {
     );
     if (!reply) throw new Error("expected a stream");
     reply.accept({ type: "text", content: "hi" });
-    expect(await reply.settle(false)).toMatchObject({ key: "s1", threadId: null });
+    expect((await reply.settle(false)).shown).toEqual([{ text: "hi", key: "s1", threadId: null }]);
   });
 
   it("settle a first streamed direct message to no thread, and reach the chat where it opened", async () => {
@@ -511,11 +666,11 @@ describe("channelAdapter", () => {
 
     reply.accept({ type: "text", content: "hi" });
 
-    expect(await reply.settle(false)).toMatchObject({ threadId: null });
+    expect((await reply.settle(false)).shown).toMatchObject([{ threadId: null }]);
     expect(addresses.addressOf(ROME, dm.externalId)).toBe("dm-78");
   });
 
-  it("settle a streamed reply to the thread its first message landed in", async () => {
+  it("settle a streamed reply to the thread its message landed in", async () => {
     const transport: DeliveryTransport = {
       capabilities: { maxPartLength: 4000, edit: false, budget: OPEN_BUDGET },
       codec: plainText,
@@ -531,7 +686,34 @@ describe("channelAdapter", () => {
 
     reply.accept({ type: "text", content: "All done." });
 
-    expect(await reply.settle(false)).toMatchObject({ key: "s1", threadId: "thread-8" });
+    expect((await reply.settle(false)).shown).toMatchObject([{ key: "s1", threadId: "thread-8" }]);
+  });
+
+  it("settle a part whose create is unknown to the thread the parts before it landed in", async () => {
+    const created: string[] = [];
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 20, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async (conversation) => {
+        created.push(conversation);
+        // The platform opens a thread for the first part; the second's answer is lost.
+        if (created.length === 1) return { messageId: "s1", chatId: "thread-8" };
+        throw new DeliveryFailure("unknown", "the answer was lost");
+      },
+    };
+    const { channel } = fakeChannel(transport);
+    const adapter = channelAdapter(channel, deps());
+    const reply = adapter.stream?.("-1001234567890123", null, {
+      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      clock: systemClock,
+    });
+    if (!reply) throw new Error("expected a stream");
+
+    reply.accept({ type: "text", content: "one two three four five six seven eight" });
+    const { shown } = await reply.settle(false);
+
+    expect(created).toEqual(["-1001234567890123", "thread-8"]);
+    expect(shown.map((message) => message.threadId)).toEqual(["thread-8", "thread-8"]);
   });
 });
 
@@ -561,10 +743,9 @@ describe("ChatAdapters", () => {
 
   it("name the account a channel is, and the channel an account is", () => {
     expect(adapters.accountOn("telegram")).toEqual(ROME);
-    expect(adapters.accountOn("telegram-user")).toEqual({
-      platform: "telegram",
-      id: "telegram-user",
-    });
+    // A channel that knows no account is not active, and no name stands in.
+    expect(() => adapters.accountOn("telegram-user")).toThrow(ChannelWithoutAccount);
+    expect(adapters.knownAccountOn("telegram-user")).toBeNull();
     expect(adapters.channelOf(ROME)).toBe("telegram");
     expect(adapters.channelOf({ platform: "telegram", id: "nobody" })).toBeNull();
   });
@@ -579,6 +760,37 @@ describe("ChatAdapters", () => {
     expect(adapters.chatAt("telegram", "bob", "dm")).toEqual(
       chatAt("telegram", "bob", { romeEnd: "rome_bot" }),
     );
+  });
+
+  it("move a direct message reached at its address to its other end's key once that is known", () => {
+    // Rome sent to the address before it knew who was there.
+    const early = adapters.chatAt("telegram", "dm-address-2", "dm");
+    addresses.bind(ROME, early.externalId, "dm-address-2");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: early.externalId, kind: "dm", startedAt: new Date() })
+      .run();
+
+    const dm = adapters.directMessageReached("telegram", "carol", "dm-address-2");
+
+    expect(dm).toEqual(chatAt("telegram", "dm-address-2", { romeEnd: "rome_bot", other: "carol" }));
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([
+      { key: dm.externalId },
+    ]);
+    expect(adapters.chatAt("telegram", "dm-address-2", "dm")).toEqual(dm);
+  });
+
+  it("keep a direct message Rome opened at its address there, so the other end's first message moves it", () => {
+    const early = startChannelChat(
+      { chats: new ChatRepository(testDb.db), adapters },
+      { channel: "telegram", threadId: "dm-address-3", threadType: "private" },
+    ).key;
+
+    expect(addresses.keyAt(ROME, "dm-address-3")).toBe(early.externalId);
+    const dm = adapters.directMessageReached("telegram", "dave", "dm-address-3");
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([
+      { key: dm.externalId },
+    ]);
   });
 });
 

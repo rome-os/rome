@@ -11,6 +11,7 @@ import {
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
+import { chatReadsOf, heardSince } from "../../lib/chat-lines.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
 import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
 import { profileMemoryDir } from "../../lib/memory-dir.js";
@@ -109,6 +110,13 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
   const { agentRunner, appContext } = deps;
   const carrierDir = deps.carrierDir ?? userSkillsCarrierDir();
   const memoryDir = deps.memoryDir ?? profileMemoryDir();
+  /** Whether anyone sent Rome a message in the last `windowHours`, read
+   *  through Chats when the host offers it. */
+  const chatInWindow = async (windowHours: number) => {
+    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+    const reads = chatReadsOf(appContext);
+    return reads ? heardSince(reads, since) : hasChatSince(appContext.db, since);
+  };
 
   return {
     config,
@@ -134,10 +142,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       // without a reserved run (the routine) need a conversation to review.
       // Checking before the reservation keeps an idle stretch out of the run
       // list.
-      if (
-        typeof args.runId !== "string" &&
-        !hasChatSince(appContext.db, new Date(Date.now() - windowHours * 60 * 60 * 1000))
-      ) {
+      if (typeof args.runId !== "string" && !(await chatInWindow(windowHours))) {
         log.info("dream skipped, no chat in window", { windowHours });
         return {
           status: "ok",

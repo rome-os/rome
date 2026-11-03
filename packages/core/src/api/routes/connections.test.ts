@@ -497,7 +497,12 @@ describe("GET /connections accounts", () => {
       onEvent: (tx, event) => {
         if (event.kind !== "connected") return;
         const record = event.connection;
-        records.claim(tx, { ...record, domain: domainOf(event.profile) }, record.createdAt);
+        // As Rome claims it: with the account the connection reached.
+        records.claim(
+          tx,
+          { ...record, domain: domainOf(event.profile), account: event.account },
+          record.createdAt,
+        );
       },
     });
     registry.register({ ...telegram.descriptor, connectionKind: "feishu", severalAccounts: true });
@@ -512,6 +517,8 @@ describe("GET /connections accounts", () => {
       channel: records.idOf(lark.id),
       platform: "lark",
       account: { platform: "lark", id: "cli_lark" },
+      // Its channel knows the account, so it is active.
+      accountUnknown: false,
     });
   });
 

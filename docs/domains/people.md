@@ -71,7 +71,7 @@ An account Rome has heard of that nobody has decided about yet: it has no link a
 Every account Rome has heard of, and every account with a link or a dismissal, each shown as linked to a person, dismissed, or a stranger.
 
 - People owns it. Which accounts Rome has heard of is Chats' to say.
-- The dashboard's Directory view and the Link account picker read it.
+- The dashboard's People page and the Link account picker read it.
 
 ## Who is this
 

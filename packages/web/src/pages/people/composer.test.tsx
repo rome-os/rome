@@ -35,7 +35,7 @@ const person: PersonResource = {
 
 function renderComposer() {
   const onSend = rs.fn();
-  render(<Composer person={person} target={account} onChangeTarget={null} onSend={onSend} />);
+  render(<Composer person={person} target={account} onSend={onSend} />);
   return { onSend, box: screen.getByRole("textbox", { name: "Message text" }) };
 }
 

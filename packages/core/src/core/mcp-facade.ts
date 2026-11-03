@@ -26,10 +26,7 @@ import type {
   ModelToolCallContext,
   ModelToolDefinition,
   SkillMcpDefinition,
-  HandbackSpec,
 } from "./agent-runner.js";
-
-export type { HandbackSpec };
 
 const log = createLogger("mcp-facade");
 
@@ -69,8 +66,6 @@ export interface FacadeBundle {
   subagents: FacadeToolDef[];
   /** Three tools when `skillCatalog` is non-empty, otherwise empty. */
   skills: FacadeToolDef[];
-  /** One `submit_output` tool for conversational handback sessions. */
-  submitOutput: FacadeToolDef[];
   /**
    * Built-in tools the model uses to ask the human something: `ask_question`
    * (registered on every surface — card in webchat, prose relay elsewhere) and
@@ -96,14 +91,12 @@ export interface FacadeParams {
    */
   getSkillCatalog: () => SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  handback?: HandbackSpec;
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
     name: string,
     input: unknown,
     context: ModelToolCallContext,
   ) => Promise<unknown>;
-  executeSubmitOutput?: (input: unknown) => Promise<unknown>;
   /**
    * Whether the consuming surface can render interactive inline UI (cards, app
    * components) and will route the next user turn back to this session. The
@@ -116,10 +109,10 @@ export interface FacadeParams {
    * True when the interactive catalog must stay advertised but no surface
    * drains this session's stream to deliver UI — exact-mode forked turns,
    * whose tool catalog must stay byte-identical to their webchat source
-   * (prefix identity) while nothing can mount cards or resolve handbacks.
+   * (prefix identity) while nothing can mount cards.
    * Runtime behavior degrades honestly: `ask_question` relays prose (same as
-   * a non-interactive surface); `propose_routine` and `confirm_output` return
-   * an error instead of claiming a card was delivered / a handback shipped.
+   * a non-interactive surface); `propose_routine` returns an error instead of
+   * claiming a card was delivered.
    */
   interactiveSurfaceDetached?: boolean;
   /**
@@ -726,11 +719,9 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
     actions: buildActionFacadeTools(params.getActionCatalog, params.executeAction),
     subagents: buildSubagentFacadeTools(params.subagentTools, params.executeSubagent),
     skills: buildSkillFacadeTools(params.getSkillCatalog),
-    submitOutput: buildSubmitOutputFacadeTool(params.handback, params.executeSubmitOutput),
     interactiveTools: buildInteractiveTools(
       params.supportsInteractiveSurface ?? false,
       params.interactiveSurfaceDetached ?? false,
-      !!params.handback,
       params.executeDefer,
       params.routineActivation
         ? { ...params.routineActivation, executeAction: params.executeAction }
@@ -844,43 +835,6 @@ async function activateRoutineDraft(
   return text(
     `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
   );
-}
-
-const CONFIRM_OUTPUT_DIRECTIVE =
-  "The guardian's approval has been recorded — the result you last submitted is being handed back now, exactly as if they had clicked Approve. Reply with one short line confirming it's shipping, then end your turn. Do not call submit_output or confirm_output again.";
-
-// The confirm_output tool: in a conversational handback, the guardian can approve
-// the standing submission by clicking Approve OR by saying so. This tool is how
-// the agent relays a *verbal* approval — the surface picks the tool_use up off
-// the stream and resolves the handback with the last submitted payload. No
-// input: it confirms the most recent submit_output, not a fresh payload, so a
-// misclassified reply can never ship a result the guardian never saw.
-function buildConfirmOutputFacadeTool(interactiveSurfaceDetached: boolean): FacadeToolDef[] {
-  return [
-    {
-      name: "confirm_output",
-      description:
-        'Ship the result you last submitted via submit_output, on the guardian\'s behalf, when they have EXPLICITLY approved it in chat (e.g. "yes", "ship it", "looks good", "go ahead"). This is the verbal-approval equivalent of the guardian clicking Approve. Call it ONLY after a submit_output this conversation and ONLY on an unambiguous approval — if the guardian asks for any change or asks a question, do NOT call it; refine and submit_output again, or just answer. Takes no input; it confirms the most recent submission.',
-      inputSchema: { type: "object", properties: {} },
-      handler: async () => {
-        // A detached session (exact fork) has no surface resolving handbacks
-        // off its stream: telling the model the approval was recorded would be
-        // false, and nothing would ship. Refuse instead of lying.
-        if (interactiveSurfaceDetached) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "This turn runs detached from the conversational surface, so no approval can be recorded and nothing was shipped. Do not retry; end the turn.",
-              },
-            ],
-            isError: true,
-          };
-        }
-        return { content: [{ type: "text", text: CONFIRM_OUTPUT_DIRECTIVE }] };
-      },
-    },
-  ];
 }
 
 /** Validate and shape a `propose_routine` tool input into the card's draft
@@ -1252,7 +1206,6 @@ function buildDeferFacadeTool(
 function buildInteractiveTools(
   supportsInteractiveSurface: boolean,
   interactiveSurfaceDetached: boolean,
-  hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
   activation?: ActivationDeps,
   sessionTools: FacadeToolDef[] = [],
@@ -1261,8 +1214,8 @@ function buildInteractiveTools(
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
   // prose from the handler, so the model routes clarifying questions through it
-  // regardless of surface. `propose_routine` and `confirm_output` have no prose
-  // fallback, so they stay interactive-only (appended below).
+  // regardless of surface. `propose_routine` has no prose
+  // fallback, so it stays interactive-only (appended below).
   const tools: FacadeToolDef[] = [
     {
       name: "ask_question",
@@ -1362,16 +1315,11 @@ function buildInteractiveTools(
     tools.push(buildDeferFacadeTool(executeDefer, textPrivate));
   }
   tools.push(...sessionTools);
-  // propose_routine and confirm_output render/resolve UI and have no prose
-  // fallback, so keep them on interactive surfaces only. Detached sessions
-  // (exact forks) keep advertising them — the catalog must stay byte-identical
-  // to the source — but their handlers refuse at runtime (below) instead of
-  // claiming UI was delivered.
+  // propose_routine renders UI and has no prose fallback, so keep it on
+  // interactive surfaces only. Detached sessions (exact forks) keep advertising
+  // it — the catalog must stay byte-identical to the source — but its handler
+  // refuses at runtime instead of claiming UI was delivered.
   if (!supportsInteractiveSurface) return tools;
-  // confirm_output also belongs only to a conversational handback (the
-  // surface that resolves it is the handoff approval gate); a plain chat never
-  // has it.
-  if (hasHandback) tools.push(...buildConfirmOutputFacadeTool(interactiveSurfaceDetached));
   tools.push({
     name: "propose_routine",
     description:
@@ -1498,21 +1446,4 @@ function buildInteractiveTools(
     },
   });
   return tools;
-}
-
-function buildSubmitOutputFacadeTool(
-  spec: HandbackSpec | undefined,
-  executeSubmitOutput: ((input: unknown) => Promise<unknown>) | undefined,
-): FacadeToolDef[] {
-  if (!spec || !executeSubmitOutput) return [];
-  return [
-    {
-      name: "submit_output",
-      description:
-        "Present a schema-valid candidate to the guardian for approval. A later candidate may supersede it after the guardian requests changes.",
-      inputSchema: spec.schema,
-      handler: (input) =>
-        runFacadeTool("submit_output", input, (parsed) => executeSubmitOutput(parsed)),
-    },
-  ];
 }

@@ -10,6 +10,8 @@ import type {
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
 import { ChatEvents } from "../chats/storage/events.js";
+import { messageToRome } from "../chats/storage/message.js";
+import { chatKey, placeIn } from "../chats/storage/place.js";
 import { inboundRecording } from "../connections/inbound-recording.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
@@ -21,9 +23,8 @@ import type { TurnLinks } from "./turn-links.js";
 // these pin: a message is on record in its chat before the hook hears it, the
 // hook hears it through the session of the account that heard it, a
 // redelivery is neither recorded nor heard twice, even after a restart, a
-// line reaches each account once whatever its session has read, a message is
-// held out of catch-up until every account and every hook that heard it
-// decided its wake, a place's messages are heard one at a time whichever account
+// message is held out of catch-up until every hook that heard it decided its
+// wake, a session catches up on what its account said there before it, a place's messages are heard one at a time whichever account
 // heard them, and nothing is recorded until a hook subscribes.
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
@@ -192,7 +193,7 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
   });
 
-  it("raises a line two of Rome's accounts heard once for each, recorded once", async () => {
+  it("raises a line two of Rome's accounts heard for the first to hear it, recorded once", async () => {
     const heard: SaidInboundEvent[] = [];
     said.subscribe(async (event) => {
       heard.push(event);
@@ -204,10 +205,10 @@ describe("messagesSaid", () => {
     await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
     await settled();
 
+    // Which of Rome's accounts heard a message is not kept yet, so the
+    // second account hears nothing.
     expect(lines()).toHaveLength(1);
-    expect(heard.map((event) => event.message.channel)).toEqual(["telegram", "telegram-2"]);
-    expect(new Set(heard.map((event) => event.recorded.messageId)).size).toBe(1);
-    expect(new Set(heard.map((event) => event.recorded.chatRecordId)).size).toBe(2);
+    expect(heard.map((event) => event.message.channel)).toEqual(["telegram"]);
   });
 
   it("decides the wake of a message whose session could not be opened", async () => {
@@ -286,29 +287,6 @@ describe("messagesSaid", () => {
     expect(lines()).toHaveLength(1);
   });
 
-  it("holds a line two accounts heard until both have decided its wake", async () => {
-    const heard: SaidInboundEvent[] = [];
-    said.subscribe(async (event) => {
-      heard.push(event);
-    });
-    const supergroup = {
-      chatId: "-1001234567890" as ChatId,
-      timestamp: new Date(Date.now() + 60_000),
-    };
-    await telegram.deliver(message(supergroup));
-    await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
-    await settled();
-    const [first, other] = heard;
-    if (!first || !other) throw new Error("not heard by both");
-
-    await said.decided(first.recorded);
-    expect(wiring.links.unseen(first.recorded.chatRecordId)).toHaveLength(0);
-    await said.decided(other.recorded);
-    expect(wiring.links.unseen(first.recorded.chatRecordId).map((line) => line.text)).toEqual([
-      "Hello",
-    ]);
-  });
-
   it("hears a place's messages one at a time, whichever account heard them", async () => {
     const blocked = gate();
     const firstHeard = gate();
@@ -361,34 +339,6 @@ describe("messagesSaid", () => {
     expect(reloaded).toEqual(["tg-3"]);
     expect(lines()).toHaveLength(2);
   });
-  it("hears a line an account's session already caught up on, when it first reaches that account", async () => {
-    const heard: SaidInboundEvent[] = [];
-    said.subscribe(async (event) => {
-      heard.push(event);
-    });
-    const supergroup = { chatId: "-1001234567890" as ChatId };
-    const viaSecond = { ...supergroup, account: SECOND, channel: "telegram-2" };
-    await second.deliver(message({ ...viaSecond, messageId: "tg-0" }));
-    await settled();
-    await telegram.deliver(message({ ...supergroup, messageId: "tg-1" }));
-    await settled();
-    const [secondSession, first] = heard;
-    if (!secondSession || !first) throw new Error("not heard");
-    wiring.links.seen(
-      [Number(first.recorded.messageId)],
-      secondSession.recorded.chatRecordId,
-      "turn-1",
-    );
-
-    await second.deliver(message({ ...viaSecond, messageId: "tg-1" }));
-    await settled();
-    expect(heard.map((event) => [event.message.channel, event.message.messageId])).toEqual([
-      ["telegram-2", "tg-0"],
-      ["telegram", "tg-1"],
-      ["telegram-2", "tg-1"],
-    ]);
-  });
-
   it("holds a line until every hook hearing it has decided its wake", async () => {
     const first: SaidInboundEvent[] = [];
     const other: SaidInboundEvent[] = [];
@@ -469,7 +419,69 @@ describe("messagesSaid", () => {
       "Hello",
     ]);
   });
-  it("raises a shared line with its quote for every account that hears it", async () => {
+  it("catches a session up on what its account said there before anyone wrote to it", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    // Rome's send started the chat, two minutes before the first reply.
+    const chat = wiring.chats.start(chatKey("telegram", GROUP), "group", "Team");
+    wiring.messages.record(
+      messageToRome({
+        key: "rome-bot:tg-0",
+        place: placeIn(chat.ref),
+        saidBy: { account: BOT, agent: "main" },
+        body: { text: "Lunch at noon?" },
+        at: new Date(Date.now() - 120_000),
+      }),
+    );
+    await telegram.deliver(message({ timestamp: new Date() }));
+    await settled();
+    const [event] = heard;
+    if (!event) throw new Error("not heard");
+
+    await said.decided(event.recorded);
+    expect(wiring.links.unseen(event.recorded.chatRecordId).map((line) => line.text)).toEqual([
+      "Lunch at noon?",
+      "Hello",
+    ]);
+  });
+
+  it("catches a group's session up on a line that woke no agent when a later line wakes one", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const now = Date.now();
+    await telegram.deliver(
+      message({ messageId: "tg-1", text: "lunch?", timestamp: new Date(now) }),
+    );
+    await telegram.deliver(
+      message({ messageId: "tg-2", text: "@rome book a table", timestamp: new Date(now + 60_000) }),
+    );
+    await settled();
+    const [ambient, waking] = heard;
+    if (!ambient || !waking) throw new Error("not heard");
+    const session = waking.recorded.chatRecordId;
+    expect(ambient.recorded.chatRecordId).toBe(session);
+
+    // The first line wakes no agent; the second wakes one and is its turn's prompt.
+    await said.decided(ambient.recorded);
+    wiring.links.prompt(Number(waking.recorded.messageId), session, "turn-1");
+    await said.decided(waking.recorded);
+
+    const unseen = wiring.links.unseen(session);
+    expect(unseen.map((line) => line.text)).toEqual(["lunch?"]);
+    // Once the turn has caught up on it, the next turn reads nothing again.
+    wiring.links.seen(
+      unseen.map((line) => line.id),
+      session,
+      "turn-1",
+    );
+    expect(wiring.links.unseen(session)).toEqual([]);
+  });
+
+  it("raises a shared line with its quote, once", async () => {
     said.subscribe(async () => undefined);
     const quotes: (number | undefined)[] = [];
     events.subscribe((event) => {
@@ -486,7 +498,7 @@ describe("messagesSaid", () => {
 
     const quoted = lines().find((line) => line.key.endsWith("tg-0"))?.id;
     expect(quoted).toBeDefined();
-    expect(quotes).toEqual([undefined, quoted, quoted]);
+    expect(quotes).toEqual([undefined, quoted]);
   });
 
   it("hands nothing to a hook that left while its session opened", async () => {

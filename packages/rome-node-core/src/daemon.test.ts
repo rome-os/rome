@@ -17,6 +17,15 @@ import { decodeMeta, encodeFrame, encodeMeta, FRAME_TYPE, parseFrame } from "./f
 import { writePrivateJson } from "./storage.js";
 import { createExecutor } from "./executor.js";
 
+/** Records nothing. Tests of the audit log itself use a real AuditStore. */
+const noAudit = {
+  hint: "",
+  start: async () => 1,
+  end: () => {},
+  host: () => {},
+  status: async () => ({ state: "ok" as const }),
+};
+
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const clean of cleanup.splice(0).reverse()) await clean();
@@ -62,6 +71,7 @@ async function fixture(prepare?: (directory: string) => Promise<void>) {
   let callerSocket: WebSocket | undefined;
   const executor = createExecutor(
     "In-process device",
+    noAudit,
     (reply) => {
       callerSocket?.send(JSON.stringify({ id: reply.id, from: device, payload: reply.payload }));
       return true;

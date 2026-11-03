@@ -84,7 +84,7 @@ interface ConnectionView
   extends Required<
       Pick<ConnectionAccountFields, "channel" | "platform" | "account" | "link" | "severalAccounts">
     >,
-    Pick<ConnectionAccountFields, "agent"> {
+    Pick<ConnectionAccountFields, "agent" | "accountUnknown"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  connection kind the guardian has never connected (nothing to address or tear down
    *  yet; the connect setup mints the row). */
@@ -152,7 +152,7 @@ function buildConnectionView(
   conn: Connection,
   record: GrantValue | null,
   manager: SetupManager | null,
-  channel: string | null,
+  channel: { id: string; platformAccountId: string | null } | null,
   agent: string | null,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
@@ -185,9 +185,10 @@ function buildConnectionView(
     capabilities: wireCapabilities(conn.status()),
     connect: connectHint(conn.connectionKind),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
-    channel,
+    channel: channel?.id ?? null,
     platform: account?.platform ?? null,
     account,
+    ...(channel ? { accountUnknown: channel.platformAccountId === null } : {}),
     // Null means silent, so a connection kind that takes no link reports none.
     agent: link === null ? undefined : agent,
     link,
@@ -226,7 +227,7 @@ async function serializeConnection(
     conn,
     await loadGrant(registry, conn),
     manager,
-    channels.byConnection(conn.id)?.id ?? null,
+    channels.byConnection(conn.id) ?? null,
     accounts.agentOf(conn.id),
   );
 }
@@ -351,7 +352,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
           conn,
           record,
           deps.setupManager ?? null,
-          channels.byConnection(conn.id)?.id ?? null,
+          channels.byConnection(conn.id) ?? null,
           accounts.agentOf(conn.id),
         ),
         grantDetails: buildGrantDetails(conn, record),

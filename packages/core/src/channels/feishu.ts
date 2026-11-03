@@ -17,7 +17,7 @@ import { preserveMentionOnlyText } from "./mention-only.js";
 import { isLinkCodeMessage } from "./guardian-link-code.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
-import { refuseAttachments, textToSend } from "./send-refusals.js";
+import { refuseAttachments, replyToShaped, textToSend } from "./send-refusals.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type {
   ChannelMessage,
@@ -31,6 +31,8 @@ import type {
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
+/** A Feishu or Lark message id, such as `om_dc13264520392913993dd051dba21dcf`. */
+const FEISHU_MESSAGE_ID = /^om_[\w-]+$/;
 /** How long a group message waits on its name lookup. */
 const CHAT_NAME_TIMEOUT_MS = 5_000;
 /** How long a failed name lookup stands before the next message retries it. */
@@ -226,12 +228,13 @@ export class FeishuAdapter {
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     refuseAttachments("feishu", message);
     const text = textToSend("feishu", message);
+    const replyTo = replyToShaped("feishu", message.replyToMessageId, FEISHU_MESSAGE_ID);
     const threadId: string = chatId;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
-    const opts = message.replyToMessageId
+    const opts = replyTo
       ? {
-          replyTo: message.replyToMessageId,
+          replyTo,
           replyInThread: await this.repliesInThread(threadId),
         }
       : undefined;

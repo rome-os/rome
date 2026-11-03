@@ -11,13 +11,6 @@ export type {
   RoutineDraftSpec,
 } from "@rome-os/app-runtime";
 
-/** Marker core stores when a handoff specialist relays the guardian's verbal
- * approval of the standing submission. Only WebChat writes it, so it is not a
- * channel-facing {@link MessagePart}. */
-export interface HandbackApprovedPart {
-  type: "handback_approved";
-}
-
 /** Error core stores as a turn's assistant content when model resolution fails
  * before the turn runs. It carries the trace error event's fields. */
 export type StoredErrorPart = Pick<
@@ -67,7 +60,6 @@ export interface ReplyToPart {
 export type TranscriptPart =
   | Exclude<MessagePart, { type: "text" }>
   | WebchatTextPart
-  | HandbackApprovedPart
   | StoredErrorPart
   | TaskChatPart
   | ReplyToPart;

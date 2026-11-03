@@ -10,6 +10,7 @@ import { createTestDb, type TestDb } from "../../../../../packages/core/src/test
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 import { resolveProjectWorkingDirWithinRoot } from "../../../../../packages/core/src/webchat/projects.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
+import { fakeChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction } from "./index.js";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/migrations");
@@ -469,5 +470,33 @@ describe("skill_review", () => {
     ).execute({});
 
     expect(installCalls).toEqual([]);
+  });
+});
+
+describe("skill_review through Chats", () => {
+  it("reviews the most recently active dashboard chat, by its name", async () => {
+    const now = new Date();
+    const reads = fakeChatReads([
+      {
+        chat: { sessionId: "web-active", name: "Fix the deploy script" },
+        lines: [{ role: "user", content: "deploy", createdAt: now }],
+      },
+      {
+        chat: { sessionId: "group", channel: { name: "telegram", kind: "telegram" } },
+        lines: [{ role: "user", content: "hi", createdAt: now }],
+      },
+    ]);
+    const runCalls: Array<{ prompt: string }> = [];
+    const deps = makeDeps([{ type: "result", content: "done" }], runCalls);
+    Object.assign(deps.appContext, { repositories: { chats: reads } });
+
+    await createAction(actionConfig, deps).execute({});
+
+    expect(runCalls[0]?.prompt).toContain("web-active");
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({
+      reviewedSessionId: "web-active",
+      reviewedSessionName: "Fix the deploy script",
+    });
   });
 });
