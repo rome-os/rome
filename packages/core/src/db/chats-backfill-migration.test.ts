@@ -85,6 +85,10 @@ describe("0108 Chats backfill", () => {
     session.run("group", "Launch", "channel", "feishu", "oc_launch", "group", "Launch", null, null);
     session.run("thread", "Launch", "channel", "feishu", "omt_1", "group", null, "group", null);
     session.run("fork-1", "Fork", "fork", null, null, null, null, null, null);
+    // Rows an app opened without naming a type: the address tells a Telegram
+    // group from a direct message.
+    session.run("tg-dm", "Ada", "channel", "tg-sales", "55", null, null, null, null);
+    session.run("tg-group", "Club", "channel", "tg-sales", "-77", null, "Club", null, null);
     const row = sqlite.prepare(
       `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at, turn_id,
          input_state, platform_message_id, sender_id, sender_name, reply_to_platform_message_id,
@@ -255,8 +259,8 @@ describe("0108 Chats backfill", () => {
       .run();
     // The thread's first message reached Rome after the platform dated it.
     sqlite.prepare("UPDATE rome_sessions SET created_at = 550 WHERE id = 'thread'").run();
-    // The DM's first message came in the second its session was made.
-    sqlite.prepare("UPDATE rome_sessions SET created_at = 400 WHERE id = 'dm'").run();
+    // Support's first message came in the second its session was made.
+    sqlite.prepare("UPDATE rome_sessions SET created_at = 300 WHERE id = 'g-support'").run();
     migrate(sqlite);
   });
 
@@ -266,6 +270,8 @@ describe("0108 Chats backfill", () => {
       { platform: "feishu", key: "dm:bot:ou_wei", kind: "dm" },
       { platform: "telegram", key: "-42", kind: "group" },
       { platform: "feishu", key: "oc_launch", kind: "group" },
+      { platform: "telegram", key: "dm:111:55", kind: "dm" },
+      { platform: "telegram", key: "-77", kind: "group" },
     ]);
   });
 
@@ -280,6 +286,8 @@ describe("0108 Chats backfill", () => {
       { id: "g-sales", key: "-42", thread_id: null, account_id: "111" },
       { id: "g-support", key: "-42", thread_id: null, account_id: "222" },
       { id: "group", key: "oc_launch", thread_id: null, account_id: "bot" },
+      { id: "tg-dm", key: "dm:111:55", thread_id: null, account_id: "111" },
+      { id: "tg-group", key: "-77", thread_id: null, account_id: "111" },
       { id: "thread", key: "oc_launch", thread_id: "omt_1", account_id: "bot" },
     ]);
   });
@@ -362,10 +370,13 @@ describe("0108 Chats backfill", () => {
   it("keeps in view a first line dated before or in the second its session was made", () => {
     // Catch-up reads lines said after the speaker's second, so each migrated
     // speaker starts the second before its first line.
-    expect(all("SELECT id, created_at FROM rome_sessions WHERE id IN ('thread', 'dm')")).toEqual(
+    expect(
+      all("SELECT id, created_at FROM rome_sessions WHERE id IN ('thread', 'g-support', 'dm')"),
+    ).toEqual(
       expect.arrayContaining([
         { id: "thread", created_at: 499 },
-        { id: "dm", created_at: 399 },
+        { id: "g-support", created_at: 299 },
+        { id: "dm", created_at: 100 },
       ]),
     );
     expect(

@@ -28,7 +28,12 @@ SELECT
   -- record knows none, as the adapters name it.
   coalesce(c.`platform_account_id`, r.`source_channel`) AS `rome_end`,
   CASE WHEN r.`source_channel` = 'webchat' THEN r.`id`
-       WHEN coalesce(r.`source_thread_type`, '') IN ('group', 'channel') THEN r.`source_thread_id`
+       -- A row that names no type is a group, as the adapters open one,
+       -- unless its address says it is a direct message: Telegram's is the
+       -- other party's positive id, WhatsApp's is not a `@g.us` group.
+       WHEN (r.`source_thread_type` IN ('group', 'channel') OR (r.`source_thread_type` IS NULL
+         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'telegram' AND r.`source_thread_id` NOT GLOB '-*')
+         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'whatsapp' AND r.`source_thread_id` NOT GLOB '*@g.us'))) THEN r.`source_thread_id`
        WHEN coalesce(c.`platform`, r.`source_channel`) IN ('email', 'agents') THEN r.`source_thread_id`
        -- A direct message's key names both ends. Where the platform's id for
        -- it is the other party (Telegram, WhatsApp) that id is the other end;
@@ -44,7 +49,9 @@ SELECT
                 ORDER BY m.`created_at`, m.`rowid` LIMIT 1), r.`source_thread_id`) END
        END AS `key`,
   CASE WHEN r.`source_channel` <> 'webchat'
-        AND coalesce(r.`source_thread_type`, '') IN ('group', 'channel') THEN 'group'
+        AND (r.`source_thread_type` IN ('group', 'channel') OR (r.`source_thread_type` IS NULL
+         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'telegram' AND r.`source_thread_id` NOT GLOB '-*')
+         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'whatsapp' AND r.`source_thread_id` NOT GLOB '*@g.us'))) THEN 'group'
        ELSE 'dm' END AS `kind`,
   CASE WHEN r.`source_channel` = 'webchat' THEN r.`name` ELSE r.`source_thread_name` END AS `name`,
   r.`created_at` AS `created_at`,
