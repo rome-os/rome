@@ -38,9 +38,6 @@ function formatResultForAgent(result: ActionResult): string {
   if (result.status === "pending_interaction") {
     return `The action you requested was approved and now awaits the guardian in the "${result.interaction.appId}" interaction surface. The outcome will arrive as a new turn.`;
   }
-  if (result.status === "handoff") {
-    return `The action you requested was approved and control has been handed off to the "${result.handoff.appId}" app. The outcome will arrive as a new turn.`;
-  }
   if (result.status === "place_widget") {
     return `The action you requested was approved and executed; the "${result.placement.appId}" widget has been placed on the guardian's workspace.`;
   }

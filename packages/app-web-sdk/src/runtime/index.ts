@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
  * runtime SDK without introducing a package dependency between the two SDKs. */
 export type RomeSessionType =
   | "webchat"
+  /** A handoff chat from before handoffs were removed. Rome creates no new ones. */
   | "webchat_handoff"
   | "channel"
   | "action"

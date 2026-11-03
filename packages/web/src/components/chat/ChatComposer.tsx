@@ -9,11 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
@@ -165,18 +164,6 @@ export interface ChatComposerProps {
   onStop?: () => void;
   // Error banner above the input.
   streamError?: string | ChatErrorNotice | null;
-  // When a suspendable action has handed off to a sub-agent, the composer shows
-  // a banner naming who the guardian is now collaborating with. Turns route to
-  // that sub-agent server-side. When that sub-agent has a pending submission
-  // awaiting the guardian, `onApprove` is set and the banner gains an Approve
-  // button — the approval gate lives here, at the bottom of the surface, rather
-  // than as a widget interrupting the conversation flow. Replying instead asks
-  // the sub-agent for changes; abandoning is the "Cancel design" header control.
-  designingInteraction?: {
-    agentLabel: string;
-    onApprove?: () => void;
-    onCancel?: () => void;
-  } | null;
   // Why typing is off right now: a card in the transcript is the only way to
   // answer. While set, a locked strip with this text stands where the box
   // was, so the state reads at a glance. Null or undefined keeps the composer
@@ -236,7 +223,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     isStreaming = false,
     onStop,
     streamError,
-    designingInteraction = null,
     lockedReason = null,
     boxClassName,
     textOnly = false,
@@ -1090,11 +1076,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     ? (draftProject.displayName ?? getProjectDisplayName(draftProject.name))
     : getProjectDisplayName(draftProjectName);
 
-  // Live handoff (not the approve moment, which keeps its own banner). When set,
-  // it's the active chip in the row and supersedes the @agent chip — both would
-  // name the same specialist.
-  const collaborating =
-    designingInteraction && !designingInteraction.onApprove ? designingInteraction : null;
   // An in-flight upload renders the cancel control in this slot instead, so the
   // send label never has to describe one.
   const sendActionLabel = isStreaming
@@ -1105,28 +1086,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
 
   return (
     <>
-      {/* Approve moment: one segmented button group above the tray — a plain text
-          segment (the message) joined to a neutral outline Cancel and a primary
-          Approve. Neutral throughout except the single Approve CTA. */}
-      {designingInteraction?.onApprove && (
-        <ButtonGroup className="mb-2 w-full rounded-12 shadow-card-hover">
-          <ButtonGroupText className="min-w-0 flex-1 gap-2 border-border bg-surface px-3">
-            <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              <span>{designingInteraction.agentLabel}</span> submitted a result — approve it, or
-              reply to request changes
-            </span>
-          </ButtonGroupText>
-          {designingInteraction.onCancel && (
-            <Button variant="outline" size="sm" onClick={designingInteraction.onCancel}>
-              Cancel
-            </Button>
-          )}
-          <Button size="sm" onClick={designingInteraction.onApprove}>
-            Approve
-          </Button>
-        </ButtonGroup>
-      )}
       {streamError && (
         <ErrorEventView
           presentation="status"
@@ -1144,21 +1103,13 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           on overflow. */}
       <div className="relative z-0 -mb-8 flex items-center gap-2 overflow-x-auto rounded-t-16 border border-border bg-surface-muted/65 px-4 pb-10 pt-2 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden supports-[backdrop-filter]:bg-surface-muted/45 empty:hidden">
         {effectiveMention && (
-          // Its × cancels the live handoff while collaborating, otherwise clears
-          // a removable draft mention.
+          // Its × clears a removable draft mention.
           <AgentMentionChip
             mention={effectiveMention}
             pinned={pinnedAgentMention !== null}
             onRemove={
-              uploadInFlight
-                ? undefined
-                : collaborating
-                  ? collaborating.onCancel
-                  : pinnedAgentMention
-                    ? undefined
-                    : () => setDraftAgentMention(null)
+              uploadInFlight || pinnedAgentMention ? undefined : () => setDraftAgentMention(null)
             }
-            removeLabel={collaborating ? "Cancel collaboration" : undefined}
           />
         )}
         {draftSkill && (

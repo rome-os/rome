@@ -21,50 +21,7 @@ export const summonInputSchema = z.object({
     .describe(
       "Project directory the summoned agent works in: a path relative to the projects root " +
         "(e.g. `landingpage/content`) or an absolute path inside it. Must be an existing " +
-        "directory. Defaults to the calling session's project. Blocking summons only.",
-    ),
-  interactive: z
-    .boolean()
-    .optional()
-    .describe(
-      "Open the summon as a handoff instead of a blocking run: the caller suspends, the " +
-        "guardian collaborates with the summoned agent in a child session, and the call " +
-        "resolves when the agent hands back a result the guardian approves. Requires `render`.",
-    ),
-  handback: z
-    .object({
-      schema: z
-        .record(z.string(), z.unknown())
-        .describe(
-          "JSON Schema the handback artifact must satisfy. The summoned agent gets a " +
-            "`submit_output` tool validated against it; guardian approval of a valid " +
-            "submission resolves the call with that payload.",
-        ),
-      validate: z
-        .string()
-        .optional()
-        .describe(
-          "Action the host runs on each schema-valid submission for app-specific checks. " +
-            "Receives the candidate payload as input; must return { valid, errors? } in data. " +
-            "Fail-closed and must be read-only.",
-        ),
-    })
-    .optional()
-    .describe("Result contract the summoned agent must satisfy to hand control back"),
-  appId: z
-    .string()
-    .optional()
-    .describe(
-      "App that owns this handoff (required when `interactive`). Names the app the " +
-        "child conversation belongs to; the host install-checks it. The handoff does " +
-        "not mount a surface itself — the summoned agent brings one up via `show_app`.",
-    ),
-  handbackHint: z
-    .string()
-    .optional()
-    .describe(
-      "Appended to the resolution prompt the resumed caller receives; the literal token " +
-        "<childSessionId> is replaced with the handoff's child session id.",
+        "directory. Defaults to the calling session's project.",
     ),
 });
 
@@ -80,67 +37,23 @@ export interface SummonDeps {
 }
 
 /**
- * Creates the summon action, which spawns a subagent — either blocking (run the
- * agent loop to completion and return its reply) or interactive (suspend the
- * caller on a guardian conversation with the agent). A blocking run works in
- * `workingDir` when given, else in the calling session's project; the host
- * rejects a `workingDir` outside the projects root.
+ * Creates the summon action, which runs a subagent's loop to completion and
+ * returns its reply. The run works in `workingDir` when given, else in the
+ * calling session's project; the host rejects a `workingDir` outside the
+ * projects root.
  */
 export function createSummonAction(config: ActionConfig, deps: SummonDeps): Action {
   return defineAction({
     config,
     schema: summonInputSchema,
     execute: async (
-      { agentName, prompt, sessionId, workingDir, interactive, handback, appId, handbackHint },
+      { agentName, prompt, sessionId, workingDir },
       actionContext,
     ): Promise<ActionResult> => {
-      if (interactive && !appId) {
-        return {
-          status: "error",
-          error: "interactive summon requires an `appId` (the app that owns the handoff).",
-        };
-      }
-      if (interactive && workingDir !== undefined) {
-        return {
-          status: "error",
-          error: "`workingDir` applies to blocking summons only; omit it when `interactive`.",
-        };
-      }
-
-      const [resolvedAgentName, resolvedValidatorName] = await Promise.all([
-        deps.resolveArtifactReference({
-          kind: "agent",
-          value: agentName,
-        }),
-        handback?.validate
-          ? deps.resolveArtifactReference({
-              kind: "action",
-              value: handback.validate,
-            })
-          : undefined,
-      ]);
-      const resolvedHandback =
-        handback && resolvedValidatorName
-          ? { ...handback, validate: resolvedValidatorName }
-          : handback;
-
-      if (interactive) {
-        // The caller suspends on this directive; the host mints the child session
-        // and seeds `prompt` as the opening turn (payload.summary). No surface is
-        // mounted here — the summoned agent brings one up via `show_app` when it
-        // has something to show. Off-webchat, the shim relays `promptText` as prose.
-        return {
-          status: "handoff",
-          handoff: {
-            appId: appId!,
-            promptText: prompt,
-            agentName: resolvedAgentName,
-            payload: { summary: prompt },
-            handback: resolvedHandback,
-            handbackHint,
-          },
-        };
-      }
+      const resolvedAgentName = await deps.resolveArtifactReference({
+        kind: "agent",
+        value: agentName,
+      });
       const result = await executeSummon(
         deps,
         resolvedAgentName,
@@ -154,9 +67,9 @@ export function createSummonAction(config: ActionConfig, deps: SummonDeps): Acti
     // The "action" a summon routine fires is an agent run, where the real
     // payload is the prompt the agent will be handed. Surface it verbatim so the
     // guardian sees the instruction that will execute, not a paraphrase of it.
-    preview: ({ agentName, prompt, interactive }) => ({
+    preview: ({ agentName, prompt }) => ({
       kind: "generic",
-      title: interactive ? `Hand off to “${agentName}”` : `Run agent “${agentName}”`,
+      title: `Run agent “${agentName}”`,
       summary: prompt,
     }),
   });

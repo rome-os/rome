@@ -13,16 +13,13 @@ import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
 // Default agent identity for the public feed. The frozen snapshot doesn't carry
-// the guardian's chosen agent name, so the main session shows a neutral label;
-// handoff child sessions still resolve their own app icon + label from the
-// handoff blocks inside chat-view.
+// the guardian's chosen agent name, so the main session shows a neutral label.
 const PUBLIC_MAIN_IDENTITY: AgentIdentity = { name: "Rome", iconUrl: null };
 
 const NO_OP = () => {};
 
 export interface PublicChatProps {
-  // The flat snapshot messages (parent + handoff children), each tagged with
-  // its own sessionId.
+  // The flat snapshot messages, each tagged with its own sessionId.
   messages: ChatMessage[];
   mainSessionId: string;
   // Trace message id → prebuilt TraceSnapshot, served straight to the drawer.

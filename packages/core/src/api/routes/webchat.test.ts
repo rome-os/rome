@@ -3381,9 +3381,9 @@ describe("Webchat API", () => {
     expect(emptyRes.status).toBe(400);
   });
 
-  describe("suspensions (handoff + inline pending_interaction)", () => {
+  describe("suspensions (inline pending_interaction)", () => {
     // Drive the drain loop with a scripted event stream per turn so we can
-    // observe what the route does when an action returns a handoff / inline
+    // observe what the route does when an action returns an inline
     // tool_result, and how a later interaction_result re-drives the agent.
     function mockScriptedManager() {
       const sentTurns: AgentTurnInput[] = [];
@@ -3454,8 +3454,7 @@ describe("Webchat API", () => {
           (p) =>
             p &&
             typeof p === "object" &&
-            ((p as { type?: unknown }).type === "pending_interaction" ||
-              (p as { type?: unknown }).type === "handoff") &&
+            (p as { type?: unknown }).type === "pending_interaction" &&
             (p as { toolUseId?: unknown }).toolUseId === toolUseId,
         );
         if (card) return card as Record<string, unknown>;
@@ -3559,7 +3558,7 @@ describe("Webchat API", () => {
       expect(missing.status).toBe(404);
     });
 
-    const handoffEvents = (toolUseId: string) =>
+    const parkedEvents = (toolUseId: string) =>
       async function* () {
         // Mirror the real MCP facade tool_result shape: the action's JSON is
         // wrapped in a `[{ type: "text", text }]` content block, not handed back
@@ -3572,9 +3571,9 @@ describe("Webchat API", () => {
             {
               type: "text",
               text: JSON.stringify({
-                handoff: true,
-                appId: "workflow-studio",
-                agentName: "workflow-studio:workflow-planner",
+                pendingInteraction: true,
+                appId: "ask-user",
+                render: { kind: "inline", componentId: "question-card", props: {} },
               }),
             },
           ],
@@ -3582,197 +3581,9 @@ describe("Webchat API", () => {
         yield { type: "result", content: "" };
       };
 
-    it("snapshots a handoff card when an action returns a handoff", async () => {
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-1"));
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-
-      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "build me a daily digest workflow" }),
-      });
-      expect(res.status).toBe(200);
-
-      const card = await findCard(sessionId, "tu-park-1");
-      expect(card).toMatchObject({
-        type: "handoff",
-        toolUseId: "tu-park-1",
-        appId: "workflow-studio",
-        agentName: "workflow-studio:workflow-planner",
-      });
-    });
-
-    it("keeps real handoff history on its own clock without including it in parent summaries or cost reads", async () => {
-      rs.useFakeTimers({ toFake: ["Date"] });
-      rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-child-1"));
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-
-      const send = await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-      await drainTurn(app, send);
-      const card = await findCard(sessionId, "tu-child-1");
-      const childSessionId = card?.childSessionId as string;
-      expect(typeof childSessionId).toBe("string");
-      expect(childSessionId).not.toBe(sessionId);
-      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
-        type: "webchat_handoff",
-        parentSessionId: null,
-        agentName: "workflow-studio:workflow-planner",
-      });
-      await deps.webchatRepo.appendTraceBlocks({
-        messageId: "handoff-child-trace",
-        sessionId: childSessionId,
-        turnId: "child-turn",
-        startSeq: 0,
-        blocks: [{ type: "thinking", content: "Child-only trace payload" }],
-      });
-      await testDb.db
-        .update(romeAgentMessages)
-        .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
-        .where(eq(romeAgentMessages.sessionId, childSessionId));
-
-      const traceReads = rs.spyOn(deps.webchatRepo, "getTraceContents");
-      const descendantReads = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
-      const history = (await (
-        await app.request(`/chat/sessions/${sessionId}/messages`)
-      ).json()) as Array<{ id: string; role: string; content: string }>;
-      expect(JSON.stringify(history)).toContain(childSessionId);
-      expect(traceReads.mock.calls.map(([id]) => id)).toEqual([sessionId]);
-      const parentTrace = history.find((row) => row.role === "trace");
-      expect(parentTrace).toBeDefined();
-      await app.request(`/chat/messages/${parentTrace!.id}/content?includeSubagentUsage=true`);
-      expect(descendantReads.mock.calls.flatMap(([refs]) => refs)).toEqual([]);
-      traceReads.mockRestore();
-      descendantReads.mockRestore();
-
-      const childHistory = await (
-        await app.request(`/chat/sessions/${childSessionId}/messages`)
-      ).json();
-      expect(childHistory).toContainEqual(
-        expect.objectContaining({
-          id: "handoff-child-trace",
-          traceArchived: true,
-        }),
-      );
-      expect(
-        await (await app.request("/chat/messages/handoff-child-trace/content")).json(),
-      ).toEqual({ trace: null, traceArchived: true });
-    });
-
-    it("gives the handoff child the parent chat's device folder", async () => {
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-folder-child"));
-      const app = createWebchatRuntime(deps).routes;
-      const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
-      await deps.webchatRepo.createSession(
-        "folder-parent",
-        "Folder chat",
-        undefined,
-        "default",
-        null,
-        "default",
-        null,
-        "webchat",
-        null,
-        {},
-        folder,
-      );
-
-      await app.request("/chat/sessions/folder-parent/turns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-
-      const card = await findCard("folder-parent", "tu-folder-child");
-      const child = await deps.webchatRepo.getSession(card?.childSessionId as string);
-      expect(child?.type).toBe("webchat_handoff");
-      expect(child?.deviceFolder).toEqual(folder);
-    });
-
-    it("inherits handoff ownership without branch lineage and accepts its first send with a model selection", async () => {
-      await deps.settingsRepo.set("enableModelSelector", true);
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-owned-child"));
-      const app = createWebchatRuntime(deps).routes;
-      const owner = {
-        kind: "visitor" as const,
-        accountId: "handoff-owner",
-        email: "owner@example.com",
-      };
-      const sessionId = await runWithSessionActor(owner, () => newSession(app));
-      const parentSend = await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-      expect(parentSend.status).toBe(200);
-      await drainTurn(app, parentSend);
-      const card = await findCard(sessionId, "tu-owned-child");
-      const childSessionId = card?.childSessionId as string;
-      expect(typeof childSessionId).toBe("string");
-      expect(await deps.webchatRepo.getSessionOwnerKey(childSessionId)).toBe(
-        "visitor:handoff-owner",
-      );
-
-      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
-      const findReusableSession = rs
-        .spyOn(deps.sessionManager, "findReusableSession")
-        .mockResolvedValue(undefined);
-      ctl.setEvents(async function* () {
-        yield { type: "result", content: "Ready to plan." };
-      });
-      const childSend = await app.request(`/chat/sessions/${childSessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "start planning", largeModelSelection: "gpt-5-6-sol" }),
-      });
-      expect(childSend.status).toBe(200);
-      expect(findReusableSession).not.toHaveBeenCalled();
-      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
-        expect.objectContaining({ agentName: "workflow-studio:workflow-planner" }),
-        expect.objectContaining({ selectionId: "gpt-5-6-sol" }),
-      );
-      await drainTurn(app, childSend);
-      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
-        type: "webchat_handoff",
-        parentSessionId: null,
-        largeModelSelection: "gpt-5-6-sol",
-      });
-    });
-
-    it("keeps spawned handoff sessions out of the top-level session list", async () => {
-      const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-hidden-1"));
-      const app = createWebchatRuntime(deps).routes;
-      const sessionId = await newSession(app);
-
-      await app.request(`/chat/sessions/${sessionId}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "design a workflow" }),
-      });
-      const card = await findCard(sessionId, "tu-hidden-1");
-      const childSessionId = card?.childSessionId as string;
-      expect(childSessionId).toBeDefined();
-
-      const listRes = await app.request("/chat/sessions");
-      const ids = ((await listRes.json()) as Array<{ id: string }>).map((s) => s.id);
-      expect(ids).toContain(sessionId);
-      expect(ids).not.toContain(childSessionId);
-    });
-
     it("re-drives the calling agent with the artifact when the surface resolves", async () => {
       const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-2"));
+      ctl.setEvents(parkedEvents("tu-park-2"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
@@ -3825,7 +3636,7 @@ describe("Webchat API", () => {
 
     it("ignores a reply on an interaction resolution", async () => {
       const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-reply"));
+      ctl.setEvents(parkedEvents("tu-park-reply"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
       await app.request(`/chat/sessions/${sessionId}/turns`, {
@@ -3856,7 +3667,7 @@ describe("Webchat API", () => {
 
     it("frames a dismissal so the agent does not retry", async () => {
       const ctl = mockScriptedManager();
-      ctl.setEvents(handoffEvents("tu-park-3"));
+      ctl.setEvents(parkedEvents("tu-park-3"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
@@ -4009,9 +3820,8 @@ describe("Webchat API", () => {
       );
     });
 
-    // An inline component goes through the same suspension lifecycle as a
-    // handoff — toolUseId-keyed card and resolution — but keeps its own
-    // `pending_interaction` part type and spawns no child session.
+    // An app's inline component: a toolUseId-keyed `pending_interaction` card
+    // the guardian resolves in place.
     const inlineRenderEvents = (
       toolUseId: string,
       appId: string,
@@ -4068,7 +3878,7 @@ describe("Webchat API", () => {
       );
     });
 
-    it("snapshots an inline pending_interaction card with no child session", async () => {
+    it("snapshots an inline pending_interaction card", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(inlineRenderEvents("tu-inline-1", "ask-user", "question-card"));
       const app = createWebchatRuntime(deps).routes;
@@ -4087,8 +3897,6 @@ describe("Webchat API", () => {
         appId: "ask-user",
         render: { kind: "inline", componentId: "question-card" },
       });
-      // Inline interactions resolve in-place — no spawned design session.
-      expect(card?.childSessionId).toBeUndefined();
     });
 
     it("does not persist an inline render whose component the app never declared (fail closed)", async () => {

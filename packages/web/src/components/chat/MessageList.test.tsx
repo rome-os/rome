@@ -19,9 +19,6 @@ rs.mock("@/components/chat/TurnFeedbackButtons", () => ({
   TurnFeedbackButtons: () => null,
 }));
 import {
-  findActiveSubmission,
-  findLastSubmission,
-  hasPendingApprovalConfirmation,
   MessageList,
   type BlockActions,
   type LivePreview,
@@ -36,17 +33,6 @@ import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 afterEach(() => cleanup());
 
 let seq = 0;
-function assistantSubmission(name: string): ChatMessage {
-  seq += 1;
-  return {
-    id: `a-${seq}`,
-    sessionId: "s-1",
-    role: "assistant",
-    content: JSON.stringify([{ type: "submission_card", payload: { name } }]),
-    createdAt: "2026-06-13T00:00:00.000Z",
-  };
-}
-
 function humanReply(text: string): ChatMessage {
   seq += 1;
   return {
@@ -57,111 +43,6 @@ function humanReply(text: string): ChatMessage {
     createdAt: "2026-06-13T00:00:00.000Z",
   };
 }
-
-// The marker the host snapshots when the borrowed agent relays a verbal "yes"
-// via confirm_output.
-function handbackApproved(): ChatMessage {
-  seq += 1;
-  return {
-    id: `a-${seq}`,
-    sessionId: "s-1",
-    role: "assistant",
-    content: JSON.stringify([{ type: "handback_approved" }]),
-    createdAt: "2026-06-13T00:00:00.000Z",
-  };
-}
-
-// The approval-resolution turn the host posts when Approve is clicked: an
-// interaction_result with no text the human typed.
-function approvalResolution(): ChatMessage {
-  seq += 1;
-  return {
-    id: `u-${seq}`,
-    sessionId: "s-1",
-    role: "user",
-    content: JSON.stringify([
-      { type: "interaction_result", toolUseId: "t-1", output: { approved: true } },
-    ]),
-    createdAt: "2026-06-13T00:00:00.000Z",
-  };
-}
-
-// findActiveSubmission is what gates the composer's Approve button: it returns
-// the submission the guardian can currently approve, or null when there is none
-// (so the button stays hidden).
-describe("findActiveSubmission", () => {
-  it("returns the submission while the agent has submitted and no reply followed", () => {
-    const active = findActiveSubmission([assistantSubmission("Morning digest")]);
-    expect(active?.payload).toEqual({ name: "Morning digest" });
-  });
-
-  it("returns null once the human replies asking for changes", () => {
-    const active = findActiveSubmission([
-      assistantSubmission("Morning digest"),
-      humanReply("send it to Slack, not email"),
-    ]);
-    expect(active).toBeNull();
-  });
-
-  it("returns the newest submission after a re-submission", () => {
-    const active = findActiveSubmission([
-      assistantSubmission("First draft"),
-      humanReply("send it to Slack, not email"),
-      assistantSubmission("Second draft"),
-    ]);
-    expect(active?.payload).toEqual({ name: "Second draft" });
-  });
-
-  it("returns null when there is no submission at all", () => {
-    expect(findActiveSubmission([humanReply("hi")])).toBeNull();
-  });
-
-  it("stays active through an interaction_result that carries no human text", () => {
-    // The resolution turn (interaction_result only) must not be mistaken for a
-    // change request — otherwise it would suppress the very submission it
-    // resolves while approval is still in flight.
-    const active = findActiveSubmission([
-      assistantSubmission("Morning digest"),
-      approvalResolution(),
-    ]);
-    expect(active?.payload).toEqual({ name: "Morning digest" });
-  });
-});
-
-// The verbal-approval gate: a `handback_approved` marker ships the standing
-// submission (findLastSubmission), which the guardian's "yes" reply had
-// superseded for the button — so we deliberately ignore supersede here.
-describe("verbal approval (confirm_output) gate", () => {
-  it("ships the standing submission even though the guardian's 'yes' superseded it for the button", () => {
-    const messages = [
-      assistantSubmission("Morning digest"),
-      humanReply("yes, ship it"),
-      handbackApproved(),
-    ];
-    // The button is gone (reply superseded it)...
-    expect(findActiveSubmission(messages)).toBeNull();
-    // ...but the confirmation pins the last submission for resolution.
-    expect(hasPendingApprovalConfirmation(messages)).toBe(true);
-    expect(findLastSubmission(messages)).toEqual({ name: "Morning digest" });
-  });
-
-  it("does not fire when the agent went back to refining after the marker", () => {
-    // A fresh submission after a (stale) confirmation means the agent is
-    // presenting a new candidate, not shipping — the marker must not resolve.
-    const messages = [
-      assistantSubmission("First"),
-      handbackApproved(),
-      humanReply("actually change the time"),
-      assistantSubmission("Second"),
-    ];
-    expect(hasPendingApprovalConfirmation(messages)).toBe(false);
-  });
-
-  it("is inert with no submission to confirm", () => {
-    expect(hasPendingApprovalConfirmation([handbackApproved()])).toBe(true);
-    expect(findLastSubmission([handbackApproved()])).toBeNull();
-  });
-});
 
 // A running turn whose row carries an inline question card. The card lives in the
 // transcript row from the moment it persists, so the streaming→settled flip is a

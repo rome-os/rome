@@ -8,8 +8,7 @@ import { ComposerChip } from "./ComposerChip";
 export interface AgentMentionChipProps {
   mention: AgentMention;
   pinned: boolean;
-  // The × shows whenever this is provided; the caller decides what it does
-  // (clear a draft mention, or cancel a live handoff).
+  // The × shows whenever this is provided; the caller decides what it does.
   onRemove?: () => void;
   removeLabel?: string;
 }

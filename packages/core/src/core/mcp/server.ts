@@ -8,7 +8,7 @@ import {
 } from "../mcp-facade.js";
 import type { ModelToolCallContext } from "../agent-runner.js";
 
-export type RomeMcpGroup = "actions" | "subagents" | "skills" | "output" | "ask_user";
+export type RomeMcpGroup = "actions" | "subagents" | "skills" | "ask_user";
 
 export interface RomeMcpToolDefinition {
   name: string;
@@ -34,8 +34,6 @@ function toolsForGroup(bundle: FacadeBundle, group: RomeMcpGroup): FacadeToolDef
       return bundle.subagents;
     case "skills":
       return bundle.skills;
-    case "output":
-      return bundle.submitOutput;
     case "ask_user":
       return bundle.interactiveTools;
   }
@@ -52,10 +50,8 @@ export function createRomeMcpServerForSession(params: ModelSessionForkOpenParams
     getActionCatalog: params.getActionCatalog,
     getSkillCatalog: params.getSkillCatalog,
     subagentTools: params.subagentTools,
-    handback: params.handback,
     executeAction: params.executeAction,
     executeSubagent: params.executeSubagent,
-    executeSubmitOutput: params.executeSubmitOutput,
     supportsInteractiveSurface: params.supportsInteractiveSurface,
     interactiveSurfaceDetached: params.interactiveSurfaceDetached,
     executeDefer: params.executeDefer,
