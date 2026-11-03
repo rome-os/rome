@@ -13,6 +13,8 @@ import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { applyGuardianProfile } from "../lib/guardian-profile.js";
+import { type AppChatReadsDeps, appChatReads } from "./chat-reads.js";
+import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
@@ -21,6 +23,11 @@ export interface CreateAppRuntimeRepositoriesDeps {
   chatRepo: ChatsByKey;
   /** Where a message an app sent is put on record. */
   chatMessages: Pick<MessageRepository, "recordSent">;
+  /** Chats, read and written for apps. Given, an app reads its chats
+   *  through `recentChats`, `transcript` and `traces`, and its lines go on
+   *  record in Chats: `addMessage`, `promoteMessageToUser`, `send` and
+   *  `sendEmail`. The Chats switch passes it. */
+  inChats?: { reads: AppChatReadsDeps; writes: Omit<AppChatWritesDeps, "open"> };
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -29,7 +36,14 @@ export interface CreateAppRuntimeRepositoriesDeps {
 export function createAppRuntimeRepositories(
   deps: CreateAppRuntimeRepositoriesDeps,
 ): AppRuntimeRepositories {
-  const chats = createChatRepository(deps.webchatRepo, deps.chatRepo, deps.chatMessages);
+  const legacy = createChatRepository(deps.webchatRepo, deps.chatRepo, deps.chatMessages);
+  const chats: ChatRepository = deps.inChats
+    ? {
+        ...legacy,
+        ...appChatReads(deps.inChats.reads),
+        ...appChatWrites({ ...deps.inChats.writes, open: legacy.ensureChannelChat }),
+      }
+    : legacy;
   return {
     settings: createAppSettingsRepository(deps.settingsRepo),
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),

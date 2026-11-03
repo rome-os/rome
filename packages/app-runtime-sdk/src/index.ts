@@ -2,7 +2,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
-import type { MessageRef, Place } from "./chats.js";
+import type { ChatReads, MessageRef, Place } from "./chats.js";
 
 export { z };
 export type { JSONSchema };
@@ -2336,7 +2336,7 @@ export interface EnsureChannelChatInput {
   projectPath?: string;
 }
 
-export interface ChatRepository {
+export interface ChatRepository extends Partial<ChatReads> {
   ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
   /** @deprecated Use `ensureChannelChat`, which does the same. */
   ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;
@@ -2351,6 +2351,53 @@ export interface ChatRepository {
     createdAt?: Date;
   }): Promise<{ inserted: boolean }>;
   promoteMessageToUser(sessionId: string, platformMessageId: string): Promise<void>;
+  /**
+   * Say a message where session `sessionId` stands, as its account on
+   * `channel`: the host sends it through the chat's adapter, records it once
+   * the platform took it, and makes it turn `turnId`'s answer when the turn
+   * knows it (`knownToProvider`). `content` is the line as it goes on record,
+   * as JSON parts, when it says more than the platform shows. Throws the
+   * platform's refusal, and records nothing then. Answers the platform's id
+   * for the message, when it gave one. Absent on a host that does not keep
+   * chats in Chats yet; use `recordOutboundMessage` after sending there.
+   */
+  send?(input: {
+    sessionId: string;
+    channel: string;
+    text?: string;
+    parts?: MessagePart[];
+    attachments?: OutgoingAttachment[];
+    content?: string;
+    replyToPlatformMessageId?: string;
+    turnId?: string;
+    knownToProvider: boolean;
+  }): Promise<{ messageId?: string }>;
+  /**
+   * Send an email as Rome's account on `channel`, on thread `threadId`, or
+   * on a new thread when none is named, through the account's chat adapter,
+   * and record it once in the thread's chat: as session `sessionId`'s when
+   * one is named, else main's there, which joins when it is not there yet.
+   * It is turn `turnId`'s answer when the turn knows it (`knownToProvider`).
+   * Throws the provider's refusal, and records nothing then. Answers the
+   * provider's ids for the message and its thread. Absent where `send` is.
+   */
+  sendEmail?(input: {
+    channel: string;
+    threadId?: string;
+    sessionId?: string;
+    text?: string;
+    parts?: MessagePart[];
+    /** The line as it goes on record, as JSON parts. */
+    content?: string;
+    email: Omit<
+      OutgoingEmailMessage,
+      "kind" | "text" | "parts" | "attachments" | "replyToMessageId" | "turnId"
+    >;
+    turnId?: string;
+    knownToProvider: boolean;
+  }): Promise<{ messageId: string | null; threadId: string }>;
+  /** @deprecated A host that keeps chats in Chats records what `send` and
+   *  `sendEmail` send; this is for one that does not yet. */
   recordOutboundMessage(input: {
     sessionId: string;
     content: string;
