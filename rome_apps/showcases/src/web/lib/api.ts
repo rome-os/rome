@@ -19,7 +19,6 @@ export interface SourceSession {
   projectPath: string | null;
   agentName: string | null;
   createdAt: string;
-  traceCount: number;
 }
 
 export interface TraceListItem {
