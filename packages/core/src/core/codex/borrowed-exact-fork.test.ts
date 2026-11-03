@@ -103,14 +103,13 @@ describe("createBorrowedExactForkSession", () => {
   // A webchat-sourced exact fork opens with supportsInteractiveSurface: true
   // (the advertised catalog must stay byte-identical to the source) and
   // interactiveSurfaceDetached: true (nothing drains the fork stream to mount
-  // cards or resolve handbacks). The borrowed turn's dynamic-tool runtime must
+  // cards). The borrowed turn's dynamic-tool runtime must
   // carry the detached flag through, or the interactive tools claim UI was
   // delivered that no one will ever see. Facade-level detached behavior is
   // covered in mcp-facade.routine-draft.test.ts; this pins the wire-through.
   it("keeps a webchat-sourced fork's interactive dynamic tools detached", async () => {
     let advertised: readonly string[] = [];
     let askRes: RomeDynamicToolCallResult | undefined;
-    let confirmRes: RomeDynamicToolCallResult | undefined;
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
       forkSessionId: "fork-session",
@@ -118,7 +117,6 @@ describe("createBorrowedExactForkSession", () => {
       openParams: openParams({
         supportsInteractiveSurface: true,
         interactiveSurfaceDetached: true,
-        handback: { schema: { type: "object", properties: {} } },
       }),
       runExclusive: async (work) => await work(),
       runTurn: async (_input, runtime) => {
@@ -126,7 +124,6 @@ describe("createBorrowedExactForkSession", () => {
         askRes = await runtime.romeTools.callTool("ask_question", {
           questions: [{ id: "city", question: "Which city?", type: "text" }],
         });
-        confirmRes = await runtime.romeTools.callTool("confirm_output", {});
         runtime.sink.push({ type: "result", content: "done" });
       },
       revertTurn: async () => undefined,
@@ -142,16 +139,11 @@ describe("createBorrowedExactForkSession", () => {
     await session.close();
 
     // Prefix identity: the full interactive catalog stays advertised.
-    expect(advertised).toEqual(
-      expect.arrayContaining(["ask_question", "propose_routine", "confirm_output"]),
-    );
+    expect(advertised).toEqual(expect.arrayContaining(["ask_question", "propose_routine"]));
     // Runtime honesty: ask_question relays prose instead of parking the
-    // turn on a card no drain will mount ...
+    // turn on a card no drain will mount.
     expect(askRes!.traceOutput.content[0].text).not.toContain("pendingInteraction");
     expect(askRes!.traceOutput.content[0].text).toContain("Which city?");
-    // ... and confirm_output refuses instead of claiming a handback shipped.
-    expect(confirmRes!.traceOutput.isError).toBe(true);
-    expect(confirmRes!.traceOutput.content[0].text).toContain("nothing was shipped");
   });
 
   it("reports the input when it is sent, before it waits for the source's turns", async () => {

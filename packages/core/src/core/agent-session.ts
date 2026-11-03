@@ -101,7 +101,6 @@ import type {
   SubagentExecutionService,
 } from "./subagent-execution.js";
 import {
-  compileJsonSchema,
   compileOutputSchema,
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
@@ -318,17 +317,6 @@ export interface AgentSessionInit {
    * connection's provider-session reset policy applies before the session opens.
    */
   applyProviderSessionReset?: boolean;
-  /**
-   * Session-scoped handback contract for a handoff child conversation
-   * (handoff + interactive summon). Exposes the `submit_output` tool validated
-   * against `schema` on every turn, WITHOUT the per-turn fail-closed rule that
-   * agent-declared `outputSchema` carries — turns may end freely; a submission
-   * is the conversation's candidate handback, not the turn's required
-   * terminal. `validate` optionally names an action the host runs on each
-   * schema-valid submission for app-specific semantic checks (fail-closed).
-   * It cannot be combined with an agent-declared `outputSchema`.
-   */
-  handback?: { schema: Record<string, unknown>; validate?: string };
 }
 
 export interface AgentTurnInput {
@@ -857,7 +845,7 @@ interface OpenOptions {
 
 /**
  * Identity + routing for tool executions on one logical turn owner. openSession
- * builds the execute callbacks (actions, subagents, submit_output, defer)
+ * builds the execute callbacks (actions, subagents, defer)
  * through these refs so one set of semantics serves two owners: the live
  * session (refs bound to the impl's current turn) and each exact-mode forked
  * turn (refs bound to the fork's own session/turn ids and outbound stream —
@@ -892,8 +880,6 @@ interface TurnExecRefs {
    * would contaminate the same provider thread the source resumes later.
    */
   childChannelThreadKey: string;
-  /** Exactly-once capture of a submit_output payload for the owning turn. */
-  captureSubmittedOutput: (payload: unknown) => boolean;
   /** Attach the Child execution to this owner's provider tool call. */
   attachSubagentExecution: (toolUseId: string, execution: SubagentExecution) => void;
   /** Bind an async tool callback into the owner's OTel context. */
@@ -1108,14 +1094,6 @@ async function openSession(
     warnOnConversationMismatch(key, sessionId, resumeResult?.chatId, requestedRomeSessionId);
   }
 
-  if (config.outputSchema && init.handback) {
-    throw new Error(
-      `Agent ${key.agentName} cannot combine provider outputSchema with a conversational handback`,
-    );
-  }
-  const conversationalHandback = init.handback;
-  // Compile both boundaries once. Provider output uses portable-v1; handback
-  // remains an internal UI contract and may use general JSON Schema.
   let structuredOutputValidator: CompiledOutputSchema | undefined;
   if (config.outputSchema) {
     try {
@@ -1123,18 +1101,6 @@ async function openSession(
     } catch (err) {
       throw new Error(
         `Agent ${key.agentName} declares an invalid outputSchema: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-  let handbackValidator: CompiledOutputSchema | undefined;
-  if (conversationalHandback) {
-    try {
-      handbackValidator = compileJsonSchema(conversationalHandback.schema);
-    } catch (err) {
-      throw new Error(
-        `Agent ${key.agentName} declares an invalid handback schema: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -1173,11 +1139,7 @@ async function openSession(
   ]
     .filter((section): section is string => !!section)
     .join("\n\n---\n\n");
-  const systemPrompt = conversationalHandback
-    ? baseSystemPrompt +
-      "\n\n--- Result contract ---\n" +
-      "A `submit_output` tool is available. Calling it is how you present a finished result for the guardian's approval — it surfaces an Approve control to them. So the moment you have a result you'd show them for sign-off, call `submit_output` once with it (matching the declared schema) AS you tell them it's ready and ask if they'd like any changes. Do NOT wait for the guardian to say 'yes' or 'it's done' first — submitting is what asks. Until you have something worth reviewing, converse normally; turns may end without calling it. The guardian then either clicks Approve, or approves in words. If they reply with changes, keep refining and call `submit_output` again when the updated result is ready. If they reply with an UNAMBIGUOUS approval of what you submitted (e.g. \"yes\", \"ship it\", \"looks good\", \"go ahead\"), call the `confirm_output` tool — that ships the result you last submitted, exactly as if they had clicked Approve. Only call `confirm_output` after a submit_output and only on a clear approval; for a question or any requested change, do not call it."
-    : baseSystemPrompt;
+  const systemPrompt = baseSystemPrompt;
 
   // The registry's `getForAgent` is the single resolution point for what this
   // agent may call — its allow-list, or everything for "*". Both the model-facing catalog and the execution gate
@@ -1266,14 +1228,13 @@ async function openSession(
     getTurnId: () => impl.currentTurnId,
     getThreadContext: () => impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
-    // Action results that hand back UI (pending_interaction, handoff,
+    // Action results that hand back UI (pending_interaction,
     // place_widget) read this, not the facade flag on ModelSessionParams. A
     // detached session must degrade both, or the agent still parks on a
     // component nobody can mount. Same combination an exact fork runs with.
     supportsInteractiveSurface: supportsInteractiveSurface && !init.interactiveSurfaceDetached,
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
-    captureSubmittedOutput: (payload) => impl.captureSubmittedOutput(payload),
     attachSubagentExecution: (toolUseId, execution) =>
       impl.addSubagentExecution(toolUseId, execution),
     bindTurnCtx: inCurrentTurnCtx,
@@ -1338,37 +1299,6 @@ async function openSession(
               `Their response will arrive as the next turn's prompt — do not call any further tools ` +
               `or send another message until then. When you reply, describe only what this step does; ` +
               `do not claim any later step has already happened.`,
-          };
-        }
-        if (result.status === "handoff") {
-          const { appId, promptText, agentName, payload, handback, handbackHint } = result.handoff;
-          // Off-webchat (messaging channel), inside a subagent, or on a forked
-          // turn: nothing can run a handoff. Fall back to relaying the prompt
-          // as prose, same as above.
-          if (!refs.supportsInteractiveSurface) {
-            return {
-              message:
-                "This surface cannot render an interactive UI. Ask the guardian the " +
-                "following as a plain message, then wait for their reply before doing " +
-                `anything else:\n\n${promptText}`,
-            };
-          }
-          // Webchat: the drain loop persists a handoff card keyed by toolUseId and
-          // mints the child session. The handoff mounts no surface itself — the
-          // summoned agent brings one up via `show_app`. handback/handbackHint ride
-          // on the tool_result so the drain loop can stamp the child session's
-          // contract and the card's hint — the model-facing `message` is unchanged.
-          return {
-            handoff: true,
-            appId,
-            agentName,
-            payload,
-            handback,
-            handbackHint,
-            message:
-              `Control has been handed off to the "${appId}" surface. ` +
-              `The guardian will work there and the outcome (the handed-back artifact, or a dismissal) will arrive as a new turn. ` +
-              `Do NOT call any further tools or send another message until then.`,
           };
         }
         if (result.status === "place_widget") {
@@ -1460,103 +1390,6 @@ async function openSession(
       );
   const executeDefer = deferEnabled ? makeExecuteDefer(sessionExecRefs) : undefined;
 
-  const makeExecuteSubmitOutput =
-    (refs: TurnExecRefs) =>
-    async (input: unknown): Promise<unknown> =>
-      refs.bindTurnCtx(async () => {
-        if (!conversationalHandback) {
-          throw new Error("submit_output is not configured for this session");
-        }
-        // A handback submission is a UI act: the webchat drain persists a
-        // submission_card off the live session's stream and the guardian
-        // approves it there. Nothing drains a forked turn's stream, so
-        // accepting here would tell the model a review is pending that can
-        // never happen. Reject before validation and capture.
-        if (!refs.supportsInteractiveSurface) {
-          return {
-            ok: false,
-            error:
-              "This turn has no guardian approval surface — the submission cannot be shown or reviewed.",
-            hint: "Do not call submit_output again. End the turn with the result stated as plain text instead.",
-          };
-        }
-        // Schema validation first — failure is a tool error the agent must
-        // fix and retry. Do not capture or emit anything; the turn stays open.
-        if (handbackValidator && !handbackValidator.validate(input)) {
-          const issues = formatOutputSchemaErrors(handbackValidator.validate.errors);
-          return {
-            ok: false,
-            error: "Payload does not match this conversation's handback schema",
-            issues,
-            hint: "Fix the listed issues and call submit_output again.",
-          };
-        }
-        // App-specific semantic gate, after the schema and before the
-        // exactly-once capture (a bounced submission must not consume the
-        // once). Fail closed: a validator that errors, throws, or returns a
-        // malformed verdict rejects the submission — never waves it through.
-        if (conversationalHandback.validate) {
-          let verdict: { valid: boolean; errors?: string[] };
-          try {
-            const res = await deps.actionEngine.run(
-              conversationalHandback.validate,
-              input as Record<string, unknown>,
-              {
-                initiator: "system:handback-validate",
-                sessionId: refs.sessionId,
-                agentName: key.agentName,
-                channelThreadKey: key.channelThreadKey,
-                turnId: refs.getTurnId(),
-              },
-            );
-            if (res.status !== "ok") {
-              const reason = res.status === "error" ? res.error : `status ${res.status}`;
-              verdict = { valid: false, errors: [`validator failed: ${reason}`] };
-            } else {
-              const data = res.data as { valid?: unknown; errors?: unknown } | undefined;
-              verdict =
-                typeof data?.valid === "boolean"
-                  ? {
-                      valid: data.valid,
-                      errors: Array.isArray(data.errors) ? data.errors.map(String) : undefined,
-                    }
-                  : { valid: false, errors: ["validator returned no { valid } verdict"] };
-            }
-          } catch (err) {
-            verdict = {
-              valid: false,
-              errors: [`validator failed: ${err instanceof Error ? err.message : String(err)}`],
-            };
-          }
-          if (!verdict.valid) {
-            return {
-              ok: false,
-              error: "Payload failed this conversation's validation",
-              issues: verdict.errors ?? [],
-              hint: "Fix the listed issues and call submit_output again. The submission was not accepted.",
-            };
-          }
-        }
-        // Exactly-once: reject a second submission within the same turn so
-        // the agent can't silently overwrite an accepted payload.
-        const accepted = refs.captureSubmittedOutput(input);
-        if (!accepted) {
-          return {
-            ok: false,
-            error: "submit_output was already called this turn",
-            hint: "Do not call submit_output again. End the turn now.",
-          };
-        }
-        return {
-          ok: true,
-          message:
-            "Submission accepted and shown to the guardian for approval. End your turn with a one-line note that the result is awaiting their review; if they want changes, their feedback arrives as the next turn.",
-        };
-      });
-  const executeSubmitOutput = conversationalHandback
-    ? makeExecuteSubmitOutput(sessionExecRefs)
-    : undefined;
-
   const makeExecuteSubagent =
     (refs: TurnExecRefs) =>
     async (name: string, input: unknown, toolContext: ModelToolCallContext): Promise<unknown> =>
@@ -1623,7 +1456,6 @@ async function openSession(
     getSkillCatalog,
     subagentTools,
     outputSchema: config.outputSchema,
-    handback: conversationalHandback,
     builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
     maxTurns: config.maxTurns,
     reasoningEffort,
@@ -1636,7 +1468,6 @@ async function openSession(
     providerThreadId: resumeProviderId === resolution.modelProvider.id ? resumeThreadId : undefined,
     executeAction,
     executeSubagent,
-    executeSubmitOutput,
     executeDefer,
     routineActivation,
     supportsInteractiveSurface,
@@ -1775,7 +1606,7 @@ async function openSession(
       getThreadContext: () => fork.threadContext ?? init.threadContext,
       getSharedContext: () => init.sharedContext,
       // Nothing drains a fork stream into webchat, so interactive action
-      // results (pending_interaction / handoff / place_widget) must take the
+      // results (pending_interaction / place_widget) must take the
       // prose fallbacks — otherwise the tool_result claims a card was shown
       // while nothing mounted and the fork dead-ends.
       supportsInteractiveSurface: false,
@@ -1789,7 +1620,6 @@ async function openSession(
         return forkChildManager;
       },
       childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
-      captureSubmittedOutput: () => false,
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
           parent: {
@@ -1818,7 +1648,6 @@ async function openSession(
         model: fork.model,
         executeAction: makeExecuteAction(refs),
         executeSubagent: makeExecuteSubagent(refs),
-        executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
         sessionTools: liveOpenParams.sessionTools
           ? detachSessionTools(liveOpenParams.sessionTools)
@@ -2075,8 +1904,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * True when a tool result parked the turn on a pending interaction, approval,
- * or handoff. Facade results may reach us directly, JSON-encoded, or wrapped
+ * True when a tool result parked the turn on a pending interaction or an
+ * approval. Facade results may reach us directly, JSON-encoded, or wrapped
  * in an MCP text-content array, so normalize all three shapes.
  */
 function toolResultSuspendsTurn(output: unknown): boolean {
@@ -2096,10 +1925,7 @@ function toolResultSuspendsTurn(output: unknown): boolean {
       return false;
     }
   }
-  return (
-    isRecord(value) &&
-    (value.pendingInteraction === true || value.pendingApproval === true || value.handoff === true)
-  );
+  return isRecord(value) && (value.pendingInteraction === true || value.pendingApproval === true);
 }
 
 function validateProviderStructuredResult(
@@ -2213,8 +2039,6 @@ class AgentSessionImpl implements AgentSession {
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
-  /** Exactly-once submission for the current conversational handback turn. */
-  private submittedOutputTurnId?: string;
   // Spans for the current turn. Both are opened in runOneTurn and closed in
   // runEventsLoop when the terminal `result`/`error` message lands, so the
   // trace contract is complete by the time the sink closes (i.e. before
@@ -3116,24 +2940,6 @@ class AgentSessionImpl implements AgentSession {
     };
   }
 
-  /** Capture and publish one schema-valid handback submission per turn. */
-  captureSubmittedOutput(payload: unknown): boolean {
-    const turnId = this.currentTurnId;
-    if (!turnId) {
-      log.warn("submit_output captured outside an active turn — dropping", {
-        sessionId: this.sessionId,
-      });
-      return false;
-    }
-    if (this.submittedOutputTurnId === turnId) return false;
-    this.submittedOutputTurnId = turnId;
-    const sink = this.currentSink;
-    if (sink) {
-      this.publishOutbound(sink, { type: "structured_output", payload });
-    }
-    return true;
-  }
-
   async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
@@ -3225,7 +3031,7 @@ class AgentSessionImpl implements AgentSession {
           });
           // One serialized outbound stream for the whole forked turn: the
           // provider-event pump below and out-of-band emitters (exact-mode
-          // subagent relays and handback candidates) push concurrently; the drain
+          // subagent relays) push concurrently; the drain
           // loop yields in arrival order. A provider stream failure becomes the
           // turn's terminal error block, preserving the bracketing invariant.
           const outbound = new ForkStreamQueue();

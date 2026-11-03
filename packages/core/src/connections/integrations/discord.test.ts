@@ -54,6 +54,8 @@ const fakeState: {
   channels: [],
 };
 
+const FAKE_REPLY_DELIVERY = { capabilities: { maxPartLength: 2000, edit: true } };
+
 rs.mock("../../channels/discord.js", () => ({
   DiscordAdapter: class {
     constructor(readonly config: FakeConfig) {
@@ -74,6 +76,9 @@ rs.mock("../../channels/discord.js", () => ({
     async send(chatId: ChatId, message: unknown): Promise<MessageReceipt> {
       fakeState.sent.push({ chatId, message });
       return { chatId, messageId: "sent-1" };
+    }
+    replyDelivery() {
+      return FAKE_REPLY_DELIVERY;
     }
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
@@ -229,6 +234,10 @@ describe("discord descriptor shape", () => {
       messageId: "sent-1",
     });
     expect(fakeState.sent).toEqual([{ chatId: "chan-1", message: { text: "hi" } }]);
+  });
+
+  it("offers reply delivery through the adapter's bot", () => {
+    expect(buildTalker().talker.replyDelivery).toBe(FAKE_REPLY_DELIVERY);
   });
 
   it("exposes provider-neutral activity", async () => {

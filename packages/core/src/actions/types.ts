@@ -10,8 +10,6 @@ export type {
   ActionResult,
   PendingApproval,
   PendingInteraction,
-  Handoff,
-  HandbackSpec,
 } from "@rome-os/app-runtime";
 
 export interface ActionRegistry {

@@ -62,11 +62,6 @@ export interface ActionMcpDefinition {
 import type { SkillMcpDefinition } from "./skill-catalog.js";
 export type { SkillMcpDefinition };
 
-export interface HandbackSpec {
-  /** JSON Schema describing a candidate shown for guardian approval. */
-  schema: Record<string, unknown>;
-}
-
 export type ModelReasoningEffort = ReasoningEffort;
 
 /**
@@ -83,7 +78,6 @@ export interface ModelRunParams {
   skillCatalog: SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
   outputSchema?: Record<string, unknown>;
-  handback?: HandbackSpec;
   builtinTools?: string[];
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
@@ -97,7 +91,6 @@ export interface ModelRunParams {
     input: unknown,
     context: ModelToolCallContext,
   ) => Promise<unknown>;
-  executeSubmitOutput?: (input: unknown) => Promise<unknown>;
 }
 
 export interface ModelProvider {
@@ -141,8 +134,6 @@ export interface ModelSessionParams {
   subagentTools: ModelToolDefinition[];
   /** Provider-native final-response JSON Schema for every model turn. */
   outputSchema?: Record<string, unknown>;
-  /** Conversational candidate/approval flow; separate from final output. */
-  handback?: HandbackSpec;
   builtinTools?: string[];
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
@@ -183,8 +174,6 @@ export interface ModelSessionParams {
     input: unknown,
     context: ModelToolCallContext,
   ) => Promise<unknown>;
-  /** Invoked when the agent calls the `submit_output` tool. */
-  executeSubmitOutput?: (input: unknown) => Promise<unknown>;
   /** Invoked when the agent calls the `defer` tool: schedules a
    * one-off wakeup back into this same thread. Absent for sessions with no
    * live thread to wake. */
@@ -205,9 +194,9 @@ export interface ModelSessionParams {
    * catalog but nothing drains its stream to mount UI — exact-mode forked
    * turns, whose model-visible prefix (system prompt + tools) must stay
    * byte-identical to their webchat source while no webchat drain exists to
-   * render cards or resolve handbacks. The interactive tools' *runtime*
+   * render cards. The interactive tools' *runtime*
    * degrades to the non-interactive fallbacks (ask_question relays prose;
-   * propose_routine / confirm_output refuse) instead of claiming UI was
+   * propose_routine refuses) instead of claiming UI was
    * delivered. See FacadeParams.interactiveSurfaceDetached.
    */
   interactiveSurfaceDetached?: boolean;
@@ -382,7 +371,6 @@ export function createSessionFromRun(
         skillCatalog: params.getSkillCatalog(),
         subagentTools: params.subagentTools,
         outputSchema: params.outputSchema,
-        handback: params.handback,
         builtinTools: params.builtinTools,
         maxTurns: params.maxTurns,
         reasoningEffort: input.reasoningEffort ?? params.reasoningEffort,
@@ -392,7 +380,6 @@ export function createSessionFromRun(
         externalMcpServers: params.externalMcpServers,
         executeAction: params.executeAction,
         executeSubagent: params.executeSubagent,
-        executeSubmitOutput: params.executeSubmitOutput,
       };
       appliedReasoningEffort = runParams.reasoningEffort;
       for await (const msg of run(runParams)) {

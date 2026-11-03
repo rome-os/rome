@@ -244,39 +244,6 @@ describe("composer error status", () => {
   });
 });
 
-// Handoff affordances on the composer: a submitted result raises the Approve
-// banner; before that, the floor agent chip in the pre-send row hosts Cancel on
-// its × (there is no separate "Collaborating with" bar anymore).
-describe("composer handoff bar", () => {
-  it("offers Approve when the specialist has a pending submission", () => {
-    const onApprove = rs.fn();
-    renderComposer({ designingInteraction: { agentLabel: "Workflow author", onApprove } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(onApprove).toHaveBeenCalledTimes(1);
-  });
-
-  it("hosts Cancel on the floor agent chip (no Approve) before a submission", () => {
-    const onCancel = rs.fn();
-    renderComposer({
-      // During a handoff the floor agent is pinned — that chip carries the ×.
-      pinnedAgentMention: {
-        appId: "workflow-builder",
-        appLabel: "Workflow Builder",
-        agentName: "workflow-builder",
-        iconUrl: "/api/apps/workflow-builder/icon",
-      },
-      designingInteraction: { agentLabel: "Workflow Builder", onCancel },
-    });
-
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
-    // The chip shows the readable agent name, and its × cancels the handoff.
-    expect(screen.getByText("Workflow Builder")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel collaboration" }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-});
-
 // Enter-to-send is a desktop convention: keyboards there have Shift+Enter for
 // newlines. On touch-first devices (no hover, coarse pointer) the popular
 // design is the opposite — Enter inserts a newline and the send button sends —

@@ -49,13 +49,11 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
-  canPickChatModel,
   currentReplyMessages,
   isAwaitingGuardian,
   isLockedByCard,
   isLastTurnFailed,
   type AgentIdentity,
-  type HandoffNode,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
@@ -87,14 +85,7 @@ import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-ses
 import { useChatTabStatus } from "@/hooks/use-tab-status";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
-import {
-  MessageList,
-  type BlockActions,
-  type ChatVariant,
-  findActiveSubmission,
-  findLastSubmission,
-  hasPendingApprovalConfirmation,
-} from "@/components/chat/MessageList";
+import { MessageList, type BlockActions, type ChatVariant } from "@/components/chat/MessageList";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -133,7 +124,6 @@ import {
   interruptTurn,
   listChatAgents,
   listSessionMessagePage,
-  listSessionMessages,
   listSessionTurns,
   markSessionRead as apiMarkSessionRead,
   openTurnStream,
@@ -160,10 +150,6 @@ const TIMELINE_LANDING_MS = 900;
 const MAX_JUMP_PAGES = 20;
 
 // Chat Component
-
-// Stable empty list so `messages.get(sid) ?? EMPTY_MESSAGES` keeps a constant
-// reference (avoids re-running submission gates every render).
-const EMPTY_MESSAGES: ChatMessage[] = [];
 
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
@@ -362,16 +348,10 @@ export function Chat({
   // The tool pane: its Trace tab shows this chat's trace, and its open state
   // includes a pane a trace holds open.
   const toolTrace = useToolTrace();
-  // Multiple sessions are in scope at once. Pick the right one deliberately:
+  // Pick the session id deliberately:
   //   • mainSessionId  — the session THIS <Chat> owns: the prop, or the one its
-  //     draft created, and null while a draft has none. Use for the owned
-  //     transcript's load / delete / agent lookup / scroll / navigation.
-  //   • floorSessionId — the session currently being interacted with / streamed:
-  //     the deepest open handoff's child, else main. Use for anything paired
-  //     with the running turn or live stream (send, stop, reattach, live trace,
-  //     onSessionMessage) and for resolving the floor's submission.
+  //     draft created, and null while a draft has none.
   //   • a block's own message.sessionId — for inline-component submit/dismiss.
-  //   • a handoff's parentSessionId (carry the node) — for resolving a handoff.
   // Never key shared interaction state by a bare toolUseId — provider ids recycle
   // per turn AND across sessions, so namespace by session (interactionResultKey).
   //
@@ -486,9 +466,6 @@ export function Chat({
   const creatingSessionRef = useRef(false);
   const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
-  // Handoff children load whole: their messages are spliced into the main
-  // transcript, so a partial child would leave a hole in the middle of it.
-  const wholeSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -551,10 +528,9 @@ export function Chat({
     setMessages,
   });
 
-  // One <Chat> owns the main session but displays & talks to the child sessions
-  // of any open handoff. The whole merge / index / floor / identity derivation
-  // lives in the pure `buildChatView`; here we just memoize it on the message
-  // map, so a streaming turn (which never touches `messages`) never recomputes.
+  // The view derivation lives in the pure `buildChatView`; here we just memoize
+  // it on the message map, so a streaming turn (which never touches
+  // `messages`) never recomputes.
   const mainIdentity = useMemo<AgentIdentity>(
     () => ({
       name: pinnedAgentMention
@@ -564,19 +540,21 @@ export function Chat({
     }),
     [mainAgentDisplayName, pinnedAgentMention, t],
   );
-  // A draft builds from the empty id: the view is empty and its floor is falsy,
-  // which every session-keyed effect below already skips.
+  // A draft builds from the empty id: the view is empty and `activeSessionId`
+  // is falsy, which every session-keyed effect below already skips.
   const view = useMemo(
     () => buildChatView(messages, mainSessionId ?? "", mainIdentity),
     [messages, mainSessionId, mainIdentity],
   );
-  const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
-    view;
-  const chatModelPickable =
-    !!mainSessionId && canPickChatModel({ mainSessionId, floorSessionId, isSideChat });
+  const { displayMessages, identityBySession, interactionResults } = view;
+  // The main session's id, empty while a draft has none. Keys the running turn
+  // and live stream (send, stop, reattach, live trace, onSessionMessage).
+  const activeSessionId = mainSessionId ?? "";
+  // A side chat promoted to a chat still runs on its branch (#1384), whose
+  // model the picker does not hold.
+  const chatModelPickable = !!mainSessionId && !isSideChat;
 
-  // Ordered, unique turn ids of the MAIN session — the selectable share unit.
-  // Handoff child turns aren't listed here; they ride along with their parent.
+  // Ordered, unique turn ids of the main session — the selectable share unit.
   const mainTurnIds = useMemo(() => {
     const ids: string[] = [];
     const seen = new Set<string>();
@@ -693,7 +671,7 @@ export function Chat({
   );
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
-    sessionId: floorSessionId || null,
+    sessionId: mainSessionId ?? null,
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
@@ -734,10 +712,6 @@ export function Chat({
     mainSessionIdRef.current = mainSessionId;
   }, [mainSessionId]);
 
-  const floorSessionIdRef = useRef(floorSessionId);
-  useEffect(() => {
-    floorSessionIdRef.current = floorSessionId;
-  }, [floorSessionId]);
   // A message shows its sender before the server has it, so the signed-in
   // person's avatar appears on their bubble as they send.
   const { data: viewer } = useDashboardIdentity();
@@ -745,28 +719,15 @@ export function Chat({
   useEffect(() => {
     viewerSenderRef.current = senderFromIdentity(viewer);
   }, [viewer]);
-  const isReadVisibleSession = useCallback(
-    (id: string) => id === mainSessionIdRef.current || id === floorSessionIdRef.current,
-    [],
-  );
-  // The open handoff the floor is inside (null when the floor is the main
-  // session) — drives Approve / Cancel / the composer's agent identity.
-  const floorHandoff = useMemo(
-    () =>
-      handoffList.find((h) => h.status === "open" && h.childSessionId === floorSessionId) ?? null,
-    [handoffList, floorSessionId],
-  );
-  const floorIdentity = identityBySession.get(floorSessionId) ?? mainIdentity;
-
-  // Only the floor session streams (every shallower caller is suspended).
-  const floorSessionStream = streamingSessions.get(floorSessionId) ?? null;
-  const currentSnapshot = floorSessionStream?.snapshot ?? null;
+  const isReadVisibleSession = useCallback((id: string) => id === mainSessionIdRef.current, []);
+  const activeSessionStream = streamingSessions.get(activeSessionId) ?? null;
+  const currentSnapshot = activeSessionStream?.snapshot ?? null;
   // The `turnId` the stream was opened under addresses the follower and Stop.
   // The transcript matches the turn by its runningTurnId, which differs for a
   // backend task.
-  const floorStreamTurnId = floorSessionStream?.turnId ?? null;
-  const runningTurnId = runningTurnIdOf(floorSessionStream);
-  const isActiveSessionStreaming = !!floorSessionStream;
+  const activeStreamTurnId = activeSessionStream?.turnId ?? null;
+  const runningTurnId = runningTurnIdOf(activeSessionStream);
+  const isActiveSessionStreaming = !!activeSessionStream;
   const awaitingGuardian = useMemo(
     () => isAwaitingGuardian(view, runningTurnId),
     [view, runningTurnId],
@@ -779,7 +740,7 @@ export function Chat({
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
   // The latest assistant text block. The live row follows it (and smooths it
   // into typing, see LiveTail); the chat does not render for it.
-  const liveTextStore = liveTextOf(floorSessionId);
+  const liveTextStore = liveTextOf(activeSessionId);
 
   // Pull host callbacks through refs so the many internal `useCallback`s
   // depending on them don't need to re-create whenever the host swaps in a
@@ -908,10 +869,8 @@ export function Chat({
   }, [mainSessionId, pinnedAt, setPinned]);
 
   useEffect(() => {
-    // The running turn lives in the floor session (the specialist during a
-    // handoff), so report that — not main — to the host's turn-follow.
-    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: floorStreamTurnId });
-  }, [floorStreamTurnId, floorSessionId]);
+    onSessionMessageRef.current?.({ sessionId: activeSessionId, turnId: activeStreamTurnId });
+  }, [activeStreamTurnId, activeSessionId]);
 
   // Fetch messages for a session
   const loadMessages = useCallback(
@@ -921,13 +880,7 @@ export function Chat({
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
       try {
-        const whole = wholeSessionsRef.current.has(id);
-        const fetchPage = () =>
-          whole
-            ? listSessionMessages(id).then((all) =>
-                all ? { messages: all, nextCursor: null } : null,
-              )
-            : listSessionMessagePage(id, { limit: pageTurns });
+        const fetchPage = () => listSessionMessagePage(id, { limit: pageTurns });
         let page = await fetchPage();
         if (page === null && (await recoverMissingSessionRef.current?.(id)))
           page = await fetchPage();
@@ -994,25 +947,8 @@ export function Chat({
     }
   }, [mainSessionId, loadMessages]);
 
-  // Load every child session referenced by a handoff so its conversation can be
-  // spliced into the flat transcript (Q4 — load the whole tree).
-  useEffect(() => {
-    for (const h of handoffList) {
-      wholeSessionsRef.current.add(h.childSessionId);
-      loadMessages(h.childSessionId);
-    }
-  }, [handoffList, loadMessages]);
-
-  // Subscribe to the main session and the floor (the only one streaming): a
-  // handoff's child streams while it holds the floor; the main session streams
-  // again once it resumes. Each child holds one subscription through useLiveEvents.
-  const sessionEventIds = useMemo(
-    () =>
-      Array.from(new Set([mainSessionId, floorSessionId])).filter((id): id is string =>
-        Boolean(id),
-      ),
-    [mainSessionId, floorSessionId],
-  );
+  // Subscribe to the main session's events through useLiveEvents.
+  const sessionEventIds = useMemo(() => (mainSessionId ? [mainSessionId] : []), [mainSessionId]);
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
@@ -1118,13 +1054,13 @@ export function Chat({
               // Model-resolution failures are persisted as assistant error
               // messages, so they render once in the conversation rather than
               // being duplicated above the composer.
-              // The composer banner belongs to the floor, as for reconnect
-              // errors below; a background turn's failure stays off it.
+              // The composer banner belongs to the chat's own turn, as for
+              // reconnect errors below; a background turn's failure stays off it.
               if (
                 !payload.success &&
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
-                sessionId === floorSessionIdRef.current
+                sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
                   message: payload.error,
@@ -1146,7 +1082,7 @@ export function Chat({
               if (
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
-                sessionId === floorSessionIdRef.current
+                sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
                   message: payload.error,
@@ -1173,10 +1109,9 @@ export function Chat({
                 segArr.push(seg);
               }
               flushSnapshot();
-              // Only the floor's turn drives the host's workspace follow. A
-              // background turn (e.g. a parent that handed off) keeps its own
-              // trace without retargeting the host.
-              if (sessionId === floorSessionIdRef.current) {
+              // Only the chat's own turn drives the host's workspace follow. A
+              // background turn keeps its own trace without retargeting the host.
+              if (sessionId === mainSessionIdRef.current) {
                 onSessionMessageRef.current?.({ sessionId, turnId, segment: seg });
               }
             } catch {
@@ -1263,9 +1198,9 @@ export function Chat({
                 route?: string;
                 params?: Record<string, string | number | boolean>;
               };
-              // The floor owns the workspace; a background turn's replayed
-              // placement would remount (and reset) a widget in use.
-              if (appId && sessionId === floorSessionIdRef.current) {
+              // The chat's own turn owns the workspace; a background turn's
+              // replayed placement would remount (and reset) a widget in use.
+              if (appId && sessionId === mainSessionIdRef.current) {
                 applyAgentPlacement(placementId, appId, route, params);
               }
             } catch {
@@ -1319,9 +1254,9 @@ export function Chat({
             if (Date.now() - openedAt >= TURN_RESUME_MAX_DELAY_MS) {
               delayMs = TURN_RESUME_BASE_DELAY_MS;
             }
-          } else if (sessionId === floorSessionIdRef.current) {
-            // The composer banner belongs to the floor; a background turn
-            // retries quietly.
+          } else if (sessionId === mainSessionIdRef.current) {
+            // The composer banner belongs to the chat's own turn; a background
+            // turn retries quietly.
             shownError = t("stream.errors.reconnectStatus", { status: res.status });
             setStreamError(shownError);
           }
@@ -1366,10 +1301,8 @@ export function Chat({
     ],
   );
 
-  // Reattach to whichever session holds the floor — during a handoff that's
-  // the specialist's child session, not the main one (only the floor can have
-  // an in-flight turn, since shallower callers are suspended). On reload this
-  // re-runs as the floor resolves, so the live preview reattaches correctly.
+  // Reattach to the session's in-flight turn, so on reload the live preview
+  // picks up where it left off.
   const pollTurns = useCallback(
     async (reattachSessionId: string, isCancelled: () => boolean): Promise<TurnPollOutcome> => {
       // Skip if the foreground send is mid-flight (locallyStreaming was added
@@ -1410,14 +1343,14 @@ export function Chat({
   // A `session_running` event or a reconnect kicks the poll, so its timer is
   // only a fallback for a lost event.
   const kickTurnPoll = useTurnPoll(
-    floorSessionId,
+    activeSessionId,
     { paused: isActiveSessionStreaming, revision: streamReconnectRevision },
     pollTurns,
   );
   const handleSessionRunning = useCallback(
     (event: z.infer<typeof sessionRunningSchema>) => {
       // A turn queued or ended with the chat still running is one to follow.
-      if (event.running && event.sessionId === floorSessionIdRef.current) kickTurnPoll();
+      if (event.running && event.sessionId === mainSessionIdRef.current) kickTurnPoll();
     },
     [kickTurnPoll],
   );
@@ -1425,7 +1358,7 @@ export function Chat({
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
       resyncSessionMessages(sid);
-      if (sid === floorSessionIdRef.current) kickTurnPoll();
+      if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
     [resyncSessionMessages, kickTurnPoll],
   );
@@ -1612,9 +1545,7 @@ export function Chat({
   // The session decides whether input joins the active run or starts the next.
   const handleComposerSend = useCallback(
     async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
-      // The single composer talks to whoever holds the floor — the open
-      // handoff's specialist, or the main agent.
-      let sendingSessionId = floorSessionIdRef.current;
+      let sendingSessionId = mainSessionIdRef.current;
       if (!sendingSessionId) {
         // A repeat submit (a double Enter) would otherwise create a second session.
         if (creatingSessionRef.current) return;
@@ -1652,7 +1583,6 @@ export function Chat({
         // below starts before that render, and its stream reads them to decide
         // which session's end counts as read and which may move the workspace.
         mainSessionIdRef.current = sendingSessionId;
-        floorSessionIdRef.current = sendingSessionId;
         setCreatedAgentMention(snapshot.agentMention ?? null);
         setCreatedSessionId(sendingSessionId);
         onSessionCreated?.(sendingSessionId);
@@ -1737,8 +1667,7 @@ export function Chat({
   // back to guardian for personaId and to the stored reasoningEffort setting.
   const handleSubmitAppComponent = useCallback(
     async (sendingSessionId: string, toolUseId: string, output: Record<string, unknown>) => {
-      // Post to the session that owns the component (the block's row), not the
-      // current floor — they differ when a component lives in another session.
+      // Post to the session that owns the component (the block's row).
       if (!sendingSessionId) return;
       const parts = [{ type: "interaction_result", toolUseId, output }];
       const meta = composerRef.current?.getMetadataSnapshot();
@@ -1765,54 +1694,10 @@ export function Chat({
     [handleSubmitAppComponent],
   );
 
-  // Hand a finished (or dismissed) handoff back to the calling agent. Posts the
-  // `interaction_result` on the handoff's PARENT session (not always main —
-  // nested handoffs resolve to their immediate caller), which resumes there.
-  const handleResolveHandoff = useCallback(
-    async (handoff: HandoffNode, output: Record<string, unknown>, label: string) => {
-      // Take the resolved node from the caller (which holds the exact handoff),
-      // not a lookup by bare toolUseId — provider ids recycle, so a find() could
-      // resolve a same-id handoff in a different parent session.
-      const sendingSessionId = handoff.parentSessionId;
-      const parts = [{ type: "interaction_result", toolUseId: handoff.toolUseId, output }];
-      const meta = composerRef.current?.getMetadataSnapshot();
-      const body: Record<string, unknown> = { text: label, parts };
-      if (meta) {
-        if (meta.personaId) body.personaId = meta.personaId;
-        body.reasoningEffort = meta.reasoningEffort;
-      }
-      await runTurnLifecycle(
-        sendingSessionId,
-        () => postSessionTurnJson(sendingSessionId, body),
-        JSON.stringify(parts),
-      );
-    },
-    [runTurnLifecycle],
-  );
-
-  // Seed a handoff's specialist with the opening brief as that child session's
-  // first turn (rendered as the calling agent's @mention, not a user message).
-  const handleSeedHandoff = useCallback(
-    async (childSessionId: string, text: string) => {
-      const meta = composerRef.current?.getMetadataSnapshot();
-      const body: Record<string, unknown> = { text };
-      if (meta) {
-        if (meta.personaId) body.personaId = meta.personaId;
-        body.reasoningEffort = meta.reasoningEffort;
-      }
-      await runTurnLifecycle(
-        childSessionId,
-        () => postSessionTurnJson(childSessionId, body),
-        JSON.stringify([{ type: "text", content: text }]),
-      );
-    },
-    [runTurnLifecycle],
-  );
-
   // Stop generation for the active streaming session by targeting
   // the specific running turnId; queued turns behind it run normally.
   const stopMessage = useCallback(async () => {
-    const sid = floorSessionIdRef.current;
+    const sid = mainSessionIdRef.current;
     if (!sid) return;
     const turnId = streamingSessionsRef.current.get(sid)?.turnId ?? null;
     if (!turnId) return;
@@ -1879,108 +1764,19 @@ export function Chat({
     rows.length === 0 &&
     !displayedStreaming;
 
-  // The composer's pinned chip = the floor agent (the specialist during a
-  // handoff, the main agent otherwise).
-  const floorAgentMention = useMemo<AgentMention | null>(
-    () =>
-      floorHandoff
-        ? {
-            appId: floorHandoff.appId,
-            appLabel: floorHandoff.agentLabel,
-            agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
-            iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
-          }
-        : pinnedAgentMention,
-    [floorHandoff, pinnedAgentMention],
-  );
-  // The floor's own (raw, chronological) messages drive the approve /
-  // verbal-approval gates — reordering doesn't affect submission detection.
-  const floorMessages = messages.get(floorSessionId) ?? EMPTY_MESSAGES;
-
-  // Cancel a still-open handoff (dismiss, no handback).
-  const handleCancelHandoff = useCallback(
-    (handoff: HandoffNode) => void handleResolveHandoff(handoff, { dismissed: true }, "Dismissed"),
-    [handleResolveHandoff],
-  );
-
-  // When the floor is a specialist with a pending submission, the composer
-  // offers Approve — resolving that handoff with the payload.
-  const activeSubmission = useMemo(
-    () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
-    [floorHandoff, floorMessages],
-  );
-
   // The composer is memoized so a streaming turn does not render it, which only
   // holds while what it is handed keeps its identity.
   const composerModelSelection = useMemo(
     () => (chatModelPickable ? { value: chatModelValue, onChange: pickChatModel } : undefined),
     [chatModelPickable, chatModelValue, pickChatModel],
   );
-  const composerDesigning = useMemo(
-    () =>
-      floorHandoff
-        ? {
-            agentLabel: floorHandoff.agentLabel,
-            // A pending submission turns the banner into an Approve
-            // that resolves the handoff with that payload.
-            onApprove: activeSubmission
-              ? () => void handleResolveHandoff(floorHandoff, activeSubmission.payload, "Approved")
-              : undefined,
-            // Cancel lives here now (off the @mention seam): dismiss
-            // the handoff and hand the floor back to the caller.
-            onCancel: () => handleCancelHandoff(floorHandoff),
-          }
-        : null,
-    [floorHandoff, activeSubmission, handleResolveHandoff, handleCancelHandoff],
-  );
   const stopComposerTurn = useCallback(() => void stopMessage(), [stopMessage]);
-  // A submission waiting on Approve is the specialist asking the guardian, the
-  // same as an open card.
   useChatTabStatus(
     isActiveSessionStreaming,
-    awaitingGuardian || activeSubmission !== null,
+    awaitingGuardian,
     lastTurnFailed && !isActiveSessionStreaming,
     turnEnds,
   );
-
-  // Verbal approval: the specialist relays the guardian's "yes" via
-  // confirm_output → a `handback_approved` marker. Resolve with the standing
-  // submission. Fires once per handoff — keyed by the child session id (unique
-  // per handoff), since toolUseIds recycle and could mis-match the guard.
-  const verbalApprovalFiredRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!floorHandoff) return;
-    if (verbalApprovalFiredRef.current === floorHandoff.childSessionId) return;
-    if (!hasPendingApprovalConfirmation(floorMessages)) return;
-    const payload = findLastSubmission(floorMessages);
-    if (!payload) return; // confirm with nothing submitted — ignore (fail closed)
-    verbalApprovalFiredRef.current = floorHandoff.childSessionId;
-    void handleResolveHandoff(floorHandoff, payload, "Approved");
-  }, [floorHandoff, floorMessages, handleResolveHandoff]);
-
-  // Seed each open handoff's specialist with the opening brief exactly once — it
-  // posts as the child session's first turn (shown as the calling agent's
-  // @mention, suppressed as a user bubble).
-  //
-  // The durable "already seeded" signal is the child being non-empty: a
-  // successful seed leaves its persisted message (and reload re-loads it), so we
-  // never re-seed; a failed seed rolls back to an empty child, so it retries
-  // instead of being permanently skipped. The ref just guards the in-flight
-  // window before the optimistic message lands.
-  const seedingChildrenRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    for (const h of handoffList) {
-      if (h.status !== "open" || !h.summary) continue;
-      if (!loadedSessionsRef.current.has(h.childSessionId)) continue;
-      if ((messages.get(h.childSessionId)?.length ?? 0) > 0) continue;
-      if (seedingChildrenRef.current.has(h.childSessionId)) continue;
-      const childSessionId = h.childSessionId;
-      seedingChildrenRef.current.add(childSessionId);
-      void handleSeedHandoff(childSessionId, h.summary).finally(() => {
-        seedingChildrenRef.current.delete(childSessionId);
-      });
-    }
-  }, [handoffList, messages, handleSeedHandoff]);
 
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
@@ -2046,14 +1842,13 @@ export function Chat({
   // advances or the user switches sessions.
   const liveDismissedRef = useRef<{ sessionId: string; turnId: string } | null>(null);
 
-  // The live trace always targets the FLOOR session's running turn (the
-  // specialist's during a handoff). One builder keeps that (sessionId, turnId)
-  // pairing consistent across open + the keep-in-sync effect.
+  // The live trace always targets the session's running turn. One builder keeps
+  // that (sessionId, turnId) pairing consistent across open + the keep-in-sync effect.
   const buildLiveTraceTarget = useCallback((): TraceDrawerTarget | null => {
-    if (!floorSessionId || !runningTurnId) return null;
+    if (!activeSessionId || !runningTurnId) return null;
     return {
       kind: "live",
-      sessionId: floorSessionId,
+      sessionId: activeSessionId,
       turnId: runningTurnId,
       summary: currentSnapshot?.summary ?? {
         distinctApps: [],
@@ -2063,16 +1858,16 @@ export function Chat({
       segments: currentSnapshot?.segments ?? [],
       streaming: true,
     };
-  }, [floorSessionId, runningTurnId, currentSnapshot]);
+  }, [activeSessionId, runningTurnId, currentSnapshot]);
 
   const closeTraceDrawer = useCallback(() => {
     setTraceDrawerTarget((prev) => {
-      if (prev?.kind === "live" && floorSessionId && runningTurnId) {
-        liveDismissedRef.current = { sessionId: floorSessionId, turnId: runningTurnId };
+      if (prev?.kind === "live" && activeSessionId && runningTurnId) {
+        liveDismissedRef.current = { sessionId: activeSessionId, turnId: runningTurnId };
       }
       return null;
     });
-  }, [floorSessionId, runningTurnId]);
+  }, [activeSessionId, runningTurnId]);
 
   // Open the live trace drawer on demand (e.g. via the trace trigger button).
   const revealTrace = toolTrace.reveal;
@@ -2313,12 +2108,12 @@ export function Chat({
                     live={{
                       isStreaming: displayedStreaming,
                       runningTurnId,
-                      quiet: floorSessionStream?.quiet,
+                      quiet: activeSessionStream?.quiet,
                       snapshot: currentSnapshot,
                       textStore: liveTextStore,
-                      blockIx: floorSessionStream?.assistantBlockIx,
-                      textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
-                      identity: floorIdentity,
+                      blockIx: activeSessionStream?.assistantBlockIx,
+                      textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                      identity: mainIdentity,
                     }}
                     selection={
                       shareMode
@@ -2347,8 +2142,7 @@ export function Chat({
               {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
                 ("scroll under the composer") instead of stopping at a solid dock.
-                It talks to whoever holds the floor (the open handoff's specialist,
-                or the main agent). In share mode it's swapped for the ShareBar,
+                In share mode it's swapped for the ShareBar,
                 which configures + mints the link for the turns selected above.
 
                 Below md the floor paints the canvas instead. Its side gutters
@@ -2472,16 +2266,13 @@ export function Chat({
                       isStreaming={displayedStreaming}
                       onStop={stopComposerTurn}
                       streamError={streamError}
-                      // The chip names the floor agent — the specialist during a
-                      // handoff, the main agent otherwise.
-                      pinnedAgentMention={floorAgentMention}
+                      pinnedAgentMention={pinnedAgentMention}
                       lockAgentMention={Boolean(mainSessionId)}
                       // Locks once the turn that saved the card has ended, so
                       // Stop stays in reach while it still streams.
                       lockedReason={
                         lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
                       }
-                      designingInteraction={composerDesigning}
                     />
                   )}
                 </div>

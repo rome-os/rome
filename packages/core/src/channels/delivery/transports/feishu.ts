@@ -7,6 +7,7 @@ import {
 } from "../types.js";
 import type { FeishuStreamingStyle } from "../streaming-switch.js";
 import { createLogger } from "../../../logger.js";
+import { renderFenced } from "./fenced-markdown.js";
 import { neverConnected } from "./network.js";
 
 const log = createLogger("feishu-delivery");
@@ -313,95 +314,15 @@ function summaryOf(text: string): string {
  * not opened again, so a closing fence alone shows nothing.
  */
 export const feishuMarkdown: TextCodec = {
-  render: (source, _settled, context) => {
-    let open = fenceAfter(context?.before ?? "");
-    let rest = source;
-    if (open) {
-      const head = source.split("\n");
-      const first = head.findIndex((line) => line.trim() !== "");
-      if (first < 0) return "";
-      if (closes(head[first]!, open)) {
-        rest = head.slice(first + 1).join("\n");
-        open = undefined;
-      } else if (first === head.length - 1 && closing(head[first]!, open)) return "";
-    }
-    const lines = `${open ? `${open.line}\n` : ""}${rest}`.split("\n");
-    const code: string[] = [];
-    const prose: string[] = [];
-    let fence: Fence | undefined;
-    let block: string[] = [];
-    for (const line of lines) {
-      if (fence) {
-        block.push(line);
-        if (closes(line, fence)) {
-          prose.push(placeholder(code, block.join("\n")));
-          fence = undefined;
-        }
-        continue;
-      }
-      fence = opener(line);
-      if (fence) block = [line];
-      else prose.push(line);
-    }
-    if (fence) {
-      // A trailing newline in the code would show as a blank last line, and a
-      // closing fence that has begun to arrive is finished rather than shown
-      // as code, so the rendering never shrinks as the source grows.
-      const last = block.at(-1)!;
-      if (block.length > 1 && (last === "" || closing(last, fence))) block.pop();
-      block.push(fence.char.repeat(fence.length));
-      prose.push(placeholder(code, block.join("\n")));
-    }
-
-    let text = prose.join("\n");
-    // The SDK looks for a large heading in the text as given, fences included.
-    if (/^#{1,3} /m.test(source))
-      text = text.replace(/^#{2,6} (.+)$/gm, "##### $1").replace(/^# (.+)$/gm, "#### $1");
-    return text
-      .replace(/\n{3,}/g, "\n\n")
-      .replace(/\u0000(\d+)\u0000/g, (_, index: string) => code[Number(index)]!);
-  },
+  render: (source, _settled, context) =>
+    renderFenced(source, context, (text, written) => {
+      // The SDK looks for a large heading in the text as given, fences included.
+      if (/^#{1,3} /m.test(written))
+        text = text.replace(/^#{2,6} (.+)$/gm, "##### $1").replace(/^# (.+)$/gm, "#### $1");
+      return text.replace(/\n{3,}/g, "\n\n");
+    }),
   measure: (rendered) => rendered.length + (rendered.match(/^##### /gm)?.length ?? 0),
 };
-
-/** An open code fence: its opening line, and what a closing line must repeat. */
-interface Fence {
-  line: string;
-  char: string;
-  length: number;
-}
-
-function opener(line: string): Fence | undefined {
-  const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-  if (!match) return undefined;
-  return { line, char: match[1]![0]!, length: match[1]!.length };
-}
-
-function closes(line: string, fence: Fence): boolean {
-  const match = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
-  return match !== null && match[1]![0] === fence.char && match[1]!.length >= fence.length;
-}
-
-/** Whether `line` is a closing fence of `fence` that has begun to arrive. */
-function closing(line: string, fence: Fence): boolean {
-  return new RegExp(`^ {0,3}\\${fence.char}+$`).test(line);
-}
-
-/** The fence still open at the end of `text`, if any. */
-function fenceAfter(text: string): Fence | undefined {
-  let fence: Fence | undefined;
-  for (const line of text.split("\n")) {
-    if (!fence) fence = opener(line);
-    else if (closes(line, fence)) fence = undefined;
-  }
-  return fence;
-}
-
-/** Stores `block` in `code` and answers the token that stands for it. */
-function placeholder(code: string[], block: string): string {
-  code.push(block);
-  return `\u0000${code.length - 1}\u0000`;
-}
 
 /** A post that shows `text` as Markdown. */
 function postOf(text: string): string {

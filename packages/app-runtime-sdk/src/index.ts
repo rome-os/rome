@@ -155,6 +155,7 @@ export interface FavorRequirementConfig {
  * object to Rome APIs and must not inspect or reconstruct its fields. */
 export type RomeSessionType =
   | "webchat"
+  /** A handoff chat from before handoffs were removed. Rome creates no new ones. */
   | "webchat_handoff"
   | "channel"
   | "action"
@@ -255,8 +256,7 @@ export interface PendingApproval {
  *
  * Resolves by posting an `interaction_result` (the produced artifact, or
  * `{ dismissed: true }`) on the session, which re-drives the calling agent
- * with a server-built outcome prompt. Control never leaves the calling agent —
- * for a transfer of the floor to another agent, see {@link Handoff}.
+ * with a server-built outcome prompt. Control never leaves the calling agent.
  */
 export interface PendingInteraction {
   appId: string;
@@ -272,70 +272,6 @@ export interface PendingInteraction {
     componentId: string;
     props?: Record<string, unknown>;
   };
-}
-
-/**
- * Result contract of a handoff's child conversation — what the specialist
- * agent must hand back before control returns to the caller.
- */
-export interface HandbackSpec {
-  /**
-   * JSON Schema the handback artifact must satisfy. The specialist agent gets
-   * a `submit_output` tool AJV-validated against it; invalid submissions
-   * bounce back as tool errors until they conform.
-   */
-  schema: Record<string, unknown>;
-  /**
-   * Optional action the host runs on each submission AFTER the schema passes,
-   * for app-specific semantic checks the schema can't express. It receives the
-   * candidate payload as its input and must return `{ valid: boolean,
-   * errors?: string[] }` in `data`. Invalid (or any validator failure —
-   * fail-closed) bounces the submission back to the agent with the errors.
-   * Must be read-only: it can run once per submission attempt.
-   */
-  validate?: string;
-}
-
-/**
- * Transfer the floor to another agent. When an agent-callable action returns
- * this, the calling agent suspends and the host opens a dedicated child session
- * the guardian collaborates in with `agentName` (see Workflow Studio's
- * `design_workflow`). The parent thread is locked until control returns.
- *
- * The handoff itself mounts no app surface — the summoned agent brings one up on
- * demand by calling the `show_app` action (e.g. Workflow Studio's author shows
- * its live storyboard once there is a plan to preview). `appId` only names the
- * app that owns the handoff (the host install-checks it).
- *
- * The handback: when `handback` is set, a schema-valid (and, if declared,
- * app-validated) `submit_output` submission renders an approval card in the
- * child session; guardian approval ends the handoff and posts the payload as
- * an `interaction_result` on the parent session, re-driving the caller with a
- * server-built outcome prompt (plus `handbackHint`). Dismissal hands control
- * back with `{ dismissed: true }` and no artifact.
- */
-export interface Handoff {
-  /** The host rejects the handoff unless this app is installed. */
-  appId: string;
-  /**
-   * Off-webchat fallback. Only webchat can run a handoff; on a messaging
-   * channel (or inside a subagent) the calling agent relays this text as prose
-   * and the guardian's reply arrives as the next turn.
-   */
-  promptText: string;
-  /**
-   * Agent the guardian collaborates with in the child session. Omit for a
-   * handoff that needs no conversation.
-   */
-  agentName?: string;
-  payload?: Record<string, unknown>;
-  handback?: HandbackSpec;
-  /**
-   * Appended to the resolution prompt the resumed caller receives, so the
-   * caller learns its exact next step. The literal token `<childSessionId>` is
-   * substituted with the handoff's child session id by the host.
-   */
-  handbackHint?: string;
 }
 
 /** True only for Rome Core's default agent, in legacy or canonical form. */
@@ -385,8 +321,7 @@ export interface PlaceWidget {
  * `runAction`, webhook invocation records — so the states are modeled as a union
  * rather than independent flags: a result is exactly one of completed (`ok`),
  * domain-rejected (`error`), suspended on approval, suspended on an inline
- * guardian input (`pending_interaction`), suspended on a handoff to another agent
- * (`handoff`), or completed-with-a-widget-placed (`place_widget`, which does NOT
+ * guardian input (`pending_interaction`), or completed-with-a-widget-placed (`place_widget`, which does NOT
  * suspend). Infrastructure failures (handler throw, serialization, worker crash)
  * are NOT `error` results — they surface as a thrown {@link ActionInvocationError}.
  * The `error` variant is for domain rejections the caller can act on ("routine
@@ -397,7 +332,6 @@ export type ActionResult<T = unknown> =
   | { status: "error"; error: string }
   | { status: "pending_approval"; approval: PendingApproval }
   | { status: "pending_interaction"; interaction: PendingInteraction }
-  | { status: "handoff"; handoff: Handoff }
   | { status: "place_widget"; placement: PlaceWidget };
 
 const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
@@ -1589,42 +1523,11 @@ export type MessagePart =
     }
   | {
       /**
-       * A handoff in progress: the calling agent suspended and `agentName`
-       * holds the floor in `childSessionId` (the spawned design conversation).
-       * The summoned agent brings up its own surface on the child session, so
-       * the card carries no `surface` of its own. The webchat drain loop
-       * snapshots this part keyed by the tool call's id.
-       */
-      type: "handoff";
-      toolUseId: string;
-      appId: string;
-      agentName?: string;
-      payload?: Record<string, unknown>;
-      childSessionId?: string;
-      /** Mirrors {@link Handoff.handbackHint}; appended to the resolution
-       * prompt when the handoff resolves with an artifact. */
-      handbackHint?: string;
-    }
-  | {
-      /**
-       * A schema-valid payload the specialist agent submitted via
-       * `submit_output` in a handoff child session that carries a handback
-       * contract. The host renders it as an approval card: Approve ends the
-       * handoff with `payload` as the output; "keep editing" feedback continues
-       * the conversation and a later submission supersedes this card.
-       */
-      type: "submission_card";
-      payload: Record<string, unknown>;
-    }
-  | {
-      /**
-       * Resolution of an inline interaction or a handoff — the single
-       * resolution part both suspension kinds share. Lives in a user-role
+       * Resolution of an inline interaction. Lives in a user-role
        * webchat message so the UI derives "this resolved" by scanning for a
        * matching toolUseId, and the server re-drives the calling agent with a
-       * server-built outcome prompt. `output` is the produced artifact (a
-       * handoff's approved handback payload, or an inline component's result),
-       * or `{ dismissed: true }`.
+       * server-built outcome prompt. `output` is the inline component's
+       * result, or `{ dismissed: true }`.
        */
       type: "interaction_result";
       toolUseId: string;
