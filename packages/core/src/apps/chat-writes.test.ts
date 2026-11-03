@@ -257,7 +257,7 @@ describe("appChatWrites", () => {
       expect(result).toEqual({ messageId: "101" });
     });
 
-    it("quotes a line by the platform's id, records what the app hands over, and keeps host-only parts out", async () => {
+    it("quotes a line by the platform's id, records what the app hands over, and keeps host-only parts off record", async () => {
       await writes.addMessage({
         sessionId: "s1",
         role: "user",
@@ -276,9 +276,10 @@ describe("appChatWrites", () => {
         knownToProvider: false,
       });
 
+      // The channel's adapter is the one to refuse a part it does not show.
       expect(sends[0]?.out).toEqual({
         text: "Sure",
-        parts: [{ type: "text", content: "Sure" }],
+        parts: [{ type: "text", content: "Sure" }, card],
         replyTo: lines.keyIn(speakerAt(), "41"),
       });
       expect(JSON.parse(said().at(-1)!.parts)).toEqual([
@@ -562,7 +563,7 @@ describe("appChatWrites", () => {
       expect(mailSent).toEqual([]);
     });
 
-    it("refuses a blank message to reply to before anything goes out", async () => {
+    it("refuses a blank message to reply to, since no thread holds it, before anything goes out", async () => {
       await expect(
         writes.sendEmail({
           channel: "mail",
@@ -571,7 +572,7 @@ describe("appChatWrites", () => {
           email: { inReplyToMessageId: " " },
           knownToProvider: false,
         }),
-      ).rejects.toThrow("must not be blank");
+      ).rejects.toThrow("Rome holds no email thread with message");
       expect(mailSent).toEqual([]);
     });
   });
