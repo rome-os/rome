@@ -47,7 +47,12 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import { createLogger } from "../logger.js";
-import { textToSend } from "./send-refusals.js";
+import {
+  ALL_ATTACHMENT_TYPES,
+  attachmentsToSend,
+  replyToShaped,
+  textToSend,
+} from "./send-refusals.js";
 import { saveUrlAttachments } from "./attachment-files.js";
 import { createReadStream } from "node:fs";
 import { basename, extname } from "node:path";
@@ -1390,6 +1395,11 @@ Use \`/channel agent clear\` to undo.`,
     // keys it by (docs/architecture/channels.md#direct-messages): Discord's
     // DM channel for that user is opened, or found, here.
     const text = textToSend("discord", message);
+    const replyTo = replyToShaped("discord", message.replyToMessageId, DISCORD_SNOWFLAKE);
+    const attachments = await attachmentsToSend("discord", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: true,
+    });
     const threadId: string = await this.channelOf(chatId);
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
@@ -1406,9 +1416,9 @@ Use \`/channel agent clear\` to undo.`,
 
     // For regular guild text channels, reply inside a thread to avoid flooding the channel
     let targetChannel: SendableChannel;
-    if (message.replyToMessageId && channel.type === ChannelType.GuildText && autoThread) {
+    if (replyTo && channel.type === ChannelType.GuildText && autoThread) {
       const textChannel = channel as TextChannel;
-      targetChannel = await this.getOrCreateThread(textChannel, message.replyToMessageId);
+      targetChannel = await this.getOrCreateThread(textChannel, replyTo);
     } else {
       targetChannel = channel as SendableChannel;
     }
@@ -1425,7 +1435,7 @@ Use \`/channel agent clear\` to undo.`,
         }
       }
 
-      for (const att of message.attachments ?? []) {
+      for (const att of attachments) {
         const attachmentMessageId = await this.sendAttachment(targetChannel, att);
         messageId ??= attachmentMessageId;
       }
@@ -1536,6 +1546,9 @@ Use \`/channel agent clear\` to undo.`,
     return sent.id;
   }
 }
+
+/** A Discord message id: a snowflake, a decimal number. */
+const DISCORD_SNOWFLAKE = /^\d{1,20}$/;
 
 function answersLine(agent: string | null): string {
   return agent

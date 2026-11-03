@@ -9,7 +9,7 @@
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { WebSocket } from "ws";
 import { createLogger } from "../logger.js";
-import { refuseAttachments, textToSend } from "./send-refusals.js";
+import { refuseAttachments, replyToShaped, textToSend } from "./send-refusals.js";
 import { InboundDedup } from "./inbound-dedup.js";
 
 const log = createLogger("slack");
@@ -624,6 +624,10 @@ export function slackMessageId(ts: string, threadTs?: string): string {
   return threadTs && threadTs !== ts ? `${threadTs}:${ts}` : ts;
 }
 
+/** A message id as `slackMessageId` writes one: a timestamp, or a thread's
+ *  timestamp and the message's. */
+const SLACK_MESSAGE_ID = /^\d+\.\d+(?::\d+\.\d+)?$/;
+
 /** The thread a reply to `messageId` goes into. A message in a thread is
  *  answered in that thread, and one at the top of a channel starts a thread
  *  under it. A direct message outside a thread is answered in place. */
@@ -777,9 +781,12 @@ export class SlackAdapter {
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     refuseAttachments("slack", message);
     const text = textToSend("slack", message).trim();
+    // Slack posts a reply whose thread it does not recognize at the top of
+    // the channel, so an id that is no message's is refused here.
+    const replyTo = replyToShaped("slack", message.replyToMessageId, SLACK_MESSAGE_ID);
     const parsed = parseSlackChatId(chatId);
     const channelId = parsed.channelId;
-    const threadTs = parsed.threadTs ?? replyThreadOf(channelId, message.replyToMessageId);
+    const threadTs = parsed.threadTs ?? replyThreadOf(channelId, replyTo);
     let firstTs: string | undefined;
     for (const chunk of splitSlackText(text)) {
       const sent = await this.api.postMessage(
