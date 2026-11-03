@@ -174,6 +174,40 @@ describe("SessionQueryRepository", () => {
       expect((await repository.getSessionDetailRows("sales"))?.messageCount).toBe(3);
     });
 
+    it("reads a group's copies once for all its speakers, each from when it joined", async () => {
+      const fixture = speakerFixture(testDb.db);
+      const chat = fixture.chat("telegram", "-42", "group");
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales", createdAt: at(0) });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support", createdAt: at(15) });
+      fixture.say({ id: "bot-sales:4", chat, from: "wei", text: "early", at: at(10) });
+      fixture.say({ id: "bot-sales:5", chat, from: "wei", text: "hi", at: at(20) });
+      fixture.say({ id: "bot-support:9", chat, from: "wei", text: "hi", at: at(20) });
+      fixture.say({ id: "bot-sales:6", chat, from: "wei", text: "later", at: at(30) });
+      own("sales", "trace-sales", "trace", 31);
+      own("support", "trace-support", "trace", 31);
+      type Statement = { all(...values: unknown[]): unknown[] };
+      const client = (testDb.db as unknown as { $client: { prepare(sql: string): Statement } })
+        .$client;
+      const prepare = client.prepare.bind(client);
+      let groupReads = 0;
+      client.prepare = (text: string) => {
+        const statement = prepare(text);
+        const all = statement.all.bind(statement);
+        statement.all = (...values: unknown[]) => {
+          if (text.startsWith("SELECT id, key, sender_account_id")) groupReads += 1;
+          return all(...values);
+        };
+        return statement;
+      };
+      try {
+        const repository = new SessionQueryRepository(testDb.db, "chats");
+        expect(await pageCounts(repository)).toEqual({ sales: 4, support: 3 });
+      } finally {
+        client.prepare = prepare;
+      }
+      expect(groupReads).toBe(1);
+    });
+
     it("counts the session's own rows when it reads the legacy tables", async () => {
       seededChat();
       const repository = new SessionQueryRepository(testDb.db);

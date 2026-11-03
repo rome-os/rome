@@ -21,12 +21,9 @@ import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 import { romeSessionKind, withSessionKind } from "../session-kind.js";
-import type { ChatId } from "@rome-os/app-runtime";
 import { CHAT_LINES, CHATS } from "../../chats/storage/lines-sql.js";
-import { MessageRepository as ChatLines } from "../../chats/storage/message-repository.js";
-import { placeIn } from "../../chats/storage/place.js";
-import { lineHolder } from "../../connections/chat-adapter.js";
-import { occurrencesOf } from "../../sessions/turn-links.js";
+import { lineHolder, type LineHolder } from "../../connections/chat-adapter.js";
+import { occurrencesOf, type CopiedLine } from "../../sessions/turn-links.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
 const turnEndTraceBlocks = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
@@ -314,6 +311,33 @@ function chatsLineCounts(ids: readonly string[]): SQL {
     WHERE s.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`;
 }
 
+/** A line as {@link occurrencesOf} reads it, straight from Chats' lines. */
+interface CopiedLineRow {
+  id: number;
+  key: string;
+  sender_account_id: string | null;
+  sender_agent: string | null;
+  text: string;
+  said_at: number;
+}
+
+function copiedLine(row: CopiedLineRow): CopiedLine {
+  return {
+    id: row.id,
+    key: row.key,
+    at: new Date(row.said_at * 1000),
+    body: { text: row.text },
+    ...(row.sender_account_id === null
+      ? {}
+      : {
+          saidBy: {
+            account: { id: row.sender_account_id },
+            ...(row.sender_agent === null ? {} : { agent: row.sender_agent }),
+          },
+        }),
+  };
+}
+
 export class SessionQueryRepository {
   constructor(
     private db: DrizzleDb,
@@ -331,26 +355,41 @@ export class SessionQueryRepository {
   /**
    * How many lines each of sessions `ids` has in its transcript, read from
    * Chats. Where each of Rome's accounts holds its own copy of a message (a
-   * Telegram basic group), a message counts once, as the transcript draws it.
+   * Telegram basic group), a message counts once, as the transcript draws it:
+   * such a place is read once for all its sessions, from the earliest one
+   * joined, and only for what tells its copies apart.
    */
   private chatsLineCountsOf(ids: readonly string[]): Map<string, number> {
     const counts = new Map<string, number>();
+    const copied = new Map<string, { holder: LineHolder; rows: ChatsLineCountRow[] }>();
     for (const row of this.db.all<ChatsLineCountRow>(chatsLineCounts(ids))) {
+      counts.set(row.id, Number(row.own) + Number(row.lines));
       const holder =
         row.platform !== null && row.key !== null ? lineHolder(row.platform, row.key) : null;
-      let lines = Number(row.lines);
-      if (holder && row.chat_id !== null && lines > 0) {
-        const place = placeIn(
-          { platform: row.platform!, id: row.chat_id },
-          (row.thread_id ?? undefined) as ChatId | undefined,
-        );
-        const said = new ChatLines(this.db)
-          .read(place)
-          .messages.filter((line) => line.at.getTime() >= row.created_at * 1000);
-        const occurrence = occurrencesOf(said, holder);
-        lines = new Set(said.map((line) => occurrence.get(line.id) ?? `line:${line.id}`)).size;
+      if (!holder || row.chat_id === null || Number(row.lines) === 0) continue;
+      const place = `${row.chat_id}\n${row.thread_id ?? ""}`;
+      const sessions = copied.get(place) ?? { holder, rows: [] };
+      sessions.rows.push(row);
+      copied.set(place, sessions);
+    }
+    for (const { holder, rows } of copied.values()) {
+      const [{ chat_id, thread_id }] = rows;
+      const since = Math.min(...rows.map((row) => row.created_at));
+      const said = this.db
+        .all<CopiedLineRow>(
+          sql`SELECT id, key, sender_account_id, sender_agent, text, said_at
+            FROM ${CHAT_LINES} m
+            WHERE chat_id = ${chat_id} AND thread_id IS ${thread_id} AND said_at >= ${since}
+            ORDER BY said_at, id`,
+        )
+        .map(copiedLine);
+      for (const row of rows) {
+        const since = row.created_at * 1000;
+        const own = said.filter((line) => line.at.getTime() >= since);
+        const occurrence = occurrencesOf(own, holder);
+        const lines = new Set(own.map((line) => occurrence.get(line.id) ?? `line:${line.id}`));
+        counts.set(row.id, Number(row.own) + lines.size);
       }
-      counts.set(row.id, Number(row.own) + lines);
     }
     return counts;
   }

@@ -60,34 +60,45 @@ export function personMessageStores(deps: {
 }): AccountMessages[] {
   const transcript =
     deps.transcript === "chats"
-      ? chatsAgentMessages(deps.db, (channel) => romeAccountOn(deps, channel))
+      ? chatsAgentMessages(deps.db, (channel) => romeAccountsOn(deps, channel))
       : agentMessages(deps.db);
   return [...messageStores(deps.channels), transcript, sentinelLogMessages(deps.db)];
 }
 
 /**
- * Rome's account on channel `channel`, as the chats it spoke in name it: the
- * channel record's while it holds one, else the account Rome's speakers on
- * that channel spoke as, so a history told to an account since disconnected
- * still reads, else the channel's own name on its platform.
+ * Every account Rome has spoken as on channel `channel`, as the chats it spoke
+ * in name them: the channel record's while it holds one, then each account
+ * Rome's speakers on that channel spoke as, newest first. A kept connection
+ * can be signed in as another account, and a history told to an earlier or
+ * disconnected account still reads. Absent any, the channel's own name on its
+ * platform.
  */
-export function romeAccountOn(
+export function romeAccountsOn(
   deps: {
     db: DrizzleDb;
     platformOfChannel: PlatformOfChannel;
     accountOf?: (channel: string) => Account | null;
   },
   channel: string,
-): Account {
-  const recorded = deps.accountOf?.(channel);
-  if (recorded) return recorded;
+): Account[] {
   const platform = deps.platformOfChannel(channel);
-  const [spoke] = deps.db.all<{ account_id: string }>(sql`
+  const recorded = deps.accountOf?.(channel);
+  const spoke = deps.db.all<{ account_id: string }>(sql`
     SELECT account_id FROM rome_sessions
     WHERE source_channel = ${channel} AND account_id IS NOT NULL
-    ORDER BY created_at DESC LIMIT 1
+    GROUP BY account_id ORDER BY max(created_at) DESC
   `);
-  return { platform, id: spoke?.account_id ?? channel };
+  const ids = new Set<string>();
+  const accounts: Account[] = [];
+  for (const account of [
+    ...(recorded ? [recorded] : []),
+    ...spoke.map((row) => ({ platform, id: row.account_id })),
+  ]) {
+    if (ids.has(account.id)) continue;
+    ids.add(account.id);
+    accounts.push(account);
+  }
+  return accounts.length > 0 ? accounts : [{ platform, id: channel }];
 }
 
 /**

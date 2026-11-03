@@ -124,8 +124,9 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
 /**
  * Rome's own transcript of a channel conversation, read for accounts from
  * Chats: each direct message Rome's account on a channel has with the
- * account's address, every line said there. `accountOn` names Rome's account
- * on a channel.
+ * account's address, every line said there. `accountsOn` names every account
+ * Rome has spoken as on a channel, since a kept connection can be signed in as
+ * another account and the chats its earlier account had stay keyed by it.
  *
  * The same store as {@link agentMessages}, over Chats' messages in place of
  * `rome_agent_messages`. A group answers to no address, and a guardian chat
@@ -135,28 +136,29 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
  */
 export function chatsAgentMessages(
   db: DrizzleDb,
-  accountOn: (channel: string) => Account,
+  accountsOn: (channel: string) => readonly Account[],
 ): AccountMessages {
   return sqlMessages({
     db,
     view(scope) {
       if (scope.keys.length === 0) return null;
-      // Rome's account once per channel, and the scope as one JSON value, so
+      // Rome's accounts once per channel, and the scope as one JSON value, so
       // a batch binds one variable however many keys it holds.
-      const accounts = new Map<string, Account>();
+      const accounts = new Map<string, readonly Account[]>();
       const on = (channel: string) => {
-        let account = accounts.get(channel);
-        if (!account) accounts.set(channel, (account = accountOn(channel)));
-        return account;
+        let held = accounts.get(channel);
+        if (!held) accounts.set(channel, (held = accountsOn(channel)));
+        return held;
       };
       const pairs = JSON.stringify(
-        scope.keys.map(({ channel, key }) => {
-          const account = on(channel);
-          // The direct message the address names before Rome's account has
-          // heard it anywhere else; the address store below has the last word.
-          const named = chatAt(account.platform, key, { romeEnd: account.id }).externalId;
-          return [channel, account.platform, account.id, key, named];
-        }),
+        scope.keys.flatMap(({ channel, key }) =>
+          on(channel).map((account) => {
+            // The direct message the address names before Rome's account has
+            // heard it anywhere else; the address store below has the last word.
+            const named = chatAt(account.platform, key, { romeEnd: account.id }).externalId;
+            return [channel, account.platform, account.id, key, named];
+          }),
+        ),
       );
       return sql`
         WITH v(channel, platform, account, key, named) AS (

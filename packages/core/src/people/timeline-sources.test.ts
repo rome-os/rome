@@ -3,7 +3,7 @@ import type { Account, AccountId, Accounts } from "../channels/accounts.js";
 import type { Channels } from "../channels/channel.js";
 import { romeSessions } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
-import { romeAccountOn, timelineAccounts } from "./timeline-sources.js";
+import { romeAccountsOn, timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
   id: id as AccountId,
@@ -234,7 +234,7 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
   });
 });
 
-describe("romeAccountOn", () => {
+describe("romeAccountsOn", () => {
   const platformOfChannel = () => "telegram";
 
   function seeded() {
@@ -256,27 +256,49 @@ describe("romeAccountOn", () => {
   it("names the account the channel's record holds", () => {
     const db = seeded();
     const accountOf = () => ({ platform: "telegram", id: "bot-live" });
-    expect(romeAccountOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual({
-      platform: "telegram",
-      id: "bot-live",
-    });
+    expect(romeAccountsOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual([
+      { platform: "telegram", id: "bot-live" },
+      { platform: "telegram", id: "bot-123" },
+    ]);
+  });
+
+  // A kept connection signed in as another account keeps the chats its
+  // earlier accounts had, keyed by them.
+  it("names every account Rome spoke as there, newest first, once each", () => {
+    const db = seeded();
+    db.insert(romeSessions)
+      .values(
+        ["bot-456", "bot-123"].map((accountId, at) => ({
+          id: `s-${at}`,
+          name: "DM",
+          type: "channel" as const,
+          sourceChannel: "tg-bot",
+          accountId,
+          createdAt: new Date(1000 * (at + 1)),
+          activityAt: new Date(1000 * (at + 1)),
+        })),
+      )
+      .run();
+    const accountOf = () => ({ platform: "telegram", id: "bot-123" });
+    expect(romeAccountsOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual([
+      { platform: "telegram", id: "bot-123" },
+      { platform: "telegram", id: "bot-456" },
+    ]);
   });
 
   // Disconnecting an account clears its record, and its chats stay keyed by
   // the account that spoke in them.
   it("names the account Rome spoke as once the record holds none", () => {
     const db = seeded();
-    expect(romeAccountOn({ db, platformOfChannel, accountOf: () => null }, "tg-bot")).toEqual({
-      platform: "telegram",
-      id: "bot-123",
-    });
+    expect(romeAccountsOn({ db, platformOfChannel, accountOf: () => null }, "tg-bot")).toEqual([
+      { platform: "telegram", id: "bot-123" },
+    ]);
   });
 
   it("names the channel itself when Rome never spoke there", () => {
     const db = seeded();
-    expect(romeAccountOn({ db, platformOfChannel }, "tg-other")).toEqual({
-      platform: "telegram",
-      id: "tg-other",
-    });
+    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([
+      { platform: "telegram", id: "tg-other" },
+    ]);
   });
 });

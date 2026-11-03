@@ -42,7 +42,7 @@ const accountOn = (channel: string): Account =>
 /** The store, with each entry's ref naming its line by the key the fixture
  *  gave it rather than the id Chats did. */
 const read = (db: DrizzleDb) => {
-  const store = chatsAgentMessages(db, accountOn);
+  const store = chatsAgentMessages(db, (channel) => [accountOn(channel)]);
   const named = <M extends { ref: string } | null>(entry: M): M => {
     if (!entry) return entry;
     const id = Number(entry.ref.slice("agent:".length));
@@ -322,6 +322,41 @@ describe("chatsAgentMessages", () => {
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
   });
 
+  // A kept connection signed in as another account keeps the direct messages
+  // its earlier account had, keyed by that account.
+  it("reads the direct messages of every account Rome spoke as on the channel", async () => {
+    const earlier: Account = { platform: "telegram", id: "rome-earlier-bot" };
+    const key = directMessageAt(earlier, DIRECT, new ChatAddresses(db));
+    const fixture = speakerFixture(db);
+    const chat = fixture.chat(key.platform, key.externalId, "dm");
+    fixture.speaker({ id: "s-earlier", chat, accountId: earlier.id, createdAt: new Date(0) });
+    db.insert(chatMessages)
+      .values({
+        key: "m-earlier",
+        chatId: chat.id,
+        threadId: null,
+        senderAccountId: DIRECT,
+        senderAgent: null,
+        senderName: null,
+        text: "m-earlier",
+        parts: JSON.stringify([{ type: "text", content: "m-earlier" }]),
+        saidAt: new Date(50_000),
+      })
+      .run();
+    const bodiesOf = async (accountsOn: (channel: string) => Account[]) =>
+      (
+        await chatsAgentMessages(db, accountsOn).read({
+          accounts: [account],
+          limit: WHOLE_HISTORY,
+        })
+      ).map((entry) => entry.body);
+
+    expect(await bodiesOf((channel) => [accountOn(channel)])).not.toContain("m-earlier");
+    const both = await bodiesOf((channel) => [accountOn(channel), earlier]);
+    expect(both).toContain("m-earlier");
+    expect(both).toContain("m-later");
+  });
+
   /** How many statements `read` runs against the database. */
   async function statementsRun(read: () => Promise<unknown>): Promise<number> {
     type Statement = Record<"all" | "get" | "run", (...values: unknown[]) => unknown>;
@@ -357,7 +392,7 @@ describe("chatsAgentMessages", () => {
 
   it("names every entry's conversation without a statement per entry", async () => {
     const runs = await statementsRun(async () => {
-      const page = await chatsAgentMessages(db, accountOn).read({
+      const page = await chatsAgentMessages(db, (channel) => [accountOn(channel)]).read({
         accounts: [account],
         limit: WHOLE_HISTORY,
       });
