@@ -315,10 +315,8 @@ describe("romeAccountsOn", () => {
     ]);
   });
 
-  it("names the channel itself when Rome never spoke there", () => {
+  it("names no account where the channel knows none and Rome never spoke there", () => {
     const db = seeded();
-    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([
-      { platform: "telegram", id: "tg-other" },
-    ]);
+    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([]);
   });
 });

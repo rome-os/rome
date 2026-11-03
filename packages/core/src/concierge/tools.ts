@@ -8,7 +8,7 @@ import {
   type ConciergeTaskState,
 } from "@rome/api-types/concierge";
 import type { SaidMessage } from "../chats/message.js";
-import type { SendResult } from "../chats/send.js";
+import type { SendResult } from "../connections/send.js";
 import type {
   ConciergeTaskWithChat,
   ConciergeTaskWrite,
@@ -364,6 +364,9 @@ export async function buildConciergeTools(
             writes.push(await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`));
           }
           const rows = await tasks.repo.upsertMany(writes);
+          const anchors = await Promise.all(
+            rows.map(async (row) => (await tasks.repo.getWithChat(row.id))?.sourceMessageId),
+          );
           // Says which message each row points to, and flags the ones that kept an
           // earlier message because the entry passed none.
           return {
@@ -371,7 +374,7 @@ export async function buildConciergeTools(
               id: row.id,
               title: row.title,
               state: row.state,
-              ...(row.sourceMessageId ? { anchor: row.sourceMessageId } : {}),
+              ...(anchors[index] ? { anchor: anchors[index] } : {}),
               ...(writes[index].sourceMessageId === undefined ? { anchorKept: true } : {}),
             })),
           };

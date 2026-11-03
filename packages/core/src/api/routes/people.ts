@@ -26,7 +26,7 @@ import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
-import { send, type SendResult } from "../../chats/send.js";
+import { send, type SendResult } from "../../connections/send.js";
 import { asGuardian, directPlace } from "../../people/send.js";
 import { readAccountTimeline } from "../../people/timeline.js";
 import {

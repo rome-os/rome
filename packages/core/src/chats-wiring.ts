@@ -6,6 +6,7 @@
 // Nothing live uses it yet: the Chats switch moves startup onto it.
 
 import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
+import { sql } from "drizzle-orm";
 import { ChatRepository } from "./chats/storage/chat-repository.js";
 import { MessageRepository } from "./chats/storage/message-repository.js";
 import type { ChatRef } from "./chats/storage/place.js";
@@ -14,7 +15,7 @@ import { ChatAddresses } from "./connections/chat-addresses.js";
 import { chatKey, type ChatKey } from "./connections/chat-ids.js";
 import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapter.js";
 import { recordedSends } from "./connections/recorded-sends.js";
-import { SpeakerLines } from "./connections/speaker-lines.js";
+import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
 import { SpeakerReplies } from "./sessions/speaker-replies.js";
 import { Speakers } from "./sessions/speakers.js";
@@ -49,8 +50,20 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
   });
   const speakers = new Speakers(db, chats);
   const links = new TurnLinks(db, messages);
-  const replies = new SpeakerReplies({ speakers, adapters, messages, links });
-  const speakerLines = new SpeakerLines({ speakers, messages, adapters });
+  const replies = new SpeakerReplies({
+    speakers,
+    adapters,
+    messages,
+    links,
+    activity: (sessionId, at) => {
+      const seconds = Math.floor(at.getTime() / 1000);
+      db.run(sql`
+        UPDATE rome_sessions SET activity_at = ${seconds}
+        WHERE id = ${sessionId} AND activity_at < ${seconds}
+      `);
+    },
+  });
+  const speakerMessages = new SpeakerMessages({ speakers, messages, adapters });
   const reads = new ChatReadModel(db, { messages, links });
   return {
     chats,
@@ -60,7 +73,7 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
     speakers,
     links,
     replies,
-    speakerLines,
+    speakerMessages,
     reads,
     /** `channels` with each send recorded through Chats. */
     recordedSends<C extends Channel>(channels: readonly C[]): C[] {

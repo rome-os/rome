@@ -4,30 +4,33 @@
 // and docs/domains/participation.md.
 //
 // An app names a session and the platform's ids; this file turns them into
-// the speaker, the line and its key. Nothing hands these to apps yet: the
+// the speaker, the message and its key. Nothing hands these to apps yet: the
 // Chats switch adds them to the app repositories and moves the inbox and
 // `send_message` onto them.
 
+import { actionExecutionContext } from "../actions/context.js";
 import type {
   Channel,
+  ChatId,
   ChatRepository,
   MessagePart,
   OutgoingAttachment,
 } from "@rome-os/app-runtime";
 import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
+import { v7 as uuidv7 } from "uuid";
 import { messageContentText } from "../channels/messages-agent.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";
-import { type ChatAdapters, platformIdOfLine } from "../connections/chat-adapter.js";
+import { type ChatAdapters, platformIdOfMessage } from "../connections/chat-adapter.js";
 import {
   emailOf,
   type EmailOutbound,
   type EmailRecipients,
 } from "../connections/email-chat-adapter.js";
-import type { SpeakerAt, SpeakerLines } from "../connections/speaker-lines.js";
+import type { SpeakerAt, SpeakerMessages } from "../connections/speaker-messages.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
@@ -38,20 +41,20 @@ const log = createLogger("app-chat-writes");
 
 export type ChatWrites = Pick<
   Required<ChatRepository>,
-  "addMessage" | "promoteMessageToUser" | "send" | "sendEmail"
+  "addMessage" | "promoteMessageToUser" | "send" | "sendEmail" | "recordOutboundMessage"
 >;
 
 export interface AppChatWritesDeps {
-  /** Moves a session's activity up when a line reaches its chat. */
+  /** Moves a session's activity up when a message reaches its chat. */
   webchatRepo: Pick<WebChatRepository, "advanceSessionActivity">;
   chats: Pick<Chats, "start">;
   messages: Pick<MessageRepository, "record" | "send" | "chatHolding">;
   speakers: Pick<Speakers, "speakerOf">;
   /** What a speaker says, recorded and linked to its turn. */
-  replies: Pick<SpeakerReplies, "send">;
+  replies: Pick<SpeakerReplies, "send" | "agentOf">;
   links: Pick<TurnLinks, "prompt" | "answer">;
-  /** The lines an app names by the platform's ids. */
-  lines: Pick<SpeakerLines, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
+  /** The messages an app names by the platform's ids. */
+  lines: Pick<SpeakerMessages, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
   adapters: Pick<ChatAdapters, "of" | "keyOf" | "accountOn">;
   /** The live channel named `name`, whose adapter a speaker says its
    *  messages through, or null when Rome holds none by that name. */
@@ -88,12 +91,12 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     }
   };
 
-  /** The platform's id for a line `speaker` says, as a function of the
-   *  line's key. It reads storage now, before a send, so turning a receipt
+  /** The platform's id for a message `speaker` says, as a function of the
+   *  message's key. It reads storage now, before a send, so turning a receipt
    *  into an id never fails a send the platform took. */
   const receiptOf = (speaker: SpeakerAt) => {
     const chat = deps.adapters.keyOf(speaker.place.chat);
-    return (lineKey: string) => platformIdOfLine(chat, speaker.accountId, lineKey);
+    return (messageKey: string) => platformIdOfMessage(chat, speaker.accountId, messageKey);
   };
 
   /** The provider's address for the email thread `chat`. Asks the email
@@ -102,22 +105,90 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
   const threadAddressOf = (channel: Channel, chat: ChatRef): string =>
     emailOf(deps.adapters, channel).threadAddress(deps.adapters.keyOf(chat).externalId);
 
-  /** The email thread holding the email the provider calls `messageId`.
-   *  Refuses one Rome holds no thread for, since sending it as a new email
-   *  would answer nothing. */
-  const threadHolding = (channel: Channel, messageId: string): ChatRef => {
+  /** The email thread holding the email the provider calls `messageId`, or
+   *  null when Rome holds none. */
+  const threadHolding = (channel: Channel, messageId: string): ChatRef | null => {
     const account = deps.adapters.accountOn(channel.name);
-    const chat = deps.messages.chatHolding(account.platform, messageId);
-    if (!chat) {
-      throw new Error(`Rome holds no email thread with message ${messageId}. No email was sent.`);
+    return deps.messages.chatHolding(account.platform, messageId);
+  };
+
+  /**
+   * Reply to the email the provider calls `messageId`, which Rome holds no
+   * thread for, as one fetched from the mailbox directly. The provider sends
+   * a reply into the thread of the email it answers, so the reply goes out
+   * through the channel's port, and Rome learns the thread from its receipt:
+   * main joins it there, and the reply is recorded as main's. The email went
+   * out once the provider took it, so a failure to record it after that is
+   * logged and the send still answers.
+   */
+  const replyUnheld = async (
+    channel: Channel,
+    messageId: string,
+    out: Omit<EmailOutbound, "replyTo">,
+    recorded: readonly MessagePart[],
+    turnId: string | undefined,
+    agent: string,
+  ) => {
+    if (!channel.send) throw new Error(`Channel "${channel.name}" cannot send`);
+    const receipt = await channel.send.send("" as ChatId, {
+      kind: "email",
+      text: out.text,
+      ...(out.parts ? { parts: [...out.parts] } : {}),
+      ...(out.html ? { html: out.html } : {}),
+      ...(out.cc?.length ? { cc: [...out.cc] } : {}),
+      ...(out.bcc?.length ? { bcc: [...out.bcc] } : {}),
+      ...(turnId ? { turnId } : {}),
+      inReplyToMessageId: messageId,
+    });
+    const sentId = receipt?.messageId?.trim() || null;
+    const threadId = receipt?.chatId?.trim() ?? "";
+    if (!threadId) {
+      log.error("an email reply went out, but the provider named no thread to record it in", {
+        channel: channel.name,
+        inReplyTo: messageId,
+      });
+      return { messageId: sentId, threadId };
     }
-    return chat;
+    try {
+      const session = await deps.open({
+        channel: channel.name,
+        threadId,
+        agentName: "main",
+        threadType: "group",
+      });
+      const speaker = speakerOf(session.id);
+      const sent = await deps.messages.send(
+        {
+          direction: "fromRome",
+          place: speaker.place,
+          saidBy: {
+            account: { platform: speaker.place.chat.platform, id: speaker.accountId },
+            agent,
+          },
+          parts: recorded,
+          replyTo: { key: deps.lines.keyIn(speaker, messageId) },
+        },
+        // Delivered already: the receipt keys the message.
+        async () => ({
+          key: sentId ? deps.lines.keyIn(speaker, sentId) : `rome:${uuidv7()}`,
+        }),
+      );
+      if (sent.id !== null && turnId) deps.links.answer(sent.id, session.id, turnId);
+      active(session.id, sent.at);
+    } catch (error) {
+      log.error("an email reply went out, but could not be recorded", {
+        channel: channel.name,
+        thread: threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return { messageId: sentId, threadId };
   };
 
   /**
    * Open a thread to `recipients` and say `out` there as main: its first
    * message, which starts it. Main joins the thread once the provider took
-   * the message, so a refused email leaves no session or line. The email
+   * the message, so a refused email leaves no session or message. The email
    * went out once the provider took it, so a failure to join after that is
    * logged and the send still answers.
    */
@@ -128,6 +199,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     out: Omit<EmailOutbound, "replyTo">,
     recorded: readonly MessagePart[],
     turnId: string | undefined,
+    agent: string,
   ) => {
     const adapter = emailOf(deps.adapters, channel);
     const key = adapter.open(recipients, subject);
@@ -137,7 +209,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       {
         direction: "fromRome",
         place: placeIn(chat),
-        saidBy: { account, agent: "main" },
+        saidBy: { account, agent },
         parts: recorded,
       },
       async (target) => ({ key: (await adapter.send(target.chat, null, out)).key }),
@@ -162,13 +234,13 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       });
     }
     return {
-      messageId: platformIdOfLine(key, account.id, sent.key),
+      messageId: platformIdOfMessage(key, account.id, sent.key),
       threadId,
     };
   };
 
   return {
-    // The line is recorded where the session stands, keyed as its account
+    // The message is recorded where the session stands, keyed as its account
     // hears the platform's message, so the adapter hearing it too records it
     // once. A prompt is linked to the session.
     async addMessage(input) {
@@ -201,6 +273,33 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       return { inserted: true };
     },
 
+    // An app built before `send` sends on its own and then names what went
+    // out. It goes on record in Chats as the speaker's, as a send would put
+    // it, so Chats' readers see it.
+    async recordOutboundMessage(input) {
+      const speaker = speakerOf(input.sessionId);
+      const key = input.platformMessageId
+        ? deps.lines.keyIn(speaker, input.platformMessageId)
+        : `rome:${uuidv7()}`;
+      const sent = await deps.messages.send(
+        {
+          direction: "fromRome",
+          place: speaker.place,
+          saidBy: {
+            account: { platform: speaker.place.chat.platform, id: speaker.accountId },
+            agent: agentOf(deps, input.turnId).agent ?? speaker.agent,
+          },
+          parts: recordedOf(input.content),
+          ...replyToIn(deps, speaker, input.replyToPlatformMessageId),
+        },
+        // Delivered already: recording says so.
+        async () => ({ key }),
+      );
+      if (sent.id !== null && input.knownToProvider && input.turnId)
+        deps.links.answer(sent.id, input.sessionId, input.turnId);
+      active(input.sessionId, sent.at);
+    },
+
     async promoteMessageToUser(sessionId, platformMessageId) {
       const line = await deps.lines.recorded(sessionId, platformMessageId);
       if (line) deps.links.prompt(line.id, sessionId);
@@ -209,7 +308,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     async send(input) {
       const channel = channelNamed(input.channel);
       const parts = input.parts?.length ? input.parts : undefined;
-      // An app quotes by the platform's id, which names a line of the
+      // An app quotes by the platform's id, which names a message of the
       // session's chat.
       const speaker = speakerOf(input.sessionId);
       const receipt = receiptOf(speaker);
@@ -226,6 +325,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         },
         {
           ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
+          ...agentOf(deps, input.turnId),
           recorded: input.content
             ? recordedOf(input.content)
             : withNotes(parts ?? [{ type: "text", content: input.text ?? "" }], input.attachments),
@@ -242,7 +342,10 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       // Refused before anything goes out on a channel that sends no email.
       emailOf(deps.adapters, channel);
       const parts = input.parts?.length ? input.parts : undefined;
-      const recorded = input.content ? recordedOf(input.content) : undefined;
+      // Composed content with nothing in it, as an HTML-only email's, says
+      // nothing: the email goes on record as its HTML reads.
+      const composed = input.content ? recordedOf(input.content) : undefined;
+      const recorded = composed?.length ? composed : undefined;
       const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
       // An email's body is its text, else the text of its parts. An
       // HTML-only email goes on record as the text its HTML reads as.
@@ -261,6 +364,29 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       // session is refused before anything goes out.
       const held =
         inReplyToMessageId === undefined ? undefined : threadHolding(channel, inReplyToMessageId);
+      if (held === null) {
+        // A blank id names no email, so nothing answers it.
+        if (!inReplyToMessageId?.trim()) {
+          throw new Error(
+            `Rome holds no email thread with message ${inReplyToMessageId}. No email was sent.`,
+          );
+        }
+        // The provider sends a reply into the thread of the email it answers,
+        // whatever thread or session the caller names, as the email port
+        // always has: the reply is recorded where the provider's receipt says.
+        return await replyUnheld(
+          channel,
+          inReplyToMessageId,
+          {
+            ...out,
+            ...(cc?.length ? { cc } : {}),
+            ...(bcc?.length ? { bcc } : {}),
+          },
+          onRecord,
+          turnId,
+          agentOf(deps, input.turnId).agent ?? "main",
+        );
+      }
       if (
         held &&
         input.threadId !== undefined &&
@@ -285,6 +411,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           out,
           onRecord,
           turnId,
+          agentOf(deps, input.turnId).agent ?? "main",
         );
       }
       // An email thread is a group chat, main's unless the caller names its
@@ -317,7 +444,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         sessionId,
         channel,
         { ...reply, ...replyToIn(deps, speaker, inReplyToMessageId) },
-        { ...(turnId ? { turnId } : {}), recorded: onRecord },
+        { ...(turnId ? { turnId } : {}), ...agentOf(deps, input.turnId), recorded: onRecord },
       );
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
       active(sessionId, sent.at);
@@ -326,7 +453,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
   };
 }
 
-/** The quote of the line the platform calls `platformMessageId` where
+/** The quote of the message the platform calls `platformMessageId` where
  *  `speaker` stands: by its id when Rome holds it, else by its key. */
 function replyToIn(
   deps: Pick<AppChatWritesDeps, "lines">,
@@ -351,7 +478,7 @@ function withNotes(
   return [...said, { type: "text", content: notes.join("\n") }];
 }
 
-/** An app's `content`, the line as it goes on record, without the parts only
+/** An app's `content`, the message as it goes on record, without the parts only
  *  the host may author, so a forged routine card never reaches the chat. */
 /** The parts an app's message content holds, host-only ones left out, when
  *  it holds a list of them. */
@@ -367,4 +494,15 @@ function partsIn(content: string): { parts?: MessagePart[] } {
 
 function recordedOf(content: string): MessagePart[] {
   return JSON.parse(stripHostOnlyPartsFromContent(content)) as MessagePart[];
+}
+
+/** The agent the turn sending runs, for a send that may not answer it: as
+ *  noted where the turn started or where a worker asked main to run it, else
+ *  as the action running in that turn names it. */
+function agentOf(deps: AppChatWritesDeps, turnId: string | undefined): { agent?: string } {
+  const running = actionExecutionContext.getStore();
+  const agent =
+    deps.replies.agentOf(turnId) ??
+    (turnId !== undefined && running?.turnId === turnId ? running.agentName : undefined);
+  return agent === undefined ? {} : { agent };
 }

@@ -36,12 +36,12 @@ import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
-import { DASHBOARD_PLATFORM } from "../chats/send.js";
+import { DASHBOARD_PLATFORM } from "./send.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
 import type { MessagePart } from "../types.js";
-import { type ChatAdapters, platformIdOfLine } from "./chat-adapter.js";
+import { type ChatAdapters, platformIdOfMessage } from "./chat-adapter.js";
 import { type ChatKey, directMessageOn } from "./chat-ids.js";
 
 const log = createLogger("app-chats");
@@ -51,7 +51,10 @@ export interface AppChatsDeps {
   channels(): readonly Channel[];
   /** The channels of Rome's accounts on `platform`. */
   channelsOn(platform: string): readonly string[];
-  adapters: Pick<ChatAdapters, "of" | "accountOn" | "channelOf" | "keyOf" | "directMessageReached">;
+  adapters: Pick<
+    ChatAdapters,
+    "of" | "accountOn" | "knownAccountOn" | "channelOf" | "keyOf" | "directMessageReached"
+  >;
   chats: Pick<ChatRepository, "get" | "byKey" | "start" | "list">;
   speakers: Pick<Speakers, "speakerIn" | "speaksIn" | "accountsIn">;
   replies: Pick<SpeakerReplies, "send">;
@@ -112,10 +115,10 @@ async function send(
         { ...outbound, ...(replyTo === undefined ? {} : { replyTo }) },
         { recorded: parts },
       );
-      if (said) return { id: said.id, lineKey: said.sent, landedIn: said.landedIn, at: said.at };
+      if (said) return { id: said.id, messageKey: said.sent, landedIn: said.landedIn, at: said.at };
     }
     const adapter = deps.adapters.of(sender.channel);
-    let lineKey = "";
+    let messageKey = "";
     let landedIn: ChatId | null = at.threadId ?? null;
     const sent = await deps.messages.send(
       {
@@ -130,7 +133,7 @@ async function send(
           ...outbound,
           ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
         });
-        lineKey = delivered.key;
+        messageKey = delivered.key;
         landedIn = delivered.threadId;
         return {
           key: delivered.key,
@@ -140,16 +143,16 @@ async function send(
         };
       },
     );
-    return { id: sent.id, lineKey, landedIn, at: sent.at };
+    return { id: sent.id, messageKey, landedIn, at: sent.at };
   });
   return sentOf(deps, chat, key, sender, delivered);
 }
 
-/** What a delivery answers: the line's id in Chats, or null when it is not on
+/** What a delivery answers: the message's id in Chats, or null when it is not on
  *  record, its adapter's key, and the thread it landed in. */
 interface Delivered {
   readonly id: number | null;
-  readonly lineKey: string;
+  readonly messageKey: string;
   readonly landedIn: ChatId | null;
   readonly at: Date;
 }
@@ -259,7 +262,7 @@ function senderIn(deps: AppChatsDeps, chat: Chat, at: Place, as: Account | undef
   }
   const [speaker] = speaking;
   if (speaker !== undefined) return senderAs(deps, { platform, id: speaker }, { inferred: true });
-  const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
+  const accounts = knownAccountsOn(deps, platform);
   const [only] = accounts.length === 1 ? accounts : [];
   if (only) return senderAs(deps, only, { inferred: true });
   if (accounts.length === 0) {
@@ -301,28 +304,28 @@ function senderAs(deps: AppChatsDeps, account: Account, opts?: { inferred: boole
 /**
  * The SDK's answer for a message the platform took, which never throws:
  * reporting a sent message as failed invites a second one. A record that did
- * not land is logged and answered by the id Rome holds for the line, if any.
+ * not land is logged and answered by the id Rome holds for the message, if any.
  */
 function sentOf(
   deps: AppChatsDeps,
   chat: Chat,
   key: ChatKey,
   sender: Sender,
-  { id, lineKey, landedIn, at }: Delivered,
+  { id, messageKey, landedIn, at }: Delivered,
 ): SdkSent {
   let recorded = id;
   if (recorded === null) {
     try {
-      recorded = deps.messages.idOf(chat.ref, lineKey);
+      recorded = deps.messages.idOf(chat.ref, messageKey);
     } catch (error) {
-      log.warn("could not read back an app's sent line", { error: String(error) });
+      log.warn("could not read back an app's sent message", { error: String(error) });
     }
   }
   if (recorded === null) {
     log.warn("an app's send went out but is not on record", { chat: chat.ref.id });
   }
   const message = { chat: chat.ref, id: recorded ?? 0 };
-  const platformMessageId = platformIdOfLine(key, sender.account.id, lineKey);
+  const platformMessageId = platformIdOfMessage(key, sender.account.id, messageKey);
   return {
     message,
     ...(platformMessageId ? { platformMessageId } : {}),
@@ -363,7 +366,7 @@ async function dm(
   }
   // The channel may have reconnected as another account while the platform
   // answered, and the address is the first account's.
-  if (deps.adapters.accountOn(sender.channel.name).id !== sender.account.id) {
+  if (deps.adapters.knownAccountOn(sender.channel.name)?.id !== sender.account.id) {
     throw new SendError("not_connected", `${describe(sender.account)} is no longer connected`);
   }
   const key = deps.adapters.directMessageReached(sender.channel.name, account.id, address);
@@ -379,7 +382,7 @@ function soleSender(deps: AppChatsDeps, platform: string, as: Account | undefine
     }
     return senderAs(deps, as);
   }
-  const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
+  const accounts = knownAccountsOn(deps, platform);
   const [only] = accounts;
   if (!only) throw new SendError("not_connected", `Rome holds no account on ${platform}`);
   if (accounts.length > 1) {
@@ -432,4 +435,10 @@ function recordedParts(
 
 function describe(account: Account): string {
   return `${account.platform} account ${account.id}`;
+}
+
+/** Rome's active accounts on `platform`: each channel's there that knows its
+ *  account. A channel that knows none is not active and sends nothing. */
+function knownAccountsOn(deps: AppChatsDeps, platform: string): Account[] {
+  return deps.channelsOn(platform).flatMap((name) => deps.adapters.knownAccountOn(name) ?? []);
 }

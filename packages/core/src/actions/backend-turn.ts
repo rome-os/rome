@@ -30,6 +30,7 @@ import type {
 import type { Channel } from "../channels/channel.js";
 import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
+import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
@@ -98,6 +99,9 @@ export interface MainBackendTurnRunner extends BackendTurnRunner {
     reply: string,
     turnId?: string,
   ): Promise<void>;
+  /** True when `deliverMessagingReply` puts the reply on record as it says
+   * it, so the turn that produced the reply must not save its answer too. */
+  readonly saysReplies: boolean;
 }
 
 export interface BackendTurnRunnerDeps {
@@ -117,12 +121,19 @@ export interface BackendTurnRunnerDeps {
     channel: string,
     threadId: string,
   ) => Promise<ThreadContext["deviceFolder"] | undefined>;
-  /** Opens the chat a delivered reply is recorded in. */
+  /** Opens the chat a delivered reply is recorded in, and the session whose
+   *  speaker says it. */
   chats?: ChatRepository;
   /** Where a delivered reply is put on record, in the place its chat's row
    *  stands for. Absent, nothing records it. */
   messages?: Pick<MessageRepository, "recordSent">;
   places?: Pick<ChatsByKey, "placeOfRecord">;
+  /** Says a reply through the speaker of the agent's session at the reply's
+   *  address, which sends it through its account's chat adapter and records
+   *  it in Chats as the turn's answer. Given, it takes the place of
+   *  `messages` and `places`, and `channel` must answer the platform's own
+   *  send ports, not ones that record their sends. */
+  replies?: Pick<SpeakerReplies, "send">;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -134,7 +145,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
-    trace: Pick<RunParams, "persistTrace" | "persistTranscript"> = {},
+    trace: Pick<RunParams, "persistTrace" | "persistTranscript" | "persistAnswer"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -192,8 +203,34 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       });
       return;
     }
-    const send = deps.channel(params.channel)?.send;
-    if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
+    const channel = deps.channel(params.channel);
+    const send = channel?.send;
+    if (!channel || !send) throw new Error(`Channel "${params.channel}" cannot send`);
+    if (deps.replies && deps.chats) {
+      // A delivery that succeeded and failed to record is logged, never
+      // thrown, so the continuation never retries a sent reply.
+      const session = await deps.chats.ensureChannelChat({
+        channel: params.channel,
+        threadId: params.threadId,
+        agentName: params.agentName,
+      });
+      const said = await deps.replies.send(
+        session.id,
+        channel,
+        { text: reply },
+        { ...(turnId ? { turnId } : {}), agent: params.agentName },
+      );
+      if (said) return;
+      // The session stands in no chat, so nothing can record the reply
+      // where it is read back. It still goes out: the user asked for it.
+      log.warn("backend reply has no speaker to say it, sent unrecorded", {
+        channel: params.channel,
+        threadId: params.threadId,
+        sessionId: session.id,
+      });
+      await send.send(params.threadId as ChatId, { text: reply, ...(turnId ? { turnId } : {}) });
+      return;
+    }
     const delivery = await send.send(params.threadId as ChatId, {
       text: reply,
       ...(turnId ? { turnId } : {}),
@@ -282,7 +319,11 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // on the channel's `send` port.
       let reply = "";
       let turnId: string | undefined;
-      for await (const msg of runTurn(params, workingDir, {}, deviceFolder)) {
+      // A speaker puts the answer on record as it says it, so the trace keeps
+      // the turn but writes no answer of its own: one that was never sent
+      // must not read as said, and one that was must not be said twice.
+      const trace = deps.replies && deps.chats ? { persistAnswer: false } : {};
+      for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }
@@ -290,5 +331,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     },
 
     deliverMessagingReply,
+
+    saysReplies: Boolean(deps.replies && deps.chats),
   };
 }

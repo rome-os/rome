@@ -102,6 +102,9 @@ export function inboundRecording(
       at: message.saidAt,
     });
     const recorded = deps.messages.record(said);
+    // Heard already, through this account or another of Rome's: a message
+    // is heard once, so only the first account to hear it decides its wake.
+    // Waking each account that hears it is an open design question.
     if (recorded === null) return null;
     const hearingAs = `${via.channel}\0${recorded.id}`;
     hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });

@@ -5,7 +5,7 @@
 // place newest first. Nothing here knows about turns or sessions: Agents
 // links a message to a turn after one of these returns its id.
 
-import { sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../db/index.js";
 import { chatMessages, chats } from "../../db/schema/system.js";
 import { createLogger } from "../../logger.js";
@@ -40,7 +40,7 @@ export interface MessagePage {
 }
 
 /** Where a send goes, by its adapter's keys: the chat's, and the quoted
- *  line's when the send quotes one. */
+ *  message's when the send quotes one. */
 export interface SendTarget {
   readonly chat: string;
   readonly replyTo?: string;
@@ -72,7 +72,7 @@ export class MessageRepository {
   /**
    * Put `message` on record in its place, and answer it with its id, or null
    * when its key is already on record in that chat: recording again changes
-   * nothing. A quote of a line Rome does not hold quotes nothing. The place's
+   * nothing. A quote of a message Rome does not hold quotes nothing. The place's
    * chat must already exist: a message never starts its chat. Throws when it
    * does not.
    */
@@ -122,7 +122,7 @@ export class MessageRepository {
       );
     }
     const chat = this.chatOf(message.place);
-    // A quote names a line in the same chat: a key is unique only there.
+    // A quote names a message in the same chat: a key is unique only there.
     const quoted =
       message.replyTo === undefined
         ? null
@@ -133,11 +133,28 @@ export class MessageRepository {
       chat: chat.key,
       ...(quoted ? { replyTo: quoted } : {}),
     });
-    // The line is on record where the platform put it.
+    // The message is on record where the platform put it.
     const threadId = landedIn ? landedIn.threadId : (message.place.threadId ?? null);
     const at = new Date();
     try {
+      const said = {
+        senderAgent: message.saidBy.agent ?? null,
+        senderName: message.saidBy.name ?? null,
+        text: partsText(message.parts),
+        parts: JSON.stringify(message.parts),
+        // A quote by key links once Rome holds that message, which it may by
+        // now even when it did not before the send.
+        replyToMessageId:
+          quoted === null
+            ? null
+            : typeof message.replyTo === "number"
+              ? message.replyTo
+              : this.idIn(chat.id, quoted),
+      };
       // The platform answered a key already on record: the same message.
+      // Where another of Rome's accounts heard it first, as anyone's, it is
+      // this account's, and goes on record as what this account said. Any
+      // other message keeps what it holds.
       this.db
         .insert(chatMessages)
         .values({
@@ -145,21 +162,20 @@ export class MessageRepository {
           key,
           threadId,
           senderAccountId: message.saidBy.account.id,
-          senderAgent: message.saidBy.agent ?? null,
-          senderName: message.saidBy.name ?? null,
-          text: partsText(message.parts),
-          parts: JSON.stringify(message.parts),
-          // A quote by key links once Rome holds that line, which it may by
-          // now even when it did not before the send.
-          replyToMessageId:
-            quoted === null
-              ? null
-              : typeof message.replyTo === "number"
-                ? message.replyTo
-                : this.idIn(chat.id, quoted),
           saidAt: at,
+          ...said,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [chatMessages.chatId, chatMessages.key],
+          set: {
+            ...said,
+            replyToMessageId: sql`coalesce(${said.replyToMessageId}, ${chatMessages.replyToMessageId})`,
+          },
+          setWhere: and(
+            isNull(chatMessages.senderAgent),
+            eq(chatMessages.senderAccountId, message.saidBy.account.id),
+          ),
+        })
         .run();
       return { id: this.idIn(chat.id, key), key, recorded: true, at };
     } catch (error) {
@@ -178,7 +194,7 @@ export class MessageRepository {
    * it, and a cursor to the newer ones: a cursor names the last message
    * read, and a bare time leaves out every message said in that second or
    * before. Without `limit` every one. A place Rome holds no chat for answers
-   * an empty page. Lines said in one second keep the order they were
+   * an empty page. Messages said in one second keep the order they were
    * recorded in.
    */
   read(
@@ -255,8 +271,8 @@ export class MessageRepository {
       .map((row) => said(placeOf(row), row));
   }
 
-  /** The parts of a line its adapter keys `key`, in whichever chat: the
-   *  oldest such line. A dashboard line's key is unique on its own. */
+  /** The parts of a message its adapter keys `key`, in whichever chat: the
+   *  oldest such message. A dashboard message's key is unique on its own. */
   partsKeyed(key: string): string | null {
     return (
       this.db.all<{ parts: string }>(sql`
@@ -265,7 +281,7 @@ export class MessageRepository {
     );
   }
 
-  /** The id of the line its adapter keys `key` in `chat`, or null when Rome
+  /** The id of the message its adapter keys `key` in `chat`, or null when Rome
    *  holds none. */
   idOf(chat: ChatRef, key: string): number | null {
     return (
@@ -275,8 +291,8 @@ export class MessageRepository {
     );
   }
 
-  /** The chat on `platform` that holds a line its adapter keys `key`, the
-   *  oldest such line's, or null when Rome holds none. For platforms whose
+  /** The chat on `platform` that holds a message its adapter keys `key`, the
+   *  oldest such message's, or null when Rome holds none. For platforms whose
    *  keys are unique across chats, as an email's message id is. */
   chatHolding(platform: string, key: string): ChatRef | null {
     const row = this.db.all<{ id: number }>(sql`

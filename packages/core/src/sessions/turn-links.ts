@@ -13,10 +13,10 @@ import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { romeSessions } from "../db/schema/system.js";
-import { lineHolder, type LineHolder } from "../connections/chat-adapter.js";
+import { messageHolder, type MessageHolder } from "../connections/chat-adapter.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 
-/** What a message is to a session's turn: its prompt, its answer, or a line
+/** What a message is to a session's turn: its prompt, its answer, or a message
  *  the turn caught up on. */
 export type TurnLinkRole = "prompt" | "answer" | "seen";
 
@@ -33,13 +33,13 @@ export interface TurnLink {
 export class TurnLinks {
   /**
    * The messages whose wake is still being decided, each with how many of
-   * Rome's accounts are deciding it: a line two accounts hear is held until
+   * Rome's accounts are deciding it: a message two accounts hear is held until
    * both have decided. Kept in memory: a restart forgets it, which decides
    * every wake in flight, since the decision died with the process.
    */
   private readonly undecided = new Map<number, number>();
 
-  /** Chats' reads, which every line a session reads goes through. */
+  /** Chats' reads, which every message a session reads goes through. */
   private readonly messages: Pick<MessageRepository, "read" | "byIds">;
 
   /** Chats' chats, where a speaker's chat is found. */
@@ -61,10 +61,10 @@ export class TurnLinks {
     threadId: string | null;
     since: Date;
     joined: Date;
-    /** Which of Rome's accounts holds each line, where the chat numbers its
+    /** Which of Rome's accounts holds each message, where the chat numbers its
      *  messages per member account and each account there holds its own copy
      *  of a message; null elsewhere. */
-    holder: LineHolder | null;
+    holder: MessageHolder | null;
   } | null {
     const row = this.db
       .select({
@@ -97,7 +97,7 @@ export class TurnLinks {
       threadId: row.threadId,
       since: row.createdAt,
       joined: first?.at ?? row.createdAt,
-      holder: lineHolder(chat.ref.platform, chat.key),
+      holder: messageHolder(chat.ref.platform, chat.key),
     };
   }
 
@@ -117,7 +117,7 @@ export class TurnLinks {
       VALUES (${messageId}, ${sessionId}, ${turnId}, 'prompt', ${inputState})
       ON CONFLICT (message_id, session_id) DO UPDATE SET
         role = 'prompt',
-        -- A line only caught up on becomes a prompt of its own turn, queued
+        -- A message only caught up on becomes a prompt of its own turn, queued
         -- when it names none; a prompt keeps the turn it already runs.
         turn_id = CASE WHEN agent_turn_messages.role = 'prompt'
           THEN coalesce(excluded.turn_id, agent_turn_messages.turn_id)
@@ -207,17 +207,17 @@ export class TurnLinks {
    * it has no link to, oldest first: what it has not seen. A message whose
    * wake is still undecided is left out, since it may yet become a turn's
    * prompt of its own. Each comes with the message it quotes, found anywhere
-   * in its chat, so a thread's first line can carry the line that started it.
-   * A copy of a line it saw, held by another of Rome's accounts, is linked as
-   * seen on the way, with no turn. A copy of an undecided line waits with it.
+   * in its chat, so a thread's first message can carry the message that started it.
+   * A copy of a message it saw, held by another of Rome's accounts, is linked as
+   * seen on the way, with no turn. A copy of an undecided message waits with it.
    */
   unseen(sessionId: string): UnseenLine[] {
     const speaker = this.speakerOf(sessionId);
     if (!speaker) return [];
-    // A line said in the second the speaker started may have come before it, so
-    // only lines said after that second are the speaker's to catch up on. Only
+    // A message said in the second the speaker started may have come before it, so
+    // only messages said after that second are the speaker's to catch up on. Only
     // ids are read here, so a long history the session has seen costs an
-    // index scan rather than every line's text.
+    // index scan rather than every message's text.
     const where = sql`m.chat_id = ${speaker.chatId} AND m.thread_id IS ${speaker.threadId}`;
     const fresh = this.db
       .all<{ id: number; said_at: number }>(sql`
@@ -234,7 +234,7 @@ export class TurnLinks {
     // message for each of Rome's accounts that heard it; no other chat holds
     // copies. The session has
     // seen every copy of a message it has seen one of, and reads one copy of
-    // the rest. Copies share their second, so the lines said in the seconds
+    // the rest. Copies share their second, so the messages said in the seconds
     // of the fresh ones are every copy any of them can have.
     const seconds = [...new Set(fresh.map((row) => row.said_at))];
     const said = this.messages.byIds(
@@ -246,7 +246,7 @@ export class TurnLinks {
         .map((row) => row.id),
     );
     const unread = new Set(fresh.map((row) => row.id));
-    // Only a line the session has a link to is one it saw. A line out of
+    // Only a message the session has a link to is one it saw. A message out of
     // `fresh` may instead be undecided, and then every copy of it waits with
     // it, unlinked, until its wake is decided.
     const linked = new Set(
@@ -265,7 +265,7 @@ export class TurnLinks {
       else if (this.undecided.has(message.id)) waiting.take(message);
     }
     for (const message of said) if (waiting.heardBefore(message)) unread.delete(message.id);
-    // A copy of a line the session saw is seen with it. Linking it so means
+    // A copy of a message the session saw is seen with it. Linking it so means
     // the next catch-up does not read it again.
     const seenCopies = said.filter(
       (message) => unread.has(message.id) && copies.heardBefore(message),
@@ -284,8 +284,8 @@ export class TurnLinks {
       copies.take(message);
       return true;
     });
-    // A quoted line said before Rome's account was in the chat stays out of
-    // its view, like every other line said then.
+    // A quoted message said before Rome's account was in the chat stays out of
+    // its view, like every other message said then.
     const quoted = new Map(
       this.messages
         .byIds(lines.flatMap((message) => (message.replyTo ? [message.replyTo] : [])))
@@ -321,7 +321,7 @@ export class TurnLinks {
   }
 }
 
-/** A line said where a session stands, as it would read it. */
+/** A message said where a session stands, as it would read it. */
 export interface ContextLine {
   readonly id: number;
   readonly senderName: string | null;
@@ -329,12 +329,12 @@ export interface ContextLine {
   readonly at: Date;
 }
 
-/** A line the session has not seen, with the line it quotes. */
+/** A message the session has not seen, with the message it quotes. */
 export interface UnseenLine extends ContextLine {
   readonly fromRome: boolean;
   readonly quoted: ContextLine | null;
-  /** Whether the quoted line was said outside the session's thread, in the
-   *  open chat, as the line that started the thread is. */
+  /** Whether the quoted message was said outside the session's thread, in the
+   *  open chat, as the message that started the thread is. */
   readonly quotesOutside: boolean;
 }
 
@@ -359,21 +359,21 @@ function toLink(row: LinkRow): TurnLink {
 /**
  * The copies of one message that two of Rome's accounts heard in a chat that
  * numbers messages per member account (a Telegram basic group). There the
- * chat's adapter says which account holds each line ({@link LineHolder}), and
- * copies share their sender, time and words. Two lines held by the same
+ * chat's adapter says which account holds each message ({@link MessageHolder}), and
+ * copies share their sender, time and words. Two messages held by the same
  * account, or keyed by no account, are never copies, however alike. Where
  * one sender said the same words twice in a second, each account holds two
- * lines, and the nth line one account holds is a copy of the nth another
+ * messages, and the nth message one account holds is a copy of the nth another
  * holds.
  */
 class Copies {
-  /** Each per-account line's message, as its holder's nth line alike. */
+  /** Each per-account message's occurrence: its holder's nth message alike. */
   private readonly occurrence: ReadonlyMap<number, string>;
   private readonly taken = new Set<string>();
 
   /** The copies among `said`, in the order said, each held by the account
    *  `holder` names. */
-  constructor(said: readonly SaidMessage[], holder: LineHolder | null) {
+  constructor(said: readonly SaidMessage[], holder: MessageHolder | null) {
     this.occurrence = holder ? occurrencesOf(said, holder) : new Map();
   }
 
@@ -384,7 +384,7 @@ class Copies {
   }
 
   /** Whether the session already took a copy of `message` another account
-   *  holds. An account holds one line of each occurrence, so a copy taken is
+   *  holds. An account holds one message of each occurrence, so a copy taken is
    *  another account's. */
   heardBefore(message: SaidMessage): boolean {
     const occurrence = this.occurrence.get(message.id);
@@ -393,13 +393,13 @@ class Copies {
 }
 
 /**
- * The message each per-account line among `said` (in the order said) is a
- * copy of, by line id: lines of the same message share it, as {@link Copies}
- * reads them. A line keyed by no account is a copy of nothing and is absent.
+ * The occurrence each per-account message among `said` (in the order said) is
+ * a copy of, by message id: copies share it, as {@link Copies} reads them. A
+ * message keyed by no account is a copy of nothing and is absent.
  */
 export function occurrencesOf(
-  said: readonly CopiedLine[],
-  holderOf: LineHolder,
+  said: readonly CopiedMessage[],
+  holderOf: MessageHolder,
 ): Map<number, string> {
   const occurrence = new Map<number, string>();
   const seen = new Map<string, number>();
@@ -414,9 +414,9 @@ export function occurrencesOf(
   return occurrence;
 }
 
-/** What {@link occurrencesOf} reads of a line: enough to tell which message
- *  it is a copy of, so a count can read no more than that. */
-export type CopiedLine = Pick<SaidMessage, "id" | "key" | "at" | "body"> & {
+/** What {@link occurrencesOf} reads of a message: enough to tell which
+ *  occurrence it is a copy of, so a count can read no more than that. */
+export type CopiedMessage = Pick<SaidMessage, "id" | "key" | "at" | "body"> & {
   readonly saidBy?: { readonly account: { readonly id: string }; readonly agent?: string };
 };
 
@@ -424,7 +424,7 @@ export type CopiedLine = Pick<SaidMessage, "id" | "key" | "at" | "body"> & {
  *  An attachment's line names the file and where the account that heard it
  *  saved it, both of which the receiving account may choose, so only its
  *  kind and caption count. */
-function copyOf(message: CopiedLine): string {
+function copyOf(message: CopiedMessage): string {
   return [
     message.saidBy?.account.id ?? message.saidBy?.agent ?? "",
     message.at.getTime(),

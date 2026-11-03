@@ -92,8 +92,8 @@ export async function guardianChannels(deps: {
  * in name them: the channel record's while it holds one, then each account
  * Rome's speakers on that channel spoke as, newest first. A kept connection
  * can be signed in as another account, and a history told to an earlier or
- * disconnected account still reads. Absent any, the channel's own name on its
- * platform.
+ * disconnected account still reads. Absent any, none: a channel's name
+ * names no account.
  */
 export function romeAccountsOn(
   deps: {
@@ -120,7 +120,7 @@ export function romeAccountsOn(
     ids.add(account.id);
     accounts.push(account);
   }
-  return accounts.length > 0 ? accounts : [{ platform, id: channel }];
+  return accounts;
 }
 
 /**

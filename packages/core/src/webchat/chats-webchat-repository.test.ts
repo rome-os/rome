@@ -321,6 +321,87 @@ describe("ChatsWebChatRepository", () => {
     ]);
     expect(await repo.getMessageCount("chat-1")).toBe(1);
   });
+  it("reads a channel chat's notification once, from Chats, though its old row stays", async () => {
+    const telegram = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "t-1" as ChatId),
+      "dm",
+      "Ana",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:telegram:t-1",
+      type: "channel",
+      name: "Ana",
+      agentName: null,
+    });
+    // As the backfill leaves it: the line in Chats, and its old row kept.
+    testDb.db
+      .update(romeSessions)
+      .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform, createdAt: new Date(0) })
+      .where(eq(romeSessions.id, "channel:telegram:t-1"))
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "note-1",
+        sessionId: "channel:telegram:t-1",
+        role: "notification",
+        content: text("Hi"),
+        createdAt: new Date(),
+      })
+      .run();
+    new MessageRepository(testDb.db).record({
+      direction: "toRome",
+      place: { chat: telegram.ref },
+      saidBy: { account: { platform: "telegram", id: "ana" } },
+      key: "5",
+      body: { text: "Hi" },
+      at: new Date(),
+    });
+
+    expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
+  });
+
+  it("reads its own account's copy of a message where each account holds one", async () => {
+    // A Telegram basic group numbers its messages per member account.
+    const group = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "-42" as ChatId),
+      "group",
+      "Family",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:tg-sales:-42",
+      type: "channel",
+      name: "Family",
+      agentName: null,
+    });
+    testDb.db
+      .update(romeSessions)
+      .set({
+        chatId: group.ref.id,
+        chatPlatform: group.ref.platform,
+        accountId: "111",
+        createdAt: new Date(0),
+      })
+      .where(eq(romeSessions.id, "channel:tg-sales:-42"))
+      .run();
+    const messages = new MessageRepository(testDb.db);
+    for (const key of ["111:5", "222:7"]) {
+      messages.record({
+        direction: "toRome",
+        place: { chat: group.ref },
+        saidBy: { account: { platform: "telegram", id: "ann" } },
+        key,
+        body: { text: "Yo" },
+        at: new Date(1000),
+      });
+    }
+
+    expect((await repo.getMessages("channel:tg-sales:-42")).map((line) => line.id)).toEqual([
+      "111:5",
+    ]);
+    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(1);
+  });
+
   it("reads a steered input after the card it answers, in the same turn", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.recordUserInput("in-1", "chat-1", text("Plan a trip"));
@@ -504,10 +585,23 @@ describe("ChatsWebChatRepository", () => {
       .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform })
       .where(eq(romeSessions.id, "channel:telegram:t-1"))
       .run();
+    const heard = new MessageRepository(testDb.db).record({
+      direction: "toRome",
+      place: { chat: telegram.ref },
+      saidBy: { account: { platform: "telegram", id: "ana" } },
+      key: "5",
+      body: { text: "Hi" },
+      at: new Date(),
+    })!;
+    links.prompt(heard.id, "channel:telegram:t-1", "turn-1");
 
     await repo.deleteSession("channel:telegram:t-1");
 
     expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "t-1" }]);
+    expect(testDb.db.select({ key: chatMessages.key }).from(chatMessages).all()).toEqual([
+      { key: "5" },
+    ]);
+    expect(links.linkOf("channel:telegram:t-1", heard.id)).toBeNull();
   });
 
   it("names a session's dashboard chat with it", async () => {
@@ -521,5 +615,70 @@ describe("ChatsWebChatRepository", () => {
     expect(chatName()).toBe("Lisbon trip");
     expect(await repo.updateSessionNameIfCurrent("chat-1", "Lisbon trip", "Porto trip")).toBe(true);
     expect(chatName()).toBe("Porto trip");
+  });
+
+  // The list, search and unread count read lines said only in Chats: nothing
+  // below has a row in rome_agent_messages but its trace.
+  it("lists a chat with its line count and a card that waits on the guardian", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Pick a date"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.addMessage(
+      "out-1",
+      "chat-1",
+      "assistant",
+      JSON.stringify([{ type: "pending_interaction", id: "q-1" }]),
+      "turn-1",
+    );
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+
+    const [listed] = await repo.listSessions();
+    expect(listed).toMatchObject({ id: "chat-1", messageCount: 3, awaitingGuardian: true });
+  });
+
+  it("finds a chat by what was said in it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.createSession("chat-2", "Other");
+    await repo.addMessage("out-1", "chat-1", "assistant", text("The ferry leaves at noon"));
+    await repo.addMessage("out-2", "chat-2", "assistant", text("Nothing about boats"));
+
+    const matches = await repo.searchSessionMessages("ferry NOON");
+    expect(
+      matches.map((match) => [match.session.id, match.message.id, match.message.role]),
+    ).toEqual([["chat-1", "out-1", "assistant"]]);
+    expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
+  });
+
+  it("finds a chat by a notice it keeps of its own", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set for the ferry"));
+
+    const matches = await repo.searchSessionMessages("ferry");
+    expect(matches.map((match) => [match.session.id, match.message.id])).toEqual([
+      ["chat-1", "note-1"],
+    ]);
+  });
+
+  it("counts the lines from Rome since the chat was last read, up to a cap", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.markSessionRead("chat-1");
+      rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
+      for (const id of ["out-1", "out-2", "out-3"]) {
+        await repo.addMessage(id, "chat-1", "assistant", text(id));
+      }
+
+      expect(await repo.countUnreadAgentMessages("chat-1", 10)).toBe(3);
+      expect(await repo.countUnreadAgentMessages("chat-1", 2)).toBe(2);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 });

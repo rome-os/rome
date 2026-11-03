@@ -17,7 +17,8 @@ import {
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { channels as channelRows, romeAgentMessages } from "../../db/schema.js";
+import { sayOnChannel } from "../../test/speakers.js";
+import { channels as channelRows } from "../../db/schema.js";
 
 // GET /people/:id/messages — one of a person's accounts, its history. These
 // tests pin what the read answers over real stores: which of the overlapping
@@ -39,7 +40,6 @@ const WA = `whatsapp:${WA_JID}`;
 const TG = `telegram:${TG_THREAD}`;
 
 const at = (iso: string) => new Date(iso);
-const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
 /** An account's naming, and only that. The assertions that use it are about
  *  which name a channel puts on an account; whether Rome can send there and
@@ -125,29 +125,22 @@ describe("People timeline API", () => {
       },
     ]);
 
-    // Telegram: no mirror, so her direct conversation is the channel session's
-    // own transcript.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    // Telegram: no mirror, so her direct conversation is Rome's own, in Chats.
+    sayOnChannel(deps, {
       channel: "telegram",
-      threadId: TG_THREAD,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "user",
-      content: textContent("did you see the invite"),
-      platformMessageId: "tg-100",
-      senderId: TG_THREAD,
+      address: TG_THREAD,
+      key: "tg-100",
       senderName: "Nadia Cross",
-      createdAt: at("2026-08-03T08:00:00Z"),
+      text: "did you see the invite",
+      at: at("2026-08-03T08:00:00Z"),
     });
-    await testDb.db.insert(romeAgentMessages).values({
-      id: "tg-100-reply",
-      sessionId: conversation.id,
-      role: "assistant",
-      content: textContent("just did — replying now"),
-      createdAt: at("2026-08-03T08:01:00Z"),
+    sayOnChannel(deps, {
+      channel: "telegram",
+      address: TG_THREAD,
+      key: "tg-100-reply",
+      fromRome: true,
+      text: "just did — replying now",
+      at: at("2026-08-03T08:01:00Z"),
     });
   });
 
@@ -295,19 +288,12 @@ describe("People timeline API", () => {
     // own transcript of the channel session, and by the sentinel that triaged
     // it. Production stores the same words in all three; the wording differs
     // here only so the assertion can say which store answered.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "whatsapp",
-      threadId: WA_JID,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: textContent("as the transcript has it"),
-      platformMessageId: "wa-old",
-      senderId: WA_JID,
-      createdAt: at("2026-08-01T09:00:02Z"),
+      address: WA_JID,
+      key: "wa-old",
+      text: "as the transcript has it",
+      at: at("2026-08-01T09:00:02Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "wa-old",
@@ -335,19 +321,12 @@ describe("People timeline API", () => {
       approved: true,
       links: [{ platform: "telegram", id: "tg-both" }],
     });
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "telegram",
-      threadId: "tg-both",
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: textContent("as the transcript has it"),
-      platformMessageId: "tg-800",
-      senderId: "tg-both",
-      createdAt: at("2026-08-04T08:00:00Z"),
+      address: "tg-both",
+      key: "tg-800",
+      text: "as the transcript has it",
+      at: at("2026-08-04T08:00:00Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "tg-800",

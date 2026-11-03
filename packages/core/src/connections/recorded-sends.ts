@@ -26,10 +26,10 @@ import { startChannelChat } from "./channel-chat.js";
 import {
   addressOf,
   isDirectMessage,
-  lineAt,
+  messageKeyAt,
   kindNamedBy,
-  platformIdOfLine,
-  sentLineId,
+  platformIdOfMessage,
+  sentMessageKey,
   type ChatAdapters,
 } from "./chat-adapter.js";
 import {
@@ -42,7 +42,10 @@ import {
 export interface RecordedSendsDeps {
   /** Each channel's chat adapter, which names the chat at an address and
    *  sends there. */
-  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "addressAt" | "keyOf">;
+  adapters: Pick<
+    ChatAdapters,
+    "of" | "chatAt" | "accountOn" | "platformOn" | "addressAt" | "keyOf" | "openedDirectMessageAt"
+  >;
   chats: Pick<ChatRepository, "byKey" | "start">;
   speakers: Pick<Speakers, "speakerOf" | "speakerIn" | "speakerInThread">;
   replies: Pick<SpeakerReplies, "send">;
@@ -82,7 +85,7 @@ function recordedParts(out: Out): MessagePart[] {
  * `channels` with each send port saying what is sent through the account's
  * chat adapter, and recording it: through the speaker that heard the address,
  * else in the chat Rome holds there, started when it holds none, with no
- * session opened. The dashboard records its own lines. An email is a message
+ * session opened. The dashboard records its own messages. An email is a message
  * in its thread's chat, and one that names no thread opens one.
  */
 export function recordedSends<C extends Channel>(
@@ -98,7 +101,7 @@ export function recordedSends<C extends Channel>(
         const local = threadsStartedOn(deps, channel);
         // Only an email channel reads a message's email fields; any other
         // ignores them, as the SDK lets it.
-        const emails = deps.adapters.accountOn(channel.name).platform === EMAIL_PLATFORM;
+        const emails = deps.adapters.platformOn(channel.name) === EMAIL_PLATFORM;
         const email = emails && message.kind === "email" ? message : undefined;
         const out: Out = {
           // The port reads a message without text by its parts.
@@ -161,7 +164,7 @@ export function recordedSends<C extends Channel>(
  * address failed, so a send to that thread reaches the chat Rome opened.
  */
 function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSendsDeps {
-  if (deps.adapters.accountOn(channel.name).platform !== EMAIL_PLATFORM) return deps;
+  if (deps.adapters.platformOn(channel.name) !== EMAIL_PLATFORM) return deps;
   const adapter = deps.adapters.of(channel);
   if (!isEmailAdapter(adapter)) return deps;
   const { adapters } = deps;
@@ -170,11 +173,14 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
     adapters: {
       of: (of) => adapters.of(of),
       accountOn: (name) => adapters.accountOn(name),
+      platformOn: (name) => adapters.platformOn(name),
       addressAt: (name, place) =>
         name === channel.name && place.threadId === undefined
           ? adapter.threadAddress(adapters.keyOf(place.chat).externalId)
           : adapters.addressAt(name, place),
       keyOf: (ref) => adapters.keyOf(ref),
+      openedDirectMessageAt: (name, address, key) =>
+        adapters.openedDirectMessageAt(name, address, key),
       chatAt: (name, address, kind) =>
         (name === channel.name ? adapter.chatStartedAt(address) : null) ??
         adapters.chatAt(name, address, kind),
@@ -212,10 +218,10 @@ async function recordDelivered(
         place: placeIn(chat),
         saidBy: { account: { platform: account.platform, id: romeEnd }, agent },
         parts: recordedParts(out),
-        replyTo: { key: lineAt(key, romeEnd, quoted) },
+        replyTo: { key: messageKeyAt(key, romeEnd, quoted) },
       },
-      // Delivered already: the receipt keys the line.
-      async () => ({ key: sentLineId(key, romeEnd, receipt.messageId?.trim() || undefined) }),
+      // Delivered already: the receipt keys the message.
+      async () => ({ key: sentMessageKey(key, romeEnd, receipt.messageId?.trim() || undefined) }),
     );
   } catch (error) {
     log.warn("could not record a delivered reply", { channel, error: String(error) });
@@ -226,7 +232,7 @@ async function recordDelivered(
  *  an email address, bare or with a display name, or the guardian, where
  *  Rome holds no thread. The email port reads an address the same way. */
 function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string): boolean {
-  if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
+  if (deps.adapters.platformOn(channel) !== EMAIL_PLATFORM) return false;
   const named = address.trim().toLowerCase() === "guardian" || address.includes("@");
   return named && !deps.chats.byKey(deps.adapters.chatAt(channel, address, "group"));
 }
@@ -234,8 +240,7 @@ function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string
 /** The address of the email thread that holds the email the provider calls
  *  `messageId`, or null when Rome holds no such email. */
 function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): ChatId | null {
-  const account = deps.adapters.accountOn(channel);
-  const chat = deps.messages.chatHolding(account.platform, messageId);
+  const chat = deps.messages.chatHolding(deps.adapters.platformOn(channel), messageId);
   return chat ? deps.adapters.addressAt(channel, placeIn(chat)) : null;
 }
 
@@ -255,7 +260,7 @@ function speakerAt(deps: RecordedSendsDeps, channel: string, address: ChatId): s
 }
 
 /** Say `out` through speaker `sessionId`, which heard the address. Throws when
- *  the speaker stands in no chat, rather than sending a line nobody can read
+ *  the speaker stands in no chat, rather than sending a message nobody can read
  *  back. */
 async function sayAsSpeaker(
   deps: RecordedSendsDeps,
@@ -270,7 +275,7 @@ async function sayAsSpeaker(
   if (!speaker) throw new Error(`Session ${sessionId} stands in no chat to send in`);
   const key = deps.adapters.keyOf(speaker.place.chat);
   const replyTo = quoted
-    ? quoteIn(deps, speaker.place.chat, lineAt(key, speaker.accountId, quoted))
+    ? quoteIn(deps, speaker.place.chat, messageKeyAt(key, speaker.accountId, quoted))
     : {};
   const said = await deps.replies.send(
     sessionId,
@@ -287,7 +292,7 @@ async function sayAsSpeaker(
       placeIn(speaker.place.chat, said.landedIn ?? undefined),
       address,
     ),
-    messageId: platformIdOfLine(key, speaker.accountId, said.sent),
+    messageId: platformIdOfMessage(key, speaker.accountId, said.sent),
   };
 }
 
@@ -324,8 +329,8 @@ async function sayInChat(
     threadType: group ? "group" : "private",
   });
   const thread = threadOf ? address : null;
-  const replyTo = quoted ? quoteIn(deps, chat, lineAt(key, romeEnd, quoted)) : {};
-  let lineKey: string | null = null;
+  const replyTo = quoted ? quoteIn(deps, chat, messageKeyAt(key, romeEnd, quoted)) : {};
+  let messageKey: string | null = null;
   let landedIn: Place = placeIn(chat, thread ?? undefined);
   await deps.messages.send(
     {
@@ -341,7 +346,7 @@ async function sayInChat(
         ...(target.replyTo ? { replyTo: target.replyTo } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
       });
-      lineKey = sent.key;
+      messageKey = sent.key;
       landedIn = placeIn(chat, sent.threadId ?? undefined);
       return {
         key: sent.key,
@@ -352,7 +357,7 @@ async function sayInChat(
   return {
     // The adapter keeps the address a direct message landed at.
     address: landedAt(deps, channel.name, landedIn, address),
-    messageId: lineKey === null ? null : platformIdOfLine(key, romeEnd, lineKey),
+    messageId: messageKey === null ? null : platformIdOfMessage(key, romeEnd, messageKey),
   };
 }
 
@@ -373,7 +378,14 @@ function landedAt(deps: RecordedSendsDeps, channel: string, place: Place, sentTo
 /** The kind of chat channel `channel`'s account reaches at `address`: the
  *  kind of the chat Rome holds there, else the kind the address names, else
  *  a group. */
-function kindAt(deps: RecordedSendsDeps, channel: string, address: string): "group" | "dm" {
+export function kindAt(
+  deps: {
+    adapters: Pick<RecordedSendsDeps["adapters"], "chatAt" | "platformOn">;
+    chats: Pick<RecordedSendsDeps["chats"], "byKey">;
+  },
+  channel: string,
+  address: string,
+): "group" | "dm" {
   for (const kind of ["group", "dm"] as const) {
     const held = deps.chats.byKey(deps.adapters.chatAt(channel, address, kind));
     if (held) return held.kind;
@@ -385,10 +397,10 @@ function kindAt(deps: RecordedSendsDeps, channel: string, address: string): "gro
   // the address. A bare Discord user id still reaches some ports today; the
   // Chats switch moves those callers onto the ref rather than having the
   // adapter look the id up here.
-  return kindNamedBy(deps.adapters.accountOn(channel).platform, address) ?? "group";
+  return kindNamedBy(deps.adapters.platformOn(channel), address) ?? "group";
 }
 
-/** The quote of the line keyed `key` in `chat`: by its id when Rome holds
+/** The quote of the message keyed `key` in `chat`: by its id when Rome holds
  *  it, else by its key, which the platform still shows as quoted. */
 function quoteIn(
   deps: Pick<RecordedSendsDeps, "messages">,
@@ -421,7 +433,7 @@ async function openThread(
   );
   const chat = deps.chats.start(key, "group", subject).ref;
   const romeEnd = adapter.account.id;
-  let lineKey = "";
+  let messageKey = "";
   await deps.messages.send(
     {
       direction: "fromRome",
@@ -430,16 +442,16 @@ async function openThread(
       parts: recordedParts(out),
     },
     async (target) => {
-      lineKey = (
+      messageKey = (
         await adapter.send(target.chat, null, {
           ...out,
           ...(email.turnId ? { turnId: email.turnId } : {}),
         })
       ).key;
-      return { key: lineKey };
+      return { key: messageKey };
     },
   );
-  const messageId = platformIdOfLine(key, romeEnd, lineKey);
+  const messageId = platformIdOfMessage(key, romeEnd, messageKey);
   return {
     // The adapter keeps the provider's thread even when storing it failed.
     chatId: adapter.threadAddress(key.externalId),

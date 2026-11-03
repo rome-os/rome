@@ -124,6 +124,15 @@ describe("SessionQueryRepository", () => {
       expect((await repository.getSessionDetailRows("sub"))?.messageCount).toBe(3);
     });
 
+    it("counts a dashboard chat's notices, which it keeps of its own", async () => {
+      seededChat();
+      own("chat-1", "notice", "notification", 203);
+      const repository = new SessionQueryRepository(testDb.db, "chats");
+
+      expect(await pageCounts(repository)).toEqual({ "chat-1": 4 });
+      expect((await repository.getSessionDetailRows("chat-1"))?.messageCount).toBe(4);
+    });
+
     it("counts lines only for the sessions on the page", async () => {
       seededChat();
       seededSubagent();

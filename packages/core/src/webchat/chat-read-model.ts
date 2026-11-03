@@ -22,12 +22,12 @@
 
 import { sql } from "drizzle-orm";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
-import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
+import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
-import { lineHolder, type LineHolder } from "../connections/chat-adapter.js";
+import { messageHolder, type MessageHolder } from "../connections/chat-adapter.js";
 import { occurrencesOf, TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
@@ -114,11 +114,11 @@ export interface ChatSearchHit {
  */
 export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
   select 1 from (
-    select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_LINES} u
+    select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
   ) last
-  cross join ${CHAT_LINES} m
+  cross join ${CHAT_MESSAGES} m
   cross join json_each(m."parts") part
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
   and m."seq" > last."cut"
@@ -239,14 +239,14 @@ export class ChatReadModel {
     place: Place,
     said: readonly SaidMessage[],
     copies: Map<number, number[]>,
-    holder: LineHolder,
+    holder: MessageHolder,
   ): SaidMessage[] {
     if (said.length === 0) return [];
     const seconds = [...new Set(said.map((message) => Math.floor(message.at.getTime() / 1000)))];
     const near = this.messages.byIds(
       this.db
         .all<{ id: number }>(sql`
-          SELECT id FROM ${CHAT_LINES}
+          SELECT id FROM ${CHAT_MESSAGES}
           WHERE chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
             AND said_at IN (SELECT value FROM json_each(${JSON.stringify(seconds)}))
         `)
@@ -402,7 +402,7 @@ export class ChatReadModel {
    *  each holds its own copy of a message. */
   private async speakerOf(
     sessionId: string,
-  ): Promise<{ place: Place; since: Date; holder: LineHolder | null } | null> {
+  ): Promise<{ place: Place; since: Date; holder: MessageHolder | null } | null> {
     const [row] = await this.db.all<{
       platform: string;
       key: string;
@@ -421,7 +421,7 @@ export class ChatReadModel {
         (row.thread_id ?? undefined) as ChatId | undefined,
       ),
       since: new Date(row.created_at * 1000),
-      holder: lineHolder(row.platform, row.key),
+      holder: messageHolder(row.platform, row.key),
     };
   }
 
@@ -484,7 +484,7 @@ export class ChatReadModel {
       -- CROSS JOIN keeps the lines outside: one pass over them, which the
       -- match needs anyway, and the joins only for the lines that match.
       -- Left to choose, SQLite reaches every line through each chat's index.
-      FROM ${CHAT_LINES} m
+      FROM ${CHAT_MESSAGES} m
       CROSS JOIN ${CHATS} c ON c.id = m.chat_id AND c.platform = 'webchat'
       -- A speaker finds what its transcript draws: its own thread, from when it
       -- joined.
@@ -538,15 +538,15 @@ export class ChatReadModel {
       AND sender_agent IS NOT NULL AND said_at > ${mark.at}`;
     if (!speaker.holder) {
       const [row] = await this.db.all<{ count: number }>(sql`
-        SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_LINES} WHERE ${fromRome} LIMIT ${cap})
+        SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_MESSAGES} WHERE ${fromRome} LIMIT ${cap})
       `);
       return Number(row?.count ?? 0);
     }
     // Copies share their second, and each second holds at least one message,
     // so the first `cap` seconds with a line from Rome hold enough to count.
     const lines = await this.db.all<{ id: number }>(sql`
-      SELECT id FROM ${CHAT_LINES} WHERE ${fromRome} AND said_at IN (
-        SELECT DISTINCT said_at FROM ${CHAT_LINES} WHERE ${fromRome} ORDER BY said_at LIMIT ${cap}
+      SELECT id FROM ${CHAT_MESSAGES} WHERE ${fromRome} AND said_at IN (
+        SELECT DISTINCT said_at FROM ${CHAT_MESSAGES} WHERE ${fromRome} ORDER BY said_at LIMIT ${cap}
       )
     `);
     const said = this.messages.byIds(lines.map((line) => line.id));

@@ -19,15 +19,9 @@ import {
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import {
-  channels as channelRows,
-  connectionGrants,
-  romeAgentMessages,
-  romeSessions,
-} from "../../db/schema.js";
+import { sayOnChannel } from "../../test/speakers.js";
+import { channels as channelRows, chatMessages, connectionGrants } from "../../db/schema.js";
 import { channelList } from "../../channels/channel-list.js";
-import { channelChatId } from "../../db/session-kind.js";
-import { conversationPlatformMessageId } from "../../db/repositories/webchat.js";
 
 // Sending to a person.
 //
@@ -90,6 +84,13 @@ describe("People send API", () => {
     const sent = (await res.json()) as SentMessage;
     expect(sent.ref).toMatch(new RegExp(`^${TG}:`));
     expect(sent.timestamp).toBeGreaterThan(0);
+    // Said in Chats, in the direct message with the account, which is what
+    // the person's timeline reads.
+    expect(
+      testDb.db.all<{ kind: string; text: string }>(
+        sql`SELECT c.kind, m.text FROM chat_messages m JOIN chats c ON c.id = m.chat_id`,
+      ),
+    ).toEqual([{ kind: "dm", text: "on my way" }]);
     expect((await timeline()).entries.map((entry) => entry.body)).toContain("on my way");
 
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
@@ -152,7 +153,12 @@ describe("People send API", () => {
     // Nothing has happened on it yet, which is a different answer from zero.
     expect(account.latestAt).toBeNull();
 
-    await send({ channel: "telegram", channelUserId: TG, text: "now there is history" });
+    const res = await send({
+      channel: "telegram",
+      channelUserId: TG,
+      text: "now there is history",
+    });
+    expect(res.status).toBe(200);
     expect((await accountOf("telegram")).latestAt).toBeGreaterThan(0);
   });
 
@@ -323,32 +329,14 @@ describe("People on an account whose channel id is opaque", () => {
       links: [{ platform: "telegram", id: ADA }],
     });
 
-    // What Ada said to that account, as Rome's transcript holds it.
-    const sessionId = channelChatId(OPAQUE, ADA);
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: sessionId,
-        name: sessionId,
-        type: "channel",
-        sourceChannel: OPAQUE,
-        sourceThreadId: ADA,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-ada",
-        sessionId,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "hello from Ada" }]),
-        senderId: ADA,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    // What Ada said to that account, as Chats holds it.
+    sayOnChannel(deps, {
+      channel: OPAQUE,
+      address: ADA,
+      key: "m-ada",
+      text: "hello from Ada",
+      at: new Date(1_000_000),
+    });
   });
 
   const person = async (): Promise<PersonResource> =>
@@ -383,20 +371,21 @@ describe("People on an account whose channel id is opaque", () => {
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: ADA, message: { text: "hi Ada" } },
     ]);
-    // Rome's line joins the conversation the account already holds, rather
-    // than one under the service's name.
+    // Rome's line joins the conversation the account already holds, said in
+    // Chats as the opaque account's.
     const entries = (await timeline()).entries;
     expect(entries.map((entry) => [entry.body, entry.source])).toEqual([
       ["hi Ada", "telegram"],
       ["hello from Ada", "telegram"],
     ]);
-    const held = testDb.db
-      .select({ sessionId: romeAgentMessages.sessionId })
-      .from(romeAgentMessages)
-      .all();
-    expect(held.map((row) => row.sessionId)).toEqual([
-      channelChatId(OPAQUE, ADA),
-      channelChatId(OPAQUE, ADA),
+    expect(
+      testDb.db.all<{ kind: string; account: string | null; text: string }>(sql`
+        SELECT c.kind, m.sender_account_id AS account, m.text
+        FROM chat_messages m JOIN chats c ON c.id = m.chat_id ORDER BY m.id
+      `),
+    ).toEqual([
+      { kind: "dm", account: ADA, text: "hello from Ada" },
+      { kind: "dm", account: ME.id, text: "hi Ada" },
     ]);
   });
 
@@ -457,7 +446,7 @@ describe("People on an account whose channel id is opaque", () => {
   // guardian's, and the triage record is not a chat with the guardian: what
   // Ada said through either is not on her page.
   it("reads neither the triage record nor an account that is not the guardian's", async () => {
-    testDb.db.delete(romeAgentMessages).run();
+    testDb.db.delete(chatMessages).run();
     testDb.db
       .insert(channelRows)
       .values({
@@ -467,31 +456,13 @@ describe("People on an account whose channel id is opaque", () => {
         createdAt: new Date(0),
       })
       .run();
-    const oldSession = channelChatId("tg-old", ADA);
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: oldSession,
-        name: oldSession,
-        type: "channel",
-        sourceChannel: "tg-old",
-        sourceThreadId: ADA,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-old",
-        sessionId: oldSession,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "said long ago" }]),
-        senderId: ADA,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    sayOnChannel(deps, {
+      channel: "tg-old",
+      address: ADA,
+      key: "m-old",
+      text: "said long ago",
+      at: new Date(1_000_000),
+    });
     await deps.sentinelLogRepo.create({
       messageId: "tg-recent",
       channel: OPAQUE,

@@ -19,6 +19,7 @@ import {
 import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
+import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 
 const log = createLogger("agent-runner");
 
@@ -475,6 +476,10 @@ export class AgentRunner {
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
     private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
+    /** Chats' lines a run names by the platform's ids. Given, a recorded
+     *  prompt becomes its turn's through Chats' turn links, not
+     *  `webchatRepo`'s rows. */
+    private runLineDeps?: RunLineDeps,
   ) {}
 
   /**
@@ -548,6 +553,11 @@ export class AgentRunner {
       threadContext,
     });
     const { romeSessionId, romeSessionType } = conversation;
+    // The line the run names by its platform id, which the turn answers, and
+    // the one its reply quotes, as Chats holds them.
+    const lines = this.runLineDeps
+      ? await runLines(this.runLineDeps.lines, romeSessionId, params)
+      : null;
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
@@ -559,10 +569,16 @@ export class AgentRunner {
         romeSessionId,
         romeSessionType,
         replyTo: params.replyTo,
+        ...(lines ? { quoted: lines.quoted } : {}),
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
-    if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
+    this.runLineDeps?.replies?.runs(handle.turnId, agentName);
+    if (lines && this.runLineDeps) {
+      if (conversation.promptPersisted && lines.prompt !== null) {
+        this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
+      }
+    } else if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
       await this.webchatRepo.assignConversationMessageTurn(
         romeSessionId,
         params.platformMessageId,
@@ -586,6 +602,8 @@ export class AgentRunner {
             // the caller's channel keeps.
             persistTranscript: conversation.recorderOwned || (params.persistTranscript ?? true),
             persistUserTranscript: !conversation.promptPersisted,
+            persistAssistantTranscript:
+              conversation.recorderOwned || (params.persistAnswer ?? true),
           })
         : null;
 

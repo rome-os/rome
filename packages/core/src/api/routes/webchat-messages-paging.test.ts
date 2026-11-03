@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
-import { romeAgentMessages } from "../../db/schema.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 
@@ -25,11 +24,14 @@ describe("GET /chat/sessions/:id/messages paging", () => {
   let testDb: TestDb;
   let deps: TestDeps;
 
-  async function setCreatedAt(id: string, seconds: number) {
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date(seconds * 1000) })
-      .where(eq(romeAgentMessages.id, id));
+  /** Moves row `id` to `seconds`, the session's own row or its chat line
+   *  alike. A session sees what was said in its chat since it was made, so
+   *  it moves back with them. */
+  function setCreatedAt(id: string, seconds: number) {
+    testDb.db.run(sql`UPDATE rome_agent_messages SET created_at = ${seconds} WHERE id = ${id}`);
+    testDb.db.run(sql`UPDATE chat_messages SET said_at = ${seconds} WHERE key = ${id}`);
+    testDb.db.run(sql`UPDATE rome_sessions SET created_at = min(created_at, ${seconds})
+      WHERE id = ${SESSION_ID}`);
   }
 
   /** One turn: user, trace (with blocks), assistant, all inside `startSeconds`..+2. */

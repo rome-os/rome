@@ -81,13 +81,25 @@ describe("RpcAgentRunner turn stream routing", () => {
   function setup(
     turns: Map<string, StreamAgentEvent[]>,
     requests?: RunTurnRequest[],
+    replies?: { runs(turnId: string, agent: string): void },
   ): RpcAgentRunner {
     const [mainTransport, workerTransport] = createTransportPair();
     const mainRpc = new IpcRpc(mainTransport, "main");
     const workerRpc = new IpcRpc(workerTransport, "worker");
     attachFakeMain(mainRpc, { turns, requests });
-    return new RpcAgentRunner(workerRpc);
+    return new RpcAgentRunner(workerRpc, replies);
   }
+
+  it("notes in the worker which agent runs the turn", async () => {
+    const noted: Array<[string, string]> = [];
+    const runner = setup(new Map([["p1", turnMessages("one")]]), undefined, {
+      runs: (turnId, agent) => noted.push([turnId, agent]),
+    });
+
+    await collect(runner.run({ agentName: "support", prompt: "p1" }));
+
+    expect(noted).toEqual([["turn-1", "support"]]);
+  });
 
   it("delivers a single run's stream", async () => {
     const runner = setup(new Map([["p1", turnMessages("one")]]));

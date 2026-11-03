@@ -350,6 +350,46 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it.each([
+    ["writes", undefined, true],
+    ["leaves out", false, false],
+  ])("%s a turn's answer in its transcript as the caller asks, and keeps its trace", async (_label, persistAnswer, answered) => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-answer", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-answer",
+        prompt: "continue",
+        threadContext: {
+          channel: "webchat",
+          threadId: "chat-answer",
+          romeSessionId: "chat-answer",
+        },
+        persistTrace: true,
+        persistAnswer,
+      }),
+    );
+
+    const roles = (await webchatRepo.getMessages("chat-answer")).map((message) => message.role);
+    expect(roles).toContain("trace");
+    expect(roles.includes("assistant")).toBe(answered);
+    await manager.shutdown();
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {
