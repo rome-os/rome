@@ -72,10 +72,10 @@ export async function readAccountTimeline(
  * first — a row previewing an entry from one store while the page beneath it
  * opens on another's.
  *
- * The one place the rule is applied. Every read of an account's history — the
- * page here, the heads the person read and the account stream preview — goes
- * through this, because a head claimed on other terms could preview an
- * exchange the page attributes to a different store.
+ * The one place the rule is applied. Every read of an account's history, the
+ * page here and the heads the person read takes its `latestAt` from, goes
+ * through this, because a head claimed on other terms could date an exchange
+ * the page attributes to a different store.
  *
  * One `latest` per account, and the whole store's worth raised before any is
  * awaited: an adapter that groups the calls of a tick — every SQL one does —
@@ -100,10 +100,10 @@ export async function assignAccounts<Account extends MessageAccount>(
  * than only who owns it.
  *
  * The `latest` a store answers is what decides ownership, and it is also the
- * head of the history that store will page — the same entry, by the law
- * `AccountMessages` states. A caller that wants both therefore asks once: the account
- * stream previews exactly what it claims by, and cannot drift from the page it
- * opens onto by reading the two from separate calls.
+ * head of the history that store will page, the same entry by the law
+ * `AccountMessages` states. A caller that wants both therefore asks once: the
+ * person read dates each account by exactly what claimed it, and cannot drift
+ * from the page by reading the two from separate calls.
  *
  * `assignAccounts` is this with the heads dropped, so the ownership rule above
  * is applied in one place whichever of the two a caller needs.
