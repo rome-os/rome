@@ -195,21 +195,23 @@ async function emailThroughChats(
   email: Parameters<NonNullable<ChatRepository["sendEmail"]>>[0]["email"],
 ): Promise<{ messageId: string | null; threadId: string }> {
   const current = getCurrentActionContext();
-  const ambient =
-    current?.channelContext?.channel === input.channel
-      ? current.channelContext.threadId
-      : undefined;
+  // Where the run was asked, when it was asked on this account.
+  const asked =
+    current?.channelContext?.channel === input.channel ? current.channelContext : undefined;
   // A reply named by its message alone, and by no session, sent while the run
   // answers an email on this account, answers on the run's thread. The host
   // refuses it, and sends nothing, when the message is in another thread.
   const threadId =
     input.threadId ??
-    (email.inReplyToMessageId && !input.romeSessionId && ambient ? ambient : undefined);
+    (email.inReplyToMessageId && !input.romeSessionId ? asked?.threadId : undefined);
   const reply = !!threadId || !!email.inReplyToMessageId;
+  // The email answers where the run was asked when it names that thread, or,
+  // naming none, the run's own session.
   const sameAmbientConversation =
-    !!threadId &&
-    current?.channelContext?.channel === input.channel &&
-    current.channelContext.threadId === threadId;
+    !!asked &&
+    (threadId
+      ? threadId === asked.threadId
+      : !!input.romeSessionId && input.romeSessionId === asked.romeSessionId);
   // A session names a thread already, so a new email must not carry one.
   const sessionId = reply
     ? (input.romeSessionId ??
