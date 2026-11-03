@@ -673,11 +673,13 @@ export class ChatAdapters {
    * `address`, as one Rome opened there before it knew the other end. The
    * first message from the other end then moves the chat to its key
    * ({@link settledDirectMessage}) rather than starting a second one. An
-   * address already kept for a chat stays as it is.
+   * address already kept stays as it is, as does the one kept for the chat,
+   * which is where the platform last placed it.
    */
   openedDirectMessageAt(channel: string, address: string, key: ChatKey): void {
     const account = this.accountOn(channel);
     if (this.deps.addresses.keyAt(account, address) !== null) return;
+    if (this.deps.addresses.addressOf(account, key.externalId) !== null) return;
     this.deps.addresses.bind(account, key.externalId, address);
   }
 
