@@ -17,8 +17,8 @@ import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import { assignAccountHeads } from "./timeline.js";
-import { readSendStates, sendersOf, type SendDeps } from "./send.js";
-import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
+import { asGuardian, readSendStates, sendersOf, type SendDeps } from "./send.js";
+import { guardianChannels, personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
@@ -75,16 +75,19 @@ async function serialize(
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
   // from one read of it instead of two.
+  // The same scope the timeline reads, so an account's time is the time of
+  // the guardian's chat with it.
+  const guardians = await guardianChannels(deps);
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
     timelineAccounts(
-      deps,
+      { ...deps, guardians },
       persons.map((person) => person.links),
     ),
     deps.accountNames.displayNames(refs),
     // Whether each link can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
-    readSendStates(deps, refs),
+    readSendStates(asGuardian(deps, guardians), refs),
     memoryProfilePaths(persons),
   ]);
   // Each account's newest entry, which is also what settles the store that
@@ -97,7 +100,9 @@ async function serialize(
   const sendersOn = (platform: string) => {
     let found = senders.get(platform);
     if (!found) {
-      found = sendersOf(deps, platform).flatMap((channel) => deps.accountOf?.(channel) ?? []);
+      found = sendersOf(asGuardian(deps, guardians), platform).flatMap(
+        (channel) => deps.accountOf?.(channel) ?? [],
+      );
       senders.set(platform, found);
     }
     return found;

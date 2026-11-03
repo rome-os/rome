@@ -27,9 +27,13 @@ import { mergePeople } from "../../people/merge.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { send, type SendResult } from "../../chats/send.js";
-import { directPlace } from "../../people/send.js";
+import { asGuardian, directPlace } from "../../people/send.js";
 import { readAccountTimeline } from "../../people/timeline.js";
-import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
+import {
+  guardianChannels,
+  personMessageStores,
+  timelineAccounts,
+} from "../../people/timeline-sources.js";
 import { accountOfWire, wireOf } from "../../people/wire.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -219,7 +223,8 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // sends it. Until then a send without it goes out from Rome's only account
     // on the platform, and is refused while Rome holds several.
     const from = parsed.request.from;
-    const found = await directPlace(deps, account, from);
+    const guardians = await guardianChannels(deps);
+    const found = await directPlace(asGuardian(deps, guardians), account, from);
     if (!found.ok) return respondToSend(c, found);
     return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, found.as));
   });
@@ -254,7 +259,8 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // The fold puts every address of the account on it, so the link is
     // matched by its address among them, the rule the person read's
     // `latestAt` uses too.
-    const [accounts] = await timelineAccounts(deps, [person.links]);
+    const guardians = await guardianChannels(deps);
+    const [accounts] = await timelineAccounts({ ...deps, guardians }, [person.links]);
     return c.json(
       await readAccountTimeline(
         personMessageStores(deps),

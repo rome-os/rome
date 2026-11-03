@@ -9,19 +9,32 @@ import {
   type TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
-import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  createTestDb,
+  buildTestDeps,
+  ownedByGuardian,
+  type TestDb,
+  type TestDeps,
+} from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { channels as channelRows, romeAgentMessages } from "../../db/schema.js";
 
 // GET /people/:id/messages — one of a person's accounts, its history. These
 // tests pin what the read answers over real stores: which of the overlapping
-// ones an account's entries come from, that only the named account is read, and
-// that walking the cursor visits each entry once.
+// ones an account's entries come from, that only the named account is read,
+// that only the guardian's own connected accounts are read through, and that
+// walking the cursor visits each entry once.
+
+/** Every channel these tests read through, as the guardian's own. */
+const GUARDIAN_CHANNELS = [
+  { channel: "telegram", platform: "telegram" },
+  { channel: "whatsapp", platform: "whatsapp" },
+  { channel: "linkedin", platform: "linkedin" },
+];
 
 const WA_JID = "15550009999@s.whatsapp.net";
 const WA_LID = "88881111@lid";
 const TG_THREAD = "tg-timeline";
-const GROUP_THREAD = "tg-group-timeline";
 const WA = `whatsapp:${WA_JID}`;
 const TG = `telegram:${TG_THREAD}`;
 
@@ -50,6 +63,7 @@ describe("People timeline API", () => {
     testDb = createTestDb();
     await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
+    ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", GUARDIAN_CHANNELS);
     app = new Hono().route("/", peopleRoutes(deps));
 
     personId = await deps.peopleRepo.create({
@@ -243,7 +257,9 @@ describe("People timeline API", () => {
     expect((await app.request(`/people/${personId}/messages?${elsewhere}`)).status).toBe(400);
   });
 
-  it("gives a sender with only sentinel history both halves of the exchange", async () => {
+  it("reads nothing an account said only to the triage record", async () => {
+    // The triage record is what Rome checked before deciding whether to
+    // answer, not a chat with the guardian.
     const sentinelOnly = await deps.peopleRepo.create({
       displayName: "Sentinel Only",
       bondLevel: "other",
@@ -262,10 +278,16 @@ describe("People timeline API", () => {
     });
 
     const page = await fetchTimeline(sentinelOnly, "telegram:tg-triaged");
-    expect(page.entries.map((entry) => [entry.direction, entry.body])).toEqual([
-      ["outbound", "it is — sending you the link"],
-      ["inbound", "is this the right number for bookings?"],
-    ]);
+    expect(page.entries).toEqual([]);
+  });
+
+  it("reads nothing through a connected account that is not the guardian's own", async () => {
+    // The Telegram channel's account is an agent's, not the guardian's, so
+    // what she said there is not a chat with the guardian.
+    await deps.peopleRepo.unlink({ platform: "telegram", id: "guardian-on-telegram" });
+
+    expect((await fetchTimeline(personId, TG)).entries).toEqual([]);
+    expect((await fetchTimeline(personId, WA)).entries.length).toBeGreaterThan(0);
   });
 
   it("reads a mirrored account from the mirror and never twice", async () => {
@@ -305,8 +327,8 @@ describe("People timeline API", () => {
   });
 
   it("falls back to the channel transcript for an account no mirror holds", async () => {
-    // The same overlap without a mirror: the transcript outranks the sentinel,
-    // so the exchange reads as Rome's own record of it.
+    // The same overlap without a mirror: the exchange reads as Rome's own
+    // record of it, and the triage record is not read.
     const triaged = await deps.peopleRepo.create({
       displayName: "Triaged Talker",
       bondLevel: "other",
@@ -341,42 +363,6 @@ describe("People timeline API", () => {
       (entry) => entry.body,
     );
     expect(bodies).toEqual(["as the transcript has it"]);
-  });
-
-  it("holds a sentinel row back when the thread it names is a group", async () => {
-    const inGroup = await deps.peopleRepo.create({
-      displayName: "Group Talker",
-      bondLevel: "other",
-      approved: true,
-      links: [{ platform: "telegram", id: "tg-in-group" }],
-    });
-    await deps.webchatRepo.ensureChannelChat({
-      channel: "telegram",
-      threadId: GROUP_THREAD,
-      threadType: "group",
-      agentName: "main",
-    });
-    await deps.sentinelLogRepo.create({
-      messageId: "tg-901",
-      channel: "telegram",
-      channelUserId: "tg-in-group",
-      threadId: GROUP_THREAD,
-      text: "said in a group",
-      action: "ignored",
-    });
-    await deps.sentinelLogRepo.create({
-      messageId: "tg-902",
-      channel: "telegram",
-      channelUserId: "tg-in-group",
-      threadId: "tg-in-group",
-      text: "said to rome",
-      action: "ignored",
-    });
-
-    const bodies = (await fetchTimeline(inGroup, "telegram:tg-in-group")).entries.map(
-      (entry) => entry.body,
-    );
-    expect(bodies).toEqual(["said to rome"]);
   });
 
   it("reads one account through every address the channel folds onto it", async () => {
@@ -494,6 +480,9 @@ describe("People API", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
+    ownedByGuardian(testDb.db, deps.peopleRepo, baseline.persons.guardianId, [
+      { channel: "whatsapp", platform: "whatsapp" },
+    ]);
     app = new Hono().route("/", peopleRoutes(deps));
 
     // One WhatsApp account reachable two ways, which the mirror folds onto the
