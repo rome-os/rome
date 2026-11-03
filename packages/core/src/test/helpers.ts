@@ -1302,3 +1302,44 @@ export async function createAppLifecycleHarness(
     cleanup,
   } as AppLifecycleHarness;
 }
+
+/**
+ * Make each named channel one of the guardian's own connected accounts: a
+ * channel record that knows its account, a live grant reaching that account,
+ * and a link from it to the guardian. A person's page reads and sends only
+ * over the guardian's own accounts, so a test of that page names the channels
+ * it reads through here. `guardianId` is the seeded guardian's.
+ */
+export function ownedByGuardian(
+  db: DrizzleDb,
+  peopleRepo: PeopleRepository,
+  guardianId: string,
+  owned: readonly { channel: string; platform: string }[],
+): void {
+  for (const { channel, platform } of owned) {
+    const account = { platform, id: `guardian-on-${channel}` };
+    db.insert(schema.channels)
+      .values({
+        id: channel,
+        connectionKind: channel,
+        platform,
+        platformAccountId: account.id,
+        connectionId: null,
+        createdAt: new Date(0),
+      })
+      .onConflictDoUpdate({
+        target: schema.channels.id,
+        set: { platformAccountId: account.id },
+      })
+      .run();
+    db.insert(schema.connectionGrants)
+      .values({
+        custody: `test:guardian:${channel}`,
+        state: "authorized",
+        platform,
+        accountId: account.id,
+      })
+      .run();
+    peopleRepo.linkStated(account, guardianId);
+  }
+}

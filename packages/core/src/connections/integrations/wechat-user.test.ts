@@ -153,6 +153,11 @@ describe("makeWechatUserSetup", () => {
     });
     expect(wechatUserGrantProfileSchema.parse(grant.profile).wxid).toBe("wxid_guardian");
     expect(grant.summary?.body?.join(" ")).toContain("read-only");
+    // The signed-in account is the guardian's own, under the id its channel records.
+    expect(grant).toMatchObject({
+      guardianChannelUserId: "wxid_guardian",
+      addsGuardianAccount: true,
+    });
   });
 
   it("resumes readable cached history without recapturing keys", async () => {

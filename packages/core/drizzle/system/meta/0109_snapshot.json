@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "583e8533-4893-471a-8e94-ec09c7df945e",
+  "id": "6e824dc0-1832-4e43-a3c4-fc37a6651bd6",
   "prevId": "0f9c7a01-cab8-458e-a732-95fa77915cba",
   "tables": {
     "account_profiles": {
@@ -1143,13 +1143,6 @@
         },
         "source_message_id": {
           "name": "source_message_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "legacy_source_message_id": {
-          "name": "legacy_source_message_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1201,19 +1194,6 @@
           "tableTo": "rome_sessions",
           "columnsFrom": [
             "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "concierge_tasks_source_message_id_chat_messages_id_fk": {
-          "name": "concierge_tasks_source_message_id_chat_messages_id_fk",
-          "tableFrom": "concierge_tasks",
-          "tableTo": "chat_messages",
-          "columnsFrom": [
-            "source_message_id"
           ],
           "columnsTo": [
             "id"
