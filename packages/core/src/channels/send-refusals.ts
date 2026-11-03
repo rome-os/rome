@@ -2,7 +2,8 @@
 // SDK's `ChannelSend.send`: it never drops what it cannot show and reports
 // the rest as sent.
 
-import { stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, stat } from "node:fs/promises";
 import {
   ChannelSendRefused,
   type OutgoingAttachment,
@@ -129,6 +130,11 @@ export async function attachmentsToSend(
     }
     const file = await stat(path).catch(() => null);
     if (!file?.isFile()) refuse(`cannot send ${path}: no file is there`);
+    const readable = await access(path, constants.R_OK).then(
+      () => true,
+      () => false,
+    );
+    if (!readable) refuse(`cannot send ${path}: Rome may not read it`);
   }
   return attachments;
 }

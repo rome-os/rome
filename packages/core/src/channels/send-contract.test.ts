@@ -8,7 +8,7 @@
 // Each harness below builds an adapter over a fake of its platform's edge,
 // counts what reached that edge and reads back the text it got.
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
@@ -56,11 +56,15 @@ interface Subject {
 
 let dir: string;
 let file: string;
+let locked: string;
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "rome-send-contract-"));
   file = join(dir, "report.pdf");
   await writeFile(file, "%PDF-1.4");
+  locked = join(dir, "locked.pdf");
+  await writeFile(locked, "%PDF-1.4");
+  await chmod(locked, 0o000);
 });
 
 afterAll(async () => {
@@ -401,6 +405,8 @@ describe.each(SUBJECTS)("$channel send", (subject) => {
         { type: "document" },
         { type: "document", source: file, caption: 42 },
         { type: "document", source: join(dir, "missing.pdf") },
+        // Root reads a file whatever its mode, so only another user sees it locked.
+        ...(process.getuid?.() === 0 ? [] : [{ type: "document", source: locked }]),
         { type: "document", source: dir },
         ...(subject.urls ? [] : [{ type: "image", source: "https://example.com/a.png" }]),
       ] as unknown as NonNullable<OutgoingMessage["attachments"]>;
