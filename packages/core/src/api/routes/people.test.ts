@@ -42,13 +42,12 @@ describe("People timeline API", () => {
   let testDb: TestDb;
   let deps: TestDeps;
   let app: Hono;
-  let baseline: BaselineIds;
   let personId: string;
   let telegramSessionId: string;
 
   beforeEach(async () => {
     testDb = createTestDb();
-    baseline = await seedBaseline(testDb.db);
+    await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
     app = new Hono().route("/", peopleRoutes(deps));
 
