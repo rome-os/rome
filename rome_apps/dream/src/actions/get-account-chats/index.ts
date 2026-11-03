@@ -10,6 +10,7 @@ import {
   isCoreMainAgentId,
 } from "@rome-os/app-runtime";
 import { ACCOUNT_KINDS, onRomeAccount } from "../../lib/chat-activity.js";
+import type { ChatLine } from "@rome-os/app-runtime/chats";
 import { chatReadsOf } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
@@ -54,6 +55,9 @@ interface MessageRow {
   created_at: number;
   /** Lines the chat holds in the window, kept or not. */
   chat_total: number;
+  /** On a line another of Rome's accounts said in a shared chat, that
+   *  account, whose agent this chat's answering agent is not. */
+  other_account?: string;
 }
 
 interface Chat {
@@ -78,6 +82,7 @@ function named(name: string): string {
 }
 
 function speakerOf(row: MessageRow): string {
+  if (row.other_account) return `Agent on Rome's account ${named(row.other_account)} (Rome)`;
   if (row.outbound) {
     // An account can be linked to an agent other than main, whose lines are
     // not Rome's own.
@@ -173,6 +178,22 @@ function formatChats(rows: MessageRow[]): { content: string; shown: number } {
   return { content, shown };
 }
 
+/**
+ * The account of Rome's a session speaks as, from the transcript it reads:
+ * the sender of a line answering one of its turns, else the sender of every
+ * line Rome said when there is only one. Null when the transcript cannot
+ * tell.
+ */
+function accountOf(lines: ChatLine[]): string | null {
+  const answer = lines.find((line) => line.role === "assistant" && line.turnId !== null);
+  if (answer?.senderId) return answer.senderId;
+  const senders = new Set(
+    lines.filter((line) => line.role === "assistant").map((line) => line.senderId),
+  );
+  const [only] = senders;
+  return senders.size === 1 && only ? only : null;
+}
+
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   const { appContext } = deps;
 
@@ -215,7 +236,14 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             where: { accountKinds: ACCOUNT_KINDS },
           })) {
             const lines = await reads.transcript(chat.sessionId, { since });
+            const ownAccount = accountOf(lines);
             for (const line of lines.slice(-MESSAGES_PER_CHAT)) {
+              // A chat can hold several of Rome's accounts, each with its own
+              // agent, so only this session's account's lines are its agent's.
+              const other =
+                line.role === "assistant" && line.senderId !== null && line.senderId !== ownAccount
+                  ? line.senderId
+                  : undefined;
               rows.push({
                 session_id: chat.sessionId,
                 session_name: chat.name,
@@ -226,6 +254,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
                 role: line.role,
                 agent_name: chat.agentName,
                 outbound: line.role === "assistant" ? 1 : 0,
+                ...(other ? { other_account: other } : {}),
                 sender_name: line.senderName,
                 sender_id: line.senderId,
                 content: line.content,

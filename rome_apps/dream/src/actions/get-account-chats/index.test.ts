@@ -387,4 +387,32 @@ describe("get_account_chats through Chats", () => {
     expect(data.content).toContain("**Agent (Rome)**:\n> done");
     expect(data.content).not.toContain("personal");
   });
+
+  it("names only this session's account's agent in a chat it shares with another", async () => {
+    const now = new Date();
+    const reads = fakeChatReads([
+      {
+        chat: {
+          sessionId: "support",
+          threadName: "Shared group",
+          agentName: "support",
+          channel: { name: "feishu", kind: "feishu" },
+          chat: { platform: "feishu", id: 1 },
+        },
+        lines: [
+          { role: "user", content: "help", createdAt: now, senderName: "Alice" },
+          { role: "assistant", content: "on it", createdAt: now, senderId: "bot-s", turnId: "t1" },
+          { role: "assistant", content: "buy more", createdAt: now, senderId: "bot-sales" },
+        ],
+      },
+    ]);
+    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
+
+    const result = await createAction(actionConfig, deps).execute({ windowHours: 1 });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const { content } = result.data as { content: string };
+    expect(content).toContain('**Agent "support" (Rome)**:\n> on it');
+    expect(content).toContain('**Agent on Rome\'s account "bot-sales" (Rome)**:\n> buy more');
+  });
 });

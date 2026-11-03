@@ -194,4 +194,53 @@ describe("showcases webchat sources through Chats", () => {
 
     expect(res.status).toBe(404);
   });
+
+  it("resolves a card with the answer a later turn's line holds, said before the card", async () => {
+    const second = (offset: number) => new Date(at.getTime() + offset * 1000);
+    const line = (
+      turnId: string,
+      role: "user" | "assistant",
+      content: unknown[],
+      offset: number,
+    ) => ({
+      key: `${turnId}-${role}-${offset}`,
+      turnId,
+      role,
+      senderId: null,
+      senderName: null,
+      content: JSON.stringify(content),
+      createdAt: second(offset),
+    });
+    const card = {
+      type: "pending_interaction",
+      toolUseId: "item_0",
+      render: { componentId: "pick", props: {} },
+    };
+    const answer = { type: "interaction_result", toolUseId: "item_0", output: { choice: "a" } };
+    const interleaved: ChatReads = {
+      ...reads,
+      async transcript() {
+        // The next turn's answer was said a second before this turn's card.
+        return [
+          line("t1", "user", [{ type: "text", content: "pick one" }], 0),
+          line("t2", "user", [answer], 1),
+          line("t1", "assistant", [{ type: "text", content: "choose" }, card], 2),
+        ];
+      },
+      async traces(sessionId) {
+        return sessionId === "web" ? [{ ...trace("web"), turnId: "t1" }] : [];
+      },
+    };
+    const api = handler(interleaved);
+
+    const res = await api.handle(request("POST", "imports/webchat-session", { sessionId: "web" }));
+    const { collectionId } = (await res.json()) as { collectionId: string };
+    const list = await api.handle(request("GET", `collections/${collectionId}/traces`));
+    const { traces } = (await list.json()) as {
+      traces: Array<{ metadata: { replyBlocks?: Array<{ type: string; result?: unknown }> } }>;
+    };
+
+    const shown = traces[0]?.metadata.replyBlocks?.find((b) => b.type === "pending_interaction");
+    expect(shown?.result).toEqual({ choice: "a" });
+  });
 });

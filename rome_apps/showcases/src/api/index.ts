@@ -470,16 +470,32 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
    *  through Chats when the host offers it. */
   private async sourceLines(sessionId: string): Promise<SourceLine[]> {
     const reads = this.chatReads();
-    if (reads) {
-      return (await reads.transcript(sessionId)).map((line) => ({
-        turnId: line.turnId,
-        role: line.role,
-        content: line.content,
-      }));
-    }
     // Ordered as core's `getMessages()`: by each turn's earliest line, then
-    // by line within the turn, since a later turn's prompt can be stored
+    // by line within the turn, since a later turn's prompt can be said
     // before an earlier turn's answer.
+    if (reads) {
+      const lines = await reads.transcript(sessionId);
+      const turnOf = (line: (typeof lines)[number]) => line.turnId ?? line.key;
+      // Each turn's earliest time, and its first line to break a tie, so a
+      // turn's lines stay together.
+      const turns = new Map<string, { at: number; first: number }>();
+      lines.forEach((line, index) => {
+        const at = line.createdAt.getTime();
+        const turn = turns.get(turnOf(line));
+        turns.set(turnOf(line), { at: Math.min(turn?.at ?? at, at), first: turn?.first ?? index });
+      });
+      const turnAt = (line: (typeof lines)[number]) =>
+        turns.get(turnOf(line)) ?? { at: 0, first: 0 };
+      return lines
+        .map((line, index) => ({ line, index }))
+        .sort(
+          (a, b) =>
+            turnAt(a.line).at - turnAt(b.line).at ||
+            turnAt(a.line).first - turnAt(b.line).first ||
+            a.index - b.index,
+        )
+        .map(({ line }) => ({ turnId: line.turnId, role: line.role, content: line.content }));
+    }
     return this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS "turnId", wm.role AS role, wm.content AS content
       FROM rome_agent_messages wm
