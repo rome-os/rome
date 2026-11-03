@@ -101,7 +101,9 @@ function renderChat(rows: ChatRow[]) {
     );
   }
   render(<Chat />);
-  return () => (box.target ? replyFormFields(box.target) : null);
+  return Object.assign(() => (box.target ? replyFormFields(box.target) : null), {
+    target: () => box.target,
+  });
 }
 
 const forward = [
@@ -184,5 +186,33 @@ describe("the reply a Concierge bubble sends", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 
     expect(sent()).toEqual({ replyToMessageId: "m1" });
+  });
+});
+
+it("keeps an on-behalf source with the guardian's messages and names the source in a reply", () => {
+  const message: ChatMessage = {
+    id: "m1",
+    sessionId: "concierge",
+    role: "user",
+    createdAt: at,
+    content: JSON.stringify([{ type: "text", content: "Find flights" }]),
+    sender: {
+      kind: "automated",
+      sourceType: "agent",
+      name: "Concierge",
+      iconUrl: null,
+      onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+    },
+  };
+  const sent = renderChat([{ kind: "user", key: message.id, message }]);
+  expect(screen.getByText("Find flights").closest(".justify-end")).not.toBeNull();
+  expect(screen.getByText("Sent by Concierge")).toBeTruthy();
+  expect(screen.getByTitle("Ray")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+  expect(sent()).toEqual({ replyToMessageId: "m1" });
+  expect(sent.target()).toMatchObject({
+    author: "automated",
+    name: "Concierge",
+    preview: "Find flights",
   });
 });

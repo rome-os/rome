@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
 import { UserMessage } from "./UserMessage";
+import enChat from "@/i18n/locales/en/chat.json";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 
 const viewer = rs.hoisted(() => ({
@@ -17,7 +18,10 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 }));
 
 rs.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, values?: { name: string }) =>
+      key === "senderOnBehalf" ? enChat.senderOnBehalf.replace("{{name}}", values!.name) : key,
+  }),
 }));
 
 afterEach(() => cleanup());
@@ -177,6 +181,61 @@ describe("UserMessage sender", () => {
   });
 
   it.each([
+    "Rome",
+    "Concierge",
+    "Daily Report",
+  ])("shows %s acting for the guardian with an always-visible badge", (name) => {
+    for (const identity of [
+      { kind: "guardian", userId: "seat", displayName: "Ray", avatarUrl: null },
+      { kind: "visitor", accountId: "acct-ada", email: "ada@example.com", avatarUrl: null },
+    ] as const) {
+      viewer.current = identity;
+      const { container, unmount } = render(
+        withSender({
+          kind: "automated",
+          sourceType: name === "Daily Report" ? "app" : "agent",
+          name,
+          iconUrl: "/source.svg",
+          onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+        }),
+      );
+      expect(side(container)).toBe(identity.kind === "guardian" ? "right" : "left");
+      expect(!!container.querySelector(".bg-primary")).toBe(identity.kind === "guardian");
+      expect(screen.getByTitle("Ray")).toBeTruthy();
+      expect(container.querySelector('[data-slot="avatar"]')?.className).not.toContain("rounded-8");
+      const badge = screen.getByText(`Sent by ${name}`);
+      expect(badge.closest(".bg-primary")).toBeNull();
+      expect(badge.closest('[class*="opacity-0"]')).toBeNull();
+      expect(badge.className).toContain("truncate");
+      expect(badge.className).toContain("text-muted-foreground");
+      expect(screen.queryByText("senderAutomated")).toBeNull();
+      if (identity.kind === "visitor")
+        expect(screen.getByText("Ray", { selector: "span" })).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("reloads an automation when its on-behalf identity changes", () => {
+    const sender = {
+      kind: "automated" as const,
+      sourceType: "agent" as const,
+      name: "Rome",
+      iconUrl: null,
+    };
+    const { container, rerender } = render(withSender(sender));
+    expect(side(container)).toBe("left");
+    rerender(
+      withSender({ ...sender, onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null } }),
+    );
+    expect(side(container)).toBe("right");
+    expect(screen.getByText("Sent by Rome")).toBeTruthy();
+    rerender(
+      withSender({ ...sender, onBehalfOf: { kind: "guardian", name: "Renamed", avatarUrl: null } }),
+    );
+    expect(screen.getByTitle("Renamed")).toBeTruthy();
+  });
+
+  it.each([
     "agent",
     "app",
     "routine",
@@ -282,7 +341,10 @@ describe("UserMessage reply", () => {
     expect(screen.queryByRole("button", { name: "reply.action" })).toBeNull();
   });
 
-  it("replies to automation with its source name, not Guardian", () => {
+  it.each([
+    false,
+    true,
+  ])("replies to automation with its source name, on behalf: %s", (onBehalf) => {
     const reply = draft();
     render(
       <ReplyDraftProvider value={reply}>
@@ -295,6 +357,9 @@ describe("UserMessage reply", () => {
                 sourceType: "routine",
                 name: "Morning briefing",
                 iconUrl: null,
+                ...(onBehalf
+                  ? { onBehalfOf: { kind: "guardian" as const, name: "Ray", avatarUrl: null } }
+                  : {}),
               },
             }}
           />

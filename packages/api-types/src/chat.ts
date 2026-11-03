@@ -73,14 +73,16 @@ export type TranscriptPart =
   | ReplyToPart;
 
 /** The person or automation that sent a WebChat user message, resolved at load
- * time. Absent when no sender was recorded. Automation takes priority over the
- * accountable actor. A null source type and name mark an unknown automation. */
+ * time. Absent when no sender was recorded. Automation names the actual source;
+ * onBehalfOf supplies the person whose avatar and viewer-relative side it uses.
+ * A null source type and name mark an unknown automation. */
 export type ChatMessageSender =
   | {
       kind: "automated";
       sourceType: "agent" | "app" | "routine" | null;
       name: string | null;
       iconUrl: string | null;
+      onBehalfOf?: { kind: "guardian"; name: string | null; avatarUrl: string | null };
     }
   | { kind: "guardian"; name: string | null; avatarUrl: string | null }
   | { kind: "visitor"; accountId: string; name: string | null; avatarUrl: string | null };

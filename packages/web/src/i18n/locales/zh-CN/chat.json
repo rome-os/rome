@@ -1,4 +1,5 @@
 {
+  "senderOnBehalf": "由{{name}}代发",
   "senderAutomated": "自动发送",
   "senderAutomation": "自动化",
   "markdown": {

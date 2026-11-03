@@ -3231,6 +3231,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   type SendBody = {
     inputId?: string;
     automatedSource?: unknown;
+    automatedActorKind?: unknown;
     threadId?: string;
     text?: string;
     personaId?: string;
@@ -3305,6 +3306,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return {
         inputId: getString("inputId"),
         automatedSource: getString("automatedSource"),
+        automatedActorKind: getString("automatedActorKind"),
         threadId: getString("threadId"),
         text: getString("text"),
         personaId: getString("personaId"),
@@ -3331,7 +3333,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
       typeof body.automatedSource === "string"
-        ? automatedSenderId(body.automatedSource)
+        ? automatedSenderId(body.automatedSource, body.automatedActorKind)
         : undefined;
     const saidBy = sourceId ? { platform: "webchat", id: sourceId } : said.saidBy;
     const automated = saidBy ? await resolveAutomatedSender(deps, saidBy.id) : null;

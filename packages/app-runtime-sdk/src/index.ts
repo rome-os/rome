@@ -2170,6 +2170,8 @@ export interface ActionRunContext {
 export interface CurrentActionContext {
   /** The runtime-recorded source of this action chain, separate from its accountable actor. */
   initiator?: string;
+  /** Kind of the chain's accountable session, before any loopback HTTP hop. */
+  actorKind?: "guardian" | "visitor" | "anonymous";
   actionName?: string;
   executionId?: string;
   rootExecutionId?: string;

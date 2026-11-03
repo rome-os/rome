@@ -30,18 +30,14 @@ export const curatedChats: DemoChat[] = [
         reply: "Today has two meetings and one release check.",
         sender: {
           kind: "automated",
-          sourceType: "routine",
-          name: "Morning briefing",
+          sourceType: "agent",
+          name: "Rome",
           iconUrl: null,
+          onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
         },
       },
       {
         at: "2026-09-15T09:01:00.000Z",
-        prompt: "Move the review to Thursday.",
-        reply: "",
-      },
-      {
-        at: "2026-09-15T09:02:00.000Z",
         prompt: "Review the new pull request.",
         reply: "",
         sender: {
@@ -49,13 +45,30 @@ export const curatedChats: DemoChat[] = [
           sourceType: "app",
           name: "Code Review",
           iconUrl: "/recorded-apps/code-review/icon.svg",
+          onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
         },
       },
       {
-        at: "2026-09-15T09:03:00.000Z",
+        at: "2026-09-15T09:02:00.000Z",
         prompt: "Run the release check again.",
         reply: "",
         sender: { kind: "automated", sourceType: "agent", name: "Coding", iconUrl: codingIcon },
+      },
+      {
+        at: "2026-09-15T09:03:00.000Z",
+        prompt: "Prepare tomorrow's briefing.",
+        reply: "",
+        sender: {
+          kind: "automated",
+          sourceType: "routine",
+          name: "Morning briefing",
+          iconUrl: null,
+        },
+      },
+      {
+        at: "2026-09-15T09:03:30.000Z",
+        prompt: "Move the review to Thursday.",
+        reply: "",
       },
       {
         at: "2026-09-15T09:04:00.000Z",

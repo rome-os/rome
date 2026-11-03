@@ -45,11 +45,35 @@ describe("send_user_message", () => {
       expect(requestBody(fetchImpl, 1)).toEqual({
         text: "/brief today",
         automatedSource: initiator ?? "unknown",
+        automatedActorKind: "anonymous",
       });
     } finally {
       setCurrentActionContextResolver(null);
     }
   });
+  it.each([
+    "guardian",
+    "visitor",
+    "anonymous",
+    undefined,
+  ] as const)("carries chain actor kind %s instead of guessing from the loopback hop", async (actorKind) => {
+    const fetchImpl = makeFetch(jsonResponse(200, { turnId: "turn" }));
+    setCurrentActionContextResolver(() => ({ initiator: "agent:core:main", actorKind }));
+    try {
+      await createSendUserMessageAction(config, { fetchImpl, baseUrl: BASE }).execute({
+        sessionId: "session",
+        text: "Status?",
+      });
+      expect(requestBody(fetchImpl, 0)).toEqual({
+        text: "Status?",
+        automatedSource: "agent:core:main",
+        automatedActorKind: actorKind ?? "anonymous",
+      });
+    } finally {
+      setCurrentActionContextResolver(null);
+    }
+  });
+
   it("defaults to creating a new chat, then posts the text as a guardian turn", async () => {
     const fetchImpl = makeFetch(
       jsonResponse(200, { id: "sess-1" }),
@@ -67,6 +91,7 @@ describe("send_user_message", () => {
     expect(requestBody(fetchImpl, 1)).toEqual({
       text: "Summarize my inbox",
       automatedSource: "unknown",
+      automatedActorKind: "anonymous",
     });
     expect(result).toEqual({
       status: "ok",
@@ -268,14 +293,14 @@ describe("send_user_message", () => {
 
     const newChat = action.preview?.({ text: "Morning briefing please" });
     expect(newChat).toMatchObject({
-      title: "Start a webchat conversation as the guardian",
+      title: "Start a webchat conversation",
       summary: "Morning briefing please",
       fields: [{ label: "Agent", value: "main" }],
     });
 
     const existing = action.preview?.({ text: "and then?", sessionId: "sess-4" });
     expect(existing).toMatchObject({
-      title: "Continue a webchat conversation as the guardian",
+      title: "Continue a webchat conversation",
       summary: "and then?",
     });
     expect(JSON.stringify(existing)).not.toContain("sess-4");

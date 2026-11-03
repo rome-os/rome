@@ -1,4 +1,5 @@
 {
+  "senderOnBehalf": "Sent by {{name}}",
   "senderAutomated": "Automated",
   "senderAutomation": "Automation",
   "markdown": {

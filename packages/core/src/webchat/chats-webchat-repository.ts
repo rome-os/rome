@@ -1,4 +1,4 @@
-import { automatedSource } from "./automated-source.js";
+import { automatedSource, speaksForGuardian } from "./automated-source.js";
 // The dashboard's repository over Chats' tables. Vocabulary:
 // docs/domains/chats.md and docs/domains/participation.md.
 //
@@ -247,12 +247,16 @@ export class ChatsWebChatRepository extends WebChatRepository {
         direction: "toRome",
         key: id,
         place: standing.place,
-        // A source records who triggered the action, not an agent participating in this chat.
+        // A tagged source records the chain kind; an agent speaking for the guardian uses their account.
         saidBy: saidBy
           ? {
               account: {
                 platform: WEBCHAT_PLATFORM,
-                id: saidBy.id.startsWith("automated::") ? saidBy.id : dashboardAccountId(saidBy.id),
+                id: saidBy.id.startsWith("automated::")
+                  ? saidBy.id
+                  : speaksForGuardian({ type: "agent", id: saidBy.id }, actor?.kind)
+                    ? "guardian"
+                    : dashboardAccountId(saidBy.id),
               },
               ...(saidBy.id.startsWith("automated::") ? {} : { agent: saidBy.id }),
             }

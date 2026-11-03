@@ -279,3 +279,23 @@ describe("buildConciergeItems reference stability", () => {
     expect(after[3]).toBe(before[3]);
   });
 });
+
+it("groups an on-behalf Concierge message with adjacent guardian messages", () => {
+  const automated = guardian("on-behalf", MIN);
+  automated.sender = {
+    kind: "automated",
+    sourceType: "agent",
+    name: "Concierge",
+    iconUrl: null,
+    onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+  };
+  const items = buildConciergeItems([userRow(guardian("typed", 0)), userRow(automated)], {
+    typing: false,
+  });
+  const groups = items.filter((item) => item.kind === "group");
+  expect(groups).toHaveLength(1);
+  expect(groups[0]).toMatchObject({
+    sender: "guardian",
+    entries: [{ message: { id: "typed" } }, { message: { id: "on-behalf" } }],
+  });
+});

@@ -9,7 +9,11 @@ import { VisitorProfilesRepository } from "../../db/repositories/visitor-profile
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
-import { automatedSource, promptSafeSourceName } from "../../webchat/automated-source.js";
+import {
+  automatedSource,
+  speaksForGuardian,
+  promptSafeSourceName,
+} from "../../webchat/automated-source.js";
 
 /**
  * Resolve each message's source or actor into the sender the dashboard shows. The
@@ -30,7 +34,7 @@ export async function resolveChatSenders(
   ];
   const profiles = await new VisitorProfilesRepository(deps.db).getMany(visitorIds);
 
-  let guardian: ChatMessageSender | null = null;
+  let guardian: Extract<ChatMessageSender, { kind: "guardian" }> | null = null;
   if (list.some((actor) => actor.kind === "guardian")) {
     const name = await deps.settingsRepo.get("guardianName");
     const [seat] = await deps.db
@@ -59,7 +63,18 @@ export async function resolveChatSenders(
   }
   for (const [messageId, senderId] of sources) {
     const sender = await resolveAutomatedSender(deps, senderId);
-    if (sender) senders.set(messageId, sender);
+    if (sender) {
+      const source = automatedSource(senderId)!;
+      const actor = actors.get(messageId);
+      if (
+        guardian &&
+        actor?.kind === "guardian" &&
+        (source.onBehalf ?? speaksForGuardian(source, actor.kind))
+      ) {
+        sender.onBehalfOf = guardian;
+      }
+      senders.set(messageId, sender);
+    }
   }
   return senders;
 }

@@ -22,13 +22,16 @@ export function senderFromIdentity(
   return undefined;
 }
 
-/** Automation is never the viewer. A message with no recorded sender keeps
- * its own-message layout, without attributing it to a person. */
+/** On-behalf automation follows the person it speaks for. A message with no
+ * recorded sender keeps its own-message layout, without naming a person. */
 export function sentByViewer(
   sender: ChatMessageSender | undefined,
   viewer: DashboardIdentity | undefined,
 ): boolean {
-  if (sender?.kind === "automated") return false;
+  if (sender?.kind === "automated") {
+    if (!sender.onBehalfOf) return false;
+    sender = sender.onBehalfOf;
+  }
   if (!sender || !viewer || viewer.kind === "anonymous") return true;
   if (sender.kind === "guardian") return viewer.kind === "guardian";
   return viewer.kind === "visitor" && viewer.accountId === sender.accountId;
@@ -37,6 +40,7 @@ export function sentByViewer(
 /** A round avatar marks a person. A rounded square marks automation,
  * with a clock for a routine. */
 export function SenderAvatar({ sender }: { sender: ChatMessageSender }) {
+  if (sender.kind === "automated" && sender.onBehalfOf) sender = sender.onBehalfOf;
   if (sender.kind === "automated") {
     return (
       <AgentAvatar

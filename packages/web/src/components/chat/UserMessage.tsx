@@ -27,6 +27,17 @@ export const UserMessage = memo(
     // state), so suppress the empty bubble.
     if (!text) return null;
     const own = sentByViewer(msg.sender, viewer);
+    const onBehalfOf = msg.sender?.kind === "automated" ? msg.sender.onBehalfOf : undefined;
+    const displaySender = onBehalfOf ?? msg.sender;
+    const sourceBadge =
+      onBehalfOf && msg.sender ? (
+        <span
+          data-automated-badge
+          className="mt-1 block max-w-full truncate text-aux text-muted-foreground"
+        >
+          {t("senderOnBehalf", { name: msg.sender.name ?? t("senderAutomation") })}
+        </span>
+      ) : null;
     const bubble = (
       <UserMessageBubble
         msg={msg}
@@ -64,25 +75,31 @@ export const UserMessage = memo(
         ) : null}
       </div>
     );
+    const footer = (
+      <>
+        {sourceBadge}
+        {actions}
+      </>
+    );
     // Someone else's message reads like the agent's: on the left, under their
     // name. Only the signed-in person's own messages sit on the right.
-    if (!own && msg.sender) {
+    if (!own && displaySender) {
       return (
         <MessageRow
           name={
-            msg.sender.name ??
-            t(msg.sender.kind === "automated" ? "senderAutomation" : "senderGuardian")
+            displaySender.name ??
+            t(displaySender.kind === "automated" ? "senderAutomation" : "senderGuardian")
           }
           subtitle={
-            msg.sender.kind === "automated" ? (
+            displaySender.kind === "automated" ? (
               <span className="rounded-4 border border-border px-1 text-aux text-muted-foreground">
                 {t("senderAutomated")}
               </span>
             ) : undefined
           }
-          avatar={<SenderAvatar sender={msg.sender} />}
+          avatar={<SenderAvatar sender={displaySender} />}
           className="group"
-          footer={actions}
+          footer={footer}
         >
           {bubble}
         </MessageRow>
@@ -92,6 +109,7 @@ export const UserMessage = memo(
       <div className="group mb-4 flex items-start justify-end gap-2">
         <div className="flex min-w-0 flex-1 flex-col items-end">
           {bubble}
+          {sourceBadge}
           {actions}
         </div>
         {msg.sender ? <SenderAvatar sender={msg.sender} /> : null}
@@ -107,7 +125,10 @@ export const UserMessage = memo(
     (prev.msg.sender?.kind === "automated"
       ? next.msg.sender?.kind === "automated" &&
         prev.msg.sender.iconUrl === next.msg.sender.iconUrl &&
-        prev.msg.sender.sourceType === next.msg.sender.sourceType
+        prev.msg.sender.sourceType === next.msg.sender.sourceType &&
+        prev.msg.sender.onBehalfOf?.name === next.msg.sender.onBehalfOf?.name &&
+        prev.msg.sender.onBehalfOf?.avatarUrl === next.msg.sender.onBehalfOf?.avatarUrl &&
+        !!prev.msg.sender.onBehalfOf === !!next.msg.sender.onBehalfOf
       : next.msg.sender?.kind !== "automated" &&
         prev.msg.sender?.avatarUrl === next.msg.sender?.avatarUrl &&
         (prev.msg.sender?.kind !== "visitor" ||
