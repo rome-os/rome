@@ -18,6 +18,7 @@ import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { chatsWiring } from "../chats-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
@@ -122,7 +123,16 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   );
   const approvalsRepo = new ApprovalsRepository(db);
   // The dashboard's sessions, with each dashboard chat's lines in Chats.
-  const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db);
+  const chatsWired = chatsWiring(db, {
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel: (name) => channelRecords.platformOfChannel(name),
+    channelsOn: (platform) => channelRecords.namesOn(platform),
+  });
+  const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db, {
+    chats: chatsWired.chats,
+    lines: chatsWired.messages,
+    links: chatsWired.links,
+  });
   // An action records the messages it sent. Nothing in the worker reads a
   // place's history or hears what was said, so it keeps no channels to read
   // under and its events go nowhere.
@@ -131,6 +141,11 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
     chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+    speakers: {
+      chats: chatsWired.chats,
+      adapters: chatsWired.adapters,
+      speakers: chatsWired.speakers,
+    },
   });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);
