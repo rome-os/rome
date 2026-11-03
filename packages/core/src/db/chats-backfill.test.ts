@@ -407,6 +407,53 @@ describe("Chats backfill", () => {
     expect(quote.reply_to_message_id).toBe((line("om_2") as { id: number }).id);
   });
 
+  it("resolves a quote of a later part of a reply an earlier pass moved", () => {
+    const session = sqlite.prepare(
+      `INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id,
+         source_thread_type, created_at)
+       VALUES (?, 'Ops', 'channel', ?, 'oc_ops', 'group', 100)`,
+    );
+    const row = sqlite.prepare(
+      `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at,
+         platform_message_id, sender_id, reply_to_platform_message_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    // One account's reply in a Feishu group, sent in two parts.
+    session.run("ops-a", "feishu");
+    row.run("ops-1", "ops-a", "assistant", text("Part one"), 700, "om_20", null, null);
+    sqlite
+      .prepare(
+        `INSERT INTO rome_agent_message_platform_ids (message_id, session_id, platform_message_id)
+         VALUES ('ops-1', 'ops-a', 'om_21')`,
+      )
+      .run();
+    backfill(sqlite);
+    // Another account in the group, whose channel learned its account after
+    // that pass, heard a quote of the second part.
+    sqlite
+      .prepare(
+        `INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+         VALUES ('feishu-2', 'feishu', 'feishu', 'bot2', 1)`,
+      )
+      .run();
+    session.run("ops-b", "feishu-2");
+    row.run(
+      "ops-2",
+      "ops-b",
+      "notification",
+      text("About part two"),
+      710,
+      "om_22",
+      "ou_li",
+      "om_21",
+    );
+
+    backfill(sqlite);
+
+    const quote = line("om_22") as { reply_to_message_id: number };
+    expect(quote.reply_to_message_id).toBe((line("om_20") as { id: number }).id);
+  });
+
   it("points a Concierge task at the message its legacy row became", () => {
     expect(
       all(

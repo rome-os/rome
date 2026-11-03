@@ -271,11 +271,16 @@ ORDER BY v.said_at, v.legacy_seq;
 UPDATE chat_messages SET reply_to_message_id = (
   SELECT coalesce(
     (SELECT q.id FROM chat_messages q WHERE q.chat_id = v.chat_id AND q.key = v.reply_key),
-    (SELECT j.message_id FROM rome_agent_message_platform_ids a
-      JOIN rome_sessions ar ON ar.id = a.session_id
-      JOIN legacy_chat_line_ids j ON j.legacy_id = a.message_id
+    -- The reply's line by its first part's key, which finds it whether this
+    -- pass or an earlier one moved it.
+    (SELECT q.id FROM rome_agent_message_platform_ids a
+      JOIN rome_agent_messages h ON h.id = a.message_id
+      JOIN rome_sessions ar ON ar.id = h.session_id
+      JOIN chat_messages q ON q.chat_id = v.chat_id
+        AND q.key = CASE WHEN v.per_account THEN v.account_id || ':' ELSE '' END || h.platform_message_id
       WHERE ar.chat_id = v.chat_id
         AND (NOT v.per_account OR ar.account_id IS v.account_id)
+        AND h.platform_message_id IS NOT NULL
         AND a.platform_message_id = (SELECT m.reply_to_platform_message_id FROM rome_agent_messages m
           WHERE m.id = v.legacy_id) LIMIT 1))
   FROM legacy_chat_line_ids i JOIN legacy_chat_line_rows v ON v.legacy_id = i.legacy_id

@@ -1079,11 +1079,21 @@ export class WebChatRepository {
       // session's second, reads that line too once it wakes no agent. Where
       // the account spoke there first, as a send that started the chat, the
       // session starts before that line instead, so it reads what it said.
-      const firstOwn = this.db.all<{ at: number | null }>(sql`
-        SELECT min(said_at) AS at FROM chat_messages
-        WHERE chat_id = ${speaker.chat.id} AND thread_id IS ${thread}
-          AND sender_account_id = ${speaker.accountId}
-      `)[0]?.at;
+      // Asked only while the session stands nowhere yet: once placed, its
+      // start no longer moves, and every message heard asks this again.
+      const placed = this.db
+        .select({ chatId: romeSessions.chatId })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, opened.id))
+        .get()?.chatId;
+      const firstOwn =
+        placed == null
+          ? this.db.all<{ at: number | null }>(sql`
+              SELECT min(said_at) AS at FROM chat_messages
+              WHERE chat_id = ${speaker.chat.id} AND thread_id IS ${thread}
+                AND sender_account_id = ${speaker.accountId}
+            `)[0]?.at
+          : null;
       const heardSecond = Math.min(
         Math.floor(speaker.at.getTime() / 1000),
         firstOwn ?? Number.POSITIVE_INFINITY,
