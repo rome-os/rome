@@ -14,6 +14,11 @@ describe("textToSend", () => {
         ],
       }),
     ).toBe("One\n\nTwo");
+    for (const blank of ["", "  "]) {
+      expect(
+        textToSend("telegram", { text: blank, parts: [{ type: "text", content: "Hello" }] }),
+      ).toBe("Hello");
+    }
   });
 
   it("sends an attachment with no text", () => {

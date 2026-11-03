@@ -68,8 +68,9 @@ export class WebChatAdapter {
     log.info("webchat adapter stopped");
   }
 
-  /** Persist an assistant reply into the session. A message with no text,
-   *  parts or attachments writes nothing, and its receipt has no `messageId`. */
+  /** Persist an assistant reply into the session. A message that shows
+   *  nothing, with no nonblank text, no other part and no attachment, is
+   *  refused and writes nothing. */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = chatId;
     // Only the host authors routine cards (see host-only-parts.ts).
@@ -77,10 +78,11 @@ export class WebChatAdapter {
     if (message.parts && given.length < message.parts.length) {
       log.warn("dropped routine_draft_card parts from a sent message", { threadId });
     }
+    const shown = given.filter((part) => part.type !== "text" || part.content.trim());
     const parts =
-      given.length > 0
-        ? given
-        : message.text
+      shown.length > 0
+        ? shown
+        : message.text?.trim()
           ? [{ type: "text" as const, content: message.text }]
           : [];
 

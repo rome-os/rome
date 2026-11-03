@@ -259,10 +259,16 @@ describe("WebChatAdapter", () => {
   it("refuses a message with nothing to persist", async () => {
     await repo.createSession("sess-empty", "Empty");
 
-    await expect(adapter.send("sess-empty" as ChatId, {})).rejects.toMatchObject({
-      name: "ChannelSendRefused",
-      reason: "empty",
-    });
+    for (const blank of [
+      {},
+      { text: "   " },
+      { parts: [{ type: "text" as const, content: "" }] },
+    ]) {
+      await expect(adapter.send("sess-empty" as ChatId, blank)).rejects.toMatchObject({
+        name: "ChannelSendRefused",
+        reason: "empty",
+      });
+    }
     await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);
   });
 });

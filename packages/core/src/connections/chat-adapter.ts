@@ -645,7 +645,11 @@ export class ChatAdapters {
  * answers in the chat keyed `chat`, or undefined when it answers none.
  * Refuses a line it has no id for, since the reply would land unquoted.
  */
-function quotable(chat: ChatKey, romeEnd: string, lineKey: string | undefined): string | undefined {
+export function quotable(
+  chat: ChatKey,
+  romeEnd: string,
+  lineKey: string | undefined,
+): string | undefined {
   if (lineKey === undefined) return undefined;
   const id = platformIdOfLine(chat, romeEnd, lineKey);
   if (id === null) {
