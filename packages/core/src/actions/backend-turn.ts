@@ -132,7 +132,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
-    trace: Pick<RunParams, "persistTrace" | "persistTranscript"> = {},
+    trace: Pick<RunParams, "persistTrace" | "persistTranscript" | "persistAnswer"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -228,7 +228,11 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // on the channel's `send` port.
       let reply = "";
       let turnId: string | undefined;
-      for await (const msg of runTurn(params, workingDir, {}, deviceFolder)) {
+      // A speaker puts the answer on record as it says it, so the trace keeps
+      // the turn but writes no answer of its own: one that was never sent
+      // must not read as said, and one that was must not be said twice.
+      const trace = deps.replies && deps.chats ? { persistAnswer: false } : {};
+      for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }

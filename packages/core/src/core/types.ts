@@ -18,6 +18,11 @@ export interface RunParams extends SdkRunParams {
    *  conversation writes them anyway, since that conversation has no other
    *  transcript, while an explicit `persistTrace: false` still skips both. */
   persistTranscript?: boolean;
+  /** Whether those transcript rows include the turn's answer. Defaults to
+   *  true. A caller that puts the answer on record as it delivers it turns it
+   *  off, so the answer is recorded once, and only once it went out. A
+   *  recorded subagent or fork conversation keeps it anyway. */
+  persistAnswer?: boolean;
 }
 
 export interface ForkRunParams extends SdkForkRunParams {

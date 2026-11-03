@@ -327,6 +327,22 @@ describe("backend turn delivery", () => {
       expect(recordSent).not.toHaveBeenCalled();
     });
 
+    it("keeps the turn's trace but leaves its answer for the speaker to record", async () => {
+      const agentRunner = answered();
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: () => wechatWith(rs.fn<Send>(async (chatId) => ({ chatId }))),
+        chats,
+        replies: { send: async () => null },
+      });
+
+      await runner.runAndDeliver(params);
+
+      expect(agentRunner.calls[0]).toMatchObject({ persistAnswer: false });
+      expect(agentRunner.calls[0]).not.toHaveProperty("persistTrace", false);
+      expect(agentRunner.calls[0]).not.toHaveProperty("persistTranscript", false);
+    });
+
     it("still sends the reply when the session stands in no chat", async () => {
       const send = rs.fn<Send>(async (chatId) => ({ chatId }));
       const runner = createBackendTurnRunner({
