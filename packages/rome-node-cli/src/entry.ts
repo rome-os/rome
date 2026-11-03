@@ -17,6 +17,7 @@ import {
 import { commandHelp } from "./help.js";
 import { copyRequest } from "./copy.js";
 import { CLI_AUDIT_HINT, cliAuditPath, runAudit } from "./audit.js";
+import type { ConnectUi } from "./connect-ui.js";
 
 const version = (): string | undefined => {
   try {
@@ -264,10 +265,14 @@ async function main(): Promise<void> {
         `Audit log unavailable: ${audit.state.message}\nRemote requests will be refused until it is fixed. Run rome-node audit status.\n`,
       );
     else process.stderr.write(`Audit log: ${audit.path}\n`);
+    // On a terminal, the status screen replaces the Connection lines once sign-in is over.
+    const screen = process.stdout.isTTY ? await import("./connect-ui.js") : undefined;
+    let ui: ConnectUi | undefined;
+    const cloud = values.cloud ?? "https://romeos.cc";
     await withShutdown((signal) =>
       connectHost({
         audit,
-        cloudUrl: values.cloud ?? "https://romeos.cc",
+        cloudUrl: cloud,
         name,
         signal,
         credentials: createFileCredentialStore(join(config.directory, "credential.json")),
@@ -293,12 +298,22 @@ async function main(): Promise<void> {
             );
           else if (event.type === "retrying")
             process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");
+          else if (event.type === "device" && screen)
+            ui = screen.startConnectUi(audit, {
+              name: event.name,
+              deviceId: event.deviceId,
+              cloud,
+            });
           else if (event.type === "device")
             process.stderr.write(`Device: ${event.name}\nDevice ID: ${event.deviceId}\n`);
+          else if (ui) ui.setStatus(event.status);
           else process.stderr.write(`Connection: ${event.status}\n`);
         },
       }),
-    ).finally(() => audit.close());
+    ).finally(() => {
+      ui?.stop();
+      audit.close();
+    });
     return;
   }
   if (positionals[0] !== "device") throw new Error("Unknown command. Run rome-node --help.");

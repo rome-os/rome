@@ -35,6 +35,11 @@ store, authorization callback, event callback, and abort signal. It does not
 print terminal output or install process signal handlers.
 See the [library examples](../packages/rome-node-core/README.md) for both APIs.
 
+On a terminal, `rome-node connect` shows a status screen once sign-in is done: the
+connection, request counts from the audit log, and the latest requests. Without a
+terminal (a service, a redirect, CI) it prints one `Connection: <status>` line per change
+to stderr instead.
+
 ## Device status in Settings
 
 Settings → Devices shows the caller connection, connected device count, and each

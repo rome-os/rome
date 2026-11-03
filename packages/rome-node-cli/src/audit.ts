@@ -33,7 +33,7 @@ function time(value: string | undefined, flag: string): number | undefined {
   return at;
 }
 
-function describe(item: AuditItem): string {
+export function describe(item: AuditItem): string {
   const args = (item.record.args ?? {}) as Record<string, unknown>;
   if (item.kind === "host")
     return `host ${String(item.record.event)} ${String(item.record.status ?? "")}`.trim();
@@ -50,17 +50,22 @@ function describe(item: AuditItem): string {
   return String(item.action);
 }
 
-/** One line per record: seq, time, what, outcome, duration, and the unverified sender. */
-function auditLine(item: AuditItem): string {
-  const what = describe(item);
+/** How a request went, as `audit tail` words it: outcome, error code, exit code, and duration. */
+export function auditResult(item: AuditItem): string {
   const outcome =
     item.kind !== "start" ? "" : item.end ? (item.end.outcome ?? "") : "no end record";
   const code = item.end?.record.errorCode ? ` ${String(item.end.record.errorCode)}` : "";
   const exit = item.end?.record.exitCode != null ? ` exit=${String(item.end.record.exitCode)}` : "";
   const duration =
     item.end?.record.durationMs != null ? ` ${String(item.end.record.durationMs)}ms` : "";
+  return `${outcome}${code}${exit}${duration}`;
+}
+
+/** One line per record: seq, time, what, outcome, duration, and the unverified sender. */
+function auditLine(item: AuditItem): string {
+  const what = describe(item);
   const from = item.record.from ? ` from=${String(item.record.from)} (unverified)` : "";
-  return `${item.seq}\t${new Date(item.at).toISOString()}\t${what.length > 100 ? `${what.slice(0, 99)}…` : what}\t${outcome}${code}${exit}${duration}${from}`;
+  return `${item.seq}\t${new Date(item.at).toISOString()}\t${what.length > 100 ? `${what.slice(0, 99)}…` : what}\t${auditResult(item)}${from}`;
 }
 
 function query(options: AuditOptions): AuditQuery {

@@ -52,6 +52,8 @@ Use --device-code over SSH or on a headless computer to approve from another dev
 This mode prints a URL and user code without opening a browser or callback listener.
 Stored credentials are reused in either mode. SSH is not detected automatically.
 The process stays in the foreground. Ctrl+C disconnects and preserves authorization.
+On a terminal it shows the connection, request counts, and the latest requests. Otherwise
+it prints plain status lines to stderr, as a service or a redirect needs.
 Programs run as the OS user who starts connect. Every request is recorded in the
 local audit log first (rome-node help audit); if it cannot be, the request is refused.
 
