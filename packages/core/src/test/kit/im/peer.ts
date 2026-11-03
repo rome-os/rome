@@ -50,7 +50,9 @@ export interface PeerExchange {
  * A fault for the next request matching `method` and `path`. `before` holds the
  * request until it resolves; `respond` answers without running the route;
  * `dropAfterAccept` runs the route and then cuts the socket, so the platform
- * changed but the client cannot know.
+ * changed but the client cannot know. `holdAnswer` runs the route and holds the
+ * answer until it resolves, so a client that stops waiting meanwhile never
+ * hears that the platform changed.
  */
 export interface Fault {
   method: string;
@@ -58,6 +60,7 @@ export interface Fault {
   before?: () => Promise<void>;
   respond?: { status: number; body: unknown };
   dropAfterAccept?: boolean;
+  holdAnswer?: () => Promise<void>;
 }
 
 export function deferred<T = void>() {
@@ -259,6 +262,8 @@ export class PeerServer {
       exchange.source = reply.source;
       exchange.accepted = reply.accepted === true;
     }
+    if (fault?.holdAnswer)
+      await Promise.race([fault.holdAnswer(), once(controller.signal, "abort")]);
 
     // The answer never reaches a client that is gone, or one a fault cuts off.
     if (fault?.dropAfterAccept || res.destroyed) {
