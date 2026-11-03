@@ -168,18 +168,19 @@ function joinChat(tx: DrizzleTx, from: number, into: number): void {
     WHERE f.chat_id = ${from}
   `);
   // Where only the moving copy knows Rome said it, as when the other account
-  // heard Rome's send as an echo, the kept copy takes who said it.
+  // heard Rome's send as an echo, the kept copy takes the message as Rome
+  // said it, as a send that finds its echo on record does. A quote it takes
+  // names the moving chat's copy until quotes move below.
   tx.run(sql`
-    UPDATE chat_messages
-    SET sender_account_id = (
-          SELECT f.sender_account_id FROM joined_chat_messages j
-          JOIN chat_messages f ON f.id = j.from_id WHERE j.into_id = chat_messages.id),
-        sender_agent = (
-          SELECT f.sender_agent FROM joined_chat_messages j
-          JOIN chat_messages f ON f.id = j.from_id WHERE j.into_id = chat_messages.id)
-    WHERE sender_agent IS NULL AND id IN (
-      SELECT j.into_id FROM joined_chat_messages j
-      JOIN chat_messages f ON f.id = j.from_id WHERE f.sender_agent IS NOT NULL)
+    UPDATE chat_messages AS i
+    SET sender_account_id = f.sender_account_id,
+        sender_agent = f.sender_agent,
+        sender_name = f.sender_name,
+        text = f.text,
+        parts = f.parts,
+        reply_to_message_id = coalesce(f.reply_to_message_id, i.reply_to_message_id)
+    FROM joined_chat_messages j JOIN chat_messages f ON f.id = j.from_id
+    WHERE j.into_id = i.id AND i.sender_agent IS NULL AND f.sender_agent IS NOT NULL
   `);
   tx.run(sql`
     UPDATE OR IGNORE agent_turn_messages

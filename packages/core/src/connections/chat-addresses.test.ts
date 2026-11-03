@@ -56,7 +56,7 @@ describe("ChatAddresses", () => {
         text, parts, said_at) VALUES
       (10, 1, 'm1', 'ada', NULL, 'hi', '[]', 1),
       (11, 1, 'm2', 'bot-2', NULL, 'sent', '[]', 2),
-      (20, 2, 'm2', 'bot-2', 'support', 'sent', '[]', 2),
+      (20, 2, 'm2', 'bot-2', 'support', 'sent\n[image: Chart]', '[{"type":"text","content":"sent"}]', 2),
       (21, 2, 'm3', 'bot-2', 'support', 'later', '[]', 3)`);
     run(sql`UPDATE chat_messages SET reply_to_message_id = 20 WHERE id = 21`);
     run(sql`INSERT INTO rome_sessions (id, name, created_at, activity_at, chat_id, account_id)
@@ -70,14 +70,14 @@ describe("ChatAddresses", () => {
     const all = <T>(query: ReturnType<typeof sql>) => testDb.db.all<T>(query);
     expect(all(sql`SELECT id, key FROM chats ORDER BY id`)).toEqual([{ id: 1, key: "G" }]);
     // bot-1 heard bot-2's send as anyone's message; the kept copy learns
-    // which agent said it.
+    // which agent said it, and what it said as recorded.
     expect(
-      all(sql`SELECT id, chat_id, reply_to_message_id AS reply, sender_agent AS agent
+      all(sql`SELECT id, chat_id, reply_to_message_id AS reply, sender_agent AS agent, text
               FROM chat_messages ORDER BY id`),
     ).toEqual([
-      { id: 10, chat_id: 1, reply: null, agent: null },
-      { id: 11, chat_id: 1, reply: null, agent: "support" },
-      { id: 21, chat_id: 1, reply: 11, agent: "support" },
+      { id: 10, chat_id: 1, reply: null, agent: null, text: "hi" },
+      { id: 11, chat_id: 1, reply: null, agent: "support", text: "sent\n[image: Chart]" },
+      { id: 21, chat_id: 1, reply: 11, agent: "support", text: "later" },
     ]);
     expect(all(sql`SELECT id, chat_id FROM rome_sessions ORDER BY id`)).toEqual([
       { id: "s1", chat_id: 1 },
