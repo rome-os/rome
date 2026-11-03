@@ -1215,6 +1215,15 @@ export class WebChatRepository {
     });
   }
 
+  /** Move session `sessionId`'s activity up to `at`, never back. */
+  advanceSessionActivity(sessionId: string, at: Date): void {
+    this.db
+      .update(romeSessions)
+      .set(advanceSessionActivitySet(at))
+      .where(eq(romeSessions.id, sessionId))
+      .run();
+  }
+
   async promoteConversationMessageToUser(
     sessionId: string,
     platformMessageId: string,

@@ -154,6 +154,7 @@ import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-se
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
+import { openChannelChat } from "./chats/open-chat.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -431,15 +432,34 @@ async function main() {
   });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
+  const appSpeakers = {
+    chats: chatsWired.chats,
+    adapters: chatsWired.adapters,
+    speakers: chatsWired.speakers,
+  };
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
     chatRepo,
     chatMessages,
-    speakers: {
-      chats: chatsWired.chats,
-      adapters: chatsWired.adapters,
-      speakers: chatsWired.speakers,
+    speakers: appSpeakers,
+    // Apps read and write their chats in Chats. A speaker sends through the
+    // raw channel, so its send goes on record once.
+    inChats: {
+      reads: { db, reads: chatsWired.reads, webchatRepo },
+      writes: {
+        webchatRepo,
+        chats: chatsWired.chats,
+        messages: chatsWired.messages,
+        speakers: chatsWired.speakers,
+        replies: chatsWired.replies,
+        links: chatsWired.links,
+        lines: chatsWired.speakerLines,
+        adapters: chatsWired.adapters,
+        // `builtChannels` is set further down, before any app runs.
+        channel: (name) => builtChannels?.find((channel) => channel.name === name) ?? null,
+        open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
+      },
     },
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });

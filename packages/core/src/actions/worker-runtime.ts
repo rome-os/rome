@@ -10,6 +10,9 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { noAccountLinks } from "../channels/account-links.js";
+import type { Channel } from "../channels/channel.js";
+import { openChannelChat } from "../chats/open-chat.js";
+import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
@@ -136,15 +139,35 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   // An action records the messages it sent. Nothing in the worker reads a
   // place's history or hears what was said, so it keeps no channels to read
   // under and its events go nowhere.
+  const appSpeakers = {
+    chats: chatsWired.chats,
+    adapters: chatsWired.adapters,
+    speakers: chatsWired.speakers,
+  };
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
     chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
-    speakers: {
-      chats: chatsWired.chats,
-      adapters: chatsWired.adapters,
-      speakers: chatsWired.speakers,
+    speakers: appSpeakers,
+    // An app's chats are read and written in Chats here too. The worker holds
+    // no channels: a speaker sends through main's, which records nothing, so
+    // the send goes on record once, here.
+    inChats: {
+      reads: { db, reads: chatsWired.reads, webchatRepo },
+      writes: {
+        webchatRepo,
+        chats: chatsWired.chats,
+        messages: chatsWired.messages,
+        speakers: chatsWired.speakers,
+        replies: chatsWired.replies,
+        links: chatsWired.links,
+        lines: chatsWired.speakerLines,
+        adapters: chatsWired.adapters,
+        // `channelsService` is built further down; an action sends after boot.
+        channel: (name) => mainChannel(name, channelsService),
+        open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
+      },
     },
   });
   const policiesRepo = new PoliciesRepository(db);
@@ -263,4 +286,28 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   }
 
   return actionEngine;
+}
+
+/** Main's channel `name` as the worker reaches it: sending only, through
+ *  main's channels service. One object per name, since a chat adapter is
+ *  kept for the channel it was made for. */
+const mainChannels = new Map<string, Channel>();
+function mainChannel(name: string, service: Pick<ChannelsService, "send">): Channel {
+  let channel = mainChannels.get(name);
+  if (!channel) {
+    channel = {
+      name,
+      send: {
+        send: (chatId, message) => service.send(name, chatId, message),
+        replies: null,
+        direct: null,
+      },
+      inbound: null,
+      accounts: null,
+      messages: null,
+      directory: null,
+    };
+    mainChannels.set(name, channel);
+  }
+  return channel;
 }
