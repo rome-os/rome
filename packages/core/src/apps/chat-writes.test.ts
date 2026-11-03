@@ -35,6 +35,7 @@ describe("appChatWrites", () => {
   let opened: string[];
   let email: ChannelChatAdapter | null;
   let mailSent: Array<{ to: ChatId; message: OutgoingMessage }>;
+  let failOpen: boolean;
 
   const telegram = {
     account: BOT,
@@ -86,6 +87,7 @@ describe("appChatWrites", () => {
     refuse = false;
     opened = [];
     mailSent = [];
+    failOpen = false;
     writes = appChatWrites({
       webchatRepo: new WebChatRepository(testDb.db),
       chats,
@@ -105,6 +107,7 @@ describe("appChatWrites", () => {
       },
       channel: (name) => (name === "mail" ? mail : name === "telegram" ? TELEGRAM : null),
       open: async (input) => {
+        if (failOpen) throw new Error("store unavailable");
         opened.push(input.threadId);
         const [chat] = testDb.db.all<{ id: number }>(
           sql`SELECT id FROM chats WHERE platform = 'email' ORDER BY id DESC LIMIT 1`,
@@ -254,6 +257,43 @@ describe("appChatWrites", () => {
       expect(line).toMatchObject({ text: "Plans" });
       expect(linkOf("mail-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
       expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+    });
+
+    it("answers an email that went out even when main cannot join its new thread", async () => {
+      failOpen = true;
+
+      const result = await writes.sendEmail({
+        channel: "mail",
+        text: "Plans",
+        email: { to: "wei@example.com", subject: "Plans" },
+        knownToProvider: false,
+      });
+
+      expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(said()).toHaveLength(1);
+    });
+
+    it("copies a reply on a thread Rome holds to its cc and bcc", async () => {
+      await writes.sendEmail({
+        channel: "mail",
+        text: "Plans",
+        email: { to: "wei@example.com", subject: "Plans" },
+        knownToProvider: false,
+      });
+
+      await writes.sendEmail({
+        channel: "mail",
+        sessionId: "mail-1",
+        text: "Adding Ann",
+        email: { cc: ["ann@example.com"], bcc: ["boss@example.com"] },
+        knownToProvider: false,
+      });
+
+      expect(mailSent[1]?.message).toMatchObject({
+        text: "Adding Ann",
+        cc: ["ann@example.com"],
+        bcc: ["boss@example.com"],
+      });
     });
 
     it("refuses a blank message to reply to before anything goes out", async () => {

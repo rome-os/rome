@@ -29,6 +29,9 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
 import type { TurnLinks } from "../sessions/turn-links.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("app-chat-writes");
 
 export type ChatWrites = Pick<
   Required<ChatRepository>,
@@ -50,8 +53,10 @@ export interface AppChatWritesDeps {
   /** The live channel named `name`, whose adapter a speaker says its
    *  messages through, or null when Rome holds none by that name. */
   channel(name: string): Channel | null;
-  /** The session at a channel address, as the app repositories'
-   *  `ensureChannelChat` opens it: main's in an email thread. */
+  /** The session at a channel address, standing in its chat as the
+   *  channel's account's speaker: main's in an email thread. It has to put
+   *  the session in Chats, as `openChannelChat` given speakers does, since
+   *  every write here finds the session there. */
   open: ChatRepository["ensureChannelChat"];
 }
 
@@ -68,9 +73,11 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
   };
 
   /**
-   * Open a thread to `recipients` under `subject` and say `out` there as
-   * main: its first message, which starts it. Main joins the thread once the
-   * provider took the message, so a refused email leaves no session or line.
+   * Open a thread to `recipients` and say `out` there as main: its first
+   * message, which starts it. Main joins the thread once the provider took
+   * the message, so a refused email leaves no session or line. The email
+   * went out once the provider took it, so a failure to join after that is
+   * logged and the send still answers.
    */
   const startThread = async (
     channel: Channel,
@@ -84,7 +91,6 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     const key = adapter.open(recipients, subject);
     const chat = deps.chats.start(key, "group", subject || null).ref;
     const account = adapter.account;
-    let sessionId = "";
     const sent = await deps.messages.send(
       {
         direction: "fromRome",
@@ -92,24 +98,27 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         saidBy: { account, agent: "main" },
         parts: recorded,
       },
-      async (target) => {
-        const delivered = await adapter.send(target.chat, null, out);
-        sessionId = (
-          await deps.open({
-            channel: channel.name,
-            threadId: deps.adapters.addressAt(channel.name, placeIn(chat)),
-            agentName: "main",
-            threadType: "group",
-            ...(subject ? { threadName: subject } : {}),
-          })
-        ).id;
-        return { key: delivered.key };
-      },
+      async (target) => ({ key: (await adapter.send(target.chat, null, out)).key }),
     );
-    if (sent.id !== null && turnId) deps.links.answer(sent.id, sessionId, turnId);
+    const threadId = deps.adapters.addressAt(channel.name, placeIn(chat));
+    try {
+      const session = await deps.open({
+        channel: channel.name,
+        threadId,
+        agentName: "main",
+        threadType: "group",
+        ...(subject ? { threadName: subject } : {}),
+      });
+      if (sent.id !== null && turnId) deps.links.answer(sent.id, session.id, turnId);
+    } catch (error) {
+      log.error("an email thread Rome started went out, but main could not join it", {
+        chat: chat.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     return {
       messageId: deps.lines.platformIdIn({ place: placeIn(chat), accountId: account.id }, sent.key),
-      threadId: deps.adapters.addressAt(channel.name, placeIn(chat)),
+      threadId,
     };
   };
 
@@ -210,10 +219,15 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           })
         ).id;
       const speaker = inReplyToMessageId ? speakerOf(sessionId) : null;
+      const reply: Omit<EmailOutbound, "replyTo"> = {
+        ...out,
+        ...(cc?.length ? { cc } : {}),
+        ...(bcc?.length ? { bcc } : {}),
+      };
       const sent = await deps.replies.send(
         sessionId,
         channel,
-        { ...out, ...replyToIn(deps, speaker, inReplyToMessageId) },
+        { ...reply, ...replyToIn(deps, speaker, inReplyToMessageId) },
         { ...(turnId ? { turnId } : {}), ...(recorded ? { recorded } : {}) },
       );
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);

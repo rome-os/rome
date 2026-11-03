@@ -93,6 +93,31 @@ describe("appChatReads", () => {
       ).toEqual([]);
     });
 
+    it("lists a chat by its channel's kind, even on a platform the kind is not named for", async () => {
+      testDb.db
+        .insert(channels)
+        .values({
+          id: "lark",
+          connectionKind: "feishu",
+          platform: "lark",
+          platformAccountId: "rome-lark",
+          createdAt: at(0),
+        })
+        .run();
+      const group = fixture.chat("lark", "oc_1", "group", "Ops");
+      fixture.speaker({ id: "s-1", chat: group, accountId: "rome-lark", createdAt: at(0) });
+      fixture.say({ id: "m-1", chat: group, from: "alice", at: at(2_000) });
+
+      const recent = await reads.recentChats({
+        since: at(1_000),
+        where: { accountKinds: ["feishu"] },
+      });
+
+      expect(recent.map((chat) => [chat.sessionId, chat.channel])).toEqual([
+        ["s-1", { name: "lark", kind: "feishu" }],
+      ]);
+    });
+
     it("leaves out a chat whose only lines were said before the session came to stand there", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       fixture.say({ id: "m-1", chat: group, from: "alice", at: at(2_000) });

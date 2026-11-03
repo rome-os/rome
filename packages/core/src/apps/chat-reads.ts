@@ -92,13 +92,15 @@ function recentChats(
     where === "dashboard"
       ? sql`c.platform = ${DASHBOARD_PLATFORM}`
       : // A platform carries other kinds of account too, such as the guardian's
-        // own signed-in Telegram beside Rome's bot, so the channel decides. A
-        // session whose channel record is gone is read on its platform.
-        sql`c.platform IN (SELECT value FROM json_each(${JSON.stringify([
-          ...new Set(where.accountKinds.map((kind) => platformOf(kind))),
-        ])})) AND (ch.connection_kind IS NULL OR ch.connection_kind IN (SELECT value FROM json_each(${JSON.stringify(
+        // own signed-in Telegram beside Rome's bot, and one kind can serve
+        // several platforms, as Feishu serves Lark, so the channel's kind
+        // decides. A session whose channel record is gone is read on its
+        // platform.
+        sql`(ch.connection_kind IN (SELECT value FROM json_each(${JSON.stringify(
           where.accountKinds,
-        )})))`;
+        )})) OR (ch.connection_kind IS NULL AND c.platform IN (SELECT value FROM json_each(${JSON.stringify(
+          [...new Set(where.accountKinds.map((kind) => platformOf(kind)))],
+        )}))))`;
   const rows = db.all<RecentRow>(sql`
     SELECT s.id, s.name, s.chat_id, c.platform, s.source_thread_name AS thread_name,
       s.owner_key, s.archived_at IS NOT NULL AS archived,

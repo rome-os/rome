@@ -26,8 +26,9 @@ export interface CreateAppRuntimeRepositoriesDeps {
   /** Chats, read and written for apps. Given, an app reads its chats
    *  through `recentChats`, `transcript` and `traces`, and its lines go on
    *  record in Chats: `addMessage`, `promoteMessageToUser`, `send` and
-   *  `sendEmail`. The Chats switch passes it. */
-  inChats?: { reads: AppChatReadsDeps; writes: Omit<AppChatWritesDeps, "open"> };
+   *  `sendEmail`. Its `open` opens every channel session, so it has to put
+   *  the session in Chats. The Chats switch passes it. */
+  inChats?: { reads: AppChatReadsDeps; writes: AppChatWritesDeps };
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -41,7 +42,10 @@ export function createAppRuntimeRepositories(
     ? {
         ...legacy,
         ...appChatReads(deps.inChats.reads),
-        ...appChatWrites({ ...deps.inChats.writes, open: legacy.ensureChannelChat }),
+        ...appChatWrites(deps.inChats.writes),
+        // A session opens in Chats too, where the writes find it.
+        ensureChannelChat: deps.inChats.writes.open,
+        ensureChannelConversation: deps.inChats.writes.open,
       }
     : legacy;
   return {
