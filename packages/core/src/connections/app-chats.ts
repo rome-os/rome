@@ -31,7 +31,6 @@ import {
 } from "@rome-os/app-runtime/chats";
 import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
 import { DeliveryFailure } from "../channels/delivery/types.js";
-import { withoutHostOnlyParts } from "../channels/host-only-parts.js";
 import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
@@ -86,16 +85,12 @@ async function send(
   const sender = senderIn(deps, chat, at, opts?.as);
   // Read before delivery: nothing after the platform took the message may
   // fail the send.
+  // A thread is opened by answering its anchor, which the adapter refuses
+  // when the sender holds no platform id for it.
   const key = deps.adapters.keyOf(chat.ref);
-  if (anchor && platformIdOfLine(key, sender.account.id, anchor.key) === null) {
-    // The adapter drops a quote it cannot address, which would post to the
-    // open chat instead of the thread asked for.
-    throw new SendError(
-      "unsupported",
-      `${describe(sender.account)} cannot answer message ${anchor.id}, so it cannot open its thread`,
-    );
-  }
-  const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
+  // A part the channel does not show, a host-only one among them, is the
+  // adapter's to refuse.
+  const given = out.parts ?? [];
   // The text an adapter shows: `text` when it says anything, else the text
   // parts. A message with no words, such as a card, goes to the adapter as
   // it is: one that cannot show it refuses it, and so does one given nothing.
@@ -198,14 +193,14 @@ function placeOf(
   deps: AppChatsDeps,
   chat: Chat,
   place: SdkPlace,
-): { at: Place; anchor?: { id: number; key: string } } {
+): { at: Place; anchor?: { id: number } } {
   if (!isThreadRef(place)) return { at: placeIn(chat.ref) };
   const [message] = deps.messages.byIds([place.id]);
   if (!message || message.place.chat.id !== chat.ref.id) {
     throw new SendError("chat_not_found", `No message ${place.id} in that chat to thread off`);
   }
   if (message.place.threadId !== undefined) return { at: message.place };
-  return { at: placeIn(chat.ref), anchor: { id: message.id, key: message.key } };
+  return { at: placeIn(chat.ref), anchor: { id: message.id } };
 }
 
 /**

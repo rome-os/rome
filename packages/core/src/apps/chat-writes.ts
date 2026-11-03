@@ -14,10 +14,7 @@ import type {
   MessagePart,
   OutgoingAttachment,
 } from "@rome-os/app-runtime";
-import {
-  stripHostOnlyPartsFromContent,
-  withoutHostOnlyParts,
-} from "../channels/host-only-parts.js";
+import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
@@ -211,7 +208,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
 
     async send(input) {
       const channel = channelNamed(input.channel);
-      const parts = input.parts?.length ? withoutHostOnlyParts(input.parts) : undefined;
+      const parts = input.parts?.length ? input.parts : undefined;
       // An app quotes by the platform's id, which names a line of the
       // session's chat.
       const speaker = speakerOf(input.sessionId);
@@ -244,12 +241,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       const channel = channelNamed(input.channel);
       // Refused before anything goes out on a channel that sends no email.
       emailOf(deps.adapters, channel);
-      const parts = input.parts?.length ? withoutHostOnlyParts(input.parts) : undefined;
+      const parts = input.parts?.length ? input.parts : undefined;
       const recorded = input.content ? recordedOf(input.content) : undefined;
       const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
-      if (inReplyToMessageId !== undefined && !inReplyToMessageId.trim()) {
-        throw new Error("Email replyToMessageId must not be blank. No email was sent.");
-      }
       // An email's body is its text, else the text of its parts. An
       // HTML-only email goes on record as the text its HTML reads as.
       const text = input.text ?? (parts ? partsText(parts) : "");

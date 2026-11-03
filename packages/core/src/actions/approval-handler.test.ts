@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "@rstest/core";
 import { callAction } from "./call-action.js";
 import { actionExecutionContext } from "./context.js";
 import { buildAgentConfig } from "../test/helpers.js";
+import { result } from "../test/kit/fake-model.js";
 import { createTestRome, buildAction, recordingAction, type TestRome } from "../test/kit/index.js";
 import type { ActionResult } from "./types.js";
 import type { ThreadContext } from "../core/types.js";
@@ -208,6 +209,46 @@ describe("ApprovalHandler", () => {
       expect(rome.model.lastPrompt()).toContain('"sent": true');
       expect(rome.model.lastSystemPrompt()).toContain("You are a test agent.");
       expect(rome.model.sessions[0].sessionId).toBe("sess-1");
+    });
+
+    it("delivers the continuation reply on the messaging channel's send port (issue #1626)", async () => {
+      await setup();
+      rome.model.setDefaultReply(result("Done, message sent."));
+      const approvalId = await rome.seed.approvedActionApproval({
+        actionName: "send_message",
+        args: { to: "user-1", text: "hello" },
+        sessionId: "sess-1",
+        agentName: "main",
+        channelThreadKey: "telegram:t-1",
+        channelContext: { channel: "telegram", threadId: "t-1", threadType: "group" },
+      });
+      await seedAgentSession("sess-1", "main", "telegram:t-1");
+
+      await rome.approvalHandler.onApproved(approvalId);
+
+      expect(rome.model.prompts()).toHaveLength(1);
+      expect(rome.channel("telegram").replies()).toMatchObject([
+        { chatId: "t-1", message: { text: "Done, message sent." } },
+      ]);
+    });
+
+    it("sends nothing on the messaging channel when the continuation has no reply", async () => {
+      await setup();
+      rome.model.setDefaultReply(result("   "));
+      const approvalId = await rome.seed.approvedActionApproval({
+        actionName: "send_message",
+        args: { to: "user-1", text: "hello" },
+        sessionId: "sess-1",
+        agentName: "main",
+        channelThreadKey: "telegram:t-1",
+        channelContext: { channel: "telegram", threadId: "t-1", threadType: "group" },
+      });
+      await seedAgentSession("sess-1", "main", "telegram:t-1");
+
+      await rome.approvalHandler.onApproved(approvalId);
+
+      expect(rome.model.prompts()).toHaveLength(1);
+      expect(rome.channel("telegram").replies()).toEqual([]);
     });
 
     it("resumes the agent session with the formatted error result", async () => {

@@ -10,7 +10,12 @@ import {
   saveIncomingAttachmentPayloads,
 } from "./attachment-files.js";
 import { createLogger } from "../logger.js";
-import { numericReplyTo, textToSend } from "./send-refusals.js";
+import {
+  ALL_ATTACHMENT_TYPES,
+  attachmentsToSend,
+  numericReplyTo,
+  textToSend,
+} from "./send-refusals.js";
 import { basename } from "node:path";
 
 const log = createLogger("telegram");
@@ -234,6 +239,10 @@ export class TelegramAdapter {
     const threadId: string = chatId;
     const text = textToSend("telegram", message);
     const replyId = numericReplyTo("telegram", message.replyToMessageId);
+    const attachments = await attachmentsToSend("telegram", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: true,
+    });
     const replyParams = replyId === undefined ? {} : { reply_parameters: { message_id: replyId } };
 
     try {
@@ -278,7 +287,7 @@ export class TelegramAdapter {
 
       // With no text, the first attachment carries the quote.
       let quote = text ? {} : replyParams;
-      for (const att of message.attachments ?? []) {
+      for (const att of attachments) {
         await this.sendAttachment(threadId, att, quote);
         quote = {};
       }
