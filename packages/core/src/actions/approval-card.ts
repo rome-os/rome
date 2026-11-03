@@ -2,13 +2,13 @@
 // main process and an action worker both send it through the channels
 // service, so each answers `onApprovalCreated` the same way.
 
-import type { ChannelsService, ChatId } from "@rome-os/app-runtime";
+import { type ChannelsService, type ChatId, isChannelSendRefused } from "@rome-os/app-runtime";
 import type { ApprovalCreatedEvent } from "./engine.js";
 
 /**
  * Put an approval's card in the conversation the approval came from. Nothing
- * is sent for an approval with no conversation, or on a channel that cannot
- * send.
+ * is sent for an approval with no conversation, on a channel that cannot
+ * send, or on one that cannot show a card, which refuses it.
  */
 export async function sendApprovalCard(
   channels: Pick<ChannelsService, "list" | "send">,
@@ -22,15 +22,20 @@ export async function sendApprovalCard(
     title: actionName,
     summary: `The agent wants to run "${actionName}" and needs your approval.`,
   };
-  await channels.send(channelContext.channel, channelContext.threadId as ChatId, {
-    parts: [
-      {
-        type: "approval_card",
-        approvalId,
-        actionName,
-        preview: payload,
-        status: "pending",
-      },
-    ],
-  });
+  try {
+    await channels.send(channelContext.channel, channelContext.threadId as ChatId, {
+      parts: [
+        {
+          type: "approval_card",
+          approvalId,
+          actionName,
+          preview: payload,
+          status: "pending",
+        },
+      ],
+    });
+  } catch (error) {
+    if (isChannelSendRefused(error) && error.reason === "part_unsupported") return;
+    throw error;
+  }
 }

@@ -256,11 +256,12 @@ describe("WebChatAdapter", () => {
     );
   });
 
-  it("returns a receipt without a messageId when there is nothing to persist", async () => {
+  it("refuses a message with nothing to persist", async () => {
     await repo.createSession("sess-empty", "Empty");
 
-    await expect(adapter.send("sess-empty" as ChatId, {})).resolves.toStrictEqual({
-      chatId: "sess-empty",
+    await expect(adapter.send("sess-empty" as ChatId, {})).rejects.toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "empty",
     });
     await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);
   });

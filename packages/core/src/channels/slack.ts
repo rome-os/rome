@@ -9,6 +9,7 @@
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { WebSocket } from "ws";
 import { createLogger } from "../logger.js";
+import { refuseAttachments, textToSend } from "./send-refusals.js";
 import { InboundDedup } from "./inbound-dedup.js";
 
 const log = createLogger("slack");
@@ -774,12 +775,8 @@ export class SlackAdapter {
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const omittedAttachments = message.attachments?.length ?? 0;
-    if (omittedAttachments > 0) {
-      log.warn("slack omitted outbound attachments", { attachments: omittedAttachments });
-    }
-    const text = message.text?.trim();
-    if (!text) return { chatId };
+    refuseAttachments("slack", message);
+    const text = textToSend("slack", message).trim();
     const parsed = parseSlackChatId(chatId);
     const channelId = parsed.channelId;
     const threadTs = parsed.threadTs ?? replyThreadOf(channelId, message.replyToMessageId);

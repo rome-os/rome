@@ -1929,8 +1929,51 @@ export interface ChannelDirectMessaging {
   conversationFor(channelUserId: string): Promise<ChatId | null>;
 }
 
+/**
+ * Why a channel refused a send before anything reached the platform:
+ *
+ * - `empty`: the message has no text and no attachment to show.
+ * - `part_unsupported`: a part's type is one the channel does not show.
+ *   A text platform shows `text` parts and nothing else.
+ * - `attachment_unsupported`: an attachment the channel cannot carry.
+ * - `reply_unaddressable`: `replyToMessageId` names no message the channel
+ *   can answer, so the reply would land somewhere else.
+ */
+export type ChannelSendRefusal =
+  | "empty"
+  | "part_unsupported"
+  | "attachment_unsupported"
+  | "reply_unaddressable";
+
+/** A channel's refusal of a send, before anything reached the platform. */
+export class ChannelSendRefused extends Error {
+  constructor(
+    readonly reason: ChannelSendRefusal,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ChannelSendRefused";
+  }
+}
+
+/** Whether `error` is a {@link ChannelSendRefused}, matched by name and
+ *  reason so it holds across module copies. */
+export function isChannelSendRefused(error: unknown): error is ChannelSendRefused {
+  return (
+    error instanceof Error &&
+    error.name === "ChannelSendRefused" &&
+    typeof (error as { reason?: unknown }).reason === "string"
+  );
+}
+
 /** Sending on a channel. */
 export interface ChannelSend {
+  /**
+   * Sends `message` to `chatId`. Resolves only once the platform has taken
+   * all of it. When the channel cannot deliver the message as given, it
+   * rejects with {@link ChannelSendRefused} and sends nothing. It never drops
+   * a part, an attachment or a quote and reports the rest as sent.
+   */
   send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits

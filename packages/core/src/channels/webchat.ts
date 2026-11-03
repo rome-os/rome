@@ -4,6 +4,7 @@ import type { StoredWebchatHistoryMessage, WebChatRepository } from "../db/repos
 import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../logger.js";
+import { ChannelSendRefused } from "@rome-os/app-runtime";
 import { withoutHostOnlyParts } from "./host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import { DEFAULT_BOT_DISPLAY_NAME } from "./mention-only.js";
@@ -88,7 +89,12 @@ export class WebChatAdapter {
       parts.push({ type: "text" as const, content: `[${att.type}] ${label}` });
     }
 
-    if (parts.length === 0) return { chatId };
+    if (parts.length === 0) {
+      throw new ChannelSendRefused(
+        "empty",
+        "A dashboard message needs text, parts or an attachment",
+      );
+    }
 
     const messageId = uuid();
     await this.webchatRepo.addSentMessage(messageId, threadId, parts, message.turnId ?? null);

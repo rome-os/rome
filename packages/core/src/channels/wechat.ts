@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { getProfileDir } from "../paths.js";
 import { createLogger } from "../logger.js";
+import { refuseReplies, textToSend } from "./send-refusals.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, MessageReplyReference, OutgoingMessage } from "./types.js";
 import {
@@ -1212,16 +1213,18 @@ export class WechatAdapter {
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const text = textToSend("wechat", message);
+    refuseReplies("wechat", message);
     this.assertSessionActive();
     const target = this.resolveSendTarget(chatId);
 
     let messageId: string | undefined;
-    if (message.text) {
+    if (text) {
       messageId = await sendTextMessage(
         this.config.baseUrl,
         this.config.token,
         target.to,
-        message.text,
+        text,
         target.contextToken,
       );
     }
