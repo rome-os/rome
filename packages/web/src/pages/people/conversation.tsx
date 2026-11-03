@@ -33,11 +33,16 @@ export function PersonConversation({ person }: { person: PersonResource }) {
   const sends = useConversationSends(person.id);
 
   const segments = useMemo(() => accountSegments(person.accounts), [person.accounts]);
-  const [segment, setSegment] = useState<string | null>(null);
-  // A segment survives a merge or an unlink that takes its account away, so the
-  // lookup answers null and the view falls back to the default account rather
-  // than to one this person no longer holds.
   const fallback = defaultSendAccount(person.accounts) ?? person.accounts[0] ?? null;
+  // The account the page opened on is held as a choice from the first render,
+  // so a refetch that changes which account is the default does not move the
+  // timeline and the composer's target under the guardian. A choice survives
+  // a merge or an unlink that takes its account away, so the lookup answers
+  // null and the view falls back to the default rather than to an account
+  // this person no longer holds.
+  const [segment, setSegment] = useState<string | null>(() =>
+    fallback ? accountRef(fallback) : null,
+  );
   const account = (segment !== null ? segmentAccount(segments, segment) : null) ?? fallback;
   const timeline = useAccountTimeline(person.id, account);
 

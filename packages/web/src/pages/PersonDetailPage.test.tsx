@@ -876,6 +876,28 @@ describe("PersonDetailPage, sending", () => {
     expect(box.closest(".sticky")).toBeTruthy();
   });
 
+  it("stays on the account it opened on when a refetch changes the default", async () => {
+    // Telegram hears from them after the page opened, so a fresh read would
+    // pick Telegram. The page the guardian is on, and the account their draft
+    // goes to, must not move without them.
+    const person: PersonResource = {
+      ...PERSON,
+      accounts: PERSON.accounts.map((account) => ({ ...account })),
+    };
+    mockApi({ person });
+    const { queryClient } = renderPage();
+
+    expect(await screen.findByText(/WhatsApp · \+6591881123/)).toBeTruthy();
+    person.accounts[1]!.latestAt = NOW;
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["people"] });
+    });
+
+    expect(screen.getByText(/WhatsApp · \+6591881123/)).toBeTruthy();
+    expect(screen.queryByText(/Telegram · 418820113/)).toBeNull();
+    expect(screen.getByText("the landlord replies fast")).toBeTruthy();
+  });
+
   it("names the account it will send to before anything is typed", async () => {
     mockApi();
     renderPage();
