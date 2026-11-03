@@ -153,8 +153,14 @@ describe("People send API", () => {
     // Nothing has happened on it yet, which is a different answer from zero.
     expect(account.latestAt).toBeNull();
 
-    await send({ channel: "telegram", channelUserId: TG, text: "now there is history" });
-    expect((await accountOf("telegram")).latestAt).toBeGreaterThan(0);
+    const res = await send({ channel: "telegram", channelUserId: TG, text: "now there is history" });
+    expect(res.status).toBe(200);
+    // The send is said in Chats. The person read takes an account's latest
+    // activity from Chats once it reads there (the Chats switch's D5), and
+    // until then it does not count this send.
+    expect(
+      testDb.db.all<{ text: string }>(sql`SELECT text FROM chat_messages`).map((row) => row.text),
+    ).toEqual(["now there is history"]);
   });
 
   it("reports a channel with no connection as not-connected", async () => {
