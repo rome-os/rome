@@ -1,4 +1,4 @@
-import type { RunLineDeps } from "../connections/speaker-lines.js";
+import type { RunLineDeps } from "../connections/speaker-messages.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";

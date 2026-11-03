@@ -21,9 +21,9 @@ import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 import { romeSessionKind, withSessionKind } from "../session-kind.js";
-import { CHAT_LINES, CHATS } from "../../chats/storage/lines-sql.js";
-import { lineHolder, type LineHolder } from "../../connections/chat-adapter.js";
-import { occurrencesOf, type CopiedLine } from "../../sessions/turn-links.js";
+import { CHAT_MESSAGES, CHATS } from "../../chats/storage/messages-sql.js";
+import { messageHolder, type MessageHolder } from "../../connections/chat-adapter.js";
+import { occurrencesOf, type CopiedMessage } from "../../sessions/turn-links.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
 const turnEndTraceBlocks = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
@@ -303,7 +303,7 @@ function chatsLineCounts(ids: readonly string[]): SQL {
     (SELECT count(*) FROM rome_agent_messages t
       WHERE t.session_id = s.id
         AND (s.chat_id IS NULL OR t.role NOT IN ('user', 'assistant', 'notification'))) AS own,
-    (SELECT count(*) FROM ${CHAT_LINES} m
+    (SELECT count(*) FROM ${CHAT_MESSAGES} m
       WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at) AS lines,
     c.platform, c.key, s.chat_id, s.thread_id, s.created_at
@@ -312,7 +312,7 @@ function chatsLineCounts(ids: readonly string[]): SQL {
 }
 
 /** A line as {@link occurrencesOf} reads it, straight from Chats' lines. */
-interface CopiedLineRow {
+interface CopiedMessageRow {
   id: number;
   key: string;
   sender_account_id: string | null;
@@ -321,7 +321,7 @@ interface CopiedLineRow {
   said_at: number;
 }
 
-function copiedLine(row: CopiedLineRow): CopiedLine {
+function copiedLine(row: CopiedMessageRow): CopiedMessage {
   return {
     id: row.id,
     key: row.key,
@@ -361,11 +361,11 @@ export class SessionQueryRepository {
    */
   private chatsLineCountsOf(ids: readonly string[]): Map<string, number> {
     const counts = new Map<string, number>();
-    const copied = new Map<string, { holder: LineHolder; rows: ChatsLineCountRow[] }>();
+    const copied = new Map<string, { holder: MessageHolder; rows: ChatsLineCountRow[] }>();
     for (const row of this.db.all<ChatsLineCountRow>(chatsLineCounts(ids))) {
       counts.set(row.id, Number(row.own) + Number(row.lines));
       const holder =
-        row.platform !== null && row.key !== null ? lineHolder(row.platform, row.key) : null;
+        row.platform !== null && row.key !== null ? messageHolder(row.platform, row.key) : null;
       if (!holder || row.chat_id === null || Number(row.lines) === 0) continue;
       const place = `${row.chat_id}\n${row.thread_id ?? ""}`;
       const sessions = copied.get(place) ?? { holder, rows: [] };
@@ -376,9 +376,9 @@ export class SessionQueryRepository {
       const [{ chat_id, thread_id }] = rows;
       const since = Math.min(...rows.map((row) => row.created_at));
       const said = this.db
-        .all<CopiedLineRow>(
+        .all<CopiedMessageRow>(
           sql`SELECT id, key, sender_account_id, sender_agent, text, said_at
-            FROM ${CHAT_LINES} m
+            FROM ${CHAT_MESSAGES} m
             WHERE chat_id = ${chat_id} AND thread_id IS ${thread_id} AND said_at >= ${since}
             ORDER BY said_at, id`,
         )

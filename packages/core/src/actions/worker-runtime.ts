@@ -162,7 +162,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         speakers: chatsWired.speakers,
         replies: chatsWired.replies,
         links: chatsWired.links,
-        lines: chatsWired.speakerLines,
+        lines: chatsWired.speakerMessages,
         adapters: chatsWired.adapters,
         // `channelsService` is built further down; an action sends after boot.
         channel: (name) => mainChannel(name, channelsService),

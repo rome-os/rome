@@ -109,7 +109,7 @@ export interface ChatAdapter {
    * messages come in the platform's order; a chat's threads are addresses of
    * their own and keep only their own order. It
    * answers the id Chats recorded the message under, or null when it was on
-   * record already. Rome's own lines never come through here. `fault`
+   * record already. Rome's own messages never come through here. `fault`
    * reports a message the adapter could not hand over.
    */
   start(deliver: (message: Inbound) => Promise<number | null>, fault: (error: Error) => void): void;
@@ -235,23 +235,23 @@ export function kindNamedBy(platform: string, address: string): "group" | "dm" |
   return null;
 }
 
-/** Which of Rome's accounts holds a line, by the line's key: the account's
- *  platform id, or null for a line no one account holds. */
-export type LineHolder = (lineKey: string) => string | null;
+/** Which of Rome's accounts holds a message, by the message's key: the account's
+ *  platform id, or null for a message no one account holds. */
+export type MessageHolder = (messageKey: string) => string | null;
 
 /**
- * Which of Rome's accounts holds each line of the chat keyed `key` on
+ * Which of Rome's accounts holds each message of the chat keyed `key` on
  * `platform`, or null when the chat does not number its messages per member
  * account. Where it does, each of Rome's accounts there holds its own copy of
- * a message, and only this adapter reads which one from a line's key.
+ * a message, and only this adapter reads which one from a message's key.
  */
-export function lineHolder(platform: string, key: string): LineHolder | null {
+export function messageHolder(platform: string, key: string): MessageHolder | null {
   const chat = chatKey(platform, key as ChatId);
   if (ownedBy(chat, "_", "") === "") return null;
-  // Such a chat's line keys carry the holding account in front (ownedBy).
-  return (lineKey) => {
-    const at = lineKey.indexOf(":");
-    return at > 0 ? lineKey.slice(0, at) : null;
+  // Such a chat's message keys carry the holding account in front (ownedBy).
+  return (messageKey) => {
+    const at = messageKey.indexOf(":");
+    return at > 0 ? messageKey.slice(0, at) : null;
   };
 }
 
@@ -262,28 +262,32 @@ export function isDirectMessage(key: ChatKey): boolean {
 
 /** The key of the message the platform calls `platformMessageId` in the chat
  *  keyed `chat`, as Rome's account `romeEnd` heard or sent it. */
-export function lineAt(chat: ChatKey, romeEnd: string, platformMessageId: string): string {
+export function messageKeyAt(chat: ChatKey, romeEnd: string, platformMessageId: string): string {
   return ownedBy(chat, romeEnd, platformMessageId);
 }
 
-/** The platform's id for the line keyed `lineKey` in the chat keyed `chat`,
- *  which Rome's account `romeEnd` sent or heard, or null for a line the
+/** The platform's id for the message keyed `messageKey` in the chat keyed `chat`,
+ *  which Rome's account `romeEnd` sent or heard, or null for a message the
  *  platform gave no id or that only another of Rome's accounts holds. */
-export function platformIdOfLine(chat: ChatKey, romeEnd: string, lineKey: string): string | null {
-  if (lineKey.startsWith("rome:")) return null;
-  // Where each account numbers its own lines, a line another account holds
+export function platformIdOfMessage(
+  chat: ChatKey,
+  romeEnd: string,
+  messageKey: string,
+): string | null {
+  if (messageKey.startsWith("rome:")) return null;
+  // Where each account numbers its own messages, a message another account holds
   // has no id this one can quote.
   const owned = ownedBy(chat, romeEnd, "");
-  if (owned !== "" && !lineKey.startsWith(owned)) return null;
-  return notOwnedBy(chat, romeEnd, lineKey);
+  if (owned !== "" && !messageKey.startsWith(owned)) return null;
+  return notOwnedBy(chat, romeEnd, messageKey);
 }
 
 /**
- * The key a line Rome sent into the chat keyed `chat` through Rome's account
+ * The key a message Rome sent into the chat keyed `chat` through Rome's account
  * `romeEnd` is recorded under: the platform's id for it, or one the adapter
  * gives it when the platform answered none.
  */
-export function sentLineId(
+export function sentMessageKey(
   chat: ChatKey,
   romeEnd: string,
   platformMessageId: string | undefined,
@@ -528,7 +532,7 @@ export function channelAdapter(
       const address = addressIn(ref, threadId);
       const receipt = await send.send(address, outgoing(out, replyTo));
       return {
-        key: sentLineId(ref, own.id, receipt.messageId || undefined),
+        key: sentMessageKey(ref, own.id, receipt.messageId || undefined),
         threadId: landedIn(ref, address, threadId, receipt.chatId),
       };
     },
@@ -560,7 +564,7 @@ export function channelAdapter(
           // takes one of Rome's.
           const shown = outcome.parts.map((part) => ({
             text: part.source,
-            key: sentLineId(ref, own.id, part.receipt?.messageId || undefined),
+            key: sentMessageKey(ref, own.id, part.receipt?.messageId || undefined),
             threadId: landedIn(ref, address, threadId, part.receipt?.chatId),
           }));
           return { outcome, shown };
@@ -694,21 +698,21 @@ export class ChatAdapters {
 }
 
 /**
- * The platform's id for the line keyed `lineKey` that account `romeEnd`
+ * The platform's id for the message keyed `messageKey` that account `romeEnd`
  * answers in the chat keyed `chat`, or undefined when it answers none.
- * Refuses a line it has no id for, since the reply would land unquoted.
+ * Refuses a message it has no id for, since the reply would land unquoted.
  */
 export function quotable(
   chat: ChatKey,
   romeEnd: string,
-  lineKey: string | undefined,
+  messageKey: string | undefined,
 ): string | undefined {
-  if (lineKey === undefined) return undefined;
-  const id = platformIdOfLine(chat, romeEnd, lineKey);
+  if (messageKey === undefined) return undefined;
+  const id = platformIdOfMessage(chat, romeEnd, messageKey);
   if (id === null) {
     throw new ChannelSendRefused(
       "reply_unaddressable",
-      `Account ${romeEnd} holds no platform id for line ${lineKey}, so it cannot answer it`,
+      `Account ${romeEnd} holds no platform id for message ${messageKey}, so it cannot answer it`,
     );
   }
   return id;

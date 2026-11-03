@@ -27,7 +27,7 @@ import {
 } from "../channels/channel.js";
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import { startChannelChat } from "../connections/channel-chat.js";
-import { platformIdOfLine, type ChatAdapters } from "../connections/chat-adapter.js";
+import { platformIdOfMessage, type ChatAdapters } from "../connections/chat-adapter.js";
 import { kindAt } from "../connections/recorded-sends.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { Delivery } from "./delivery.js";
@@ -284,5 +284,5 @@ async function sayInChats(
       };
     },
   );
-  return platformIdOfLine(key, romeEnd, sent.key);
+  return platformIdOfMessage(key, romeEnd, sent.key);
 }

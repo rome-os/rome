@@ -38,7 +38,7 @@ import {
 } from "../actions/action-subprocess.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
-import { runLines, type RunLineDeps } from "../connections/speaker-lines.js";
+import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 
 const log = createLogger("agent-session-bridge");
 

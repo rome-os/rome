@@ -169,7 +169,7 @@ describe("Chats backfill", () => {
         pmid: "6",
         reply: "5",
       },
-      // Support's own lines, numbered by its account as Sales numbers its.
+      // Support's own messages, numbered by its account as Sales numbers its.
       {
         id: "g-4",
         session: "g-support",
@@ -353,7 +353,7 @@ describe("Chats backfill", () => {
     expect(linkOf("out-1", "chat-1")).toEqual({ turn_id: "t1", role: "answer", input_state: null });
   });
 
-  it("keeps a Telegram basic group's line once per account that heard it", () => {
+  it("keeps a Telegram basic group's message once per account that heard it", () => {
     expect(line("111:5")).toMatchObject({
       sender_account_id: "u9",
       sender_name: "Ann",
@@ -376,16 +376,16 @@ describe("Chats backfill", () => {
   });
 
   it("reads a basic group's reply aliases only for the account that holds them", () => {
-    // Sales sent its reply as its 6 and 7; Support's own 6 and 7 are other lines.
+    // Sales sent its reply as its 6 and 7; Support's own 6 and 7 are other messages.
     expect(line("111:6")).toMatchObject({ text: "Hey" });
     expect(line("222:6")).toMatchObject({ text: "Six" });
     expect(line("222:7")).toMatchObject({ text: "Seven" });
     expect(line("111:7")).toBeUndefined();
   });
 
-  it("keeps in view a first line dated before or in the second its session was made", () => {
-    // Catch-up reads lines said after the speaker's second, so each migrated
-    // speaker starts the second before its first line.
+  it("keeps in view a first message dated before or in the second its session was made", () => {
+    // Catch-up reads messages said after the speaker's second, so each migrated
+    // speaker starts the second before its first message.
     expect(
       all("SELECT id, created_at FROM rome_sessions WHERE id IN ('thread', 'g-support', 'dm')"),
     ).toEqual(
@@ -402,7 +402,7 @@ describe("Chats backfill", () => {
     ).toEqual([]);
   });
 
-  it("resolves a quote of a later part of a reply to the reply's line", () => {
+  it("resolves a quote of a later part of a reply to the reply's message", () => {
     const quote = line("om_4") as { reply_to_message_id: number };
     expect(quote.reply_to_message_id).toBe((line("om_2") as { id: number }).id);
   });
@@ -466,7 +466,7 @@ describe("Chats backfill", () => {
     ]);
   });
 
-  it("keys a line the platform gave no id by one of Rome's own", () => {
+  it("keys a message the platform gave no id by one of Rome's own", () => {
     expect(line("rome:dm-4")).toMatchObject({ sender_account_id: "bot", text: "No id" });
   });
 
@@ -519,7 +519,7 @@ describe("Chats backfill", () => {
 
     backfill(sqlite);
 
-    // The sessions moved before keep their lines as they were.
+    // The sessions moved before keep their messages as they were.
     expect(all("SELECT id, chat_id, key FROM chat_messages ORDER BY id")).toEqual(before);
     expect(
       all(`SELECT c.platform, c.key, c.kind, s.account_id FROM rome_sessions s

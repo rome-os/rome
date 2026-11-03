@@ -4,7 +4,7 @@
 // and docs/domains/participation.md.
 //
 // An app names a session and the platform's ids; this file turns them into
-// the speaker, the line and its key. Nothing hands these to apps yet: the
+// the speaker, the message and its key. Nothing hands these to apps yet: the
 // Chats switch adds them to the app repositories and moves the inbox and
 // `send_message` onto them.
 
@@ -21,13 +21,13 @@ import type { ChatRepository as Chats } from "../chats/storage/chat-repository.j
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";
-import { type ChatAdapters, platformIdOfLine } from "../connections/chat-adapter.js";
+import { type ChatAdapters, platformIdOfMessage } from "../connections/chat-adapter.js";
 import {
   emailOf,
   type EmailOutbound,
   type EmailRecipients,
 } from "../connections/email-chat-adapter.js";
-import type { SpeakerAt, SpeakerLines } from "../connections/speaker-lines.js";
+import type { SpeakerAt, SpeakerMessages } from "../connections/speaker-messages.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
@@ -42,7 +42,7 @@ export type ChatWrites = Pick<
 >;
 
 export interface AppChatWritesDeps {
-  /** Moves a session's activity up when a line reaches its chat. */
+  /** Moves a session's activity up when a message reaches its chat. */
   webchatRepo: Pick<WebChatRepository, "advanceSessionActivity">;
   chats: Pick<Chats, "start">;
   messages: Pick<MessageRepository, "record" | "send" | "chatHolding">;
@@ -50,8 +50,8 @@ export interface AppChatWritesDeps {
   /** What a speaker says, recorded and linked to its turn. */
   replies: Pick<SpeakerReplies, "send" | "agentOf">;
   links: Pick<TurnLinks, "prompt" | "answer">;
-  /** The lines an app names by the platform's ids. */
-  lines: Pick<SpeakerLines, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
+  /** The messages an app names by the platform's ids. */
+  lines: Pick<SpeakerMessages, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
   adapters: Pick<ChatAdapters, "of" | "keyOf" | "accountOn">;
   /** The live channel named `name`, whose adapter a speaker says its
    *  messages through, or null when Rome holds none by that name. */
@@ -88,12 +88,12 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     }
   };
 
-  /** The platform's id for a line `speaker` says, as a function of the
-   *  line's key. It reads storage now, before a send, so turning a receipt
+  /** The platform's id for a message `speaker` says, as a function of the
+   *  message's key. It reads storage now, before a send, so turning a receipt
    *  into an id never fails a send the platform took. */
   const receiptOf = (speaker: SpeakerAt) => {
     const chat = deps.adapters.keyOf(speaker.place.chat);
-    return (lineKey: string) => platformIdOfLine(chat, speaker.accountId, lineKey);
+    return (messageKey: string) => platformIdOfMessage(chat, speaker.accountId, messageKey);
   };
 
   /** The provider's address for the email thread `chat`. Asks the email
@@ -117,7 +117,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
   /**
    * Open a thread to `recipients` and say `out` there as main: its first
    * message, which starts it. Main joins the thread once the provider took
-   * the message, so a refused email leaves no session or line. The email
+   * the message, so a refused email leaves no session or message. The email
    * went out once the provider took it, so a failure to join after that is
    * logged and the send still answers.
    */
@@ -162,13 +162,13 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       });
     }
     return {
-      messageId: platformIdOfLine(key, account.id, sent.key),
+      messageId: platformIdOfMessage(key, account.id, sent.key),
       threadId,
     };
   };
 
   return {
-    // The line is recorded where the session stands, keyed as its account
+    // The message is recorded where the session stands, keyed as its account
     // hears the platform's message, so the adapter hearing it too records it
     // once. A prompt is linked to the session.
     async addMessage(input) {
@@ -209,7 +209,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     async send(input) {
       const channel = channelNamed(input.channel);
       const parts = input.parts?.length ? input.parts : undefined;
-      // An app quotes by the platform's id, which names a line of the
+      // An app quotes by the platform's id, which names a message of the
       // session's chat.
       const speaker = speakerOf(input.sessionId);
       const receipt = receiptOf(speaker);
@@ -327,7 +327,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
   };
 }
 
-/** The quote of the line the platform calls `platformMessageId` where
+/** The quote of the message the platform calls `platformMessageId` where
  *  `speaker` stands: by its id when Rome holds it, else by its key. */
 function replyToIn(
   deps: Pick<AppChatWritesDeps, "lines">,
@@ -352,7 +352,7 @@ function withNotes(
   return [...said, { type: "text", content: notes.join("\n") }];
 }
 
-/** An app's `content`, the line as it goes on record, without the parts only
+/** An app's `content`, the message as it goes on record, without the parts only
  *  the host may author, so a forged routine card never reaches the chat. */
 /** The parts an app's message content holds, host-only ones left out, when
  *  it holds a list of them. */

@@ -2,11 +2,11 @@
 // Chats' tables (docs/domains/chats.md), keyed as the adapters key them
 // (connections/chat-ids.ts). From the switch on, Rome reads and writes only
 // there; the legacy rows stay until the contract migration drops them. Each
-// speaker's session row learns its chat, thread and account; and a line
+// speaker's session row learns its chat, thread and account; and a message
 // keeps the earliest time and place any of its rows had.
 //
 // A dashboard chat is a webchat direct message keyed by its session, and only
-// its prompts and answers are lines: its notices and traces stay the
+// its prompts and answers are messages: its notices and traces stay the
 // session's own. A fork, a handoff and an action session stand in no chat.
 //
 // A chat is keyed by Rome's account, never by a channel's name, so a session
@@ -61,12 +61,12 @@ WHERE r.type = 'channel' AND r.source_channel IS NOT NULL AND r.source_thread_id
   AND r.chat_id IS NULL
   AND (r.source_channel = 'webchat' OR c.platform_account_id IS NOT NULL);
 --> statement-breakpoint
-CREATE TEMP TABLE legacy_chat_line_ids (
+CREATE TEMP TABLE legacy_chat_message_ids (
 	legacy_id text PRIMARY KEY NOT NULL,
 	message_id integer NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX temp.idx_legacy_chat_line_ids_message ON legacy_chat_line_ids (message_id);
+CREATE INDEX temp.idx_legacy_chat_message_ids_message ON legacy_chat_message_ids (message_id);
 --> statement-breakpoint
 -- Each legacy chat session as a speaker: the chat its rows name, Rome's end
 -- there, and whether it is a thread of another session's chat.
@@ -118,7 +118,7 @@ SELECT
        ELSE c.platform_account_id END AS account_id,
   coalesce(r.agent_name, 'main') AS agent,
   -- A Telegram basic group, -<id> below 10^12, numbers its messages per
-  -- member account, so a line's key there carries Rome's end in front
+  -- member account, so a message's key there carries Rome's end in front
   -- (https://core.telegram.org/api/bots/ids).
   c.platform = 'telegram'
     AND r.source_thread_id GLOB '-[1-9]*' AND NOT substr(r.source_thread_id, 2) GLOB '*[^0-9]*'
@@ -127,10 +127,10 @@ FROM rome_sessions r
 JOIN legacy_chat_pending p ON p.session_id = r.id
 LEFT JOIN channels c ON c.id = r.source_channel;
 --> statement-breakpoint
--- Each legacy row that is a line, as that line. A dashboard line is keyed by
--- its row's id; a channel line by the platform's id, or, where the platform
+-- Each legacy row that is a message, as that message. A dashboard message is keyed by
+-- its row's id; a channel message by the platform's id, or, where the platform
 -- gave none, by one of Rome's own.
-CREATE TEMP VIEW legacy_chat_line_rows_view AS
+CREATE TEMP VIEW legacy_chat_message_rows_view AS
 SELECT
   m.id AS legacy_id,
   m.rowid AS legacy_seq,
@@ -154,7 +154,7 @@ SELECT
   CASE WHEN s.dashboard AND json_valid(m.actor) AND json_extract(m.actor, '$.kind') = 'visitor'
        THEN json_extract(m.actor, '$.email')
        WHEN s.dashboard THEN NULL ELSE m.sender_name END AS sender_name,
-  -- The text a line's parts say: its text parts, commentary left out.
+  -- The text a message's parts say: its text parts, commentary left out.
   CASE WHEN NOT json_valid(m.content) OR json_type(m.content) <> 'array' THEN m.content
        ELSE coalesce((
          SELECT group_concat(json_extract(b.value, '$.content'), char(10))
@@ -168,13 +168,13 @@ SELECT
   CASE WHEN s.dashboard THEN m.id
        WHEN m.platform_message_id IS NULL THEN 'rome:' || m.id
        -- A later part of a reply Rome sent in several messages is the reply's
-       -- line, wherever another of Rome's accounts holds it.
+       -- message, wherever another of Rome's accounts holds it.
        ELSE CASE WHEN s.per_account THEN s.rome_end || ':' ELSE '' END || coalesce((
          SELECT h.platform_message_id FROM rome_agent_message_platform_ids a
          JOIN rome_agent_messages h ON h.id = a.message_id
          JOIN rome_sessions hr ON hr.id = h.session_id
          WHERE a.platform_message_id = m.platform_message_id AND hr.chat_id = r.chat_id
-           -- Where each account numbers its own lines, only its own aliases.
+           -- Where each account numbers its own messages, only its own aliases.
            AND (NOT s.per_account OR hr.account_id IS r.account_id)
            AND h.platform_message_id IS NOT NULL LIMIT 1), m.platform_message_id)
        END AS key,
@@ -226,52 +226,52 @@ FROM rome_sessions r JOIN chats c ON c.id = r.chat_id
 WHERE c.platform <> 'webchat' AND r.account_id IS NOT NULL AND r.source_thread_id IS NOT NULL
   AND (c.kind = 'dm' OR r.thread_id IS NOT NULL);
 --> statement-breakpoint
--- The lines, worked out once now that each speaker stands in its chat, and
+-- The messages, worked out once now that each speaker stands in its chat, and
 -- found by key and by row: every statement below joins on them.
-CREATE TEMP TABLE legacy_chat_line_rows AS SELECT * FROM legacy_chat_line_rows_view;
+CREATE TEMP TABLE legacy_chat_message_rows AS SELECT * FROM legacy_chat_message_rows_view;
 --> statement-breakpoint
-CREATE INDEX temp.idx_legacy_chat_line_rows_key ON legacy_chat_line_rows (chat_id, key);
+CREATE INDEX temp.idx_legacy_chat_message_rows_key ON legacy_chat_message_rows (chat_id, key);
 --> statement-breakpoint
-CREATE INDEX temp.idx_legacy_chat_line_rows_legacy ON legacy_chat_line_rows (legacy_id);
+CREATE INDEX temp.idx_legacy_chat_message_rows_legacy ON legacy_chat_message_rows (legacy_id);
 --> statement-breakpoint
--- Oldest first, so a line two rows stand for keeps the earliest of them.
+-- Oldest first, so a message two rows stand for keeps the earliest of them.
 INSERT OR IGNORE INTO chat_messages (chat_id, key, thread_id, sender_account_id, sender_agent,
   sender_name, text, parts, reply_to_message_id, said_at)
 SELECT v.chat_id, v.key, v.thread_id, v.sender_account_id, v.sender_agent, v.sender_name,
   v.text, v.parts, NULL, v.said_at
-FROM legacy_chat_line_rows v
+FROM legacy_chat_message_rows v
 ORDER BY v.said_at, v.legacy_seq;
 --> statement-breakpoint
-INSERT OR REPLACE INTO legacy_chat_line_ids (legacy_id, message_id)
+INSERT OR REPLACE INTO legacy_chat_message_ids (legacy_id, message_id)
 SELECT v.legacy_id, q.id
-FROM legacy_chat_line_rows v JOIN chat_messages q ON q.chat_id = v.chat_id AND q.key = v.key;
+FROM legacy_chat_message_rows v JOIN chat_messages q ON q.chat_id = v.chat_id AND q.key = v.key;
 --> statement-breakpoint
--- A line said by one of Rome's accounts is that account's, wherever another
+-- A message said by one of Rome's accounts is that account's, wherever another
 -- account's row recorded it first.
 UPDATE chat_messages SET
   (sender_account_id, sender_agent, sender_name, text, parts) = (
     SELECT v.sender_account_id, v.sender_agent, v.sender_name, v.text, v.parts
-    FROM legacy_chat_line_ids i JOIN legacy_chat_line_rows v ON v.legacy_id = i.legacy_id
+    FROM legacy_chat_message_ids i JOIN legacy_chat_message_rows v ON v.legacy_id = i.legacy_id
     WHERE i.message_id = chat_messages.id AND v.sender_agent IS NOT NULL
     ORDER BY v.said_at, v.legacy_seq LIMIT 1)
 WHERE sender_agent IS NULL AND id IN (
-  SELECT i.message_id FROM legacy_chat_line_rows v JOIN legacy_chat_line_ids i ON i.legacy_id = v.legacy_id
+  SELECT i.message_id FROM legacy_chat_message_rows v JOIN legacy_chat_message_ids i ON i.legacy_id = v.legacy_id
   WHERE v.sender_agent IS NOT NULL);
 --> statement-breakpoint
--- Each speaker's link to the lines its turns took or gave, the earliest
--- standing when one speaker's rows link a line twice.
+-- Each speaker's link to the messages its turns took or gave, the earliest
+-- standing when one speaker's rows link a message twice.
 INSERT OR IGNORE INTO agent_turn_messages (message_id, session_id, turn_id, role, input_state)
 SELECT i.message_id, v.session_id, v.link_turn_id, v.link_role, v.input_state
-FROM legacy_chat_line_rows v JOIN legacy_chat_line_ids i ON i.legacy_id = v.legacy_id
+FROM legacy_chat_message_rows v JOIN legacy_chat_message_ids i ON i.legacy_id = v.legacy_id
 WHERE v.link_role IS NOT NULL
 ORDER BY v.said_at, v.legacy_seq;
 --> statement-breakpoint
--- A line's quote, by the platform's id for it in the same chat, or by a later
--- part of a reply that line stands for.
+-- A message's quote, by the platform's id for it in the same chat, or by a later
+-- part of a reply that message stands for.
 UPDATE chat_messages SET reply_to_message_id = (
   SELECT coalesce(
     (SELECT q.id FROM chat_messages q WHERE q.chat_id = v.chat_id AND q.key = v.reply_key),
-    -- The reply's line by its first part's key, which finds it whether this
+    -- The reply's message by its first part's key, which finds it whether this
     -- pass or an earlier one moved it.
     (SELECT q.id FROM rome_agent_message_platform_ids a
       JOIN rome_agent_messages h ON h.id = a.message_id
@@ -283,15 +283,15 @@ UPDATE chat_messages SET reply_to_message_id = (
         AND h.platform_message_id IS NOT NULL
         AND a.platform_message_id = (SELECT m.reply_to_platform_message_id FROM rome_agent_messages m
           WHERE m.id = v.legacy_id) LIMIT 1))
-  FROM legacy_chat_line_ids i JOIN legacy_chat_line_rows v ON v.legacy_id = i.legacy_id
+  FROM legacy_chat_message_ids i JOIN legacy_chat_message_rows v ON v.legacy_id = i.legacy_id
   WHERE i.message_id = chat_messages.id AND v.reply_key IS NOT NULL
   ORDER BY v.said_at, v.legacy_seq LIMIT 1)
 WHERE reply_to_message_id IS NULL AND id IN (
-  SELECT i.message_id FROM legacy_chat_line_rows v JOIN legacy_chat_line_ids i ON i.legacy_id = v.legacy_id
+  SELECT i.message_id FROM legacy_chat_message_rows v JOIN legacy_chat_message_ids i ON i.legacy_id = v.legacy_id
   WHERE v.reply_key IS NOT NULL);
 --> statement-breakpoint
--- A speaker catches up on lines said after the second it was made. A
--- migrated speaker starts the second before its first line, so a first line
+-- A speaker catches up on messages said after the second it was made. A
+-- migrated speaker starts the second before its first message, so a first message
 -- the platform dated before or in the second its session was made, as a
 -- first message delivered late, stays in view.
 UPDATE rome_sessions SET created_at = (
@@ -303,18 +303,18 @@ WHERE id IN (SELECT s.session_id FROM legacy_chat_speakers s)
 -- A Concierge task points back to the message its legacy source row became.
 UPDATE concierge_tasks SET
   source_message_id = (
-    SELECT i.message_id FROM legacy_chat_line_ids i
+    SELECT i.message_id FROM legacy_chat_message_ids i
     WHERE i.legacy_id = concierge_tasks.legacy_source_message_id),
   legacy_source_message_id = NULL
-WHERE legacy_source_message_id IN (SELECT legacy_id FROM legacy_chat_line_ids);
+WHERE legacy_source_message_id IN (SELECT legacy_id FROM legacy_chat_message_ids);
 --> statement-breakpoint
-DROP TABLE legacy_chat_line_rows;
+DROP TABLE legacy_chat_message_rows;
 --> statement-breakpoint
-DROP VIEW legacy_chat_line_rows_view;
+DROP VIEW legacy_chat_message_rows_view;
 --> statement-breakpoint
 DROP VIEW legacy_chat_speakers;
 --> statement-breakpoint
-DROP TABLE legacy_chat_line_ids;
+DROP TABLE legacy_chat_message_ids;
 --> statement-breakpoint
 DROP TABLE legacy_chat_pending;
 `

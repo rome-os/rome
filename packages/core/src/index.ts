@@ -455,7 +455,7 @@ async function main() {
         speakers: chatsWired.speakers,
         replies: chatsWired.replies,
         links: chatsWired.links,
-        lines: chatsWired.speakerLines,
+        lines: chatsWired.speakerMessages,
         adapters: chatsWired.adapters,
         // `builtChannels` is set further down, before any app runs.
         channel: (name) => builtChannels?.find((channel) => channel.name === name) ?? null,
@@ -1135,7 +1135,7 @@ async function main() {
     agentTurnStreamRegistry,
     undefined,
     replyStreams,
-    { lines: chatsWired.speakerLines, links: chatsWired.links, replies: chatsWired.replies },
+    { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1145,7 +1145,7 @@ async function main() {
     webchatRepo,
     agentTurnStreamRegistry,
     actionRegistry,
-    { lines: chatsWired.speakerLines, links: chatsWired.links, replies: chatsWired.replies },
+    { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

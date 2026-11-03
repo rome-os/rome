@@ -15,7 +15,7 @@ import type { TranscriptPart } from "@rome/api-types/chat";
 import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
-import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
+import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/place.js";
@@ -802,7 +802,7 @@ export function sessionLines(sessionIds: readonly string[]) {
       m.seq AS seq
     FROM rome_sessions s
     JOIN ${CHATS} c ON c.id = s.chat_id
-    JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+    JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
     -- Only a prompt or answer link says whose turn a line is: one caught up
@@ -838,7 +838,7 @@ export function sessionLines(sessionIds: readonly string[]) {
  * `rome_sessions`.
  */
 const chatsSessionMessageCount = sql<number>`((
-  select count(*) from ${CHAT_LINES} m
+  select count(*) from ${CHAT_MESSAGES} m
   where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
     and m."said_at" >= "rome_sessions"."created_at"
 ) + (

@@ -272,7 +272,7 @@ describe("SpeakerReplies", () => {
     expect(said).toMatchObject({ id: expect.any(Number) });
   });
 
-  it("quote in a streamed reply only a line of the speaker's own chat", async () => {
+  it("quote in a streamed reply only a message of the speaker's own chat", async () => {
     const quotes: Array<string | undefined> = [];
     const quoting = {
       ...adapter,

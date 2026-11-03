@@ -152,7 +152,7 @@ describe("appChats", () => {
       expect(result.thread).toBeUndefined();
     });
 
-    it("sends as the speaker there, so the line is its agent's", async () => {
+    it("sends as the speaker there, so the message is its agent's", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       fixture.speaker({ id: "s1", chat: group, accountId: BOT.id, agentName: "concierge" });
 

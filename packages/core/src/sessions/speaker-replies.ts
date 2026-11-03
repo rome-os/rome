@@ -42,7 +42,7 @@ export interface SpeakerSent {
   readonly at: Date;
 }
 
-/** A message a speaker sends: what its adapter takes, quoting a line by its id
+/** A message a speaker sends: what its adapter takes, quoting a message by its id
  *  in Chats, or by its adapter's key for one Rome never recorded. The turn
  *  it answers is named once, in the send's options. */
 export type SpeakerOutbound = Omit<Outbound, "replyTo" | "turnId"> & {
@@ -113,7 +113,7 @@ export class SpeakerReplies {
   /**
    * Send `out` where session `sessionId` stands, through its account's
    * adapter on `channel`, record it as the speaker's, and make it turn
-   * `turnId`'s answer when one is named. `recorded` is the line as it goes on
+   * `turnId`'s answer when one is named. `recorded` is the message as it goes on
    * record, when it says more than the platform shows. Answers the speaker it
    * was said through, the adapter's key for what went out as `sent`, and
    * the thread it landed in, or null for the open chat.
@@ -130,7 +130,7 @@ export class SpeakerReplies {
     if (!speaker) return null;
     const { account, adapter } = this.adapterOf(speaker, channel);
     const { replyTo, ...rest } = out;
-    let lineKey = "";
+    let messageKey = "";
     let landedIn: ChatId | null = speaker.place.threadId ?? null;
     const sent = await this.deps.messages.send(
       {
@@ -146,20 +146,20 @@ export class SpeakerReplies {
           ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
           ...(options.turnId ? { turnId: options.turnId } : {}),
         });
-        lineKey = out.key;
+        messageKey = out.key;
         landedIn = out.threadId;
-        return { key: lineKey, ...landed(speaker, out.threadId) };
+        return { key: messageKey, ...landed(speaker, out.threadId) };
       },
     );
-    if (sent.id === null) return { id: null, at: sent.at, sent: lineKey, speaker, landedIn };
+    if (sent.id === null) return { id: null, at: sent.at, sent: messageKey, speaker, landedIn };
     if (options.turnId !== undefined) this.answered(sent.id, sessionId, options.turnId);
-    return { id: sent.id, at: sent.at, sent: lineKey, speaker, landedIn };
+    return { id: sent.id, at: sent.at, sent: messageKey, speaker, landedIn };
   }
 
   /**
    * Open a reply where session `sessionId` stands, written through its
    * account's adapter on `channel` as the run goes, and put it on record as
-   * turn `turnId`'s answer once it settles. `replyTo` is the line it
+   * turn `turnId`'s answer once it settles. `replyTo` is the message it
    * answers, by its id in Chats. Null when the session stands in no chat or
    * the channel cannot stream.
    */
@@ -181,7 +181,7 @@ export class SpeakerReplies {
     const { account, adapter } = this.adapterOf(speaker, channel);
     const replyTo = options.replyTo;
     const chat = this.deps.adapters.keyOf(speaker.place.chat);
-    // A key names a line only in its own chat.
+    // A key names a message only in its own chat.
     const line = replyTo === undefined ? undefined : this.deps.messages.byIds([replyTo])[0];
     const quoted = line?.place.chat.id === speaker.place.chat.id ? line.key : null;
     const reply = adapter.stream?.(chat.externalId, speaker.place.threadId ?? null, {

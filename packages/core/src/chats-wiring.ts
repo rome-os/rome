@@ -14,7 +14,7 @@ import { ChatAddresses } from "./connections/chat-addresses.js";
 import { chatKey, type ChatKey } from "./connections/chat-ids.js";
 import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapter.js";
 import { recordedSends } from "./connections/recorded-sends.js";
-import { SpeakerLines } from "./connections/speaker-lines.js";
+import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
 import { SpeakerReplies } from "./sessions/speaker-replies.js";
 import { Speakers } from "./sessions/speakers.js";
@@ -50,7 +50,7 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
   const speakers = new Speakers(db, chats);
   const links = new TurnLinks(db, messages);
   const replies = new SpeakerReplies({ speakers, adapters, messages, links });
-  const speakerLines = new SpeakerLines({ speakers, messages, adapters });
+  const speakerMessages = new SpeakerMessages({ speakers, messages, adapters });
   const reads = new ChatReadModel(db, { messages, links });
   return {
     chats,
@@ -60,7 +60,7 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
     speakers,
     links,
     replies,
-    speakerLines,
+    speakerMessages,
     reads,
     /** `channels` with each send recorded through Chats. */
     recordedSends<C extends Channel>(channels: readonly C[]): C[] {

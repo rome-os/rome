@@ -19,7 +19,7 @@ import {
 import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
-import { runLines, type RunLineDeps } from "../connections/speaker-lines.js";
+import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 
 const log = createLogger("agent-runner");
 

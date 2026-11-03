@@ -10,7 +10,7 @@ import { ChatAddresses } from "../connections/chat-addresses.js";
 import type { ChannelChatAdapter, Outbound } from "../connections/chat-adapter.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { emailChatAdapter } from "../connections/email-chat-adapter.js";
-import { SpeakerLines } from "../connections/speaker-lines.js";
+import { SpeakerMessages } from "../connections/speaker-messages.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
@@ -27,7 +27,7 @@ describe("appChatWrites", () => {
   let fixture: ReturnType<typeof speakerFixture>;
   let messages: MessageRepository;
   let links: TurnLinks;
-  let lines: SpeakerLines;
+  let lines: SpeakerMessages;
   let group: ChatRef;
   let sends: Array<{ chat: string; threadId: ChatId | null; out: Outbound }>;
   let refuse: boolean;
@@ -97,7 +97,7 @@ describe("appChatWrites", () => {
       });
       return email;
     };
-    lines = new SpeakerLines({ speakers, messages, adapters: { keyOf } });
+    lines = new SpeakerMessages({ speakers, messages, adapters: { keyOf } });
     group = fixture.chat("telegram", "-100", "group", "ops");
     fixture.speaker({ id: "s1", chat: group, accountId: BOT.id });
     sends = [];
@@ -158,7 +158,7 @@ describe("appChatWrites", () => {
   const speakerAt = () => ({ place: placeIn(group), accountId: BOT.id });
 
   describe("addMessage", () => {
-    it("records a line keyed as its account hears it, as the session's prompt, once", async () => {
+    it("records a message keyed as its account hears it, as the session's prompt, once", async () => {
       const input = {
         sessionId: "s1",
         role: "user" as const,
@@ -205,7 +205,7 @@ describe("appChatWrites", () => {
       expect(linkOf("s1", line!.id)).toMatchObject({ role: "prompt" });
     });
 
-    it("makes a line its account already heard the session's prompt", async () => {
+    it("makes a message its account already heard the session's prompt", async () => {
       const heard = messages.record({
         direction: "toRome",
         key: lines.keyIn(speakerAt(), "43"),
@@ -257,7 +257,7 @@ describe("appChatWrites", () => {
       expect(result).toEqual({ messageId: "101" });
     });
 
-    it("quotes a line by the platform's id, records what the app hands over, and keeps host-only parts off record", async () => {
+    it("quotes a message by the platform's id, records what the app hands over, and keeps host-only parts off record", async () => {
       await writes.addMessage({
         sessionId: "s1",
         role: "user",

@@ -22,11 +22,11 @@ import {
   ChannelWithoutAccount,
   type Inbound,
   isDirectMessage,
-  lineAt,
-  lineHolder,
+  messageKeyAt,
+  messageHolder,
   kindNamedBy,
-  platformIdOfLine,
-  sentLineId,
+  platformIdOfMessage,
+  sentMessageKey,
 } from "./chat-adapter.js";
 import { chatKey } from "./chat-ids.js";
 
@@ -92,35 +92,35 @@ describe("chat adapter keys", () => {
     expect(addressOf(group)).toBe("-1001234567890123");
   });
 
-  it("key a basic group's lines by the account that heard them, and back", () => {
+  it("key a basic group's messages by the account that heard them, and back", () => {
     const basic = chatAt("telegram", "-42");
-    expect(lineAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
-    expect(platformIdOfLine(basic, "rome_bot", "rome_bot:7")).toBe("7");
-    expect(sentLineId(basic, "rome_bot", "8")).toBe("rome_bot:8");
+    expect(messageKeyAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
+    expect(platformIdOfMessage(basic, "rome_bot", "rome_bot:7")).toBe("7");
+    expect(sentMessageKey(basic, "rome_bot", "8")).toBe("rome_bot:8");
   });
 
-  it("name the account holding each line only where each account holds its own copy", () => {
-    const holder = lineHolder("telegram", "-42");
-    expect(holder?.(lineAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
+  it("name the account holding each message only where each account holds its own copy", () => {
+    const holder = messageHolder("telegram", "-42");
+    expect(holder?.(messageKeyAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
     expect(holder?.("7")).toBeNull();
-    expect(lineHolder("telegram", "-1001234567890123")).toBeNull();
-    expect(lineHolder("telegram", "dm:rome_bot:alice")).toBeNull();
-    expect(lineHolder("discord", "-42")).toBeNull();
+    expect(messageHolder("telegram", "-1001234567890123")).toBeNull();
+    expect(messageHolder("telegram", "dm:rome_bot:alice")).toBeNull();
+    expect(messageHolder("discord", "-42")).toBeNull();
   });
 
-  it("quote no line in a basic group that only another of Rome's accounts holds", () => {
+  it("quote no message in a basic group that only another of Rome's accounts holds", () => {
     const basic = chatAt("telegram", "-42");
-    expect(platformIdOfLine(basic, "rome_bot", "other_bot:7")).toBeNull();
-    expect(platformIdOfLine(basic, "rome_bot", "7")).toBeNull();
+    expect(platformIdOfMessage(basic, "rome_bot", "other_bot:7")).toBeNull();
+    expect(platformIdOfMessage(basic, "rome_bot", "7")).toBeNull();
     const group = chatAt("telegram", "-1001234567890123");
-    expect(platformIdOfLine(group, "rome_bot", "7")).toBe("7");
+    expect(platformIdOfMessage(group, "rome_bot", "7")).toBe("7");
   });
 
-  it("key a line the platform gave no id by one of Rome's, which names no platform line", () => {
+  it("key a message the platform gave no id by one of Rome's, which names no platform message", () => {
     const group = chatAt("telegram", "-1001234567890123");
-    const key = sentLineId(group, "rome_bot", undefined);
+    const key = sentMessageKey(group, "rome_bot", undefined);
     expect(key).toMatch(/^rome:/);
-    expect(platformIdOfLine(group, "rome_bot", key)).toBeNull();
+    expect(platformIdOfMessage(group, "rome_bot", key)).toBeNull();
   });
 });
 
@@ -382,7 +382,7 @@ describe("channelAdapter", () => {
     expect(landed).toEqual({ key: "p1", threadId: null });
   });
 
-  it("refuse to answer a line the account holds no platform id for, and send nothing", async () => {
+  it("refuse to answer a message the account holds no platform id for, and send nothing", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
     const delivered: Inbound[] = [];
