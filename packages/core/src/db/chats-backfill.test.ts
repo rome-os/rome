@@ -393,21 +393,6 @@ describe("Chats backfill", () => {
     ).toEqual([]);
   });
 
-  it("notes each heard line as reached by the account that heard it", () => {
-    expect(
-      all(`SELECT m.key, d.account_id FROM chat_message_deliveries d
-           JOIN chat_messages m ON m.id = d.message_id ORDER BY m.id`),
-    ).toEqual([
-      { key: "111:5", account_id: "111" },
-      { key: "222:5", account_id: "222" },
-      { key: "222:6", account_id: "222" },
-      { key: "222:7", account_id: "222" },
-      { key: "om_1", account_id: "bot" },
-      { key: "om_4", account_id: "bot" },
-      { key: "om_9", account_id: "bot" },
-    ]);
-  });
-
   it("resolves a quote of a later part of a reply to the reply's line", () => {
     const quote = line("om_4") as { reply_to_message_id: number };
     expect(quote.reply_to_message_id).toBe((line("om_2") as { id: number }).id);

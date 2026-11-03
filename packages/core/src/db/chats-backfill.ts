@@ -2,9 +2,8 @@
 // Chats' tables (docs/domains/chats.md), keyed as the adapters key them
 // (connections/chat-ids.ts). From the switch on, Rome reads and writes only
 // there; the legacy rows stay until the contract migration drops them. Each
-// speaker's session row learns its chat, thread and account; a line keeps
-// the earliest time and place any of its rows had; and each line an account
-// heard is noted as reached, so a platform's redelivery is not heard twice.
+// speaker's session row learns its chat, thread and account; and a line
+// keeps the earliest time and place any of its rows had.
 //
 // A dashboard chat is a webchat direct message keyed by its session, and only
 // its prompts and answers are lines: its notices and traces stay the
@@ -251,15 +250,6 @@ SELECT i.message_id, v.session_id, v.link_turn_id, v.link_role, v.input_state
 FROM legacy_chat_line_rows v JOIN legacy_chat_line_ids i ON i.legacy_id = v.legacy_id
 WHERE v.link_role IS NOT NULL
 ORDER BY v.said_at, v.legacy_seq;
---> statement-breakpoint
--- Each line someone else said in a channel chat reached the account whose
--- row heard it.
-INSERT OR IGNORE INTO chat_message_deliveries (message_id, account_id)
-SELECT i.message_id, v.account_id
-FROM legacy_chat_line_rows v JOIN legacy_chat_line_ids i ON i.legacy_id = v.legacy_id
-JOIN chats c ON c.id = v.chat_id
-WHERE c.platform <> 'webchat' AND v.role IN ('user', 'notification')
-  AND v.sender_agent IS NULL AND v.account_id IS NOT NULL;
 --> statement-breakpoint
 -- A line's quote, by the platform's id for it in the same chat, or by a later
 -- part of a reply that line stands for.
