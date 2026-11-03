@@ -15,6 +15,7 @@ import {
   useReplyDraftState,
   type ReplyTarget,
 } from "./reply/reply-draft";
+import { findMessageAnchor } from "./reply/reply-source";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -215,4 +216,29 @@ it("keeps an on-behalf source with the guardian's messages and names the source 
     name: "Concierge",
     preview: "Find flights",
   });
+});
+
+it("anchors an automated message, so a selection quotes it and a jump can find it", () => {
+  const message: ChatMessage = {
+    id: "m1",
+    sessionId: "concierge",
+    role: "user",
+    createdAt: at,
+    content: JSON.stringify([{ type: "text", content: "Find flights\n\nBook the cheapest" }]),
+    sender: {
+      kind: "automated",
+      sourceType: "agent",
+      name: "Concierge",
+      iconUrl: null,
+      onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+    },
+  };
+  const sent = renderChat([{ kind: "user", key: message.id, message }]);
+  const line = screen.getByText("Book the cheapest");
+  expect(findMessageAnchor(document, "m1")?.contains(line)).toBe(true);
+
+  window.getSelection()?.selectAllChildren(line);
+  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+
+  expect(sent()).toEqual({ replyToMessageId: "m1", replyQuote: "Book the cheapest" });
 });

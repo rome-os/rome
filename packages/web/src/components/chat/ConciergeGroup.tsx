@@ -210,7 +210,11 @@ export const ConciergeGroup = memo(function ConciergeGroup({
     >
       {group.entries.map((entry) =>
         entry.message.sender?.kind === "automated" ? (
-          <div key={entry.message.id} className="w-full self-start">
+          <div
+            key={entry.message.id}
+            data-timeline-anchor={entry.message.id}
+            className="w-full self-start"
+          >
             <UserMessage msg={entry.message} />
           </div>
         ) : group.sender === "guardian" ? (
