@@ -839,7 +839,7 @@ async function main() {
   const anthropicProvider = new AnthropicProvider({
     settingsRepo,
     onAuthRevoked: () => aiToolState.markAuthRevoked("anthropic"),
-    onQuotaExhausted: () => aiToolState.markQuotaExhausted("anthropic"),
+    onQuotaExhausted: (until) => aiToolState.markQuotaExhausted("anthropic", until),
   });
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
