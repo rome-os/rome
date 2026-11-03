@@ -390,6 +390,24 @@ describe("TelegramAdapter", () => {
     });
   });
 
+  describe("send() with blank text", () => {
+    it("sends an attachment beside blank text parts alone, quoting on the attachment", async () => {
+      await adapter.send(CHAT, {
+        parts: [{ type: "text", content: "  " }],
+        attachments: [{ type: "image", source: "https://example.com/pic.png" }],
+        replyToMessageId: "41",
+      });
+
+      expect(telegram.sent).toHaveLength(1);
+      expect(telegram.sent[0]?.method).toBe("sendPhoto");
+      expect(telegram.sent[0]?.payload).toMatchObject({
+        chat_id: "chat-99",
+        photo: "https://example.com/pic.png",
+        reply_parameters: { message_id: 41 },
+      });
+    });
+  });
+
   describe("saveIncomingAttachments()", () => {
     it("downloads Telegram bot attachments through the size-limited reader", async () => {
       const body = Buffer.from("image-data");

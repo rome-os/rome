@@ -21,10 +21,21 @@ describe("textToSend", () => {
     }
   });
 
-  it("sends an attachment with no text", () => {
-    expect(textToSend("telegram", { attachments: [{ type: "image", source: "/tmp/a.png" }] })).toBe(
+  it("sends an attachment with no text, or with only blank text", () => {
+    const attachments = [{ type: "image" as const, source: "/tmp/a.png" }];
+    expect(textToSend("telegram", { attachments })).toBe("");
+    expect(textToSend("telegram", { attachments, parts: [{ type: "text", content: "   " }] })).toBe(
       "",
     );
+    expect(
+      textToSend("telegram", {
+        attachments,
+        parts: [
+          { type: "text", content: "" },
+          { type: "text", content: "" },
+        ],
+      }),
+    ).toBe("");
   });
 
   it("refuses a part that is not text, even beside text", () => {

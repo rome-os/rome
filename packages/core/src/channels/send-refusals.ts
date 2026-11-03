@@ -16,10 +16,12 @@ export function textToSend(channel: string, message: OutgoingMessage): string {
   const text = message.text?.trim()
     ? message.text
     : parts.flatMap((part) => (part.type === "text" ? [part.content] : [])).join("\n\n");
-  if (!text.trim() && !message.attachments?.length) {
+  if (text.trim()) return text;
+  if (!message.attachments?.length) {
     throw new ChannelSendRefused("empty", `A message to ${channel} needs text or an attachment`);
   }
-  return text;
+  // Blank text says nothing, so the attachments go out alone.
+  return "";
 }
 
 /** Refuses any attachment, on a channel named `channel` that carries none. */
