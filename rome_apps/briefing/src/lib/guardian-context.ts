@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { RomeAppContext } from "@rome-os/app-runtime";
+import type { ChatReads } from "@rome-os/app-runtime/chats";
 import { unwrap } from "./action-result.js";
 
 // Personal context for the brief's "Try with Rome" section: what the guardian
@@ -31,14 +32,54 @@ export async function gatherGuardianContext(
   tz: string,
   now = Date.now(),
 ): Promise<GuardianContext> {
-  return { chats: readRecentChats(appContext, tz, now), profile: await readProfile(appContext) };
+  return {
+    chats: await readRecentChats(appContext, tz, now),
+    profile: await readProfile(appContext),
+  };
 }
 
-function readRecentChats(appContext: RomeAppContext, tz: string, now: number): string | null {
+/** The chat reads Rome hands this app, or null when the host offers none. */
+function chatReadsOf(appContext: RomeAppContext): ChatReads | null {
+  const chats = appContext.repositories?.chats;
+  if (!chats?.recentChats || !chats.transcript || !chats.traces) return null;
+  return chats as ChatReads;
+}
+
+/** The guardian's requests in their own unarchived dashboard chats since
+ *  `since`, newest first, read through Chats. */
+async function guardianRequests(reads: ChatReads, since: Date): Promise<MessageRow[]> {
+  const recent = (await reads.recentChats({ since, where: "dashboard" })).filter(
+    (chat) => chat.ownerKey === "guardian" && !chat.archived,
+  );
+  const rows: MessageRow[] = [];
+  for (const { sessionId, name } of recent) {
+    const asked = (await reads.transcript(sessionId)).filter((line) => line.role === "user");
+    if (asked.some((line) => line.senderId?.startsWith("visitor:"))) continue;
+    for (const line of asked) {
+      if (line.createdAt < since) continue;
+      rows.push({
+        chat: name,
+        content: line.content,
+        created_at: Math.floor(line.createdAt.getTime() / 1000),
+      });
+    }
+  }
+  rows.sort((a, b) => b.created_at - a.created_at);
+  return rows.slice(0, MAX_MESSAGES);
+}
+
+async function readRecentChats(
+  appContext: RomeAppContext,
+  tz: string,
+  now: number,
+): Promise<string | null> {
   const cutoff = Math.floor((now - WINDOW_HOURS * 60 * 60 * 1000) / 1000);
   let rows: MessageRow[];
+  const reads = chatReadsOf(appContext);
   try {
-    rows = appContext.db.connection.all(sql`
+    rows = reads
+      ? await guardianRequests(reads, new Date(cutoff * 1000))
+      : (appContext.db.connection.all(sql`
       SELECT s.name AS chat, m.content, m.created_at
       FROM rome_agent_messages m
       JOIN rome_sessions s ON s.id = m.session_id
@@ -54,7 +95,7 @@ function readRecentChats(appContext: RomeAppContext, tz: string, now: number): s
         AND m.created_at >= ${cutoff}
       ORDER BY m.created_at DESC
       LIMIT ${MAX_MESSAGES}
-    `) as MessageRow[];
+    `) as MessageRow[]);
   } catch {
     return null;
   }

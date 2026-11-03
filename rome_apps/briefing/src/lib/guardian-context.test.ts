@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ActionResult, RomeAppContext } from "@rome-os/app-runtime";
+import type { ChatLine, ChatReads, RecentChat } from "@rome-os/app-runtime/chats";
 import { createTestDb, type TestDb } from "../../../../packages/core/src/test/helpers.js";
 import { gatherGuardianContext } from "./guardian-context.js";
 
@@ -79,6 +80,96 @@ function appContext(profile: ActionResult = { status: "error", error: "unavailab
     },
   } as unknown as RomeAppContext;
 }
+
+/** Chat reads over the chats given, each with its lines, as a host that
+ *  offers Chats hands them. */
+function fakeReads(
+  chats: Array<{ chat: Partial<RecentChat> & { sessionId: string }; lines: ChatLine[] }>,
+): ChatReads {
+  return {
+    async recentChats({ since }) {
+      return chats
+        .filter(({ lines }) => lines.some((line) => line.createdAt >= since))
+        .map(({ chat }) => ({
+          chat: { platform: "webchat", id: 1 },
+          name: "Chat",
+          threadName: null,
+          ownerKey: "guardian",
+          archived: false,
+          channel: null,
+          agentName: null,
+          projectName: null,
+          projectPath: null,
+          startedAt: new Date(0),
+          ...chat,
+        }));
+    },
+    async transcript(sessionId) {
+      return chats.find(({ chat }) => chat.sessionId === sessionId)?.lines ?? [];
+    },
+    async traces() {
+      return [];
+    },
+  };
+}
+
+function line(role: ChatLine["role"], content: string, hoursAgo: number, senderId?: string) {
+  return {
+    key: `${role}-${hoursAgo}-${content}`,
+    turnId: null,
+    role,
+    senderId: senderId ?? null,
+    senderName: null,
+    content,
+    createdAt: new Date(sec(hoursAgo) * 1000),
+  };
+}
+
+describe("gatherGuardianContext through Chats", () => {
+  it("reads only the guardian's own recent words in their own chats", async () => {
+    const reads = fakeReads([
+      {
+        chat: { sessionId: "mine", name: "Bakery orders" },
+        lines: [
+          line("user", text("Can you track pickup orders?"), 2, "guardian"),
+          line("assistant", text("AGENT REPLY"), 2),
+          line("user", text("too old"), 60),
+        ],
+      },
+      {
+        chat: { sessionId: "visited", name: "Shared demo" },
+        lines: [
+          line("user", text("guardian start"), 3),
+          line("user", text("visitor request"), 3, "visitor:v"),
+        ],
+      },
+      {
+        chat: { sessionId: "theirs", name: "Visitor chat", ownerKey: "visitor:v" },
+        lines: [line("user", text("owner request"), 3)],
+      },
+      {
+        chat: { sessionId: "old", name: "Archived", archived: true },
+        lines: [line("user", text("archived note"), 3)],
+      },
+    ]);
+    const context = { ...appContext(), repositories: { chats: reads } } as RomeAppContext;
+
+    const { chats } = await gatherGuardianContext(context, "UTC", now);
+
+    expect(chats).toContain('Chat "Bakery orders"');
+    expect(chats).toContain("Can you track pickup orders?");
+    for (const absent of [
+      "AGENT REPLY",
+      "too old",
+      "guardian start",
+      "visitor request",
+      "owner request",
+      "archived note",
+    ]) {
+      expect(chats).not.toContain(absent);
+    }
+  });
+});
 
 describe("gatherGuardianContext", () => {
   it("reads only the guardian's own recent words in their own chats", async () => {
