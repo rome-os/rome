@@ -188,6 +188,16 @@ describe("appChats", () => {
       expect(sent.map((send) => send.channel)).toEqual(["telegram-2"]);
     });
 
+    it("answers a group whose only speaker has disconnected as not connected, never picking another account", async () => {
+      accounts["telegram-2"] = SECOND_BOT;
+      const group = fixture.chat("telegram", "-100", "group");
+      fixture.speaker({ id: "s1", chat: group, accountId: BOT.id });
+      delete accounts.telegram;
+
+      expect(await refusal(chats.send(group, { text: "x" }))).toBe("not_connected");
+      expect(sent).toEqual([]);
+    });
+
     it("answers a direct message whose end has disconnected as not connected", async () => {
       const dm = fixture.chat(
         "telegram",

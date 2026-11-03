@@ -54,7 +54,7 @@ export interface AppChatsDeps {
   channelsOn(platform: string): readonly string[];
   adapters: Pick<ChatAdapters, "of" | "accountOn" | "channelOf" | "keyOf" | "directMessageReached">;
   chats: Pick<ChatRepository, "get" | "byKey" | "start" | "list">;
-  speakers: Pick<Speakers, "speakerIn" | "speaksIn">;
+  speakers: Pick<Speakers, "speakerIn" | "speaksIn" | "accountsIn">;
   replies: Pick<SpeakerReplies, "send">;
   messages: Pick<MessageRepository, "send" | "byIds" | "idOf">;
 }
@@ -252,12 +252,20 @@ function senderIn(deps: AppChatsDeps, chat: Chat, at: Place, as: Account | undef
     }
     return senderAs(deps, as);
   }
-  const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
   if (romeEnd !== null) return senderAs(deps, { platform, id: romeEnd }, { inferred: true });
-  const speaking = accounts.filter(
-    (account) => deps.speakers.speakerIn(chat.ref.id, at.threadId ?? null, account.id) !== null,
-  );
-  const [only] = speaking.length === 1 ? speaking : accounts.length === 1 ? accounts : [];
+  // The speakers on record decide, connected or not: one that cannot send
+  // now is not connected, never a reason to pick another account.
+  const speaking = deps.speakers.accountsIn(chat.ref.id, at.threadId ?? null);
+  if (speaking.length > 1) {
+    throw new SendError(
+      "sender_ambiguous",
+      `${speaking.length} of Rome's accounts speak there; name one as \`as\``,
+    );
+  }
+  const [speaker] = speaking;
+  if (speaker !== undefined) return senderAs(deps, { platform, id: speaker }, { inferred: true });
+  const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
+  const [only] = accounts.length === 1 ? accounts : [];
   if (only) return senderAs(deps, only, { inferred: true });
   if (accounts.length === 0) {
     throw new SendError("not_connected", `Rome holds no account on ${platform}`);

@@ -73,6 +73,22 @@ export class Speakers {
     );
   }
 
+  /** Rome's accounts that hold a speaker in chat `chatId`, in thread
+   *  `threadId` or the open chat when null, connected or not. */
+  accountsIn(chatId: number, threadId: string | null): string[] {
+    return this.db
+      .selectDistinct({ accountId: romeSessions.accountId })
+      .from(romeSessions)
+      .where(
+        and(
+          eq(romeSessions.chatId, chatId),
+          threadId === null ? isNull(romeSessions.threadId) : eq(romeSessions.threadId, threadId),
+        ),
+      )
+      .all()
+      .flatMap((row) => (row.accountId === null ? [] : [row.accountId]));
+  }
+
   /** Whether Rome's account `accountId` holds a speaker anywhere in chat
    *  `chatId`, its threads included. */
   speaksIn(chatId: number, accountId: string): boolean {
