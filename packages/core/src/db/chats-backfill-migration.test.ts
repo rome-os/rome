@@ -413,9 +413,17 @@ describe("0108 Chats backfill", () => {
   it("keeps where each account reaches a direct message and a thread", () => {
     expect(
       all(
-        "SELECT platform, account_id, chat_key, thread_id, address FROM chat_addresses ORDER BY thread_id",
+        `SELECT platform, account_id, chat_key, thread_id, address FROM chat_addresses
+         ORDER BY thread_id, chat_key`,
       ),
     ).toEqual([
+      {
+        platform: "telegram",
+        account_id: "111",
+        chat_key: "dm:111:55",
+        thread_id: "",
+        address: "55",
+      },
       {
         platform: "feishu",
         account_id: "bot",
