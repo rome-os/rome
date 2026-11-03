@@ -54,6 +54,12 @@ export interface AccountDirectoryDeps {
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
   db: DrizzleDb;
+  /** Rome's own account on a channel, which names the direct message Rome's
+   *  transcript holds there when it is read from Chats. */
+  accountOf?: (channel: string) => Account | null;
+  /** Where Rome's transcript is read from: its legacy table by default, or
+   *  Chats. */
+  transcript?: "legacy" | "chats";
 }
 
 /**

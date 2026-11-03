@@ -398,7 +398,7 @@ class Copies {
  * reads them. A line keyed by no account is a copy of nothing and is absent.
  */
 export function occurrencesOf(
-  said: readonly SaidMessage[],
+  said: readonly CopiedLine[],
   holderOf: LineHolder,
 ): Map<number, string> {
   const occurrence = new Map<number, string>();
@@ -414,11 +414,17 @@ export function occurrencesOf(
   return occurrence;
 }
 
+/** What {@link occurrencesOf} reads of a line: enough to tell which message
+ *  it is a copy of, so a count can read no more than that. */
+export type CopiedLine = Pick<SaidMessage, "id" | "key" | "at" | "body"> & {
+  readonly saidBy?: { readonly account: { readonly id: string }; readonly agent?: string };
+};
+
 /** What the copies of one message share: its sender, its time and its words.
  *  An attachment's line names the file and where the account that heard it
  *  saved it, both of which the receiving account may choose, so only its
  *  kind and caption count. */
-function copyOf(message: SaidMessage): string {
+function copyOf(message: CopiedLine): string {
   return [
     message.saidBy?.account.id ?? message.saidBy?.agent ?? "",
     message.at.getTime(),
