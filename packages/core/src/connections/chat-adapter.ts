@@ -328,6 +328,15 @@ export function channelAdapter(
     if (!known) throw new ChannelWithoutAccount(channel.name);
     return known;
   };
+  // A direct message is the chat the account already reaches at its
+  // address, so a reply to a direct message Rome opened by sending to an
+  // address lands in that chat even where the key names the address.
+  const keyed: ChatKeying = (heardBy, message) => {
+    const found = keying(heardBy, message);
+    if (found.kind !== "dm" || message.parentChatId !== undefined) return found;
+    const bound = deps.addresses?.keyAt(heardBy, message.chatId) ?? null;
+    return bound === null ? found : { key: chatKey(heardBy.platform, bound as ChatId), kind: "dm" };
+  };
   let unsubscribe: (() => void) | null = null;
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
@@ -405,7 +414,7 @@ export function channelAdapter(
       const handOver = async (event: InboundEvent) => {
         if (!event.message.text?.trim() && event.message.attachments.length === 0) return;
         const saved = await materialized(channel, event);
-        const inbound = toInbound(channel.name, saved.message.account ?? account(), saved, keying);
+        const inbound = toInbound(channel.name, saved.message.account ?? account(), saved, keyed);
         // A direct message is reached where it was heard, which on some
         // platforms is an id of its own rather than the other end.
         if (inbound.chatKind === "dm" && inbound.thread === null) {
@@ -460,7 +469,7 @@ export function channelAdapter(
           });
           return;
         }
-        const chat = keying(heardBy, event.message).key.externalId;
+        const chat = keyed(heardBy, event.message).key.externalId;
         const waiting = queues.get(chat);
         if (waiting) {
           if (waiting.length >= QUEUE_CAPACITY) {

@@ -335,6 +335,26 @@ describe("channelAdapter", () => {
     expect(adapter.threadAt("topic-2")).toBeNull();
   });
 
+  it("hear a direct message in the chat the account already reaches at its address", async () => {
+    // Rome opened this direct message by sending to its address, before it
+    // knew the other end.
+    addresses.bind(ROME, "dm:rome_bot:oc_p2p", "oc_p2p");
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "oc_p2p", senderId: "ou_person", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["dm:rome_bot:oc_p2p"]);
+  });
+
   it("send to a direct message where it was heard, quoting the platform's id", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
