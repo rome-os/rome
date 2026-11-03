@@ -9,6 +9,8 @@ import type { AppConnectionAccessRepository } from "../db/repositories/app-conne
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
 import type { MessageRepository } from "../chats/message-repository.js";
+import type { ChatRepository } from "../chats/storage/chat-repository.js";
+import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { ExternalAgents } from "../channels/agents-accounts.js";
@@ -117,7 +119,11 @@ export interface ApiDeps {
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
+  chatMessages: Pick<MessageRepository, "recordSent">;
+  /** The chats Rome takes part in, by their adapter's keys. */
+  chats: Pick<ChatRepository, "byKey">;
+  /** What was said in each chat, as Chats records it. */
+  messages: Pick<ChatLines, "read">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

@@ -79,6 +79,8 @@ import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { chatsWiring } from "../chats-wiring.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
@@ -604,7 +606,17 @@ export async function buildTestDeps(
   const appKeysRepo = new AppKeysRepository(db);
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
-  const webchatRepo = new WebChatRepository(db);
+  // Chats as production wires it, with each dashboard chat's lines in it.
+  const chatsWired = chatsWiring(db, {
+    accountOf: (channel) => channelRecords.accountOf(channel),
+    platformOfChannel: (name) => channelRecords.platformOfChannel(name),
+    channelsOn: (platform) => channelRecords.namesOn(platform),
+  });
+  const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db, {
+    chats: chatsWired.chats,
+    lines: chatsWired.messages,
+    links: chatsWired.links,
+  });
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
@@ -798,6 +810,8 @@ export async function buildTestDeps(
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,
+    chats: chatsWired.chats,
+    messages: chatsWired.messages,
     chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), {
       channelsOn: (platform) =>
         storedOn(
@@ -1171,7 +1185,7 @@ export async function createAppLifecycleHarness(
       processRole: "worker",
     });
     const settingsRepo = new SettingsRepository(db);
-    const webchatRepo = new WebChatRepository(db);
+    const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db);
     const appRuntimeRepositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,

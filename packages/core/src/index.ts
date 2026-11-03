@@ -1915,6 +1915,8 @@ async function main() {
       assistants: listedAgents,
       webchatRepo,
       chatMessages,
+      chats: chatsWired.chats,
+      messages: chatsWired.messages,
       webhookInvocationsRepo,
       approvalsRepo,
       approvalHandler,
