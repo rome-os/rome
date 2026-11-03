@@ -1024,6 +1024,32 @@ describe("send_message through Chats", () => {
     );
   });
 
+  it("answers a message-only reply on the run's email thread, as the run", async () => {
+    setCurrentActionContextResolver(() => ({
+      executionId: "e",
+      agentName: "main",
+      turnId: "turn-1",
+      channelContext: { channel: "email", threadId: "t1", romeSessionId: "session-1" },
+    }));
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      makeAdapter("email"),
+      { channel: "email", replyToMessageId: "msg_1", text: "reply" },
+      { chats },
+    );
+
+    expect(chats.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "t1",
+        sessionId: "session-1",
+        email: { inReplyToMessageId: "msg_1" },
+        turnId: "turn-1",
+        knownToProvider: true,
+      }),
+    );
+  });
+
   it("falls back to the channel and records the line when the host offers no send", async () => {
     const adapter = makeAdapter();
     const { send: _send, sendEmail: _sendEmail, ...legacy } = chatsWithWrites();

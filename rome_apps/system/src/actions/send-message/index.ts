@@ -185,7 +185,8 @@ async function sendThroughChats(
 /**
  * Send email `input` through Chats. A reply, on its thread or to a message,
  * goes as the session the caller names, or the run's own when it answers where
- * the run was asked, else as main's there. An email that names neither starts
+ * the run was asked, else as main's there. A reply to a message on the
+ * account the run answers on is taken to be on the run's thread. An email that names neither starts
  * a new thread to its recipients, as no session's.
  */
 async function emailThroughChats(
@@ -194,7 +195,14 @@ async function emailThroughChats(
   email: Parameters<NonNullable<ChatRepository["sendEmail"]>>[0]["email"],
 ): Promise<{ messageId: string | null; threadId: string }> {
   const current = getCurrentActionContext();
-  const threadId = input.threadId;
+  const ambient =
+    current?.channelContext?.channel === input.channel
+      ? current.channelContext.threadId
+      : undefined;
+  // A reply named by its message alone, sent while the run answers an email
+  // on this account, answers on the run's thread. The host refuses it, and
+  // sends nothing, when the message is in another thread.
+  const threadId = input.threadId ?? (email.inReplyToMessageId && ambient ? ambient : undefined);
   const reply = !!threadId || !!email.inReplyToMessageId;
   const sameAmbientConversation =
     !!threadId &&
