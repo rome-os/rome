@@ -2646,6 +2646,7 @@ describe("AgentRunner", () => {
         turnContext: context.active(),
       }));
       const session: AgentSession = {
+        selectModel: () => {},
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
         sessionId: "sess-1",
         status: "idle",

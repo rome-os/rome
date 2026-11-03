@@ -371,6 +371,7 @@
     }
   },
   "modelSwitch": {
+    "quota": "{{from}} 额度已用完，已切换到 {{to}}",
     "notice": "已切换到 {{model}}"
   },
   "modelSelector": {

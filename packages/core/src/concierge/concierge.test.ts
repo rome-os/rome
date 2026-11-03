@@ -11,8 +11,9 @@ import type { SessionToolContext } from "../core/session-tools.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
+import { readWebchatMessages } from "../channels/webchat.js";
 import { startConciergeEvents } from "./events.js";
-import { NUDGE_PROMPT } from "./nudge.js";
+import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import {
   CONCIERGE_ACCOUNT,
   CONCIERGE_AGENT_ID,
@@ -145,6 +146,9 @@ function setup(
     webchatRepo: {
       getSession: async (id: string) => sessions.get(id) ?? null,
       listSessions: async () => [...sessions.values()],
+      updateSessionLargeModelSelection: rs.fn(async (id: string, largeModelSelection: string) => {
+        sessions.set(id, { ...sessions.get(id), largeModelSelection });
+      }),
       updateSessionName: rs.fn(async (id: string, name: string) => {
         order.push("rename");
         sessions.set(id, { ...sessions.get(id), name });
@@ -193,6 +197,7 @@ function setup(
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
+    agentSessionManager: { peek: rs.fn(() => ({ selectModel: rs.fn() })) },
     aiToolState: {
       get: () => ({
         claude: { loggedIn: true, quotaExhausted: false },
@@ -1388,5 +1393,128 @@ describe("Concierge chat", () => {
     const { service, createSession } = serviceWith(codexOnly, true);
     expect(await service.ensureChatId()).toBe("concierge");
     expect(createSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Concierge quota failover", () => {
+  const state = () => ({
+    claude: { loggedIn: true, quotaExhausted: true },
+    codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+  });
+  it("stores a selection, changes a live session, and persists a pushed notice excluded from history", async () => {
+    const s = setup({ startEvents: false });
+    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
+    await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "claude-sonnet");
+    s.service.deps.webchatRepo = s.storedChats;
+    const raw = state();
+    s.deps.aiToolState.get = () => raw;
+    s.deps.sessionManager.findReusableSession = rs.fn(
+      async () => ({ provider: "openai" }) as never,
+    );
+    const selectModel = rs.fn();
+    s.deps.agentSessionManager.peek = rs.fn(() => ({ selectModel }) as never);
+    const inserted = rs.fn();
+    s.storedChats.onMessageInserted(inserted);
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toEqual({
+      from: "anthropic",
+      to: "openai",
+      selectionId: "gpt-6-luna",
+    });
+    expect(selectModel).toHaveBeenCalledWith("gpt-6-luna");
+    expect((await s.storedChats.getSession(CONCIERGE_CHAT))?.largeModelSelection).toBe(
+      "gpt-6-luna",
+    );
+    expect(inserted).toHaveBeenCalledTimes(1);
+    expect(JSON.parse((await s.storedChats.getMessages(CONCIERGE_CHAT))[0].content)).toEqual([
+      { type: "quota_switch", from: "anthropic", to: "openai", model: "gpt-6-luna" },
+    ]);
+    expect(await readWebchatMessages(s.storedChats, CONCIERGE_CHAT, new Date(0))).toEqual([]);
+    raw.claude.quotaExhausted = false;
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
+  });
+  it.each([
+    "both out",
+    "not exhausted",
+    "credits",
+    "reauth",
+    "api key",
+    "other chat",
+  ])("leaves %s alone", async (reason) => {
+    const s = setup({ startEvents: false });
+    const raw = state();
+    s.deps.aiToolState.get = () => raw;
+    if (reason === "both out") raw.codex.quotaExhausted = true;
+    if (reason === "not exhausted") raw.claude.quotaExhausted = false;
+    if (reason === "credits") raw.codex.loggedIn = false;
+    if (reason === "reauth") Object.assign(raw.codex, { needsReauth: true });
+    if (reason === "api key") Object.assign(raw.codex, { accountType: "api_key" });
+    expect(
+      await s.service.switchIfExhausted(reason === "other chat" ? "task-chat" : CONCIERGE_CHAT),
+    ).toBeNull();
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+  it("checks quota before a background system turn", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.aiToolState.get = state;
+    await s.service.runSystemTurn(CONCIERGE_CHAT, "check unfinished work");
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenCalledWith(
+      CONCIERGE_CHAT,
+      "gpt-6-luna",
+    );
+    expect(s.backendTurns).toEqual([
+      expect.objectContaining({ sessionId: "runtime-1", prompt: "check unfinished work" }),
+    ]);
+  });
+  it("uses the runtime provider before the sole-exhausted fallback", async () => {
+    const s = setup({ startEvents: false });
+    s.deps.aiToolState.get = state;
+    s.deps.sessionManager.findReusableSession = rs.fn(
+      async () => ({ provider: "openai" }) as never,
+    );
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
+    s.deps.sessionManager.findReusableSession = rs.fn(async () => undefined);
+    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
+      from: "anthropic",
+      to: "openai",
+    });
+  });
+  it("runs one recovery and never recovers the recovery, even across a slow settings read", async () => {
+    const s = setup({ settingsDelayMs: 10 });
+    const raw = state();
+    s.deps.aiToolState.get = () => raw;
+    s.onBackendTurn(() => {
+      raw.claude.quotaExhausted = false;
+      raw.codex.quotaExhausted = true;
+      if (s.backendTurns.length < 3)
+        void s.finish({
+          turnId: "recovery",
+          agentName: CONCIERGE_AGENT_ID,
+          chatId: CONCIERGE_CHAT,
+          status: "error",
+        });
+    });
+    await s.finish({
+      turnId: "quota",
+      agentName: CONCIERGE_AGENT_ID,
+      chatId: CONCIERGE_CHAT,
+      status: "error",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([quotaRecoveryPrompt("Claude")]);
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenCalledTimes(1);
+  });
+  it.each(["no flag", "per-model limit", "task chat"])("does not recover %s", async (reason) => {
+    const s = setup();
+    const switchModel = rs.spyOn(s.service, "switchIfExhausted");
+    await s.finish({
+      turnId: reason,
+      agentName: reason === "task chat" ? "main" : CONCIERGE_AGENT_ID,
+      chatId: reason === "task chat" ? "task-chat" : CONCIERGE_CHAT,
+      status: "error",
+    });
+    expect(s.backendTurns).toEqual([]);
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
+    if (reason === "task chat") expect(switchModel).not.toHaveBeenCalled();
   });
 });

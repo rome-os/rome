@@ -5,7 +5,7 @@
  * `send_message`, `channels.send`, a People send — strips them, so a forged card
  * can't bind those controls to a routine or schedule an arbitrary action.
  */
-const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set(["routine_draft_card"]);
+const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set(["routine_draft_card", "quota_switch"]);
 
 export function withoutHostOnlyParts<T extends { type: string }>(parts: readonly T[]): T[] {
   return parts.filter((part) => !HOST_ONLY_PART_TYPES.has(part.type));

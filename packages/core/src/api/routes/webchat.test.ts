@@ -1,3 +1,4 @@
+import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -195,6 +196,7 @@ describe("Webchat API", () => {
       },
     );
     const agent: AgentSession = {
+      selectModel: () => {},
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
@@ -3484,6 +3486,58 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("fails over only the Concierge pre-turn and leaves an ordinary quota failure unchanged", async () => {
+      mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.aiToolState, "get").mockReturnValue({
+        claude: { loggedIn: true, quotaExhausted: true },
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      });
+      deps.concierge = new ConciergeService({ ...deps } as unknown as ConciergeDeps);
+      const acquire = deps.agentSessionManager.acquire;
+      deps.agentSessionManager.acquire = rs.fn(
+        async (key: AgentSessionKey, init?: AgentSessionInit) => {
+          if (key.channelThreadKey === "webchat:ordinary-quota")
+            throw new ModelResolutionError("Claude quota exhausted", {
+              code: "model_provider_unavailable",
+              provider: "anthropic",
+              reason: "quota_exhausted",
+            });
+          return acquire(key, init);
+        },
+      );
+      const app = createWebchatRuntime(deps).routes;
+      for (const id of ["concierge", "ordinary-quota"]) {
+        await deps.webchatRepo.createSession(
+          id,
+          "Quota",
+          undefined,
+          undefined,
+          "claude-sonnet",
+          undefined,
+          id === "concierge" ? "core:concierge" : "main",
+        );
+        const sent = await app.request(`/chat/sessions/${id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        });
+        expect(sent.status).toBe(200);
+        const { turnId } = (await sent.json()) as { turnId: string };
+        const stream = await (await app.request(`/chat/turns/${turnId}/stream`)).text();
+        if (id === "ordinary-quota") expect(stream).toContain("quota_exhausted");
+        expect((await deps.webchatRepo.getSession(id))?.largeModelSelection).toBe(
+          id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+        );
+        expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            selectionId: id === "concierge" ? "gpt-6-luna" : "claude-sonnet",
+          }),
+        );
+      }
+    });
+
     it("stores an open chat's model pick and hands it to the next turn's acquire", async () => {
       await deps.settingsRepo.set("enableModelSelector", true);
       mockScriptedManager();
@@ -6289,7 +6343,7 @@ describe("Webchat API", () => {
   });
 });
 
-type FakeSession = Omit<AgentSession, "submitInput" | "runForkedTurn">;
+type FakeSession = Omit<AgentSession, "submitInput" | "runForkedTurn" | "selectModel">;
 
 /**
  * A manager over fake sessions that script only `sendTurn`. Every submitted
@@ -6315,6 +6369,7 @@ function fakeSessionManager(
 
 function withSubmitInput(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
+    selectModel: () => {},
     submitInput: (
       input: AgentTurnInput & { inputId: string },
       options: SubmitInputOptions,

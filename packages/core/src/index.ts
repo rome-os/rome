@@ -1033,6 +1033,7 @@ async function main() {
     sessionManager,
     aiToolState,
     messages: chatMessages,
+    agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),

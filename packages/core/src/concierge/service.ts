@@ -12,7 +12,14 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { SessionManager } from "../core/session-manager.js";
-import type { ModelSelectionId } from "../core/model-selector.js";
+import {
+  resolveWebchatLargeModelSelection,
+  WEBCHAT_LARGE_MODEL_SELECTIONS,
+  type ModelSelectionId,
+} from "../core/model-selector.js";
+import type { AgentSessionManager } from "../core/agent-session.js";
+import { quotaSwitchTarget, soleExhaustedProvider } from "../core/quota-switch.js";
+import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
@@ -64,6 +71,7 @@ export interface ConciergeDeps {
     | "getSession"
     | "listSessions"
     | "updateSessionName"
+    | "updateSessionLargeModelSelection"
     | "getTurnChatMessages"
     | "getReplyTarget"
     | "addBackendMessage"
@@ -76,6 +84,7 @@ export interface ConciergeDeps {
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };
+  agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
   runBackendTurn: (params: BackendTurnParams, options?: { quiet?: boolean }) => Promise<void>;
@@ -117,8 +126,8 @@ export class ConciergeService {
 
   /**
    * The Concierge chat's id. Creates the chat on first use; concurrent calls
-   * share one creation. Its model is picked once, here; the guardian changes
-   * it later with the chat's model picker.
+   * share one creation. The initial model is picked here; later selections
+   * and quota failover are stored on the chat.
    */
   async ensureChatId(): Promise<string> {
     if (await this.findChatId()) return CONCIERGE_CHAT_ID;
@@ -158,6 +167,39 @@ export class ConciergeService {
     return null;
   }
 
+  /**
+   * Moves the Concierge chat to the other subscription when its provider is
+   * flagged out of quota and the other is eligible, and records the notice.
+   * Null for any other chat, or when nothing moved.
+   */
+  async switchIfExhausted(chatId: string) {
+    if (chatId !== CONCIERGE_CHAT_ID) return null;
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat) return null;
+    const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
+    const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection)?.providerId;
+    const pinned =
+      selected ??
+      (await this.deps.sessionManager.findReusableSession(key.channelThreadKey, key.agentName))
+        ?.provider;
+    const state = this.deps.aiToolState.get();
+    const from = pinned ?? soleExhaustedProvider(state);
+    if (from !== "openai" && from !== "anthropic") return null;
+    const target = quotaSwitchTarget(state, from);
+    if (!target) return null;
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
+    this.deps.agentSessionManager.peek(key)?.selectModel(target.selectionId);
+    await this.deps.webchatRepo.addBackendMessage(chatId, randomUUID(), [
+      {
+        type: "quota_switch",
+        from,
+        to: target.provider,
+        model: WEBCHAT_LARGE_MODEL_SELECTIONS[target.selectionId].model,
+      },
+    ]);
+    return { from, to: target.provider, selectionId: target.selectionId };
+  }
+
   /** The runtime session id of the Concierge chat, or null before its first turn. */
   async runtimeSessionId(chatId: string): Promise<string | null> {
     const row = await this.deps.sessionManager.findReusableSession(
@@ -167,12 +209,13 @@ export class ConciergeService {
     return row?.id ?? null;
   }
 
-  /** Runs `prompt` as a system turn in the Concierge chat. A no-op before its first turn. */
+  /** Checks quota, then runs `prompt`. Without a runtime session, sends no turn. */
   async runSystemTurn(
     chatId: string,
     prompt: string,
     options: { quiet?: boolean } = {},
   ): Promise<void> {
+    await this.switchIfExhausted(chatId);
     const sessionId = await this.runtimeSessionId(chatId);
     if (!sessionId) return;
     await this.deps.runBackendTurn(

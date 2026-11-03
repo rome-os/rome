@@ -33,6 +33,7 @@ const REQUIRED_FIELDS = {
   interaction_result: { toolUseId: "string" },
   handback_approved: {},
   error: { error: "string" },
+  quota_switch: { from: "string", to: "string", model: "string" },
   task_chat: { chatId: "string", title: "string" },
   reply_to: { messageId: "string", author: "string", text: "string" },
 } satisfies {

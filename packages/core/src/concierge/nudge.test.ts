@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { shouldNudge } from "./nudge.js";
+import { quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 
 const base = { status: "completed" as const, text: "hi", reminderRunning: false };
 
@@ -16,4 +16,23 @@ describe("shouldNudge", () => {
     expect(shouldNudge({ ...base, status: "interrupted" })).toBe(false);
     expect(shouldNudge({ ...base, reminderRunning: true })).toBe(false);
   });
+});
+
+it("carries first-thread recovery instructions without relying on continuation", () => {
+  const prompt = quotaRecoveryPrompt("Claude");
+  for (const text of [
+    "Claude ran out of quota",
+    "system:fetch_channel_history",
+    "limit 20",
+    "this thread's channel and id",
+    "task_list",
+    "chat_list",
+    "actual state",
+    "verify",
+    "Do only what remains",
+    "ask the guardian rather than redo",
+    "say",
+    "done",
+  ])
+    expect(prompt).toContain(text);
 });
