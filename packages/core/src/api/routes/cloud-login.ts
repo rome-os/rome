@@ -3,18 +3,17 @@ import { hostname } from "node:os";
 import { verifyIdToken } from "@rome-os/libs/oidc";
 import { createPkce } from "@rome-os/libs/pkce";
 import { Hono, type Context } from "hono";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import {
-  COOKIE_NAME,
-  createGuardianSession,
-  issueGuardianSession,
-  shouldSecureCookie,
-} from "../../lib/auth.js";
+import { COOKIE_NAME, createGuardianSession, issueGuardianSession } from "../../lib/auth.js";
 import {
   createCloudGuardian,
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../lib/guardian-auth-state.js";
+import {
+  clearAttemptCookie,
+  readAttemptCookie,
+  setAttemptCookie,
+} from "../../lib/attempt-cookie.js";
 import { applySetupDefaults, defaultGuardianName } from "../../lib/guardian-profile.js";
 import {
   getInstanceToken,
@@ -104,34 +103,6 @@ function createPendingLogin(
   return { state, nonce, challenge: pkce.challenge, expiresAt };
 }
 
-function setLoginStateCookie(c: Context, state: string): void {
-  const secure = shouldSecureCookie(c.req.raw);
-  setCookie(c, LOGIN_STATE_COOKIE, state, {
-    httpOnly: true,
-    secure,
-    // Lax still sends it on Rome Cloud's top-level redirect back to the callback.
-    sameSite: "Lax",
-    path: "/",
-    maxAge: PENDING_TTL_MS / 1000,
-    ...(secure && { prefix: "host" as const }),
-  });
-}
-
-function readLoginStateCookie(c: Context): string | undefined {
-  return shouldSecureCookie(c.req.raw)
-    ? getCookie(c, LOGIN_STATE_COOKIE, "host")
-    : getCookie(c, LOGIN_STATE_COOKIE);
-}
-
-function clearLoginStateCookie(c: Context): void {
-  const secure = shouldSecureCookie(c.req.raw);
-  deleteCookie(c, LOGIN_STATE_COOKIE, {
-    path: "/",
-    secure,
-    ...(secure && { prefix: "host" as const }),
-  });
-}
-
 function sweepExpired(now: number): void {
   for (const [state, entry] of pending) {
     if (entry.expiresAt <= now) pending.delete(state);
@@ -185,7 +156,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     const redirectUri = new URL(CALLBACK_PATH, getInstanceOrigin()).toString();
 
     const attempt = createPendingLogin("browser", redirectUri);
-    setLoginStateCookie(c, attempt.state);
+    setAttemptCookie(c, LOGIN_STATE_COOKIE, attempt.state, PENDING_TTL_MS);
 
     const scope = getInstanceToken() === null ? "openid instance:enroll" : "openid";
 
@@ -338,11 +309,11 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     if (entry.expiresAt <= Date.now()) {
       return c.redirect(errorRedirect("expired"));
     }
-    if (readLoginStateCookie(c) !== state) {
+    if (readAttemptCookie(c, LOGIN_STATE_COOKIE) !== state) {
       log.warn("cloud login callback state not bound to this browser");
       return c.redirect(errorRedirect("state"));
     }
-    clearLoginStateCookie(c);
+    clearAttemptCookie(c, LOGIN_STATE_COOKIE);
     if (oauthError || !code) {
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.
@@ -365,7 +336,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           return c.redirect(errorRedirect("iss"));
         }
         if (deps.dashboardAccessState.hasCloudEmailAccess()) {
-          const authorizeUrl = beginDashboardVisitorFlow();
+          const authorizeUrl = beginDashboardVisitorFlow(c);
           if (authorizeUrl) {
             log.info("cloud login not-owner; dispatching to dashboard visitor flow");
             return c.redirect(authorizeUrl);

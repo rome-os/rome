@@ -840,6 +840,13 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     return app;
   }
 
+  // The dispatch binds the visitor attempt to this browser with its own cookie.
+  function visitorAttemptCookie(res: Response): string {
+    const cookie = res.headers.get("set-cookie")?.match(/rome_visitor_login_state=[^;]+/)?.[0];
+    expect(cookie).toBeTruthy();
+    return cookie as string;
+  }
+
   it("dispatches into the dashboard visitor flow and completes it end-to-end", async () => {
     insertGuardian({ accountId: "OWNER" });
     setInstanceTokenInMemory("romeinst_existing");
@@ -861,7 +868,9 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     expect(new URL(redirectUri as string).pathname).toBe("/api/auth/visitor/callback");
 
     const visitorState = authorizeUrl.searchParams.get("state") as string;
-    const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`);
+    const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`, {
+      headers: { cookie: visitorAttemptCookie(res) },
+    });
     expect(done.status).toBe(302);
     expect(done.headers.get("location")).toBe("/");
     expect(done.headers.get("set-cookie")).toContain(`${VISITOR_COOKIE_NAME}=`);
@@ -884,12 +893,14 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
       "state",
     ) as string;
 
-    const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`);
+    const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`, {
+      headers: { cookie: visitorAttemptCookie(res) },
+    });
     expect(done.status).toBe(302);
     const target = new URL(done.headers.get("location") as string, "https://rome.example.com");
     expect(`${target.pathname}${target.search}`).toBe("/login?visitor=error&reason=forbidden");
     expect(new URLSearchParams(target.hash.slice(1)).get("email")).toBe("stranger@example.com");
-    expect(done.headers.get("set-cookie")).toBeNull();
+    expect(done.headers.get("set-cookie") ?? "").not.toContain(`${VISITOR_COOKIE_NAME}=`);
   });
 
   it("surfaces not_owner when no dashboard allow-list exists", async () => {
