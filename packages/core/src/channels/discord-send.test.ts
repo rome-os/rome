@@ -49,27 +49,6 @@ describe("DiscordAdapter.send", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it("quotes the message a reply answers outside an auto-thread", async () => {
-    const channel = {
-      id: "discord-dm-1",
-      type: ChannelType.DM,
-      isTextBased: () => true,
-      isThread: () => false,
-      send: rs.fn().mockResolvedValue({ id: "m-2" }),
-    };
-    const adapter = new DiscordAdapter({ botToken: "test-token" });
-    Object.assign(adapter, {
-      client: { channels: { fetch: rs.fn().mockResolvedValue(channel) } },
-    });
-
-    await adapter.send(channel.id as ChatId, { text: "Yes.", replyToMessageId: "m-1" });
-
-    expect(channel.send).toHaveBeenCalledWith({
-      content: "Yes.",
-      reply: { messageReference: "m-1", failIfNotExists: true },
-    });
-  });
-
   it("refuses a message with nothing to send", async () => {
     const channel = {
       id: "discord-thread-1",

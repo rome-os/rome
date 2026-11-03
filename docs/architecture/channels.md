@@ -19,7 +19,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
   - `empty`: the message has no text and no attachment.
   - `part_unsupported`: the message has a part the channel cannot show. A text platform shows `text` parts and nothing else.
   - `attachment_unsupported`: the message has an attachment the channel cannot carry.
-  - `reply_unaddressable`: the message's `replyToMessageId` names a message the channel cannot quote.
+  - `reply_unaddressable`: the message's `replyToMessageId` names a message the channel cannot find to answer. A platform with no quoting at all, such as WhatsApp or WeChat, answers in place instead.
 
   The caller decides what a refusal means. An approval card is left out on a channel that cannot show one. An agent's reply that cannot quote the message it answers fails.
 - An inbound event carries its chat's `ChatRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.

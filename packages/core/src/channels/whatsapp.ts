@@ -29,7 +29,7 @@ import {
 
 import { readFile } from "node:fs/promises";
 import { createLogger } from "../logger.js";
-import { refuseReplies, textToSend } from "./send-refusals.js";
+import { textToSend } from "./send-refusals.js";
 
 const log = createLogger("whatsapp");
 
@@ -420,7 +420,6 @@ export class WhatsAppAdapter {
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
     const text = textToSend("whatsapp", message);
-    refuseReplies("whatsapp", message);
     const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
 

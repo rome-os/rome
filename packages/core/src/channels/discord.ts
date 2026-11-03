@@ -1405,22 +1405,13 @@ Use \`/channel agent clear\` to undo.`,
     const autoThread = snapshot?.effective.replies.placement !== "inline";
 
     // For regular guild text channels, reply inside a thread to avoid flooding the channel
-    // Elsewhere a reply quotes the message it answers, so the quote is never
-    // dropped.
     let targetChannel: SendableChannel;
-    let quote: string | undefined;
     if (message.replyToMessageId && channel.type === ChannelType.GuildText && autoThread) {
       const textChannel = channel as TextChannel;
       targetChannel = await this.getOrCreateThread(textChannel, message.replyToMessageId);
     } else {
       targetChannel = channel as SendableChannel;
-      quote = message.replyToMessageId;
     }
-    const reply = () => {
-      const answered = quote;
-      quote = undefined;
-      return answered ? { reply: { messageReference: answered, failIfNotExists: true } } : {};
-    };
 
     try {
       let messageId: string | undefined;
@@ -1429,13 +1420,13 @@ Use \`/channel agent clear\` to undo.`,
         // Discord has a 2000 character limit per message
         const chunks = splitMessage(text);
         for (const chunk of chunks) {
-          const sent = await targetChannel.send({ content: chunk, ...reply() });
+          const sent = await targetChannel.send({ content: chunk });
           messageId ??= sent.id;
         }
       }
 
       for (const att of message.attachments ?? []) {
-        const attachmentMessageId = await this.sendAttachment(targetChannel, att, reply());
+        const attachmentMessageId = await this.sendAttachment(targetChannel, att);
         messageId ??= attachmentMessageId;
       }
 
@@ -1532,11 +1523,7 @@ Use \`/channel agent clear\` to undo.`,
     return attachments;
   }
 
-  private async sendAttachment(
-    channel: SendableChannel,
-    att: OutgoingAttachment,
-    reply: { reply?: { messageReference: string; failIfNotExists: boolean } } = {},
-  ): Promise<string> {
+  private async sendAttachment(channel: SendableChannel, att: OutgoingAttachment): Promise<string> {
     const isUrl = att.source.startsWith("http");
     const file = isUrl
       ? new AttachmentBuilder(att.source, { name: basename(att.source) })
@@ -1545,7 +1532,6 @@ Use \`/channel agent clear\` to undo.`,
     const sent = await channel.send({
       content: att.caption,
       files: [file],
-      ...reply,
     });
     return sent.id;
   }
