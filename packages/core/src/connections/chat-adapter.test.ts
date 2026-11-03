@@ -21,6 +21,7 @@ import {
   type Inbound,
   isDirectMessage,
   lineAt,
+  lineHolder,
   kindNamedBy,
   platformIdOfLine,
   sentLineId,
@@ -94,6 +95,15 @@ describe("chat adapter keys", () => {
     expect(lineAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
     expect(platformIdOfLine(basic, "rome_bot", "rome_bot:7")).toBe("7");
     expect(sentLineId(basic, "rome_bot", "8")).toBe("rome_bot:8");
+  });
+
+  it("name the account holding each line only where each account holds its own copy", () => {
+    const holder = lineHolder("telegram", "-42");
+    expect(holder?.(lineAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
+    expect(holder?.("7")).toBeNull();
+    expect(lineHolder("telegram", "-1001234567890123")).toBeNull();
+    expect(lineHolder("telegram", "dm:rome_bot:alice")).toBeNull();
+    expect(lineHolder("discord", "-42")).toBeNull();
   });
 
   it("quote no line in a basic group that only another of Rome's accounts holds", () => {

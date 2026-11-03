@@ -101,6 +101,18 @@ describe("emailChatAdapter", () => {
     });
   });
 
+  it("refuse a reply to a line it holds no provider id for, and send nothing", async () => {
+    const { channel, sent } = fakeMail();
+    const adapter = emailChatAdapter(channel, deps());
+    const chat = adapter.open({ to: "wei@example.com" }, "Plans");
+    await adapter.send(chat.externalId, null, { text: "hello" });
+
+    await expect(
+      adapter.send(chat.externalId, null, { text: "again", replyTo: "rome:local-1" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    expect(sent).toHaveLength(1);
+  });
+
   it("start a thread once when two messages go into it together", async () => {
     const { channel, sent } = fakeMail();
     let release = () => {};

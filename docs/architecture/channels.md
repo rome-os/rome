@@ -21,7 +21,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
   - `attachment_unsupported`: the message has an attachment the channel cannot carry.
   - `reply_unaddressable`: the message's `replyToMessageId` names a message the channel cannot find to answer. A platform with no quoting at all, such as WhatsApp or WeChat, answers in place instead.
 
-  The caller decides what a refusal means. An approval card is left out on a channel that cannot show one. An agent's reply that cannot quote the message it answers fails.
+  A refusal is never swallowed. An approval card a channel cannot show rejects, and the action engine logs it as an error without failing the turn. An agent's reply that cannot quote the message it answers fails.
 - An inbound event carries its chat's `ChatRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.
 - An inbound event's message is a `ChannelMessage`, the record `messages` answers: it names the channel and says it came inbound.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
@@ -42,6 +42,7 @@ Chats will record a chat and its messages under integer ids of its own, and keep
 - A chat's key is the platform's own id for it, and a message's key is the platform's id for the message. The dashboard gives its chats and messages random keys.
 - A direct message's key names its two ends, `dm:<Rome's account>:<other account>` ([Chat](../domains/chats.md#chat)). Where the platform addresses a direct message by the other party (Telegram, WhatsApp), the other end is that address. Email and Rome Cloud chats keep their own ids.
 - A Telegram basic group numbers messages per member account, so its message keys carry Rome's account in front (`ownedBy`).
+- Which of Rome's accounts holds a line there is the adapter's answer too (`lineHolder` in [`connections/chat-adapter.ts`](../../packages/core/src/connections/chat-adapter.ts)). Catch-up and the dashboard transcript ask it to tell one account's copy of a message from another's, and never split a key themselves.
 - Only the channels layer imports these rules, and no other code spells a key.
 - Where a chat's key is not where an account reaches it, as for a direct message Feishu or Discord gives an id of its own, the adapter keeps the address in `chat_addresses` through [`ChatAddresses`](../../packages/core/src/connections/chat-addresses.ts), by Rome's account and the chat's key. A thread's address is kept the same way under its chat's key. No adapter writes it yet.
 

@@ -6,19 +6,22 @@ import { ChannelSendRefused, type OutgoingMessage } from "@rome-os/app-runtime";
 
 /**
  * The text a channel named `channel`, which shows text and no other part,
- * sends for `message`: its `text`, else its text parts. Refuses a part of any
- * other type, and a message with no text and no attachment.
+ * sends for `message`: its `text` when it has any, else its text parts.
+ * Refuses a part of any other type, and a message with no text and no
+ * attachment.
  */
 export function textToSend(channel: string, message: OutgoingMessage): string {
   refuseUnshownParts(channel, message);
   const parts = message.parts ?? [];
-  const text =
-    message.text ??
-    parts.flatMap((part) => (part.type === "text" ? [part.content] : [])).join("\n\n");
-  if (!text.trim() && !message.attachments?.length) {
+  const text = message.text?.trim()
+    ? message.text
+    : parts.flatMap((part) => (part.type === "text" ? [part.content] : [])).join("\n\n");
+  if (text.trim()) return text;
+  if (!message.attachments?.length) {
     throw new ChannelSendRefused("empty", `A message to ${channel} needs text or an attachment`);
   }
-  return text;
+  // Blank text says nothing, so the attachments go out alone.
+  return "";
 }
 
 /** Refuses any attachment, on a channel named `channel` that carries none. */

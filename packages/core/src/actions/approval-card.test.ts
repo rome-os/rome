@@ -48,7 +48,7 @@ describe("sendApprovalCard", () => {
     });
   });
 
-  it("leaves out the card on a channel that cannot show one", async () => {
+  it("rejects with the refusal of a channel that cannot show a card", async () => {
     const target = channels(true);
     target.send.mockRejectedValue(
       new ChannelSendRefused("part_unsupported", "telegram_user shows text only"),
@@ -59,7 +59,7 @@ describe("sendApprovalCard", () => {
         ...approval,
         channelContext: { channel: "telegram_user", threadId: "t1" },
       } as never),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
   });
 
   it("sends nothing without a conversation or on a channel that cannot send", async () => {

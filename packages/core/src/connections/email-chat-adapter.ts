@@ -13,7 +13,7 @@ import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
 import { v7 as uuidv7 } from "uuid";
 import {
   channelAdapter,
-  platformIdOfLine,
+  quotable,
   sentLineId,
   type ChannelAdapterDeps,
   type ChannelChatAdapter,
@@ -144,6 +144,7 @@ export function emailChatAdapter(
     async send(key, _threadId, out) {
       const own = account();
       const ref = chatKey(own.platform, key as ChatId);
+      const replyTo = quotable(ref, own.id, out.replyTo);
       const body = {
         kind: "email" as const,
         text: out.text,
@@ -199,7 +200,6 @@ export function emailChatAdapter(
           starting.delete(key);
         }
       }
-      const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
       const at = started.get(key) ?? addresses.addressOf(own, key) ?? key;
       const receipt = await port().send(at as ChatId, {
         ...body,
