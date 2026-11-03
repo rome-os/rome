@@ -562,4 +562,59 @@ describe("ChatsWebChatRepository", () => {
     expect(await repo.updateSessionNameIfCurrent("chat-1", "Lisbon trip", "Porto trip")).toBe(true);
     expect(chatName()).toBe("Porto trip");
   });
+
+  // The list, search and unread count read lines said only in Chats: nothing
+  // below has a row in rome_agent_messages but its trace.
+  it("lists a chat with its line count and a card that waits on the guardian", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Pick a date"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.addMessage(
+      "out-1",
+      "chat-1",
+      "assistant",
+      JSON.stringify([{ type: "pending_interaction", id: "q-1" }]),
+      "turn-1",
+    );
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+
+    const [listed] = await repo.listSessions();
+    expect(listed).toMatchObject({ id: "chat-1", messageCount: 3, awaitingGuardian: true });
+  });
+
+  it("finds a chat by what was said in it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.createSession("chat-2", "Other");
+    await repo.addMessage("out-1", "chat-1", "assistant", text("The ferry leaves at noon"));
+    await repo.addMessage("out-2", "chat-2", "assistant", text("Nothing about boats"));
+
+    const matches = await repo.searchSessionMessages("ferry NOON");
+    expect(
+      matches.map((match) => [match.session.id, match.message.id, match.message.role]),
+    ).toEqual([["chat-1", "out-1", "assistant"]]);
+    expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
+  });
+
+  it("counts the lines from Rome since the chat was last read, up to a cap", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.markSessionRead("chat-1");
+      rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
+      for (const id of ["out-1", "out-2", "out-3"]) {
+        await repo.addMessage(id, "chat-1", "assistant", text(id));
+      }
+
+      expect(await repo.countUnreadAgentMessages("chat-1", 10)).toBe(3);
+      expect(await repo.countUnreadAgentMessages("chat-1", 2)).toBe(2);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
 });

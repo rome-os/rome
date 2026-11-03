@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { latestDynamic, type StreamAccount } from "@rome/api-types/people";
-import { channels as channelRows, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { channels as channelRows } from "../db/schema.js";
 import {
   buildTestDeps,
   countingDb,
@@ -19,6 +19,7 @@ import {
   type TestDeps,
 } from "../test/helpers.js";
 import { seedBaseline } from "../test/seeds.js";
+import { sayOnChannel } from "../test/speakers.js";
 import { readAccountStream } from "./account-directory.js";
 import { readPersonTimeline } from "./timeline.js";
 import { channelList } from "../channels/channel-list.js";
@@ -36,7 +37,6 @@ const TRIAGED = "tg-triaged";
 const TRANSCRIBED = "tg-transcribed";
 
 const at = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
-const line = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
 describe("readAccountStream", () => {
   let testDb: TestDb;
@@ -95,23 +95,12 @@ describe("readAccountStream", () => {
       approved: true,
       links: [{ platform: "telegram", id: TRANSCRIBED }],
     });
-    await testDb.db.insert(romeSessions).values({
-      id: "s-transcribed",
-      name: "s-transcribed",
-      type: "channel",
-      sourceChannel: "telegram",
-      sourceThreadId: TRANSCRIBED,
-      sourceThreadType: "private",
-      createdAt: new Date(0),
-      activityAt: new Date(0),
-    });
-    await testDb.db.insert(romeAgentMessages).values({
-      id: "m-transcribed",
-      sessionId: "s-transcribed",
-      role: "user",
-      content: line("only Rome's transcript holds this"),
-      senderId: null,
-      createdAt: new Date("2026-08-18T09:00:00Z"),
+    sayOnChannel(deps, {
+      channel: "telegram",
+      address: TRANSCRIBED,
+      key: "m-transcribed",
+      text: "only Rome's transcript holds this",
+      at: new Date("2026-08-18T09:00:00Z"),
     });
   });
 
@@ -301,31 +290,13 @@ describe("readAccountStream", () => {
     // Rome's own stores under each of the platform's seven channels. One of
     // them spoke to the newest released account.
     const last = jid(CONTACTS - 1);
-    const sessionId = `wa-released-${RELEASED - 1}:${last}`;
-    testDb.db
-      .insert(romeSessions)
-      .values({
-        id: sessionId,
-        name: sessionId,
-        type: "channel",
-        sourceChannel: `wa-released-${RELEASED - 1}`,
-        sourceThreadId: last,
-        sourceThreadType: "private",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    testDb.db
-      .insert(romeAgentMessages)
-      .values({
-        id: "m-released",
-        sessionId,
-        role: "user",
-        content: JSON.stringify([{ type: "text", content: "said to a released account" }]),
-        senderId: last,
-        createdAt: new Date(1_000_000),
-      })
-      .run();
+    sayOnChannel(deps, {
+      channel: `wa-released-${RELEASED - 1}`,
+      address: last,
+      key: "m-released",
+      text: "said to a released account",
+      at: new Date(1_000_000),
+    });
 
     const stream = await readAccountStream(deps);
 

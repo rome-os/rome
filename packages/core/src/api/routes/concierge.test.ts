@@ -6,6 +6,7 @@ import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { romeAgentMessages } from "../../db/schema.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
@@ -30,7 +31,8 @@ describe("GET /concierge/session", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    webchatRepo = new WebChatRepository(testDb.db);
+    // The repository production wires: what Rome says lands in Chats.
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
     enabled = true;
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));

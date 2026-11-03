@@ -153,6 +153,7 @@ import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
 import { resolveSessionPolicy } from "./core/session-policy.js";
 import { ConciergeService } from "./concierge/service.js";
+import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -1058,7 +1059,8 @@ async function main() {
     webchatRepo,
     sessionManager,
     aiToolState,
-    messages: chatMessages,
+    // Task chats are read from Chats, where their lines are now said.
+    messages: chatsTaskChatMessages(db),
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
@@ -1923,6 +1925,7 @@ async function main() {
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
+      transcript: "chats",
       accountNames,
       assistants: listedAgents,
       webchatRepo,

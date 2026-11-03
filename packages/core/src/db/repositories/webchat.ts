@@ -764,6 +764,16 @@ export class WebChatRepository {
 
   constructor(protected readonly db: DrizzleDb) {}
 
+  /** How many lines a listed session holds, as a column of its row. */
+  protected readonly messageCountColumn: SQL<number> = sessionSelectFields.messageCount;
+  /** Whether a listed session waits on the guardian, as a column of its row. */
+  protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
+
+  /** The columns a listed session is read with. */
+  protected sessionFields() {
+    return { ...sessionSelectFields, messageCount: this.messageCountColumn };
+  }
+
   /** Set by {@link leaveOutOfCatchUp}. */
   private wakeUndecided: (messageId: string) => boolean = () => false;
 
@@ -1870,9 +1880,9 @@ export class WebChatRepository {
           : undefined;
     return this.db
       .select({
-        ...sessionSelectFields,
+        ...this.sessionFields(),
         lastTurnFailed: sessionLastTurnFailed,
-        awaitingGuardian: sessionAwaitingGuardian,
+        awaitingGuardian: this.awaitingGuardianColumn,
       })
       .from(romeSessions)
       .where(
@@ -1910,7 +1920,7 @@ export class WebChatRepository {
         sql`lower(${romeAgentMessages.content}) LIKE ${`%${escapeSqlLikePattern(term)}%`} ESCAPE ${SQL_LIKE_ESCAPE}`,
     );
     const rows = await this.db
-      .select({ message: webchatMessageSelectFields, session: sessionSelectFields })
+      .select({ message: webchatMessageSelectFields, session: this.sessionFields() })
       .from(romeAgentMessages)
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
       .where(
@@ -2015,7 +2025,7 @@ export class WebChatRepository {
     const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
 
     const rows = await this.db
-      .select(sessionSelectFields)
+      .select(this.sessionFields())
       .from(romeSessions)
       .where(and(...predicates))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id))
@@ -2059,7 +2069,7 @@ export class WebChatRepository {
     const predicates = [isWebchatChat, cursorPredicate];
 
     const rows = await this.db
-      .select(sessionSelectFields)
+      .select(this.sessionFields())
       .from(romeSessions)
       .where(and(...predicates))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id))

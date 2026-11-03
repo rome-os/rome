@@ -33,6 +33,7 @@ import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
+import { ChatReadModel, chatsSessionAwaitingGuardian } from "./chat-read-model.js";
 import {
   isSessionTraceArchived,
   sessionTraceCutoff,
@@ -55,6 +56,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
   private readonly chats: ChatRepository;
   private readonly lines: MessageRepository;
   private readonly links: TurnLinks;
+  private readonly reads: ChatReadModel;
 
   constructor(
     db: DrizzleDb,
@@ -64,6 +66,55 @@ export class ChatsWebChatRepository extends WebChatRepository {
     this.chats = deps.chats ?? new ChatRepository(db);
     this.lines = deps.lines ?? new MessageRepository(db);
     this.links = deps.links ?? new TurnLinks(db, this.lines);
+    this.reads = new ChatReadModel(db, { messages: this.lines, links: this.links });
+  }
+
+  // A listed session counts and waits on the lines its transcript draws.
+  protected override readonly messageCountColumn = chatsSessionMessageCount;
+  protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
+
+  /** Searches the dashboard chats' lines in Chats, at most one match per
+   *  chat, most recent first. */
+  override async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
+    const hits = await this.reads.search(query, Math.max(1, options.sessionLimit ?? 20));
+    if (hits.length === 0) return [];
+    const sessions = new Map(
+      (
+        await this.db
+          .select(this.sessionFields())
+          .from(romeSessions)
+          .where(
+            and(
+              inArray(
+                romeSessions.id,
+                hits.map((hit) => hit.chatId),
+              ),
+              isWebchatChat,
+            ),
+          )
+      ).map((session) => [session.id, session]),
+    );
+    return hits.flatMap((hit) => {
+      const session = sessions.get(hit.chatId);
+      if (!session) return [];
+      return [
+        {
+          session,
+          message: {
+            id: hit.messageId,
+            role: hit.role,
+            createdAt: hit.createdAt,
+            snippet: hit.snippet,
+          },
+        },
+      ];
+    });
+  }
+
+  /** How many lines from Rome the session's chat got since the guardian
+   *  last read it, counting at most `cap`. */
+  override async countUnreadAgentMessages(id: string, cap: number): Promise<number> {
+    return await this.reads.unreadCount(id, cap);
   }
 
   override async createSession(...args: Parameters<WebChatRepository["createSession"]>) {
@@ -779,3 +830,21 @@ export function sessionLines(sessionIds: readonly string[]) {
         AND s.chat_platform IS NOT ${WEBCHAT_PLATFORM})
   )`;
 }
+
+/**
+ * How many lines the session in the current `rome_sessions` row draws, as
+ * {@link sessionLines} does: what was said where it stands since it started
+ * there, and its own rows that Chats does not hold. For a select over
+ * `rome_sessions`.
+ */
+const chatsSessionMessageCount = sql<number>`((
+  select count(*) from ${CHAT_LINES} m
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+    and m."said_at" >= "rome_sessions"."created_at"
+) + (
+  select count(*) from "rome_agent_messages" r
+  where r."session_id" = "rome_sessions"."id"
+    and ("rome_sessions"."chat_id" is null or r."role" not in ('user', 'assistant'))
+    and not (r."role" = 'notification' and "rome_sessions"."chat_id" is not null
+      and "rome_sessions"."chat_platform" is not ${WEBCHAT_PLATFORM})
+))`.mapWith(Number);

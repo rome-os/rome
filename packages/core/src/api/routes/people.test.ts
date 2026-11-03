@@ -11,7 +11,8 @@ import {
 import { peopleRoutes } from "./people.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { channels as channelRows, romeAgentMessages } from "../../db/schema.js";
+import { sayOnChannel } from "../../test/speakers.js";
+import { channels as channelRows } from "../../db/schema.js";
 
 // GET /people/:id/messages — one person's history merged across every account
 // they are linked to. These tests pin what the merge answers over real stores:
@@ -24,7 +25,6 @@ const TG_THREAD = "tg-timeline";
 const GROUP_THREAD = "tg-group-timeline";
 
 const at = (iso: string) => new Date(iso);
-const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
 /** An account's naming, and only that. The assertions that use it are about
  *  which name a channel puts on an account; whether Rome can send there and
@@ -43,7 +43,6 @@ describe("People timeline API", () => {
   let deps: TestDeps;
   let app: Hono;
   let personId: string;
-  let telegramSessionId: string;
 
   beforeEach(async () => {
     testDb = createTestDb();
@@ -110,30 +109,22 @@ describe("People timeline API", () => {
       },
     ]);
 
-    // Telegram: no mirror, so her direct conversation is the channel session's
-    // own transcript.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    // Telegram: no mirror, so her direct conversation is Rome's own, in Chats.
+    sayOnChannel(deps, {
       channel: "telegram",
-      threadId: TG_THREAD,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "user",
-      content: textContent("did you see the invite"),
-      platformMessageId: "tg-100",
-      senderId: TG_THREAD,
+      address: TG_THREAD,
+      key: "tg-100",
       senderName: "Nadia Cross",
-      createdAt: at("2026-08-03T08:00:00Z"),
+      text: "did you see the invite",
+      at: at("2026-08-03T08:00:00Z"),
     });
-    telegramSessionId = conversation.id;
-    await testDb.db.insert(romeAgentMessages).values({
-      id: "tg-100-reply",
-      sessionId: conversation.id,
-      role: "assistant",
-      content: textContent("just did — replying now"),
-      createdAt: at("2026-08-03T08:01:00Z"),
+    sayOnChannel(deps, {
+      channel: "telegram",
+      address: TG_THREAD,
+      key: "tg-100-reply",
+      fromRome: true,
+      text: "just did — replying now",
+      at: at("2026-08-03T08:01:00Z"),
     });
   });
 
@@ -210,13 +201,12 @@ describe("People timeline API", () => {
         hasMedia: false,
       },
     ]);
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: telegramSessionId,
-      role: "user",
-      content: textContent("telegram inbound"),
-      platformMessageId: "tg-tie",
-      senderId: TG_THREAD,
-      createdAt: collide,
+    sayOnChannel(deps, {
+      channel: "telegram",
+      address: TG_THREAD,
+      key: "tg-tie",
+      text: "telegram inbound",
+      at: collide,
     });
 
     const whole = (await fetchTimeline(personId)).entries;
@@ -277,19 +267,12 @@ describe("People timeline API", () => {
     // own transcript of the channel session, and by the sentinel that triaged
     // it. Production stores the same words in all three; the wording differs
     // here only so the assertion can say which store answered.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "whatsapp",
-      threadId: WA_JID,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: textContent("as the transcript has it"),
-      platformMessageId: "wa-old",
-      senderId: WA_JID,
-      createdAt: at("2026-08-01T09:00:02Z"),
+      address: WA_JID,
+      key: "wa-old",
+      text: "as the transcript has it",
+      at: at("2026-08-01T09:00:02Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "wa-old",
@@ -317,19 +300,12 @@ describe("People timeline API", () => {
       approved: true,
       links: [{ platform: "telegram", id: "tg-both" }],
     });
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "telegram",
-      threadId: "tg-both",
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: textContent("as the transcript has it"),
-      platformMessageId: "tg-800",
-      senderId: "tg-both",
-      createdAt: at("2026-08-04T08:00:00Z"),
+      address: "tg-both",
+      key: "tg-800",
+      text: "as the transcript has it",
+      at: at("2026-08-04T08:00:00Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "tg-800",
@@ -699,19 +675,12 @@ describe("People API", () => {
     // The mirror, Rome's own transcript of the channel session, and the
     // sentinel that triaged it all hold the same WhatsApp message. Adding them
     // would treble the number beside her name.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "whatsapp",
-      threadId: NADIA_JID,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: JSON.stringify([{ type: "text", content: "as the transcript has it" }]),
-      platformMessageId: "wa-n1",
-      senderId: NADIA_JID,
-      createdAt: at("2026-08-10T09:00:02Z"),
+      address: NADIA_JID,
+      key: "wa-n1",
+      text: "as the transcript has it",
+      at: at("2026-08-10T09:00:02Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "wa-n1",

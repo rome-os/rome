@@ -7,6 +7,11 @@ import type { DrizzleDb } from "../db/index.js";
 import { chatMessages, chats, romeSessions } from "../db/schema/system.js";
 import type { ChatKind } from "../chats/storage/chat.js";
 import type { ChatRef } from "../chats/storage/place.js";
+import type { Account } from "@rome-os/app-runtime";
+import type { PlatformOfChannel } from "../channels/channel.js";
+import { chatAt, directMessageAt } from "../connections/chat-adapter.js";
+import { ChatAddresses } from "../connections/chat-addresses.js";
+import { romeAccountsOn } from "../people/timeline-sources.js";
 
 type SessionRow = typeof romeSessions.$inferInsert;
 
@@ -95,4 +100,68 @@ export function speakerFixture(db: DrizzleDb) {
       return row.id;
     },
   };
+}
+
+/**
+ * Say a line where Rome's account on `channel` talks with the party at
+ * `address`, as that channel's inbound and Rome's sends record it in Chats:
+ * in their direct message, or in the group keyed `address` for a group. A
+ * line from Rome is said by its main agent. For tests that read what People
+ * reads.
+ */
+export function sayOnChannel(
+  deps: {
+    db: DrizzleDb;
+    platformOfChannel: PlatformOfChannel;
+    accountOf?: (channel: string) => Account | null;
+  },
+  line: {
+    channel: string;
+    address: string;
+    kind?: ChatKind;
+    /** The line's key in its chat: the platform's id for the message. */
+    key: string;
+    fromRome?: boolean;
+    /** Who said a line not from Rome, the party at `address` when absent. */
+    senderId?: string;
+    senderName?: string;
+    text: string;
+    at: Date;
+  },
+): number {
+  const account = romeAccountsOn(deps, line.channel)[0]!;
+  const kind = line.kind ?? "dm";
+  const key =
+    kind === "dm"
+      ? directMessageAt(account, line.address, new ChatAddresses(deps.db))
+      : chatAt(account.platform, line.address);
+  const fixture = speakerFixture(deps.db);
+  const chat = fixture.chat(key.platform, key.externalId, kind);
+  // Rome's speaker there, as the channel's first line placed it.
+  deps.db
+    .insert(romeSessions)
+    .values({
+      id: `${line.channel}:${line.address}`,
+      name: line.address,
+      type: "channel",
+      sourceChannel: line.channel,
+      sourceThreadId: line.address,
+      sourceThreadType: kind === "dm" ? "private" : "group",
+      chatId: chat.id,
+      chatPlatform: chat.platform,
+      accountId: account.id,
+      createdAt: new Date(0),
+      activityAt: new Date(0),
+    })
+    .onConflictDoNothing()
+    .run();
+  return fixture.say({
+    id: line.key,
+    chat,
+    from: line.fromRome ? account.id : (line.senderId ?? line.address),
+    agent: line.fromRome ? "main" : null,
+    name: line.senderName ?? null,
+    text: line.text,
+    at: line.at,
+  });
 }
