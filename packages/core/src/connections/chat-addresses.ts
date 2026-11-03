@@ -68,29 +68,34 @@ export class ChatAddresses {
    * both hold is kept once, as the one the chat keyed `to` holds.
    */
   rekey(account: Account, from: string, to: string, kind?: "group" | "dm"): void {
-    this.db.transaction((tx) => {
-      const keyed = (key: string) =>
-        tx
-          .select({ id: chats.id })
-          .from(chats)
-          .where(and(eq(chats.platform, account.platform), eq(chats.key, key)))
-          .get()?.id;
-      const taken = keyed(to);
-      const moving = keyed(from);
-      if (taken === undefined) {
-        tx.update(chats)
-          .set({ key: to, ...(kind ? { kind } : {}) })
-          .where(and(eq(chats.platform, account.platform), eq(chats.key, from)))
-          .run();
-      } else if (moving !== undefined) {
-        joinChat(tx, moving, taken);
-        if (kind) tx.update(chats).set({ kind }).where(eq(chats.id, taken)).run();
-      }
-      tx.run(sql`
+    // The write lock is taken before the reads: another connection's
+    // write between a read and the first write here would fail the rekey.
+    this.db.transaction(
+      (tx) => {
+        const keyed = (key: string) =>
+          tx
+            .select({ id: chats.id })
+            .from(chats)
+            .where(and(eq(chats.platform, account.platform), eq(chats.key, key)))
+            .get()?.id;
+        const taken = keyed(to);
+        const moving = keyed(from);
+        if (taken === undefined) {
+          tx.update(chats)
+            .set({ key: to, ...(kind ? { kind } : {}) })
+            .where(and(eq(chats.platform, account.platform), eq(chats.key, from)))
+            .run();
+        } else if (moving !== undefined) {
+          joinChat(tx, moving, taken);
+          if (kind) tx.update(chats).set({ kind }).where(eq(chats.id, taken)).run();
+        }
+        tx.run(sql`
         UPDATE OR REPLACE chat_addresses SET chat_key = ${to}
         WHERE platform = ${account.platform} AND chat_key = ${from}
       `);
-    });
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /** The key of the chat `account` reaches at `address`, or null when it

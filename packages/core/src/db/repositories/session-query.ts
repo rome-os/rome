@@ -295,14 +295,18 @@ interface ChatsLineCountRow {
  * What the transcript of each of sessions `ids` holds, read from Chats: its
  * own rows in `rome_agent_messages` that Chats does not hold (`own`), and the
  * lines said where its speaker stands since it joined (`lines`), with where
- * that is. A session in a chat keeps only traces of its own; one in no chat
- * keeps its prompts and answers too.
+ * that is. A session in a chat keeps only traces of its own, and a dashboard
+ * chat its notices too; one in no chat keeps its prompts and answers too.
  */
 function chatsLineCounts(ids: readonly string[]): SQL {
   return sql`SELECT s.id AS id,
     (SELECT count(*) FROM rome_agent_messages t
       WHERE t.session_id = s.id
-        AND (s.chat_id IS NULL OR t.role NOT IN ('user', 'assistant', 'notification'))) AS own,
+        AND (s.chat_id IS NULL OR t.role NOT IN ('user', 'assistant'))
+        -- A channel chat's notifications are its lines in Chats; only the
+        -- dashboard ('webchat') keeps notices of its own.
+        AND NOT (t.role = 'notification' AND s.chat_id IS NOT NULL
+          AND s.chat_platform IS NOT 'webchat')) AS own,
     (SELECT count(*) FROM ${CHAT_MESSAGES} m
       WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
         AND m.said_at >= s.created_at) AS lines,
