@@ -849,7 +849,11 @@ function chatOf(
   if (message.parentChatId !== undefined) {
     return { key: chatKey(platform, message.parentChatId), kind: "group" };
   }
-  if (message.thread?.kind !== "dm")
+  // Where the address says which it is, it wins over the message's hint: a
+  // Telegram account's live message names no kind, so it reads as a group
+  // even in a private chat.
+  const named = platform === "telegram" ? kindNamedBy(platform, message.chatId) : null;
+  if ((named ?? message.thread?.kind) !== "dm")
     return { key: chatKey(platform, message.chatId), kind: "group" };
   return {
     key: directMessageOn(platform, romeEnd, message.chatId, message.senderId),

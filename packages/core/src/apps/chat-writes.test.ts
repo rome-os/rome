@@ -416,6 +416,30 @@ describe("appChatWrites", () => {
       expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
     });
 
+    it("credits a new thread's first email to the agent its turn runs, answer or not", async () => {
+      await actionExecutionContext.run(
+        {
+          executionId: "x2",
+          rootExecutionId: "x2",
+          initiator: "agent",
+          turnId: "turn-9",
+          agentName: "support",
+        },
+        () =>
+          writes.sendEmail({
+            channel: "mail",
+            text: "Plans",
+            email: { to: "wei@example.com", subject: "Plans" },
+            turnId: "turn-9",
+            knownToProvider: false,
+          }),
+      );
+
+      expect(
+        testDb.db.all<{ agent: string }>(sql`SELECT sender_agent AS agent FROM chat_messages`),
+      ).toEqual([{ agent: "support" }]);
+    });
+
     it("answers an email that went out even when main cannot join its new thread", async () => {
       failOpen = true;
 

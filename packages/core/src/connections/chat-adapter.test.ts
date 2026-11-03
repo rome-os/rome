@@ -411,6 +411,27 @@ describe("channelAdapter", () => {
     expect(landed).toEqual({ key: "p1", threadId: null });
   });
 
+  it("keep a Telegram private chat a direct message when its message names a group", async () => {
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    // A Telegram account's live message names no kind and reads as a group;
+    // the other party's positive id says it is a direct message.
+    await hear({ chatId: "42", senderId: "42", messageId: "5", thread: { kind: "group" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => [message.chat.externalId, message.chatKind])).toEqual([
+      ["dm:rome_bot:42", "dm"],
+    ]);
+  });
+
   it("refuse to answer a message the account holds no platform id for, and send nothing", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());

@@ -129,6 +129,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     out: Omit<EmailOutbound, "replyTo">,
     recorded: readonly MessagePart[],
     turnId: string | undefined,
+    agent: string,
   ) => {
     const adapter = emailOf(deps.adapters, channel);
     const key = adapter.open(recipients, subject);
@@ -138,7 +139,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       {
         direction: "fromRome",
         place: placeIn(chat),
-        saidBy: { account, agent: "main" },
+        saidBy: { account, agent },
         parts: recorded,
       },
       async (target) => ({ key: (await adapter.send(target.chat, null, out)).key }),
@@ -287,6 +288,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           out,
           onRecord,
           turnId,
+          agentOf(deps, input.turnId).agent ?? "main",
         );
       }
       // An email thread is a group chat, main's unless the caller names its

@@ -91,8 +91,9 @@ describe("Chats backfill", () => {
     // A send opened every new address as private, a group's too.
     session.run("tg-sent", "Crew", "channel", "tg-sales", "-88", "private", "Crew", null, null);
     // A chat heard on a channel that knows no account: it waits until the
-    // channel does.
-    session.run("tgu-dm", "Bo", "channel", "telegram_user", "99", null, null, null, null);
+    // channel does. A Telegram account's session names its private chat a
+    // group, and the address says otherwise.
+    session.run("tgu-dm", "Bo", "channel", "telegram_user", "99", "group", null, null, null);
     const row = sqlite.prepare(
       `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at, turn_id,
          input_state, platform_message_id, sender_id, sender_name, reply_to_platform_message_id,
