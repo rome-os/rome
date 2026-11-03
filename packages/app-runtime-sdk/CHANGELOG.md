@@ -1,5 +1,18 @@
 # @rome-os/app-runtime
 
+## [0.10.0](https://github.com/rome-os/rome/compare/app-runtime-v0.9.6...app-runtime-v0.10.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove chat handoff and its handback approval ([#1645](https://github.com/rome-os/rome/issues/1645))
+
+### Features
+
+* let apps read and write the chats their sessions stand in through Chats ([#1632](https://github.com/rome-os/rome/issues/1632)) ([844e8a8](https://github.com/rome-os/rome/commit/844e8a814a74c172437c88d17af141330dc7f59a))
+* refuse a send a channel cannot deliver in full ([#1622](https://github.com/rome-os/rome/issues/1622)) ([24088ae](https://github.com/rome-os/rome/commit/24088ae2e65f1f0c1378a1bbc0a972361d500a7b))
+* remove chat handoff and its handback approval ([#1645](https://github.com/rome-os/rome/issues/1645)) ([001214b](https://github.com/rome-os/rome/commit/001214b9ccbbfa5e6e2dcc0f933d2246d610ca25))
+
 ## [0.9.6](https://github.com/rome-os/rome/compare/app-runtime-v0.9.5...app-runtime-v0.9.6) (2026-11-02)
 
 
