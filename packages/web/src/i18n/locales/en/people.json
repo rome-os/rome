@@ -1,8 +1,6 @@
 {
   "page": {
     "loading": "Loading…",
-    "emptyTitle": "Nothing new yet",
-    "emptyHint": "People appear here after they message you.",
     "emptyForSearch": "Nobody matches your search",
     "emptyDirectory": "Nobody here yet",
     "loadMore": "Show more"
@@ -13,12 +11,6 @@
   "search": {
     "label": "Search people",
     "placeholder": "Search name, phone, handle…"
-  },
-  "timeAgo": {
-    "justNow": "just now",
-    "minutes": "{{count}}m ago",
-    "hours": "{{count}}h ago",
-    "days": "{{count}}d ago"
   },
   "levels": {
     "stranger": "Stranger",
@@ -45,10 +37,7 @@
     "all": "All"
   },
   "row": {
-    "messageCount_one": "{{count}} message",
-    "messageCount_other": "{{count}} messages",
-    "noPreview": "No text in this one",
-    "noActivity": "No activity yet"
+    "noPreview": "No text in this one"
   },
   "guardian": {
     "you": "You",
@@ -110,11 +99,6 @@
     "send": "Send",
     "notConnected": "WhatsApp isn't connected — link it in Settings to send."
   },
-  "views": {
-    "label": "View",
-    "latest": "Latest",
-    "directory": "Directory"
-  },
   "detail": {
     "back": "People",
     "bond": "Bond",
@@ -122,7 +106,7 @@
     "changeBond": "Change bond",
     "memoryProfile": "Memory profile",
     "timeline": "Timeline",
-    "timelineEmpty": "Nothing has happened on any account yet.",
+    "timelineEmpty": "No accounts linked yet, so there is no history to show.",
     "loadOlder": "Load older",
     "outboundPrefix": "You:",
     "sendVia": "Send via",
@@ -131,7 +115,7 @@
     "composerPlaceholder": "Message {{name}}…",
     "missingTitle": "That person is not here",
     "missingBody": "This person may have been merged into someone else or deleted. Head back to People to find them.",
-    "linkDescription": "The account you pick starts resolving to this person, and its history joins this timeline.",
+    "linkDescription": "The account you pick starts resolving to this person, and its history shows here under that account.",
     "noAccounts": "No accounts yet",
     "delegate": "agent"
   },
@@ -139,7 +123,6 @@
     "to": "To",
     "segments": {
       "label": "Account",
-      "all": "All",
       "empty": "Nothing on this {{channel}} account yet."
     },
     "submit": "Send",

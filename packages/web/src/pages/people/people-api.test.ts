@@ -67,19 +67,6 @@ test("proposed /people contract walkthrough", async () => {
   r = await call("GET", "/api/accounts?state=bogus");
   expect(r.status).toBe(400);
 
-  // The stream is the same accounts, narrowed to the ones something happened
-  // on, with the line to preview. A cursor from one names no position in the
-  // other, so each read refuses the other's.
-  r = await call("GET", "/api/accounts/stream?state=unlinked");
-  expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).toContain(DEV_JID);
-  expect(r.body.accounts.every((a: { latest: unknown }) => a.latest != null)).toBe(true);
-  expect(r.body.silentTotal).toBeUndefined();
-  const streamPage = await call("GET", "/api/accounts/stream?limit=1");
-  expect(
-    (await call("GET", `/api/accounts?cursor=${encodeURIComponent(streamPage.body.nextCursor)}`))
-      .status,
-  ).toBe(400);
-
   // Atomic create-and-link: promote Devika. One call, person + link together.
   r = await call("POST", "/api/people", {
     displayName: "Devika",
@@ -158,20 +145,27 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.status).toBe(200);
   expect(r.body.accounts).toHaveLength(2);
 
-  // Timeline: cross-account, newest first, opaque cursor, no overlap between
-  // pages, channel filter reaches an account with no mirrored history.
-  r = await call("GET", `/api/people/${devikaId}/messages?limit=1`);
+  // Timeline: one account, newest first, opaque cursor, no overlap between
+  // pages, and an account with no mirrored history reads empty.
+  const devWa = `channel=whatsapp&channelUserId=${encodeURIComponent(DEV_JID)}`;
+  r = await call("GET", `/api/people/${devikaId}/messages?${devWa}&limit=1`);
   expect(r.status).toBe(200);
   expect(r.body.entries).toHaveLength(1);
   expect(r.body.nextCursor).toBeTruthy();
   const firstRef = r.body.entries[0].ref;
   r = await call(
     "GET",
-    `/api/people/${devikaId}/messages?limit=10&cursor=${encodeURIComponent(r.body.nextCursor)}`,
+    `/api/people/${devikaId}/messages?${devWa}&limit=10&cursor=${encodeURIComponent(r.body.nextCursor)}`,
   );
   expect(r.body.entries.map((e: { ref: string }) => e.ref)).not.toContain(firstRef);
-  r = await call("GET", `/api/people/${devikaId}/messages?channel=linkedin`);
+  r = await call(
+    "GET",
+    `/api/people/${devikaId}/messages?channel=linkedin&channelUserId=${encodeURIComponent(LI_URL)}`,
+  );
   expect(r.body.entries).toHaveLength(0);
+  // A read that names no account has no answer: there is no joined history.
+  r = await call("GET", `/api/people/${devikaId}/messages`);
+  expect(r.status).toBe(400);
 
   // Unlink destroys the link; the account itself persists.
   r = await call(

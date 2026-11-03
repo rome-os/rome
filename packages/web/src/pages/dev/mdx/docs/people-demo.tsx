@@ -12,7 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -23,7 +22,7 @@ import {
 import { Avatar } from "@/pages/people/avatar";
 import { CHANNEL_META, ChannelGlyph, channelLabel } from "@/pages/people/channel-meta";
 import { FILTER_ORDER, type PeopleRow, type RowLevel } from "@/pages/people/people-model";
-import { DirectoryRow, StreamRow, StrangerRow, levelLabelKey } from "@/pages/people/rows";
+import { DirectoryRow, levelLabelKey } from "@/pages/people/rows";
 import { List } from "@/components/ui/list-row";
 
 // Live specimens for the People-page design note (people-page.mdx).
@@ -38,12 +37,7 @@ import { List } from "@/components/ui/list-row";
 // two are the surfaces still ahead of it — a bulk gesture is N writes with one
 // confirmation, which the contract's verbs do not answer on their own.
 
-const NOW = Math.floor(Date.now() / 1000);
-const MINUTE = 60;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-/** A row in the shape both the page and these specimens render. */
+/** A row in the shape the page and these specimens render. */
 function row(
   over: Partial<PeopleRow> & Pick<PeopleRow, "id" | "displayName" | "level">,
 ): PeopleRow {
@@ -52,8 +46,6 @@ function row(
     kind: over.level === "stranger" || over.level === "dismissed" ? "account" : "person",
     accounts: [],
     addresses: account ? [account.channelUserId] : [],
-    latest: null,
-    messageCount: 0,
     ...over,
   };
 }
@@ -62,12 +54,6 @@ function row(
 const on = (channel: string, channelUserId: string) => [
   { channel, channelUserId, displayName: channelUserId },
 ];
-
-const dynamic = (source: string, ago: number, preview: string | null) => ({
-  source,
-  timestamp: NOW - ago,
-  preview,
-});
 
 /* ---------------------------------------------------------------- channels */
 
@@ -167,107 +153,6 @@ function Frame({
       )}
       <div className="p-2">{grouped ? children : <List>{children}</List>}</div>
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ stream */
-
-const STREAM: PeopleRow[] = [
-  row({
-    id: "mira",
-    displayName: "Mira Okafor",
-    level: "inner-circle",
-    accounts: on("whatsapp", "12065550113@s.whatsapp.net"),
-    latest: dynamic("whatsapp", 4 * MINUTE, "landed, heading to the hotel now"),
-    messageCount: 42,
-  }),
-  row({
-    id: "dan",
-    displayName: "Dan Levy",
-    level: "acquaintance",
-    accounts: on("telegram", "418820113"),
-    latest: dynamic("telegram", 22 * MINUTE, "sent over the revised deck"),
-    messageCount: 8,
-  }),
-  row({
-    id: "unplaced",
-    displayName: "+1 415 555 0142",
-    level: "stranger",
-    accounts: on("whatsapp", "14155550142@s.whatsapp.net"),
-    latest: dynamic("whatsapp", HOUR, "Hi — is this the right number for Rome?"),
-    messageCount: 3,
-  }),
-  row({
-    id: "build-bot",
-    displayName: "build-bot",
-    level: "other",
-    // A channel a Rome App contributed: no glyph of its own, so it draws the
-    // generic one rather than claiming a color.
-    accounts: on("rome-app", "build-bot"),
-    latest: dynamic("rome-app", 3 * HOUR, "nightly finished: 1124 passed"),
-    messageCount: 120,
-  }),
-  row({
-    id: "priya",
-    displayName: "Priya Raman",
-    level: "inner-circle",
-    accounts: on("discord", "284417003118395393"),
-    // A dynamic the channel gave no text for: the row says so rather than
-    // rendering an empty line.
-    latest: dynamic("discord", 6 * HOUR, null),
-    messageCount: 17,
-  }),
-];
-
-/** One row per account, newest first, carrying only what routing needs. */
-export function StreamDemo() {
-  return (
-    <Frame label="Latest">
-      {STREAM.map((subject) => (
-        <StreamRow key={subject.id} row={subject} onOpen={() => {}} />
-      ))}
-    </Frame>
-  );
-}
-
-/* ----------------------------------------------------------------- unknown */
-
-const UNKNOWN: PeopleRow[] = [
-  row({
-    id: "u1",
-    displayName: "+1 415 555 0142",
-    level: "stranger",
-    accounts: on("whatsapp", "14155550142@s.whatsapp.net"),
-    latest: dynamic("whatsapp", HOUR, "Hi — is this the right number for Rome?"),
-    messageCount: 3,
-  }),
-  row({
-    id: "u2",
-    displayName: "@quietstorm",
-    level: "stranger",
-    accounts: on("telegram", "@quietstorm"),
-    latest: dynamic("telegram", 2 * DAY, "hey, saw your talk"),
-    messageCount: 1,
-  }),
-  row({
-    id: "u3",
-    displayName: "+44 7700 900321",
-    level: "stranger",
-    accounts: on("whatsapp", "447700900321@s.whatsapp.net"),
-    latest: dynamic("whatsapp", 5 * DAY, "CLAIM YOUR PRIZE NOW"),
-    messageCount: 12,
-  }),
-];
-
-/** The Stranger chip's row: dense, because the placement decision runs on the
- *  evidence — which channel, which number, how much they have said. */
-export function StrangerDemo() {
-  return (
-    <Frame label="Stranger">
-      {UNKNOWN.map((subject) => (
-        <StrangerRow key={subject.id} row={subject} actions={<RowMenu row={subject} />} />
-      ))}
-    </Frame>
   );
 }
 
@@ -385,26 +270,15 @@ export function DirectoryDemo() {
   );
 }
 
-/* ----------------------------------------------------------- view switcher */
+/* ------------------------------------------------------------ filter chips */
 
-/** The two one-of-N controls: the kit's radiogroups, not styled buttons. The
- *  chips are the page's own set, in its own order. */
-export function ViewSwitcherDemo() {
+/** The bond filter: the kit's radiogroup, not styled buttons. The chips are the
+ *  page's own set, in its own order. */
+export function FilterChipsDemo() {
   const { t } = useTranslation("people");
-  const [view, setView] = useState("latest");
   const [chip, setChip] = useState("all");
   return (
     <div className="flex flex-col gap-3 rounded-12 border border-border bg-surface p-4">
-      <SegmentedControl
-        aria-label={t("views.label")}
-        size="sm"
-        value={view}
-        onValueChange={setView}
-        options={[
-          { value: "latest", label: t("views.latest") },
-          { value: "directory", label: t("views.directory") },
-        ]}
-      />
       <FilterChipGroup
         aria-label={t("filters.groupLabel")}
         value={chip}
@@ -421,8 +295,8 @@ export function ViewSwitcherDemo() {
 
 /* ------------------------------------------------------------ person page */
 
-/** The dossier: the person card with bond select and linked-account pills, the
- *  merged timeline grouped by day, a sticky composer. */
+/** The dossier: the person card with bond select and linked-account pills, one
+ *  account's timeline grouped by day, a sticky composer. */
 export function PersonPageDemo() {
   const { t } = useTranslation("people");
   return (

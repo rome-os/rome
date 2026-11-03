@@ -168,25 +168,30 @@ function accountsOf(
   storedUnder: (platform: string) => string[],
   links: readonly Account[],
 ): MessageAccount[] {
-  const byAccount = new Map<string, MessageAccount[]>();
+  const byAccount = new Map<string, { platform: string; addresses: Set<string> }>();
   for (const link of links) {
     const key = fold.key(link.platform, link.id);
-    if (byAccount.has(key)) continue;
-    byAccount.set(
-      key,
-      perChannel({
-        channel: link.platform,
-        storedUnder: storedUnder(link.platform),
-        // The link's own address among them, whatever the book says: a
-        // platform that folds nothing onto it is still read at the address the
-        // guardian stored.
-        addresses: [
-          ...new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
-        ],
-      }),
-    );
+    const held = byAccount.get(key);
+    // Every link's own address among them, whatever the book says: a platform
+    // that folds nothing onto it is still read at the address the guardian
+    // stored, and a second link onto the account is matched by its own
+    // address even where the book does not list it.
+    if (held) {
+      held.addresses.add(link.id);
+      continue;
+    }
+    byAccount.set(key, {
+      platform: link.platform,
+      addresses: new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
+    });
   }
-  return [...byAccount.values()].flat();
+  return [...byAccount.values()].flatMap((account) =>
+    perChannel({
+      channel: account.platform,
+      storedUnder: storedUnder(account.platform),
+      addresses: [...account.addresses],
+    }),
+  );
 }
 
 /**
