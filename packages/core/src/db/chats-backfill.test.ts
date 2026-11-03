@@ -486,6 +486,52 @@ describe("Chats backfill", () => {
     ).toEqual([{ key: "9001", kind: "group" }]);
   });
 
+  it("keys by address the direct messages that would share one key, as a send opened groups as private", () => {
+    sqlite
+      .prepare(
+        `INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+         VALUES ('discord', 'discord', 'discord', 'dbot', 1)`,
+      )
+      .run();
+    const session = sqlite.prepare(
+      `INSERT INTO rome_sessions (id, name, type, source_channel, source_thread_id,
+         source_thread_type, created_at)
+       VALUES (?, 'Ada', 'channel', 'discord', ?, 'private', 100)`,
+    );
+    // Ada's direct message, and two groups a send opened as private where only
+    // she has written.
+    session.run("dc-dm", "7001");
+    session.run("dc-g1", "7002");
+    session.run("dc-g2", "7003");
+    const row = sqlite.prepare(
+      `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at,
+         platform_message_id, sender_id)
+       VALUES (?, ?, 'user', ?, ?, ?, 'ada')`,
+    );
+    row.run("dc-dm-1", "dc-dm", text("Hi"), 800, "e1");
+    row.run("dc-g1-1", "dc-g1", text("Morning all"), 801, "e2");
+    row.run("dc-g2-1", "dc-g2", text("Lunch?"), 802, "e3");
+
+    backfill(sqlite);
+
+    expect(
+      all(`SELECT s.id, c.key FROM rome_sessions s JOIN chats c ON c.id = s.chat_id
+           WHERE s.id LIKE 'dc-%' ORDER BY s.id`),
+    ).toEqual([
+      { id: "dc-dm", key: "dm:dbot:7001" },
+      { id: "dc-g1", key: "dm:dbot:7002" },
+      { id: "dc-g2", key: "dm:dbot:7003" },
+    ]);
+    expect(
+      all(`SELECT chat_key, address FROM chat_addresses
+           WHERE platform = 'discord' ORDER BY address`),
+    ).toEqual([
+      { chat_key: "dm:dbot:7001", address: "7001" },
+      { chat_key: "dm:dbot:7002", address: "7002" },
+      { chat_key: "dm:dbot:7003", address: "7003" },
+    ]);
+  });
+
   it("points a Concierge task at the message its legacy row became", () => {
     expect(
       all(

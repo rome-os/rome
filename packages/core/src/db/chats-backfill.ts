@@ -148,6 +148,32 @@ CREATE TEMP TABLE legacy_chat_speakers AS SELECT * FROM legacy_chat_speakers_vie
 --> statement-breakpoint
 CREATE UNIQUE INDEX temp.idx_legacy_chat_speakers ON legacy_chat_speakers (session_id);
 --> statement-breakpoint
+-- A direct message keyed by whoever first wrote there may be a group a send
+-- opened as private, where one person has written so far. Where two addresses
+-- would share that key, or a chat already holds it at another address, each
+-- is keyed by its address instead, as an adapter keys a direct message before
+-- it knows the other end, and what it hears there next settles it.
+CREATE TEMP TABLE legacy_chat_unsettled AS
+SELECT s.session_id, s.rome_end, r.source_thread_id AS address
+FROM legacy_chat_speakers s JOIN rome_sessions r ON r.id = s.session_id
+WHERE s.kind = 'dm' AND NOT s.is_thread
+  AND s.platform NOT IN ('telegram', 'whatsapp', 'email', 'agents', 'webchat')
+  AND (EXISTS (
+        SELECT 1 FROM legacy_chat_speakers o JOIN rome_sessions ro ON ro.id = o.session_id
+        WHERE o.platform = s.platform AND o.key = s.key
+          AND ro.source_thread_id IS NOT r.source_thread_id)
+    OR EXISTS (
+        SELECT 1 FROM chat_addresses a
+        WHERE a.platform = s.platform AND a.account_id = s.account_id AND a.chat_key = s.key
+          AND a.thread_id = '' AND a.address IS NOT r.source_thread_id));
+--> statement-breakpoint
+UPDATE legacy_chat_speakers
+SET key = (SELECT 'dm:' || u.rome_end || ':' || u.address FROM legacy_chat_unsettled u
+           WHERE u.session_id = legacy_chat_speakers.session_id)
+WHERE session_id IN (SELECT session_id FROM legacy_chat_unsettled);
+--> statement-breakpoint
+DROP TABLE legacy_chat_unsettled;
+--> statement-breakpoint
 -- Each legacy row that is a message, as that message. A dashboard message is keyed by
 -- its row's id; a channel message by the platform's id, or, where the platform
 -- gave none, by one of Rome's own.
