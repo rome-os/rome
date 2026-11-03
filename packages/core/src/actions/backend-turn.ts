@@ -89,6 +89,19 @@ export interface MainBackendTurnRunner extends BackendTurnRunner {
     task: BackendSessionTask,
     options?: BackendTurnOptions,
   ): Promise<void>;
+  /** Sends a messaging channel's reply on its `send` port and records it in the
+   * conversation, as `runAndDeliver` does for a turn it ran itself. For a task
+   * run through `runBackendSessionTask` on a channel other than webchat, whose
+   * own work produced the reply. Sends nothing for an empty reply or an agent
+   * whose text is private. */
+  deliverMessagingReply(
+    params: Pick<BackendTurnParams, "agentName" | "channel" | "threadId">,
+    reply: string,
+    turnId?: string,
+  ): Promise<void>;
+  /** True when `deliverMessagingReply` puts the reply on record as it says
+   * it, so the turn that produced the reply must not save its answer too. */
+  readonly saysReplies: boolean;
 }
 
 export interface BackendTurnRunnerDeps {
@@ -178,6 +191,84 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     await task({ emit: async () => {} });
   };
 
+  const deliverMessagingReply = async (
+    params: Pick<BackendTurnParams, "agentName" | "channel" | "threadId">,
+    reply: string,
+    turnId?: string,
+  ): Promise<void> => {
+    if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) {
+      log.info("backend turn produced no reply; nothing to deliver", {
+        channel: params.channel,
+        threadId: params.threadId,
+      });
+      return;
+    }
+    const channel = deps.channel(params.channel);
+    const send = channel?.send;
+    if (!channel || !send) throw new Error(`Channel "${params.channel}" cannot send`);
+    if (deps.replies && deps.chats) {
+      // A delivery that succeeded and failed to record is logged, never
+      // thrown, so the continuation never retries a sent reply.
+      const session = await deps.chats.ensureChannelChat({
+        channel: params.channel,
+        threadId: params.threadId,
+        agentName: params.agentName,
+      });
+      const said = await deps.replies.send(
+        session.id,
+        channel,
+        { text: reply },
+        { ...(turnId ? { turnId } : {}), agent: params.agentName },
+      );
+      if (said) return;
+      // The session stands in no chat, so nothing can record the reply
+      // where it is read back. It still goes out: the user asked for it.
+      log.warn("backend reply has no speaker to say it, sent unrecorded", {
+        channel: params.channel,
+        threadId: params.threadId,
+        sessionId: session.id,
+      });
+      await send.send(params.threadId as ChatId, { text: reply, ...(turnId ? { turnId } : {}) });
+      return;
+    }
+    const delivery = await send.send(params.threadId as ChatId, {
+      text: reply,
+      ...(turnId ? { turnId } : {}),
+    });
+    const { chats, messages, places } = deps;
+    if (chats && messages && places) {
+      try {
+        const conversation = await chats.ensureChannelChat({
+          channel: params.channel,
+          threadId: params.threadId,
+          agentName: params.agentName,
+        });
+        const at = places.placeOfRecord(conversation.id);
+        if (!at) throw new Error(`No place for conversation ${conversation.id}`);
+        await messages.recordSent(
+          {
+            direction: "fromRome",
+            place: at.place,
+            parts: [{ type: "text", content: reply }],
+            ...(delivery?.messageId ? { platformMessageId: delivery.messageId } : {}),
+            ...(turnId ? { turnId } : {}),
+            turnAnswer: true,
+          },
+          { channel: at.channel },
+        );
+      } catch (err) {
+        // Delivery already succeeded. A persistence failure must not make the
+        // continuation retry and send the same provider message twice.
+        log.warn("backend reply delivered but conversation recording failed", {
+          channel: params.channel,
+          threadId: params.threadId,
+          messageId: delivery?.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  };
+
   return {
     setWebchatRuntime(runtime: WebchatSessionStreamHost): void {
       webchatRuntime = runtime;
@@ -236,77 +327,11 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }
-      if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) {
-        log.info("backend turn produced no reply; nothing to deliver", {
-          channel: params.channel,
-          threadId: params.threadId,
-        });
-        return;
-      }
-      const channel = deps.channel(params.channel);
-      const send = channel?.send;
-      if (!channel || !send) throw new Error(`Channel "${params.channel}" cannot send`);
-      if (deps.replies && deps.chats) {
-        // A delivery that succeeded and failed to record is logged, never
-        // thrown, so the continuation never retries a sent reply.
-        const session = await deps.chats.ensureChannelChat({
-          channel: params.channel,
-          threadId: params.threadId,
-          agentName: params.agentName,
-        });
-        const said = await deps.replies.send(
-          session.id,
-          channel,
-          { text: reply },
-          { ...(turnId ? { turnId } : {}), agent: params.agentName },
-        );
-        if (said) return;
-        // The session stands in no chat, so nothing can record the reply
-        // where it is read back. It still goes out: the user asked for it.
-        log.warn("backend reply has no speaker to say it, sent unrecorded", {
-          channel: params.channel,
-          threadId: params.threadId,
-          sessionId: session.id,
-        });
-        await send.send(params.threadId as ChatId, { text: reply, ...(turnId ? { turnId } : {}) });
-        return;
-      }
-      const delivery = await send.send(params.threadId as ChatId, {
-        text: reply,
-        ...(turnId ? { turnId } : {}),
-      });
-      const { chats, messages, places } = deps;
-      if (chats && messages && places) {
-        try {
-          const conversation = await chats.ensureChannelChat({
-            channel: params.channel,
-            threadId: params.threadId,
-            agentName: params.agentName,
-          });
-          const at = places.placeOfRecord(conversation.id);
-          if (!at) throw new Error(`No place for conversation ${conversation.id}`);
-          await messages.recordSent(
-            {
-              direction: "fromRome",
-              place: at.place,
-              parts: [{ type: "text", content: reply }],
-              ...(delivery?.messageId ? { platformMessageId: delivery.messageId } : {}),
-              ...(turnId ? { turnId } : {}),
-              turnAnswer: true,
-            },
-            { channel: at.channel },
-          );
-        } catch (err) {
-          // Delivery already succeeded. A persistence failure must not make the
-          // continuation retry and send the same provider message twice.
-          log.warn("backend reply delivered but conversation recording failed", {
-            channel: params.channel,
-            threadId: params.threadId,
-            messageId: delivery?.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      await deliverMessagingReply(params, reply, turnId);
     },
+
+    deliverMessagingReply,
+
+    saysReplies: Boolean(deps.replies && deps.chats),
   };
 }

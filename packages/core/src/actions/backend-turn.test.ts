@@ -356,5 +356,19 @@ describe("backend turn delivery", () => {
 
       expect(send).toHaveBeenCalledWith("wechat-thread-1", { text: "Done.", turnId: "turn-1" });
     });
+
+    it("tells a caller delivering its own turn's reply that the speaker records it", () => {
+      const channel = () => wechatWith(rs.fn<Send>(async (chatId) => ({ chatId })));
+      const spoken = createBackendTurnRunner({
+        agentRunner: answered(),
+        channel,
+        chats,
+        replies: { send: async () => null },
+      });
+      const unspoken = createBackendTurnRunner({ agentRunner: answered(), channel });
+
+      expect(spoken.saysReplies).toBe(true);
+      expect(unspoken.saysReplies).toBe(false);
+    });
   });
 });
