@@ -15,6 +15,7 @@
     "dist",
     "src/**/*.test.ts",
     "src/**/*.integration.test.ts",
-    "src/**/*.e2e.test.ts"
+    "src/**/*.e2e.test.ts",
+    "src/connections/adapter-conformance.ts"
   ]
 }
