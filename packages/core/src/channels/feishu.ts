@@ -17,6 +17,7 @@ import { preserveMentionOnlyText } from "./mention-only.js";
 import { isLinkCodeMessage } from "./guardian-link-code.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
+import { refuseAttachments, textToSend } from "./send-refusals.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type {
   ChannelMessage,
@@ -223,7 +224,8 @@ export class FeishuAdapter {
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    if (!message.text) return { chatId };
+    refuseAttachments("feishu", message);
+    const text = textToSend("feishu", message);
     const threadId: string = chatId;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
@@ -235,11 +237,7 @@ export class FeishuAdapter {
       : undefined;
 
     try {
-      const sent = (await this.channel.send(
-        threadId,
-        { markdown: message.text },
-        opts,
-      )) as unknown as {
+      const sent = (await this.channel.send(threadId, { markdown: text }, opts)) as unknown as {
         messageId?: string;
         message_id?: string;
       };

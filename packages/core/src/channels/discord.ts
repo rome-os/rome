@@ -47,6 +47,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import { createLogger } from "../logger.js";
+import { textToSend } from "./send-refusals.js";
 import { saveUrlAttachments } from "./attachment-files.js";
 import { createReadStream } from "node:fs";
 import { basename, extname } from "node:path";
@@ -1388,6 +1389,7 @@ Use \`/channel agent clear\` to undo.`,
     // A direct message is addressed by the other party's user id, which Chats
     // keys it by (docs/architecture/channels.md#direct-messages): Discord's
     // DM channel for that user is opened, or found, here.
+    const text = textToSend("discord", message);
     const threadId: string = await this.channelOf(chatId);
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
@@ -1413,10 +1415,10 @@ Use \`/channel agent clear\` to undo.`,
 
     try {
       let messageId: string | undefined;
-      if (message.text) {
+      if (text) {
         // Discord natively supports markdown; send as-is
         // Discord has a 2000 character limit per message
-        const chunks = splitMessage(message.text);
+        const chunks = splitMessage(text);
         for (const chunk of chunks) {
           const sent = await targetChannel.send({ content: chunk });
           messageId ??= sent.id;
