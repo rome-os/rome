@@ -70,7 +70,7 @@ CREATE INDEX temp.idx_legacy_chat_message_ids_message ON legacy_chat_message_ids
 --> statement-breakpoint
 -- Each legacy chat session as a speaker: the chat its rows name, Rome's end
 -- there, and whether it is a thread of another session's chat.
-CREATE TEMP VIEW legacy_chat_speakers AS
+CREATE TEMP VIEW legacy_chat_speakers_view AS
 SELECT
   r.id AS session_id,
   r.source_channel = 'webchat' AS dashboard,
@@ -140,6 +140,13 @@ SELECT
 FROM rome_sessions r
 JOIN legacy_chat_pending p ON p.session_id = r.id
 LEFT JOIN channels c ON c.id = r.source_channel;
+--> statement-breakpoint
+-- The speakers, worked out once: every message row joins its session's, and
+-- a view would work each one out again for every row. Nothing the view reads
+-- changes before its last use.
+CREATE TEMP TABLE legacy_chat_speakers AS SELECT * FROM legacy_chat_speakers_view;
+--> statement-breakpoint
+CREATE UNIQUE INDEX temp.idx_legacy_chat_speakers ON legacy_chat_speakers (session_id);
 --> statement-breakpoint
 -- Each legacy row that is a message, as that message. A dashboard message is keyed by
 -- its row's id; a channel message by the platform's id, or, where the platform
@@ -326,7 +333,9 @@ DROP TABLE legacy_chat_message_rows;
 --> statement-breakpoint
 DROP VIEW legacy_chat_message_rows_view;
 --> statement-breakpoint
-DROP VIEW legacy_chat_speakers;
+DROP TABLE legacy_chat_speakers;
+--> statement-breakpoint
+DROP VIEW legacy_chat_speakers_view;
 --> statement-breakpoint
 DROP TABLE legacy_chat_message_ids;
 --> statement-breakpoint
