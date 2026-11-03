@@ -49,8 +49,35 @@ export type SpeakerOutbound = Omit<Outbound, "replyTo" | "turnId"> & {
   readonly replyTo?: OutboundMessage["replyTo"];
 };
 
+/** How many turns' agents are kept. A reply is sent while its turn runs, so
+ *  only the latest turns are ever asked for. */
+const TURN_AGENTS_KEPT = 1024;
+
 export class SpeakerReplies {
+  /** The agent each recent turn runs, by its id. */
+  private readonly turnAgents = new Map<string, string>();
+
   constructor(private readonly deps: SpeakerRepliesDeps) {}
+
+  /**
+   * Note that turn `turnId` runs `agent`. An account's own agent runs a
+   * session that still names main, so a reply the turn sends without
+   * naming its agent is said by the agent that ran it, not by the
+   * session's. Kept in memory: a turn's replies go out while it runs.
+   */
+  runs(turnId: string, agent: string): void {
+    this.turnAgents.delete(turnId);
+    this.turnAgents.set(turnId, agent);
+    if (this.turnAgents.size > TURN_AGENTS_KEPT) {
+      const oldest = this.turnAgents.keys().next().value;
+      if (oldest !== undefined) this.turnAgents.delete(oldest);
+    }
+  }
+
+  /** The agent turn `turnId` runs, when it was noted. */
+  agentOf(turnId: string | undefined): string | undefined {
+    return turnId === undefined ? undefined : this.turnAgents.get(turnId);
+  }
 
   /**
    * Say `parts` where session `sessionId` stands, as its account and agent,
@@ -72,7 +99,7 @@ export class SpeakerReplies {
         place: speaker.place,
         saidBy: {
           account: { platform: speaker.place.chat.platform, id: speaker.accountId },
-          agent: speaker.agent,
+          agent: this.agentOf(options.turnId) ?? speaker.agent,
         },
         parts,
       },
@@ -109,7 +136,7 @@ export class SpeakerReplies {
       {
         direction: "fromRome",
         place: speaker.place,
-        saidBy: { account, agent: options.agent ?? speaker.agent },
+        saidBy: { account, agent: options.agent ?? this.agentOf(options.turnId) ?? speaker.agent },
         parts: options.recorded ?? out.parts ?? [{ type: "text", content: out.text }],
         ...(replyTo === undefined ? {} : { replyTo }),
       },

@@ -185,6 +185,19 @@ describe("SpeakerReplies", () => {
     expect(line?.saidBy).toMatchObject({ agent: "support" });
   });
 
+  it("send as the agent whose turn sends, when the send names none", async () => {
+    // A reply sent whole, as without streaming: the session still names the
+    // agent it opened with, and the account's own agent ran the turn.
+    const speaking = replies();
+    speaking.runs("turn-5", "support");
+
+    const sent = await speaking.send("speaker-1", CHANNEL, { text: "hi" }, { turnId: "turn-5" });
+    const unnoted = await speaking.send("speaker-1", CHANNEL, { text: "yo" }, { turnId: "turn-6" });
+
+    expect(messages.byIds([sent!.id!])[0]?.saidBy).toMatchObject({ agent: "support" });
+    expect(messages.byIds([unnoted!.id!])[0]?.saidBy).toMatchObject({ agent: "sales" });
+  });
+
   it("record each message of a reply the platform split as its own, each the turn's answer", async () => {
     streamed = [
       { text: "First half, ", key: "s1", threadId: null },

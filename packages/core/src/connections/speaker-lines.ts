@@ -7,6 +7,7 @@
 
 import type { SaidMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
+import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speaker, Speakers } from "../sessions/speakers.js";
 import { contextOf, type ContextLine, type TurnLinks } from "../sessions/turn-links.js";
 import { type ChatAdapters, lineAt, platformIdOfLine } from "./chat-adapter.js";
@@ -88,4 +89,6 @@ export async function runLines(
 export interface RunLineDeps {
   lines: Pick<SpeakerLines, "recorded" | "stands">;
   links: Pick<TurnLinks, "prompt">;
+  /** Told the agent each turn runs, so its replies are said by it. */
+  replies?: Pick<SpeakerReplies, "runs">;
 }

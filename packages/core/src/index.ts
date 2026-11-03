@@ -1135,7 +1135,7 @@ async function main() {
     agentTurnStreamRegistry,
     undefined,
     replyStreams,
-    { lines: chatsWired.speakerLines, links: chatsWired.links },
+    { lines: chatsWired.speakerLines, links: chatsWired.links, replies: chatsWired.replies },
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1145,7 +1145,7 @@ async function main() {
     webchatRepo,
     agentTurnStreamRegistry,
     actionRegistry,
-    { lines: chatsWired.speakerLines, links: chatsWired.links },
+    { lines: chatsWired.speakerLines, links: chatsWired.links, replies: chatsWired.replies },
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

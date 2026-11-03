@@ -48,7 +48,7 @@ export interface AppChatWritesDeps {
   messages: Pick<MessageRepository, "record" | "send" | "chatHolding">;
   speakers: Pick<Speakers, "speakerOf">;
   /** What a speaker says, recorded and linked to its turn. */
-  replies: Pick<SpeakerReplies, "send">;
+  replies: Pick<SpeakerReplies, "send" | "agentOf">;
   links: Pick<TurnLinks, "prompt" | "answer">;
   /** The lines an app names by the platform's ids. */
   lines: Pick<SpeakerLines, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
@@ -226,6 +226,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         },
         {
           ...(input.knownToProvider && input.turnId ? { turnId: input.turnId } : {}),
+          ...agentOf(deps, input.turnId),
           recorded: input.content
             ? recordedOf(input.content)
             : withNotes(parts ?? [{ type: "text", content: input.text ?? "" }], input.attachments),
@@ -317,7 +318,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         sessionId,
         channel,
         { ...reply, ...replyToIn(deps, speaker, inReplyToMessageId) },
-        { ...(turnId ? { turnId } : {}), recorded: onRecord },
+        { ...(turnId ? { turnId } : {}), ...agentOf(deps, input.turnId), recorded: onRecord },
       );
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
       active(sessionId, sent.at);
@@ -367,4 +368,10 @@ function partsIn(content: string): { parts?: MessagePart[] } {
 
 function recordedOf(content: string): MessagePart[] {
   return JSON.parse(stripHostOnlyPartsFromContent(content)) as MessagePart[];
+}
+
+/** The agent the turn sending runs, for a send that may not answer it. */
+function agentOf(deps: AppChatWritesDeps, turnId: string | undefined): { agent?: string } {
+  const agent = deps.replies.agentOf(turnId);
+  return agent === undefined ? {} : { agent };
 }

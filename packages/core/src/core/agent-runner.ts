@@ -586,6 +586,7 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
+    this.runLineDeps?.replies?.runs(handle.turnId, agentName);
     if (lines && this.runLineDeps) {
       if (conversation.promptPersisted && lines.prompt !== null) {
         this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);

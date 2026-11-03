@@ -215,6 +215,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           },
         );
         try {
+          this.runLineDeps?.replies?.runs(handle.turnId, req.key.agentName);
           if (lines && this.runLineDeps) {
             if (conversation.promptPersisted && lines.prompt !== null) {
               this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
