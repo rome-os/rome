@@ -439,10 +439,8 @@ class McpSessionModelProvider extends MockModelProvider {
       getActionCatalog: params.getActionCatalog,
       getSkillCatalog: params.getSkillCatalog,
       subagentTools: params.subagentTools,
-      handback: params.handback,
       executeAction: params.executeAction,
       executeSubagent: params.executeSubagent,
-      executeSubmitOutput: params.executeSubmitOutput,
     });
     this.mcpServers.push(server);
     return await super.openSession(params);

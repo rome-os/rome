@@ -207,38 +207,10 @@ describe("normalizeRoutineDraftForCard", () => {
     expect(withoutSurface.interactiveTools.map((t) => t.name)).toEqual(["ask_question"]);
   });
 
-  // confirm_output is the verbal-approval lever for a handback; it must appear
-  // only in a conversational handback on an interactive surface, never in a
-  // plain chat (which has no Approve gate to resolve).
-  it("registers confirm_output only for a handback on an interactive surface", () => {
-    const params = {
-      getActionCatalog: () => [],
-      getSkillCatalog: () => [],
-      subagentTools: [],
-      executeAction: async () => ({}),
-      executeSubagent: async () => ({}),
-      supportsInteractiveSurface: true,
-    };
-    const handbackSpec = { schema: { type: "object", properties: {} } };
-    const handback = buildFacadeBundle({ ...params, handback: handbackSpec });
-    const plainChat = buildFacadeBundle(params);
-    const noSurface = buildFacadeBundle({
-      ...params,
-      supportsInteractiveSurface: false,
-      handback: handbackSpec,
-    });
-    expect(handback.interactiveTools.map((t) => t.name)).toContain("confirm_output");
-    expect(plainChat.interactiveTools.map((t) => t.name)).not.toContain("confirm_output");
-    // ask_question registers on every surface, but confirm_output has no prose
-    // fallback — a non-interactive surface never gets it even for a handback.
-    expect(noSurface.interactiveTools.map((t) => t.name)).not.toContain("confirm_output");
-  });
-
   // A detached session (exact-mode forked turn) must keep advertising the
   // interactive catalog — its model-visible prefix has to stay byte-identical
   // to the webchat source — but nothing drains its stream to deliver UI, so
-  // the handlers must refuse instead of claiming a card was shown or a
-  // handback shipped.
+  // the handlers must refuse instead of claiming a card was shown.
   describe("interactiveSurfaceDetached (exact-mode forks)", () => {
     const params = {
       getActionCatalog: () => [],
@@ -247,7 +219,6 @@ describe("normalizeRoutineDraftForCard", () => {
       executeAction: async () => ({}),
       executeSubagent: async () => ({}),
       supportsInteractiveSurface: true,
-      handback: { schema: { type: "object", properties: {} } },
       interactiveSurfaceDetached: true,
     };
 
@@ -258,7 +229,7 @@ describe("normalizeRoutineDraftForCard", () => {
         live.interactiveTools.map((t) => t.name),
       );
       expect(detached.interactiveTools.map((t) => t.name)).toEqual(
-        expect.arrayContaining(["ask_question", "propose_routine", "confirm_output"]),
+        expect.arrayContaining(["ask_question", "propose_routine"]),
       );
     });
 
@@ -272,17 +243,6 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toContain("NOT shown");
       expect(res.content[0].text).not.toContain("has been delivered");
-    });
-
-    it("confirm_output refuses instead of claiming the approval was recorded", async () => {
-      const bundle = buildFacadeBundle(params);
-      const tool = bundle.interactiveTools.find((t) => t.name === "confirm_output")!;
-      const res = (await tool.handler({})) as {
-        content: { text: string }[];
-        isError?: boolean;
-      };
-      expect(res.isError).toBe(true);
-      expect(res.content[0].text).toContain("nothing was shipped");
     });
   });
 

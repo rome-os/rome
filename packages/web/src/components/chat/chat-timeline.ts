@@ -30,17 +30,8 @@ export interface TimelineNode {
  * Every question the rail can point at: user turns that actually render a
  * bubble, in transcript order.
  *
- * Deliberately not filtered to the main session. While a handoff is open the
- * composer posts to the child session, so a filter would drop every question
- * asked during that handoff — a whole stretch of the conversation missing from
- * the rail with nothing to explain the gap. Those rows are spliced into
- * `displayMessages` and carry their own anchors, so they are addressable like
- * any other. Share selection does filter by session, but that decides which
- * turns can be frozen into a link, not what can be scrolled to.
- *
  * Text-less user turns are excluded because `UserMessage` returns null for
- * them, so there would be no anchor. The suppressed handoff seed is already
- * absent from `displayMessages`.
+ * them, so there would be no anchor.
  */
 export function buildTimelineQuestions(messages: ChatMessage[]): TimelineQuestion[] {
   const questions: TimelineQuestion[] = [];

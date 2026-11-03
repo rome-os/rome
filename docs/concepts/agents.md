@@ -91,9 +91,7 @@ provider's native structured-output API.
 - A successful terminal `result` carries the validated value in
   `structuredOutput`. `content` is that value's JSON serialization. Missing,
   invalid, or retry-exhausted provider output fails the turn.
-- Structured output is separate from a handoff's guardian-approved handback.
-  A handback may span several ordinary conversational turns. An
-  `outputSchema` turn may not park on that interaction.
+- An `outputSchema` turn may not park on an interaction.
 
 **Not to be confused with:**
 

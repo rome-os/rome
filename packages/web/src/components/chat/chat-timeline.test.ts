@@ -9,7 +9,6 @@ import {
 } from "./chat-timeline";
 
 const MAIN = "main";
-const CHILD = "child";
 
 let seq = 0;
 function msg(role: ChatMessage["role"], sessionId: string, blocks: unknown[]): ChatMessage {
@@ -33,18 +32,6 @@ describe("buildTimelineQuestions", () => {
     expect(buildTimelineQuestions([a, b, c])).toEqual([
       { messageId: a.id, text: "first question" },
       { messageId: c.id, text: "second question" },
-    ]);
-  });
-
-  it("includes questions asked during a handoff", () => {
-    // While a handoff is open the composer posts to the child session. Dropping
-    // those would leave a whole stretch of the conversation off the rail with
-    // nothing to explain the gap.
-    const mine = msg("user", MAIN, text("mine"));
-    const duringHandoff = msg("user", CHILD, text("asked the specialist"));
-    expect(buildTimelineQuestions([mine, duringHandoff])).toEqual([
-      { messageId: mine.id, text: "mine" },
-      { messageId: duringHandoff.id, text: "asked the specialist" },
     ]);
   });
 
