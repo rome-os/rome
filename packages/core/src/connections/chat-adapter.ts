@@ -340,12 +340,13 @@ export function channelAdapter(
   // address lands in that chat even where the key names the address.
   const keyed: ChatKeying = (heardBy, message) => {
     const found = keying(heardBy, message);
-    if (message.parentChatId !== undefined || !deps.addresses) return found;
+    if (!deps.addresses) return found;
     if (found.kind === "group") {
       // A group Rome took for a direct message, as a send opened it, is a
-      // group once a group message is heard there: the chat moves to its key,
-      // or into the group another of Rome's accounts heard there first.
-      const bound = deps.addresses.keyAt(heardBy, message.chatId);
+      // group once a group message is heard there, or in one of its threads:
+      // the chat moves to its key, or into the group another of Rome's
+      // accounts heard there first.
+      const bound = deps.addresses.keyAt(heardBy, message.parentChatId ?? message.chatId);
       if (bound !== null && bound !== found.key.externalId) {
         const held = chatKey(heardBy.platform, bound as ChatId);
         if (isDirectMessage(held))

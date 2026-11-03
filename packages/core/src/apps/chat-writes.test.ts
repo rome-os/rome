@@ -636,10 +636,34 @@ describe("appChatWrites", () => {
       expect(said()).toEqual([]);
     });
 
-    it("refuses to reply to an email Rome holds no thread with", async () => {
+    it("replies to an email Rome holds no thread with through the provider, and records it in the thread it names", async () => {
+      // As one fetched from the mailbox directly: its thread is the
+      // provider's, and Rome learns it from the receipt.
+      fixture.chat("email", "thread-1", "group", "Invoice");
+
+      const result = await writes.sendEmail({
+        channel: "mail",
+        text: "Re",
+        email: { inReplyToMessageId: "unknown" },
+        turnId: "turn-1",
+        knownToProvider: true,
+      });
+
+      expect(mailSent).toEqual([
+        { to: "", message: expect.objectContaining({ text: "Re", inReplyToMessageId: "unknown" }) },
+      ]);
+      expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(opened).toEqual(["thread-1"]);
+      const [line] = said();
+      expect(line).toMatchObject({ text: "Re" });
+      expect(linkOf("mail-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
+    });
+
+    it("refuses a reply to an email Rome holds no thread with that names a session", async () => {
       await expect(
         writes.sendEmail({
           channel: "mail",
+          sessionId: "mail-1",
           text: "Re",
           email: { inReplyToMessageId: "unknown" },
           knownToProvider: false,

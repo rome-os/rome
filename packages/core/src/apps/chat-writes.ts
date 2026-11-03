@@ -11,6 +11,7 @@
 import { actionExecutionContext } from "../actions/context.js";
 import type {
   Channel,
+  ChatId,
   ChatRepository,
   MessagePart,
   OutgoingAttachment,
@@ -104,16 +105,84 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
   const threadAddressOf = (channel: Channel, chat: ChatRef): string =>
     emailOf(deps.adapters, channel).threadAddress(deps.adapters.keyOf(chat).externalId);
 
-  /** The email thread holding the email the provider calls `messageId`.
-   *  Refuses one Rome holds no thread for, since sending it as a new email
-   *  would answer nothing. */
-  const threadHolding = (channel: Channel, messageId: string): ChatRef => {
+  /** The email thread holding the email the provider calls `messageId`, or
+   *  null when Rome holds none. */
+  const threadHolding = (channel: Channel, messageId: string): ChatRef | null => {
     const account = deps.adapters.accountOn(channel.name);
-    const chat = deps.messages.chatHolding(account.platform, messageId);
-    if (!chat) {
-      throw new Error(`Rome holds no email thread with message ${messageId}. No email was sent.`);
+    return deps.messages.chatHolding(account.platform, messageId);
+  };
+
+  /**
+   * Reply to the email the provider calls `messageId`, which Rome holds no
+   * thread for, as one fetched from the mailbox directly. The provider sends
+   * a reply into the thread of the email it answers, so the reply goes out
+   * through the channel's port, and Rome learns the thread from its receipt:
+   * main joins it there, and the reply is recorded as main's. The email went
+   * out once the provider took it, so a failure to record it after that is
+   * logged and the send still answers.
+   */
+  const replyUnheld = async (
+    channel: Channel,
+    messageId: string,
+    out: Omit<EmailOutbound, "replyTo">,
+    recorded: readonly MessagePart[],
+    turnId: string | undefined,
+    agent: string,
+  ) => {
+    if (!channel.send) throw new Error(`Channel "${channel.name}" cannot send`);
+    const receipt = await channel.send.send("" as ChatId, {
+      kind: "email",
+      text: out.text,
+      ...(out.parts ? { parts: [...out.parts] } : {}),
+      ...(out.html ? { html: out.html } : {}),
+      ...(out.cc?.length ? { cc: [...out.cc] } : {}),
+      ...(out.bcc?.length ? { bcc: [...out.bcc] } : {}),
+      ...(turnId ? { turnId } : {}),
+      inReplyToMessageId: messageId,
+    });
+    const sentId = receipt?.messageId?.trim() || null;
+    const threadId = receipt?.chatId?.trim() ?? "";
+    if (!threadId) {
+      log.error("an email reply went out, but the provider named no thread to record it in", {
+        channel: channel.name,
+        inReplyTo: messageId,
+      });
+      return { messageId: sentId, threadId };
     }
-    return chat;
+    try {
+      const session = await deps.open({
+        channel: channel.name,
+        threadId,
+        agentName: "main",
+        threadType: "group",
+      });
+      const speaker = speakerOf(session.id);
+      const sent = await deps.messages.send(
+        {
+          direction: "fromRome",
+          place: speaker.place,
+          saidBy: {
+            account: { platform: speaker.place.chat.platform, id: speaker.accountId },
+            agent,
+          },
+          parts: recorded,
+          replyTo: { key: deps.lines.keyIn(speaker, messageId) },
+        },
+        // Delivered already: the receipt keys the message.
+        async () => ({
+          key: sentId ? deps.lines.keyIn(speaker, sentId) : `rome:${uuidv7()}`,
+        }),
+      );
+      if (sent.id !== null && turnId) deps.links.answer(sent.id, session.id, turnId);
+      active(session.id, sent.at);
+    } catch (error) {
+      log.error("an email reply went out, but could not be recorded", {
+        channel: channel.name,
+        thread: threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return { messageId: sentId, threadId };
   };
 
   /**
@@ -292,6 +361,27 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       // session is refused before anything goes out.
       const held =
         inReplyToMessageId === undefined ? undefined : threadHolding(channel, inReplyToMessageId);
+      if (held === null) {
+        // An email Rome holds no thread for sits in a thread only the
+        // provider knows, so a caller that names one is refused.
+        if (input.threadId !== undefined || input.sessionId) {
+          throw new Error(
+            `Rome holds no email thread with message ${inReplyToMessageId}. No email was sent.`,
+          );
+        }
+        return await replyUnheld(
+          channel,
+          inReplyToMessageId as string,
+          {
+            ...out,
+            ...(cc?.length ? { cc } : {}),
+            ...(bcc?.length ? { bcc } : {}),
+          },
+          onRecord,
+          turnId,
+          agentOf(deps, input.turnId).agent ?? "main",
+        );
+      }
       if (
         held &&
         input.threadId !== undefined &&

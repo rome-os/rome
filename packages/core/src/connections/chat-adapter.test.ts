@@ -386,6 +386,37 @@ describe("channelAdapter", () => {
     ]);
   });
 
+  it("move a group Rome took for a direct message once a message is heard in one of its threads", async () => {
+    addresses.bind(ROME, "dm:rome_bot:alice", "grp_2");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: "dm:rome_bot:alice", kind: "dm", startedAt: new Date() })
+      .run();
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({
+      chatId: "topic-9",
+      parentChatId: "grp_2" as ChatId,
+      senderId: "bob",
+      messageId: "5",
+      thread: { kind: "topic", name: "Plans" },
+    });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["grp_2"]);
+    expect(testDb.db.select({ key: chats.key, kind: chats.kind }).from(chats).all()).toEqual([
+      { key: "grp_2", kind: "group" },
+    ]);
+  });
+
   it("send to a direct message where it was heard, quoting the platform's id", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
