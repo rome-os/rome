@@ -372,8 +372,8 @@ function recordedOf(content: string): MessagePart[] {
 }
 
 /** The agent the turn sending runs, for a send that may not answer it: as
- *  noted where the turn started, else as the action running in that turn
- *  names it, which is how a worker, where no turn starts, knows it. */
+ *  noted where the turn started or where a worker asked main to run it, else
+ *  as the action running in that turn names it. */
 function agentOf(deps: AppChatWritesDeps, turnId: string | undefined): { agent?: string } {
   const running = actionExecutionContext.getStore();
   const agent =

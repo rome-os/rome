@@ -197,7 +197,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     // Best effort in workers.
   });
 
-  const agentRunner = new RpcAgentRunner();
+  const agentRunner = new RpcAgentRunner(undefined, chatsWired.replies);
   const resolveArtifactReference = createArtifactReferenceResolver({
     agentLoader,
     actionRegistry,
