@@ -231,6 +231,161 @@ describe("tool tabs", () => {
   });
 });
 
+describe("opening chats", () => {
+  const layout = [
+    { id: "files", type: "projects" as const, order: 0 },
+    { id: "notes", type: "app" as const, targetId: "notes", order: 1 },
+  ];
+  const savedView = { activeId: "notes", collapsed: false, unreadIds: ["files", "notes"] };
+
+  async function open({ width = 390, cached = true, saved = false, empty = false } = {}) {
+    rs.stubGlobal("innerWidth", width);
+    if (cached)
+      localStorage.setItem("rome:free-layout:opening", JSON.stringify(empty ? [] : layout));
+    if (saved) localStorage.setItem("rome:tool-view:opening", JSON.stringify(savedView));
+    const store = await import("./use-free-cells");
+    store.setActiveSession("opening");
+    return { store, ...renderHook(() => store.useFreeCells()) };
+  }
+
+  it.each([
+    false,
+    true,
+  ])("keeps a narrow cached chat visible with saved view %s without writing it", async (saved) => {
+    const { result } = await open({ saved });
+    expect(result.current.toolView).toEqual({
+      activeId: saved ? "notes" : "files",
+      collapsed: true,
+      unreadIds: saved ? savedView.unreadIds : [],
+    });
+    expect(localStorage.getItem("rome:tool-view:opening")).toBe(
+      saved ? JSON.stringify(savedView) : null,
+    );
+  });
+
+  it("keeps the chat visible just below the compact breakpoint", async () => {
+    const { result } = await open({ width: 720, saved: true });
+    expect(result.current.toolView.collapsed).toBe(true);
+  });
+
+  it.each([false, true])("keeps a narrow empty chat visible with saved view %s", async (saved) => {
+    const { store, result } = await open({ saved, empty: true });
+    expect(result.current.toolView).toEqual({ activeId: null, collapsed: true, unreadIds: [] });
+    rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout: [] }));
+    await act(() => store.loadLayoutForSession("opening"));
+    expect(result.current.toolView).toEqual({ activeId: null, collapsed: true, unreadIds: [] });
+  });
+
+  it.each([
+    false,
+    true,
+  ])("keeps a narrow chat visible after the server loads an uncached layout with saved view %s", async (saved) => {
+    const { store, result } = await open({ saved, cached: false });
+    expect(result.current.toolView.collapsed).toBe(true);
+    rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout }));
+    await act(() => store.loadLayoutForSession("opening"));
+    expect(result.current.placements).toEqual(layout);
+    expect(result.current.toolView).toEqual({
+      activeId: saved ? "notes" : "files",
+      collapsed: true,
+      unreadIds: saved ? savedView.unreadIds : [],
+    });
+    expect(localStorage.getItem("rome:tool-view:opening")).toBe(
+      saved ? JSON.stringify(savedView) : null,
+    );
+  });
+
+  it.each([
+    "toggle",
+    "link",
+    "empty toggle",
+  ])("preserves a narrow user's %s while the server layout loads", async (action) => {
+    const { store, result } = await open({ empty: action === "empty toggle" });
+    let respond!: (response: Response) => void;
+    rs.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    const loading = store.loadLayoutForSession("opening");
+    act(() => {
+      if (action === "link") result.current.selectTool("notes");
+      else result.current.setToolsCollapsed(false);
+    });
+    expect(result.current.toolView.collapsed).toBe(false);
+    await act(async () => {
+      respond(Response.json({ layout }));
+      await loading;
+    });
+    expect(result.current.toolView.collapsed).toBe(false);
+    if (action === "link") expect(result.current.toolView.activeId).toBe("notes");
+    act(() => result.current.setToolsCollapsed(true));
+    rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout }));
+    await act(() => store.loadLayoutForSession("opening"));
+    expect(result.current.toolView.collapsed).toBe(true);
+  });
+
+  it("opens the saved tab from the narrow header toggle and lets links and added widgets open the pane", async () => {
+    const { result } = await open({ saved: true });
+    expect(result.current.toolView.collapsed).toBe(true);
+    act(() => result.current.setToolsCollapsed(false));
+    expect(result.current.toolView).toEqual({
+      activeId: "notes",
+      collapsed: false,
+      unreadIds: ["files"],
+    });
+    act(() => result.current.setToolsCollapsed(true));
+    act(() => result.current.selectTool("files"));
+    expect(result.current.toolView).toEqual({ activeId: "files", collapsed: false, unreadIds: [] });
+    act(() => result.current.setToolsCollapsed(true));
+    act(() => result.current.addWidget("app", "calendar"));
+    expect(result.current.toolView.collapsed).toBe(false);
+    expect(
+      result.current.placements.find((p) => p.id === result.current.toolView.activeId)?.targetId,
+    ).toBe("calendar");
+  });
+
+  it("does not reset the pane on a same-session activation but collapses on returning from another chat", async () => {
+    const { store, result } = await open();
+    act(() => result.current.selectTool("notes"));
+    const view = result.current.toolView;
+    act(() => store.setActiveSession("opening"));
+    expect(result.current.toolView).toBe(view);
+    act(() => store.setActiveSession("other"));
+    act(() => store.setActiveSession("opening"));
+    expect(result.current.toolView).toEqual({ ...view, collapsed: true });
+  });
+
+  it("does not let passive agent placements open a narrow chat's pane", async () => {
+    const { store, result } = await open();
+    act(() => {
+      store.autoPlaceProjects();
+      store.applyAgentPlacement("opening-placement", "calendar");
+    });
+    expect(result.current.toolView.collapsed).toBe(true);
+  });
+
+  it.each([
+    721, 1280,
+  ])("keeps desktop defaults and saved state at %s px, including after the server loads", async (width) => {
+    const { store, result } = await open({ width });
+    expect(result.current.toolView).toEqual({ activeId: "files", collapsed: false, unreadIds: [] });
+    rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout }));
+    await act(() => store.loadLayoutForSession("opening"));
+    expect(result.current.toolView.collapsed).toBe(false);
+    for (const collapsed of [false, true]) {
+      act(() => store.setActiveSession("other"));
+      localStorage.setItem("rome:tool-view:opening", JSON.stringify({ ...savedView, collapsed }));
+      act(() => store.setActiveSession("opening"));
+      expect(result.current.toolView).toEqual({ ...savedView, collapsed });
+      rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout }));
+      await act(() => store.loadLayoutForSession("opening"));
+      expect(result.current.toolView).toEqual({ ...savedView, collapsed });
+    }
+  });
+});
+
 describe("placeWidgetsIfSessionActive", () => {
   it("does not apply a delayed widget handoff after the active session changes", async () => {
     const { placeWidgetsIfSessionActive, setActiveSession } = await import("./use-free-cells");

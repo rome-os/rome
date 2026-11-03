@@ -820,6 +820,20 @@ function TasksHarness({
 }
 
 describe("ToolWorkspace Tasks tab", () => {
+  it("keeps the narrow chat visible until Tasks is requested and returns to it on close", async () => {
+    viewportWidth = 390;
+    const user = userEvent.setup();
+    render(<TasksHarness initial={{ activeId: "a", collapsed: true, unreadIds: [] }} />);
+    expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
+    expect(screen.queryByRole("tab")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(screen.queryByRole("textbox", { name: "Chat draft" })).toBeNull();
+    expect(screen.getByText("Task panel body")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Close Tasks" }));
+    expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
+    expect(screen.queryByRole("tab")).toBeNull();
+  });
+
   it("adds an ephemeral Tasks tab ahead of the apps and selects it, writing nothing to the layout", async () => {
     const user = userEvent.setup();
     const selectTool = rs.fn();

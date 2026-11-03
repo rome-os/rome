@@ -1,5 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 
+export const COMPACT_WIDTH = 721;
+
 export type WidgetType = "chat" | "desktop" | "projects" | "app";
 
 export interface WidgetPlacement {
@@ -54,9 +56,10 @@ let toolView: ToolView = { activeId: null, collapsed: true, unreadIds: [] };
 const VIEW_PREFIX = "rome:tool-view:";
 
 function readToolView(sessionId: string | null, layout: WidgetPlacement[]): ToolView {
+  const compact = window.innerWidth < COMPACT_WIDTH;
   const fallback: ToolView = {
     activeId: [...layout].sort((a, b) => a.order - b.order)[0]?.id ?? null,
-    collapsed: layout.length === 0,
+    collapsed: compact || layout.length === 0,
     unreadIds: [],
   };
   if (!sessionId) return fallback;
@@ -65,7 +68,7 @@ function readToolView(sessionId: string | null, layout: WidgetPlacement[]): Tool
     if (!saved || typeof saved.collapsed !== "boolean") return fallback;
     return {
       activeId: layout.some((p) => p.id === saved.activeId) ? saved.activeId : fallback.activeId,
-      collapsed: saved.collapsed,
+      collapsed: compact || saved.collapsed,
       unreadIds: Array.isArray(saved.unreadIds)
         ? layout.filter((p) => saved.unreadIds.includes(p.id)).map((p) => p.id)
         : [],
@@ -658,7 +661,11 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
     writeStorage(sessionId, layout);
     if (sessionId === activeSessionId) {
       snapshot = layout;
-      toolView = readToolView(sessionId, layout);
+      const nextView = readToolView(sessionId, layout);
+      // A narrow chat starts collapsed, but a toggle or chat link can open it
+      // while this load is in flight. Keep that choice when the layout arrives.
+      if (window.innerWidth < COMPACT_WIDTH) nextView.collapsed = toolView.collapsed;
+      toolView = nextView;
       notify();
     }
   } catch {
