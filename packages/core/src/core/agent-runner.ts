@@ -614,7 +614,8 @@ export class AgentRunner {
             // the caller's channel keeps.
             persistTranscript: conversation.recorderOwned || (params.persistTranscript ?? true),
             persistUserTranscript: !conversation.promptPersisted,
-            persistAssistantTranscript: conversation.recorderOwned || (params.persistAnswer ?? true),
+            persistAssistantTranscript:
+              conversation.recorderOwned || (params.persistAnswer ?? true),
           })
         : null;
 

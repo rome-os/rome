@@ -374,7 +374,11 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:chat-answer",
         prompt: "continue",
-        threadContext: { channel: "webchat", threadId: "chat-answer", romeSessionId: "chat-answer" },
+        threadContext: {
+          channel: "webchat",
+          threadId: "chat-answer",
+          romeSessionId: "chat-answer",
+        },
         persistTrace: true,
         persistAnswer,
       }),
