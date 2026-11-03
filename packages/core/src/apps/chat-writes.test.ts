@@ -258,6 +258,23 @@ describe("appChatWrites", () => {
       expect(result).toEqual({ messageId: "101" });
     });
 
+    it("puts a send where another session in the chat catches up on it", async () => {
+      // send_message without streaming: the reply goes out through the
+      // host's Chats writes, never the legacy writer.
+      fixture.speaker({ id: "s2", chat: group, accountId: BOT.id, agentName: "support" });
+
+      await writes.send({
+        sessionId: "s1",
+        channel: "telegram",
+        text: "Deploy done",
+        turnId: "turn-1",
+        knownToProvider: true,
+      });
+
+      expect(links.unseen("s2")).toMatchObject([{ text: "Deploy done", fromRome: true }]);
+      expect(links.unseen("s1")).toEqual([]);
+    });
+
     it("says a send as the agent the running action names for its turn, as in a worker", async () => {
       // A worker starts no turn, so only the action running in it knows that
       // the account's own agent runs this one.
