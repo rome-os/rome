@@ -17,13 +17,15 @@ CREATE TABLE `legacy_chat_line_ids` (
 CREATE INDEX `idx_legacy_chat_line_ids_message` ON `legacy_chat_line_ids` (`message_id`);
 --> statement-breakpoint
 -- Each legacy chat session as a speaker: the chat its rows name, Rome's end
--- there, and whether it is a thread of another session's chat.
+-- there, and whether it is a thread of another session's chat. A channel with
+-- no record is on the platform of the connection kind it is named after, as
+-- migration 0101 and platformOf in @rome/api-types/platform read it.
 CREATE VIEW `legacy_chat_speakers` AS
 SELECT
   r.`id` AS `session_id`,
   r.`source_channel` = 'webchat' AS `dashboard`,
   CASE WHEN r.`source_channel` = 'webchat' THEN 'webchat'
-       ELSE coalesce(c.`platform`, r.`source_channel`) END AS `platform`,
+       ELSE coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) END AS `platform`,
   -- Rome's end: the account's platform id, or the channel's name while its
   -- record knows none, as the adapters name it.
   coalesce(c.`platform_account_id`, r.`source_channel`) AS `rome_end`,
@@ -32,15 +34,15 @@ SELECT
        -- unless its address says it is a direct message: Telegram's is the
        -- other party's positive id, WhatsApp's is not a `@g.us` group.
        WHEN (r.`source_thread_type` IN ('group', 'channel') OR (r.`source_thread_type` IS NULL
-         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'telegram' AND r.`source_thread_id` NOT GLOB '-*')
-         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'whatsapp' AND r.`source_thread_id` NOT GLOB '*@g.us'))) THEN r.`source_thread_id`
-       WHEN coalesce(c.`platform`, r.`source_channel`) IN ('email', 'agents') THEN r.`source_thread_id`
+         AND NOT (coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) = 'telegram' AND r.`source_thread_id` NOT GLOB '-*')
+         AND NOT (coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) = 'whatsapp' AND r.`source_thread_id` NOT GLOB '*@g.us'))) THEN r.`source_thread_id`
+       WHEN coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) IN ('email', 'agents') THEN r.`source_thread_id`
        -- A direct message's key names both ends. Where the platform's id for
        -- it is the other party (Telegram, WhatsApp) that id is the other end;
        -- where it is an id of its own (Feishu, Discord) the other end is
        -- whoever first wrote to Rome there.
        ELSE 'dm:' || coalesce(c.`platform_account_id`, r.`source_channel`) || ':' ||
-         CASE WHEN coalesce(c.`platform`, r.`source_channel`) IN ('telegram', 'whatsapp')
+         CASE WHEN coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) IN ('telegram', 'whatsapp')
               THEN r.`source_thread_id`
               ELSE coalesce((
                 SELECT m.`sender_id` FROM `rome_agent_messages` m
@@ -50,8 +52,8 @@ SELECT
        END AS `key`,
   CASE WHEN r.`source_channel` <> 'webchat'
         AND (r.`source_thread_type` IN ('group', 'channel') OR (r.`source_thread_type` IS NULL
-         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'telegram' AND r.`source_thread_id` NOT GLOB '-*')
-         AND NOT (coalesce(c.`platform`, r.`source_channel`) = 'whatsapp' AND r.`source_thread_id` NOT GLOB '*@g.us'))) THEN 'group'
+         AND NOT (coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) = 'telegram' AND r.`source_thread_id` NOT GLOB '-*')
+         AND NOT (coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) = 'whatsapp' AND r.`source_thread_id` NOT GLOB '*@g.us'))) THEN 'group'
        ELSE 'dm' END AS `kind`,
   CASE WHEN r.`source_channel` = 'webchat' THEN r.`name` ELSE r.`source_thread_name` END AS `name`,
   r.`created_at` AS `created_at`,
@@ -62,7 +64,7 @@ SELECT
   -- A Telegram basic group, `-<id>` below 10^12, numbers its messages per
   -- member account, so a line's key there carries Rome's end in front
   -- (https://core.telegram.org/api/bots/ids).
-  coalesce(c.`platform`, r.`source_channel`) = 'telegram'
+  coalesce(c.`platform`, CASE r.`source_channel` WHEN 'telegram_user' THEN 'telegram' WHEN 'wechat_user' THEN 'wechat' WHEN 'slack_bot' THEN 'slack' ELSE r.`source_channel` END) = 'telegram'
     AND r.`source_thread_id` GLOB '-[1-9]*' AND NOT substr(r.`source_thread_id`, 2) GLOB '*[^0-9]*'
     AND length(r.`source_thread_id`) <= 13 AS `per_account`
 FROM `rome_sessions` r

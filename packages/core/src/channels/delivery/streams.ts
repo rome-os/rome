@@ -33,6 +33,8 @@ export interface ReplyTarget {
   /** The conversation the run's turn is recorded in. */
   romeSessionId: string;
   turnId: string;
+  /** The agent whose turn writes the reply. */
+  agent?: string;
 }
 
 /** One run's reply, streaming. */
@@ -122,6 +124,7 @@ export class ReplyStreams {
     const reply = await speakers.replies.stream(target.romeSessionId, channel, {
       turnId: target.turnId,
       ...(target.replyTo === undefined ? {} : { replyTo: target.replyTo }),
+      ...(target.agent === undefined ? {} : { agent: target.agent }),
       policy: this.deps.policy ?? DEFAULT_POLICY,
       clock: this.deps.clock,
     });

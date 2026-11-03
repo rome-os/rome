@@ -169,6 +169,22 @@ describe("SpeakerReplies", () => {
     expect(links.linkOf("speaker-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-3" });
   });
 
+  it("put a streamed reply on record as the agent whose turn wrote it", async () => {
+    // The session still names the agent it opened with; the account's own
+    // agent ran the turn.
+    const reply = await replies().stream("speaker-1", CHANNEL, {
+      turnId: "turn-4",
+      agent: "support",
+      policy: POLICY,
+      clock: systemClock,
+    });
+
+    await reply!.settle(false);
+
+    const [line] = messages.read(placeIn(chat)).messages;
+    expect(line?.saidBy).toMatchObject({ agent: "support" });
+  });
+
   it("record nothing for a streamed reply that showed nothing", async () => {
     streamed = { text: "", key: null, threadId: null };
     const reply = await replies().stream("speaker-1", CHANNEL, {

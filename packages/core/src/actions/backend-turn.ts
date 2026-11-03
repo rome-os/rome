@@ -258,7 +258,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
           session.id,
           channel,
           { text: reply },
-          turnId ? { turnId } : {},
+          { ...(turnId ? { turnId } : {}), agent: params.agentName },
         );
         if (said) return;
         // The session stands in no chat, so nothing can record the reply

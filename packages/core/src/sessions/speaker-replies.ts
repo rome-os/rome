@@ -97,7 +97,7 @@ export class SpeakerReplies {
     sessionId: string,
     channel: Channel,
     out: SpeakerOutbound,
-    options: { turnId?: string; recorded?: readonly MessagePart[] } = {},
+    options: { turnId?: string; recorded?: readonly MessagePart[]; agent?: string } = {},
   ): Promise<(SpeakerSent & { sent: string; speaker: Speaker; landedIn: ChatId | null }) | null> {
     const speaker = this.deps.speakers.speakerOf(sessionId);
     if (!speaker) return null;
@@ -109,7 +109,7 @@ export class SpeakerReplies {
       {
         direction: "fromRome",
         place: speaker.place,
-        saidBy: { account, agent: speaker.agent },
+        saidBy: { account, agent: options.agent ?? speaker.agent },
         parts: options.recorded ?? out.parts ?? [{ type: "text", content: out.text }],
         ...(replyTo === undefined ? {} : { replyTo }),
       },
@@ -139,7 +139,15 @@ export class SpeakerReplies {
   async stream(
     sessionId: string,
     channel: Channel,
-    options: { turnId: string; replyTo?: number; policy: DeliveryPolicy; clock: Clock },
+    options: {
+      turnId: string;
+      replyTo?: number;
+      /** The agent whose turn writes the reply, when it is not the one the
+       *  session names, as an account's own agent is not. */
+      agent?: string;
+      policy: DeliveryPolicy;
+      clock: Clock;
+    },
   ): Promise<StreamedReply | null> {
     const speaker = this.deps.speakers.speakerOf(sessionId);
     if (!speaker) return null;
@@ -168,7 +176,7 @@ export class SpeakerReplies {
             {
               direction: "fromRome",
               place: speaker.place,
-              saidBy: { account, agent: speaker.agent },
+              saidBy: { account, agent: options.agent ?? speaker.agent },
               parts: [{ type: "text", content: settled.text }],
               ...(replyTo === undefined ? {} : { replyTo }),
             },

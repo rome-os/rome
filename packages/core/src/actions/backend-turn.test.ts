@@ -320,7 +320,7 @@ describe("backend turn delivery", () => {
         "session-1",
         wechat,
         { text: "Done." },
-        { turnId: "turn-1" },
+        { turnId: "turn-1", agent: "main" },
       );
       // The speaker's adapter sends it, not the runner.
       expect(send).not.toHaveBeenCalled();

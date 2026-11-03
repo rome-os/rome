@@ -249,6 +249,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               // records it in the conversation the turn is recorded in.
               romeSessionId,
               turnId: handle.turnId,
+              // The agent the turn runs, which an account's own agent is
+              // while its session still names main.
+              agent: req.key.agentName,
             });
             // The worker may have gone away while the reply opened. Nobody is
             // left to stream to, so the reply is dropped before it writes.

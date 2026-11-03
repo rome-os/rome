@@ -89,6 +89,9 @@ describe("0108 Chats backfill", () => {
     // group from a direct message.
     session.run("tg-dm", "Ada", "channel", "tg-sales", "55", null, null, null, null);
     session.run("tg-group", "Club", "channel", "tg-sales", "-77", null, "Club", null, null);
+    // A signed-in Telegram user's chat whose channel has no record: it is on
+    // the platform of the connection kind the channel is named after.
+    session.run("tgu-dm", "Bo", "channel", "telegram_user", "99", null, null, null, null);
     const row = sqlite.prepare(
       `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at, turn_id,
          input_state, platform_message_id, sender_id, sender_name, reply_to_platform_message_id,
@@ -272,6 +275,7 @@ describe("0108 Chats backfill", () => {
       { platform: "feishu", key: "oc_launch", kind: "group" },
       { platform: "telegram", key: "dm:111:55", kind: "dm" },
       { platform: "telegram", key: "-77", kind: "group" },
+      { platform: "telegram", key: "dm:telegram_user:99", kind: "dm" },
     ]);
   });
 
@@ -288,6 +292,7 @@ describe("0108 Chats backfill", () => {
       { id: "group", key: "oc_launch", thread_id: null, account_id: "bot" },
       { id: "tg-dm", key: "dm:111:55", thread_id: null, account_id: "111" },
       { id: "tg-group", key: "-77", thread_id: null, account_id: "111" },
+      { id: "tgu-dm", key: "dm:telegram_user:99", thread_id: null, account_id: "telegram_user" },
       { id: "thread", key: "oc_launch", thread_id: "omt_1", account_id: "bot" },
     ]);
   });
@@ -430,6 +435,13 @@ describe("0108 Chats backfill", () => {
         chat_key: "dm:bot:ou_wei",
         thread_id: "",
         address: "oc_p2p",
+      },
+      {
+        platform: "telegram",
+        account_id: "telegram_user",
+        chat_key: "dm:telegram_user:99",
+        thread_id: "",
+        address: "99",
       },
       {
         platform: "feishu",
