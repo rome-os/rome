@@ -62,7 +62,10 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
 /** Where a send is said and recorded: Chats, and each channel's chat
  *  adapter, which the message goes out through. */
 export interface SendRecording {
-  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "directMessageReached">;
+  adapters: Pick<
+    ChatAdapters,
+    "of" | "chatAt" | "accountOn" | "platformOn" | "directMessageReached"
+  >;
   chats: Pick<ChatRepository, "start" | "byKey">;
   messages: Pick<MessageRepository, "send">;
 }

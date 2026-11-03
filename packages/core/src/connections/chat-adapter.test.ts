@@ -18,6 +18,7 @@ import {
   ChatAdapters,
   chatAt,
   channelAdapter,
+  ChannelWithoutAccount,
   type Inbound,
   isDirectMessage,
   lineAt,
@@ -412,6 +413,26 @@ describe("channelAdapter", () => {
     expect(listening()).toBe(false);
   });
 
+  it("drop what reaches a channel that knows no account, and refuse its sends", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, { ...deps(), accountOf: () => null });
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return null;
+      },
+      () => {},
+    );
+
+    await hear({ chatId: "-42", messageId: "7" });
+    await adapter.settled();
+
+    expect(delivered).toEqual([]);
+    await expect(adapter.send("-42", null, { text: "hi" })).rejects.toThrow(ChannelWithoutAccount);
+    expect(sent).toEqual([]);
+  });
+
   it("open no stream on a channel that cannot stream", () => {
     const { channel } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
@@ -590,10 +611,9 @@ describe("ChatAdapters", () => {
 
   it("name the account a channel is, and the channel an account is", () => {
     expect(adapters.accountOn("telegram")).toEqual(ROME);
-    expect(adapters.accountOn("telegram-user")).toEqual({
-      platform: "telegram",
-      id: "telegram-user",
-    });
+    // A channel that knows no account is not active, and no name stands in.
+    expect(() => adapters.accountOn("telegram-user")).toThrow(ChannelWithoutAccount);
+    expect(adapters.knownAccountOn("telegram-user")).toBeNull();
     expect(adapters.channelOf(ROME)).toBe("telegram");
     expect(adapters.channelOf({ platform: "telegram", id: "nobody" })).toBeNull();
   });

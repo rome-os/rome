@@ -607,8 +607,14 @@ export async function buildTestDeps(
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   // Chats as production wires it, with each dashboard chat's lines in it.
+  // Every test channel is active: one its record names no account for is
+  // the account named like it, so tests need not record one per channel.
   const chatsWired = chatsWiring(db, {
-    accountOf: (channel) => channelRecords.accountOf(channel),
+    accountOf: (channel) =>
+      channelRecords.accountOf(channel) ?? {
+        platform: channelRecords.platformOfChannel(channel),
+        id: channel,
+      },
     platformOfChannel: (name) => channelRecords.platformOfChannel(name),
     channelsOn: (platform) => channelRecords.namesOn(platform),
   });

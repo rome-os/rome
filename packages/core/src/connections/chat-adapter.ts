@@ -323,11 +323,11 @@ export function channelAdapter(
   deps: ChannelAdapterDeps,
   keying: ChatKeying = (account, message) => chatOf(account.platform, account.id, message),
 ): ChannelChatAdapter {
-  const account = (): Account =>
-    deps.accountOf(channel.name) ?? {
-      platform: deps.platformOfChannel(channel.name),
-      id: channel.name,
-    };
+  const account = (): Account => {
+    const known = deps.accountOf(channel.name);
+    if (!known) throw new ChannelWithoutAccount(channel.name);
+    return known;
+  };
   let unsubscribe: (() => void) | null = null;
   let started = false;
   const inFlight = new Set<Promise<unknown>>();
@@ -450,7 +450,17 @@ export function channelAdapter(
         // order the port hands it over, and returns: the adapter hands a
         // chat's messages over one at a time, and none waits behind another
         // thread's at the port. The queue is bounded as the port's is.
-        const chat = keying(event.message.account ?? account(), event.message).key.externalId;
+        // A channel that does not know its account is not active: what
+        // reaches it keys no chat.
+        const heardBy = event.message.account ?? deps.accountOf(channel.name);
+        if (!heardBy) {
+          log.error("inbound message dropped: channel knows no account", {
+            channel: channel.name,
+            messageId: event.message.messageId,
+          });
+          return;
+        }
+        const chat = keying(heardBy, event.message).key.externalId;
         const waiting = queues.get(chat);
         if (waiting) {
           if (waiting.length >= QUEUE_CAPACITY) {
@@ -546,6 +556,17 @@ export function channelAdapter(
   };
 }
 
+/**
+ * A channel whose record knows no account. It is not active: it keys no
+ * chat, what reaches it is dropped, and a send through it is refused.
+ */
+export class ChannelWithoutAccount extends Error {
+  constructor(readonly channel: string) {
+    super(`Channel ${channel} knows no account, so it is not active`);
+    this.name = "ChannelWithoutAccount";
+  }
+}
+
 /** A platform's own adapter over one of its channels. */
 export type PlatformAdapter = (
   channel: Channel,
@@ -583,15 +604,24 @@ export class ChatAdapters {
     return adapter;
   }
 
-  /** Rome's account on channel `channel`: its record's, else the channel's
-   *  name on its platform while the record knows none. */
+  /** Rome's account on channel `channel`, as its record knows it. Throws
+   *  {@link ChannelWithoutAccount} for a channel that knows none, which is
+   *  not active: nothing is keyed by a channel's name. */
   accountOn(channel: string): Account {
-    return (
-      this.deps.accountOf(channel) ?? {
-        platform: this.deps.platformOfChannel(channel),
-        id: channel,
-      }
-    );
+    const account = this.deps.accountOf(channel);
+    if (!account) throw new ChannelWithoutAccount(channel);
+    return account;
+  }
+
+  /** Rome's account on channel `channel`, or null while it knows none. */
+  knownAccountOn(channel: string): Account | null {
+    return this.deps.accountOf(channel);
+  }
+
+  /** The platform channel `channel` is on, whether or not it knows its
+   *  account. */
+  platformOn(channel: string): string {
+    return this.deps.platformOfChannel(channel);
   }
 
   /** The channel Rome's account `account` speaks through, or null when no
@@ -600,7 +630,7 @@ export class ChatAdapters {
     return (
       this.deps
         .channelsOn(account.platform)
-        .find((channel) => this.accountOn(channel).id === account.id) ?? null
+        .find((channel) => this.knownAccountOn(channel)?.id === account.id) ?? null
     );
   }
 

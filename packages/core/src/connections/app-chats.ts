@@ -52,7 +52,10 @@ export interface AppChatsDeps {
   channels(): readonly Channel[];
   /** The channels of Rome's accounts on `platform`. */
   channelsOn(platform: string): readonly string[];
-  adapters: Pick<ChatAdapters, "of" | "accountOn" | "channelOf" | "keyOf" | "directMessageReached">;
+  adapters: Pick<
+    ChatAdapters,
+    "of" | "accountOn" | "knownAccountOn" | "channelOf" | "keyOf" | "directMessageReached"
+  >;
   chats: Pick<ChatRepository, "get" | "byKey" | "start" | "list">;
   speakers: Pick<Speakers, "speakerIn" | "speaksIn" | "accountsIn">;
   replies: Pick<SpeakerReplies, "send">;
@@ -264,7 +267,7 @@ function senderIn(deps: AppChatsDeps, chat: Chat, at: Place, as: Account | undef
   }
   const [speaker] = speaking;
   if (speaker !== undefined) return senderAs(deps, { platform, id: speaker }, { inferred: true });
-  const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
+  const accounts = knownAccountsOn(deps, platform);
   const [only] = accounts.length === 1 ? accounts : [];
   if (only) return senderAs(deps, only, { inferred: true });
   if (accounts.length === 0) {
@@ -368,7 +371,7 @@ async function dm(
   }
   // The channel may have reconnected as another account while the platform
   // answered, and the address is the first account's.
-  if (deps.adapters.accountOn(sender.channel.name).id !== sender.account.id) {
+  if (deps.adapters.knownAccountOn(sender.channel.name)?.id !== sender.account.id) {
     throw new SendError("not_connected", `${describe(sender.account)} is no longer connected`);
   }
   const key = deps.adapters.directMessageReached(sender.channel.name, account.id, address);
@@ -384,7 +387,7 @@ function soleSender(deps: AppChatsDeps, platform: string, as: Account | undefine
     }
     return senderAs(deps, as);
   }
-  const accounts = deps.channelsOn(platform).map((name) => deps.adapters.accountOn(name));
+  const accounts = knownAccountsOn(deps, platform);
   const [only] = accounts;
   if (!only) throw new SendError("not_connected", `Rome holds no account on ${platform}`);
   if (accounts.length > 1) {
@@ -437,4 +440,10 @@ function recordedParts(
 
 function describe(account: Account): string {
   return `${account.platform} account ${account.id}`;
+}
+
+/** Rome's active accounts on `platform`: each channel's there that knows its
+ *  account. A channel that knows none is not active and sends nothing. */
+function knownAccountsOn(deps: AppChatsDeps, platform: string): Account[] {
+  return deps.channelsOn(platform).flatMap((name) => deps.adapters.knownAccountOn(name) ?? []);
 }

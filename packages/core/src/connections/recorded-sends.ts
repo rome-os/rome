@@ -44,7 +44,10 @@ import {
 export interface RecordedSendsDeps {
   /** Each channel's chat adapter, which names the chat at an address and
    *  sends there. */
-  adapters: Pick<ChatAdapters, "of" | "chatAt" | "accountOn" | "addressAt" | "keyOf">;
+  adapters: Pick<
+    ChatAdapters,
+    "of" | "chatAt" | "accountOn" | "platformOn" | "addressAt" | "keyOf"
+  >;
   chats: Pick<ChatRepository, "byKey" | "start">;
   speakers: Pick<Speakers, "speakerOf" | "speakerIn" | "speakerInThread">;
   replies: Pick<SpeakerReplies, "send">;
@@ -100,7 +103,7 @@ export function recordedSends<C extends Channel>(
         const local = threadsStartedOn(deps, channel);
         // Only an email channel reads a message's email fields; any other
         // ignores them, as the SDK lets it.
-        const emails = deps.adapters.accountOn(channel.name).platform === EMAIL_PLATFORM;
+        const emails = deps.adapters.platformOn(channel.name) === EMAIL_PLATFORM;
         const email = emails && message.kind === "email" ? message : undefined;
         const out: Out = {
           // The port reads a message without text by its parts.
@@ -172,7 +175,7 @@ export function recordedSends<C extends Channel>(
  * address failed, so a send to that thread reaches the chat Rome opened.
  */
 function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSendsDeps {
-  if (deps.adapters.accountOn(channel.name).platform !== EMAIL_PLATFORM) return deps;
+  if (deps.adapters.platformOn(channel.name) !== EMAIL_PLATFORM) return deps;
   const adapter = deps.adapters.of(channel);
   if (!isEmailAdapter(adapter)) return deps;
   const { adapters } = deps;
@@ -181,6 +184,7 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
     adapters: {
       of: (of) => adapters.of(of),
       accountOn: (name) => adapters.accountOn(name),
+      platformOn: (name) => adapters.platformOn(name),
       addressAt: (name, place) =>
         name === channel.name && place.threadId === undefined
           ? adapter.threadAddress(adapters.keyOf(place.chat).externalId)
@@ -237,7 +241,7 @@ async function recordDelivered(
  *  an email address, bare or with a display name, or the guardian, where
  *  Rome holds no thread. The email port reads an address the same way. */
 function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string): boolean {
-  if (deps.adapters.accountOn(channel).platform !== EMAIL_PLATFORM) return false;
+  if (deps.adapters.platformOn(channel) !== EMAIL_PLATFORM) return false;
   const named = address.trim().toLowerCase() === "guardian" || address.includes("@");
   return named && !deps.chats.byKey(deps.adapters.chatAt(channel, address, "group"));
 }
@@ -245,8 +249,7 @@ function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string
 /** The address of the email thread that holds the email the provider calls
  *  `messageId`, or null when Rome holds no such email. */
 function threadOf(deps: RecordedSendsDeps, channel: string, messageId: string): ChatId | null {
-  const account = deps.adapters.accountOn(channel);
-  const chat = deps.messages.chatHolding(account.platform, messageId);
+  const chat = deps.messages.chatHolding(deps.adapters.platformOn(channel), messageId);
   return chat ? deps.adapters.addressAt(channel, placeIn(chat)) : null;
 }
 
@@ -386,7 +389,7 @@ function landedAt(deps: RecordedSendsDeps, channel: string, place: Place, sentTo
  *  a group. */
 export function kindAt(
   deps: {
-    adapters: Pick<RecordedSendsDeps["adapters"], "chatAt" | "accountOn">;
+    adapters: Pick<RecordedSendsDeps["adapters"], "chatAt" | "platformOn">;
     chats: Pick<RecordedSendsDeps["chats"], "byKey">;
   },
   channel: string,
@@ -403,7 +406,7 @@ export function kindAt(
   // the address. A bare Discord user id still reaches some ports today; the
   // Chats switch moves those callers onto the ref rather than having the
   // adapter look the id up here.
-  return kindNamedBy(deps.adapters.accountOn(channel).platform, address) ?? "group";
+  return kindNamedBy(deps.adapters.platformOn(channel), address) ?? "group";
 }
 
 /** The quote of the line keyed `key` in `chat`: by its id when Rome holds
