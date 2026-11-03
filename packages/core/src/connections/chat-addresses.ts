@@ -60,10 +60,11 @@ export class ChatAddresses {
   /**
    * Key the chat keyed `from` on `account`'s platform `to` instead, with
    * every address kept for it: a direct message Rome reached at its address
-   * before it knew the other end, once it does. False, changing nothing,
-   * when a chat already holds `to`.
+   * before it knew the other end, once it does, or one Rome took for a
+   * direct message once a group message is heard there, which also names it
+   * `kind`. False, changing nothing, when a chat already holds `to`.
    */
-  rekey(account: Account, from: string, to: string): boolean {
+  rekey(account: Account, from: string, to: string, kind?: "group" | "dm"): boolean {
     return this.db.transaction((tx) => {
       const taken = tx
         .select({ id: chats.id })
@@ -72,7 +73,7 @@ export class ChatAddresses {
         .get();
       if (taken) return false;
       tx.update(chats)
-        .set({ key: to })
+        .set({ key: to, ...(kind ? { kind } : {}) })
         .where(and(eq(chats.platform, account.platform), eq(chats.key, from)))
         .run();
       tx.run(sql`

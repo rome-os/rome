@@ -30,7 +30,7 @@ import {
   type TraceBatch,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { agentTurnMessages, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
@@ -572,10 +572,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
   /**
    * Delete sessions `ids` with the dashboard chats they stand in, each with
    * every line said in it. A chat is the session's alone when it is the
-   * dashboard chat keyed by that session; a channel chat goes on without it.
+   * dashboard chat keyed by that session; a channel chat goes on without it,
+   * and without the sessions' links to its messages.
    */
   protected override deleteSessionRows(tx: DrizzleTx, ids: string[]): void {
     const ended = ids.flatMap((id) => this.dashboardChatOf(id) ?? []);
+    tx.delete(agentTurnMessages).where(inArray(agentTurnMessages.sessionId, ids)).run();
     super.deleteSessionRows(tx, ids);
     for (const ref of ended) this.chats.end(ref);
   }

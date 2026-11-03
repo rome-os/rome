@@ -585,10 +585,23 @@ describe("ChatsWebChatRepository", () => {
       .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform })
       .where(eq(romeSessions.id, "channel:telegram:t-1"))
       .run();
+    const heard = new MessageRepository(testDb.db).record({
+      direction: "toRome",
+      place: { chat: telegram.ref },
+      saidBy: { account: { platform: "telegram", id: "ana" } },
+      key: "5",
+      body: { text: "Hi" },
+      at: new Date(),
+    })!;
+    links.prompt(heard.id, "channel:telegram:t-1", "turn-1");
 
     await repo.deleteSession("channel:telegram:t-1");
 
     expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "t-1" }]);
+    expect(testDb.db.select({ key: chatMessages.key }).from(chatMessages).all()).toEqual([
+      { key: "5" },
+    ]);
+    expect(links.linkOf("channel:telegram:t-1", heard.id)).toBeNull();
   });
 
   it("names a session's dashboard chat with it", async () => {

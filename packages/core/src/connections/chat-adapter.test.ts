@@ -359,6 +359,33 @@ describe("channelAdapter", () => {
     expect(delivered.map((message) => message.chat.externalId)).toEqual(["dm:rome_bot:oc_p2p"]);
   });
 
+  it("move a group Rome took for a direct message to its key once a group message is heard there", async () => {
+    // A send opened the group as private, so Rome keyed it as a direct
+    // message with the one person who wrote there.
+    addresses.bind(ROME, "dm:rome_bot:alice", "grp_1");
+    testDb.db
+      .insert(chats)
+      .values({ platform: "telegram", key: "dm:rome_bot:alice", kind: "dm", startedAt: new Date() })
+      .run();
+    const { channel, hear } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "grp_1", senderId: "bob", messageId: "4", thread: { kind: "group" } });
+    await adapter.settled();
+
+    expect(delivered.map((message) => message.chat.externalId)).toEqual(["grp_1"]);
+    expect(testDb.db.select({ key: chats.key, kind: chats.kind }).from(chats).all()).toEqual([
+      { key: "grp_1", kind: "group" },
+    ]);
+  });
+
   it("send to a direct message where it was heard, quoting the platform's id", async () => {
     const { channel, hear, sent } = fakeChannel();
     const adapter = channelAdapter(channel, deps());
