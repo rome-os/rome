@@ -165,6 +165,20 @@ describe("appChatWrites", () => {
       expect(linkOf("s1", line!.id)).toMatchObject({ role: "prompt" });
     });
 
+    it("keeps the parts an app hands over, host-only ones left out", async () => {
+      const result = { type: "interaction_result", interactionId: "i1", value: "yes" };
+      await writes.addMessage({
+        sessionId: "s1",
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "Picked" }, result]),
+        platformMessageId: "41",
+      });
+
+      const [line] = said();
+      expect(line?.text).toBe("Picked");
+      expect(JSON.parse(line!.parts)).toEqual([{ type: "text", content: "Picked" }, result]);
+    });
+
     it("keeps a notification out of the turn until it is promoted", async () => {
       await writes.addMessage({
         sessionId: "s1",
@@ -259,6 +273,22 @@ describe("appChatWrites", () => {
       expect(JSON.parse(said().at(-1)!.parts)).toEqual([
         { type: "text", content: "Sure, on record" },
       ]);
+    });
+
+    it("moves the session's activity to when its message went out", async () => {
+      testDb.db.run(sql`UPDATE rome_sessions SET activity_at = 0 WHERE id = 's1'`);
+
+      await writes.send({
+        sessionId: "s1",
+        channel: "telegram",
+        text: "x",
+        knownToProvider: false,
+      });
+
+      const [session] = testDb.db.all<{ activity_at: number }>(
+        sql`SELECT activity_at FROM rome_sessions WHERE id = 's1'`,
+      );
+      expect(session!.activity_at).toBeGreaterThan(0);
     });
 
     it("says a parts-only message's text parts as its text", async () => {
@@ -435,6 +465,20 @@ describe("appChatWrites", () => {
         }),
       ).rejects.toThrow("Email m1 is not in session mail-2's thread");
       expect(mailSent).toHaveLength(2);
+    });
+
+    it("refuses a channel that sends no email before anything goes out", async () => {
+      await expect(
+        writes.sendEmail({
+          channel: "telegram",
+          sessionId: "s1",
+          text: "x",
+          email: {},
+          knownToProvider: false,
+        }),
+      ).rejects.toThrow('Channel "telegram" sends no email');
+      expect(sends).toEqual([]);
+      expect(said()).toEqual([]);
     });
 
     it("refuses to reply to an email Rome holds no thread with", async () => {

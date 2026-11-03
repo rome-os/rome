@@ -78,6 +78,19 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     return speaker;
   };
 
+  /** Moves the session's activity to `at`, once a send went out. The send
+   *  already happened, so a failure here is logged, not thrown. */
+  const active = (sessionId: string, at: Date) => {
+    try {
+      deps.webchatRepo.advanceSessionActivity(sessionId, at);
+    } catch (error) {
+      log.error("a send went out, but its session's activity could not move", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   /** The provider's address for the email thread `chat`. Asks the email
    *  adapter, which keeps the address of a thread it started even when
    *  storing it failed. */
@@ -134,6 +147,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         ...(subject ? { threadName: subject } : {}),
       });
       if (sent.id !== null && turnId) deps.links.answer(sent.id, session.id, turnId);
+      active(session.id, sent.at);
     } catch (error) {
       log.error("an email thread Rome started went out, but main could not join it", {
         chat: chat.id,
@@ -162,6 +176,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           ...(input.senderName === undefined ? {} : { name: input.senderName }),
         },
         body: { text: messageContentText(input.content) ?? "" },
+        ...partsIn(input.content),
         ...(input.replyToPlatformMessageId === undefined
           ? {}
           : { replyTo: keyOf(input.replyToPlatformMessageId) }),
@@ -209,12 +224,15 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         },
       );
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
+      active(input.sessionId, sent.at);
       const messageId = deps.lines.platformIdIn(sent.speaker, sent.sent);
       return messageId ? { messageId } : {};
     },
 
     async sendEmail(input) {
       const channel = channelNamed(input.channel);
+      // Refused before anything goes out on a channel that sends no email.
+      emailOf(deps.adapters, channel);
       const parts = input.parts?.length ? withoutHostOnlyParts(input.parts) : undefined;
       const recorded = input.content ? recordedOf(input.content) : undefined;
       const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
@@ -290,6 +308,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         { ...(turnId ? { turnId } : {}), recorded: onRecord },
       );
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
+      active(sessionId, sent.at);
       return {
         messageId: deps.lines.platformIdIn(sent.speaker, sent.sent),
         threadId: sent.speaker.place.threadId ?? threadAddressOf(channel, sent.speaker.place.chat),
@@ -325,6 +344,18 @@ function withNotes(
 
 /** An app's `content`, the line as it goes on record, without the parts only
  *  the host may author, so a forged routine card never reaches the chat. */
+/** The parts an app's message content holds, host-only ones left out, when
+ *  it holds a list of them. */
+function partsIn(content: string): { parts?: MessagePart[] } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripHostOnlyPartsFromContent(content));
+  } catch {
+    return {};
+  }
+  return Array.isArray(parsed) && parsed.length ? { parts: parsed as MessagePart[] } : {};
+}
+
 function recordedOf(content: string): MessagePart[] {
   return JSON.parse(stripHostOnlyPartsFromContent(content)) as MessagePart[];
 }
