@@ -1,3 +1,4 @@
+import type { RunLineDeps } from "../connections/speaker-lines.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -572,6 +573,7 @@ describe("AgentSessionBridge reply streaming", () => {
       repo,
       db,
       named = true,
+      runLineDeps,
     }: {
       streamReply: boolean;
       /** A pending promise holds the setting's read open. */
@@ -587,6 +589,8 @@ describe("AgentSessionBridge reply streaming", () => {
       db?: DrizzleDb;
       /** Whether the caller names the conversation. Otherwise the thread does. */
       named?: boolean;
+      /** Chats' lines, given once Chats records what the caller sends. */
+      runLineDeps?: RunLineDeps;
     },
   ) {
     const recording = platform();
@@ -621,7 +625,7 @@ describe("AgentSessionBridge reply streaming", () => {
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, repo, undefined, turns, undefined, replies).attach(
+    new AgentSessionBridge(manager, repo, undefined, turns, undefined, replies, runLineDeps).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -965,6 +969,23 @@ describe("AgentSessionBridge reply streaming", () => {
         JSON.stringify({ status: "partial", messageIds: ["m1"] }),
       );
       expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "Looking." }])]);
+    } finally {
+      close();
+    }
+  });
+
+  it("leaves an answer it does not stream for its caller to record, once Chats records sends", async () => {
+    const { repo, db, answers, close } = await recorded();
+    try {
+      const { turnEnd } = run(turnEvents(...answer), {
+        streamReply: false,
+        repo,
+        db,
+        runLineDeps: { lines: { recorded: async () => null }, links: { prompt: () => {} } },
+      });
+
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      expect(await answers()).toEqual([]);
     } finally {
       close();
     }
