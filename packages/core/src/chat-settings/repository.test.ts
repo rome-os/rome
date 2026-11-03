@@ -26,6 +26,7 @@ describe("ChatSettingsRepository.hasMessageHistory", () => {
         sourceThreadType: "private",
         chatId,
         createdAt: new Date(),
+        activityAt: new Date(),
       })
       .run();
 

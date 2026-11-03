@@ -119,7 +119,7 @@ export interface ApiDeps {
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recordSent">;
+  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
   /** The chats Rome takes part in, by their adapter's keys. */
   chats: Pick<ChatRepository, "byKey">;
   /** What was said in each chat, as Chats records it. */
