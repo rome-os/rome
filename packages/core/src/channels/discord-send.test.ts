@@ -49,7 +49,7 @@ describe("DiscordAdapter.send", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves messageId out of the receipt when nothing was sent", async () => {
+  it("refuses a message with nothing to send", async () => {
     const channel = {
       id: "discord-thread-1",
       type: ChannelType.DM,
@@ -62,8 +62,10 @@ describe("DiscordAdapter.send", () => {
       client: { channels: { fetch: rs.fn().mockResolvedValue(channel) } },
     });
 
-    await expect(adapter.send(channel.id as ChatId, {})).resolves.toStrictEqual({
-      chatId: channel.id,
+    await expect(adapter.send(channel.id as ChatId, {})).rejects.toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "empty",
     });
+    expect(channel.send).not.toHaveBeenCalled();
   });
 });

@@ -332,22 +332,24 @@ describe("EmailAdapter.send", () => {
     expect(provider.sent[0].text).toContain("Safe");
   });
 
-  it("receipts the conversation it was asked for when nothing is sent", async () => {
+  it("refuses a message with nothing to send, and calls no provider", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const receipt = await adapter.send("t-empty" as ChatId, { text: "   " });
+    await expect(adapter.send("t-empty" as ChatId, { text: "   " })).rejects.toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "empty",
+    });
 
     expect(provider.sent).toHaveLength(0);
     expect(provider.listMessages).not.toHaveBeenCalled();
-    expect(receipt).toEqual({ chatId: "t-empty" });
   });
 
-  it("skips a parts-only approval card without a provider call or an error", async () => {
+  it("refuses an approval card it cannot show, and calls no provider", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const receipt = await adapter.send("t-approval" as ChatId, {
+    const sent = adapter.send("t-approval" as ChatId, {
       parts: [
         {
           type: "approval_card",
@@ -359,7 +361,10 @@ describe("EmailAdapter.send", () => {
       ],
     });
 
-    expect(receipt).toEqual({ chatId: "t-approval" });
+    await expect(sent).rejects.toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "part_unsupported",
+    });
     expect(provider.send).not.toHaveBeenCalled();
     expect(provider.listMessages).not.toHaveBeenCalled();
   });

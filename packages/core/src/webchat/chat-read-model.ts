@@ -27,7 +27,7 @@ import type { SaidMessage } from "../chats/storage/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
-import { perAccountChat } from "../connections/chat-adapter.js";
+import { lineHolder, type LineHolder } from "../connections/chat-adapter.js";
 import { occurrencesOf, TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
@@ -96,6 +96,40 @@ export interface ChatSearchHit {
   createdAt: Date;
 }
 
+/**
+ * Whether the session in the current `rome_sessions` row waits on the
+ * guardian, read from Chats: a card (question, connect-AI, app component) in
+ * a line from Rome after the last prompt where the session's speaker stands,
+ * or an approval still pending in this chat. Any answer to a card is a line
+ * prompting a turn, the guardian's own or one Concierge relays for them, so a
+ * card after the last one is still open. `seq` is the order Chats recorded
+ * lines in. The last prompt is found once per session (`last`) rather than
+ * once per line from Rome, which walked the place again for each line. The
+ * pending approvals' chats are collected once per list rather than scanned
+ * per chat.
+ * json_valid and the object check skip lines whose parts are not a block
+ * array, which would otherwise fail the whole list. The Chats version of the
+ * legacy `sessionAwaitingGuardian` (db/repositories/webchat.ts), for a
+ * select over `rome_sessions`.
+ */
+export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
+  select 1 from (
+    select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_LINES} u
+    where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
+    and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
+  ) last
+  cross join ${CHAT_LINES} m
+  cross join json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and m."seq" > last."cut"
+  and m."sender_agent" is not null and json_valid(m."parts")
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+) or "rome_sessions"."id" in (
+  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
+  where a."status" = 'pending'
+  and json_extract(a."payload", '$.channelContext.threadId') is not null
+))`.mapWith(Boolean);
+
 const SEARCH_SCAN_LIMIT = 400;
 const SNIPPET_CONTEXT = 40;
 const SNIPPET_LENGTH = 160;
@@ -132,13 +166,13 @@ export class ChatReadModel {
   async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
     const speaker = await this.speakerOf(sessionId);
     if (!speaker) return null;
-    const { place, since, perAccount } = speaker;
+    const { place, since, holder } = speaker;
     const copies = new Map<number, number[]>();
     // A speaker sees what was said where it stands from when it joined: a line
     // said in a group before Rome's account was there never reached it.
     const seen = (said: readonly SaidMessage[]) => said.filter((message) => message.at >= since);
     const drawn = (said: readonly SaidMessage[]) =>
-      perAccount ? this.oneCopyEach(place, said, copies) : said;
+      holder ? this.oneCopyEach(place, said, copies, holder) : said;
     if (!page) {
       const read = await this.messages.read(place);
       return this.transcriptOf(sessionId, drawn(seen(read.messages)), null, copies);
@@ -205,6 +239,7 @@ export class ChatReadModel {
     place: Place,
     said: readonly SaidMessage[],
     copies: Map<number, number[]>,
+    holder: LineHolder,
   ): SaidMessage[] {
     if (said.length === 0) return [];
     const seconds = [...new Set(said.map((message) => Math.floor(message.at.getTime() / 1000)))];
@@ -217,7 +252,7 @@ export class ChatReadModel {
         `)
         .map((row) => row.id),
     );
-    const occurrence = occurrencesOf(near);
+    const occurrence = occurrencesOf(near, holder);
     const links = this.links.turnsOf(near.map((message) => message.id));
     const message = new Map<string, number[]>();
     for (const line of near) {
@@ -363,11 +398,11 @@ export class ChatReadModel {
   }
 
   /** The place the session stands in, its chat's key and its thread, when
-   *  the speaker joined it, and whether each of Rome's accounts there holds its
-   *  own copy of a message. */
+   *  the speaker joined it, and which of Rome's accounts holds each line where
+   *  each holds its own copy of a message. */
   private async speakerOf(
     sessionId: string,
-  ): Promise<{ place: Place; since: Date; perAccount: boolean } | null> {
+  ): Promise<{ place: Place; since: Date; holder: LineHolder | null } | null> {
     const [row] = await this.db.all<{
       platform: string;
       key: string;
@@ -386,7 +421,7 @@ export class ChatReadModel {
         (row.thread_id ?? undefined) as ChatId | undefined,
       ),
       since: new Date(row.created_at * 1000),
-      perAccount: perAccountChat(row.platform, row.key),
+      holder: lineHolder(row.platform, row.key),
     };
   }
 
@@ -501,7 +536,7 @@ export class ChatReadModel {
     const { place } = speaker;
     const fromRome = sql`chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
       AND sender_agent IS NOT NULL AND said_at > ${mark.at}`;
-    if (!speaker.perAccount) {
+    if (!speaker.holder) {
       const [row] = await this.db.all<{ count: number }>(sql`
         SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_LINES} WHERE ${fromRome} LIMIT ${cap})
       `);
@@ -515,7 +550,7 @@ export class ChatReadModel {
       )
     `);
     const said = this.messages.byIds(lines.map((line) => line.id));
-    const occurrence = occurrencesOf(said);
+    const occurrence = occurrencesOf(said, speaker.holder);
     const messages = new Set(said.map((line) => occurrence.get(line.id) ?? `line:${line.id}`));
     return Math.min(messages.size, cap);
   }

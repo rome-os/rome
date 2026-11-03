@@ -17,6 +17,7 @@ import type {
   InboundEvent,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { ChannelSendRefused } from "@rome-os/app-runtime";
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
@@ -118,8 +119,10 @@ export interface ChatAdapter {
   /**
    * Post `out` as one message in the chat keyed `chatKey`, in thread
    * `threadId` or the open chat when null, and answer where it landed once
-   * the platform took it. A refusal rejects with the platform's words. No
-   * retry.
+   * the platform took it. A refusal rejects with the platform's words. A
+   * message the channel cannot deliver as given, such as a `replyTo` the
+   * account has no platform id for, rejects with `ChannelSendRefused` and
+   * sends nothing. No retry.
    */
   send(chatKey: string, threadId: ChatId | null, out: Outbound): Promise<Sent>;
   /**
@@ -128,7 +131,8 @@ export interface ChatAdapter {
    * platform allows, maybe in several messages, and settles to one line: the
    * text the user was shown and the adapter's key for its first message, or
    * null when nothing showed. `replyTo` is the adapter's key of the message
-   * it answers.
+   * it answers, and one the account has no platform id for throws
+   * `ChannelSendRefused`.
    */
   stream?(
     chatKey: string,
@@ -225,11 +229,24 @@ export function kindNamedBy(platform: string, address: string): "group" | "dm" |
   return null;
 }
 
-/** Whether the chat keyed `key` on `platform` numbers its messages per
- *  member account, so each of Rome's accounts there holds its own copy of a
- *  message. */
-export function perAccountChat(platform: string, key: string): boolean {
-  return ownedBy(chatKey(platform, key as ChatId), "_", "") !== "";
+/** Which of Rome's accounts holds a line, by the line's key: the account's
+ *  platform id, or null for a line no one account holds. */
+export type LineHolder = (lineKey: string) => string | null;
+
+/**
+ * Which of Rome's accounts holds each line of the chat keyed `key` on
+ * `platform`, or null when the chat does not number its messages per member
+ * account. Where it does, each of Rome's accounts there holds its own copy of
+ * a message, and only this adapter reads which one from a line's key.
+ */
+export function lineHolder(platform: string, key: string): LineHolder | null {
+  const chat = chatKey(platform, key as ChatId);
+  if (ownedBy(chat, "_", "") === "") return null;
+  // Such a chat's line keys carry the holding account in front (ownedBy).
+  return (lineKey) => {
+    const at = lineKey.indexOf(":");
+    return at > 0 ? lineKey.slice(0, at) : null;
+  };
 }
 
 /** Whether the chat keyed `key` is a direct message, which its key says. */
@@ -480,9 +497,9 @@ export function channelAdapter(
       if (!send) throw new Error(`Channel "${channel.name}" cannot send`);
       const own = account();
       const ref = chatKey(own.platform, chat as ChatId);
-      const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
+      const replyTo = quotable(ref, own.id, out.replyTo);
       const address = addressIn(ref, threadId);
-      const receipt = await send.send(address, outgoing(out, replyTo || undefined));
+      const receipt = await send.send(address, outgoing(out, replyTo));
       return {
         key: sentLineId(ref, own.id, receipt.messageId || undefined),
         threadId: landedIn(ref, address, threadId, receipt.chatId),
@@ -494,7 +511,7 @@ export function channelAdapter(
       if (!replies) return null;
       const own = account();
       const ref = chatKey(own.platform, chat as ChatId);
-      const replyTo = out.replyTo && platformIdOfLine(ref, own.id, out.replyTo);
+      const replyTo = quotable(ref, own.id, out.replyTo);
       const address = addressIn(ref, threadId);
       const delivery = new ReplyDelivery({
         transport: replies.transport,
@@ -634,6 +651,27 @@ export class ChatAdapters {
     if (kind === "group") return chatAt(account.platform, address);
     return chatAt(account.platform, address, { romeEnd: account.id });
   }
+}
+
+/**
+ * The platform's id for the line keyed `lineKey` that account `romeEnd`
+ * answers in the chat keyed `chat`, or undefined when it answers none.
+ * Refuses a line it has no id for, since the reply would land unquoted.
+ */
+export function quotable(
+  chat: ChatKey,
+  romeEnd: string,
+  lineKey: string | undefined,
+): string | undefined {
+  if (lineKey === undefined) return undefined;
+  const id = platformIdOfLine(chat, romeEnd, lineKey);
+  if (id === null) {
+    throw new ChannelSendRefused(
+      "reply_unaddressable",
+      `Account ${romeEnd} holds no platform id for line ${lineKey}, so it cannot answer it`,
+    );
+  }
+  return id;
 }
 
 /** `out` as the channel port takes it, quoting the platform's `replyTo`. */

@@ -21,6 +21,7 @@ import {
   type Inbound,
   isDirectMessage,
   lineAt,
+  lineHolder,
   kindNamedBy,
   platformIdOfLine,
   sentLineId,
@@ -94,6 +95,15 @@ describe("chat adapter keys", () => {
     expect(lineAt(basic, "rome_bot", "7")).toBe("rome_bot:7");
     expect(platformIdOfLine(basic, "rome_bot", "rome_bot:7")).toBe("7");
     expect(sentLineId(basic, "rome_bot", "8")).toBe("rome_bot:8");
+  });
+
+  it("name the account holding each line only where each account holds its own copy", () => {
+    const holder = lineHolder("telegram", "-42");
+    expect(holder?.(lineAt(chatAt("telegram", "-42"), "rome_bot", "7"))).toBe("rome_bot");
+    expect(holder?.("7")).toBeNull();
+    expect(lineHolder("telegram", "-1001234567890123")).toBeNull();
+    expect(lineHolder("telegram", "dm:rome_bot:alice")).toBeNull();
+    expect(lineHolder("discord", "-42")).toBeNull();
   });
 
   it("quote no line in a basic group that only another of Rome's accounts holds", () => {
@@ -347,6 +357,26 @@ describe("channelAdapter", () => {
 
     expect(sent).toEqual([{ to: "alice", message: { text: "hello", replyToMessageId: "3" } }]);
     expect(landed).toEqual({ key: "p1", threadId: null });
+  });
+
+  it("refuse to answer a line the account holds no platform id for, and send nothing", async () => {
+    const { channel, hear, sent } = fakeChannel();
+    const adapter = channelAdapter(channel, deps());
+    const delivered: Inbound[] = [];
+    adapter.start(
+      async (message) => {
+        delivered.push(message);
+        return 1;
+      },
+      () => {},
+    );
+    await hear({ chatId: "alice", messageId: "3", thread: { kind: "dm" } });
+    await adapter.settled();
+
+    await expect(
+      adapter.send(delivered[0]!.chat.externalId, null, { text: "hello", replyTo: "rome:local-1" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    expect(sent).toEqual([]);
   });
 
   it("answer the thread a sent message landed in when the platform placed it elsewhere", async () => {

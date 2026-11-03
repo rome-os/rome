@@ -10,6 +10,7 @@ import {
   saveIncomingAttachmentPayloads,
 } from "./attachment-files.js";
 import { createLogger } from "../logger.js";
+import { numericReplyTo, textToSend } from "./send-refusals.js";
 import { basename } from "node:path";
 
 const log = createLogger("telegram");
@@ -231,27 +232,27 @@ export class TelegramAdapter {
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = chatId;
-    const replyParams = message.replyToMessageId
-      ? { reply_parameters: { message_id: Number(message.replyToMessageId) } }
-      : {};
+    const text = textToSend("telegram", message);
+    const replyId = numericReplyTo("telegram", message.replyToMessageId);
+    const replyParams = replyId === undefined ? {} : { reply_parameters: { message_id: replyId } };
 
     try {
       let messageId: string | undefined;
-      if (message.text) {
+      if (text) {
         let html: string | null = null;
         try {
-          html = markdownToTelegramHtml(message.text);
+          html = markdownToTelegramHtml(text);
         } catch (mdErr) {
           log.warn("markdown→html conversion failed, will send as plain text", {
             threadId,
             error: mdErr instanceof Error ? mdErr.message : String(mdErr),
-            input: message.text.slice(0, 500),
+            input: text.slice(0, 500),
           });
         }
 
         if (html) {
           log.info("markdown→html conversion", {
-            input: message.text.slice(0, 500),
+            input: text.slice(0, 500),
             output: html.slice(0, 500),
           });
           try {
@@ -266,17 +267,20 @@ export class TelegramAdapter {
               error: parseErr instanceof Error ? parseErr.message : String(parseErr),
               html: html.slice(0, 500),
             });
-            const sent = await this.bot.api.sendMessage(threadId, message.text, replyParams);
+            const sent = await this.bot.api.sendMessage(threadId, text, replyParams);
             messageId = String(sent.message_id);
           }
         } else {
-          const sent = await this.bot.api.sendMessage(threadId, message.text, replyParams);
+          const sent = await this.bot.api.sendMessage(threadId, text, replyParams);
           messageId = String(sent.message_id);
         }
       }
 
+      // With no text, the first attachment carries the quote.
+      let quote = text ? {} : replyParams;
       for (const att of message.attachments ?? []) {
-        await this.sendAttachment(threadId, att);
+        await this.sendAttachment(threadId, att, quote);
+        quote = {};
       }
 
       log.info("message sent", { threadId });
@@ -383,9 +387,13 @@ export class TelegramAdapter {
     return attachments;
   }
 
-  private async sendAttachment(threadId: string, att: OutgoingAttachment): Promise<void> {
+  private async sendAttachment(
+    threadId: string,
+    att: OutgoingAttachment,
+    quote: { reply_parameters?: { message_id: number } } = {},
+  ): Promise<void> {
     const source = att.source.startsWith("http") ? att.source : new InputFile(att.source);
-    const options = att.caption ? { caption: att.caption } : {};
+    const options = { ...quote, ...(att.caption ? { caption: att.caption } : {}) };
 
     switch (att.type) {
       case "image":
