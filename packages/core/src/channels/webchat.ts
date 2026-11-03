@@ -73,18 +73,28 @@ export class WebChatAdapter {
    *  refused and writes nothing. */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = chatId;
-    // Only the host authors routine cards (see host-only-parts.ts).
+    // Only the host authors routine cards, and it writes them to the
+    // repository itself (see host-only-parts.ts), so a sender's is refused.
     const given = withoutHostOnlyParts(message.parts ?? []);
     if (message.parts && given.length < message.parts.length) {
-      log.warn("dropped routine_draft_card parts from a sent message", { threadId });
+      throw new ChannelSendRefused(
+        "part_unsupported",
+        "Only Rome itself shows a routine_draft_card on the dashboard",
+      );
     }
     const shown = given.filter((part) => part.type !== "text" || part.content.trim());
+    // `text` that says anything is what is said, in place of the text parts,
+    // as on every channel; the other parts show beside it. Text parts that
+    // say the same are kept, since they carry each block's place in the turn.
+    const said = message.text?.trim() ? message.text : undefined;
+    const partsSay = shown.flatMap((part) => (part.type === "text" ? [part.content] : []));
     const parts =
-      shown.length > 0
+      said === undefined || partsSay.join("\n\n").trim() === said.trim()
         ? shown
-        : message.text?.trim()
-          ? [{ type: "text" as const, content: message.text }]
-          : [];
+        : [
+            { type: "text" as const, content: said },
+            ...shown.filter((part) => part.type !== "text"),
+          ];
 
     for (const att of message.attachments ?? []) {
       const label = att.caption ? `${att.caption}: ${att.source}` : att.source;

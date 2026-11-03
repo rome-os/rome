@@ -29,7 +29,7 @@ import {
 
 import { readFile } from "node:fs/promises";
 import { createLogger } from "../logger.js";
-import { textToSend } from "./send-refusals.js";
+import { ALL_ATTACHMENT_TYPES, attachmentsToSend, textToSend } from "./send-refusals.js";
 
 const log = createLogger("whatsapp");
 
@@ -420,6 +420,13 @@ export class WhatsAppAdapter {
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
     const text = textToSend("whatsapp", message);
+    const attachments = await attachmentsToSend("whatsapp", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: false,
+    });
+    // Every file is read before the first message goes out, so a send never
+    // stops part way for a file it could not read.
+    const media = await Promise.all(attachments.map((att) => readFile(att.source)));
     const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
 
@@ -430,27 +437,26 @@ export class WhatsAppAdapter {
         messageId = sent?.key.id ?? undefined;
       }
 
-      for (const att of message.attachments ?? []) {
-        const media = await readFile(att.source);
+      for (const [i, att] of attachments.entries()) {
         switch (att.type) {
           case "image":
             await this.sock.sendMessage(jid, {
-              image: media,
+              image: media[i]!,
               caption: att.caption,
             });
             break;
           case "video":
             await this.sock.sendMessage(jid, {
-              video: media,
+              video: media[i]!,
               caption: att.caption,
             });
             break;
           case "audio":
-            await this.sock.sendMessage(jid, { audio: media, mimetype: "audio/mpeg" });
+            await this.sock.sendMessage(jid, { audio: media[i]!, mimetype: "audio/mpeg" });
             break;
           case "document":
             await this.sock.sendMessage(jid, {
-              document: media,
+              document: media[i]!,
               mimetype: "application/octet-stream",
               fileName: att.source.split("/").pop() ?? "file",
               caption: att.caption,

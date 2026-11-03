@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { getProfileDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import { textToSend } from "./send-refusals.js";
+import { ALL_ATTACHMENT_TYPES, attachmentsToSend, textToSend } from "./send-refusals.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, MessageReplyReference, OutgoingMessage } from "./types.js";
 import {
@@ -1214,6 +1214,13 @@ export class WechatAdapter {
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const text = textToSend("wechat", message);
+    const attachments = await attachmentsToSend("wechat", message, {
+      types: ALL_ATTACHMENT_TYPES,
+      urls: false,
+    });
+    // Every file is read before the first message goes out, so a send never
+    // stops part way for a file it could not read.
+    const media = await Promise.all(attachments.map((att) => readFile(att.source)));
     this.assertSessionActive();
     const target = this.resolveSendTarget(chatId);
 
@@ -1228,7 +1235,7 @@ export class WechatAdapter {
       );
     }
 
-    for (const attachment of message.attachments ?? []) {
+    for (const [i, attachment] of attachments.entries()) {
       const mediaType =
         attachment.type === "image"
           ? MSG_ITEM_IMAGE
@@ -1237,7 +1244,7 @@ export class WechatAdapter {
             : attachment.type === "audio"
               ? MSG_ITEM_VOICE
               : MSG_ITEM_FILE;
-      const data = await readFile(attachment.source);
+      const data = media[i]!;
       const fileName =
         attachment.type === "document" || attachment.type === "audio"
           ? basename(attachment.source)
