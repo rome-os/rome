@@ -1,3 +1,5 @@
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { backfillLegacyChats } from "../db/chats-backfill.js";
 import { resolveChatSenders } from "../api/routes/chat-senders.js";
 import { resolveReply } from "../api/routes/webchat-reply.js";
 import type { ChatId } from "@rome-os/app-runtime";
@@ -35,6 +37,60 @@ describe("ChatsWebChatRepository", () => {
     testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id)).get();
   const ownRows = (id: string) =>
     testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all();
+
+  it("preserves legacy Concierge delegation and human identities through startup backfill", async () => {
+    const legacy = new WebChatRepository(testDb.db);
+    await legacy.createSession("old-chat", "Before the switch");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    await legacy.recordUserInput("old-concierge", "old-chat", text("Find flights"), guardian, {
+      platform: "webchat",
+      id: "core:concierge",
+    });
+    await legacy.recordUserInput("old-loopback", "old-chat", text("Loopback"), {
+      ...guardian,
+      via: "loopback",
+    });
+    await legacy.recordUserInput("old-cookie", "old-chat", text("Typed"), guardian);
+    await legacy.recordUserInput("old-visitor", "old-chat", text("Visitor"), {
+      kind: "visitor",
+      accountId: "alex",
+      email: "alex@example.com",
+    });
+    backfillLegacyChats(testDb.db);
+    const deps = {
+      db: testDb.db,
+      settingsRepo: { get: async () => "Ray" },
+      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      appCatalog: { get: () => undefined },
+    } as never;
+    const sources = await repo.getUserMessageSources("old-chat");
+    expect(sources).toEqual(new Map([["old-concierge", "core:concierge"]]));
+    const senders = await resolveChatSenders(
+      deps,
+      await repo.getUserMessageActors("old-chat"),
+      sources,
+    );
+    expect(senders.get("old-concierge")).toMatchObject({
+      kind: "automated",
+      name: "Concierge",
+      onBehalfOf: { kind: "guardian", name: "Ray" },
+    });
+    expect(senders.get("old-loopback")).toMatchObject({ kind: "guardian", name: "Ray" });
+    expect(senders.get("old-cookie")).toMatchObject({ kind: "guardian", name: "Ray" });
+    expect(senders.get("old-visitor")).toMatchObject({
+      kind: "visitor",
+      name: "alex@example.com",
+      accountId: "alex",
+    });
+    expect((await repo.getReplyTarget("old-chat", "old-concierge"))?.actor?.kind).toBe("guardian");
+    const page = await repo.getMessagesPage("old-chat", { limit: 10 });
+    expect(page.rows.map((message) => message.id).sort()).toEqual([
+      "old-concierge",
+      "old-cookie",
+      "old-loopback",
+      "old-visitor",
+    ]);
+  });
 
   it.each([
     "cookie",
@@ -111,6 +167,23 @@ describe("ChatsWebChatRepository", () => {
       new Map([["source-input", senderId]]),
     );
     expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
+    expect((await repo.getMessagesPage("source-chat", { limit: 1 })).rows[0]).toMatchObject({
+      id: "source-input",
+      role: "user",
+    });
+    await repo.updateUserInput("source-chat", {
+      type: "input_status",
+      inputId: "source-input",
+      turnId: "source-turn",
+      state: "accepted",
+    });
+    expect(await repo.getTurnChatMessages("source-chat", "source-turn")).toMatchObject([
+      { id: "source-input", role: "user", senderId },
+    ]);
+    expect(await repo.getUserInput("source-chat", "source-input")).toMatchObject({
+      turnId: "source-turn",
+      inputState: "accepted",
+    });
     if (senderId.startsWith("automated::")) {
       expect((await repo.getUserMessageActors("source-chat")).get("source-input")?.kind).toBe(
         "guardian",
