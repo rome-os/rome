@@ -36,6 +36,8 @@ describe("appChatWrites", () => {
   let email: ChannelChatAdapter | null;
   let mailSent: Array<{ to: ChatId; message: OutgoingMessage }>;
   let failOpen: boolean;
+  let failBind: boolean;
+  let threads: number;
 
   const telegram = {
     account: BOT,
@@ -52,7 +54,9 @@ describe("appChatWrites", () => {
     send: {
       send: async (to: ChatId, message: OutgoingMessage) => {
         mailSent.push({ to, message });
-        return { messageId: `m${mailSent.length}`, chatId: "thread-1" };
+        // A new email starts a thread of its own; a reply lands in its own.
+        const chatId = to.startsWith("thread-") ? to : `thread-${(threads += 1)}`;
+        return { messageId: `m${mailSent.length}`, chatId };
       },
     },
   } as unknown as Channel;
@@ -69,7 +73,14 @@ describe("appChatWrites", () => {
       if (!chat) throw new Error(`No chat ${ref.id}`);
       return chatKey(ref.platform, chat.key as ChatId);
     };
-    const addresses = new ChatAddresses(testDb.db);
+    const stored = new ChatAddresses(testDb.db);
+    // Storing a thread's address can fail after the provider took its email.
+    const addresses = Object.assign(Object.create(stored) as ChatAddresses, {
+      bind: (...args: Parameters<ChatAddresses["bind"]>) => {
+        if (failBind) throw new Error("store unavailable");
+        return stored.bind(...args);
+      },
+    });
     email = null;
     const adapterOf = (channel: Channel) => {
       if (channel !== mail) return telegram;
@@ -88,6 +99,8 @@ describe("appChatWrites", () => {
     opened = [];
     mailSent = [];
     failOpen = false;
+    failBind = false;
+    threads = 0;
     writes = appChatWrites({
       webchatRepo: new WebChatRepository(testDb.db),
       chats,
@@ -103,7 +116,7 @@ describe("appChatWrites", () => {
       lines,
       adapters: {
         of: adapterOf,
-        addressAt: (_channel, place) => (place.threadId ?? "thread-1") as ChatId,
+        keyOf,
         accountOn: (name) =>
           name === "mail" ? { platform: "email", id: "rome@example.com" } : BOT,
       },
@@ -377,6 +390,51 @@ describe("appChatWrites", () => {
         to: "thread-1",
         message: { text: "Re", inReplyToMessageId: "m1" },
       });
+    });
+
+    it("answers and joins the provider's thread when storing its address fails", async () => {
+      failBind = true;
+
+      const result = await writes.sendEmail({
+        channel: "mail",
+        text: "Plans",
+        email: { to: "wei@example.com", subject: "Plans" },
+        knownToProvider: false,
+      });
+
+      expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(opened).toEqual(["thread-1"]);
+    });
+
+    it("refuses a reply whose email is in another thread than the one named", async () => {
+      for (const to of ["wei@example.com", "ann@example.com"]) {
+        await writes.sendEmail({
+          channel: "mail",
+          text: "Plans",
+          email: { to, subject: "Plans" },
+          knownToProvider: false,
+        });
+      }
+
+      await expect(
+        writes.sendEmail({
+          channel: "mail",
+          threadId: "thread-2",
+          text: "Re",
+          email: { inReplyToMessageId: "m1" },
+          knownToProvider: false,
+        }),
+      ).rejects.toThrow("Email m1 is not in thread thread-2");
+      await expect(
+        writes.sendEmail({
+          channel: "mail",
+          sessionId: "mail-2",
+          text: "Re",
+          email: { inReplyToMessageId: "m1" },
+          knownToProvider: false,
+        }),
+      ).rejects.toThrow("Email m1 is not in session mail-2's thread");
+      expect(mailSent).toHaveLength(2);
     });
 
     it("refuses to reply to an email Rome holds no thread with", async () => {

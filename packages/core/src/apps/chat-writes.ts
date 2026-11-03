@@ -23,7 +23,7 @@ import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
-import { placeIn } from "../chats/storage/place.js";
+import { type ChatRef, placeIn } from "../chats/storage/place.js";
 import type { ChatAdapters } from "../connections/chat-adapter.js";
 import {
   emailOf,
@@ -55,7 +55,7 @@ export interface AppChatWritesDeps {
   links: Pick<TurnLinks, "prompt" | "answer">;
   /** The lines an app names by the platform's ids. */
   lines: Pick<SpeakerLines, "idIn" | "keyIn" | "platformIdIn" | "recorded">;
-  adapters: Pick<ChatAdapters, "of" | "addressAt" | "accountOn">;
+  adapters: Pick<ChatAdapters, "of" | "keyOf" | "accountOn">;
   /** The live channel named `name`, whose adapter a speaker says its
    *  messages through, or null when Rome holds none by that name. */
   channel(name: string): Channel | null;
@@ -78,16 +78,22 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     return speaker;
   };
 
-  /** The address of the email thread holding the email the provider calls
-   *  `messageId`. Refuses one Rome holds no thread for, since sending it as
-   *  a new email would answer nothing. */
-  const threadHolding = (channelName: string, messageId: string): string => {
-    const account = deps.adapters.accountOn(channelName);
+  /** The provider's address for the email thread `chat`. Asks the email
+   *  adapter, which keeps the address of a thread it started even when
+   *  storing it failed. */
+  const threadAddressOf = (channel: Channel, chat: ChatRef): string =>
+    emailOf(deps.adapters, channel).threadAddress(deps.adapters.keyOf(chat).externalId);
+
+  /** The email thread holding the email the provider calls `messageId`.
+   *  Refuses one Rome holds no thread for, since sending it as a new email
+   *  would answer nothing. */
+  const threadHolding = (channel: Channel, messageId: string): ChatRef => {
+    const account = deps.adapters.accountOn(channel.name);
     const chat = deps.messages.chatHolding(account.platform, messageId);
     if (!chat) {
       throw new Error(`Rome holds no email thread with message ${messageId}. No email was sent.`);
     }
-    return deps.adapters.addressAt(channelName, placeIn(chat));
+    return chat;
   };
 
   /**
@@ -118,7 +124,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       },
       async (target) => ({ key: (await adapter.send(target.chat, null, out)).key }),
     );
-    const threadId = deps.adapters.addressAt(channel.name, placeIn(chat));
+    const threadId = threadAddressOf(channel, chat);
     try {
       const session = await deps.open({
         channel: channel.name,
@@ -227,13 +233,27 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         ...(html ? { html } : {}),
       };
       const turnId = input.knownToProvider ? input.turnId : undefined;
-      // A reply names its thread by the email it answers, when the caller
-      // names neither.
+      // A reply goes to the thread holding the email it answers, since the
+      // provider sends it there. A caller that names another thread or
+      // session is refused before anything goes out.
+      const held =
+        inReplyToMessageId === undefined ? undefined : threadHolding(channel, inReplyToMessageId);
+      if (
+        held &&
+        input.threadId !== undefined &&
+        threadAddressOf(channel, held) !== input.threadId
+      ) {
+        throw new Error(
+          `Email ${inReplyToMessageId} is not in thread ${input.threadId}. No email was sent.`,
+        );
+      }
+      if (held && input.sessionId && speakerOf(input.sessionId).place.chat.id !== held.id) {
+        throw new Error(
+          `Email ${inReplyToMessageId} is not in session ${input.sessionId}'s thread. No email was sent.`,
+        );
+      }
       const threadId =
-        input.threadId ??
-        (input.sessionId || inReplyToMessageId === undefined
-          ? undefined
-          : threadHolding(channel.name, inReplyToMessageId));
+        input.threadId ?? (input.sessionId || !held ? undefined : threadAddressOf(channel, held));
       if (!threadId && !input.sessionId) {
         return await startThread(
           channel,
@@ -272,7 +292,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
       return {
         messageId: deps.lines.platformIdIn(sent.speaker, sent.sent),
-        threadId: deps.adapters.addressAt(input.channel, sent.speaker.place),
+        threadId: sent.speaker.place.threadId ?? threadAddressOf(channel, sent.speaker.place.chat),
       };
     },
   };
