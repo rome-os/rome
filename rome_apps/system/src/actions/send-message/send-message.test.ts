@@ -1050,6 +1050,25 @@ describe("send_message through Chats", () => {
     );
   });
 
+  it("leaves a message-only reply naming its session off the run's thread", async () => {
+    setCurrentActionContextResolver(() => ({
+      executionId: "e",
+      agentName: "main",
+      channelContext: { channel: "email", threadId: "t1", romeSessionId: "session-1" },
+    }));
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      makeAdapter("email"),
+      { channel: "email", replyToMessageId: "msg_9", romeSessionId: "session-2", text: "reply" },
+      { chats },
+    );
+
+    const sent = chats.sendEmail.mock.calls[0]![0];
+    expect(sent).not.toHaveProperty("threadId");
+    expect(sent.sessionId).toBe("session-2");
+  });
+
   it("falls back to the channel and records the line when the host offers no send", async () => {
     const adapter = makeAdapter();
     const { send: _send, sendEmail: _sendEmail, ...legacy } = chatsWithWrites();

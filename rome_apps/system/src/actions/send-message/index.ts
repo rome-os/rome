@@ -199,10 +199,12 @@ async function emailThroughChats(
     current?.channelContext?.channel === input.channel
       ? current.channelContext.threadId
       : undefined;
-  // A reply named by its message alone, sent while the run answers an email
-  // on this account, answers on the run's thread. The host refuses it, and
-  // sends nothing, when the message is in another thread.
-  const threadId = input.threadId ?? (email.inReplyToMessageId && ambient ? ambient : undefined);
+  // A reply named by its message alone, and by no session, sent while the run
+  // answers an email on this account, answers on the run's thread. The host
+  // refuses it, and sends nothing, when the message is in another thread.
+  const threadId =
+    input.threadId ??
+    (email.inReplyToMessageId && !input.romeSessionId && ambient ? ambient : undefined);
   const reply = !!threadId || !!email.inReplyToMessageId;
   const sameAmbientConversation =
     !!threadId &&
