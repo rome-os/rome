@@ -24,7 +24,7 @@ import {
   type PlatformOfChannel,
 } from "../channels/channel.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
-import { agentMessages } from "../channels/messages-agent.js";
+import { agentMessages, chatsAgentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
 import type { DrizzleDb } from "../db/index.js";
 
@@ -50,8 +50,18 @@ import type { DrizzleDb } from "../db/index.js";
 export function personMessageStores(deps: {
   db: DrizzleDb;
   channels: Channels;
+  platformOfChannel: PlatformOfChannel;
+  /** Rome's own account on a channel, or null while its record knows none. */
+  accountOf?: (channel: string) => Account | null;
+  /** Where Rome's transcript is read from: its legacy table by default, or
+   *  Chats. */
+  transcript?: "legacy" | "chats";
 }): AccountMessages[] {
-  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
+  const accountOn = (channel: string): Account =>
+    deps.accountOf?.(channel) ?? { platform: deps.platformOfChannel(channel), id: channel };
+  const transcript =
+    deps.transcript === "chats" ? chatsAgentMessages(deps.db, accountOn) : agentMessages(deps.db);
+  return [...messageStores(deps.channels), transcript, sentinelLogMessages(deps.db)];
 }
 
 /**

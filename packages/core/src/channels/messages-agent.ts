@@ -7,6 +7,11 @@ import type { MessagePart } from "../types.js";
 import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
+import type { Account, ChatId } from "@rome-os/app-runtime";
+import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
+import { directMessageAddress, directMessageAt } from "../connections/chat-adapter.js";
+import { ChatAddresses } from "../connections/chat-addresses.js";
+import { chatKey } from "../connections/chat-ids.js";
 
 /**
  * The sender id Rome stamps on a message it sent itself.
@@ -115,6 +120,101 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
       map: transcriptDetail,
     },
   });
+}
+
+/**
+ * Rome's own transcript of a channel conversation, read for accounts from
+ * Chats: each direct message Rome's account on a channel has with the
+ * account's address, every line said there. `accountOn` names Rome's account
+ * on a channel.
+ *
+ * The same store as {@link agentMessages}, over Chats' messages in place of
+ * `rome_agent_messages`. A group answers to no address, and a guardian chat
+ * is the guardian talking to Rome, so neither is read. A line is Rome's when
+ * one of its agents said it, or when Rome's account said it, as the guardian
+ * can through it. Vocabulary: docs/domains/chats.md.
+ */
+export function chatsAgentMessages(
+  db: DrizzleDb,
+  accountOn: (channel: string) => Account,
+): AccountMessages {
+  const addresses = new ChatAddresses(db);
+  return sqlMessages({
+    db,
+    view(scope) {
+      if (scope.keys.length === 0) return null;
+      const rows = sql.join(
+        scope.keys.map(({ channel, key }) => {
+          const account = accountOn(channel);
+          const chat = directMessageAt(account, key, addresses).externalId;
+          return sql`(${channel}, ${account.platform}, ${account.id}, ${key}, ${chat})`;
+        }),
+        sql`, `,
+      );
+      return sql`
+        WITH v(channel, platform, account, key, chat) AS (VALUES ${rows})
+        SELECT
+          v.channel AS source,
+          v.key AS key,
+          m.said_at AS at,
+          (m.sender_agent IS NOT NULL OR m.sender_account_id IS v.account) AS outbound,
+          'agent:' || m.id AS ref,
+          m.parts AS body,
+          json_array(m.id, v.account) AS detail_key
+        FROM v
+        JOIN ${CHATS} c ON c.platform = v.platform AND c.key = v.chat
+        JOIN ${CHAT_LINES} m ON m.chat_id = c.id AND m.thread_id IS NULL
+        WHERE c.kind = 'dm' AND c.platform <> 'webchat'`;
+    },
+    body: messageContentText,
+    detail: {
+      // The line, and Rome's account at its end of the direct message.
+      of: (key) => sql`(
+        SELECT json_object(
+          'senderId', m.sender_account_id,
+          'senderName', m.sender_name,
+          'chatKey', c.key,
+          'platform', c.platform,
+          'accountId', json_extract(${key}, '$[1]'),
+          'threadName', c.name
+        )
+        FROM ${CHAT_LINES} m
+        JOIN ${CHATS} c ON c.id = m.chat_id
+        WHERE m.id = json_extract(${key}, '$[0]')
+      )`,
+      map: (raw, entry) => chatsTranscriptDetail(raw, entry, addresses),
+    },
+  });
+}
+
+/** Who said a line of a direct message, and the direct message, named by the
+ *  address Rome's account reaches it at. Rome's own lines carry no sender. */
+function chatsTranscriptDetail(
+  raw: Record<string, unknown>,
+  entry: Message,
+  addresses: Pick<ChatAddresses, "addressOf">,
+): MessageDetail {
+  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
+  const detail: MessageDetail = {};
+  const sender = { id: text(raw.senderId), name: text(raw.senderName) };
+  if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
+    detail.sender = sender;
+  }
+  const key = text(raw.chatKey);
+  const platform = text(raw.platform);
+  const accountId = text(raw.accountId);
+  if (key !== null && platform !== null && accountId !== null) {
+    detail.conversation = {
+      id: directMessageAddress(
+        { platform, id: accountId },
+        chatKey(platform, key as ChatId),
+        addresses,
+      ),
+      name: text(raw.threadName),
+      kind: "dm",
+    };
+  }
+  return detail;
 }
 
 /** Who said a transcript line and in which session's thread, as the row
