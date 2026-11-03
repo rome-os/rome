@@ -1,10 +1,12 @@
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
-import type { AgentMessage } from "../types.js";
+import type { DeviceFolder } from "@rome/api-types/devices";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
+import type { AgentEvent } from "../types.js";
 import type { ActionResult } from "../actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
 import { isValidAppId } from "../apps/packaging/app-id.js";
+import type { TransientDeltaType } from "../core/agent-message.js";
 
 /** Connections and channels are owned by the ConnectionRegistry. The
  *  daemon always injects `connectionRegistry`; a missing one is a wiring bug,
@@ -16,7 +18,7 @@ export function requireConnectionRegistry(deps: ApiDeps): ConnectionRegistry {
   return deps.connectionRegistry;
 }
 
-/** Conferral setups. The daemon injects `setupManager` alongside
+/** Grant setups. The daemon injects `setupManager` alongside
  *  the registry; a missing one on the generic setup routes is a wiring bug. */
 export function requireSetupManager(
   deps: ApiDeps,
@@ -104,7 +106,10 @@ export function toWebchatSessionResponse(
     largeModelSelection?: string | null;
     projectName: string;
     projectPath?: string | null;
+    deviceFolder?: DeviceFolder | null;
     agentName?: string | null;
+    parentSessionId?: string | null;
+    triggerKind?: string | null;
     archivedAt?: Date | null;
     pinnedAt?: Date | null;
     createdAt: Date;
@@ -125,7 +130,10 @@ export function toWebchatSessionResponse(
     largeModelSelection: session.largeModelSelection ?? null,
     projectName: session.projectName,
     projectPath: session.projectPath ?? session.projectName,
+    deviceFolder: session.deviceFolder ?? null,
     agentName: session.agentName ?? null,
+    parentSessionId: session.parentSessionId ?? null,
+    triggerKind: session.triggerKind ?? null,
     archivedAt: session.archivedAt ? session.archivedAt.toISOString() : null,
     pinnedAt: session.pinnedAt ? session.pinnedAt.toISOString() : null,
     createdAt: session.createdAt.toISOString(),
@@ -149,14 +157,14 @@ function timestampToIso(value: Date | number): string {
 }
 
 /**
- * AgentMessage variants that have a trace-block representation. `text_delta`
- * is excluded at the type level: it is a transient streaming preview that is
- * never persisted, so callers must filter deltas out before reaching here —
- * the compiler enforces it instead of a runtime throw.
+ * Events that have a trace representation. Delta events and `input_status`
+ * are excluded at the type level: a delta is transient and never persisted,
+ * so callers must filter deltas out before reaching here — the compiler
+ * enforces it instead of a runtime throw.
  */
-export type TraceableAgentMessage = Exclude<AgentMessage, { type: "text_delta" | "input_status" }>;
+export type TraceableEvent = Exclude<AgentEvent, { type: TransientDeltaType | "input_status" }>;
 
-export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): TraceBlockDto {
+export function toTraceEvent(msg: TraceableEvent & { agent?: string }): TraceEventDto {
   switch (msg.type) {
     case "session_init":
       return {
@@ -210,6 +218,7 @@ export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): T
         agent: msg.agent,
         ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
         ...(msg.endedAt ? { endedAt: msg.endedAt } : {}),
+        ...(msg.isError !== undefined ? { isError: msg.isError } : {}),
       };
     case "subagent_start":
       return {
@@ -261,6 +270,7 @@ export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): T
         accounting: msg.accounting,
         agent: msg.agent,
         code: msg.code,
+        ...(msg.httpStatus !== undefined ? { httpStatus: msg.httpStatus } : {}),
         provider: msg.provider,
         reason: msg.reason,
       };

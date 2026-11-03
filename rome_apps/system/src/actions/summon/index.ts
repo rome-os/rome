@@ -15,6 +15,14 @@ export const summonInputSchema = z.object({
   agentName: z.string().describe("Name of the agent to summon (must match an agent YAML config)"),
   prompt: z.string().describe("The task/prompt to send to the summoned agent"),
   sessionId: z.string().optional().describe("Optional session ID to resume a previous session"),
+  workingDir: z
+    .string()
+    .optional()
+    .describe(
+      "Project directory the summoned agent works in: a path relative to the projects root " +
+        "(e.g. `landingpage/content`) or an absolute path inside it. Must be an existing " +
+        "directory. Defaults to the calling session's project. Blocking summons only.",
+    ),
   interactive: z
     .boolean()
     .optional()
@@ -72,22 +80,30 @@ export interface SummonDeps {
 }
 
 /**
- * Creates the summon action, which spawns a subagent in the current project —
- * either blocking (run the agent loop to completion and return its reply) or
- * interactive (suspend the caller on a guardian conversation with the agent).
+ * Creates the summon action, which spawns a subagent — either blocking (run the
+ * agent loop to completion and return its reply) or interactive (suspend the
+ * caller on a guardian conversation with the agent). A blocking run works in
+ * `workingDir` when given, else in the calling session's project; the host
+ * rejects a `workingDir` outside the projects root.
  */
 export function createSummonAction(config: ActionConfig, deps: SummonDeps): Action {
   return defineAction({
     config,
     schema: summonInputSchema,
     execute: async (
-      { agentName, prompt, sessionId, interactive, handback, appId, handbackHint },
+      { agentName, prompt, sessionId, workingDir, interactive, handback, appId, handbackHint },
       actionContext,
     ): Promise<ActionResult> => {
       if (interactive && !appId) {
         return {
           status: "error",
           error: "interactive summon requires an `appId` (the app that owns the handoff).",
+        };
+      }
+      if (interactive && workingDir !== undefined) {
+        return {
+          status: "error",
+          error: "`workingDir` applies to blocking summons only; omit it when `interactive`.",
         };
       }
 
@@ -125,7 +141,14 @@ export function createSummonAction(config: ActionConfig, deps: SummonDeps): Acti
           },
         };
       }
-      const result = await executeSummon(deps, resolvedAgentName, prompt, sessionId, actionContext);
+      const result = await executeSummon(
+        deps,
+        resolvedAgentName,
+        prompt,
+        sessionId,
+        actionContext,
+        workingDir,
+      );
       return { status: "ok", data: result };
     },
     // The "action" a summon routine fires is an agent run, where the real
@@ -149,6 +172,7 @@ export async function executeSummon(
   prompt: string,
   sessionId?: string,
   actionContext?: ActionExecutionContext,
+  workingDir?: string,
 ): Promise<SummonOutput> {
   // Wraps the nested agent run in a dedicated `summon:{child}` span so the
   // subagent-tree view can filter `name LIKE 'summon:%'` directly. The
@@ -159,21 +183,30 @@ export async function executeSummon(
     let resolvedSessionId = sessionId ?? "";
     let romeSession: RomeSessionRef | undefined;
     let output: unknown;
+    let runError: string | undefined;
+    let hasResult = false;
+    let turnStarted = false;
+    let turnStatus: "completed" | "interrupted" | "error" | undefined;
 
     for await (const msg of deps.agentRunner.run({
       agentName,
       prompt,
       sessionId,
+      ...(workingDir !== undefined ? { workingDir } : {}),
       sharedContext: getCurrentActionContext()?.sharedContext,
     })) {
       // Lifecycle brackets describe the summoned agent's own stream, not the
       // caller's; keep them local and forward only content. session_init still
       // forwards — the trace UI keys the sub-agent header off it.
       if (msg.type === "turn_start") {
+        turnStarted = true;
         resolvedSessionId = msg.sessionId;
         continue;
       }
-      if (msg.type === "turn_end") continue;
+      if (msg.type === "turn_end") {
+        turnStatus = msg.status;
+        continue;
+      }
 
       if (msg.type === "session_init" && msg.romeSession && !romeSession) {
         romeSession = msg.romeSession;
@@ -184,9 +217,12 @@ export async function executeSummon(
         });
       }
 
+      if (msg.type === "error") runError ??= msg.error;
+
       deps.emitAgentMessage?.({ ...msg, agent: agentName });
 
       if (msg.type === "result") {
+        hasResult = true;
         result = msg.content;
         if (Object.prototype.hasOwnProperty.call(msg, "structuredOutput")) {
           output = msg.structuredOutput;
@@ -195,7 +231,26 @@ export async function executeSummon(
     }
 
     if (!romeSession) {
-      throw new Error(`Summoned agent "${agentName}" did not provide a durable Rome session`);
+      // A run the host refuses to start (an unknown agent, a rejected
+      // `workingDir`) streams only an error; surface its reason.
+      throw new Error(
+        runError
+          ? `Summoned agent "${agentName}" failed to start: ${runError}`
+          : `Summoned agent "${agentName}" did not provide a durable Rome session`,
+      );
+    }
+
+    // An abort can also emit an error block. The turn outcome owns cancellation.
+    if (turnStatus === "interrupted") {
+      throw new Error(`Summoned agent "${agentName}" was interrupted`);
+    }
+    if (runError !== undefined || turnStatus === "error") {
+      throw new Error(
+        `Summoned agent "${agentName}" failed: ${runError || "turn ended with an error"}`,
+      );
+    }
+    if (!hasResult || (turnStarted && turnStatus === undefined)) {
+      throw new Error(`Summoned agent "${agentName}" ended without a completed result`);
     }
 
     return {

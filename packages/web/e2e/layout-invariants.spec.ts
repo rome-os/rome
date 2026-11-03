@@ -36,15 +36,15 @@ const ROUTES = [
   "/people",
   "/sessions",
   "/routines",
-  "/activity",
+  "/sessions/events",
   "/memory",
   "/projects",
   "/dev/styleguide",
   "/dev/typography",
   "/dev/connections",
-  // Transcript blocks. Each renders only for a particular agent state, so this
+  // Chat entries. Each renders only for a particular agent state, so this
   // route is the only place the sweep sees one at all.
-  "/dev/chat-blocks",
+  "/dev/chat-entries",
 ];
 
 /** Mirrors the control slots `collectRowHeightViolations` compares. */
@@ -76,10 +76,9 @@ for (const route of ROUTES) {
     // hidden "Close sidebar" trigger would be chosen and then fail the
     // visibility assertion on every route. The sweep only measures visible
     // boxes, so the wait has to agree with it.
-    // Generous first-paint budget: a cold rsbuild dev server compiles the
-    // route's chunk on demand, which a shared runner does far slower than a
-    // warm local machine. Only this wait is slow; the measurement after it is
-    // instant.
+    // Generous first-paint budget: a shared runner can render a route far
+    // slower than a warm local machine. Only this wait is slow; the
+    // measurement after it is instant.
     await expect(page.locator(MEASURED_CONTROLS).filter({ visible: true }).first()).toBeVisible({
       timeout: 30_000,
     });

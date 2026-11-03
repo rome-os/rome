@@ -5,27 +5,25 @@
  * `Badge`. It is the single source of the status vocabulary so the list and the
  * detail-page header render identically.
  *
- * Four labels — chosen so each means something genuinely different to the
- * guardian ("Disconnected" is banned vocabulary):
- *   Connected     → it works.
- *   Degraded      → it is authorized but temporarily impaired; recovery may
- *                   happen automatically.
- *   Not connected → it doesn't work, but you can fix it (open to connect,
- *                   finish verification, or reconnect a broken credential).
+ * Four labels, each meaning something different to the guardian
+ * ("Disconnected" is banned vocabulary). Working and Broken are the
+ * connection's own states (docs/domains/connections.md):
+ *   Working       → the platform accepts Rome's access.
+ *   Broken        → the platform stopped accepting it. The account and its
+ *                   agent stay until the guardian gives access again.
+ *   Not connected → nothing gives Rome access yet. Open to connect.
  *   Unavailable   → it doesn't work and you *can't* fix it (host misconfig);
  *                   carries the reason as a tooltip.
  *
- * The dot and warning icon carry a fourth, finer-grained signal — `attention` —
- * layered on top of the "Not connected" label for a credential that WAS
- * conferred and is now degraded (the ledger knows it is broken), not just a
- * first-time setup. The vocabulary above stays three deep.
+ * A working connection whose transport is temporarily impaired keeps the
+ * Working label with an amber dot and the reason as a tooltip, since the
+ * platform still accepts its grant and recovery may happen automatically.
  *
- * Mapping over the card's registry-native slot states:
- *   alwaysOn (webchat)                     → green dot, "Connected"
- *   transient runtime degradation          → amber dot, "Degraded"
- *   any slot degraded                      → amber dot, "Not connected" (attention)
- *   any slot authorized                    → green dot, "Connected"
- *   none conferred + connect unavailable   → muted dot, "Unavailable" (reason tooltip)
+ * Mapping over the card's slot states:
+ *   any slot broken                        → amber dot, "Broken"
+ *   transient runtime degradation          → amber dot, "Working" (reason tooltip)
+ *   any slot working                       → green dot, "Working"
+ *   none connected + connect unavailable   → muted dot, "Unavailable" (reason tooltip)
  *   everything else                        → muted dot, "Not connected"
  */
 
@@ -42,33 +40,30 @@ export interface ConnectionStatus {
   title?: string;
 }
 
-/** Maps a card's slot grant states onto the dot+text status vocabulary. */
+/** Maps a card's slot states onto the dot+text status vocabulary. */
 export function connectionStatus(card: ConnectionCard): ConnectionStatus {
-  if (card.alwaysOn) {
-    return { label: "Connected", tone: "success" };
+  const states = new Set(card.slots.map((slot) => slot.state));
+  // A broken connection surfaces even when a sibling slot still works, since
+  // it needs the guardian's attention more than "1 of 2 works".
+  if (states.has("broken")) {
+    return {
+      label: "Broken",
+      tone: "attention",
+      title: "The platform stopped accepting Rome's access. Give access again.",
+    };
   }
   if (card.degradation) {
     const retry = card.degradation.retryAt
       ? ` Automatic retry at ${card.degradation.retryAt}.`
       : "";
     return {
-      label: "Degraded",
+      label: "Working",
       tone: "attention",
       title: `${card.degradation.reason}${retry}`,
     };
   }
-  const states = new Set(card.slots.map((slot) => slot.state));
-  // A degraded credential surfaces even when a sibling slot still works — a
-  // broken conferral needs the guardian's attention more than "1 of 2 works".
-  if (states.has("degraded")) {
-    return {
-      label: "Not connected",
-      tone: "attention",
-      title: "Access expired — reconnect",
-    };
-  }
-  if (states.has("authorized")) {
-    return { label: "Connected", tone: "success" };
+  if (states.has("working")) {
+    return { label: "Working", tone: "success" };
   }
   // A service the host can't offer (misconfig) is the only "you can't fix this"
   // case; everything else is a fixable "Not connected" whose specific next step

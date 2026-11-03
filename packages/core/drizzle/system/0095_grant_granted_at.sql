@@ -1,0 +1,1 @@
+ALTER TABLE `connection_grants` RENAME COLUMN "conferred_at" TO "granted_at";

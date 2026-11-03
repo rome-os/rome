@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { visitorAuthRoutes, type VisitorAuthSeams } from "./visitor-auth.js";
+import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../lib/auth.js";
 import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
 import { PublicAccessState } from "../../lib/public-access-state.js";
@@ -24,11 +25,11 @@ afterEach(() => {
   }
 });
 
-function mockAccountSession(email: string): typeof fetch {
+function mockAccountSession(email: string, accountId = "acct-1"): typeof fetch {
   return (async () =>
     new Response(
       JSON.stringify({
-        accountId: "acct-1",
+        accountId,
         email,
         avatarUrl: "https://example.com/avatar.png",
         favorViewerToken: "favor-token",
@@ -99,16 +100,68 @@ describe("/api/auth/visitor dashboard access", () => {
     });
   });
 
-  it("rejects dashboard visitor callback when the email is not allowed", async () => {
+  it("keeps the signed-in profile so chat can show who sent a message", async () => {
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
-    const app = await buildRoute(state, { fetchImpl: mockAccountSession("lin@example.com") });
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession("Ada@Example.com") });
     const nonce = await startDashboardLogin(app);
 
-    const res = await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+
+    const profiles = await new VisitorProfilesRepository(testDb.db).getMany(["acct-1"]);
+    expect(profiles.get("acct-1")).toEqual({
+      email: "ada@example.com",
+      avatarUrl: "https://example.com/avatar.png",
+    });
+  });
+
+  it("keeps no profile for a sign-in the allow-list refuses", async () => {
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const app = await buildRoute(state, {
+      fetchImpl: mockAccountSession("lin@example.com", "acct-lin"),
+    });
+    const nonce = await startDashboardLogin(app);
+
+    await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+
+    const profiles = await new VisitorProfilesRepository(testDb.db).getMany(["acct-lin"]);
+    expect(profiles.size).toBe(0);
+  });
+
+  it.each([
+    "lin@example.com",
+    "Lin+Work@Example.com",
+  ])("identifies the rejected dashboard account %s without granting access", async (email) => {
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession(email) });
+    const nonce = await startDashboardLogin(app);
+
+    const res = await app.request(
+      `/api/auth/visitor/callback?state=${nonce}&code=abc&email=ada%40example.com`,
+    );
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/login?visitor=error&reason=forbidden");
+    const target = new URL(res.headers.get("location")!, "https://rome.example.com");
+    expect(`${target.pathname}${target.search}`).toBe("/login?visitor=error&reason=forbidden");
+    expect(new URLSearchParams(target.hash.slice(1)).get("email")).toBe(email.toLowerCase());
+    expect(target.toString()).not.toContain("ada");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("does not include an account when the account session is malformed", async () => {
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession("") });
+    const nonce = await startDashboardLogin(app);
+
+    const res = await app.request(
+      `/api/auth/visitor/callback?state=${nonce}&code=abc&email=ada%40example.com`,
+    );
+
+    expect(res.headers.get("location")).toBe("/login?visitor=error&reason=malformed");
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 });

@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettings,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChatDescriptor,
+  ChatId,
+  ChatSettings,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
 } from "@rome-os/app-runtime";
 import type { AutocompleteInteraction, ChatInputCommandInteraction } from "discord.js";
 import { buildDiscordSlashCommands, DiscordAdapter } from "./discord.js";
 
 const CONNECTION_ID = "connection:discord";
-const CHANNEL_ID = "channel-1" as ConversationId;
+const CHANNEL_ID = "channel-1" as ChatId;
 const GUARDIAN_ID = "discord-guardian-777";
 const UNLINKED_ID = "discord-user-888";
 
-function makeConversationSettings() {
-  const effective: ConversationSettings = {
+function makeChatSettings() {
+  const effective: ChatSettings = {
     enabled: true,
     activation: {
       mode: "mention",
@@ -26,14 +26,15 @@ function makeConversationSettings() {
     routing: { agentName: null },
     session: { reset: { mode: "idle", idleMinutes: 10_080 } },
   };
-  const descriptor: ConversationDescriptor = {
-    ref: { connectionId: CONNECTION_ID, conversationId: CHANNEL_ID },
+  const descriptor: ChatDescriptor = {
+    ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
+    connectionKind: "discord",
     service: "discord",
     kind: "channel",
     displayName: "general",
     containerName: "Rome",
   };
-  const snapshot: ConversationSettingsSnapshot = {
+  const snapshot: ChatSettingsSnapshot = {
     conversation: descriptor,
     supportedFields: [
       "enabled",
@@ -55,8 +56,8 @@ function makeConversationSettings() {
     update,
     reset,
     list: rs.fn(async () => ({ items: [] })),
-  } as unknown as ConversationSettingsControl & {
-    observe(descriptor: ConversationDescriptor): void;
+  } as unknown as ChatSettingsControl & {
+    observe(descriptor: ChatDescriptor): void;
   };
   return { control, get, update, reset };
 }
@@ -66,12 +67,14 @@ function makeInteraction(input: {
   subcommand: string;
   subcommandGroup?: string | null;
   strings?: Record<string, string>;
+  guildId?: string | null;
 }) {
   const deferReply = rs.fn(async () => undefined);
   const editReply = rs.fn(async () => undefined);
   const interaction = {
     commandName: "channel",
     channelId: CHANNEL_ID,
+    guildId: input.guildId === undefined ? "guild-1" : input.guildId,
     channel: { name: "general", isThread: () => false },
     guild: { name: "Rome" },
     user: { id: input.userId },
@@ -140,14 +143,14 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("lets the linked guardian read channel status", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const resolveDiscordPerson = rs.fn(async (discordUserId: string) =>
       discordUserId === GUARDIAN_ID ? { id: "guardian", bondLevel: "guardian" as const } : null,
     );
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson,
     });
     const { interaction, editReply } = makeInteraction({
@@ -165,7 +168,7 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("lets the linked guardian set a channel agent", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const resolveDiscordPerson = rs.fn(async () => ({
       id: "guardian",
       bondLevel: "guardian" as const,
@@ -173,7 +176,7 @@ describe("Discord configuration command authorization", () => {
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson,
       listAgents: () => ["main", "pm-assistant"],
     });
@@ -188,7 +191,7 @@ describe("Discord configuration command authorization", () => {
 
     expect(settings.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        ref: { connectionId: CONNECTION_ID, conversationId: CHANNEL_ID },
+        ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
         set: { routing: { agentName: "pm-assistant" } },
         actor: { kind: "guardian", id: "discord-slash" },
       }),
@@ -198,14 +201,140 @@ describe("Discord configuration command authorization", () => {
     });
   });
 
+  it("names the account's agent in status and after a clear", async () => {
+    const settings = makeChatSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      chatSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      accountAgent: () => "sales:agent",
+    });
+    const status = makeInteraction({ userId: GUARDIAN_ID, subcommand: "status" });
+    await runCommand(adapter, status.interaction);
+    expect(status.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("agent: sales:agent"),
+    });
+
+    const clear = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "clear",
+    });
+    await runCommand(adapter, clear.interaction);
+    expect(clear.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("messages now route to sales:agent"),
+    });
+  });
+
+  it("names the account's agent in status when the stored agent is not loaded", async () => {
+    const settings = makeChatSettings();
+    const snapshot = await settings.get();
+    snapshot.effective.routing.agentName = "gone:agent";
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      chatSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      accountAgent: () => "sales:agent",
+      hasAgent: (name) => name === "sales:agent",
+    });
+    const { interaction, editReply } = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommand: "status",
+    });
+    await runCommand(adapter, interaction);
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("agent: sales:agent"),
+    });
+  });
+
+  it("says no agent answers when the account has no agent", async () => {
+    const settings = makeChatSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      chatSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      accountAgent: () => null,
+    });
+    const { interaction, editReply } = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "set",
+      strings: { name: "main" },
+    });
+    await runCommand(adapter, interaction);
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("no agent answers here"),
+    });
+  });
+
+  it("pins a channel to main on `set main`", async () => {
+    const settings = makeChatSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      chatSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      accountAgent: () => "sales:agent",
+    });
+    const { interaction, editReply } = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "set",
+      strings: { name: "main" },
+    });
+    await runCommand(adapter, interaction);
+    expect(settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ set: { routing: { agentName: "main" } } }),
+    );
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("pinned to main — messages now route to main"),
+    });
+  });
+
+  it("follows the account's agent in a DM, whatever agent is stored", async () => {
+    const settings = makeChatSettings();
+    const snapshot = await settings.get();
+    snapshot.effective.routing.agentName = "pm-assistant";
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      chatSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      accountAgent: () => "sales:agent",
+      listAgents: () => ["pm-assistant", "sales:agent"],
+    });
+    const status = makeInteraction({ userId: GUARDIAN_ID, subcommand: "status", guildId: null });
+    await runCommand(adapter, status.interaction);
+    expect(status.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("agent: sales:agent"),
+    });
+
+    const set = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "set",
+      strings: { name: "pm-assistant" },
+      guildId: null,
+    });
+    await runCommand(adapter, set.interaction);
+    expect(set.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining(
+        "stored agent `pm-assistant`, but messages now route to sales:agent",
+      ),
+    });
+  });
+
   it("refuses an unlinked Discord user and records safe structured diagnostics", async () => {
     const warn = rs.spyOn(console, "warn").mockImplementation(() => undefined);
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const resolveDiscordPerson = rs.fn(async () => null);
     const adapter = new DiscordAdapter({
       botToken: "credential-must-not-appear",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson,
       listAgents: () => ["pm-assistant"],
     });

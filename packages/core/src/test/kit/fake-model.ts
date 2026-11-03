@@ -1,4 +1,4 @@
-import type { AgentMessage } from "../../types.js";
+import type { AgentEvent } from "../../types.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -23,21 +23,21 @@ export interface ActionCallStep {
 }
 
 /** One scripted element of a turn: a message to emit, or an action to invoke. */
-export type ReplyStep = AgentMessage | ActionCallStep;
+export type ReplyStep = AgentEvent | ActionCallStep;
 
-export function text(content: string): AgentMessage {
+export function text(content: string): AgentEvent {
   return { type: "text", content };
 }
 
-export function thinking(content: string): AgentMessage {
+export function thinking(content: string): AgentEvent {
   return { type: "thinking", content };
 }
 
-export function result(content: string): AgentMessage {
+export function result(content: string): AgentEvent {
   return { type: "result", content };
 }
 
-export function errorMessage(error: string): AgentMessage {
+export function errorMessage(error: string): AgentEvent {
   return { type: "error", error };
 }
 
@@ -120,7 +120,7 @@ export class FakeModel implements ModelProvider {
     return this.calls.at(-1)?.systemPrompt;
   }
 
-  async *run(params: ModelRunParams): AsyncIterable<AgentMessage> {
+  async *run(params: ModelRunParams): AsyncIterable<AgentEvent> {
     this.calls.push(params);
     const steps = this.nextSteps(params);
 

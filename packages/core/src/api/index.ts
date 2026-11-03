@@ -1,3 +1,4 @@
+import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -5,29 +6,36 @@ import { type Context, Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createLogger } from "../logger.js";
-import { renderSocialMeta } from "../lib/social-meta.js";
+import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
+import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
+import { attachLiveEventsServer } from "../live-events-server.js";
+import { attachNodeConsoleServer } from "../node-console-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
+import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../lib/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
-import { appsRoutes } from "./routes/apps.js";
+import { appsRoutes, subscribeCatalogChanges } from "./routes/apps.js";
 import { agentsRoutes } from "./routes/agents.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
-import { conversationSettingsRoutes } from "./routes/conversation-settings.js";
+import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
+import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
+import { send } from "../chats/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
+import { conciergeRoutes } from "./routes/concierge.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -38,7 +46,7 @@ import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { accountsRoutes } from "./routes/accounts.js";
 import { accountDecisionRoutes } from "./routes/account-decisions.js";
 import { peopleRoutes } from "./routes/people.js";
-import { whatsappContactsRoutes } from "./routes/whatsapp-contacts.js";
+import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
@@ -63,6 +71,7 @@ import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
 import { desktopProxyRoutes } from "./routes/desktop-proxy.js";
 import { appAssetsRoutes } from "./routes/app-assets.js";
+import { appHomeScreenRoutes } from "./routes/app-home-screen.js";
 import { appOgRoutes } from "./routes/app-og.js";
 import { appStoreRoutes } from "./routes/app-store.js";
 import { showcasePresetRoutes } from "./routes/showcase-presets.js";
@@ -71,7 +80,12 @@ import { routinesRoutes } from "./routes/routines.js";
 import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
+import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+import { accountLinkOf, connectionKindOf } from "../channels/account-links.js";
+import { byChannel, readAccountAgent } from "../channels/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -86,16 +100,27 @@ export function buildApp(
 
   // Same-container Agent surface. This is deliberately outside `/api`, which
   // is Caddy-proxied, and refuses to register on a non-loopback listener.
-  app.route("/", discordCliRoutes(deps, config.host));
+  app.route(
+    "/",
+    discordCliRoutes(
+      {
+        ...deps,
+        channelRecords: new ChannelRecordsRepository(
+          deps.db,
+          accountLinkOf(deps.connectionRegistry),
+        ),
+      },
+      config.host,
+    ),
+  );
 
   // External webhooks — X-API-Key auth, no /api/ prefix. Intentionally outside
   // sessionActorMiddleware: a machine-credential surface records no session
   // actor (the router also enforces this itself via withoutSessionActor).
   app.route("/", webhookRoutes(deps, config.webhookApiKey));
 
-  // noVNC reverse proxy — mounted at root so the dashboard iframe can embed
-  // the desktop on the same origin. WebSocket upgrades are handled separately
-  // via attachDesktopProxy() on the raw HTTP server.
+  // Reject ordinary HTTP on the desktop-proxy path before the SPA fallback.
+  // WebSocket upgrades are handled by attachDesktopProxy() on the raw server.
   app.route("/", desktopProxyRoutes());
 
   // Built web assets for installed apps, served at /app-assets/:appId/:version/*.
@@ -103,6 +128,9 @@ export function buildApp(
 
   // Social card image per installed app, at /app-og/<appId>.png (public).
   app.route("/", appOgRoutes(deps));
+
+  // Home-screen manifest and icon per installed app (public).
+  app.route("/", appHomeScreenRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. No global auth gate
   // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
@@ -128,6 +156,7 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
+  api.route("/", wechatAppRoutes(deps));
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
@@ -139,6 +168,8 @@ export function buildApp(
   api.route("/", appApiPublicRoutes(deps));
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
+  api.route("/", appConnectionAccessRoutes(deps));
+  api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());
@@ -156,16 +187,18 @@ export function buildApp(
   api.route("/", appStoreRoutes(deps.appStore));
   api.route("/", showcasePresetRoutes());
   api.route("/", favorRoutes(deps));
-  api.route("/", conversationSettingsRoutes(deps));
+  api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", conciergeRoutes(deps));
+  api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", peopleRoutes(deps));
+  api.route("/", assistantsRoutes(deps));
   api.route("/", accountsRoutes(deps));
   api.route("/", accountDecisionRoutes(deps));
-  api.route("/", whatsappContactsRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
@@ -175,10 +208,25 @@ export function buildApp(
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
+  const sessionChannelRecords = new ChannelRecordsRepository(
+    deps.db,
+    accountLinkOf(deps.connectionRegistry),
+  );
+  const sessionAccountAgents = {
+    kindOf: connectionKindOf(deps.connectionRegistry),
+    linkOf: accountLinkOf(deps.connectionRegistry),
+    accounts: new ConnectedAccountsRepository(deps.db),
+  };
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
+    accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
+      readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),
+    ),
+    // A channel with no record answers no agent, so the records are every
+    // channel that can.
+    channelNames: () => sessionChannelRecords.all().map((record) => record.id),
   });
   api.route("/", sessionsRoutes(sessionQueries));
 
@@ -189,6 +237,12 @@ export function buildApp(
   // buildApp runs, so the runtime is bound after the fact, like the rest of the
   // post-setup wiring.
   deps.backendTurnRunner.setWebchatRuntime(webchatRuntime);
+  // Concierge is built before the API layer too. Its sends are Chats' own,
+  // with the dashboard taking those into its chats.
+  deps.concierge?.attachDashboard({
+    chats: webchatRuntime,
+    send: (place, body, as) => send({ ...deps, dashboard: webchatRuntime }, place, body, as),
+  });
 
   app.route("/api", api);
 
@@ -214,13 +268,16 @@ function mountSpa(
   webRoot: string,
   deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
 ): void {
-  // App document routes get the shell with per-app social meta. Registered
-  // before `serveStatic` so the static handler never answers them, and
-  // `no-cache` because Caddy set that on the shell before this path existed —
-  // a cached shell points at bundle hashes the next image upgrade removes.
+  // App document routes get the shell with per-app social meta and
+  // home-screen identity. Registered before `serveStatic` so the static
+  // handler never answers them, and `no-cache` because Caddy set that on the
+  // shell before this path existed — a cached shell points at bundle hashes
+  // the next image upgrade removes.
   const appDocument = async (c: Context) => {
     const card = await buildAppSocialCard(deps, c.req.raw);
-    return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
+    const identity = buildAppIdentity(deps, c.req.raw);
+    const html = renderAppIdentity(renderSocialMeta(readIndexHtml(webRoot), card), identity);
+    return c.html(html, 200, {
       "Cache-Control": "no-cache",
     });
   };
@@ -261,6 +318,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           port: info.port,
           close: async () => {
             terminalServer.close();
+            liveEvents.close();
+            nodeConsole.close();
             desktopProxy.close();
             appWebSocket.close();
             await webchatRuntime.flushAll();
@@ -273,12 +332,27 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, {
+      const terminalServer = attachTerminalServer(server as Server, deps.db, {
         onAuthCommandExit: () => {
           void deps.aiToolState.refresh().catch(() => {});
         },
       });
-      const desktopProxy = attachDesktopProxy(server as Server);
+      const liveEvents = attachLiveEventsServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
+          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          subscribeChatSession: (sessionId, emit) =>
+            webchatRuntime.subscribeSessionEvents(sessionId, emit),
+          subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+          subscribeConciergeTasks: (emit) =>
+            deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
+        },
+      );
+      const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });

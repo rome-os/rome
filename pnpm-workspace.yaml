@@ -11,6 +11,7 @@ packages:
   - "packages/*"
   - "rome_apps/*"
   - "example_apps/*"
+  - "tests/midscene"
 linkWorkspacePackages: true
 preferWorkspacePackages: true
 
@@ -25,13 +26,18 @@ preferWorkspacePackages: true
 # than omitted.
 allowBuilds:
   bcrypt: true
-  better-sqlite3: true
-  electron: true
   esbuild: true
+  fsevents: false
   node-pty: true
   protobufjs: true
   sharp: true
   workerd: true
+  # better-sqlite3 13 ships Node-API prebuilds that load without a build.
+  # Approved, pnpm would run node-gyp over its binding.gyp, which needs make.
+  better-sqlite3: false
+  # koffi ships prebuilt binaries in its package; its install script only
+  # checks for them.
+  koffi: false
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false
@@ -56,6 +62,7 @@ overrides:
   # rome-mobile subtree; keep these in lockstep with the Expo SDK's pins.
   "rome-mobile>react": "19.2.3"
   "rome-mobile>@types/react": "~19.2.14"
+  'shell-quote': '1.9.0'
 
 # The global react pins above rewrite the PEER ranges of mobile's deps
 # (expo/react-native declare `react: ^19.1.0`, the override turns that into

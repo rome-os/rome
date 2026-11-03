@@ -1,0 +1,79 @@
+{
+  "loading": "Loading…",
+  "loadFailed": "Failed to load envoys",
+  "accountCount_one": "{{count}} account",
+  "accountCount_other": "{{count}} accounts",
+  "index": {
+    "title": "Envoys",
+    "description": "Agents people can reach on chat platforms, each speaking through an account you connected.",
+    "add": "Connect an account",
+    "emptyTitle": "No connected accounts yet",
+    "emptyBody": "To list an agent here, connect an account for it on a chat platform."
+  },
+  "agent": {
+    "missing": "No connected account has <agent>{{agent}}</agent> as its agent."
+  },
+  "overview": {
+    "accounts": "Accounts"
+  },
+  "kinds": {
+    "own_account": "Own account",
+    "delegate": "Delegate",
+    "yours": "your account"
+  },
+  "unlinked": {
+    "title": "Connected, no agent",
+    "description": "Rome has access to these accounts, but no agent speaks through them yet."
+  },
+  "tabs": {
+    "overview": "Overview",
+    "settings": "Settings"
+  },
+  "change": {
+    "pick": "Link an agent",
+    "noAgent": "No agent",
+    "suggested": "{{agent}} (suggested)",
+    "linkConfirm": "Link <agent>{{to}}</agent> to {{account}}?",
+    "delegateConfirm": "Link <agent>{{to}}</agent> to {{account}}, your own account? <agent>{{to}}</agent> answers people in your personal chats on your behalf from now on.",
+    "switchConfirm": "Switch {{account}} to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers in every chat the account is in from now on.",
+    "delegateSwitchConfirm": "Switch {{account}}, your own account, to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers people in your personal chats on your behalf from now on.",
+    "unlinkConfirm": "Unlink <agent>{{agent}}</agent> from {{account}}? The account stays connected, but its messages go unanswered until an agent is linked again.",
+    "delegateUnlinkConfirm": "Unlink <agent>{{agent}}</agent> from {{account}}, your own account? <agent>{{agent}}</agent> stops answering in your personal chats for you.",
+    "link": "Link",
+    "switch": "Switch agent",
+    "unlink": "Unlink",
+    "cancel": "Cancel",
+    "failed": "Failed to change the agent",
+    "agentsFailed": "Failed to load agents",
+    "agentFor": "Agent for {{account}}"
+  },
+  "disconnect": {
+    "action": "Disconnect",
+    "pending": "Disconnecting…",
+    "accountLabel": "Disconnect {{account}}",
+    "confirm": "Disconnect {{account}}? Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
+    "delegateConfirm": "Disconnect {{account}}, your own account? Rome loses access to it and stops answering in your personal chats for you.",
+    "failed": "Failed to disconnect the account"
+  },
+  "connect": {
+    "title": "Connect an account",
+    "description": "Pick the agent that speaks through the new account. The platform comes next.",
+    "agents": "Agents",
+    "platforms": "Platforms",
+    "forAgent": "Connect an account for <agent>{{agent}}</agent>",
+    "anyNumber": "An agent can speak through any number of accounts, on one platform or several.",
+    "ownTitle": "<agent>{{agent}}</agent>'s own account",
+    "ownBody": "People see <agent>{{agent}}</agent> as a member of its own, under the account's name.",
+    "delegateTitle": "Your own account",
+    "delegateBody": "<agent>{{agent}}</agent> answers from your account. People see your name on its replies.",
+    "yourAccount": "Your {{app}}",
+    "taken": "Already connected. Rome holds one of these accounts.",
+    "onTitle": "Connect an account on {{app}} for <agent>{{agent}}</agent>",
+    "onDescription": "<agent>{{agent}}</agent> answers in every chat this account is in.",
+    "delegateOnTitle": "Connect your {{app}} account",
+    "delegateOnDescription": "<agent>{{agent}}</agent> answers from your own account on your behalf. People in your chats see your name, not the agent's.",
+    "unavailable": "No new account can be connected on this platform.",
+    "linkFailed": "The account is connected, but linking {{agent}} to it failed. Link an agent under Connected, no agent.",
+    "notFound": "The account is connected, but Envoys could not find it to link {{agent}}. Check its agent in Envoys."
+  }
+}

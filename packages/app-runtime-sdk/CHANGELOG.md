@@ -1,5 +1,200 @@
 # @rome-os/app-runtime
 
+## [0.9.6](https://github.com/rome-os/rome/compare/app-runtime-v0.9.5...app-runtime-v0.9.6) (2026-11-02)
+
+
+### Features
+
+* **app-runtime:** add the chats subpath for sending by Chats refs ([#1605](https://github.com/rome-os/rome/issues/1605)) ([c36a3a7](https://github.com/rome-os/rome/commit/c36a3a704976b495e89cfe6f459e6295f7119d8f))
+
+## [0.9.5](https://github.com/rome-os/rome/compare/app-runtime-v0.9.4...app-runtime-v0.9.5) (2026-10-29)
+
+
+### Features
+
+* **chats:** record every inbound message before the wake decides ([#1502](https://github.com/rome-os/rome/issues/1502)) ([4a91a0c](https://github.com/rome-os/rome/commit/4a91a0c865955af009c1831d4c338f2eefeb3c51))
+
+## [0.9.4](https://github.com/rome-os/rome/compare/app-runtime-v0.9.3...app-runtime-v0.9.4) (2026-10-28)
+
+
+### Features
+
+* **app-runtime:** name accounts in person mapping and sentinel entries ([#1472](https://github.com/rome-os/rome/issues/1472)) ([20afa03](https://github.com/rome-os/rome/commit/20afa039f68d3ced3e4541d72fa6c8caf1d68421))
+
+## [0.9.3](https://github.com/rome-os/rome/compare/app-runtime-v0.9.2...app-runtime-v0.9.3) (2026-10-27)
+
+
+### Features
+
+* **core:** key People links by platform ([#1459](https://github.com/rome-os/rome/issues/1459)) ([93401a8](https://github.com/rome-os/rome/commit/93401a8cb659d4d75d8889b1929d3abb7090298a))
+
+## [0.9.2](https://github.com/rome-os/rome/compare/app-runtime-v0.9.1...app-runtime-v0.9.2) (2026-10-27)
+
+
+### Features
+
+* **chat:** close the composer while a card is the only way to answer ([#1275](https://github.com/rome-os/rome/issues/1275)) ([dbd1fea](https://github.com/rome-os/rome/commit/dbd1feae47b3196286cc4f6831c89694b9a1c518))
+
+## [0.9.1](https://github.com/rome-os/rome/compare/app-runtime-v0.9.0...app-runtime-v0.9.1) (2026-10-27)
+
+
+### Features
+
+* **app-runtime:** name Rome's accounts by platform and id ([#1415](https://github.com/rome-os/rome/issues/1415)) ([65c7e1a](https://github.com/rome-os/rome/commit/65c7e1a2d8ef998bdd99ba7fe05a73ca9dde81d9))
+
+## [0.9.0](https://github.com/rome-os/rome/compare/app-runtime-v0.8.2...app-runtime-v0.9.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** add restricted connection access
+
+### Features
+
+* **app-runtime:** add restricted connection access ([d90d3e4](https://github.com/rome-os/rome/commit/d90d3e4f7a007d96ae172200bda270d5d9f58e51))
+* **core:** let an open chat change its model and tell a new thread what it missed ([#1377](https://github.com/rome-os/rome/issues/1377)) ([b278aa9](https://github.com/rome-os/rome/commit/b278aa9839379619f0bc2ab76feb5c110bcd87c0))
+
+## [0.8.2](https://github.com/rome-os/rome/compare/app-runtime-v0.8.1...app-runtime-v0.8.2) (2026-10-24)
+
+
+### Features
+
+* **core:** subscribe to an event's source when defer waits on it ([#1315](https://github.com/rome-os/rome/issues/1315)) ([55cfac3](https://github.com/rome-os/rome/commit/55cfac3eb4155b4826f3078f9aa9a820258b41f3))
+
+## [0.8.1](https://github.com/rome-os/rome/compare/app-runtime-v0.8.0...app-runtime-v0.8.1) (2026-10-23)
+
+
+### Features
+
+* **core:** let defer wake a session when an event arrives ([#1285](https://github.com/rome-os/rome/issues/1285)) ([174a3bc](https://github.com/rome-os/rome/commit/174a3bc519d7ada7095c4667bde6970072f72362))
+* let a new chat work in a folder on a connected device ([#1267](https://github.com/rome-os/rome/issues/1267)) ([c327426](https://github.com/rome-os/rome/commit/c3274267262499ebb2a8a9354b962e74c6a00c36))
+
+## [0.8.0](https://github.com/rome-os/rome/compare/app-runtime-v0.7.9...app-runtime-v0.8.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** name the chat id chatId on refs, messages, queries and receipts ([#1206](https://github.com/rome-os/rome/issues/1206))
+
+### Features
+
+* **app-runtime:** name a channel's platform, and send to any account by its id ([#1203](https://github.com/rome-os/rome/issues/1203)) ([52f84af](https://github.com/rome-os/rome/commit/52f84af097ee9aace8a2bdccfdbe978f47dab0a7))
+* **app-runtime:** name a chat's connection kind, and say connection kind across core ([#1214](https://github.com/rome-os/rome/issues/1214)) ([a533d3a](https://github.com/rome-os/rome/commit/a533d3a534f55112a6609bf73bdd39f51578b512))
+* **app-runtime:** name chat services chatSettings and chats, keep old names as deprecated aliases ([#1194](https://github.com/rome-os/rome/issues/1194)) ([c585a25](https://github.com/rome-os/rome/commit/c585a25e3f55382b4a51bdc8d6a953ba589a1eb2))
+* **app-runtime:** name the chat id chatId on refs, messages, queries and receipts ([#1206](https://github.com/rome-os/rome/issues/1206)) ([c42b46b](https://github.com/rome-os/rome/commit/c42b46baed7780f12141aaa16a838ac28e9e50be))
+
+## [0.7.9](https://github.com/rome-os/rome/compare/app-runtime-v0.7.8...app-runtime-v0.7.9) (2026-10-21)
+
+
+### Features
+
+* **app-runtime:** name chat types Chat, keep Conversation names as deprecated aliases ([#1189](https://github.com/rome-os/rome/issues/1189)) ([3766b63](https://github.com/rome-os/rome/commit/3766b63e12f8c1c0e93ebfde3d5b01d8cd353e70))
+
+## [0.7.8](https://github.com/rome-os/rome/compare/app-runtime-v0.7.7...app-runtime-v0.7.8) (2026-10-21)
+
+
+### Features
+
+* **connector:** add Shopify and Otter.ai to the connectable toolkits ([#1169](https://github.com/rome-os/rome/issues/1169)) ([0441336](https://github.com/rome-os/rome/commit/0441336425f019158603908cf66000230e040b76))
+
+## [0.7.7](https://github.com/rome-os/rome/compare/app-runtime-v0.7.6...app-runtime-v0.7.7) (2026-10-20)
+
+
+### Features
+
+* **app-runtime:** say account and agent, not linked agent, bot or channel ([#1157](https://github.com/rome-os/rome/issues/1157)) ([e5f9464](https://github.com/rome-os/rome/commit/e5f94640c7c206c0296da76295fe4aa03e4ab30c))
+
+## [0.7.6](https://github.com/rome-os/rome/compare/app-runtime-v0.7.5...app-runtime-v0.7.6) (2026-10-19)
+
+
+### Features
+
+* **app-runtime:** stream a guardian's Telegram reply as the agent writes it ([#1145](https://github.com/rome-os/rome/issues/1145)) ([b2bc593](https://github.com/rome-os/rome/commit/b2bc5937569b5c5ab986743faf406e3fa1464201))
+
+## [0.7.5](https://github.com/rome-os/rome/compare/app-runtime-v0.7.4...app-runtime-v0.7.5) (2026-10-16)
+
+
+### Features
+
+* **app-runtime:** answer as an account's linked agent, and keep an unlinked account silent ([#1101](https://github.com/rome-os/rome/issues/1101)) ([bae6b6f](https://github.com/rome-os/rome/commit/bae6b6fb1389c05a53611736747151875fffbc03))
+
+## [0.7.4](https://github.com/rome-os/rome/compare/app-runtime-v0.7.3...app-runtime-v0.7.4) (2026-10-16)
+
+
+### Features
+
+* **core:** add another account of a service ([#1067](https://github.com/rome-os/rome/issues/1067)) ([01e41c6](https://github.com/rome-os/rome/commit/01e41c62774f6447227f40010f5139fc20cf46d6))
+
+## [0.7.3](https://github.com/rome-os/rome/compare/app-runtime-v0.7.2...app-runtime-v0.7.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **app-runtime:** type favor consent results as always carrying their request ([#894](https://github.com/rome-os/rome/issues/894)) ([e8c97fe](https://github.com/rome-os/rome/commit/e8c97feba4ad9409e610e17d60a6d1e7b8bf86d7))
+
+## [0.7.2](https://github.com/rome-os/rome/compare/app-runtime-v0.7.1...app-runtime-v0.7.2) (2026-10-10)
+
+
+### Features
+
+* **routines:** auto-enable a routine the guardian explicitly asked for ([#872](https://github.com/rome-os/rome/issues/872)) ([f52d3a5](https://github.com/rome-os/rome/commit/f52d3a506da17596dd6103ed88c9d9993d5734ac))
+
+## [0.7.1](https://github.com/rome-os/rome/compare/app-runtime-v0.7.0...app-runtime-v0.7.1) (2026-10-10)
+
+
+### Features
+
+* **web:** link saved routine cards to their run history ([#870](https://github.com/rome-os/rome/issues/870)) ([79c7990](https://github.com/rome-os/rome/commit/79c7990b6e6c03122e16c9572a30cd1e8d08eefd))
+
+## [0.7.0](https://github.com/rome-os/rome/compare/app-runtime-v0.6.7...app-runtime-v0.7.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** retire the Talk names and the multi-Connection channel options ([#772](https://github.com/rome-os/rome/issues/772))
+* **app-runtime:** `TalkRouter`, `Talk`, `TalkFeatureMap`, `TalkFeatureName`, `TalkHistory`, `TalkDirectory`, `InboundMessage`, `Attachment.data`, `WHATSAPP_UNKNOWN_SENDER` and `ChannelMessageHookDeps.talkRouter` are removed from `@rome-os/app-runtime`, and app actions no longer receive `deps.talkRouter`. Through the 0.7 release, an action or a channel-message hook that reads `deps.talkRouter` gets an error naming its replacement. Migrate an action to `deps.channelsService` (`ChannelsService`). `talkRouter.list()` becomes `channelsService.list()`, which names each channel with its `connectionIds`. `talkRouter.send(connectionId, conversationId, message)` becomes `channelsService.send(channel, conversationId, message, { connectionId })`, and the `connectionId` is needed only when several Connections back the channel. `talkRouter.feature(id, "history").query(input)` becomes `channelsService.query(channel, { conversationId, since, limit })`, newest first. A hook drops `deps.talkRouter`, hears through `channel.inbound.subscribe` and answers through `channel.send`. `InboundMessage` becomes `ChannelMessage`, which adds the required `channel` and `direction` fields. A WhatsApp group line with no recorded sender carries `senderId: ""` instead of `"whatsapp:unknown"`, and the People API's `sender.id` for such a line is `null` instead of `"whatsapp:unknown"`.
+* **app-runtime:** `ChannelMessageHook.registerConnection` is removed, and the host no longer calls a channel-message hook on each Talk unlock. Migrate a hook by subscribing in `register()` through `deps.channels` (typed `ChannelMessageHookDeps`): for each channel whose `inbound` is not null, call `channel.inbound.subscribe(handler)`, where each event carries its conversation's `ConversationRef` in `event.ref`. The host calls `register()` once per activation and again only after `unregister()`, so a hook must handle `register → unregister → register`. A hook that still defines `registerConnection` gets a warning when it loads. The `interactions` Talk feature is removed: `TalkFeatureMap.interactions`, `TalkInteractions`, `ConversationInteraction` and `ConversationPresentation`. No channel implemented it.
+
+### Features
+
+* **app-runtime:** add a name-keyed channels service for app actions and deprecate TalkRouter ([#572](https://github.com/rome-os/rome/issues/572)) ([66ec9b2](https://github.com/rome-os/rome/commit/66ec9b2516d23ca8d163403a3479f6b3889a8758))
+* **app-runtime:** add an app-started hook and schedule Dream from it ([#692](https://github.com/rome-os/rome/issues/692)) ([5f1b7c5](https://github.com/rome-os/rome/commit/5f1b7c5d9ba2de873150ca735cc3929dd09936c2))
+* **app-runtime:** add ChannelMessage and give every message store one query ([#561](https://github.com/rome-os/rome/issues/561)) ([48f0fd0](https://github.com/rome-os/rome/commit/48f0fd0b33d56e42033b02a3def915063455f9a1))
+* **app-runtime:** deprecate ChannelsService.history in favour of query ([#763](https://github.com/rome-os/rome/issues/763)) ([6667901](https://github.com/rome-os/rome/commit/6667901cfe6e535eb656ddfe7140f1c461dcf608))
+* **app-runtime:** flag failed tool results the same way on every provider ([#564](https://github.com/rome-os/rome/issues/564)) ([6b8b9b9](https://github.com/rome-os/rome/commit/6b8b9b96742044ec264f4aa3be83d4d513ee4c53))
+* **app-runtime:** hear channels in the channel-message hook ([#543](https://github.com/rome-os/rome/issues/543)) ([eddb311](https://github.com/rome-os/rome/commit/eddb3118366a76e283e3c819662f2229793b537c))
+* **app-runtime:** name stream items AgentEvent and add MessagePart.blockId ([#602](https://github.com/rome-os/rome/issues/602)) ([aa0d58c](https://github.com/rome-os/rome/commit/aa0d58c2c9ba79c069171fd5fb61050c8fbac198))
+* **app-runtime:** name the channel ports in channel vocabulary, deprecate the Talk names ([#750](https://github.com/rome-os/rome/issues/750)) ([46808bb](https://github.com/rome-os/rome/commit/46808bba8efe194b0c347cf6007ba5750ab086ca))
+* **app-runtime:** read history through each channel's messages query ([#568](https://github.com/rome-os/rome/issues/568)) ([a63df8f](https://github.com/rome-os/rome/commit/a63df8f5bfd945a21345cf620a72092076206f26))
+* **app-runtime:** remove registerConnection and the interactions Talk feature ([#556](https://github.com/rome-os/rome/issues/556)) ([836b137](https://github.com/rome-os/rome/commit/836b137aa619dafcfcb3b68d0913c24eff2d6352))
+* **app-runtime:** remove TalkRouter, Talk and InboundMessage from the SDK ([#579](https://github.com/rome-os/rome/issues/579)) ([b8db82e](https://github.com/rome-os/rome/commit/b8db82e2a8f156ccd02237a6b47753016f1e1c07))
+* **app-runtime:** resolve Rome credit funding ([#648](https://github.com/rome-os/rome/issues/648)) ([40552fb](https://github.com/rome-os/rome/commit/40552fbdc5055a4393fcb8936c02e2425f17fa39))
+* **app-runtime:** retire the Talk names and the multi-Connection channel options ([#772](https://github.com/rome-os/rome/issues/772)) ([f3a3661](https://github.com/rome-os/rome/commit/f3a3661e0945f32d0f9530c94207939305e4b03f))
+* **app-runtime:** stream reasoning, tool input, and command output with block ids ([#593](https://github.com/rome-os/rome/issues/593)) ([69cce01](https://github.com/rome-os/rome/commit/69cce014648f13c9e05a2a497bb86b14d0941402))
+* **app-runtime:** type the channel-message hook's deps and show typing on the send port ([#555](https://github.com/rome-os/rome/issues/555)) ([ef523c4](https://github.com/rome-os/rome/commit/ef523c4659149e2711744deb04ec42c3be339907))
+* **app-runtime:** unify stop reason, reasoning tokens, and error codes across providers ([#563](https://github.com/rome-os/rome/issues/563)) ([3e8c862](https://github.com/rome-os/rome/commit/3e8c8623ebc404088e1e982d205eb16d60db7f96))
+
+
+### Bug Fixes
+
+* **app-runtime:** let strict action schemas run under routines ([#688](https://github.com/rome-os/rome/issues/688)) ([fab15be](https://github.com/rome-os/rome/commit/fab15be6f8d6ebd576e209fbcc10408deb529890))
+* **core:** resolve AgentEvent follow-up findings ([#635](https://github.com/rome-os/rome/issues/635)) ([2ae5ce3](https://github.com/rome-os/rome/commit/2ae5ce3832fb12d9c098163807573fa0f3928271))
+* **favors:** reject bare-key displayFields pointers at load time ([#609](https://github.com/rome-os/rome/issues/609)) ([3befd83](https://github.com/rome-os/rome/commit/3befd83ce018e36ec65d8fca5c66a069f984ba48))
+
+## [0.6.7](https://github.com/rome-os/rome/compare/app-runtime-v0.6.6...app-runtime-v0.6.7) (2026-09-25)
+
+
+### Features
+
+* **app-runtime:** add explicit action visibility ([#451](https://github.com/rome-os/rome/issues/451)) ([768a205](https://github.com/rome-os/rome/commit/768a205e63ae3186d98cd51b7429ad7609a264b7))
+
+## [0.6.6](https://github.com/rome-os/rome/compare/app-runtime-v0.6.5...app-runtime-v0.6.6) (2026-09-17)
+
+
+### Features
+
+* unify channel pairing with Activity approvals ([#298](https://github.com/rome-os/rome/issues/298)) ([78b085a](https://github.com/rome-os/rome/commit/78b085a86145d791db425fcb26658de7f6c3198f))
+
 ## [0.6.5](https://github.com/rome-os/rome/compare/app-runtime-v0.6.4...app-runtime-v0.6.5) (2026-09-15)
 
 

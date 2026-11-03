@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-11
-- **Concept**: [Sessions — Agent run](../concepts/sessions.md#agent-run)
+- **Concept**: [Sessions — Turn](../concepts/sessions.md#turn)
 
 ## Context
 
@@ -14,7 +14,7 @@ The stream has three readers with different shapes. A live reader watches the tu
 
 Duration has two meanings that a single field cannot hold. Per-block `accounting` describes one model call — its provider, model, token usage, cost, and the duration that provider reported. Cost and usage rollups sum that field across blocks. The turn's wall clock is a different quantity, measured by the session across the whole turn, and only the producer measures it.
 
-An [agent run](../concepts/sessions.md#agent-run) is one turn, so a reader that cannot place the turn's edges cannot report the run. Ordering does not supply those edges: a terminal arriving last is a property of one execution shape, not a contract. A [subagent runs in its own child session](child-session-owns-subagent-stream-and-cost.md), so a parent turn's edges have to be marked rather than deduced from whatever the parent's list happens to end with.
+An [agent run](../concepts/sessions.md#turn) is one turn, so a reader that cannot place the turn's edges cannot report the run. Ordering does not supply those edges: a terminal arriving last is a property of one execution shape, not a contract. A [subagent runs in its own child session](child-session-owns-subagent-stream-and-cost.md), so a parent turn's edges have to be marked rather than deduced from whatever the parent's list happens to end with.
 
 Two mechanisms have carried this decision. The original design chose a `turnTerminal` boolean on the existing `result`/`error` block and rejected a separate message for the boundary. The shipped system carries it as an explicit `turn_start`/`turn_end` bracket instead, and no `turnTerminal` field remains. This record documents the standing decision — the producer marks identity and the turn boundary in-band — and the bracket that now carries it. The marker sits below as the alternative that implementation experience overturned, so a reader arriving from that design can see which part survived.
 

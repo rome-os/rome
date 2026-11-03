@@ -1,19 +1,27 @@
-import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { reportDetectedTimezoneOnce, resetDetectedTimezoneReport } from "./guardian-timezone";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+
+// The module remembers that it reported, so every test gets a fresh instance.
+async function loadReporter() {
+  rs.resetModules();
+  return (await import("./guardian-timezone")).reportDetectedTimezoneOnce;
+}
+
+afterEach(() => {
+  rs.restoreAllMocks();
+});
 
 describe("reportDetectedTimezoneOnce", () => {
-  beforeEach(() => {
-    resetDetectedTimezoneReport();
-  });
-
   it("posts the browser zone once per page load", async () => {
-    const fetcher = rs.fn(async () => new Response("{}", { status: 200 }));
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("{}", { status: 200 }));
+    const reportDetectedTimezoneOnce = await loadReporter();
 
-    await reportDetectedTimezoneOnce(fetcher as unknown as typeof fetch);
-    await reportDetectedTimezoneOnce(fetcher as unknown as typeof fetch);
+    await reportDetectedTimezoneOnce();
+    await reportDetectedTimezoneOnce();
 
-    expect(fetcher).toHaveBeenCalledOnce();
-    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/settings/guardian-timezone/detected");
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({
@@ -22,12 +30,11 @@ describe("reportDetectedTimezoneOnce", () => {
   });
 
   it("swallows a failed post", async () => {
-    const fetcher = rs.fn(async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async () => {
       throw new Error("offline");
     });
+    const reportDetectedTimezoneOnce = await loadReporter();
 
-    await expect(
-      reportDetectedTimezoneOnce(fetcher as unknown as typeof fetch),
-    ).resolves.toBeUndefined();
+    await expect(reportDetectedTimezoneOnce()).resolves.toBeUndefined();
   });
 });

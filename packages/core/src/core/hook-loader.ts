@@ -1,7 +1,7 @@
 import type { AgentRunnerInterface, AppLogger, RomeAppContext } from "@rome-os/app-runtime";
 import { importModuleWithCacheBuster, resolveModuleEntryPath } from "../actions/module-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { ArtifactRef, ResolvedApp } from "../apps/state.js";
+import { type ArtifactRef, isResolvedApp } from "../apps/state.js";
 import { createAppLogger } from "../logger.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
 
@@ -48,8 +48,4 @@ export async function loadAppHook(
     deps.appContext = createRomeAppContext(app, appRuntimeServices);
   }
   return module.createHook(deps);
-}
-
-export function isResolvedApp(value: unknown): value is ResolvedApp {
-  return typeof value === "object" && value !== null && "manifest" in value;
 }

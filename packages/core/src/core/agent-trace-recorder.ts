@@ -3,16 +3,21 @@ import {
   type CurrentActionContext,
   type RomeSessionType,
 } from "@rome-os/app-runtime";
+import { channelChatId } from "../db/session-kind.js";
 import type {
   RomeAgentTranscriptMessageInput,
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
-import type { AgentMessage, MessagePart } from "../types.js";
+import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
-import { toTraceBlock, type TraceableAgentMessage } from "../api/helpers.js";
-import type { Logger } from "../logger.js";
+import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
+import { createLogger, type Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { isTransientDelta } from "./agent-message.js";
+import type { SessionConversation } from "./session-conversation.js";
+
+const log = createLogger("agent-trace-recorder");
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -36,6 +41,9 @@ export interface AgentTraceRecorderInput {
   persistTranscript?: boolean;
   /** Inbound conversation messages are already persisted before dispatch. */
   persistUserTranscript?: boolean;
+  /** A reply the host streams records its own assistant row, as the text it
+   *  showed, so the turn's answer is not recorded twice. */
+  persistAssistantTranscript?: boolean;
   /**
    * Explicit trigger metadata stamped on the trace message row. When absent,
    * falls back to the ambient action context.
@@ -57,16 +65,69 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
   if (input.romeSessionId) return input.romeSessionId;
   if (input.existingSessionId) return input.existingSessionId;
   if (input.threadContext) {
-    if (input.threadContext.channel === "webchat") {
-      return input.threadContext.threadId;
-    }
-    return `channel:${input.threadContext.channel}:${input.threadContext.threadId}`;
+    if (input.threadContext.romeSessionId) return input.threadContext.romeSessionId;
+    return channelChatId(input.threadContext.channel, input.threadContext.threadId);
   }
   const actionContext = input.actionContext ?? getCurrentActionContext();
   if (actionContext?.executionId) {
     return `action:${actionContext.executionId}:${input.agentName || "main"}`;
   }
   return `action:${input.channelThreadKey ?? input.agentName}:${input.agentName || "main"}`;
+}
+
+export interface TurnConversationInput extends RomeSessionIdInput {
+  /** The conversation the session serves, as it stood when the turn started. */
+  sessionConversation?: SessionConversation;
+}
+
+// Conversations whose turns only the recorder writes. A webchat conversation
+// belongs to the webchat route, and a channel one to the inbox, which also
+// injects its pending context on a channel turn.
+const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set([
+  "subagent",
+  "fork",
+]);
+
+/**
+ * The conversation a turn records into, and its type. A conversation the
+ * caller named wins. Otherwise a recorded subagent or fork conversation is
+ * used, and the id is derived as before for anything else. `existing` is true
+ * for a named or recorded conversation, which needs no creating.
+ * `promptPersisted` is true only for a named one, whose caller owns the prompt.
+ * `recorderOwned` is true for a recorded one, which only the recorder writes.
+ *
+ * A turn under a thread stays with that thread's conversation, as before. Its
+ * reply is delivered and recorded there under the turn's id, so the trace has
+ * to be found there too, and a webchat card is answered by looking its turn up
+ * in that chat. That covers backend and approval turns on a subagent or side
+ * chat.
+ */
+export function resolveTurnConversation(input: TurnConversationInput): {
+  romeSessionId: string;
+  romeSessionType: RomeSessionType;
+  existing: boolean;
+  promptPersisted: boolean;
+  recorderOwned: boolean;
+} {
+  const conversation = input.sessionConversation;
+  // The opener's named conversation wins over the one this turn's caller names.
+  const named = conversation?.origin === "named" ? conversation.id : input.romeSessionId;
+  const found = !named && conversation?.origin === "recorded" ? conversation : undefined;
+  const ownedByRecorder =
+    found !== undefined &&
+    RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
+    !input.threadContext;
+  const recorded = ownedByRecorder ? found : undefined;
+  return {
+    romeSessionId: resolveRomeSessionId({
+      ...input,
+      romeSessionId: named ?? recorded?.id,
+    }),
+    romeSessionType: recorded?.type ?? resolveRomeSessionType(input),
+    existing: Boolean(named ?? recorded),
+    promptPersisted: Boolean(named),
+    recorderOwned: Boolean(recorded),
+  };
 }
 
 export function resolveRomeSessionType(
@@ -84,18 +145,18 @@ export class AgentTraceRecorder {
 
   constructor(private input: AgentTraceRecorderInput) {}
 
-  async record(msg: AgentMessage & { agent?: string }): Promise<void> {
+  async record(msg: AgentEvent & { agent?: string }): Promise<void> {
     await this.recordBatch([msg], this.seq);
   }
 
   async recordBatch(
-    messages: (AgentMessage & { agent?: string })[],
+    messages: (AgentEvent & { agent?: string })[],
     startSeq = this.seq,
   ): Promise<void> {
     const blocks = messages.flatMap((msg) =>
-      msg.type === "text_delta" || msg.type === "input_status"
+      isTransientDelta(msg) || msg.type === "input_status"
         ? []
-        : [toTraceBlock(msg as TraceableAgentMessage & { agent?: string })],
+        : [toTraceEvent(msg as TraceableEvent & { agent?: string })],
     );
     if (blocks.length === 0) return;
     await this.ensureSession();
@@ -184,7 +245,7 @@ export class AgentTraceRecorder {
 
   private transcriptMessages(
     sessionId: string,
-    messages: (AgentMessage & { agent?: string })[],
+    messages: (AgentEvent & { agent?: string })[],
   ): RomeAgentTranscriptMessageInput[] {
     if (!this.shouldPersistTranscript()) return [];
     const rows: RomeAgentTranscriptMessageInput[] = [];
@@ -202,17 +263,19 @@ export class AgentTraceRecorder {
       }
     }
 
-    for (const msg of messages) {
-      if (msg.type !== "result") continue;
-      if (!msg.content.trim()) continue;
-      if (this.persistedAssistantTurnIds.has(this.input.turnId)) continue;
-      rows.push({
-        id: transcriptMessageId(sessionId, this.input.turnId, "assistant"),
-        sessionId,
-        role: "assistant",
-        content: textMessageContent(msg.content),
-        turnId: this.input.turnId,
-      });
+    if (this.input.persistAssistantTranscript ?? true) {
+      for (const msg of messages) {
+        if (msg.type !== "result") continue;
+        if (!msg.content.trim()) continue;
+        if (this.persistedAssistantTurnIds.has(this.input.turnId)) continue;
+        rows.push({
+          id: transcriptMessageId(sessionId, this.input.turnId, "assistant"),
+          sessionId,
+          role: "assistant",
+          content: textMessageContent(msg.content),
+          turnId: this.input.turnId,
+        });
+      }
     }
     return rows;
   }
@@ -248,7 +311,7 @@ function transcriptMessageId(
 
 export async function recordAgentTraceBestEffort(
   recorder: AgentTraceRecorder | null,
-  msg: AgentMessage & { agent?: string },
+  msg: AgentEvent & { agent?: string },
   log: Pick<Logger, "warn">,
   context: { turnId: string; source: string },
 ): Promise<void> {

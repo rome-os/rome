@@ -5,10 +5,12 @@ import { join } from "node:path";
 import {
   getAnthropicCompatibleCredentialSecret,
   getStoredAnthropicCompatibleCredentials,
+} from "./anthropic-compatible-providers.js";
+import {
   isAnthropicCompatibleConfigurationId,
   type AnthropicCompatibleConfigurationId,
   type StoredAnthropicCompatibleCredentials,
-} from "./anthropic-compatible-providers.js";
+} from "@rome/api-types/anthropic-compatible-providers";
 import { createLogger } from "../logger.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 

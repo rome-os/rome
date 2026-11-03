@@ -1,26 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#6D5CF6"/>
-      <stop offset="0.55" stop-color="#9B4FF0"/>
-      <stop offset="1" stop-color="#E15CC0"/>
-    </linearGradient>
-    <linearGradient id="tile" x1="32" y1="32" x2="51" y2="52" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#EFE9FF"/>
-    </linearGradient>
-    <linearGradient id="spark" x1="36" y1="35" x2="49" y2="50" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7C5CF6"/>
-      <stop offset="1" stop-color="#E15CC0"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
-  <!-- gallery of demo-app tiles -->
-  <rect x="13" y="13" width="16" height="16" rx="4.5" fill="#FFFFFF" opacity="0.42"/>
-  <rect x="35" y="13" width="16" height="16" rx="4.5" fill="#FFFFFF" opacity="0.62"/>
-  <rect x="13" y="35" width="16" height="16" rx="4.5" fill="#FFFFFF" opacity="0.62"/>
-  <!-- featured / inspiring tile with soft glow -->
-  <rect x="32" y="32" width="20" height="20" rx="5.5" fill="#FFFFFF" opacity="0.30"/>
-  <rect x="33.5" y="33.5" width="18" height="18" rx="5" fill="url(#tile)"/>
-  <path d="M42.5 36 C 43.45 40.5, 44.9 41.95, 49.4 42.9 C 44.9 43.85, 43.45 45.3, 42.5 49.8 C 41.55 45.3, 40.1 43.85, 35.6 42.9 C 40.1 41.95, 41.55 40.5, 42.5 36 Z" fill="url(#spark)"/>
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <rect width="24" height="24" rx="5.5" fill="#fae8ff"/>
+  <g transform="translate(6 6) scale(0.5)">
+    <g fill="none" stroke="#86198f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="7" height="7" x="3" y="3" rx="1.5"/>
+      <rect width="7" height="7" x="14" y="3" rx="1.5"/>
+      <rect width="7" height="7" x="3" y="14" rx="1.5"/>
+    </g>
+    <path d="M17.5 12.5c.45 2.7 1.3 3.55 4 4-2.7.45-3.55 1.3-4 4-.45-2.7-1.3-3.55-4-4 2.7-.45 3.55-1.3 4-4Z" fill="#c026d3"/>
+  </g>
 </svg>

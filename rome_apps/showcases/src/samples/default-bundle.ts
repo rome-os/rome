@@ -1,9 +1,9 @@
 import { buildTraceSnapshot } from "../trace/build-snapshot.js";
 import type { ShowcaseBundle } from "../trace/portable.js";
 import { SHOWCASE_BUNDLE_SCHEMA, SHOWCASE_BUNDLE_VERSION } from "../trace/portable.js";
-import type { TraceBlockDto } from "../trace/types.js";
+import type { TraceEventDto } from "../trace/types.js";
 
-const tripPlannerBlocks: TraceBlockDto[] = [
+const tripPlannerBlocks: TraceEventDto[] = [
   {
     type: "session_init",
     agent: "main",
@@ -101,7 +101,7 @@ const tripPlannerSnapshot = buildTraceSnapshot({
   blocks: tripPlannerBlocks,
 });
 
-const gitResetBlocks: TraceBlockDto[] = [
+const gitResetBlocks: TraceEventDto[] = [
   {
     type: "session_init",
     agent: "main",

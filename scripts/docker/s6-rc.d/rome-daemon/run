@@ -1,0 +1,15 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# The health-check and capability daemon owns the backend and web lifecycle.
+case "${ROME_DOCKER_APP_CODE_MODE:-source}" in
+  source) set -- node --import tsx /app/packages/core/src/daemon/index.ts ;;
+  compiled) set -- node /app/packages/core/dist/daemon/index.js ;;
+  *)
+    echo "Unsupported ROME_DOCKER_APP_CODE_MODE: ${ROME_DOCKER_APP_CODE_MODE}"
+    exit 1
+    ;;
+esac
+
+cd /app || exit 1
+echo "Starting health-check + capability daemon ..."
+exec rome-run-as rome "$@"

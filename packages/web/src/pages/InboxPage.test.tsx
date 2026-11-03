@@ -3,6 +3,9 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
+import { connections as mockConnections } from "../../mock/handlers/connections-store";
+import type { GrantState } from "@/lib/connections-api";
+import { stateOfGrants } from "@/test/connection-state";
 import InboxPage from "./InboxPage";
 
 beforeAll(async () => {
@@ -27,13 +30,14 @@ function mockBackend(connections: unknown[] = []) {
   }) as typeof fetch);
 }
 
-// A lean /api/connections row for the source overview: grant states + whether
+// A lean /api/connections row for the source overview: its state + whether
 // the Talk capability is unlocked.
-function connectionRow(service: string, grants: Record<string, string>, talkUnlocked: boolean) {
+function connectionRow(kind: string, grants: Record<string, GrantState>, talkUnlocked: boolean) {
   return {
-    service,
+    connectionKind: kind,
+    state: stateOfGrants(grants),
     grants,
-    capabilities: { talk: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
+    capabilities: { chat: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
   };
 }
 
@@ -46,25 +50,26 @@ function renderPage() {
 }
 
 describe("InboxPage message sources", () => {
-  it("renders 'channel settings' as a link to /settings/connections in the description", async () => {
+  it("renders 'Connections settings' as a link to /settings/connections in the description", async () => {
     mockBackend();
     renderPage();
 
     // The Trans-embedded link only renders if the component map matches the
     // <link> tag in the i18n string — a plain-text fallback would have no role.
-    const link = await screen.findByRole("link", { name: /channel settings/i });
+    const link = await screen.findByRole("link", { name: /Connections settings/i });
     expect(link.getAttribute("href")).toBe("/settings/connections");
   });
 
   it("classifies each channel with the shared registry-native rule", async () => {
     mockBackend([
-      // Talk unlocked → Connected.
+      // Chat unlocked → Connected.
       connectionRow("telegram", { bot: "authorized" }, true),
-      // Conferred (even degraded) but transport not up → Configured.
+      // The platform stopped accepting the grant → Broken.
       connectionRow("whatsapp", { session: "degraded" }, false),
       connectionRow("wechat", { account: "authorized" }, true),
-      connectionRow("discord", { bot: "authorized" }, true),
-      // Nothing conferred → Disconnected.
+      // Working, but Talk is not unlocked → Configured.
+      connectionRow("discord", { bot: "authorized" }, false),
+      // Nothing granted → Disconnected.
       connectionRow("telegram_user", { session: "unauthorized" }, false),
     ]);
     renderPage();
@@ -75,11 +80,21 @@ describe("InboxPage message sources", () => {
     };
 
     expect((await badgeOf("Telegram")).getByText("Connected")).toBeTruthy();
-    expect((await badgeOf("WhatsApp")).getByText("Configured")).toBeTruthy();
+    expect((await badgeOf("WhatsApp")).getByText("Broken")).toBeTruthy();
     expect((await badgeOf("WeChat")).getByText("Connected")).toBeTruthy();
-    expect((await badgeOf("Discord")).getByText("Connected")).toBeTruthy();
+    expect((await badgeOf("Discord")).getByText("Configured")).toBeTruthy();
     expect((await badgeOf("Telegram User")).getByText("Not connected")).toBeTruthy();
     expect((await badgeOf("Webchat")).getByText("Always on")).toBeTruthy();
+  });
+
+  it("shows the mock dashboard's connected accounts as connected", async () => {
+    mockBackend(mockConnections.connections);
+    renderPage();
+
+    for (const label of ["Telegram", "WhatsApp", "WeChat", "Discord"]) {
+      const row = (await screen.findByText(label)).parentElement as HTMLElement;
+      expect(within(row).queryByText("Not connected")).toBeNull();
+    }
   });
 });
 

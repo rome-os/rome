@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { appDisplayName } from "@/lib/app-display-name";
 import { useApps } from "@/hooks/use-apps";
 import { trackWidgetRender } from "@/lib/analytics";
+import { buildFullAppPath } from "./widget-links";
 import { useWorkspaceContextRegistry } from "./workspace-context";
 
 // Wire contract with the app-web-sdk global-params channel: the app
@@ -60,22 +63,14 @@ export function AppWidget({
     route,
     params,
   }));
-  const query = new URLSearchParams();
-  if (frozen.params) {
-    for (const [k, v] of Object.entries(frozen.params)) query.set(k, String(v));
-  }
-  const qs = query.toString();
-  const routePath = frozen.route
-    ? frozen.route.split("/").filter(Boolean).map(encodeURIComponent).join("/")
-    : "";
-  const src = `/full/apps/${encodeURIComponent(appId)}${routePath ? `/${routePath}` : ""}${qs ? `?${qs}` : ""}`;
+  const src = buildFullAppPath(appId, frozen.route, frozen.params);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const registry = useWorkspaceContextRegistry();
   // The frame's accessible name must match the tile header, which renders the
-  // installed app's display name; the id is only the fallback while the
-  // catalog loads.
+  // installed app's display name, or a generic label until the catalog loads.
   const { apps } = useApps();
-  const frameTitle = (apps ?? []).find((a) => a.id === appId)?.displayName ?? appId;
+  const { t } = useTranslation("common");
+  const frameTitle = appDisplayName(appId, apps, t("nav.apps"));
 
   // Host runtime context handed to the app out-of-band: the chat
   // session this tile is bound to + whether it's an interaction surface. Kept

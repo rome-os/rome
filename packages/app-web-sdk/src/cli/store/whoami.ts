@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { CliError, resolveBearer } from "./config.js";
+import { requireBearer } from "./config.js";
 import { getJson } from "./api.js";
 
 const HELP = `Usage: rome whoami [options]
@@ -59,12 +59,7 @@ export async function runWhoami(argv: string[]): Promise<void> {
     return;
   }
 
-  const bearer = await resolveBearer();
-  if (!bearer) {
-    throw new CliError(
-      `Not logged in. Either set ROME_TOKEN (generate one in Settings → CLI / API token) or run "rome login --host <URL>".`,
-    );
-  }
+  const bearer = await requireBearer();
 
   const body = await getJson<WhoamiResponse>(bearer.host, "/api/store/me", bearer);
 

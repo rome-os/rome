@@ -28,18 +28,21 @@ export function getTextPreviewKind(path: string, mimeType: string): TextPreviewK
   return null;
 }
 
+/** Workbooks the file browser previews as a read-only grid. The server lists
+ *  them as plain binary files, so the extension is the signal. */
+export function isSpreadsheetPath(path: string): boolean {
+  return ["xlsx", "xls", "ods"].includes(getFileExtension(path));
+}
+
 export function getDelimitedSeparator(path: string, mimeType: string): "," | "\t" {
   const extension = getFileExtension(path);
   return extension === "tsv" || mimeType === "text/tab-separated-values" ? "\t" : ",";
 }
 
-export function parseDelimitedContent(
-  content: string,
-  separator: "," | "\t",
-  options: { maxColumns?: number; maxRows?: number } = {},
-): string[][] {
-  const maxColumns = options.maxColumns ?? 50;
-  const maxRows = options.maxRows ?? 200;
+const MAX_DELIMITED_COLUMNS = 50;
+const MAX_DELIMITED_ROWS = 200;
+
+export function parseDelimitedContent(content: string, separator: "," | "\t"): string[][] {
   const rows: string[][] = [];
   let cell = "";
   let row: string[] = [];
@@ -70,8 +73,8 @@ export function parseDelimitedContent(
         index += 1;
       }
       row.push(cell);
-      rows.push(row.slice(0, maxColumns));
-      if (rows.length >= maxRows) {
+      rows.push(row.slice(0, MAX_DELIMITED_COLUMNS));
+      if (rows.length >= MAX_DELIMITED_ROWS) {
         return rows;
       }
       row = [];
@@ -84,7 +87,7 @@ export function parseDelimitedContent(
 
   if (cell || row.length > 0) {
     row.push(cell);
-    rows.push(row.slice(0, maxColumns));
+    rows.push(row.slice(0, MAX_DELIMITED_COLUMNS));
   }
 
   return rows;

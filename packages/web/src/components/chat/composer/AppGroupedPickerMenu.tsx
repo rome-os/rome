@@ -2,6 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { ChevronRight } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { RomeLogo } from "@/components/logo";
+import { cn } from "@/lib/utils";
+import { CHAT_POPOVER_FIT } from "@/components/chat/chat-overlay";
 
 /**
  * One left-panel row: an app (or core) that owns pickable items. The
@@ -192,7 +194,11 @@ function AppGroupedPickerMenuInner<TItem>(
         align="start"
         side="top"
         sideOffset={10}
-        className="max-h-(--radix-popover-content-available-height) w-96 gap-0 p-0"
+        collisionPadding={CHAT_POPOVER_FIT.collisionPadding}
+        className={cn(
+          "max-h-(--radix-popover-content-available-height) w-96 gap-0 p-0",
+          CHAT_POPOVER_FIT.className,
+        )}
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >

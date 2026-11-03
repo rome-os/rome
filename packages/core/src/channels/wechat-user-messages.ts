@@ -14,23 +14,40 @@
 
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { Account, AccountId, Accounts } from "./accounts.js";
-import type { ConversationRead, MessageAccount, MessageRead, Messages } from "./messages.js";
+import { sharedRead } from "./account-snapshot.js";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import {
+  channelMessageDetail,
+  heldOn,
+  queryLimit,
+  queryPage,
+  querySince,
+  type AccountMessages,
+  type MessageAccount,
+  type MessageRead,
+  type Messages,
+} from "./messages.js";
 import {
   isWechatUserSessionRejected,
   WechatUserStorePending,
-  type WechatUserConversation,
+  type WechatUserChat,
   type WechatUserMessage,
   type WechatUserReader,
 } from "./wechat-user.js";
 
 /** The channel name every stored WeChat-account row spells, matching the
- *  connection service and the person mappings that link to it. */
+ *  connection kind and the person mappings that link to it. */
 export const WECHAT_USER_CHANNEL = "wechat_user";
 
 /** A bounded window for one live read. The reader ranks newest-first and has no
  *  native cursor, so a page is taken locally over a bounded fetch — the same
  *  bargain the connection's own directory read makes. */
 const WINDOW_CAP = 500;
+
+/** Background lookups (heads and counts) let into the reader's queue at once.
+ *  The reader runs one bridge process at a time, so two keep it busy while each
+ *  command of a history read waits behind at most two of them, not the directory. */
+const BACKGROUND_LOOKUPS = 2;
 
 function windowSize(limit: number): number {
   return Math.min(Math.max(limit, 1) * 4, WINDOW_CAP);
@@ -46,6 +63,32 @@ function toMessage(message: WechatUserMessage): Message {
     body: message.text || null,
     direction: message.isSelf ? "outbound" : "inbound",
     ref: message.id,
+    ...channelMessageDetail(toWechatUserChannelMessage(message)),
+  };
+}
+
+/**
+ * A reader message as a {@link ChannelMessage}. `senderId` falls back to the
+ * conversation for an authorless system notice, because an empty sender reads
+ * downstream as an unknown person rather than as the chat. The reader keeps no
+ * attachments, only a placeholder line for them.
+ */
+export function toWechatUserChannelMessage(message: WechatUserMessage): ChannelMessage {
+  return {
+    channel: WECHAT_USER_CHANNEL,
+    direction: message.isSelf ? "outbound" : "inbound",
+    messageId: message.id,
+    chatId: message.chatId as ChatId,
+    senderId: message.senderId || message.chatId,
+    ...(message.senderName ? { senderDisplayName: message.senderName } : {}),
+    text: message.text,
+    attachments: [],
+    timestamp: new Date(message.timestamp * 1000),
+    thread: {
+      kind: message.isGroup ? "group" : "dm",
+      ...(message.conversationName ? { name: message.conversationName } : {}),
+    },
+    raw: message,
   };
 }
 
@@ -54,7 +97,7 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
   return [
     ...new Set(
       accounts
-        .filter((account) => account.channel === WECHAT_USER_CHANNEL)
+        .filter((account) => heldOn(account).includes(WECHAT_USER_CHANNEL))
         .flatMap((account) => account.addresses),
     ),
   ];
@@ -63,23 +106,62 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
 /**
  * `Messages` over the personal WeChat store, read live through the reader.
  *
- * Paging without a native cursor: the reader answers the newest messages
+ * `query` asks the reader directly, every conversation unless one is named.
+ *
+ * The account reads page without a native cursor: the reader answers the newest messages
  * at-or-before a timestamp, so a page after a cursor fetches a bounded window
  * ending at the cursor's second, including every tie, and drops what the cursor covered
  * ({@link isAfterMessageCursor}). `compareMessages` is the one ranking both a
  * store and a person's timeline cut, so the local sort matches every consumer.
  */
 export function wechatUserMessages(reader: WechatUserReader): Messages {
+  return {
+    async query({ chatId, since, after, limit }) {
+      const messages = await reader.messages({
+        ...(chatId ? { chatId } : {}),
+        ...(since ? { since: querySince(since) } : {}),
+        // After a cursor: up to its second with every tie there, which the
+        // page then settles.
+        ...(after ? { before: new Date(after.timestamp * 1000), includeBoundaryTies: true } : {}),
+        limit: queryLimit(limit),
+      });
+      // The reader answers oldest first, same-second messages included; the
+      // port answers newest first.
+      return queryPage(messages.map(toWechatUserChannelMessage).reverse(), { after, limit });
+    },
+    byAccount: wechatUserAccountMessages(reader),
+  };
+}
+
+function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
+  // A FIFO semaphore over the background lookups. A sweep of every contact
+  // would otherwise put a command per chat on the reader's serial queue at
+  // once, and a history read, which takes no slot, would queue behind them all.
+  let free = BACKGROUND_LOOKUPS;
+  const waiting: Array<() => void> = [];
+  async function background<T>(lookup: () => Promise<T>): Promise<T> {
+    if (free > 0) free -= 1;
+    else await new Promise<void>((resolve) => waiting.push(resolve));
+    try {
+      return await lookup();
+    } finally {
+      // Hand the slot straight to the next waiter, or return it.
+      const next = waiting.shift();
+      if (next) next();
+      else free += 1;
+    }
+  }
+
   async function windowFor(
     addresses: readonly string[],
     opts: { before?: Message | null; limit: number },
   ): Promise<Message[]> {
     const before = opts.before ? new Date(opts.before.timestamp * 1000) : undefined;
     const perConversation = await Promise.all(
-      addresses.map((conversationId) =>
+      addresses.map((chatId) =>
         reader
           .messages({
-            conversationId,
+            chatId,
             ...(before ? { before } : {}),
             limit: opts.limit,
             includeBoundaryTies: true,
@@ -89,6 +171,38 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
       ),
     );
     return perConversation.flat().sort(compareMessages);
+  }
+
+  /** Each chat's newest message, kept with the activity key it was read under. */
+  const heads = new Map<string, { key: string; head: Message | null }>();
+
+  /**
+   * A chat's newest message, read again only when the session list shows new
+   * activity in it. The people surfaces ask this of every contact on a timer,
+   * and the reader runs one query at a time, so reading every chat every time
+   * keeps it busy for minutes and starves every other read. On a cold cache
+   * every chat misses, so a miss takes a background slot, and `query` and
+   * `read`, which take none, run between the lookups. A chat the session list
+   * does not know is read live; a failed read answers null and is not kept.
+   */
+  async function newestIn(
+    chatId: string,
+    activity: ReadonlyMap<string, string> | null,
+  ): Promise<Message | null> {
+    const key = activity?.get(chatId);
+    const cached = heads.get(chatId);
+    if (key !== undefined && cached?.key === key) return cached.head;
+    let head: Message | null;
+    try {
+      const newest = await background(() =>
+        reader.messages({ chatId, limit: 1, includeBoundaryTies: true }),
+      );
+      head = newest.map(toMessage).sort(compareMessages)[0] ?? null;
+    } catch {
+      return null;
+    }
+    if (key !== undefined) heads.set(chatId, { key, head });
+    return head;
   }
 
   function page(all: Message[], after: Message | null | undefined, limit: number): Message[] {
@@ -108,7 +222,7 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
       const addresses = directAddresses(accounts);
       if (addresses.length === 0) return 0;
       const counts = await Promise.all(
-        addresses.map((conversationId) => reader.count(conversationId).catch(() => 0)),
+        addresses.map((chatId) => background(() => reader.count(chatId)).catch(() => 0)),
       );
       return counts.reduce((total, n) => total + n, 0);
     },
@@ -116,23 +230,9 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
     async latest(accounts: readonly MessageAccount[]): Promise<Message | null> {
       const addresses = directAddresses(accounts);
       if (addresses.length === 0) return null;
-      const newest = await windowFor(addresses, { limit: 1 });
-      return newest[0] ?? null;
-    },
-
-    async readConversation({ conversation, after, limit }: ConversationRead): Promise<Message[]> {
-      if (conversation.channel !== WECHAT_USER_CHANNEL) return [];
-      const before = after ? new Date(after.timestamp * 1000) : undefined;
-      const messages = await reader
-        .messages({
-          conversationId: conversation.id,
-          includeBoundaryTies: true,
-          ...(before ? { before } : {}),
-          limit: windowSize(limit),
-        })
-        .then((rows) => rows.map(toMessage).sort(compareMessages))
-        .catch(() => [] as Message[]);
-      return page(messages, after, limit);
+      const activity = await reader.lastActivity().catch(() => null);
+      const heads = await Promise.all(addresses.map((chatId) => newestIn(chatId, activity)));
+      return heads.filter((head) => head !== null).sort(compareMessages)[0] ?? null;
     },
   };
 }
@@ -140,7 +240,7 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
 /** One WeChat contact as an account: its wxid is the id and its only address,
  *  its display name is the platform's, and the wxid is also a searchable
  *  identifier. Groups are not accounts and are filtered out by the caller. */
-function toAccount(conversation: WechatUserConversation): Account {
+function toAccount(conversation: WechatUserChat): Account {
   return {
     id: conversation.id as AccountId,
     addresses: [conversation.id],
@@ -159,31 +259,40 @@ function toAccount(conversation: WechatUserConversation): Account {
  * and every address a message arrives on (the wxid) resolves to it.
  */
 export function wechatUserAccounts(reader: WechatUserReader): Accounts {
-  async function conversations(input: { query?: string; limit: number }) {
+  // Every chat the session list holds, read once for every call made while it
+  // is in flight. A directory read lists the address book and then resolves
+  // each account it holds, all at once; the reader runs one query at a time, so
+  // a read per call queued a session-list read per contact. See
+  // {@link sharedRead} for what this is and is not.
+  const load = sharedRead(async () => {
     try {
-      return await reader.conversations(input);
+      return await reader.conversations({ limit: Number.MAX_SAFE_INTEGER });
     } catch (error) {
       if (isWechatUserSessionRejected(error) || error instanceof WechatUserStorePending) return [];
       throw error;
     }
-  }
+  });
   return {
     async listAccounts({ query, limit }): Promise<{ accounts: Account[] }> {
-      const rows = await conversations({
-        ...(query ? { query } : {}),
-        limit,
-      });
+      const needle = query?.toLowerCase();
+      const rows = (await load())
+        .filter(
+          (conversation) =>
+            !needle ||
+            conversation.name.toLowerCase().includes(needle) ||
+            conversation.id.toLowerCase().includes(needle),
+        )
+        .slice(0, limit);
       return {
         accounts: rows.filter((conversation) => !conversation.isGroup).map(toAccount),
       };
     },
 
     async resolve(address: string): Promise<Account | null> {
-      // The address is a wxid; find the direct conversation it names. A bounded
-      // scan, since the reader has no by-id contact read — enough to cover an
-      // account's own contacts, which is all a message can arrive from.
-      const rows = await conversations({ limit: WINDOW_CAP });
-      const match = rows.find(
+      // The address is a wxid; find the direct conversation it names. The
+      // reader has no by-id contact read, so this looks it up in the shared
+      // session-list read.
+      const match = (await load()).find(
         (conversation) => conversation.id === address && !conversation.isGroup,
       );
       return match ? toAccount(match) : null;

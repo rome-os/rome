@@ -1,5 +1,5 @@
 // VENDORED VERBATIM from rome-internal:
-//   packages/web/src/components/chat/blocks/MermaidBlock.tsx
+//   packages/web/src/components/chat/entries/MermaidBlock.tsx
 // Only the import lines are adapted (see ../VENDOR.md "seams"):
 //   - "@/hooks/use-theme"  -> ../shims/use-theme
 // The component body below is unchanged. Renders Mermaid diagrams to SVG via the

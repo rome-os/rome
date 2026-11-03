@@ -36,7 +36,7 @@ Revocation stops needing care. A returning sign-in cannot disturb a resource con
 
 The costs land on reads and on migration. A surface answering "what does this guardian have with Google" reads two records instead of one. Several connections per provider means every read surface picks deterministically or shows all of them, and the connection settings surface carries that choice. Reconnect flows scope token inheritance to the user, the provider, and the provider account together, which is more key than a single per-provider slot carries. Moving identity data out of a shared row fails loudly on collision, because the identity key is stricter than a per-user-and-provider key.
 
-This record governs Rome Cloud's storage, which lives in the [`rome-cloud`](https://github.com/amantru/rome-cloud) repository. A Rome instance is a consumer of the brokered grant, not a second home for the split. Its `provider_accounts` table holds one row per provider, so the instance binds a single account per provider and merges token material on that key alone. The multi-account cardinality this decision buys is a Rome Cloud-side property, and an instance-side surface that needs several accounts of one provider is a change to that table rather than an application of this record.
+This record governs Rome Cloud's storage, which lives in the [`rome-cloud`](https://github.com/amantru/rome-cloud) repository. A Rome instance is a consumer of the brokered grant, not a second home for the split. Its `connections` table holds one row per provider, so the instance binds a single account per provider and stores token material on that provider's grant. The multi-account cardinality this decision buys is a Rome Cloud-side property, and an instance-side surface that needs several accounts of one provider is a change to that table rather than an application of this record.
 
 Future diffs must respect:
 
@@ -45,5 +45,5 @@ Future diffs must respect:
 - Identity is globally unique on the provider and the provider account: one external account maps to one Rome user, and one sign-in subject per provider per user.
 - A Rome Cloud connection keys on the user, the provider, and the provider account, so a guardian can hold several. New dimensions such as per-instance rows are additive on that key and never a return to one slot per provider.
 - Token inheritance on reconnect stays scoped to the same provider account. Nothing reintroduces a shared slot, and nothing reintroduces a rebind guard to police one.
-- The instance-side `provider_accounts` table is out of this record's scope. It binds one account per provider by design, and widening it to several is its own decision rather than a consequence of this one.
+- The instance-side `connections` table is out of this record's scope. It binds one account per provider by design, and widening it to several is its own decision rather than a consequence of this one.
 - Login requests identity scopes only. A login path that asks for resource scopes is a merge of the two roles by another route.

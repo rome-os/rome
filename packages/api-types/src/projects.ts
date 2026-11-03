@@ -1,10 +1,29 @@
-export interface ProjectDashboardUsageDay {
+export interface ProjectDashboardUsageAmounts {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   costUsd: number;
-  date: string;
   inputTokens: number;
   outputTokens: number;
+}
+
+/**
+ * One provider's share of a usage figure. `provider` is the accounting id the
+ * model provider reported (`anthropic`, `openai`), or `unknown` for usage
+ * recorded without one.
+ */
+export interface ProjectDashboardProviderUsage extends ProjectDashboardUsageAmounts {
+  provider: string;
+}
+
+export interface ProjectDashboardUsageDay extends ProjectDashboardUsageAmounts {
+  date: string;
+  /** The day's figures split by provider. */
+  providers: ProjectDashboardProviderUsage[];
+}
+
+export interface ProjectDashboardProviderUsageTotals {
+  month: ProjectDashboardProviderUsage[];
+  total: ProjectDashboardProviderUsage[];
 }
 
 export interface ProjectDashboardChat {
@@ -53,4 +72,6 @@ export interface ProjectDashboardResponse {
   relativePath: string;
   stats: ProjectDashboardStats;
   usage: ProjectDashboardUsageDay[];
+  /** All-time and this-month figures split by provider. */
+  providerUsage: ProjectDashboardProviderUsageTotals;
 }

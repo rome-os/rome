@@ -1,35 +1,84 @@
-// Connection conferral HTTP surface. Messaging model: docs/concepts/messaging.md.
+// Connection grant HTTP surface. Vocabulary: docs/domains/connections.md.
 //
-// Four routes for EVERY service's connect setup (channels + brokered OAuth
-// alike); per-service knowledge lives in the integration descriptor's
+// Four routes for EVERY connection kind's connect setup (channels + brokered OAuth
+// alike); per-kind knowledge lives in the integration descriptor's
 // `setup`, never here:
 //   POST /api/connections/:id/grants/:name/setup  — start or re-attach
 //   GET  /api/setups/:cid                          — poll state
 //   POST /api/setups/:cid/input                    — feed answers
 //   POST /api/setups/:cid/cancel                   — cancel
 //
-// `:id` addresses the connection to confer. For a service the guardian has
-// never connected there is no ledger row yet (the terminal conferral mints it),
-// so `:id` may instead be a bare service name — an offerable placeholder. Either
-// way the setup is keyed by (service, grant); the manager enforces one active
-// setup per grant and re-attaches a duplicate start.
+// `:id` addresses the connection to grant. For a connection kind the guardian has
+// never connected there is no ledger row yet (the terminal grant mints it),
+// so `:id` may instead be a bare connection kind — an offerable placeholder. A
+// start naming the connection kind with `another: true` connects a new account of a
+// connection kind that offers several, minted the same way. Either way the setup is
+// keyed by (connection kind, grant); the manager enforces one active setup per grant
+// and re-attaches a duplicate start.
 
 import { Hono, type Context } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { NoSetupError, type SetupTarget } from "../../connections/setup/manager.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
+import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js";
 import type { ApiDeps } from "../deps.js";
+import { createLogger } from "../../logger.js";
 import { requireSetupManager, requireConnectionRegistry } from "../helpers.js";
+import type { SetupState } from "../../connections/setup/types.js";
+
+const log = createLogger("setups");
+
+/** The state as the wire carries it. A finished setup also carries its grant
+ *  under `conferral`, the field's old name, because a dashboard tab loaded
+ *  before an upgrade still reads it. Remove the alias once those tabs are gone. */
+function wireState(state: SetupState) {
+  return state.status === "done" ? { ...state, conferral: state.grant } : state;
+}
 
 /** Resolve what a setup start addresses. `:id` is either a live connection id
- *  (carry the id AND its service so the terminal write imports into THAT
- *  connection) or, for a never-connected service, the bare service name — valid
+ *  (carry the id AND its connection kind so the terminal write imports into THAT
+ *  connection) or, for a never-connected connection kind, the bare connection kind — valid
  *  only when a descriptor is registered for it (placeholder; the write mints the
- *  row). Null when neither. */
-function resolveTarget(registry: ConnectionRegistry, id: string): SetupTarget | null {
+ *  row). With `another`, `:id` must name a connection kind that offers several
+ *  accounts, and the write mints a new one. Null when none of these. */
+function resolveTarget(
+  registry: ConnectionRegistry,
+  id: string,
+  another: boolean,
+): SetupTarget | null {
+  if (another) {
+    return registry.getDescriptor(id)?.severalAccounts === true
+      ? { connectionKind: id, another: true }
+      : null;
+  }
   const conn = registry.all().find((c) => c.id === id);
-  if (conn) return { service: conn.service, connectionId: conn.id };
-  return registry.isRegistered(id) ? { service: id } : null;
+  if (conn) return { connectionKind: conn.connectionKind, connectionId: conn.id };
+  return registry.isRegistered(id) ? { connectionKind: id } : null;
+}
+
+/** Remove `connectionId` when it is an account a failed removal left behind,
+ *  so no setup connects into its old channel. Answers "kept" for an account
+ *  still connected, "gone" once it is removed (now, or by a disconnect that
+ *  ran first), and "stuck" when the removal fails again, which leaves it for
+ *  the boot pass. */
+async function removeLeftoverAccount(
+  registry: ConnectionRegistry,
+  connectionKind: string,
+  connectionId: string,
+  grant: string,
+): Promise<"kept" | "gone" | "stuck"> {
+  return registry.withGrantSection(connectionKind, grant, async () => {
+    const conn = registry.all().find((held) => held.id === connectionId);
+    if (!conn) return "gone";
+    if (!(await isUnconnectedAccount(registry, conn))) return "kept";
+    try {
+      await registry.remove(connectionId);
+    } catch (error) {
+      log.warn("could not remove a disconnected account before its setup", { connectionId, error });
+      return "stuck";
+    }
+    return "gone";
+  });
 }
 
 function crossOriginBlocked(c: Context): Response | null {
@@ -48,18 +97,58 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     if (blocked) return blocked;
     const registry = requireConnectionRegistry(deps);
     const manager = requireSetupManager(deps);
-    const target = resolveTarget(registry, c.req.param("id"));
-    if (!target) return c.json({ error: "Unknown connection." }, 404);
-    const grant = c.req.param("name");
-    const body = await c.req.json<{ force?: unknown }>().catch(() => ({}) as { force?: unknown });
+    const body = await c.req
+      .json<{ force?: unknown; another?: unknown }>()
+      .catch(() => ({}) as { force?: unknown; another?: unknown });
     const force = body.force === true;
+    const another = body.another === true;
+    const id = c.req.param("id");
+    const target = resolveTarget(registry, id, another);
+    if (!target) {
+      return another
+        ? c.json({ error: `"${id}" does not offer another account.` }, 400)
+        : c.json({ error: "Unknown connection." }, 404);
+    }
+    const grant = c.req.param("name");
+    // Checked before anything below touches the account, so a start for a
+    // grant with no setup changes nothing.
+    const descriptor = registry.getDescriptor(target.connectionKind);
+    if (descriptor?.grant !== grant || !descriptor.auth.setup) {
+      return c.json({ error: "No setup for this grant." }, 404);
+    }
+    // An account that connects again starts fresh, so the card of a
+    // disconnected account offers no setup into it. Its card goes on the next
+    // refresh, and the connection kind's own Connect starts the new account.
+    if (target.connectionId) {
+      const leftover = await removeLeftoverAccount(
+        registry,
+        target.connectionKind,
+        target.connectionId,
+        grant,
+      );
+      if (leftover === "gone") {
+        return c.json(
+          { error: "This account was disconnected. Connect it again from Connections." },
+          409,
+        );
+      }
+      if (leftover === "stuck") {
+        return c.json(
+          {
+            error:
+              "Rome could not clear this disconnected account. Restart Rome, then connect it again.",
+          },
+          409,
+        );
+      }
+    }
     try {
       const started = await manager.start(target, grant, { force });
       c.header("Cache-Control", "no-store");
-      return c.json(started);
+      return c.json({ ...started, state: wireState(started.state) });
     } catch (err) {
       if (err instanceof NoSetupError) {
-        return c.json({ error: "No conferral setup for this grant." }, 404);
+        return c.json({ error: "No setup for this grant." }, 404);
       }
       throw err;
     }
@@ -71,7 +160,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     const state = manager.state(c.req.param("cid"));
     if (!state) return c.json({ error: "Unknown setup." }, 404);
     c.header("Cache-Control", "no-store");
-    return c.json({ state });
+    return c.json({ state: wireState(state) });
   });
 
   // Feed the guardian's answers to a setup awaiting input.
@@ -92,7 +181,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     c.header("Cache-Control", "no-store");
     // Idempotent against late/double delivery: a non-accepted input is a 409 so
     // the client re-polls state rather than retrying.
-    return c.json(outcome, outcome.accepted ? 200 : 409);
+    return c.json({ ...outcome, state: wireState(outcome.state) }, outcome.accepted ? 200 : 409);
   });
 
   // Resume a setup suspended at a `redirect` verb, correlated by the OAuth
@@ -140,7 +229,14 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     // A non-accepted resume (a race that lost the pending-redirect guard) is a
     // 409 so the caller re-polls rather than retrying.
     return c.json(
-      { matched: true, cid: resumed.cid, service: resumed.service, ...outcome },
+      {
+        matched: true,
+        cid: resumed.cid,
+        connectionKind: resumed.connectionKind,
+        service: resumed.connectionKind,
+        ...outcome,
+        state: wireState(outcome.state),
+      },
       outcome.accepted ? 200 : 409,
     );
   });
@@ -154,7 +250,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     if (!pending) return c.json({ error: "Unknown setup." }, 404);
     const state = await pending;
     c.header("Cache-Control", "no-store");
-    return c.json({ state });
+    return c.json({ state: wireState(state) });
   });
 
   return app;

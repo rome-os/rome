@@ -71,6 +71,20 @@ function authHeaderFor(apiKey: string): Record<string, string> {
   return apiKey.startsWith("uak_") ? { "x-user-api-key": apiKey } : { "x-api-key": apiKey };
 }
 
+class ComposioHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Recognizes credential rejection from both the SDK and direct Composio requests. */
+export function isComposioAuthenticationError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 401;
+}
+
 /**
  * Module-scope dedup: `ensureAuthConfig` is a list-then-create flow
  * that races on double-click — two parallel calls for the same toolkit can
@@ -81,6 +95,7 @@ function authHeaderFor(apiKey: string): Record<string, string> {
 const inFlightAuthConfigEnsures = new Map<string, Promise<string>>();
 
 const AUTH_SCHEME_API_KEY = "API_KEY";
+const AUTH_SCHEME_DCR_OAUTH = "DCR_OAUTH";
 
 /**
  * Module-scope cache of trigger type lookups, keyed by lowercase slug.
@@ -300,7 +315,25 @@ export function selectReusableAuthConfig(
   if (managed) return managed.id;
 
   const apiKeyConfig = enabledForToolkit.find((row) => row.auth_scheme === AUTH_SCHEME_API_KEY);
-  return apiKeyConfig?.id ?? null;
+  if (apiKeyConfig) return apiKeyConfig.id;
+
+  // A bring-your-own OAuth provider has no config Rome can create, so the
+  // guardian's own dashboard config is the only path to a connection.
+  return enabledForToolkit[0]?.id ?? null;
+}
+
+/**
+ * The custom auth scheme Rome can create a config for without app credentials,
+ * or null when the toolkit needs a guardian-created config. API_KEY wins so a
+ * toolkit that connected with a key before keeps doing so.
+ */
+export function selectProvisionableAuthScheme(
+  details: ReadonlyArray<{ mode: string }> | undefined,
+): typeof AUTH_SCHEME_API_KEY | typeof AUTH_SCHEME_DCR_OAUTH | null {
+  const modes = new Set((details ?? []).map((detail) => detail.mode.toUpperCase()));
+  if (modes.has(AUTH_SCHEME_API_KEY)) return AUTH_SCHEME_API_KEY;
+  if (modes.has(AUTH_SCHEME_DCR_OAUTH)) return AUTH_SCHEME_DCR_OAUTH;
+  return null;
 }
 
 /** A connected-account row reduced to the fields the reconcile loop reasons on. */
@@ -623,7 +656,7 @@ export class ComposioClient {
     endpoint: string;
     method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD";
     body?: unknown;
-    query?: Record<string, string | number>;
+    query?: Record<string, string | number | boolean>;
     headers?: Record<string, string>;
   }): Promise<ProxiedResponse> {
     // The public surface mirrors a common HTTP client (`query`/`headers` objects);
@@ -682,11 +715,15 @@ export class ComposioClient {
    * config when possible. For OAuth-style providers with Composio-managed auth
    * (Gmail, GitHub, Supabase, etc.) it keeps the one-click managed path. For
    * API-key-only providers (Neon, etc.) it creates a custom API_KEY config so the
-   * Composio connect link can collect the user's account credential.
+   * Composio connect link can collect the user's account credential. For
+   * DCR-only providers (Otter.ai's hosted MCP) it creates a custom DCR_OAUTH
+   * config: Composio registers the OAuth client itself, so it needs no app
+   * credentials either.
    *
-   * Note: BYO OAuth providers still require dashboard-side credential setup; if
-   * a toolkit has neither managed auth nor API_KEY auth, this surfaces a clear
-   * unsupported-auth error instead of trying the wrong auth mode.
+   * BYO OAuth providers need an auth config the guardian creates in the
+   * Composio dashboard with their own app credentials; once it exists it is
+   * reused here. Until then, a toolkit with none of those schemes surfaces a
+   * clear unsupported-auth error instead of trying the wrong auth mode.
    */
   async ensureAuthConfig(toolkit: string): Promise<string> {
     const key = toolkit.toLowerCase();
@@ -710,12 +747,10 @@ export class ComposioClient {
         return created.auth_config.id;
       }
 
-      const supportsApiKey = toolkitInfo.auth_config_details?.some(
-        (detail) => detail.mode.toUpperCase() === "API_KEY",
-      );
-      if (!supportsApiKey) {
+      const authScheme = selectProvisionableAuthScheme(toolkitInfo.auth_config_details);
+      if (!authScheme) {
         throw new Error(
-          `Composio toolkit "${toolkit}" does not expose managed auth or API key auth; create an auth config in Composio first.`,
+          `Composio toolkit "${toolkit}" does not expose managed, API key or DCR auth; create an auth config in Composio first.`,
         );
       }
 
@@ -723,8 +758,8 @@ export class ComposioClient {
         toolkit: { slug: toolkit },
         auth_config: {
           type: "use_custom_auth",
-          authScheme: AUTH_SCHEME_API_KEY,
-          name: `Rome ${toolkitInfo.name} API key`,
+          authScheme,
+          name: `Rome ${toolkitInfo.name} ${authScheme === AUTH_SCHEME_API_KEY ? "API key" : "OAuth"}`,
         },
       });
       return created.auth_config.id;
@@ -864,8 +899,9 @@ export class ComposioClient {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(
+      throw new ComposioHttpError(
         `Composio webhook_subscriptions ${method} returned ${response.status}: ${text || response.statusText}`,
+        response.status,
       );
     }
     const body = (await response.json()) as { id?: string; secret?: string };
@@ -882,8 +918,9 @@ export class ComposioClient {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(
+      throw new ComposioHttpError(
         `Composio webhook_subscriptions list returned ${response.status}: ${text || response.statusText}`,
+        response.status,
       );
     }
     const body = (await response.json()) as { items?: Array<{ id?: string }> };
@@ -899,8 +936,9 @@ export class ComposioClient {
     });
     if (!response.ok && response.status !== 404) {
       const text = await response.text();
-      throw new Error(
+      throw new ComposioHttpError(
         `Composio webhook_subscriptions DELETE ${id} returned ${response.status}: ${text || response.statusText}`,
+        response.status,
       );
     }
   }
@@ -978,22 +1016,25 @@ export class ComposioClient {
    */
   async ping(): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
     const url = `${this.baseURL.replace(/\/$/, "")}/api/v3/connected_accounts?limit=1`;
-    let response: Response;
+    let status = 0;
     try {
-      response = await fetch(url, {
+      const response = await fetch(url, {
         method: "GET",
         headers: { ...authHeaderFor(this.apiKey) },
         signal: AbortSignal.timeout(PING_TIMEOUT_MS),
       });
+      if (response.ok) return { ok: true };
+      status = response.status;
+      // The timeout also aborts the body read, so it stays inside the try:
+      // callers await ping() from their own catch blocks and expect no throw.
+      const text = await response.text();
+      return { ok: false, status, message: text || response.statusText };
     } catch (err) {
       return {
         ok: false,
-        status: 0,
+        status,
         message: err instanceof Error ? err.message : "network error",
       };
     }
-    if (response.ok) return { ok: true };
-    const text = await response.text();
-    return { ok: false, status: response.status, message: text || response.statusText };
   }
 }

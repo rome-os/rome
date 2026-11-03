@@ -71,6 +71,7 @@ describe("POST /api/feedback", () => {
     // Diagnostics are server-assembled, not client-supplied.
     expect(sent.payload.diagnostics).toHaveProperty("database");
     expect(sent.payload.diagnostics).toHaveProperty("build");
+    expect(sent.payload.diagnostics.reporter).toEqual({ kind: "guardian" });
   });
 
   it("given a client that smuggles a `diagnostics` key, when submitted, then it is confined to payload.client and the trusted payload.diagnostics stays server-owned", async () => {

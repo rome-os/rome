@@ -14,7 +14,8 @@
     "Trust": "信任",
     "Channels": "渠道",
     "AI Tools": "AI 工具",
-    "Advanced": "高级"
+    "Advanced": "高级",
+    "Devices": "设备"
   },
   "appearance": {
     "title": "外观",
@@ -51,7 +52,70 @@
     "loading": "正在加载连接",
     "errorTitle": "无法加载连接",
     "emptyTitle": "暂无可用连接",
+    "connect": "连接",
+    "search": {
+      "placeholder": "搜索连接",
+      "clear": "清除搜索",
+      "noMatch": {
+        "connected": "没有与“{{query}}”匹配的已连接服务。",
+        "available": "没有与“{{query}}”匹配的可添加服务。"
+      }
+    },
+    "tabs": {
+      "label": "连接",
+      "connected": "已连接",
+      "available": "可添加",
+      "empty": {
+        "connected": "还没有任何连接。",
+        "available": "这里的服务都已连接。"
+      },
+      "show": {
+        "connected": "在已连接中查看 {{count}} 个",
+        "available": "在可添加中查看 {{count}} 个"
+      }
+    },
+    "groups": {
+      "messaging": "消息渠道",
+      "accounts": "账号和工具",
+      "other": "其他"
+    },
+    "composioServices": {
+      "group": "通过 Composio 连接",
+      "via": "via Composio",
+      "viaLong": "Rome 通过你的 Composio 账号连接这个服务。",
+      "signInBanner": "登录 Composio 后才能连接这些服务。",
+      "signIn": "登录",
+      "authorize": "请在新标签页中授权 {{name}}，完成后回到这里。",
+      "alreadyConnected": "{{name}} 已经连接。",
+      "openTab": "打开",
+      "returnConnected": "已连接 {{name}}。",
+      "returnFailed": "{{name}} 没有连接成功，请重试。",
+      "connectFailed": "无法开始连接，请重试。",
+      "reconnect": "重新连接",
+      "disconnectConfirm": "断开 {{name}}？断开后，Rome 无法访问它，直到你重新连接。",
+      "disconnected": "已断开 {{name}}。",
+      "loadFailed": "无法加载 Composio 服务。",
+      "webhook": {
+        "title": "事件推送",
+        "ready": "正常",
+        "notReady": "需要设置",
+        "unavailable": "此实例不可用",
+        "setUp": "重新设置",
+        "done": "事件推送已设置。"
+      }
+    },
     "loadFailedFallback": "加载连接失败。",
+    "accounts": {
+      "add": "添加另一个账号",
+      "addedNotShown": "账号已连接，可在连接列表中找到。",
+      "newAccount": "新账号",
+      "noAgent": "无。Rome 不监听此账号。",
+      "changeInEnvoys": "在外派智能体中更改",
+      "agentSpeaksAs": "以此账号的身份发言",
+      "agentAnswersForYou": "代你在此账号上回复",
+      "noAgentTitle": "无智能体",
+      "agentNone": "Rome 不监听此账号"
+    },
     "headings": {
       "connected": "这个连接让你的 agent 能",
       "primary": "连接后，你的 agent 将能",
@@ -64,7 +128,12 @@
       "accessExpired": "访问已过期 — 重新连接以继续使用",
       "reconnect": "重新连接",
       "reconnecting": "正在重新连接账户…",
-      "resumePending": "你已开始连接 {{label}} 但尚未完成。请在 {{label}} 上继续，或取消。"
+      "resumePending": "你已开始连接 {{label}} 但尚未完成。请在 {{label}} 上继续，或取消。",
+      "shopify": {
+        "connect": "在 Shopify 中连接",
+        "ownApp": "使用你自己的 Shopify 应用",
+        "installNote": "Shopify 会在新标签页中打开，你在那里选择店铺并授权 Rome OS。"
+      }
     },
     "composio": {
       "unavailable": "此主机上无法使用 Composio。"
@@ -72,14 +141,14 @@
     "cards": {
       "telegram": {
         "bot": {
-          "titleFallback": "你的 Telegram 机器人",
-          "subtitle": "通过 @BotFather 添加一个机器人。",
+          "titleFallback": "智能体的 Telegram 账号",
+          "subtitle": "通过 @BotFather 创建账号。",
           "bullets": {
             "reply": "有人给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
           },
           "bulletsFallback": {
-            "reply": "有人给你的机器人发消息时自动回复",
+            "reply": "有人给这个账号发消息时自动回复",
             "start": "收到新消息时启动任务"
           }
         },
@@ -126,26 +195,39 @@
           "title": "你的领英",
           "bullets": {
             "read": "保持同步你的领英收件箱副本",
-            "recap": "阅读并总结你的领英对话"
+            "recap": "阅读并总结你的领英聊天"
           }
         }
       },
       "discord": {
         "bot": {
-          "titleFallback": "你的 Discord 机器人",
+          "titleFallback": "智能体的 Discord 账号",
           "bullets": {
             "reply": "有人在你的服务器里给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
           },
           "bulletsFallback": {
-            "reply": "有人在你的服务器里给你的机器人发消息时自动回复",
+            "reply": "有人在你的服务器里给这个账号发消息时自动回复",
+            "start": "收到新消息时启动任务"
+          }
+        }
+      },
+      "slack_bot": {
+        "bot": {
+          "titleFallback": "智能体的 Slack 账号",
+          "bullets": {
+            "reply": "有人私信 {{identity}} 或在频道中提及它时自动回复",
+            "start": "收到新消息时启动任务"
+          },
+          "bulletsFallback": {
+            "reply": "有人私信这个账号或在频道中提及它时自动回复",
             "start": "收到新消息时启动任务"
           }
         }
       },
       "feishu": {
         "bot": {
-          "title": "你的飞书应用",
+          "title": "智能体的飞书账号",
           "bullets": {
             "reply": "有人在飞书上给你的 agent 发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -161,13 +243,13 @@
           }
         }
       },
-      "webchat": {
+      "agents": {
         "bot": {
-          "title": "面板聊天",
+          "title": "与你的其他 agent 互发消息",
           "bullets": {
-            "chat": "在这个面板里直接和你的 agent 聊天"
-          },
-          "alwaysOn": "始终开启 — 无需配置。"
+            "reply": "你的 dot 通过 Rome Cloud 给你的 agent 发消息",
+            "start": "有事需要处理时，你的 agent 给 dot 发消息"
+          }
         }
       },
       "github": {
@@ -196,6 +278,15 @@
             "work": "以你的身份在你的 Slack 工作区收发消息"
           },
           "privacyNote": "你在 Slack 上授权访问，随时可以在这里断开。"
+        }
+      },
+      "shopify": {
+        "user": {
+          "title": "你的 Shopify 店铺",
+          "bullets": {
+            "work": "更新你店铺的商品和库存，并读取订单"
+          },
+          "privacyNote": "你在 Shopify 上授权访问，随时可以在这里断开。"
         }
       },
       "composio": {
@@ -247,11 +338,30 @@
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
       "saving": "保存中…",
-      "cancel": "取消"
+      "cancel": "取消",
+      "inputMethod": "添加密钥的方式",
+      "singleKey": "单个密钥",
+      "pasteEnv": "粘贴 .env",
+      "envContent": ".env 内容",
+      "envHint": "粘贴 KEY=value 格式的内容，支持注释和带引号的值。同名密钥会被替换，变量引用会按原文保存。",
+      "envEmpty": "请粘贴至少一条 KEY=value 内容",
+      "envError": "第 {{line}} 行：{{reason}}",
+      "envErrors": {
+        "assignment": "应使用 KEY=value 格式",
+        "quote": "引号未闭合，或引号后存在多余内容",
+        "duplicate": "密钥名称重复",
+        "emptyValue": "值不能为空",
+        "longValue": "值超过 32,768 个字符",
+        "name": "密钥名称无效"
+      },
+      "batchFailed": "已保存 {{saved}} 个，{{count}} 个失败。表单中仅保留失败的条目，请重试保存。"
     },
     "saved": "已保存。应用现在可以读取 {{name}}。",
     "savedOverridden": "已保存，但存在同名的服务器设置并优先生效——你输入的值不会被使用。",
-    "removed": "已移除 {{name}}。"
+    "removed": "已移除 {{name}}。",
+    "batchSaved_one": "已为所有应用保存 {{count}} 个密钥。",
+    "batchSaved_other": "已为所有应用保存 {{count}} 个密钥。",
+    "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。"
   },
   "trust": {
     "title": "关系层级规则",
@@ -271,10 +381,9 @@
     }
   },
   "channels": {
-    "title": "渠道连接",
     "conversationSettings": {
-      "configure": "配置会话",
-      "searchPlaceholder": "搜索提供商、工作区或会话",
+      "configure": "配置聊天",
+      "searchPlaceholder": "搜索提供商、工作区或聊天",
       "allConnections": "所有连接",
       "anyStatus": "所有状态",
       "connectionFilterAria": "按连接筛选",
@@ -290,9 +399,9 @@
         "dm": "私聊",
         "topic": "话题"
       },
-      "loading": "正在加载会话…",
-      "emptyTitle": "未找到可配置的会话",
-      "emptyDescription": "连接受支持的对话服务，或发送一条消息让 Rome 发现该会话。",
+      "loading": "正在加载聊天…",
+      "emptyTitle": "未找到可配置的聊天",
+      "emptyDescription": "在受支持的平台上连接一个账号，或发送一条消息让 Rome 发现该聊天。",
       "loadMore": "加载更多",
       "overrideCount_one": "{{count}} 项覆盖",
       "overrideCount_other": "{{count}} 项覆盖",
@@ -304,16 +413,16 @@
         "routing": "路由"
       },
       "fields": {
-        "enabled": "Rome 在此会话中",
+        "enabled": "Rome 在此聊天中",
         "respond": "响应条件",
-        "botMessages": "机器人消息",
+        "botMessages": "自动账号的消息",
         "whenOthersMentioned": "提及其他人时",
         "replies": "回复位置",
         "agent": "智能体",
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "sessionReset": "清除提供商侧的会话记忆"
+        "sessionReset": "清除模型提供商侧保存的智能体记忆"
       },
       "source": {
         "overridden": "已覆盖"
@@ -328,6 +437,10 @@
         "inline": "会话内"
       },
       "mainAgent": "main（默认）",
+      "accountAgent": "{{agent}}（此账号的智能体）",
+      "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
+      "silentAccountLink": "<account>在账号页面关联</account>。",
+      "silentAccountOverride": "关联后，此聊天选择的 {{agent}} 将生效。",
       "sessionReset": {
         "never": "永不",
         "afterInactivity": "无活动后",
@@ -347,6 +460,10 @@
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
     "disconnectFailedFallback": "断开失败。",
+    "reconnect": "重新连接",
+    "disconnectConfirmTitle": "断开 {{name}}？",
+    "disconnectConfirmTitleUnnamed": "断开此账号？",
+    "disconnectConfirmBody": "Rome 将失去对该账号的访问，并停止在它的聊天中回复。再次连接时，它会从零开始，不带之前的聊天。",
     "status": {
       "connected": "已连接",
       "disconnected": "未连接",
@@ -361,7 +478,7 @@
       "linkAccount": "绑定你的 Telegram 账号",
       "sendCodeTo": "在 Telegram 中向 <link>{{target}}</link> 发送以下验证码：",
       "sendCodeToPlain": "在 Telegram 中向 {{target}} 发送以下验证码：",
-      "yourBot": "你的机器人",
+      "yourBot": "智能体的账号",
       "waitingVerification": "等待验证中…",
       "codeShownEarlier": "首次连接时已显示验证码。请断开后重新连接以生成新验证码。",
       "botTokenLabel": "机器人 Token",
@@ -407,7 +524,7 @@
         "addCancel": "取消",
         "addPickBoth": "请同时选择频道和 agent。",
         "addAllBound": "所有可见频道都已绑定 — 请在上方编辑现有行进行修改。",
-        "addDiscordOffline": "Discord 未连接。请先在上方连接 bot 以填充列表。",
+        "addDiscordOffline": "Discord 未连接。请先在上方连接账号以填充列表。",
         "suggestionsTitle": "应用建议",
         "suggestionFromApp": "{{app}} 建议把某个 Discord 频道路由到"
       }
@@ -518,6 +635,19 @@
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "refreshFailed": "无法刷新 AI 工具，请重试。",
+    "romeCredits": {
+      "name": "Rome 额度",
+      "status": {
+        "inUse": "使用中",
+        "ready": "就绪",
+        "standby": "待用",
+        "usedUp": "已用完",
+        "usedUpWithClaude": "已用完",
+        "paused": "已暂停"
+      },
+      "ofGranted": "共 {{amount}}",
+      "meterLabel": "Rome 剩余额度"
+    },
     "providers": {
       "claudeCode": {
         "name": "Claude"
@@ -547,6 +677,7 @@
       "environmentApiKey": "运行环境中的 API 密钥"
     },
     "usage": {
+      "unavailable": "用量暂时不可用。",
       "fiveHour": "5 小时已用",
       "sevenDay": "7 天已用",
       "resetsIn": "<1>{{time}}</1> 后重置"
@@ -633,13 +764,43 @@
       "description": "隐藏固定代理的名称、头像和输入框标签。仅对当前浏览器生效。",
       "toggleLabel": "在聊天中隐藏代理身份"
     },
+    "experimental": {
+      "title": "实验性功能",
+      "description": "仍在试用的功能。每项默认关闭，之后可能调整或移除。",
+      "replyStreaming": {
+        "title": "回复流式输出",
+        "description": "适用于守护者在 Telegram 和飞书的私聊。在 Telegram 中，回复以纯文本显示。回复中途失败时不会重发，可能停在未完成的状态。",
+        "toggleLabel": "边生成边发送回复"
+      },
+      "concierge": {
+        "title": "Concierge",
+        "description": "在对话列表里增加一个对话：代理像发消息一样用短消息和你聊天，较长的工作交给可以打开查看的任务对话。",
+        "toggleLabel": "在对话中显示 Concierge"
+      },
+      "feishuStreamingStyle": {
+        "title": "飞书流式样式",
+        "description": "消息每条最多编辑 20 次，之后回复在新消息里继续。卡片以打字效果显示文字。",
+        "message": "消息",
+        "card": "卡片"
+      }
+    },
     "developerSettings": {
       "title": "开发者设置"
     },
-    "fable": {
-      "title": "Fable",
-      "description": "仅在 Claude 可用时生效。",
-      "toggleLabel": "将 large 模型路由到 Fable"
+    "tierModelMappings": {
+      "title": "模型 ID 映射",
+      "description": "设置每个提供商中各层级使用的模型 ID。将 ID 留空可保留默认值。",
+      "openai": {
+        "large": "Codex large 模型 ID",
+        "medium": "Codex medium 模型 ID",
+        "small": "Codex small 模型 ID"
+      },
+      "anthropic": {
+        "large": "Claude large 模型 ID",
+        "medium": "Claude medium 模型 ID",
+        "small": "Claude small 模型 ID"
+      },
+      "save": "保存映射"
     },
     "modelSelector": {
       "title": "模型选择器",
@@ -719,7 +880,15 @@
       "noChannels": "无活动通道",
       "apps": "应用",
       "appsHealthy": "已加载 {{count}} 个，无失败",
-      "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}"
+      "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}",
+      "memory": "内存",
+      "disk": "磁盘",
+      "free": "剩余 {{free}}，共 {{total}}",
+      "ok": "正常",
+      "short": "不足",
+      "low": "不足",
+      "memoryShortHint": "内存不足。排队中的任务会等到内存释放后再开始，正在运行的任务可能变慢。",
+      "diskLowHint": "磁盘即将用满。请在写入开始失败前清理空间。"
     },
     "uptimePrefix": "已运行 {{uptime}}",
     "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",
@@ -746,6 +915,45 @@
       "lastSeen": "上次在线",
       "notReported": "未提供",
       "installExtension": "安装 OpenCLI 扩展"
+    },
+    "feedback": {
+      "title": "反馈",
+      "agentReports": {
+        "title": "智能体平台问题报告",
+        "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
+        "toggleLabel": "允许智能体发送报告"
+      }
+    },
+    "spokenRecaps": {
+      "title": "语音回顾",
+      "description": "在较长的对话回合后生成一段简短总结，可选生成音频，方便不看屏幕时收听。回顾会显示在对话中。",
+      "enabled": {
+        "title": "生成回顾",
+        "description": "每次回顾会多调用一次模型。默认关闭。关闭后不再生成新的总结和音频，已有的回顾会保留。"
+      },
+      "threshold": {
+        "title": "长度阈值",
+        "description": "按回复长度和工具调用量判断，与回顾本身的长度无关。",
+        "short": "较短的回合",
+        "medium": "较长的回合",
+        "long": "仅很长的回合"
+      },
+      "createAudio": {
+        "title": "生成音频",
+        "description": "将回顾文字发送到 Microsoft Edge 文字转语音服务，生成可播放的录音。"
+      },
+      "audioSpeed": {
+        "title": "音频语速",
+        "description": "仅对新生成的录音生效。",
+        "slower": "较慢（−15%）",
+        "normal": "正常",
+        "faster": "较快（+15%）",
+        "fastest": "最快（+30%）"
+      },
+      "loadFailed": "无法加载或保存回顾设置，请重试。",
+      "loading": "正在加载回顾设置…",
+      "saving": "正在保存…",
+      "retry": "重试"
     }
   },
   "system": {
@@ -778,16 +986,45 @@
     "restartTimeoutBody": "Rome 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。"
   },
-  "sentinel": {
-    "title": "哨兵设置",
-    "intervalLabel": "审阅间隔（分钟）",
-    "intervalHelp": "提醒守护者审阅哨兵日志条目的频率。"
-  },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",
     "console": "控制台",
     "artLabel": "高级彩蛋",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "设备",
+    "description": "Rome 账户关联的设备。",
+    "loadFailed": "设备加载失败",
+    "connectionLabel": "Rome 连接",
+    "connection": {
+      "not_running": "服务未运行",
+      "online": "已连接",
+      "stopped": "空闲",
+      "connecting": "正在连接",
+      "retrying": "正在重连",
+      "revoked": "授权已撤销",
+      "superseded": "连接已被替换",
+      "not_configured": "未配置",
+      "unavailable": "不可用",
+      "incompatible": "需要重启"
+    },
+    "help": {
+      "not_running": "启动此 Rome 实例上的服务后，即可检查已关联的电脑。",
+      "unavailable": "暂时无法获取设备状态，页面会自动重试。",
+      "not_configured": "尚未配置设备访问。将此 Rome 实例关联到 Rome Cloud 后即可准备访问。",
+      "incompatible": "在 Rome 实例上先运行 rome-node daemon stop，再运行 rome-node daemon start。这会重启共享服务，并中断正在进行的设备请求。"
+    },
+    "start": "启动服务",
+    "starting": "正在启动…",
+    "startFailed": "设备服务启动失败",
+    "setup": {
+      "title": "连接电脑",
+      "description": "设备服务运行在 Rome 实例上。每台需要使用的电脑都要单独建立连接。",
+      "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
+      "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
+      "instructions": "安装与连接指南"
+    }
   }
 }

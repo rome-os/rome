@@ -1,7 +1,7 @@
 // The Telegram-user descriptor. Layers under test:
 //   1. material round-trip (settings ⇄ SecretRecord, incl. apiId stringify +
 //      nullable username), descriptor shape, the route-driven session scheme
-//      (confer throws, renew "re-confer") — pure.
+//      (grant throws, renew "needs-fix") — pure.
 //   2. fault mapping — a fake TelegramUserAdapter (rs.mock) lets us drive a
 //      start rejection and a send failure; the real
 //      isTelegramUserSessionRejected classifier (imported unmocked) decides
@@ -16,15 +16,10 @@
 // pin the descriptor's own mapping arithmetic here.
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ConversationId,
-  InboundMessage,
-  NormalizedMessage,
-  OutgoingMessage,
-} from "@rome-os/app-runtime";
+import type { ChatId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { installTestClock } from "../../test/kit/index.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
@@ -36,12 +31,15 @@ const fakeState: {
   startError: unknown;
   sendError: unknown;
   stopped: boolean;
-  sent: Array<{ channelUserId: string; threadId: string; message: OutgoingMessage }>;
+  sent: Array<{ chatId: ChatId; message: OutgoingMessage }>;
   /** Error the fake probe() throws on its next tick (null → session healthy). */
   probeError: unknown;
   /** Count of probe() ticks, so a test can assert the timer stopped. */
   probeCalls: number;
-  historyCalls: Array<{ threadId: string | null; windowHours: number }>;
+  /** The handler the integration registered through onInbound. */
+  inbound: ((msg: ChannelMessage) => Promise<void>) | null;
+  /** What the fake saveIncomingAttachments was asked to materialize. */
+  materialized: ChannelMessage[];
   /** When set, probe() awaits this instead of resolving — lets a test hold a
    *  probe in flight across a re-login and release it afterward. */
   probeGate: Promise<void> | null;
@@ -52,7 +50,8 @@ const fakeState: {
   sent: [],
   probeError: null,
   probeCalls: 0,
-  historyCalls: [],
+  inbound: null,
+  materialized: [],
   probeGate: null,
 };
 
@@ -61,7 +60,9 @@ rs.mock("../../channels/telegram-user.js", () => {
   return {
     ...telegramUserModule,
     TelegramUserAdapter: class {
-      onMessage(_handler: (msg: NormalizedMessage) => Promise<void>): void {}
+      onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+        fakeState.inbound = handler;
+      }
       async start(): Promise<void> {
         if (fakeState.startError) throw fakeState.startError;
       }
@@ -73,20 +74,17 @@ rs.mock("../../channels/telegram-user.js", () => {
         if (fakeState.probeGate) await fakeState.probeGate;
         if (fakeState.probeError) throw fakeState.probeError;
       }
-      async sendMessage(
-        channelUserId: string,
-        threadId: string,
+      async send(
+        chatId: ChatId,
         message: OutgoingMessage,
-      ): Promise<void> {
+      ): Promise<{ chatId: ChatId; messageId: string }> {
         if (fakeState.sendError) throw fakeState.sendError;
-        fakeState.sent.push({ channelUserId, threadId, message });
+        fakeState.sent.push({ chatId, message });
+        return { chatId, messageId: "sent-1" };
       }
-      async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
+      async saveIncomingAttachments(msg: ChannelMessage): Promise<unknown[]> {
+        fakeState.materialized.push(msg);
         return msg.attachments;
-      }
-      async fetchHistory(threadId: string | null, windowHours: number): Promise<unknown[]> {
-        fakeState.historyCalls.push({ threadId, windowHours });
-        return [];
       }
     },
   };
@@ -131,14 +129,11 @@ function buildTalker(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}
   start: () => void;
 } {
   const desc = makeTelegramUserDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
-    { session: validCred() },
-    {
-      connectionId: "telegram-user-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "telegram-user-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -158,7 +153,8 @@ beforeEach(() => {
   fakeState.sent = [];
   fakeState.probeError = null;
   fakeState.probeCalls = 0;
-  fakeState.historyCalls = [];
+  fakeState.inbound = null;
+  fakeState.materialized = [];
   fakeState.probeGate = null;
 });
 
@@ -180,21 +176,20 @@ describe("telegram_user material round-trip", () => {
 describe("telegram_user descriptor shape", () => {
   it("declares one setup-driven `session` grant and a talker needing it", () => {
     const desc = makeTelegramUserDescriptor();
-    expect(desc.service).toBe("telegram_user");
-    expect(Object.keys(desc.auth)).toEqual(["session"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["session"]);
+    expect(desc.connectionKind).toBe("telegram_user");
+    expect(desc.grant).toBe("session");
     expect(desc.capabilities.actor).toBeUndefined();
-    // The `session` grant carries a conferral setup coroutine.
-    expect(typeof desc.auth.session.setup).toBe("function");
+    // The `session` grant carries a setup coroutine.
+    expect(typeof desc.auth.setup).toBe("function");
   });
 
-  it("session scheme: confer is setup-driven (throws), renew answers re-confer", async () => {
-    const scheme = makeTelegramUserDescriptor().auth.session;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+  it("session scheme: grant is setup-driven (throws), renew answers fix", async () => {
+    const scheme = makeTelegramUserDescriptor().auth;
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
     expect(await scheme.renew({ material: {} as SecretRecord, expiresAt: "never" })).toBe(
-      "re-confer",
+      "needs-fix",
     );
   });
 
@@ -202,31 +197,72 @@ describe("telegram_user descriptor shape", () => {
     const h = buildTalker();
     h.start();
     const message = {
+      channel: "telegram_user",
+      direction: "inbound",
       messageId: "message-1",
-      conversationId: "dialog-1" as ConversationId,
+      chatId: "dialog-1" as ChatId,
       senderId: "999",
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "telegram_user", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
-    await expect(h.talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
+    } satisfies ChannelMessage;
+    await expect(h.talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
+    // The ChannelMessage reaches the transport as it is, with no `raw` to unwrap.
+    expect(fakeState.materialized).toStrictEqual([message]);
     const stopped = h.talker.stop();
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
     expect(fakeState.stopped).toBe(true);
   });
+});
 
-  it("exposes provider-neutral history", async () => {
-    const h = buildTalker();
-    h.start();
-    await expect(
-      h.talker.feature("history")?.query({
-        conversationId: "dialog-1" as ConversationId,
-        limit: 20,
-      }),
-    ).resolves.toEqual([]);
-    expect(fakeState.historyCalls).toEqual([{ threadId: "dialog-1", windowHours: 24 }]);
+describe("telegram_user inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const desc = makeTelegramUserDescriptor();
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-user-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+    const raw = { id: 7, out: false };
+    const message: ChannelMessage = {
+      channel: "telegram_user",
+      direction: "inbound",
+      messageId: "7",
+      chatId: "-100555" as ChatId,
+      senderId: "111",
+      senderDisplayName: "111",
+      text: "see this",
+      attachments: [{ type: "document" }],
+      timestamp: new Date(1_700_000_000_000),
+      replyTo: { messageId: "5" },
+      thread: { kind: "group" },
+      raw,
+    };
+    await fakeState.inbound!(message);
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "telegram_user",
+        direction: "inbound",
+        messageId: "7",
+        chatId: "-100555",
+        senderId: "111",
+        senderDisplayName: "111",
+        text: "see this",
+        attachments: [{ type: "document" }],
+        timestamp: new Date(1_700_000_000_000),
+        replyTo: { messageId: "5" },
+        thread: { kind: "group" },
+        raw,
+      },
+    ]);
+    await talker.stop();
   });
 });
 
@@ -271,7 +307,7 @@ describe("telegram_user Talker fault mapping", () => {
     const h = buildTalker();
     h.start();
     fakeState.sendError = rpcError(undefined, "SESSION_REVOKED");
-    const address = "999" as ConversationId;
+    const address = "999" as ChatId;
     await expect(h.talker.send(address, { text: "hi" })).rejects.toBeInstanceOf(CredentialRejected);
     await expect(h.talker.send(address, { text: "hi" })).rejects.toMatchObject({
       grant: "session",
@@ -282,16 +318,17 @@ describe("telegram_user Talker fault mapping", () => {
     const h = buildTalker();
     h.start();
     fakeState.sendError = new Error("timeout");
-    await expect(h.talker.send("999" as ConversationId, { text: "hi" })).rejects.toThrow("timeout");
+    await expect(h.talker.send("999" as ChatId, { text: "hi" })).rejects.toThrow("timeout");
   });
 
-  it("forwards the opaque conversation id to the adapter's sendMessage", async () => {
+  it("forwards the opaque conversation id to the adapter's send and returns its receipt", async () => {
     const h = buildTalker();
     h.start();
-    await h.talker.send("chat-42" as ConversationId, { text: "hi" });
-    expect(fakeState.sent).toEqual([
-      { channelUserId: "chat-42", threadId: "chat-42", message: { text: "hi" } },
-    ]);
+    await expect(h.talker.send("chat-42" as ChatId, { text: "hi" })).resolves.toEqual({
+      chatId: "chat-42",
+      messageId: "sent-1",
+    });
+    expect(fakeState.sent).toEqual([{ chatId: "chat-42", message: { text: "hi" } }]);
   });
 });
 
@@ -373,7 +410,7 @@ const PROFILE = telegramUserProfileFromSettings(SETTINGS) as ProfileRecord;
 
 function makeRegistry(): ConnectionRegistry {
   const { db } = createTestDb();
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   registry.register(makeTelegramUserDescriptor({ probeIntervalMs: 1000 }));
   return registry;
 }
@@ -384,23 +421,29 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.importCredential(conn.id, "session", validCred() as Credential, PROFILE);
+      await registry.giveGrant(
+        conn.connectionKind,
+        conn.id,
+        "session",
+        validCred() as Credential,
+        PROFILE,
+      );
       expect(conn.auth.grants().session).toBe("authorized");
-      expect(conn.talk).not.toBeNull();
+      expect(conn.isUnlocked("chat")).toBe(true);
 
       // The account revokes the session server-side: the next probe sees it.
       fakeState.probeError = rpcError(undefined, "SESSION_REVOKED");
       await clock.advance(1000);
 
-      // renew answers "re-confer", so one probe fault degrades. The status
+      // renew answers "needs-fix", so one probe fault degrades. The status
       // surface then reads needs-reconnect + reason off the ledger.
       expect(conn.auth.grants().session).toBe("degraded");
-      expect(conn.talk).toBeNull();
-      const grant = await registry.getLedger().getGrant(conn.id, "session");
+      expect(conn.isUnlocked("chat")).toBe(false);
+      const grant = await registry.grantOf(conn.id);
       expect(grant?.state).toBe("degraded");
       // The status surface reads `degradedReason` off this — a non-empty reason
       // naming the credential rejection (the registry's renew-once-then-degrade
-      // wording; a user session's renew can only answer "re-confer").
+      // wording; a user session's renew can only answer "needs-fix").
       expect(grant?.degraded?.reason).toContain("credential rejected");
       expect(grant?.degraded?.at).toBeInstanceOf(Date);
     } finally {
@@ -413,7 +456,13 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.importCredential(conn.id, "session", validCred() as Credential, PROFILE);
+      await registry.giveGrant(
+        conn.connectionKind,
+        conn.id,
+        "session",
+        validCred() as Credential,
+        PROFILE,
+      );
 
       // Park epoch A's probe in flight (it has read the live client but not yet
       // returned) so a re-login can land underneath it.
@@ -434,7 +483,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
         }),
         expiresAt: "never",
       };
-      await registry.importCredential(conn.id, "session", cred2, PROFILE);
+      await registry.giveGrant(conn.connectionKind, conn.id, "session", cred2, PROFILE);
       expect(conn.auth.grants().session).toBe("authorized");
 
       // Epoch A's parked probe now fails auth — but it reports through the dead
@@ -446,7 +495,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       await clock.advance(0);
 
       expect(conn.auth.grants().session).toBe("authorized");
-      expect(conn.talk).not.toBeNull();
+      expect(conn.isUnlocked("chat")).toBe(true);
     } finally {
       clock.uninstall();
     }

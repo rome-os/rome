@@ -9,9 +9,9 @@ const DB_DIR = join(homedir(), ".rome-desktop");
 const DB_PATH = join(DB_DIR, "rome-desktop.db");
 
 /**
- * Resolve the path to the Electron-rebuilt better_sqlite3.node.
- * In dev: apps/desktop/native/better_sqlite3.node
- * In production (asar): relative to the app resources
+ * Resolve the better_sqlite3.node that scripts/rebuild-native.mjs places.
+ * In dev: packages/desktop/native/better_sqlite3.node
+ * In production: the unpacked app resources
  */
 export function getNativeBindingPath(): string | undefined {
   const candidates = [

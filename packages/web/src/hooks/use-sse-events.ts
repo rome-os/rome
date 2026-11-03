@@ -1,8 +1,6 @@
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 
-export const raw = z.json();
-
 export interface SseEventHandler<Schema extends z.ZodType = z.ZodType> {
   schema: Schema;
   fn: (value: z.output<Schema>) => void | Promise<void>;
@@ -18,7 +16,7 @@ export interface SseErrorContext {
   readyState: EventSource["readyState"];
 }
 
-type SseEventHandlers<Schemas extends Record<string, z.ZodType>> = {
+export type SseEventHandlers<Schemas extends Record<string, z.ZodType>> = {
   [EventName in keyof Schemas]: SseEventHandler<Schemas[EventName]>;
 };
 
@@ -31,7 +29,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function invokeObservedCallback(
+export function invokeObservedCallback(
   callback: () => void | Promise<void>,
   messages: { rejected: string; failed: string },
   context: Record<string, unknown>,
@@ -55,8 +53,6 @@ function invokeHandler<
   eventName: EventName,
   event: MessageEvent<string>,
 ): void {
-  const handler = handlersRef.current[eventName];
-
   let payload: unknown;
   try {
     payload = JSON.parse(event.data);
@@ -64,12 +60,24 @@ function invokeHandler<
     console.error("Invalid SSE event JSON", { url, eventName });
     return;
   }
+  dispatchValidatedEvent(handlersRef.current[eventName], payload, "SSE", { url, eventName });
+}
 
+/**
+ * Validates a parsed payload against the handler's schema and calls it. An
+ * invalid payload is logged with `context` and the Zod issue codes only, never
+ * the payload itself, and dropped.
+ */
+export function dispatchValidatedEvent<Schema extends z.ZodType>(
+  handler: SseEventHandler<Schema>,
+  payload: unknown,
+  transport: "SSE" | "Live",
+  context: Record<string, unknown>,
+): void {
   const result = handler.schema.safeParse(payload);
   if (!result.success) {
-    console.error("Invalid SSE event payload", {
-      url,
-      eventName,
+    console.error(`Invalid ${transport} event payload`, {
+      ...context,
       issueCount: result.error.issues.length,
       issueCodes: result.error.issues.map(({ code }) => code),
     });
@@ -78,8 +86,11 @@ function invokeHandler<
 
   invokeObservedCallback(
     () => handler.fn(result.data),
-    { rejected: "SSE event handler rejected", failed: "SSE event handler failed" },
-    { url, eventName },
+    {
+      rejected: `${transport} event handler rejected`,
+      failed: `${transport} event handler failed`,
+    },
+    context,
   );
 }
 
@@ -97,14 +108,6 @@ function addEventListener<
   }) as EventListener;
   state.listeners.set(eventName, listener);
   state.source.addEventListener(eventName, listener);
-}
-
-export function useSseEvent<Schema extends z.ZodType>(
-  url: string,
-  handler: SseEventHandler<Schema>,
-  options?: UseSseEventsOptions,
-): void {
-  useSseEvents<{ message: Schema }>(url, { message: handler }, options);
 }
 
 export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(

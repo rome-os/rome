@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   Chrome,
   FolderKanban,
@@ -19,10 +20,11 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
-import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
-import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
+import { appDisplayName } from "@/lib/app-display-name";
+import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
 import {
   DropdownMenu,
@@ -37,14 +39,22 @@ import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
-import { ToolWorkspace } from "./ToolWorkspace";
+import { cn } from "@/lib/utils";
+import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import { useConciergeChatId } from "@/hooks/use-concierge";
+import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
+import { useToolTrace } from "./tool-trace";
+import { getWidgetFullHref } from "./widget-links";
+import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
   loadLayoutForSession,
   placeWidgetsIfSessionActive,
   setActiveSession,
+  type PlacementLink,
   updatePlacementLink,
+  updatePlacementLinks,
   type WidgetPlacement,
   type WidgetSeed,
   useFreeCells,
@@ -127,21 +137,57 @@ function WidgetContent({
   }
 }
 
+// The mobile header's pane toggle. It follows the pane's effective open state,
+// which includes a pane a trace holds open, and collapses or expands for real.
+function ToolsToggle({ unread }: { unread: boolean }) {
+  const { t } = useTranslation("common");
+  const { paneOpen, setPaneCollapsed } = useToolTrace();
+  return (
+    <IconButton
+      size="md"
+      label={t(paneOpen ? "chat.collapseTools" : "chat.expandTools")}
+      aria-expanded={paneOpen}
+      icon={
+        <span className="relative">
+          {paneOpen ? <PanelRightClose /> : <PanelRightOpen />}
+          {!paneOpen && unread && (
+            <span
+              className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+              aria-label={t("chat.toolUpdated")}
+            />
+          )}
+        </span>
+      }
+      onClick={() => setPaneCollapsed(paneOpen)}
+    />
+  );
+}
+
 export function FreeGrid() {
   const { t } = useTranslation("common");
   const params = useParams<{ "*"?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { placements, addWidget, removeWidget, toolView, selectTool, setToolsCollapsed } =
-    useFreeCells();
+  const {
+    placements,
+    addWidget,
+    removeWidget,
+    toolView,
+    toolActivations,
+    selectTool,
+    setToolsCollapsed,
+  } = useFreeCells();
   const { apps } = useApps();
+  const sessionNames = useSessionNames(
+    placements.flatMap((widget) =>
+      widget.type === "chat" && widget.targetId ? [widget.targetId] : [],
+    ),
+  );
   const widgetLabel = (widget: WidgetPlacement) => {
-    if (widget.type === "app")
-      return (
-        apps?.find((app) => app.id === widget.targetId)?.displayName ??
-        widget.targetId ??
-        t("nav.apps")
-      );
+    if (widget.type === "chat" && widget.targetId) {
+      return sessionNames.get(widget.targetId) ?? t("nav.chat");
+    }
+    if (widget.type === "app") return appDisplayName(widget.targetId, apps, t("nav.apps"));
     return t(
       widget.type === "chat"
         ? "nav.chat"
@@ -159,6 +205,7 @@ export function FreeGrid() {
   const urlSessionId = params["*"]?.split("/")[0] || undefined;
   const locState = location.state as {
     projectPath?: string;
+    deviceFolder?: DraftDeviceFolder;
     agentMention?: AgentMention;
     agentName?: string;
     draft?: string;
@@ -166,6 +213,7 @@ export function FreeGrid() {
     widgets?: WidgetSeed[];
   } | null;
   const initialProjectName = locState?.projectPath?.trim() || undefined;
+  const initialDeviceFolder = locState?.deviceFolder;
   const initialAgentMention = useMemo<AgentMention | null>(() => {
     if (locState?.agentMention) return locState.agentMention;
     const agentName = locState?.agentName?.trim();
@@ -187,12 +235,22 @@ export function FreeGrid() {
     return JSON.stringify(initialWidgets);
   }, [initialWidgets]);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>(urlSessionId);
+  const flushAppLink = useCallback(
+    (p: WidgetPlacement) => {
+      if (p.type !== "app") return;
+      const link = workspaceContextRegistry.resolveLink(p.id);
+      if (link) updatePlacementLink(p.id, link.route, link.params);
+    },
+    [workspaceContextRegistry],
+  );
   const flushLayout = useCallback(() => {
+    const links: PlacementLink[] = [];
     for (const p of placementsRef.current) {
       if (p.type !== "app") continue;
       const link = workspaceContextRegistry.resolveLink(p.id);
-      if (link) updatePlacementLink(p.id, link.route, link.params);
+      if (link) links.push({ placementId: p.id, route: link.route, params: link.params });
     }
+    updatePlacementLinks(links);
   }, [workspaceContextRegistry]);
 
   const suppressProjectsRef = useRef(false);
@@ -202,10 +260,14 @@ export function FreeGrid() {
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
     const applyInitialWidgets = (targetSessionId: string | null) => {
-      if (!initialWidgetsKey || !Array.isArray(initialWidgets) || initialWidgets.length === 0) {
+      if (!initialWidgetsKey || !initialWidgets) {
         return;
       }
-      placeWidgetsIfSessionActive(targetSessionId, initialWidgets);
+      // A narrow workspace shows one pane at a time, so an expanded panel
+      // would hide the chat this navigation opened.
+      placeWidgetsIfSessionActive(targetSessionId, initialWidgets, {
+        chatFirst: window.innerWidth < COMPACT_WIDTH,
+      });
     };
     if (urlSessionId) {
       const targetSessionId = urlSessionId;
@@ -225,7 +287,7 @@ export function FreeGrid() {
 
   useEffect(() => {
     return eventBus.on<{ paths: string[]; force?: boolean }>("projects:opened", (payload) => {
-      if (!payload?.paths || payload.paths.length === 0) return;
+      if (payload.paths.length === 0) return;
       // A forced open (an explicit click on a /projects link in chat) overrides
       // the user's earlier manual close of the panel; the passive agent-link
       // path (no force) still respects that close.
@@ -285,8 +347,15 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, pinnedAgentMention, pinnedAt } = useSessionIdentity(chatSessionId);
+  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
+    useSessionIdentity(chatSessionId);
+  // The chat a guardian names is the one they keep a tab on, so the name
+  // outranks the route's own title. Claimed here rather than in FreePage so it
+  // reads the same identity the header does, and follows a rename with it.
+  useDocumentTitle(sessionName);
   const setPinned = usePinSession();
+  const conciergeChatId = useConciergeChatId();
+  const isConcierge = chatSessionId === conciergeChatId;
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
   // desktop navbar: drop the session, refresh the sidebar list, land on a fresh
@@ -327,99 +396,78 @@ export function FreeGrid() {
             content={(widget, dragging) => (
               <WidgetContent widget={widget} dragging={dragging} sessionId={chatSessionId} />
             )}
+            fullHref={getWidgetFullHref}
+            // App tiles navigate inside a frozen iframe, so persist the live
+            // route before the link is followed; the href then carries it.
+            onOpenIntent={flushAppLink}
+            activations={toolActivations}
           >
-            {!chatSessionId && (
-              <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">
-                {toolView.collapsed && (
-                  <IconButton
-                    size="sm"
-                    data-coach="add-widget"
-                    aria-expanded={false}
-                    onClick={() => setToolsCollapsed(false)}
-                    label={t("chat.expandTools")}
-                    icon={<PanelRightOpen />}
-                  />
-                )}
-              </div>
-            )}
             <ChatWidget
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}
               initialProjectName={initialProjectName}
+              initialDeviceFolder={initialDeviceFolder}
               initialAgentMention={initialAgentMention}
               initialDraftText={initialDraftText}
               initialSkillName={initialSkillName}
             />
-          </ToolWorkspace>
-
-          <SlotContent name="mobileHeader">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AgentAvatar
-                iconUrl={pinnedAgentMention?.iconUrl}
-                label={pinnedAgentMention?.appLabel}
-                size="sm"
-                className="shrink-0"
-              />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-ui text-foreground">
+            {/* A portal: it renders in the mobile header, and sits here so it
+                reads the pane's open state. */}
+            <SlotContent name="mobileHeader">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <SessionAvatar
+                  iconUrl={pinnedAgentMention?.iconUrl}
+                  label={pinnedAgentMention?.appLabel}
+                  model={model}
+                  reasoningEffort={reasoningEffort}
+                />
+                <span className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}>
                   {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
-                <div className="flex min-w-0 items-center gap-2">
-                  <SessionModelLabel model={model} />
-                  {sessionName?.trim() && pinnedAgentMention && (
-                    <span className="truncate text-aux text-muted-foreground">
-                      {pinnedAgentMention.appLabel}
-                    </span>
-                  )}
-                </div>
+                {isConcierge ? <ConciergeTasksPill /> : null}
+                {/* Same label as the desktop navbar, also none for the Concierge. */}
+                {!isConcierge && sessionName?.trim() && pinnedAgentMention && (
+                  <span className="shrink-0 truncate text-aux text-muted-foreground">
+                    {pinnedAgentMention.appLabel}
+                  </span>
+                )}
               </div>
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  size="md"
-                  label={t("nav.more")}
-                  icon={<MoreHorizontal />}
-                  className="text-muted-foreground hover:text-foreground"
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {chatSessionId && (
-                  <DropdownMenuItem onSelect={() => void handlePinSession()}>
-                    {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                    {pinnedAt ? t("navbar.unpin", { ns: "chat" }) : t("navbar.pin", { ns: "chat" })}
-                  </DropdownMenuItem>
-                )}
-                {chatSessionId && (
-                  <DropdownMenuItem onSelect={() => eventBus.emit("share:start", {})}>
-                    <Share2 className="size-4" />
-                    {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem variant="destructive" onSelect={() => void handleDeleteSession()}>
-                  <Trash2 className="size-4" />
-                  {t("recentChats.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton
-              size="md"
-              label={t(toolView.collapsed ? "chat.expandTools" : "chat.collapseTools")}
-              aria-expanded={!toolView.collapsed}
-              icon={
-                <span className="relative">
-                  {toolView.collapsed ? <PanelRightOpen /> : <PanelRightClose />}
-                  {toolView.collapsed && toolView.unreadIds.length > 0 && (
-                    <span
-                      className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
-                      aria-label={t("chat.toolUpdated")}
-                    />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    size="md"
+                    label={t("nav.more")}
+                    icon={<MoreHorizontal />}
+                    className="text-muted-foreground hover:text-foreground"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {chatSessionId && (
+                    <DropdownMenuItem onSelect={() => void handlePinSession()}>
+                      {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+                      {pinnedAt
+                        ? t("navbar.unpin", { ns: "chat" })
+                        : t("navbar.pin", { ns: "chat" })}
+                    </DropdownMenuItem>
                   )}
-                </span>
-              }
-              onClick={() => setToolsCollapsed(!toolView.collapsed)}
-            />
-          </SlotContent>
+                  {chatSessionId && (
+                    <DropdownMenuItem onSelect={() => eventBus.emit("share:start", {})}>
+                      <Share2 className="size-4" />
+                      {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => void handleDeleteSession()}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("recentChats.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <ToolsToggle unread={toolView.unreadIds.length > 0} />
+            </SlotContent>
+          </ToolWorkspace>
         </WorkspaceContextRegistryContext.Provider>
       </WorkspaceStoreContext.Provider>
     </WorkspaceEventBusContext.Provider>

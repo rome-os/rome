@@ -6,9 +6,9 @@
 // CLI alive across turns.
 
 import { getWorkerIpc, type IpcRpc } from "../actions/ipc.js";
-import { getWorkerRpc } from "../actions/worker-rpc-client.js";
-import { getCurrentActionContext, type StreamAgentMessage } from "@rome-os/app-runtime";
-import type { AgentMessage } from "../types.js";
+import { callMain } from "../actions/worker-rpc-client.js";
+import { getCurrentActionContext, type StreamAgentEvent } from "@rome-os/app-runtime";
+import type { AgentEvent } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "./types.js";
 import {
   AGENT_SESSION_RUN_TURN_TIMEOUT_MS,
@@ -18,6 +18,7 @@ import {
 import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
+import { adhocSessionKey } from "./agent-session-key.js";
 
 const log = createLogger("rpc-agent-runner");
 
@@ -38,7 +39,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
    * locally.
    */
   async hasAgent(name: string): Promise<boolean> {
-    const res = await getWorkerRpc().call<{ hasAgent: boolean }>("agent.hasAgent", { name });
+    const res = await callMain<{ hasAgent: boolean }>("agent.hasAgent", { name });
     return res.hasAgent;
   }
 
@@ -50,18 +51,17 @@ export class RpcAgentRunner implements AgentRunnerInterface {
    * absent answer as "cannot", which is the safe default for guidance).
    */
   async hasAction(agentName: string, actionName: string): Promise<boolean> {
-    const res = await getWorkerRpc().call<{ hasAction: boolean }>("agent.hasAction", {
+    const res = await callMain<{ hasAction: boolean }>("agent.hasAction", {
       agentName,
       actionName,
     });
     return res.hasAction;
   }
 
-  async *run(params: RunParams): AsyncIterable<AgentMessage> {
+  async *run(params: RunParams): AsyncIterable<AgentEvent> {
     const ipc = this.getIpc();
     const router = agentTurnStreamRouterFor(ipc);
-    const channelThreadKey =
-      params.channelThreadKey ?? `${params.agentName}:${Date.now()}-${Math.random()}`;
+    const channelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
 
     const req: RunTurnRequest = {
       key: { agentName: params.agentName, channelThreadKey },
@@ -75,6 +75,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
       input: { prompt: params.prompt, images: params.images },
       platformMessageId: params.platformMessageId,
       replyTo: params.replyTo,
+      ...(params.streamReply ? { streamReply: true } : {}),
       sessionId: params.sessionId,
       hookInvocationContext: getCurrentHookInvocationContext(),
       actionContext: getCurrentActionContext(),
@@ -101,8 +102,8 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     });
 
     const streamName = `agent.turn:${response.turnId}`;
-    const values: StreamAgentMessage[] = [];
-    const resolvers: Array<(item: IteratorResult<StreamAgentMessage>) => void> = [];
+    const values: StreamAgentEvent[] = [];
+    const resolvers: Array<(item: IteratorResult<StreamAgentEvent>) => void> = [];
     let done = false;
     let error: Error | undefined;
 
@@ -133,7 +134,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
           if (error) throw error;
           return;
         }
-        const next = await new Promise<IteratorResult<StreamAgentMessage>>((resolve) => {
+        const next = await new Promise<IteratorResult<StreamAgentEvent>>((resolve) => {
           resolvers.push(resolve);
         });
         if (next.done) {
@@ -149,8 +150,8 @@ export class RpcAgentRunner implements AgentRunnerInterface {
 }
 
 function attachRomeSession(
-  message: StreamAgentMessage,
+  message: StreamAgentEvent,
   romeSession: RunTurnResponse["romeSession"],
-): StreamAgentMessage {
+): StreamAgentEvent {
   return message.type === "session_init" ? { ...message, romeSession } : message;
 }

@@ -23,7 +23,8 @@ import type { AppManager } from "../../apps/manager.js";
 import { AppManagerError, SYSTEM_APP_ID } from "../../apps/manager.js";
 import { deriveRuntimeStatusFromView } from "../../apps/runtime-status-subscriber.js";
 import { SpecSourceSchema } from "../../apps/lockfile.js";
-import type { ArtifactRef, ResolvedApp } from "../../apps/state.js";
+import { type ArtifactRef, isResolvedApp } from "../../apps/state.js";
+import type { AppOwnedArtifactLoadFailure } from "../../apps/types.js";
 import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-data-purge.js";
 import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
 import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
@@ -33,10 +34,12 @@ import { getProfileAppsDir, getProjectsRoot } from "../../paths.js";
 import { settings } from "../../db/schema.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
+  PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "../../lib/public-access-config.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
@@ -50,10 +53,6 @@ function formatCount(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? "" : "s"}`;
 }
 
-function isResolvedApp(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
-}
-
 // Provenance for the dashboard's grouped apps page. `firstParty` wins over the
 // source mode: boot installs first-party apps as local bundles, so a bundle
 // source alone cannot distinguish "ships with Rome" from "packed by the user".
@@ -61,6 +60,21 @@ function deriveAppOrigin(view: ReturnType<AppCatalog["list"]>[number]): AppOrigi
   if (view.firstParty) return "builtin";
   if (view.source.mode === "appstore") return "appstore";
   return "local";
+}
+
+/**
+ * Emits a `catalog-change` event `{ appId, change }` per catalog event, with no
+ * asset or manifest data. Returns the unsubscribe.
+ *
+ * `emit` must not block. The catalog awaits each subscriber inside `fireEvent`,
+ * under the `refreshMutex` that serializes every app install, uninstall,
+ * enable, and disable. This subscriber returns void, so a network write that
+ * hangs on a stalled client cannot stall app lifecycle instance-wide.
+ */
+export function subscribeCatalogChanges(catalog: AppCatalog, emit: LiveEventEmit): () => void {
+  return catalog.subscribe(function catalogEventStream(event) {
+    emit("catalog-change", { appId: event.appId, change: event.change });
+  });
 }
 
 export function deriveAppProjectPath(
@@ -125,6 +139,7 @@ function toInstalledAppCard(
     // rejects the uninstall too); enable/disable remains available above.
     canUninstall: view.appId !== SYSTEM_APP_ID && !view.firstParty,
     includeSource: view.includeSource === true,
+    hideInLauncher: view.hideInLauncher === true,
     canPublish:
       view.state === "installed" &&
       view.appId !== SYSTEM_APP_ID &&
@@ -137,6 +152,7 @@ function toInstalledAppCard(
     source: view.source,
     projectPath: deriveAppProjectPath(view.source),
     origin: deriveAppOrigin(view),
+    installedAt: view.installedAt ?? null,
     suggestedChannelBindings: resolved?.manifest.suggestedChannelBindings ?? [],
   };
 }
@@ -238,10 +254,24 @@ async function readArtifactSummary(ref: ArtifactRef): Promise<AppArtifactSummary
   };
 }
 
+function artifactKey(kind: string, ownerId: string, publicName: string): string {
+  return JSON.stringify([kind, ownerId, publicName]);
+}
+
 async function loadArtifactDetailsByApp(
   catalog: AppCatalog,
+  loadFailures: readonly AppOwnedArtifactLoadFailure[],
 ): Promise<Map<string, AppArtifactDetails>> {
   const byApp = new Map<string, AppArtifactDetails>();
+  // The loaders read the same catalog refs listed below, so kind, owner, and
+  // public name match exactly. Reading the artifact file here cannot tell that
+  // a loader rejected it, for example on the output-schema check.
+  const loadErrors = new Map(
+    loadFailures.map((failure) => [
+      artifactKey(failure.kind, failure.ownerId, failure.publicName),
+      failure.error,
+    ]),
+  );
 
   async function append(
     key: keyof AppArtifactDetails,
@@ -253,7 +283,10 @@ async function loadArtifactDetailsByApp(
         .map(async (ref) => {
           const details = byApp.get(ref.ownerId) ?? emptyArtifactDetails();
           byApp.set(ref.ownerId, details);
-          details[key].push(await readArtifactSummary(ref));
+          const summary = await readArtifactSummary(ref);
+          const loadError =
+            summary.loadError ?? loadErrors.get(artifactKey(ref.kind, ref.ownerId, ref.publicName));
+          details[key].push(loadError ? { ...summary, loadError } : summary);
         }),
     );
   }
@@ -276,7 +309,10 @@ async function loadArtifactDetailsByApp(
 }
 
 async function loadPublicAccessConfig(deps: ApiDeps): Promise<PublicAccessConfig> {
-  const rows = await deps.db.select().from(settings).where(eq(settings.key, "publicAccess"));
+  const rows = await deps.db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
   return rows.length > 0 && rows[0].value
     ? normalizePublicAccessConfig(rows[0].value)
     : DEFAULT_PUBLIC_ACCESS_CONFIG;
@@ -345,28 +381,17 @@ export function appsRoutes(deps: ApiDeps): Hono {
         unsubscribe();
         close();
       };
-      // Fire-and-forget the write; do NOT return its promise. The catalog
-      // awaits each subscriber inside `fireEvent`, which runs under its global
-      // `refreshMutex` — the mutex that serializes every app
-      // install/uninstall/enable/disable. Returning the `writeSSE` promise here
-      // would tie that mutex to a live network write that can hang indefinitely
-      // on a stalled or half-dead client (stream backpressure leaves
-      // `writer.write()` pending), stalling app lifecycle instance-wide.
-      // Returning void keeps refresh decoupled from this connection, and
-      // successive writes stay ordered by the underlying writer.
+      // Fire-and-forget the write: see subscribeCatalogChanges for why it
+      // must not hold up the catalog. Successive writes stay ordered by the
+      // underlying writer.
       //
       // Teardown on a dead client comes from `onAbort` (reader cancel / request
       // abort) → `finish`, below. The `.catch(finish)` here is only a defensive
       // backstop: Hono's StreamingApi.write() swallows write errors and never
       // rejects, so it does not fire on a failed write today — it's kept in case
       // that ever changes, matching the system-upgrade route.
-      unsubscribe = deps.appCatalog.subscribe(function catalogEventStream(event) {
-        sse
-          .writeSSE({
-            event: "catalog-change",
-            data: JSON.stringify({ appId: event.appId, change: event.change }),
-          })
-          .catch(finish);
+      unsubscribe = subscribeCatalogChanges(deps.appCatalog, (event, data) => {
+        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
       });
       heartbeat = setInterval(() => {
         sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
@@ -445,7 +470,11 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const catalog = deps.appCatalog;
     const views = catalog.list();
     const publicAccess = await loadPublicAccessConfig(deps);
-    const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog);
+    const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
+      ...deps.agentLoader.getRegistryLoadFailures(),
+      ...deps.actionLoader.getRegistryLoadFailures(),
+      ...deps.skillCatalog.getRegistryLoadFailures(),
+    ]);
     const cards = views.map((view) =>
       toInstalledAppCard(
         view,
@@ -464,7 +493,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const path = c.req.query("path") ?? "";
 
     const view = deps.appCatalog.get(appId);
-    if (!view || !isResolvedApp(view) || !view.web) {
+    if (!isResolvedApp(view) || !view.web) {
       return c.json({ error: `App "${appId}" has no frontend` }, 404);
     }
 
@@ -707,9 +736,6 @@ export function appsRoutes(deps: ApiDeps): Hono {
     }
     const systemBlock = assertAppIdIsNotSystem(c, appId, 'App "system" cannot be published');
     if (systemBlock) return systemBlock;
-    if (!deps.appCatalog) {
-      return c.json({ error: "App catalog is not configured" }, 501);
-    }
     const view = deps.appCatalog.get(appId);
     if (!view) {
       return c.json({ error: `App "${appId}" is not installed` }, 404);

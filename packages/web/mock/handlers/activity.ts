@@ -1,5 +1,5 @@
 import { pairingPayload, PAIRING_HISTORY_PAGE_SIZE } from "@rome/api-types/approvals";
-import { pairingFixtures, PAIRING_FIXTURE_CODE } from "../../src/pages/dev/pairing-fixtures";
+import { pairingFixtures } from "../../src/pages/dev/pairing-fixtures";
 import { http, HttpResponse } from "msw";
 import type { ApprovalRecord } from "@/lib/chat-types";
 import type {
@@ -336,7 +336,7 @@ export const activityHandlers = [
   http.get("/api/approvals", ({ request }) => {
     for (const approval of approvals) {
       const payload = pairingPayload(approval);
-      if (payload && approval.status === "pending" && payload.expiresAt <= Date.now()) {
+      if (payload && approval.status === "pending") {
         approval.status = "rejected";
         approval.payload = { ...payload, resolution: "expired" };
         approval.resolvedBy = "system:expiry";
@@ -353,19 +353,6 @@ export const activityHandlers = [
       ...current,
       ...history.slice(offset, offset + PAIRING_HISTORY_PAGE_SIZE),
     ]);
-  }),
-  http.get("/api/approvals/:id/code", ({ params }) => {
-    const approval = findApproval(String(params.id));
-    const payload = approval && pairingPayload(approval);
-    return HttpResponse.json({
-      code:
-        payload &&
-        approval?.status === "pending" &&
-        payload.expiresAt > Date.now() &&
-        payload.failedAttempts < 5
-          ? PAIRING_FIXTURE_CODE
-          : null,
-    });
   }),
   // Keyed by :id, so it must stay after the collection route above.
   http.get("/api/approvals/:id", ({ params }) => {
@@ -404,15 +391,12 @@ export const activityHandlers = [
     // The real route is write-once: a second resolution is a 409, and the
     // ApprovalCard treats that as success (it adopts the stored record), so a
     // fixture that silently re-resolved would hide the branch.
-    if (approval.status !== "pending") {
+    if (approval.status !== "pending" || pairingPayload(approval)) {
       return HttpResponse.json({ error: "Already resolved" }, { status: 409 });
     }
     approval.status = intent === "approve" ? "approved" : "rejected";
     approval.resolvedAt = new Date().toISOString();
     approval.resolvedBy = "mock-guardian";
-    const payload = pairingPayload(approval);
-    if (payload)
-      approval.payload = { ...payload, resolution: intent === "approve" ? "web" : "rejected" };
     if (intent === "approve" && approval.type === "action_execution")
       approval.executedAt = approval.resolvedAt;
     return HttpResponse.json({ ok: true });

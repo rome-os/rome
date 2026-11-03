@@ -497,6 +497,42 @@ describe("buildAnthropicMcpServers", () => {
     });
   });
 
+  it("read_skill returns the skill directory and companion files when present", async () => {
+    const withCompanions: SkillMcpDefinition = {
+      name: "system:app-lifecycle",
+      description: "Lifecycle",
+      content: "# App lifecycle",
+      directory: "/apps/system/dist/skills/app-lifecycle",
+      files: ["PUBLISHING.md", "SHARING.md"],
+      ownerType: "app",
+      ownerId: "system",
+    };
+    const bare: SkillMcpDefinition = {
+      name: "plain",
+      description: "Plain",
+      content: "# Plain",
+      ownerType: "core",
+      ownerId: "plain",
+    };
+    build({ skillCatalog: [withCompanions, bare], getSkillCatalog: () => [withCompanions, bare] });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const withPayload = JSON.parse(
+      (await readTool.handler({ skill_name: "system:app-lifecycle" })).content[0].text,
+    ) as Record<string, unknown>;
+    expect(withPayload).toEqual({
+      name: "system:app-lifecycle",
+      content: "# App lifecycle",
+      directory: "/apps/system/dist/skills/app-lifecycle",
+      files: ["PUBLISHING.md", "SHARING.md"],
+    });
+
+    const barePayload = JSON.parse(
+      (await readTool.handler({ skill_name: "plain" })).content[0].text,
+    ) as Record<string, unknown>;
+    expect(barePayload).toEqual({ name: "plain", content: "# Plain" });
+  });
+
   it("getSkillCatalog: skills server is registered even when the initial catalog is empty", async () => {
     // A profile that boots with no apps installed must still expose the
     // skill-discovery tools, so the agent can re-list after `app_management`

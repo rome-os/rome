@@ -1,5 +1,12 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+
+const logs = rs.hoisted(() => ({ warn: rs.fn(), info: rs.fn() }));
+rs.mock("../logger.js", () => ({
+  createLogger: () => ({ debug: rs.fn(), info: logs.info, warn: logs.warn, error: rs.fn() }),
+}));
+
 import { createAIToolState, type AIToolStateProbes } from "./ai-tool-state.js";
+import type { AIToolUsageStatus } from "../lib/provider-usage.js";
 
 function probes(overrides: Partial<AIToolStateProbes> = {}): AIToolStateProbes {
   return {
@@ -84,6 +91,217 @@ describe("AIToolState", () => {
     expect(state.get().codex.quotaExhausted).toBe(false);
   });
 
+  it.each([
+    "anthropic",
+    "openai",
+  ] as const)("replaces stale %s usage on failed probes without clearing a quota signal", async (provider) => {
+    const exhausted = {
+      checkedAt: "2026-09-27T17:12:35.031Z",
+      source: "test",
+      sevenDay: { usedPercent: 100, resetsAt: "2099-01-01T04:59:59.955Z" },
+    };
+    const failed = {
+      checkedAt: "2026-09-28T17:00:00.000Z",
+      source: "test",
+      error: "Claude usage request failed with HTTP 429",
+    };
+    const usageProbe = rs.fn<AIToolStateProbes["claudeUsage"]>();
+    usageProbe.mockResolvedValueOnce(exhausted);
+    usageProbe.mockResolvedValueOnce(failed);
+    usageProbe.mockResolvedValueOnce(null);
+    usageProbe.mockRejectedValueOnce(new Error("usage timed out"));
+    usageProbe.mockResolvedValueOnce({ ...failed, sevenDay: exhausted.sevenDay });
+    usageProbe.mockResolvedValueOnce({
+      checkedAt: "2026-09-28T17:05:00.000Z",
+      source: "test",
+      sevenDay: { usedPercent: 2, resetsAt: "2099-01-08T04:59:59.955Z" },
+    });
+    const state = createAIToolState({
+      probes: probes({
+        [provider === "anthropic" ? "claudeUsage" : "codexUsage"]: usageProbe,
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const current = () => state.get()[provider === "anthropic" ? "claude" : "codex"];
+    try {
+      await state.refresh(provider);
+      expect(current().usage?.sevenDay?.usedPercent).toBe(100);
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage).toEqual(failed);
+      expect(current().quotaExhausted).toBe(true);
+
+      // No usage source is not a failure: no bars and no error.
+      await state.refresh(provider);
+      expect(current().usage).toBeUndefined();
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage?.error).toBe("usage timed out");
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage).toEqual(failed);
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage?.error).toBeUndefined();
+      expect(current().usage?.sevenDay?.usedPercent).toBe(2);
+      expect(current().quotaExhausted).toBe(false);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("notifies only when the Codex login changes", async () => {
+    let loggedIn = true;
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({ codexStatus: async () => ({ loggedIn }) }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    state.markQuotaExhausted("openai");
+    expect(onCodexLoginChanged).not.toHaveBeenCalled();
+
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+
+    state.markQuotaExhausted("openai");
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+
+    loggedIn = false;
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("notifies after every Codex refresh, including a failed probe", async () => {
+    let fail = false;
+    const onCodexRefreshed = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => {
+          if (fail) throw new Error("down");
+          return { loggedIn: true };
+        },
+      }),
+      onCodexRefreshed,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    await state.refresh("anthropic");
+    expect(onCodexRefreshed).not.toHaveBeenCalled();
+    await state.refresh("openai");
+    fail = true;
+    await state.refresh();
+    expect(onCodexRefreshed).toHaveBeenCalledTimes(2);
+  });
+
+  it("notifies a Codex login change before unrelated full-refresh probes settle", async () => {
+    let releaseClaude!: () => void;
+    const claudeGate = new Promise<void>((resolve) => {
+      releaseClaude = resolve;
+    });
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn: false }),
+        claudeStatus: async () => {
+          await claudeGate;
+          return { loggedIn: true };
+        },
+      }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const refresh = state.refresh();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.get().codex.loggedIn).toBe(false);
+      expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseClaude();
+      await refresh;
+    }
+  });
+
+  it("notifies a Codex login change while the quota probe is still pending", async () => {
+    let releaseUsage!: () => void;
+    const usageGate = new Promise<void>((resolve) => {
+      releaseUsage = resolve;
+    });
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn: false }),
+        codexUsage: async () => {
+          await usageGate;
+          return null;
+        },
+      }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const refresh = state.refresh("openai");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.get().codex.loggedIn).toBe(false);
+      expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseUsage();
+      await refresh;
+    }
+  });
+
+  it("reads Codex usage again after a login change restarts Codex", async () => {
+    let loggedIn = false;
+    let usedPercent = 100;
+    let staleProbe: { reject: (err: Error) => void } | undefined;
+    let usageCalls = 0;
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn, authMode: "chatgpt", planType: "plus" }),
+        codexUsage: async () => {
+          usageCalls += 1;
+          if (loggedIn && !staleProbe) {
+            // Started on the process that the payer change replaces.
+            return await new Promise((_, reject) => {
+              staleProbe = { reject };
+            });
+          }
+          return {
+            checkedAt: "2026-08-07T00:00:00.000Z",
+            source: "test",
+            fiveHour: { usedPercent },
+          };
+        },
+      }),
+      onCodexLoginChanged: () => staleProbe?.reject(new Error("codex app-server exited")),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    await state.refresh("openai");
+    expect(state.get().codex.quotaExhausted).toBe(true);
+
+    loggedIn = true;
+    usedPercent = 10;
+    const callsBefore = usageCalls;
+    await state.refresh("openai");
+
+    expect(usageCalls - callsBefore).toBe(2);
+    expect(state.get().codex.quotaExhausted).toBe(false);
+  });
+
   it("does not let an older in-flight refresh clear a runtime quota failure", async () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>((resolve) => {
@@ -151,6 +369,281 @@ describe("AIToolState", () => {
 
     state.markQuotaExhausted("anthropic");
     expect(state.get().claude.quotaExhausted).toBe(false);
+  });
+
+  describe("usage-derived quota exhaustion", () => {
+    const now = Date.parse("2026-10-11T12:00:00.000Z");
+    const at = (offsetMs: number) => new Date(now + offsetMs).toISOString();
+    const HOUR = 60 * 60 * 1000;
+
+    function exhaustedState(windows: Pick<AIToolUsageStatus, "fiveHour" | "sevenDay">) {
+      const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => ({
+        checkedAt: at(0),
+        source: "test",
+        ...windows,
+      }));
+      const state = createAIToolState({
+        probes: probes({ claudeUsage }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+      return { state, claudeUsage };
+    }
+
+    it("ends at the latest reset among the exhausted windows", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+          sevenDay: { usedPercent: 100, resetsAt: at(3 * HOUR) },
+        });
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 3 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 3 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+        expect(claudeUsage).toHaveBeenCalledTimes(1);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("ignores the reset of a window with capacity", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+          sevenDay: { usedPercent: 40, resetsAt: at(72 * HOUR) },
+        });
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it.each([
+      ["no reset time", { fiveHour: { usedPercent: 100 } }],
+      ["an unparseable reset time", { fiveHour: { usedPercent: 100, resetsAt: "soon" } }],
+      [
+        "one exhausted window without a reset time",
+        {
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+          sevenDay: { remainingPercent: 0 },
+        },
+      ],
+    ])("blocks for one window after the window has %s, and longer while probes confirm it", async (_case, windows) => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState(windows);
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        // A later probe that confirms the exhaustion pushes the end out.
+        rs.setSystemTime(now + 4 * HOUR);
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + 9 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        // A probe with unknown usage, such as an expired CLI token, does not.
+        claudeUsage.mockResolvedValueOnce(null);
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + 9 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("ends at the usage reset after a runtime quota failure before it", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR - 1);
+        state.markQuotaExhausted("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("judges a replayed runtime quota failure by when it happened", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return { checkedAt: at(HOUR), source: "test", error: "HTTP 429" };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR - 1);
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + HOUR);
+        releaseUsage();
+        await olderRefresh;
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("keeps the reset known at a runtime quota failure when an older probe shows capacity", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return { checkedAt: at(0), source: "test", fiveHour: { usedPercent: 0 } };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        state.markQuotaExhausted("anthropic");
+        releaseUsage();
+        await olderRefresh;
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("caps a replayed failure over an exhausted window with no reset at one window", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return {
+            checkedAt: at(0),
+            source: "test",
+            fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+            sevenDay: { usedPercent: 100 },
+          };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        state.markQuotaExhausted("anthropic");
+        releaseUsage();
+        await olderRefresh;
+
+        rs.setSystemTime(now + 5 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 5 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("lets a runtime quota failure after the usage reset outlast it for one window", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR);
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + 6 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 6 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("ends a runtime quota failure with no reset after one window while probes fail", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        // An expired CLI token: every probe reports unknown usage.
+        const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => null);
+        const state = createAIToolState({
+          probes: probes({ claudeUsage }),
+          startRefresh: false,
+          refreshIntervalMs: null,
+        });
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + 5 * HOUR - 1);
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 5 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("keeps a usage reset when a later probe fails", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        claudeUsage.mockResolvedValueOnce({
+          checkedAt: at(0),
+          source: "test",
+          error: "Claude usage request failed with HTTP 429",
+        });
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
   });
 
   it("marks revoked auth after an older in-flight status refresh finishes", async () => {
@@ -290,6 +783,31 @@ describe("AIToolState", () => {
     await claudeRefresh;
   });
 
+  it("preserves startup and hourly probes for both providers without probing cached reads", async () => {
+    rs.useFakeTimers();
+    const codexStatus = rs.fn(async () => ({ loggedIn: true }));
+    const claudeStatus = rs.fn(async () => ({ loggedIn: true }));
+    const codexUsage = rs.fn(async () => null);
+    const claudeUsage = rs.fn(async () => null);
+    const allProbes = { codexStatus, claudeStatus, codexUsage, claudeUsage };
+    const state = createAIToolState({ probes: allProbes });
+    try {
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(1);
+      await state.refresh();
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(1);
+
+      for (let read = 0; read < 20; read += 1) state.get();
+      await rs.advanceTimersByTimeAsync(60 * 60 * 1000 - 1);
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(1);
+
+      await rs.advanceTimersByTimeAsync(1);
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(2);
+    } finally {
+      state.close();
+      rs.useRealTimers();
+    }
+  });
+
   it("runs all provider checks on the hourly timer", async () => {
     rs.useFakeTimers();
     const codexStatus = rs.fn(async () => ({
@@ -324,5 +842,148 @@ describe("AIToolState", () => {
     expect(state.get().claude.quotaExhausted).toBe(false);
     state.close();
     rs.useRealTimers();
+  });
+  describe("quota change logging", () => {
+    const now = Date.parse("2026-10-21T10:00:00.000Z");
+    const HOUR = 60 * 60 * 1000;
+
+    beforeEach(() => {
+      logs.warn.mockClear();
+      logs.info.mockClear();
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+    });
+
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    function codexWithUsage(usedPercent: () => number) {
+      return createAIToolState({
+        probes: probes({
+          codexUsage: async () => ({
+            checkedAt: new Date(now).toISOString(),
+            source: "test",
+            fiveHour: { usedPercent: usedPercent(), resetsAt: new Date(now + HOUR).toISOString() },
+          }),
+        }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+    }
+
+    it("logs a usage check that finds the limit once, then its recovery once", async () => {
+      let usedPercent = 100;
+      const state = codexWithUsage(() => usedPercent);
+
+      await state.refresh("openai");
+      await state.refresh("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.warn).toHaveBeenCalledWith("model provider usage limit reached", {
+        provider: "openai",
+        source: "usage check",
+        until: new Date(now + HOUR).toISOString(),
+        fiveHourUsedPercent: 100,
+        sevenDayUsedPercent: undefined,
+      });
+
+      usedPercent = 40;
+      await state.refresh("openai");
+      await state.refresh("openai");
+      expect(logs.info).toHaveBeenCalledTimes(1);
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "usage check",
+      });
+    });
+
+    it("logs the first failed run that hits the limit and not the ones after it", () => {
+      const state = createAIToolState({
+        probes: probes(),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+
+      state.markQuotaExhausted("openai");
+      state.markQuotaExhausted("openai");
+
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.warn).toHaveBeenCalledWith(
+        "model provider usage limit reached",
+        expect.objectContaining({ provider: "openai", source: "failed run" }),
+      );
+    });
+
+    it("attributes a recovery to the end time when no usage check confirmed it", async () => {
+      let usageFails = false;
+      const state = codexWithUsage(() => {
+        if (usageFails) throw new Error("usage endpoint throttled");
+        return 100;
+      });
+      await state.refresh("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+
+      // A failed usage check keeps the stored flag, so only the end time can
+      // have cleared the limit.
+      usageFails = true;
+      rs.setSystemTime(now + HOUR);
+      await state.refresh("openai");
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "end time passed",
+      });
+    });
+
+    it("logs a limit that ends and is hit again as cleared, then reached", () => {
+      const state = createAIToolState({
+        probes: probes(),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+      state.markQuotaExhausted("openai");
+      const until = state.get().codex.quotaExhaustedUntil;
+
+      rs.setSystemTime(Date.parse(until ?? "") + 1);
+      expect(state.get().codex.quotaExhausted).toBe(false);
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "end time passed",
+      });
+
+      state.markQuotaExhausted("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(2);
+      expect(logs.info).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs one warning for a failed run during a usage check that finds capacity", async () => {
+      let releaseUsage!: () => void;
+      const usageGate = new Promise<void>((resolve) => {
+        releaseUsage = resolve;
+      });
+      const state = createAIToolState({
+        probes: probes({
+          codexUsage: async () => {
+            await usageGate;
+            return {
+              checkedAt: new Date(now).toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 50 },
+            };
+          },
+        }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+
+      const refresh = state.refresh("openai");
+      state.markQuotaExhausted("openai");
+      releaseUsage();
+      await refresh;
+      await Promise.resolve();
+
+      expect(state.get().codex.quotaExhausted).toBe(true);
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.info).not.toHaveBeenCalled();
+    });
   });
 });

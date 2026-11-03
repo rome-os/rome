@@ -17,6 +17,7 @@
     "@expo/ui": "~57.0.13",
     "@preeternal/react-native-cookie-manager": "^6.4.0",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@rome-os/libs": "workspace:*",
     "expo": "~57.0.16",
     "expo-application": "~57.0.2",
     "expo-crypto": "~57.0.2",

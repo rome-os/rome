@@ -1,4 +1,10 @@
-import type { RomeSessionType, RunOutcomeSummary, RunUsageSummary } from "@rome/api-types/sessions";
+import type {
+  RomeSessionType,
+  RunOutcomeSummary,
+  RunUsageSummary,
+  SessionMetricGroup,
+} from "@rome/api-types/sessions";
+import { modelDisplayName } from "@/lib/model-display";
 
 export const SESSION_TYPE_LABELS: Record<RomeSessionType, string> = {
   webchat: "Chat",
@@ -38,20 +44,6 @@ export function formatDate(value?: string | null): string {
   }).format(date);
 }
 
-export function formatRelativeDate(value?: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  const delta = date.getTime() - Date.now();
-  if (Number.isNaN(delta)) return "—";
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  const abs = Math.abs(delta);
-  if (abs < 60_000) return "just now";
-  if (abs < 3_600_000) return formatter.format(Math.round(delta / 60_000), "minute");
-  if (abs < 86_400_000) return formatter.format(Math.round(delta / 3_600_000), "hour");
-  if (abs < 7 * 86_400_000) return formatter.format(Math.round(delta / 86_400_000), "day");
-  return formatDate(value);
-}
-
 export function formatOutcome(outcomes: RunOutcomeSummary): string {
   const known = outcomes.completed + outcomes.error + outcomes.interrupted;
   if (known === 0) return outcomes.unknown > 0 ? `${outcomes.unknown} unknown` : "No runs";
@@ -71,4 +63,12 @@ export function costCoverage(usage: RunUsageSummary, runCount: number): string |
 export function sourceLabel(value: string | null): string {
   if (!value) return "Internal";
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/** A metric group's name; a model group reads by the shared model display name. */
+export function metricGroupLabel(group: Pick<SessionMetricGroup, "label" | "dimension">): string {
+  const { dimension } = group;
+  return dimension.dimension === "model" && dimension.state === "known"
+    ? modelDisplayName(dimension.name)
+    : group.label;
 }

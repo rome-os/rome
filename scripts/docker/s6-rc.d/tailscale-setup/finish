@@ -1,0 +1,5 @@
+#!/bin/bash
+# s6 starts run in its own session. The finish process belongs to a different
+# session, so it can kill descendants that survived the service's exit.
+group="$(cat process-group 2>/dev/null)" || exit 0
+kill -KILL -- "-$group" 2>/dev/null || true

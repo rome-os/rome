@@ -1,7 +1,7 @@
 // A person's history, merged across every account they are linked to. The
 // message shape, the ordering and the cursor are the message module's
 // (@rome/api-types/message), and the page that wraps them is the People
-// contract's (@rome/api-types/people); a store is the channel's (`Messages`, in
+// contract's (@rome/api-types/people); a store is the channel's (`AccountMessages`, in
 // channels/messages.js); this module is only the merge above them.
 
 import { type TimelinePage } from "@rome/api-types/people";
@@ -11,7 +11,7 @@ import {
   messageCursor,
   type Message,
 } from "@rome/api-types/message";
-import type { MessageAccount, Messages } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 
 /**
  * One page of `accounts`' merged history, newest first, resuming after
@@ -23,7 +23,7 @@ import type { MessageAccount, Messages } from "../channels/messages.js";
  * the only scope there is.
  */
 export async function readPersonTimeline(
-  stores: readonly Messages[],
+  stores: readonly AccountMessages[],
   accounts: readonly MessageAccount[],
   options: { cursor?: Message | null; limit: number },
 ): Promise<TimelinePage> {
@@ -66,7 +66,7 @@ export async function readPersonTimeline(
  * page boundary. Instead each account's history comes from exactly one store.
  *
  * Ownership is derived rather than asked for: a store that answers a `latest`
- * for an account is a store that holds it, and `Messages` states that `latest`
+ * for an account is a store that holds it, and `AccountMessages` states that `latest`
  * is the head of the very history `read` pages. A separate "do you hold this"
  * verb would be a second answer to the same question, free to disagree with the
  * first — a row previewing an entry from one store while the page beneath it
@@ -83,11 +83,11 @@ export async function readPersonTimeline(
  * one per row.
  */
 export async function assignAccounts<Account extends MessageAccount>(
-  stores: readonly Messages[],
+  stores: readonly AccountMessages[],
   accounts: readonly Account[],
-): Promise<Array<[Messages, Account[]]>> {
+): Promise<Array<[AccountMessages, Account[]]>> {
   const owned = await assignAccountHeads(stores, accounts);
-  const assigned: Array<[Messages, Account[]]> = [];
+  const assigned: Array<[AccountMessages, Account[]]> = [];
   for (const store of stores) {
     const held = accounts.filter((account) => owned.get(account)?.store === store);
     if (held.length > 0) assigned.push([store, held]);
@@ -101,7 +101,7 @@ export async function assignAccounts<Account extends MessageAccount>(
  *
  * The `latest` a store answers is what decides ownership, and it is also the
  * head of the history that store will page — the same entry, by the law
- * `Messages` states. A caller that wants both therefore asks once: the account
+ * `AccountMessages` states. A caller that wants both therefore asks once: the account
  * stream previews exactly what it claims by, and cannot drift from the page it
  * opens onto by reading the two from separate calls.
  *
@@ -112,10 +112,10 @@ export async function assignAccounts<Account extends MessageAccount>(
  * back off the values it passed in.
  */
 export async function assignAccountHeads<Account extends MessageAccount>(
-  stores: readonly Messages[],
+  stores: readonly AccountMessages[],
   accounts: readonly Account[],
-): Promise<Map<Account, { store: Messages; head: Message }>> {
-  const owned = new Map<Account, { store: Messages; head: Message }>();
+): Promise<Map<Account, { store: AccountMessages; head: Message }>> {
+  const owned = new Map<Account, { store: AccountMessages; head: Message }>();
   let unclaimed = [...accounts];
   for (const store of stores) {
     if (unclaimed.length === 0) break;

@@ -1,13 +1,11 @@
 import { http, HttpResponse } from "msw";
-import { STRANGER_PERSON_ID, protectedPersonReason } from "@rome/api-types/persons";
+import { protectedPersonReason } from "@rome/api-types/persons";
 import {
   accountPresentation,
   comparePeople,
   countPeople,
   isAssignableBondLevel,
   latestDynamic,
-  matchesSendRequest,
-  SEND_IDEMPOTENCY_RETENTION_MS,
   parseAccountCursor,
   parseAccountState,
   parseStreamCursor,
@@ -17,6 +15,7 @@ import {
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
+  sendRefusalMessage,
   sliceAccountDirectory,
   sliceAccountStream,
   timelinePageLimit,
@@ -26,11 +25,10 @@ import {
   type LinkConflict,
   type AccountSendState,
   type AccountState,
-  type OutboxMessage,
-  type OutboxPage,
   type PeopleList,
   type PersonResource,
   type SendRefusal,
+  type SentMessage,
   type StreamAccount,
   type TimelinePage,
 } from "@rome/api-types/people";
@@ -48,6 +46,8 @@ import {
   nameForAccount,
   nextPersonId,
   ownerOf,
+  dismissalOf,
+  dismissedAccounts,
   personTimeline,
   persons,
   recordDelivered,
@@ -67,9 +67,8 @@ import {
  * against the contract module like every other handler here, so the dashboard
  * cannot be built against a shape production does not answer with.
  *
- * The stranger sentinel is implementation, not contract: dismissal is stored
- * as a link to the sentinel row, presented as `state: "dismissed"` through
- * `accountPresentation`, and no /api/people route addresses the sentinel.
+ * A dismissal is its own record (`dismissedAccounts`), presented as
+ * `state: "dismissed"` through `accountPresentation`.
  */
 
 function sendState({ channel, channelUserId }: AccountRef): AccountSendState {
@@ -95,6 +94,7 @@ function personResource(person: PersonFixture): PersonResource {
       // names a channel and not an address, so it cannot say which of two
       // accounts on one channel was the recent one.
       latestAt: accountTimeline(a)[0]?.timestamp ?? null,
+      ...(a.delegate ? { delegate: true as const } : {}),
     })),
     // Timeline entries, not records: the contract pins a person's count to the
     // history GET /api/people/:id/messages pages.
@@ -116,7 +116,13 @@ function directoryRow(ref: AccountRef): DirectoryAccount {
     channelUserId: ref.channelUserId,
     addresses: [ref.channelUserId],
     displayName: nameForAccount(ref.channel, ref.channelUserId),
-    ...accountPresentation(owner ? { personId: owner.id, displayName: owner.displayName } : null),
+    ...accountPresentation(
+      owner
+        ? { personId: owner.id, displayName: owner.displayName }
+        : dismissalOf(ref.channel, ref.channelUserId) >= 0
+          ? { dismissed: true }
+          : null,
+    ),
   };
 }
 
@@ -135,6 +141,7 @@ function observedAccounts(): AccountRef[] {
     seen.set(`${channel}\n${channelUserId}`, { channel, channelUserId });
   };
   for (const p of persons) for (const m of p.channelMappings) add(m.channel, m.channelUserId);
+  for (const d of dismissedAccounts) add(d.channel, d.channelUserId);
   for (const s of sentinelSenders) add(s.channel, s.channelUserId);
   for (const c of whatsappContacts) if (!c.isGroup) add("whatsapp", c.jid);
   return [...seen.values()];
@@ -156,20 +163,9 @@ function readState(params: URLSearchParams): { state: AccountState | null } | { 
   return { state };
 }
 
-/** The sentinel is structure: no /api/people route resolves it. */
-const findVisiblePerson = (id: string) =>
-  id === STRANGER_PERSON_ID ? undefined : persons.find((p) => p.id === id);
-
-const strangerRow = () => persons.find((p) => p.id === STRANGER_PERSON_ID);
+const findVisiblePerson = (id: string) => persons.find((p) => p.id === id);
 
 const notFound = (what: string) => HttpResponse.json({ error: `Unknown ${what}` }, { status: 404 });
-
-/** What both outbox mutations answer for a row that is not this person's failed
- *  row. One reply for "no such row", "not yours" and "already claimed": the
- *  caller re-reads the outbox either way, and telling them apart would be
- *  telling a caller about somebody else's rows. */
-const notTheirs = () =>
-  HttpResponse.json({ error: "No failed message of theirs with that id" }, { status: 404 });
 
 const linkConflict = (ref: AccountRef, owner: { id: string; displayName: string }) =>
   ({
@@ -193,24 +189,28 @@ function link(
 ): { ok: true } | { status: number; body: Record<string, unknown> } {
   const owner = ownerOf(ref.channel, ref.channelUserId);
   if (owner?.id === person.id) return { ok: true }; // idempotent re-link
-  if (owner && owner.id !== STRANGER_PERSON_ID && owner.id !== transferFrom) {
+  if (owner && owner.id !== transferFrom) {
     return { status: 409, body: linkConflict(ref, owner) };
   }
-  if (transferFrom && owner?.id !== transferFrom && owner?.id !== STRANGER_PERSON_ID) {
+  if (transferFrom && owner?.id !== transferFrom) {
     return {
       status: 409,
       body: {
         error: "transferFrom does not match the account's current owner",
-        linkedPersonId: owner && owner.id !== STRANGER_PERSON_ID ? owner.id : null,
+        linkedPersonId: owner ? owner.id : null,
       },
     };
   }
+  // A transfer moves the link itself, so its delegate mark goes with it.
+  const moved = owner?.channelMappings.find(
+    (m) => m.channel === ref.channel && m.channelUserId === ref.channelUserId,
+  );
   if (owner) {
-    owner.channelMappings = owner.channelMappings.filter(
-      (m) => !(m.channel === ref.channel && m.channelUserId === ref.channelUserId),
-    );
+    owner.channelMappings = owner.channelMappings.filter((m) => m !== moved);
   }
-  person.channelMappings.push({ channel: ref.channel, channelUserId: ref.channelUserId });
+  const dismissal = dismissalOf(ref.channel, ref.channelUserId);
+  if (dismissal >= 0) dismissedAccounts.splice(dismissal, 1);
+  person.channelMappings.push(moved ?? { channel: ref.channel, channelUserId: ref.channelUserId });
   return { ok: true };
 }
 
@@ -220,235 +220,28 @@ const refFromParams = (params: Record<string, unknown>): AccountRef => ({
 });
 
 // ---------------------------------------------------------------------------
-// The outbox
+// Sending
 // ---------------------------------------------------------------------------
 
 /**
- * Sends Rome has been asked to make and has not seen arrive.
+ * Sends the channel has refused once, by account and text.
  *
- * Nothing here clears a row. A row is gone once its message is on the timeline,
- * and {@link readOutbox} is what notices — the same derivation the route runs,
- * so a dashboard built against this cannot come to depend on a delivery
- * callback production does not send.
- *
- * A real channel answers on its own schedule; this one answers on the clock,
- * because a mock with no provider behind it has nothing else to wait for. The
- * two waits are what make `sending` and `unconfirmed` visible states rather
- * than a flicker nobody can look at.
+ * A message starting with "fail" is refused the first time it is sent, so the
+ * dashboard's failed state and its Retry can both be reached: a mock has no
+ * provider to be down. The retry is a new request with the same text, and it
+ * goes through.
  */
-interface OutboxRow extends OutboxMessage {
-  /** When the current attempt started, in ms. A retry resets it, so the row
-   *  walks the same two stages again. */
-  attemptedAt: number;
-  attempts: number;
-}
+const refusedOnce = new Set<string>();
 
-const outbox: OutboxRow[] = [];
-const sendReceipts = new Map<string, { response: OutboxMessage; expiresAt: number }>();
-
-function pruneSendReceipts(now: number) {
-  for (const [id, receipt] of sendReceipts) {
-    if (receipt.expiresAt <= now) sendReceipts.delete(id);
-  }
-}
-
-function retireRow(row: OutboxRow, now: number) {
-  pruneSendReceipts(now);
-  sendReceipts.set(row.id, {
-    response: outboxMessage(row),
-    expiresAt: now + SEND_IDEMPOTENCY_RETENTION_MS,
-  });
-  outbox.splice(outbox.indexOf(row), 1);
-}
-
-/** How long the channel takes to accept a message, and how long after that it
- *  surfaces in the store the timeline reads. */
-const ACCEPTED_AFTER_MS = 700;
-const LANDS_AFTER_MS = 1_400;
-
-/** How long a row may sit unconfirmed before it counts as stuck. The route's
- *  five minutes; a mock row lands in under two seconds, so anything still here
- *  after this has been deliberately wedged. */
-const STRANDED_AFTER_MS = 5 * 60_000;
-
-/**
- * The fallback line on a refusal, in the route's own words.
- *
- * A fallback and not the copy: the dashboard keys off `send` and owns every
- * sentence a reader sees, which is what lets the refusal localize. Kept
- * identical to the route's so nothing can come to depend on the difference.
- */
-function refusalMessage(send: Exclude<AccountSendState, "yes">): string {
-  switch (send) {
-    case "not-connected":
-      return "That channel is not connected";
-    case "unsupported":
-      return "Rome cannot send on that channel";
-    case "no-conversation":
-      return "Rome has no conversation open with that account";
-  }
-}
-
-/**
- * The server's own line for a send whose process died before the channel
- * answered. Not a provider message, and deliberately equivocal — Rome does not
- * know whether it went out. Kept identical to `people/outbox.ts`'s, so the
- * dashboard is exercised against the text production actually sends.
- */
-const STRANDED_ERROR =
-  "Rome stopped before the channel answered; this may or may not have been sent";
-
-/**
- * Why this attempt stops, or null when it goes through.
- *
- * Text-triggered, because nothing else in mock mode can go wrong: there is no
- * provider to be down and no process to die. `fail` stops only the first
- * attempt, so Retry has something to succeed at — the gesture is the point of
- * the state. `stranded` keeps answering the same way, because it stands in for
- * a row nothing will ever move.
- */
-function stops(row: OutboxRow): string | null {
-  const text = row.text.toLowerCase();
-  if (text.startsWith("stranded")) return STRANDED_ERROR;
-  if (text.startsWith("fail") && row.attempts === 1) return "the channel rejected this message";
-  return null;
-}
-
-/**
- * A send the channel took and whose message never reaches the timeline.
- *
- * The phantom Discard exists for: on a channel with no mirror of its own,
- * Rome's transcript write is how a sent message lands, so a write that failed
- * leaves a row nothing will ever move. Text-triggered, because a mock has no
- * transcript to fail. Its row is backdated past the landing window on the way
- * to `unconfirmed`, since nobody is going to sit here for five minutes to watch
- * a button appear.
- */
-function wedges(row: OutboxRow): boolean {
-  return row.text.toLowerCase().startsWith("wedged");
-}
-
-/**
- * This person's row with that id, or null.
- *
- * Both outbox mutations resolve their row through this, because both are scoped
- * the same way: a message id is not a capability, and the person in the path is
- * whose outbox it is. Which states each verb then accepts is its own question,
- * and the two answers differ.
- */
-function rowOf(person: PersonFixture, messageId: string): OutboxRow | null {
-  const row = outbox.find((candidate) => candidate.id === messageId);
-  if (!row) return null;
-  const held = person.channelMappings.some(
-    (m) => m.channel === row.channel && m.channelUserId === row.channelUserId,
-  );
-  return held ? row : null;
-}
-
-/**
- * Whether a row can be given up on: the route's rule, kept here so the mock and
- * production never disagree about whether a button works.
- *
- * A row is dismissable once nothing is going to happen to it on its own. A
- * `failed` one is finished. An `unconfirmed` one inside the landing window is
- * ordinary and about to clear itself, so dropping it would race the clearing;
- * past the window it was delivered and will never be seen, and on a channel
- * with no mirror of its own that is the only way out it has. A `sending` one
- * has not been answered yet.
- */
-function isDismissableRow(row: OutboxRow, now: number): boolean {
-  if (row.state === "failed") return true;
-  return row.state === "unconfirmed" && now - row.attemptedAt >= STRANDED_AFTER_MS;
-}
-
-function openRow(account: AccountRef, text: string, id: string = crypto.randomUUID()): OutboxRow {
-  const row: OutboxRow = {
-    id,
-    channel: account.channel,
-    channelUserId: account.channelUserId,
-    text,
-    timestamp: Math.floor(Date.now() / 1000),
-    state: "sending",
-    ref: null,
-    error: null,
-    attemptedAt: Date.now(),
-    attempts: 1,
-  };
-  outbox.push(row);
-  return row;
-}
-
-/** The wire shape: the row minus the bookkeeping that drives the mock's clock,
- *  which is not on the contract. */
-function outboxMessage(row: OutboxRow): OutboxMessage {
-  const { attemptedAt: _at, attempts: _n, ...message } = row;
-  return message;
-}
-
-/**
- * This person's outbox, after moving every row as far as its clock allows.
- *
- * Two steps, in the order the real one takes them. First each attempt resolves:
- * accepted and named, or refused. Then a message that has surfaced clears its
- * row — by looking its `ref` up on the timeline, never by a flag, because that
- * comparison is what the contract says an outbox row *is*.
- */
-function readOutbox(person: PersonFixture): OutboxMessage[] {
-  const now = Date.now();
-  const held = (row: OutboxRow) =>
-    person.channelMappings.some(
-      (m) => m.channel === row.channel && m.channelUserId === row.channelUserId,
-    );
-
-  for (const row of outbox.filter(held)) {
-    const elapsed = now - row.attemptedAt;
-    if (row.state === "sending" && elapsed >= ACCEPTED_AFTER_MS) {
-      const stopped = stops(row);
-      if (stopped !== null) {
-        row.state = "failed";
-        row.error = stopped;
-      } else {
-        row.state = "unconfirmed";
-        // The id the channel gives back. A hint at the entry this would become
-        // at the address it was sent to, not a key: the server recognizes an
-        // arrival across every address the account folds, and this is the mock
-        // playing server rather than anything a client may rely on.
-        row.ref = `${row.channelUserId}:${row.id}`;
-        if (wedges(row)) {
-          // Backdated on the wire as well as in the bookkeeping. The row stands
-          // in for one accepted five minutes ago, and a reader decides whether
-          // to offer Discard from `timestamp` — the only age the contract
-          // carries. A row old to the route and fresh to the client would be a
-          // button that looks wrong rather than a state worth looking at.
-          row.attemptedAt = now - STRANDED_AFTER_MS;
-          row.timestamp = Math.floor((now - STRANDED_AFTER_MS) / 1000);
-        }
-      }
-    }
-    if (
-      row.state === "unconfirmed" &&
-      elapsed >= LANDS_AFTER_MS &&
-      row.ref !== null &&
-      !wedges(row)
-    ) {
-      recordDelivered(row, { timestamp: row.timestamp, body: row.text, ref: row.ref });
-    }
-  }
-
-  const arrived = new Set((personTimeline(person.id) ?? []).map((entry) => entry.ref));
-  for (let i = outbox.length - 1; i >= 0; i -= 1) {
-    const row = outbox[i]!;
-    if (held(row) && row.state === "unconfirmed" && row.ref !== null && arrived.has(row.ref)) {
-      retireRow(row, now);
-    }
-  }
-
-  return outbox.filter(held).map(outboxMessage);
+function refuses(account: AccountRef, text: string): boolean {
+  if (!text.toLowerCase().startsWith("fail")) return false;
+  const key = `${account.channel}\u0000${account.channelUserId}\u0000${text}`;
+  if (refusedOnce.has(key)) return false;
+  refusedOnce.add(key);
+  return true;
 }
 
 export const peopleHandlers = [
-  // Curated people only — the sentinel's holdings surface on /api/accounts as
-  // dismissed rows, never as a person.
   http.get("/api/people", ({ request }) => {
     const params = new URL(request.url).searchParams;
     const q = (params.get("q") ?? "").trim();
@@ -459,10 +252,7 @@ export const peopleHandlers = [
     }
     // Counts cover everything the query matches; `?level=` narrows the rows
     // alone, so every chip keeps its number while one is selected.
-    const matching = persons
-      .filter((p) => p.id !== STRANGER_PERSON_ID)
-      .map(personResource)
-      .filter((p) => !q || personMatchesQuery(p, q));
+    const matching = persons.map(personResource).filter((p) => !q || personMatchesQuery(p, q));
     const rows = matching.filter((p) => !level || personMatchesLevel(p, level)).sort(comparePeople);
     return HttpResponse.json({ people: rows, counts: countPeople(matching) } satisfies PeopleList);
   }),
@@ -489,6 +279,7 @@ export const peopleHandlers = [
     return HttpResponse.json(
       sliceAccountDirectory(observedAccounts().map(directoryRow), {
         query: params.get("q"),
+        channel: params.get("channel"),
         state: state.state,
         cursor,
         limit: params.get("limit") ? Number(params.get("limit")) : null,
@@ -525,13 +316,9 @@ export const peopleHandlers = [
   http.post("/api/accounts/:channel/:channelUserId/dismiss", ({ params }) => {
     const ref = refFromParams(params);
     const owner = ownerOf(ref.channel, ref.channelUserId);
-    if (owner && owner.id !== STRANGER_PERSON_ID) {
-      return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
-    }
-    const sentinel = strangerRow();
-    if (!sentinel) return notFound("account");
-    if (!owner) {
-      sentinel.channelMappings.push({ channel: ref.channel, channelUserId: ref.channelUserId });
+    if (owner) return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
+    if (dismissalOf(ref.channel, ref.channelUserId) < 0) {
+      dismissedAccounts.push({ channel: ref.channel, channelUserId: ref.channelUserId });
     }
     return HttpResponse.json(directoryRow(ref));
   }),
@@ -541,16 +328,16 @@ export const peopleHandlers = [
   http.post("/api/accounts/:channel/:channelUserId/restore", ({ params }) => {
     const ref = refFromParams(params);
     const owner = ownerOf(ref.channel, ref.channelUserId);
-    if (owner && owner.id !== STRANGER_PERSON_ID) {
-      return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
-    }
-    if (owner) {
-      owner.channelMappings = owner.channelMappings.filter(
-        (m) => !(m.channel === ref.channel && m.channelUserId === ref.channelUserId),
-      );
-    }
+    if (owner) return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
+    const dismissal = dismissalOf(ref.channel, ref.channelUserId);
+    if (dismissal >= 0) dismissedAccounts.splice(dismissal, 1);
     return HttpResponse.json(directoryRow(ref));
   }),
+
+  // A fixed code: mock mode links nothing, so only the dialog is exercised.
+  http.post("/api/people/link-code", () =>
+    HttpResponse.json({ code: "ROME-7KQ2M9XA", expiresAt: Date.now() + 600_000 }, { status: 201 }),
+  ),
 
   http.post("/api/people", async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as Partial<CreatePersonRequest>;
@@ -569,9 +356,7 @@ export const peopleHandlers = [
     // if any named account is held by a real person — never a half-made person.
     for (const ref of accounts) {
       const owner = ownerOf(ref.channel, ref.channelUserId);
-      if (owner && owner.id !== STRANGER_PERSON_ID) {
-        return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
-      }
+      if (owner) return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
     }
     const created: PersonFixture = {
       id: nextPersonId(body.displayName),
@@ -610,11 +395,9 @@ export const peopleHandlers = [
   }),
 
   /**
-   * Say something to one of this person's accounts.
-   *
-   * 202 rather than 200, and an outbox row rather than a timeline entry: the
-   * channel taking a message is not the message arriving, and the body says
-   * which of those has happened.
+   * Say something to one of this person's accounts. One call: the channel takes
+   * the message and Rome's copy is on the timeline, or the channel's refusal
+   * comes back as a 502.
    */
   http.post("/api/people/:id/messages", async ({ params, request }) => {
     const person = findVisiblePerson(String(params.id));
@@ -637,75 +420,23 @@ export const peopleHandlers = [
       );
     }
 
-    pruneSendReceipts(Date.now());
-    const active = outbox.find((row) => row.id === parsed.request.id);
-    const existing = active
-      ? outboxMessage(active)
-      : sendReceipts.get(parsed.request.id ?? "")?.response;
-    if (existing) {
-      return matchesSendRequest(existing, parsed.request)
-        ? HttpResponse.json(existing, { status: 202 })
-        : HttpResponse.json(
-            { error: "That send id belongs to a different message" },
-            { status: 409 },
-          );
-    }
-
     // The same state the person read answered with, so a client that raced a
     // disconnect renders the reason it would already have shown.
     const send = sendState(parsed.request);
     if (send !== "yes") {
-      return HttpResponse.json({ error: refusalMessage(send), send } satisfies SendRefusal, {
+      return HttpResponse.json({ error: sendRefusalMessage(send), send } satisfies SendRefusal, {
         status: 409,
       });
     }
 
-    return HttpResponse.json(
-      outboxMessage(openRow(parsed.request, parsed.request.text, parsed.request.id)),
-      {
-        status: 202,
-      },
-    );
-  }),
+    if (refuses(parsed.request, parsed.request.text)) {
+      return HttpResponse.json({ error: "the channel rejected this message" }, { status: 502 });
+    }
 
-  /** Every send of this person's still in flight. Unpaged — an outbox long
-   *  enough to page is an incident rather than a listing. */
-  http.get("/api/people/:id/outbox", ({ params }) => {
-    const person = findVisiblePerson(String(params.id));
-    if (!person) return notFound("person");
-    return HttpResponse.json({ messages: readOutbox(person) } satisfies OutboxPage);
-  }),
-
-  /** Try a failed send again. Under its own id, so a retry never reads as a
-   *  second message the guardian did not write. */
-  http.post("/api/people/:id/outbox/:messageId/retry", ({ params }) => {
-    const person = findVisiblePerson(String(params.id));
-    if (!person) return notFound("person");
-    // The row is claimed by the state it is in: a second retry of one already
-    // reopened finds nothing, which is what stops a double-clicked Retry
-    // delivering the guardian's message twice.
-    // Retry accepts a failed row and nothing else, and the state is what claims
-    // it: the second of two retries finds a row that is no longer theirs to
-    // send.
-    const row = rowOf(person, String(params.messageId));
-    if (!row || row.state !== "failed") return notTheirs();
-    row.state = "sending";
-    row.error = null;
-    row.ref = null;
-    row.attempts += 1;
-    row.attemptedAt = Date.now();
-    return HttpResponse.json(outboxMessage(row), { status: 202 });
-  }),
-
-  /** Give up on a failed send. The only way a row leaves the outbox without
-   *  having been delivered. */
-  http.delete("/api/people/:id/outbox/:messageId", ({ params }) => {
-    const person = findVisiblePerson(String(params.id));
-    if (!person) return notFound("person");
-    const row = rowOf(person, String(params.messageId));
-    if (!row || !isDismissableRow(row, Date.now())) return notTheirs();
-    retireRow(row, Date.now());
-    return new HttpResponse(null, { status: 204 });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const ref = `${parsed.request.channelUserId}:${crypto.randomUUID()}`;
+    recordDelivered(parsed.request, { timestamp, body: parsed.request.text, ref });
+    return HttpResponse.json({ ref, timestamp } satisfies SentMessage);
   }),
 
   http.get("/api/people/:id", ({ params }) => {
@@ -783,5 +514,17 @@ export const peopleHandlers = [
     target.channelMappings.push(...source.channelMappings);
     persons.splice(persons.indexOf(source), 1);
     return HttpResponse.json(personResource(target));
+  }),
+
+  // Delete: the person and their links go, so their accounts are strangers
+  // again. The guardian stays.
+  http.delete("/api/people/:id", ({ params }) => {
+    const person = findVisiblePerson(String(params.id));
+    if (!person) return notFound("person");
+    if (protectedPersonReason(person) === "guardian") {
+      return HttpResponse.json({ error: "the guardian cannot be deleted" }, { status: 400 });
+    }
+    persons.splice(persons.indexOf(person), 1);
+    return new HttpResponse(null, { status: 204 });
   }),
 ];

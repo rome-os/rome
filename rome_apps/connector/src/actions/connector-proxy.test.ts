@@ -1,6 +1,8 @@
+import { APIError } from "@composio/client";
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as sharedModule from "../shared.js" with { rstest: "importActual" };
+import * as shopifyProxyModule from "../api/shopify-proxy.js" with { rstest: "importActual" };
 
 // Composio is the external system here; fake the connector client so the
 // response-mapping can be exercised as a black box (given an upstream response,
@@ -33,6 +35,16 @@ const slackProxyCall = rs.fn();
 rs.mock("../api/slack-proxy.js", () => ({
   readSlackOAuthTokens: () => readSlackOAuthTokens(),
   slackProxyCall: (args: unknown) => slackProxyCall(args),
+}));
+
+// Shopify is likewise brokered by Rome's own integration — fake the token read
+// and the HTTP call, keeping the real GraphQL error detection.
+const readShopifyOAuthToken = rs.fn();
+const shopifyProxyCall = rs.fn();
+rs.mock("../api/shopify-proxy.js", () => ({
+  ...shopifyProxyModule,
+  readShopifyOAuthToken: () => readShopifyOAuthToken(),
+  shopifyProxyCall: (args: unknown) => shopifyProxyCall(args),
 }));
 
 const { createAction } = await import("./connector-proxy/index.js");
@@ -115,6 +127,41 @@ describe("connector_proxy response mapping", () => {
     });
   });
 
+  // Google Calendar's flags (singleEvents, showDeleted, …) are booleans, and an
+  // agent naturally writes them as JSON booleans. The client serializes them.
+  it.each([true, false])("accepts a boolean query value (singleEvents: %s)", async (flag) => {
+    let received: unknown;
+    loadConnectorClient.mockResolvedValueOnce({
+      findActiveConnectedAccount: async () => ({ kind: "ok", id: "acc_1" }),
+      proxyTool: async (args: unknown) => {
+        received = args;
+        return { status: 200, data: {}, headers: {} };
+      },
+    });
+    const result = await run({
+      toolkit: "googlecalendar",
+      path: "/calendar/v3/calendars/primary/events",
+      method: "GET",
+      query: { singleEvents: flag, maxResults: 10 },
+    });
+    expect(result.status).toBe("ok");
+    expect(received).toMatchObject({ query: { singleEvents: flag, maxResults: 10 } });
+  });
+
+  it("rejects a non-scalar query value before loading the client", async () => {
+    const result = await run({
+      toolkit: "googlecalendar",
+      path: "/calendar/v3/calendars/primary/events",
+      method: "GET",
+      query: { singleEvents: { value: true } },
+    });
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/query\.singleEvents/),
+    });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+
   it("fills in the toolkit's default host when host is omitted (path-only call)", async () => {
     let received: { endpoint?: string } | undefined;
     loadConnectorClient.mockResolvedValueOnce({
@@ -175,6 +222,9 @@ describe("connector_proxy response mapping", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/401/);
     expect(result.error).toMatch(/invalid token/);
+    // The provider refused its own token, which says nothing about the Composio
+    // sign-in, so the agent must not be sent to connector_login.
+    expect(result.error).not.toMatch(/connector_login/);
   });
 
   it("fails closed when the toolkit is not connected", async () => {
@@ -243,10 +293,7 @@ describe("connector_proxy response mapping", () => {
     expect(result).toMatchObject({ status: "ok", data: { data: { emailAddress: "a@b.com" } } });
   });
 
-  it("routes an unconnected GitHub (no token) to Settings, not connector_connect", async () => {
-    // GitHub bypasses Composio entirely — "not connected" means no OAuth token
-    // file, so the agent is pointed at Settings → Connections, never asked to
-    // run connector_connect (which can't broker a Rome-managed toolkit).
+  it("routes an unconnected GitHub (no token) to its native connect card", async () => {
     readGithubOAuthToken.mockResolvedValueOnce(null);
     loadConnectorClient.mockImplementation(() => {
       throw new Error("Composio must not be reached for GitHub");
@@ -255,7 +302,8 @@ describe("connector_proxy response mapping", () => {
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/settings/i);
-    expect(result.error).not.toMatch(/connector_connect/);
+    expect(result.error).toContain('connector_connect({"toolkit":"github"})');
+    expect(result.error).not.toMatch(/can.t be connected from here/);
     expect(githubProxyCall).not.toHaveBeenCalled();
   });
 
@@ -404,5 +452,198 @@ describe("connector_proxy response mapping", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/Refusing to proxy/);
     expect(readSlackOAuthTokens).not.toHaveBeenCalled();
+  });
+});
+
+// The error the SDK throws when Composio rejects Rome's own CLI session key.
+function composioError(status: number) {
+  return APIError.generate(
+    status,
+    { error: { slug: "UserApiKey_Unauthorized", message: "Invalid or revoked user API key" } },
+    undefined,
+    new Headers(),
+  );
+}
+
+describe("connector_proxy when Composio rejects the call", () => {
+  it("sends the agent to connector_login when the account lookup is rejected", async () => {
+    const proxyTool = rs.fn();
+    const ping = rs.fn(async () => ({ ok: false, status: 401, message: "revoked" }));
+    loadConnectorClient.mockResolvedValueOnce({
+      findActiveConnectedAccount: async () => {
+        throw composioError(401);
+      },
+      proxyTool,
+      ping,
+    });
+    const result = await run(linearCall);
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/connector_login/);
+    expect(result.error).toMatch(/sign in again/i);
+    expect(result.error).toMatch(/UserApiKey_Unauthorized/);
+    expect(proxyTool).not.toHaveBeenCalled();
+  });
+
+  it("sends the agent to connector_login when the proxy call itself is rejected", async () => {
+    loadConnectorClient.mockResolvedValueOnce({
+      ...clientWithProxy(async () => {
+        throw composioError(401);
+      }),
+      ping: async () => ({ ok: false, status: 401, message: "revoked" }),
+    });
+    const result = await run(linearCall);
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/connector_login/),
+    });
+  });
+
+  it("keeps the generic error when the saved sign-in still pings OK", async () => {
+    // A 401 the ping does not confirm is about something other than the sign-in.
+    // connector_login would answer signed_in, so naming it here would loop.
+    loadConnectorClient.mockResolvedValueOnce({
+      ...clientWithProxy(async () => {
+        throw composioError(401);
+      }),
+      ping: async () => ({ ok: true }),
+    });
+    const result = await run(linearCall);
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/^Composio proxy call failed: /);
+    expect(result.error).not.toMatch(/connector_login/);
+  });
+
+  it.each([403, 429, 500])("keeps the generic error for a thrown %i", async (status) => {
+    const ping = rs.fn();
+    loadConnectorClient.mockResolvedValueOnce({
+      ...clientWithProxy(async () => {
+        throw composioError(status);
+      }),
+      ping,
+    });
+    const result = await run(linearCall);
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/^Composio proxy call failed: /);
+    expect(result.error).not.toMatch(/connector_login/);
+    expect(ping).not.toHaveBeenCalled();
+  });
+
+  it("routes an unconnected Shopify (no token) to its native connect card", async () => {
+    readShopifyOAuthToken.mockResolvedValueOnce(null);
+    loadConnectorClient.mockImplementation(() => {
+      throw new Error("Composio must not be reached for Shopify");
+    });
+    const result = await run({
+      toolkit: "shopify",
+      path: "/admin/api/2026-10/graphql.json",
+      method: "POST",
+    });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toContain('connector_connect({"toolkit":"shopify"})');
+    expect(result.error).not.toMatch(/can.t be connected from here/);
+    expect(shopifyProxyCall).not.toHaveBeenCalled();
+  });
+
+  it("proxies Shopify to the connected store with its token, bypassing Composio", async () => {
+    readShopifyOAuthToken.mockResolvedValueOnce({
+      accessToken: "shpat_live",
+      shop: "acme.myshopify.com",
+    });
+    loadConnectorClient.mockImplementation(() => {
+      throw new Error("Composio must not be reached for Shopify");
+    });
+    let received: unknown;
+    shopifyProxyCall.mockImplementation(async (args: unknown) => {
+      received = args;
+      return { status: 200, data: { data: { shop: { name: "Acme" } } }, headers: {} };
+    });
+    const result = await run({
+      toolkit: "shopify",
+      path: "/admin/api/2026-10/graphql.json",
+      method: "POST",
+      body: { query: "{ shop { name } }" },
+    });
+    expect(received).toMatchObject({
+      token: { accessToken: "shpat_live" },
+      endpoint: "https://acme.myshopify.com/admin/api/2026-10/graphql.json",
+      method: "POST",
+    });
+    expect(result).toMatchObject({ status: "ok", data: { status: 200 } });
+  });
+
+  it("refuses to send a store's token to a different store", async () => {
+    readShopifyOAuthToken.mockResolvedValueOnce({
+      accessToken: "shpat_live",
+      shop: "acme.myshopify.com",
+    });
+    const result = await run({
+      toolkit: "shopify",
+      host: "other.myshopify.com",
+      path: "/admin/api/2026-10/graphql.json",
+      method: "POST",
+    });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/acme\.myshopify\.com/);
+    expect(shopifyProxyCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses an off-provider host for Shopify before sending the token", async () => {
+    readShopifyOAuthToken.mockResolvedValueOnce({
+      accessToken: "shpat_live",
+      shop: "acme.myshopify.com",
+    });
+    const result = await run({
+      toolkit: "shopify",
+      host: "evil.example.com",
+      path: "/admin/api/2026-10/graphql.json",
+      method: "POST",
+    });
+    expect(result.status).toBe("error");
+    expect(shopifyProxyCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Shopify REST Admin API call before sending the token", async () => {
+    for (const [path, method] of [
+      ["/admin/api/2026-10/products.json", "GET"],
+      ["/admin/api/2026-10/products/1.json", "PUT"],
+      ["/admin/api/2026-10/graphql.json", "GET"],
+    ] as const) {
+      readShopifyOAuthToken.mockResolvedValueOnce({
+        accessToken: "shpat_live",
+        shop: "acme.myshopify.com",
+      });
+      const result = await run({ toolkit: "shopify", path, method });
+      expect(result.status).toBe("error");
+      if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+      expect(result.error).toMatch(/^Refusing to proxy: /);
+      expect(result.error).toMatch(/GraphQL Admin API/);
+    }
+    expect(shopifyProxyCall).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Shopify returns GraphQL errors inside a 200", async () => {
+    readShopifyOAuthToken.mockResolvedValueOnce({
+      accessToken: "shpat_live",
+      shop: "acme.myshopify.com",
+    });
+    shopifyProxyCall.mockResolvedValueOnce({
+      status: 200,
+      data: { errors: [{ message: "Access denied for orders field." }] },
+      headers: {},
+    });
+    const result = await run({
+      toolkit: "shopify",
+      path: "/admin/api/2026-10/graphql.json",
+      method: "POST",
+      body: { query: "{ orders(first: 1) { nodes { id } } }" },
+    });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/Access denied/);
   });
 });

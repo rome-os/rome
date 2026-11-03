@@ -9,7 +9,7 @@
 <h1 align="center">Rome</h1>
 
 <p align="center">
-  <strong>The agentic OS for humans and agents.</strong>
+  <strong>A compounding agent OS for recursive agents.</strong>
 </p>
 
 <p align="center">
@@ -67,6 +67,10 @@ available as a preview.
 
 [Join the preview →](https://romeos.cc/login)
 
+The Mac app signs in to Rome Cloud, opens your Rome in its window, and connects
+the Mac as a device your Rome can run programs on. It does not run Rome itself.
+To run Rome on your own machine, use Docker.
+
 ### Run with Docker
 
 One script checks for Docker, pulls the published image, and starts Rome:
@@ -91,6 +95,16 @@ Telemetry export stays off unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`. Run
 the script with `--help` for ports, profiles, and the other settings it
 forwards.
 
+Rome Docker images default to `PANTHEON_BASE_ORIGIN=https://romeos.cc`.
+To use another Rome Cloud deployment, pass your origin when starting the container
+with `docker run -e PANTHEON_BASE_ORIGIN=https://cloud.example.com` or set it in
+the Compose `.env` file. Recreate the container after changing the value.
+The quickstart script also accepts a shell override:
+
+```bash
+PANTHEON_BASE_ORIGIN=https://cloud.example.com ./scripts/quickstart-docker.sh
+```
+
 ### Run the development environment
 
 To run this repository from source, you need:
@@ -113,8 +127,9 @@ default; set `ROME_DEV_PANTHEON_ORIGIN` to use another Rome Cloud deployment.
 The script prints the local URLs and development credentials when startup completes.
 
 This is the contributor development path, not the final production self-hosting
-distribution. See [`CLAUDE.md`](CLAUDE.md) for the complete development loop,
-container commands, and validation requirements.
+distribution. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report issues,
+open pull requests, and get through code review, and [`CLAUDE.md`](CLAUDE.md) for
+the complete development loop, container commands, and validation requirements.
 
 ## Rome Apps
 
@@ -293,7 +308,7 @@ Rome is a pnpm monorepo.
 | --- | --- |
 | [`packages/core/`](packages/core/) | Agent runtime, sessions, actions, events, channels, policies, memory, and persistence |
 | [`packages/web/`](packages/web/) | Guardian-only web dashboard |
-| [`packages/desktop/`](packages/desktop/) | Electron shell and local Rome runtime |
+| [`packages/desktop/`](packages/desktop/) | Mac app: opens a Rome Cloud Rome and connects the Mac as a device |
 | [`rome_apps/`](rome_apps/) | First-party Rome Apps loaded through the same app model |
 | [`packages/app-runtime-sdk/`](packages/app-runtime-sdk/) | Public backend SDK for Rome Apps |
 | [`packages/app-web-sdk/`](packages/app-web-sdk/) | Public web SDK and app build tooling |

@@ -68,9 +68,8 @@ export function getHostAppRoute(appId: string): string | null {
 // Paths under /apps/* that are host routes, not embeddable app bundles, so they
 // must never be classified as an app id — otherwise the public-app allowlist
 // could expose them without a session, and the auth gate would probe a manifest
-// that does not exist. "store" is the external Rome Cloud link; the rest are the
-// host-app dashboards above.
-const RESERVED_APP_ROUTE_IDS = new Set(["store", ...Object.keys(HOST_APP_ROUTES)]);
+// that does not exist.
+const RESERVED_APP_ROUTE_IDS = new Set(Object.keys(HOST_APP_ROUTES));
 
 export function getRoutedAppId(pathname: string): string | null {
   const match = pathname.match(/^\/(?:full\/)?apps\/([^/]+)(?:\/|$)/);

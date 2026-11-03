@@ -31,6 +31,8 @@ function makeService(
     },
     clearTimeout: () => {},
   });
+  // Fires every armed timer: the countdown deadline, or once a cutover is
+  // accepted, the restart window.
   const fireDeadline = () => {
     for (const fn of timers.splice(0)) fn();
   };
@@ -143,6 +145,32 @@ describe("SystemUpgradeService cutover", () => {
     fireDeadline();
     await rs.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("updating"));
     expect(applyUpgrade).toHaveBeenCalledExactlyOnceWith("1.3.0");
+  });
+
+  it("an accepted cutover that never replaces this process is offered again by the next probe", async () => {
+    const checkUpgrade = rs.fn(async () =>
+      check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
+    );
+    const { service, applyUpgrade, fireDeadline } = makeService({ checkUpgrade });
+    await service.checkAndOffer();
+    fireDeadline();
+    await rs.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("updating"));
+
+    // While updating, the nightly probe stays out of the way.
+    await service.checkAndOffer();
+    expect(checkUpgrade).toHaveBeenCalledTimes(1);
+
+    // Rome Cloud accepted but never restarted this process: the restart window
+    // elapses, and the next nightly probe opens a fresh countdown.
+    fireDeadline();
+    expect(service.getHub().getSnapshot().phase).toBe("idle");
+    const offer = await service.checkAndOffer();
+    expect(offer).toEqual({ pending: true, targetVersion: "1.3.0" });
+    expect(checkUpgrade).toHaveBeenCalledTimes(2);
+    expect(service.getHub().getSnapshot().phase).toBe("countdown");
+
+    fireDeadline();
+    await rs.waitFor(() => expect(applyUpgrade).toHaveBeenCalledTimes(2));
   });
 
   it("a failed deadline-path relay stands down to idle for the next nightly re-offer", async () => {

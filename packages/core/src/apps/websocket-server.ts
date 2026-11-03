@@ -17,6 +17,7 @@ import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { stripInternalHeaders } from "../relay/protocol.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../lib/auth.js";
 import { resolveGuardianSessionFromMaterial } from "../lib/guardian-session.js";
+import { readCookie, rejectUpgrade, toOriginRequest } from "../lib/ws-upgrade.js";
 import {
   enrichGuardianActor,
   runWithSessionActor,
@@ -24,6 +25,7 @@ import {
 } from "../lib/session-actor.js";
 import type { RomeAppViewer } from "../lib/visitor-session.js";
 import type { FavorService } from "../favors/types.js";
+import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 const log = createLogger("app-websocket");
 
@@ -51,6 +53,7 @@ export interface AppWebSocketDeps {
   routinesRepo?: RoutinesRepository;
   appRuntimeRepositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  appConnections?: AppConnectionsContextFactory;
 }
 
 interface MatchedPath {
@@ -69,44 +72,6 @@ function matchAppPath(pathname: string): MatchedPath | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Adapt a Node `IncomingMessage` to the `RequestLike` shape the origin helpers
- * expect: a Fetch-style `headers.get` and an absolute `url`. Lets the WS upgrade
- * reuse the same same-origin check as HTTP mutations.
- */
-function toOriginRequest(req: IncomingMessage): {
-  headers: { get(name: string): string | null };
-  url: string;
-} {
-  const host = req.headers.host ?? "localhost";
-  return {
-    url: new URL(req.url ?? "/", `http://${host}`).toString(),
-    headers: {
-      get(name) {
-        const value = req.headers[name.toLowerCase()];
-        return Array.isArray(value) ? value.join(", ") : (value ?? null);
-      },
-    },
-  };
-}
-
-/** Minimal cookie-header lookup — the upgrade path has no Hono context. */
-function readCookie(header: string | undefined, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() !== name) continue;
-    const raw = part.slice(eq + 1).trim();
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      return raw;
-    }
-  }
-  return null;
 }
 
 function resolveWsViewer(req: IncomingMessage): RomeAppViewer | undefined {
@@ -171,20 +136,6 @@ function toMessageData(raw: RawData, isBinary: boolean): string | Uint8Array {
   return new Uint8Array(raw as ArrayBuffer);
 }
 
-function rejectUpgrade(socket: Duplex, status: number, message: string): void {
-  const body = `${status} ${message}`;
-  // `end()` (not `destroy()`): flush the response, then half-close. `destroy()`
-  // aborts the stream before the kernel buffer drains, which can truncate the
-  // error body the client sees. The remote FIN tears down the rest.
-  socket.end(
-    `HTTP/1.1 ${status} ${message}\r\n` +
-      "Connection: close\r\n" +
-      "Content-Type: text/plain\r\n" +
-      `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n` +
-      body,
-  );
-}
-
 /**
  * Attaches app WebSocket support to the raw HTTP server. WebSocket upgrades
  * bypass `app.fetch` entirely (Node routes them through the `upgrade` event), so
@@ -201,6 +152,7 @@ export function attachAppWebSocket(server: Server, deps: AppWebSocketDeps): { cl
     routinesRepo: deps.routinesRepo,
     repositories: deps.appRuntimeRepositories,
     favorService: deps.favorService,
+    appConnections: deps.appConnections,
   });
 
   // Live connections, keyed by appId, so a catalog change can close them all.

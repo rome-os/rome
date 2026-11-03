@@ -19,12 +19,24 @@ Use this skill when a task requires browser automation, web interaction, page in
 
 OpenCLI uses its browser extension by default. Run `opencli profile list` to discover connected browsers before choosing a target.
 Pass `opencli --profile <name-or-id> ...` on every command for a task so concurrent work does not change its browser.
+The `chatgpt_chat` and `chatgpt_image` actions take the same name or id as their `profile` input.
 If the requested browser is disconnected, report that it is unavailable. Do not substitute another browser or assume its login session is equivalent.
 Settings > Advanced > Computer Use shows observed browser connections and their last seen times.
 Use `--cdp-endpoint` only when the task explicitly requires a direct CDP connection.
 
 The available sites are:
 1688, 36kr, 51job, amazon, antigravity, apple-podcasts, arxiv, baidu-scholar, band, barchart, bbc, bilibili, binance, bloomberg, bluesky, boss, chaoxing, chatgpt, chatgpt-app, chatwise, claude, cnki, codex, coupang, craigslist, ctrip, cursor, dblp, deepseek, devto, dianping, dictionary, discord-app, douban, doubao, doubao-app, douyin, eastmoney, facebook, gemini, gitee, google, google-scholar, gov-law, gov-policy, grok, hackernews, hf, hupu, imdb, indeed, instagram, jd, jianyu, jike, jimeng, ke, lesswrong, linkedin, linux-do, lobsters, maimai, medium, mubu, notebooklm, notion, nowcoder, ones, openreview, paperreview, pixiv, producthunt, quark, reddit, reuters, sinablog, sinafinance, smzdm, spotify, stackoverflow, steam, substack, taobao, tdx, ths, tiktok, toutiao, twitter, uiverse, v2ex, wanfang, web, weibo, weixin, weread, wikipedia, xianyu, xiaoe, xiaohongshu, xiaoyuzhou, xueqiu, yahoo-finance, yollomi, youtube, yuanbao, zhihu, zlibrary, zsxq
+
+## When a browser command times out
+
+A browser command can fail with `command_result_unknown`, for example `Browser exec command timed out after 120s; it may still complete in the browser.` The command may still finish in the browser, so its outcome is unknown.
+
+1. Do not repeat the command, and do not switch to another browser.
+2. Run `opencli --profile <name-or-id> browser <session> tab list`. It reads each tab's URL and title from the browser without running page JavaScript, so it usually answers while the page is stalled. `eval` and `state` run page JavaScript and wait on the same stalled page.
+3. If the command that timed out changes something, such as a submit or a send, check for its effect before closing the tab. Report an outcome you cannot confirm instead of retrying.
+4. If you attached the session to the user's tab with `browser <session> bind`, run `opencli --profile <name-or-id> browser <session> unbind` and stop. Tell the user that their tab is stalled and the command's outcome is unknown. `close` does not close a bound tab, and opening the page again would load it in a new tab instead of the user's.
+5. Otherwise, run `opencli --profile <name-or-id> browser <session> close`. It releases the session's tab lease, which holds the stalled page. Other sessions on the same browser keep working.
+6. Open the page again in that session once. This is the one repeat that step 1 allows, because `close` released the stalled page. If it times out again, report the site as unavailable.
 
 ## Authoring browser automation actions
 
@@ -35,3 +47,23 @@ The available sites are:
 5. Collect the result and close the page when no further action needs it.
 
 A script can trigger navigation, such as when it submits a form. That navigation destroys the JavaScript execution context. Run subsequent work in a separate step after the destination page is ready, not in the same script.
+
+## Per-user OpenCLI scripts
+
+Save a script when the same browser task comes up a second time, a routine or workflow will run it, or the user asks. Keep one-off exploration interactive.
+
+Use `~/.rome/<active-profile>/projects/browser-automation/<site>/`, a normal project visible in the Projects UI. Each site folder contains:
+- `opencli-plugin.json` with `"name": "user-<site>"`.
+- `package.json` containing `{"type":"module"}`.
+- One flat `.js` file per command, calling `cli()` from `@jackwener/opencli/registry`.
+- A `README.md` listing the commands.
+
+1. Complete the task interactively first.
+2. Write the command in the site folder.
+3. For a new site folder, run `opencli plugin install <dir>` once. The install symlinks the folder, so edits are live on the next invocation.
+4. Test with `opencli <site> <cmd> -f json`.
+5. Add a command line to the plugin README.
+
+Use the rendered page, not private APIs or auth tokens. Commands that change something must only verify by default and require an explicit flag such as `--send` to act. Fail on auth walls instead of returning partial data.
+
+Overrides of Rome or upstream commands are allowed. List each override in the plugin README, start its file with a comment naming the command it replaces, and redeclare that command's aliases. Overrides stop receiving Rome's fixes. When touching one, compare it with the current Rome version and delete it if it no longer adds anything.

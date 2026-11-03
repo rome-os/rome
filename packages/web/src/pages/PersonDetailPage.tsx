@@ -1,10 +1,11 @@
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
-import { formatWhatsAppPhone, normalizeBondLevel } from "@rome/api-types/people";
+import { normalizeBondLevel } from "@rome/api-types/people";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageShell, PageBody } from "@/shell/PageShell";
 import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
@@ -12,6 +13,7 @@ import { PersonConversation } from "./people/conversation";
 import { PersonManagement } from "./people/manage";
 import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
 import { levelLabelKey } from "./people/rows";
+import { accountHandle } from "./people/send-model";
 import { usePerson } from "./people/use-roster";
 
 /**
@@ -20,7 +22,7 @@ import { usePerson } from "./people/use-roster";
  * Who they are on top — name, bond, the accounts that resolve to this person —
  * and everything said to or by them below. This file owns the header and the
  * one read behind it, `GET /api/people/:id`; the conversation under it is
- * `people/conversation.tsx`, which owns the timeline, the outbox and the
+ * `people/conversation.tsx`, which owns the timeline, the pending sends and the
  * composer together because the three are one surface and settle as one.
  *
  * The management gestures the design puts on this card — the bond select, Link
@@ -43,6 +45,9 @@ export default function PersonDetailPageRoute() {
 
 function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const { t } = useTranslation("people");
+  // The section this dossier belongs to, named the way the sidebar and the
+  // route title name it, so the tab reads "<Person> · People · Rome".
+  const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -60,6 +65,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
 
   const personQuery = usePerson(personId);
   const person = personQuery.data ?? null;
+  useDocumentTitle(person === null ? null : [person.displayName, tCommon("nav.people")]);
 
   if (personQuery.isPending) {
     return (
@@ -143,11 +149,10 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                     key={`${account.channel}:${account.channelUserId}`}
                     channel={account.channel}
                   >
-                    <span className="font-mono tabular-nums">
-                      {account.channel === "whatsapp"
-                        ? (formatWhatsAppPhone(account.channelUserId) ?? account.channelUserId)
-                        : account.channelUserId}
-                    </span>
+                    <span className="font-mono tabular-nums">{accountHandle(account)}</span>
+                    {/* A delegate link is someone's agent, not the person, and
+                        the pill says so where the account is named. */}
+                    {account.delegate && <span>· {t("detail.delegate")}</span>}
                   </ChannelPill>
                 ))
               )}
@@ -163,6 +168,9 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
             onMerged={(survivorId) =>
               navigate(personPath(survivorId), { replace: true, state: { from: origin } })
             }
+            // A delete leaves nobody to follow, so the page goes where its back
+            // arrow would.
+            onDeleted={back}
           />
         </div>
 
@@ -172,24 +180,11 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   );
 }
 
-/**
- * The address a person was reached by before the dossier took its own segment.
- *
- * A person id never named a view, so forwarding is unambiguous: `/people/wei-chen`
- * meant that dossier and still reaches it. The two view segments are matched by
- * their own routes ahead of this one and never arrive here.
- */
-export function PersonLegacyRedirect() {
-  const params = useParams<{ personId: string }>();
-  const location = useLocation();
-  return <Navigate to={personPath(params.personId ?? "")} state={location.state} replace />;
-}
-
 function BackLink({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation("people");
   return (
     <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onClick}>
-      <ArrowLeft aria-hidden="true" />
+      <ArrowLeft data-icon="inline-start" aria-hidden="true" />
       {t("detail.back")}
     </Button>
   );

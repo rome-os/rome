@@ -1,12 +1,12 @@
+import { platformOf } from "@rome/api-types/platform";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
 
 /**
@@ -35,7 +35,6 @@ export interface BaselineIds {
     innerCircleId: string;
     acquaintanceId: string;
     otherId: string;
-    strangerId: string;
   };
   approvals: {
     pendingId: string;
@@ -83,7 +82,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PersonMappingRepository(db);
+  const repo = new PeopleRepository(db);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
@@ -92,38 +91,31 @@ async function seedPersonsBaseline(db: DrizzleDb) {
     profilePath: GUARDIAN_PROFILE_PATH,
     approved: true,
   });
-  await repo.addChannelMapping(guardianId, "telegram", "tg-guardian", "Guardian");
-  await repo.addChannelMapping(guardianId, "webchat", "web-guardian", "Guardian");
+  repo.linkStated({ platform: "telegram", id: "tg-guardian" }, guardianId);
+  repo.linkStated({ platform: "webchat", id: "web-guardian" }, guardianId);
 
   const innerCircleId = await repo.create({
     displayName: "Alice Inner",
     bondLevel: "inner-circle",
     approved: true,
-    channelMappings: [{ channel: "telegram", channelUserId: "tg-alice" }],
+    links: [{ platform: "telegram", id: "tg-alice" }],
   });
 
   const acquaintanceId = await repo.create({
     displayName: "Bob Acquaintance",
     bondLevel: "acquaintance",
     approved: true,
-    channelMappings: [{ channel: "telegram", channelUserId: "tg-bob" }],
+    links: [{ platform: "telegram", id: "tg-bob" }],
   });
 
   const otherId = await repo.create({
     displayName: "Carol Other",
     bondLevel: "other",
     approved: true,
-    channelMappings: [{ channel: "whatsapp", channelUserId: "wa-carol" }],
+    links: [{ platform: "whatsapp", id: "wa-carol" }],
   });
 
-  const strangerId = STRANGER_PERSON_ID;
-  await repo.createWithId(strangerId, {
-    displayName: "Stranger",
-    bondLevel: "other",
-    approved: true,
-  });
-
-  return { guardianId, innerCircleId, acquaintanceId, otherId, strangerId };
+  return { guardianId, innerCircleId, acquaintanceId, otherId };
 }
 
 async function seedApprovalsBaseline(db: DrizzleDb) {
@@ -166,7 +158,7 @@ async function seedApprovalsBaseline(db: DrizzleDb) {
 }
 
 async function seedSentinelLogBaseline(db: DrizzleDb) {
-  const repo = new SentinelLogRepository(db);
+  const repo = new SentinelLogRepository(db, platformOf);
 
   const repliedId = await repo.create({
     messageId: "msg-replied-1",

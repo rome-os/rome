@@ -1,0 +1,36 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# rome-start-chrome-cdp.sh restarts Chrome itself when it crashes, and s6
+# restarts the wrapper when the wrapper exits.
+echo "$$" >process-group
+if [ "${ROME_ENABLE_CHROME:-1}" = "0" ]; then
+  echo "ROME_ENABLE_CHROME=0, skipping Chrome startup."
+  exec sleep infinity
+fi
+
+browser_binary="${ROME_CHROME_BINARY:-}"
+if [ -z "$browser_binary" ] && [ -f /etc/rome-browser-binary ]; then
+  browser_binary="$(cat /etc/rome-browser-binary)"
+fi
+
+echo "Starting Chrome with CDP on :${ROME_CHROME_CDP_PORT:-9222} ..."
+exec rome-run-as rome --log /tmp/chrome-cdp.log env \
+  ROME_CHROME_BINARY="${browser_binary:-/usr/bin/google-chrome-stable}" \
+  ROME_CHROME_NAME="${ROME_CHROME_NAME:-Chrome}" \
+  ROME_CHROME_CDP_PORT="${ROME_CHROME_CDP_PORT:-9222}" \
+  ROME_CHROME_INTERNAL_CDP_PORT="${ROME_CHROME_INTERNAL_CDP_PORT:-9223}" \
+  ROME_CHROME_BIND_ADDRESS="${ROME_CHROME_BIND_ADDRESS:-0.0.0.0}" \
+  ROME_CHROME_STARTUP_WAIT="${ROME_CHROME_STARTUP_WAIT:-20}" \
+  ROME_CHROME_WINDOW_SIZE="${ROME_CHROME_WINDOW_SIZE:-1280,800}" \
+  ROME_CHROME_URL="${ROME_CHROME_URL:-about:blank}" \
+  ROME_CHROME_USER_DATA_DIR="${ROME_CHROME_USER_DATA_DIR:-/home/rome/.rome/chrome-profile}" \
+  ROME_CHROME_FULLSCREEN="${ROME_CHROME_FULLSCREEN:-0}" \
+  ROME_CHROME_DISABLE_SANDBOX="${ROME_CHROME_DISABLE_SANDBOX:-0}" \
+  ROME_ENABLE_CDP_AUTOMATION="${ROME_ENABLE_CDP_AUTOMATION:-false}" \
+  ROME_CHROME_ENABLE_STEALTH="${ROME_CHROME_ENABLE_STEALTH:-1}" \
+  ROME_CHROME_TIMEZONE="${ROME_CHROME_TIMEZONE:-America/Los_Angeles}" \
+  ROME_CHROME_LANG="${ROME_CHROME_LANG:-en-US}" \
+  ROME_CHROME_CLIPBOARD_DEFAULT_SETTING="${ROME_CHROME_CLIPBOARD_DEFAULT_SETTING:-}" \
+  ROME_CHROME_USER_AGENT="${ROME_CHROME_USER_AGENT:-}" \
+  ROME_CHROME_PROXY_URL="${ROME_CHROME_PROXY_URL:-}" \
+  /opt/rome/scripts/docker/rome-start-chrome-cdp.sh

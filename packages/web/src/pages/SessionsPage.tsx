@@ -12,7 +12,18 @@ import {
   SquareActivity,
   X,
 } from "lucide-react";
-import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import ActivityPage, { PendingApprovalsCallout } from "@/pages/ActivityPage";
+import { staticLiveText } from "@/hooks/live-text";
+import { useApprovals } from "@/hooks/use-approvals";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -44,7 +55,7 @@ import {
   traceDrawerContentInsetClass,
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
 import {
@@ -58,11 +69,11 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
+import { modelDisplayName } from "@/lib/model-display";
 import type {
   ChatMessage,
-  RomeSessionRecord,
+  RomeSessionExplorerRecord,
   RomeSessionsPageResult,
-  StreamBlock,
 } from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
@@ -97,7 +108,9 @@ function sessionAgentLabel(agentName: string | null | undefined): string {
   return artifactLocalName(agentName ?? "main");
 }
 
-function sessionTriggerLabel(session: RomeSessionRecord | RomeSessionDetail): string | null {
+function sessionTriggerLabel(
+  session: RomeSessionExplorerRecord | RomeSessionDetail,
+): string | null {
   return (
     session.triggerName ??
     (session.triggerActionName ? artifactLocalName(session.triggerActionName) : null)
@@ -254,8 +267,63 @@ function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children
   );
 }
 
-export function sessionsViewportClass(fullMode: boolean): string {
-  return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
+function sessionsViewportClass(fullMode: boolean): string {
+  return fullMode
+    ? "h-[var(--rome-viewport-height)] pt-safe"
+    : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]";
+}
+
+type ActivityView = "overview" | "sessions" | "events";
+
+/** Where the Activity page lives: in the shell, or mounted as a workspace tile. */
+function useActivityBase(): string {
+  return useLocation().pathname.startsWith("/full/apps/sessions")
+    ? "/full/apps/sessions"
+    : "/sessions";
+}
+
+/** The switch between the Activity page's three tabs. */
+function ActivityViewSwitch({ view }: { view: ActivityView }) {
+  const navigate = useNavigate();
+  const base = useActivityBase();
+  return (
+    <SegmentedControl
+      aria-label="Activity view"
+      size="sm"
+      value={view}
+      onValueChange={(value) => {
+        if (value === view) return;
+        navigate(
+          value === "overview" ? base : `${base}/${value === "sessions" ? "all" : "events"}`,
+        );
+      }}
+      options={[
+        { value: "overview", label: "Overview" },
+        { value: "sessions", label: "Sessions" },
+        { value: "events", label: "Events" },
+      ]}
+    />
+  );
+}
+
+/**
+ * Pending approvals wait on the Events tab, so the other tabs say they are
+ * there: an approval must not go unseen because another tab is open.
+ */
+function PendingApprovalsBanner({ className }: { className?: string }) {
+  const navigate = useNavigate();
+  const base = useActivityBase();
+  const approvals = useApprovals();
+  const count = (approvals.data ?? []).filter((approval) => approval.status === "pending").length;
+  if (count === 0) return null;
+  return (
+    <div className={className}>
+      <PendingApprovalsCallout
+        count={count}
+        onReview={() => navigate(`${base}/events?status=pending`)}
+      />
+    </div>
+  );
 }
 
 function SessionsIndexPage({
@@ -372,7 +440,7 @@ function SessionsIndexPage({
   const recentInventory = useRomeSessions(recentOptions, view === "overview");
   const { data, loading, error } = inventory;
   const sessions = data?.sessions ?? [];
-  const columns = useMemo<DataTableColumn<RomeSessionRecord>[]>(
+  const columns = useMemo<DataTableColumn<RomeSessionExplorerRecord>[]>(
     () => [
       {
         id: "session",
@@ -584,7 +652,7 @@ function SessionsIndexPage({
     model
       ? {
           key: "model",
-          label: `Model: ${model.kind === "unknown" ? "Unknown" : model.name}`,
+          label: `Model: ${model.kind === "unknown" ? "Unknown" : modelDisplayName(model.name)}`,
           clear: () => setModel(undefined),
         }
       : null,
@@ -600,7 +668,7 @@ function SessionsIndexPage({
   // not the drill-in filters the overview hands over, which the chip row shows.
   const popoverFilterCount = (type ? 1 : 0) + (source ? 1 : 0);
   const openSession = useCallback(
-    (session: RomeSessionRecord) => {
+    (session: RomeSessionExplorerRecord) => {
       navigate(
         view === "overview"
           ? encodeURIComponent(session.id)
@@ -614,20 +682,7 @@ function SessionsIndexPage({
     [navigate, view],
   );
 
-  const viewSwitch = (
-    <SegmentedControl
-      aria-label="Sessions view"
-      value={view}
-      onValueChange={(value) => {
-        if (value === view) return;
-        navigate(value === "sessions" ? "all" : "..", { relative: "path" });
-      }}
-      options={[
-        { value: "overview", label: "Overview" },
-        { value: "sessions", label: "Sessions" },
-      ]}
-    />
-  );
+  const viewSwitch = <ActivityViewSwitch view={view} />;
   const rangeItems = (
     <>
       <SelectItem value="24h">24 hours</SelectItem>
@@ -655,7 +710,7 @@ function SessionsIndexPage({
       }}
       disabled={overviewRefreshing}
     >
-      <RefreshCw className={overviewRefreshing ? "animate-spin" : ""} />
+      <RefreshCw data-icon="inline-start" className={overviewRefreshing ? "animate-spin" : ""} />
       Refresh
     </Button>
   );
@@ -676,6 +731,7 @@ function SessionsIndexPage({
               </PageHeading>
               <PageActions>{viewSwitch}</PageActions>
             </PageHeader>
+            <PendingApprovalsBanner />
             <ListToolbar aria-label="Filter sessions">
               {/* Search leads and grows: it is the only text control here, and the
                 one the reader reaches for first. */}
@@ -707,7 +763,7 @@ function SessionsIndexPage({
                 <ToolbarButton asChild>
                   <PopoverTrigger asChild>
                     <Button variant="outline">
-                      <ListFilter aria-hidden />
+                      <ListFilter data-icon="inline-start" aria-hidden />
                       Filter
                       {popoverFilterCount > 0 ? (
                         <Badge variant="muted" shape="pill">
@@ -1018,6 +1074,7 @@ function SessionsIndexPage({
         </header>
 
         <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
+          <PendingApprovalsBanner className="px-5 pt-4" />
           <SessionsOverview
             data={metrics.data}
             error={metrics.error}
@@ -1052,7 +1109,7 @@ function ReadOnlySessionChat({
   messages,
   liveTurn,
 }: {
-  session: RomeSessionRecord;
+  session: RomeSessionExplorerRecord;
   messages: ChatMessage[];
   liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
 }) {
@@ -1087,6 +1144,8 @@ function ReadOnlySessionChat({
       }),
     [identity, liveTurn, view],
   );
+  const liveText = liveTurn?.text ?? "";
+  const liveTextStore = useMemo(() => staticLiveText(liveText), [liveText]);
   const actions = useMemo<BlockActions>(
     () => ({
       onApprovalResolved: NO_OP,
@@ -1097,7 +1156,10 @@ function ReadOnlySessionChat({
     [view.interactionResults],
   );
   const loadStoredTrace = useCallback(
-    async (messageId: string, includeSubagentUsage: boolean): Promise<TraceSnapshot | null> => {
+    async (
+      messageId: string,
+      includeSubagentUsage: boolean,
+    ): Promise<TraceSnapshot | "archived" | null> => {
       const params = new URLSearchParams({
         includeSubagentUsage: String(includeSubagentUsage),
       });
@@ -1106,8 +1168,8 @@ function ReadOnlySessionChat({
         { credentials: "include" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { trace: TraceSnapshot | null };
-      return data.trace;
+      const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+      return data.traceArchived ? "archived" : data.trace;
     },
     [],
   );
@@ -1140,7 +1202,7 @@ function ReadOnlySessionChat({
                 isStreaming: liveTurn !== null,
                 runningTurnId: liveTurn?.turnId ?? null,
                 snapshot: liveTurn?.snapshot ?? null,
-                text: liveTurn?.text ?? "",
+                textStore: liveTextStore,
                 identity,
               }}
               contentRef={NO_OP}
@@ -1167,13 +1229,13 @@ function ReadOnlySessionChat({
           allowSubagentUsage
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,
@@ -1336,6 +1398,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const fullMode = location.pathname.startsWith("/full/apps/sessions");
+  const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const [session, setSession] = useState<RomeSessionDetail | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1374,6 +1437,11 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           setError("Session not found");
           setSession(null);
           setMessages([]);
+          // A saved workspace tile can outlive its session, so a framed page shows
+          // not-found in place: redirecting would nest chat in the tile.
+          if (window.parent === window) {
+            navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+          }
           return;
         }
         setSession(sessionResult);
@@ -1388,7 +1456,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, navigate, hideSidebar]);
 
   useEffect(() => {
     if (!session) {
@@ -1422,10 +1490,14 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         invocationCounts: {},
       };
       let text = "";
+      // The stream is opened under `active.turnId`; the transcript knows a
+      // backend turn by its `agentTurnId`, which the listing may already carry
+      // or the stream may report after attaching.
+      let runningTurnId = active.agentTurnId ?? active.turnId;
       const publish = () => {
         if (!cancelled) {
           setLiveTurn({
-            turnId: active.turnId,
+            turnId: runningTurnId,
             snapshot: { segments: segments.slice(), summary },
             text,
           });
@@ -1472,6 +1544,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           } else if (event.event === "assistant_text") {
             const payload = JSON.parse(event.data) as { text?: string };
             text = payload.text ?? "";
+            publish();
+          } else if (event.event === "turn_id") {
+            const payload = JSON.parse(event.data) as { turnId?: string };
+            if (payload.turnId) runningTurnId = payload.turnId;
             publish();
           } else if (event.event === "done" || event.event === "stream_error") {
             finished = true;
@@ -1547,7 +1623,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
               relative="path"
               state={location.state}
             >
-              <GitFork />
+              <GitFork data-icon="inline-start" />
               {session.type === "subagent" ? "Parent" : "Forked from"}
             </Link>
           </Button>
@@ -1555,7 +1631,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         {session?.type === "webchat" ? (
           <Button asChild variant="outline">
             <Link to={`/chat/${session.id}`}>
-              <ExternalLink />
+              <ExternalLink data-icon="inline-start" />
               Open chat
             </Link>
           </Button>
@@ -1596,8 +1672,23 @@ export default function SessionsPage() {
     <Routes>
       <Route index element={<SessionsIndexPage state={state} view="overview" />} />
       <Route path="all" element={<SessionsIndexPage state={state} view="sessions" />} />
+      <Route path="events" element={<ActivityEventsRoute />} />
       <Route path=":sessionId" element={<SessionDetailRoute />} />
     </Routes>
+  );
+}
+
+/** The Events tab: the event log. `?status=pending` opens it on the pending approvals. */
+function ActivityEventsRoute() {
+  const [params] = useSearchParams();
+  const fullMode = useActivityBase() !== "/sessions";
+  return (
+    <SessionsListFrame fullMode={fullMode}>
+      <ActivityPage
+        viewSwitch={<ActivityViewSwitch view="events" />}
+        initialFilter={params.get("status") === "pending" ? "pending" : "all"}
+      />
+    </SessionsListFrame>
   );
 }
 

@@ -85,17 +85,13 @@ function isFullyExpanded(node: ActionNode, expanded: Set<string>): boolean {
 
 export function ActionExecutionTree({
   roots,
-  defaultExpanded = true,
   className,
 }: {
   roots: ActionNode[];
-  /** Start with every direct child of the roots visible. */
-  defaultExpanded?: boolean;
   className?: string;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() =>
-    defaultExpanded ? new Set(roots.map((r) => r.id)) : new Set(),
-  );
+  // Start with every direct child of the roots visible.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(roots.map((r) => r.id)));
 
   // expand: reveal direct children only (add this node's id).
   const expand = (node: ActionNode) => setExpanded((prev) => new Set(prev).add(node.id));
@@ -289,53 +285,3 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
     </>
   );
 }
-
-// Mirrors the `action_executions` rows discussed in triage: the run reports
-// success while the `ai_summarize` child carries the real error.
-
-export const SAMPLE_ACTION_TREE: ActionNode[] = [
-  {
-    id: "1a2b3c4d-0001-4000-8000-000000000001",
-    actionName: "compose_daily_brief",
-    actionType: "custom",
-    status: "success",
-    durationMs: 30620,
-    initiator: "routine:Morning Brief",
-    args: { personId: "guardian", sections: ["calendar", "summary"] },
-    startedAt: 1782115200,
-    finishedAt: 1782115230,
-    children: [
-      {
-        id: "1a2b3c4d-0002-4000-8000-000000000002",
-        actionName: "fetch_calendar",
-        actionType: "system",
-        status: "success",
-        durationMs: 270,
-        initiator: "routine:Morning Brief",
-        args: { range: "today" },
-        children: [],
-      },
-      {
-        id: "1a2b3c4d-0003-4000-8000-000000000003",
-        actionName: "ai_summarize",
-        actionType: "system",
-        status: "error",
-        durationMs: 30010,
-        error: "model request timed out after 30000ms",
-        initiator: "routine:Morning Brief",
-        args: { model: "claude-haiku-4-5", maxTokens: 512 },
-        children: [],
-      },
-      {
-        id: "1a2b3c4d-0004-4000-8000-000000000004",
-        actionName: "send_telegram",
-        actionType: "system",
-        status: "success",
-        durationMs: 260,
-        initiator: "routine:Morning Brief",
-        args: { channel: "telegram", fallbackText: true },
-        children: [],
-      },
-    ],
-  },
-];

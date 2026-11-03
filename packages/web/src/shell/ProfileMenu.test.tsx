@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { loadNewChatDraft, saveNewChatDraft } from "@/lib/new-chat-draft-storage";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,16 +12,14 @@ import { ProfileMenu } from "./ProfileMenu";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
   cleanup();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
+  sessionStorage.clear();
+  localStorage.clear();
 });
 
 function LocationProbe() {
@@ -129,7 +128,23 @@ describe("ProfileMenu", () => {
       displayName: "Evan",
       avatarUrl: null,
     });
-    const assign = rs.fn();
+    localStorage.setItem("rome:auth-epoch", "before-logout");
+    saveNewChatDraft({
+      version: 1,
+      text: "private draft",
+      projectPath: "default",
+      agentMention: null,
+      skill: null,
+      personaId: "",
+    });
+    sessionStorage.setItem("rome:pending-app-remix", "unrelated");
+    const assign = rs.fn(() => {
+      expect(sessionStorage.getItem("rome:new-chat-draft")).toBeNull();
+      expect(localStorage.getItem("rome:auth-epoch")).toBeTruthy();
+      expect(localStorage.getItem("rome:auth-epoch")).not.toBe("before-logout");
+      expect(loadNewChatDraft()).toBeNull();
+      expect(sessionStorage.getItem("rome:pending-app-remix")).toBe("unrelated");
+    });
     rs.stubGlobal("location", { ...window.location, assign });
     renderMenu();
 

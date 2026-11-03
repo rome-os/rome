@@ -3,20 +3,25 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ActionConfig, TalkRouter } from "@rome-os/app-runtime";
+import {
+  setCurrentActionContextResolver,
+  type ActionConfig,
+  type ChannelsService,
+  type ChatRepository,
+} from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
-import type { SendMessageInput } from "./index.js";
+import type { AgentNamesService, SendMessageInput } from "./index.js";
 
 let tempDir = "";
 let projectsRoot = "";
 let outsideRoot = "";
 
-function makeAdapter(service = "discord"): TalkRouter {
+/** A channels service with one channel, `service`, backed by one Connection. */
+function makeAdapter(service = "discord"): ChannelsService {
   return {
-    list: async () => [{ connectionId: `test:${service}`, service }],
-    subscribe: () => () => {},
-    send: rs.fn(async (_connectionId, conversationId) => ({ conversationId })),
-    feature: () => null,
+    list: rs.fn(async () => [{ name: service, sendable: true }]),
+    send: rs.fn(async (_channel, chatId) => ({ chatId })),
+    query: async () => [],
   };
 }
 
@@ -50,7 +55,7 @@ describe("send_message attachments", () => {
       attachments: [{ type: "document", source, caption: "Report" }],
     });
 
-    expect(adapter.send).toHaveBeenCalledWith("test:discord", "thread-1", {
+    expect(adapter.send).toHaveBeenCalledWith("discord", "thread-1", {
       text: undefined,
       attachments: [{ type: "document", source: safeSource, caption: "Report" }],
       replyToMessageId: undefined,
@@ -95,8 +100,13 @@ describe("send_message attachments", () => {
 });
 
 describe("send_message email union", () => {
-  function makeEmailAdapter(): TalkRouter {
-    return makeAdapter("email");
+  function makeEmailAdapter(): ChannelsService {
+    const adapter = makeAdapter("email");
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      chatId: "t1",
+      messageId: "msg_1",
+    });
+    return adapter;
   }
 
   it("maps email-specific fields into OutgoingMessage.email for a new email", async () => {
@@ -110,9 +120,8 @@ describe("send_message email union", () => {
     });
 
     expect(adapter.send).toHaveBeenCalledTimes(1);
-    const [connectionId, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock
-      .calls[0];
-    expect(connectionId).toBe("test:email");
+    const [channel, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(channel).toBe("email");
     expect(threadId).toBe("");
     expect(message.kind).toBe("email");
     expect(message.text).toBe("body");
@@ -151,6 +160,26 @@ describe("send_message email union", () => {
     const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(message.html).toBe("<p>hi</p>");
   });
+
+  it("rejects email attachments before checking their sources or the body", async () => {
+    const adapter = makeEmailAdapter();
+    await expect(
+      executeSendMessage(adapter, {
+        channel: "email",
+        to: "x@y.com",
+        attachments: [{ type: "document", source: "/outside/any/workspace.txt" }],
+      }),
+    ).rejects.toThrow("Email attachments are not supported by the mail transport");
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects an email whose text and html are blank", async () => {
+    const adapter = makeEmailAdapter();
+    await expect(
+      executeSendMessage(adapter, { channel: "email", to: "x@y.com", text: " ", html: "" }),
+    ).rejects.toThrow("Email requires non-empty `text` or `html`");
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
 });
 
 describe("send_message chat recipient aliases", () => {
@@ -173,7 +202,7 @@ describe("send_message chat recipient aliases", () => {
       turnId: "turn-1",
     });
 
-    expect(adapter.send).toHaveBeenCalledWith("test:webchat", "session-1", {
+    expect(adapter.send).toHaveBeenCalledWith("webchat", "session-1", {
       text: "Final answer",
       parts,
       attachments: undefined,
@@ -206,7 +235,7 @@ describe("send_message chat recipient aliases", () => {
     );
 
     expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
-    expect(adapter.send).toHaveBeenCalledWith("test:whatsapp", "15551234567@s.whatsapp.net", {
+    expect(adapter.send).toHaveBeenCalledWith("whatsapp", "15551234567@s.whatsapp.net", {
       text: "hello guardian",
       parts: undefined,
       attachments: undefined,
@@ -249,14 +278,208 @@ describe("send_message chat recipient aliases", () => {
   });
 });
 
+describe("send_message connection choice", () => {
+  // A channel no Connection can send on is refused before anything else, so
+  // the error names the channel rather than an attachment or a recipient.
+  it("refuses an unconfigured channel before checking attachments or recipients", async () => {
+    const adapter = makeAdapter("telegram_user");
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [{ channelMappings: [] }]),
+    };
+
+    await expect(
+      executeSendMessage(adapter, {
+        channel: "discord",
+        threadId: "thread-1",
+        attachments: [{ type: "document", source: "/outside/secret.txt" }],
+      }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "whatsapp", to: "guardian", text: "hello guardian" },
+        { personMappingRepo },
+      ),
+    ).rejects.toThrow('No Talk connection registered for "whatsapp"');
+    expect(personMappingRepo.findByBondLevel).not.toHaveBeenCalled();
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("send_message to an account with an opaque id", () => {
+  const FIRST = "6f1d2c3b-0000-4000-8000-000000000001";
+  const SECOND = "6f1d2c3b-0000-4000-8000-000000000002";
+
+  function accounts(...names: string[]): ChannelsService {
+    return {
+      list: rs.fn(async () => [
+        { name: "telegram", platform: "telegram", sendable: false },
+        ...names.map((name) => ({ name, platform: "telegram", sendable: true })),
+      ]),
+      send: rs.fn(async (_channel, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+  }
+
+  it("sends as the account its id names", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      SECOND,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("sends as Rome's one account on a platform it names", async () => {
+    const adapter = accounts(FIRST);
+
+    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
+  });
+
+  it("refuses a platform where Rome has several accounts, naming them", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await expect(
+      executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow(`Rome has several accounts on "telegram": "${FIRST}", "${SECOND}"`);
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  // A bot connected before opaque ids has a channel named after its platform.
+  // Its name addresses that bot, and the platform still counts both accounts.
+  it("keeps a channel named after its platform apart from the platform", async () => {
+    const adapter: ChannelsService = {
+      list: rs.fn(async () => [
+        { name: "telegram", platform: "telegram", sendable: true },
+        { name: FIRST, platform: "telegram", sendable: true },
+      ]),
+      send: rs.fn(async (_account, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+
+    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "telegram",
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+    await expect(
+      executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow(`Rome has several accounts on "telegram": "telegram", "${FIRST}"`);
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a channel named after a platform once its account is gone", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "telegram"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a platform where Rome has no account it can send as", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { platform: "discord", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a message naming both a channel and a platform, or neither", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: FIRST, platform: "telegram", text: "hi" }),
+    ).rejects.toThrow("Name either `channel` or `platform`");
+    await expect(executeSendMessage(adapter, { threadId: "42", text: "hi" })).rejects.toThrow(
+      "Name either `channel` or `platform`",
+    );
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("sends as the account by its platform and id where the host names it", async () => {
+    const account = { platform: "telegram", id: "8123456789" };
+    const adapter: ChannelsService = {
+      list: rs.fn(async () => [{ name: FIRST, account, platform: "telegram", sendable: true }]),
+      send: rs.fn(async (_account, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+
+    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      account,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("resolves to: guardian through the link People keys by platform", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        { channelMappings: [{ channel: "telegram", channelUserId: "1001" }] },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "1001",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  // A host that fills `accounts` names the guardian's link by its platform,
+  // whatever `channelMappings` still says.
+  it("resolves to: guardian through the account on the sending account's platform", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        {
+          channelMappings: [{ channel: "whatsapp", channelUserId: "wa-1" }],
+          accounts: [
+            { platform: "whatsapp", id: "wa-1" },
+            { platform: "telegram", id: "2002" },
+          ],
+        },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "2002",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+});
+
 describe("send_message conversation recording", () => {
   it("stores a confirmed out-of-band delivery as a pending notification", async () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-1",
-      conversationId: "thread-1",
+      chatId: "thread-1",
     });
-    const ensureChannelConversation = rs.fn(async () => ({
+    const ensureChannelChat = rs.fn(async () => ({
       id: "channel:discord:thread-1",
       agentName: null,
     }));
@@ -266,8 +489,8 @@ describe("send_message conversation recording", () => {
       adapter,
       { channel: "discord", threadId: "thread-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -276,7 +499,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
-    expect(ensureChannelConversation).toHaveBeenCalledWith(
+    expect(ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "discord",
         threadId: "thread-1",
@@ -294,11 +517,67 @@ describe("send_message conversation recording", () => {
     });
   });
 
+  it("records a delivery through a host that predates the chat names", async () => {
+    const adapter = makeAdapter();
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messageId: "platform-out-1",
+      chatId: "thread-1",
+    });
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    // Only the old method, reading its own receiver as a host repository can.
+    const legacy = {
+      sessionId: "channel:discord:thread-1",
+      async ensureChannelConversation() {
+        return { id: this.sessionId, agentName: null };
+      },
+      recordOutboundMessage,
+      addMessage: rs.fn(),
+      promoteMessageToUser: rs.fn(),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: "discord", threadId: "thread-1", text: "Background update" },
+      { chats: legacy as unknown as ChatRepository },
+    );
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "channel:discord:thread-1" }),
+    );
+  });
+
+  it("leaves a webchat send to the channel, which writes it into the chat", async () => {
+    const adapter = makeAdapter("webchat");
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messageId: "webchat-out-1",
+      chatId: "session-1",
+    });
+    const ensureChannelChat = rs.fn();
+    const recordOutboundMessage = rs.fn();
+
+    const result = await executeSendMessage(
+      adapter,
+      { channel: "webchat", threadId: "session-1", text: "Background update" },
+      {
+        chats: {
+          ensureChannelChat,
+          recordOutboundMessage,
+          addMessage: rs.fn(),
+          promoteMessageToUser: rs.fn(),
+        },
+      },
+    );
+
+    expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
+    expect(ensureChannelChat).not.toHaveBeenCalled();
+    expect(recordOutboundMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps a confirmed delivery successful when transcript recording fails", async () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-2",
-      conversationId: "thread-2",
+      chatId: "thread-2",
     });
 
     await expect(
@@ -313,8 +592,8 @@ describe("send_message conversation recording", () => {
           turnId: "turn-2",
         },
         {
-          conversations: {
-            ensureChannelConversation: rs.fn(),
+          chats: {
+            ensureChannelChat: rs.fn(),
             recordOutboundMessage: rs.fn(async () => {
               throw new Error("database unavailable");
             }),
@@ -353,10 +632,207 @@ describe("send_message preview", () => {
     expect(JSON.stringify(payload)).not.toContain("918273645");
   });
 
+  it("names the platform a message goes to when it names no channel", () => {
+    const action = createSendMessageAction(config, makeAdapter());
+
+    expect(action.preview!({ platform: "whatsapp", to: "guardian", text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "WhatsApp" }],
+    });
+    expect(action.preview!({ platform: "email", to: "a@b.com", text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "Email" }],
+    });
+    expect(action.preview!({ platform: "agents", to: "Atlas", text: "hi" })).toMatchObject({
+      fields: [
+        { label: "Channel", value: "Agents" },
+        { label: "To", value: "Atlas" },
+      ],
+    });
+  });
+
   it("falls back to the raw channel name for an unmapped adapter", () => {
     const action = createSendMessageAction(config, makeAdapter());
     const payload = action.preview!({ channel: "matrix", threadId: "t1", text: "hi" });
 
     expect(payload).toMatchObject({ fields: [{ label: "Channel", value: "matrix" }] });
+  });
+
+  it("names the agent a message goes to by name, but never shows an agent id", () => {
+    const action = createSendMessageAction(config, makeAdapter("agents"));
+    const id = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
+
+    expect(action.preview!({ channel: "agents", to: "Atlas", text: "hi" })).toMatchObject({
+      fields: [
+        { label: "Channel", value: "Agents" },
+        { label: "To", value: "Atlas" },
+      ],
+    });
+    expect(action.preview!({ channel: "agents", to: id, text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "Agents" }],
+    });
+    expect(
+      JSON.stringify(action.preview!({ channel: "agents", to: id, text: "hi" })),
+    ).not.toContain(id);
+  });
+});
+
+describe("send_message to an agent by name", () => {
+  const ATLAS = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
+  const FRIEND_ATLAS = "1c7a7f9e-9b5d-4a4f-8d0e-3a2b4c5d6e7f";
+
+  function names(answer: Awaited<ReturnType<AgentNamesService["resolve"]>>) {
+    return { resolve: rs.fn<AgentNamesService["resolve"]>(async () => answer) };
+  }
+
+  beforeEach(() =>
+    setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "main" })),
+  );
+  afterEach(() => setCurrentActionContextResolver(null));
+
+  it("sends to the agent the name resolves to", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    expect(agentNames.resolve).toHaveBeenCalledWith("Atlas");
+    expect(adapter.send).toHaveBeenCalledWith(
+      "agents",
+      ATLAS,
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("refuses a name two agents share, naming each with its id", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({
+      status: "ambiguous",
+      matches: [
+        { label: "Atlas (dot)", agentId: ATLAS },
+        { label: "Atlas (@friend's dot)", agentId: FRIEND_ATLAS },
+      ],
+    });
+
+    const sent = executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    await expect(sent).rejects.toThrow(`"Atlas (dot)" (threadId ${ATLAS})`);
+    await expect(sent).rejects.toThrow(`"Atlas (@friend's dot)" (threadId ${FRIEND_ATLAS})`);
+    await expect(sent).rejects.toThrow("full name as `to`");
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("offers only the id when the agents share a whole label", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({
+      status: "ambiguous",
+      matches: [
+        { label: "Atlas (dot)", agentId: ATLAS },
+        { label: "Atlas (dot)", agentId: FRIEND_ATLAS },
+      ],
+    });
+
+    const sent = executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    await expect(sent).rejects.toThrow("Send again with the id as `threadId`.");
+    await expect(sent).rejects.not.toThrow("full name");
+  });
+
+  it("says when no agent has the name, or Agents is not connected", async () => {
+    const adapter = makeAdapter("agents");
+    const input = { channel: "agents" as const, to: "Atlas", text: "hi" };
+
+    await expect(
+      executeSendMessage(adapter, input, { agentNames: names({ status: "none" }) }),
+    ).rejects.toThrow('No agent named "Atlas"');
+    await expect(
+      executeSendMessage(adapter, input, { agentNames: names({ status: "not_connected" }) }),
+    ).rejects.toThrow('Channel "agents" is not connected');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("sends to an id given as `to` in any case without looking it up", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "none" });
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: ATLAS.toUpperCase(), text: "hi" },
+      { agentNames },
+    );
+
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+  });
+
+  it("reads a padded guardian alias as the alias, as the approval card does", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        { channelMappings: [{ channel: "agents", channelUserId: ATLAS }] },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: " guardian", text: "hi" },
+      { agentNames, personMappingRepo },
+    );
+
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+  });
+
+  it("says what `to` takes on agents when it is empty", async () => {
+    const adapter = makeAdapter("agents");
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: " ", text: "hi" }),
+    ).rejects.toThrow('Channel "agents" takes an agent\'s name or "guardian" as `to`');
+  });
+
+  it("refuses a name from any agent but main, without looking", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "assistant:assistant" }));
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }, { agentNames }),
+    ).rejects.toThrow("Only Rome's main agent sends to an agent by name");
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name from an installed app calling through runAction", async () => {
+    setCurrentActionContextResolver(() => ({
+      executionId: "e",
+      agentName: "main",
+      callerAppId: "some-app",
+    }));
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }, { agentNames }),
+    ).rejects.toThrow("Only Rome's main agent sends to an agent by name");
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+  });
+
+  it("says names need the lookup when this Rome has none", async () => {
+    const adapter = makeAdapter("agents");
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }),
+    ).rejects.toThrow("Sending to an agent by name is not available");
   });
 });

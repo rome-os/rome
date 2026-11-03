@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   createReadStream,
   createWriteStream,
@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -57,6 +58,11 @@ export interface FileBrowserScope {
   assetBasePath: string;
   logicalRoot: string;
   rootDir: string;
+  /** When set, a path resolves only if its real path, with every symlink
+   * resolved, stays inside `realpath(rootDir)`. Any scope served to a caller
+   * other than the guardian must set it. Owner scopes leave it unset because the
+   * guardian may deliberately symlink content from outside the root. */
+  confineToRealRoot?: boolean;
   /** Optional serializer for git commits. When set, every commit in
    * this scope runs through it, so file-save commits don't interleave with an
    * external writer (e.g. memory sync) on the same repo. Omitted scopes commit
@@ -94,8 +100,8 @@ export interface FileBrowserScope {
     resolvedPath: string;
     type: "directory" | "file";
   }) => Promise<void> | void;
-  ignoredNames?: string[];
-  searchGlobs?: string[];
+  ignoredNames?: readonly string[];
+  searchGlobs?: readonly string[];
   historyTarget?: (resolvedPath: string, logicalPath: string) => GitTarget | null;
   renameCommitTarget?: (
     fromResolvedPath: string,
@@ -501,7 +507,46 @@ function resolveScopedFilePath(scope: FileBrowserScope, logicalPath: string): st
   const relativePath =
     logicalPath === scope.logicalRoot ? "" : logicalPath.slice(scope.logicalRoot.length + 1);
   const resolvedPath = resolve(scope.rootDir, relativePath);
-  return isWithinDirectory(resolvedPath, scope.rootDir) ? resolvedPath : null;
+  if (!isWithinDirectory(resolvedPath, scope.rootDir)) return null;
+  if (scope.confineToRealRoot && !isWithinRealRoot(scope.rootDir, resolvedPath)) return null;
+  // Callers derive logical paths and names from the lexical path, so only the
+  // gate above looks at real paths.
+  return resolvedPath;
+}
+
+function isWithinRealRoot(rootDir: string, resolvedPath: string): boolean {
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(rootDir);
+  } catch {
+    return false;
+  }
+
+  // A missing path is judged by its nearest existing ancestor, so a miss under an
+  // escaping symlink is rejected rather than answered with a 404 that reveals
+  // what exists outside. lstat, unlike existsSync, finds a dangling link itself,
+  // and realpath then fails on it.
+  let existingPath = resolvedPath;
+  while (!lstatExists(existingPath)) {
+    const parentPath = dirname(existingPath);
+    if (parentPath === existingPath) return false;
+    existingPath = parentPath;
+  }
+
+  try {
+    return isWithinDirectory(realpathSync(existingPath), realRoot);
+  } catch {
+    return false;
+  }
+}
+
+function lstatExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function encodeContentDispositionFileName(
@@ -874,7 +919,8 @@ function parseRangeHeader(
     end = size - 1;
   }
 
-  if (start < 0 || end < start || end >= size) return null;
+  if (start < 0 || start >= size || end < start) return null;
+  end = Math.min(end, size - 1);
 
   return { start, end };
 }
@@ -1724,7 +1770,11 @@ export function createHistoryHandler(scope: FileBrowserScope): Handler {
         .split("\n")
         .filter(Boolean)
         .map((line) => {
-          const [hash, message, date] = line.split("|");
+          const firstSeparator = line.indexOf("|");
+          const lastSeparator = line.lastIndexOf("|");
+          const hash = line.slice(0, firstSeparator);
+          const message = line.slice(firstSeparator + 1, lastSeparator);
+          const date = line.slice(lastSeparator + 1);
           return { date, hash, message };
         });
 
@@ -1733,6 +1783,80 @@ export function createHistoryHandler(scope: FileBrowserScope): Handler {
       return c.json([]);
     }
   };
+}
+
+function readSearchOutput(rootDir: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("rg", args, { cwd: rootDir, stdio: ["ignore", "pipe", "pipe"] });
+    const lines: string[] = [];
+    const maxOutputBytes = 1024 * 1024;
+    let outputBytes = 0;
+    let pending = "";
+    let stderr = "";
+    let failure: Error | undefined;
+    let stoppedAtLimit = false;
+
+    const fail = (error: Error) => {
+      failure ??= error;
+      child.kill("SIGKILL");
+    };
+    const appendLine = (line: string, newlineBytes: number) => {
+      if (!line) return;
+      outputBytes += Buffer.byteLength(line, "utf8") + newlineBytes;
+      if (outputBytes > maxOutputBytes) {
+        fail(new Error("Search results exceed the output limit"));
+      } else {
+        lines.push(line.endsWith("\r") ? line.slice(0, -1) : line);
+      }
+    };
+
+    // setEncoding retains UTF-8 sequences split across pipe chunks. The byte
+    // budget also bounds an unfinished line, not just completed results.
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      if (failure || lines.length === 100) return;
+      pending += chunk;
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) !== -1) {
+        appendLine(pending.slice(0, newline), 1);
+        pending = pending.slice(newline + 1);
+        if (failure) return;
+        if (lines.length === 100) {
+          pending = "";
+          stoppedAtLimit = child.kill("SIGKILL");
+          return;
+        }
+      }
+      if (outputBytes + Buffer.byteLength(pending, "utf8") > maxOutputBytes) {
+        fail(new Error("Search results exceed the output limit"));
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(0, 16 * 1024);
+    });
+    child.stdout.once("error", fail);
+    child.stderr.once("error", fail);
+    child.once("error", (error) => {
+      failure ??= error;
+    });
+    // Wait for close to reap rg and drain both pipes. Our limit signal is success
+    // only without diagnostics, so an observed rg error cannot become a match.
+    child.once("close", (code, signal) => {
+      if (!failure && pending && lines.length < 100) appendLine(pending, 0);
+      if (failure) {
+        reject(failure);
+      } else if (code === 0 || (stoppedAtLimit && signal === "SIGKILL" && !stderr)) {
+        resolve(lines.join("\n"));
+      } else {
+        reject(
+          Object.assign(new Error(stderr.trim() || `rg exited with ${signal ?? code}`), {
+            status: code,
+          }),
+        );
+      }
+    });
+  });
 }
 
 export function createSearchHandler(scope: FileBrowserScope): Handler {
@@ -1750,17 +1874,19 @@ export function createSearchHandler(scope: FileBrowserScope): Handler {
         "never",
         "--fixed-strings",
         "--smart-case",
+        // The UI shows short snippets; one huge line must not fail the whole search.
+        "--max-columns",
+        "500",
+        "--max-columns-preview",
         ...(scope.searchGlobs ?? []).flatMap((pattern) => ["--glob", pattern]),
         ...DOT_ENTRY_SEARCH_GLOBS.flatMap((pattern) => ["--glob", pattern]),
+        // Without "--", a query such as "-L" turns into an rg flag, and --follow
+        // would read through symlinks out of the root.
+        "--",
         query,
         ".",
       ];
-      const output = execFileSync("rg", args, {
-        cwd: scope.rootDir,
-        encoding: "utf-8",
-        maxBuffer: 1024 * 1024,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const output = await readSearchOutput(scope.rootDir, args);
 
       const results = output
         .trim()

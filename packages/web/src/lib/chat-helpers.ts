@@ -1,5 +1,5 @@
 import { escapeMarkdownText } from "./markdown-text";
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { ApprovalRecord, PendingUpload, ReasoningEffort } from "./chat-types";
 
 export interface AppInstalledEvent {
@@ -35,10 +35,10 @@ function parseInstallSuccess(output: unknown): { appId?: string } | null {
   return null;
 }
 
-export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] {
+export function detectAppInstalls(blocks: TraceEventDto[]): AppInstalledEvent[] {
   const results: AppInstalledEvent[] = [];
 
-  const resultMap = new Map<string, TraceBlockDto>();
+  const resultMap = new Map<string, TraceEventDto>();
   // tool_use id → appId from the input ("create" carries one), or null when it
   // can only come from the result ("install" takes NO appId by contract — the
   // daemon derives it from the source and returns it in the result).
@@ -81,6 +81,9 @@ export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] 
   for (const block of blocks) {
     if (block.type !== "tool_use" || block.tool !== "Bash" || !block.id) continue;
     const input = block.input as Record<string, unknown> | null;
+    // A background run returns before the install finishes, so its result
+    // says nothing about whether the install succeeded.
+    if (input?.run_in_background === true) continue;
     const cmd = typeof input?.command === "string" ? input.command : "";
     if (!cmd.includes("app:install")) continue;
     const match = cmd.match(/\/apps\/([a-z][a-z0-9-]*)\//);
@@ -88,12 +91,20 @@ export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] 
     const appId = match[1];
     const resultBlock = resultMap.get(block.id);
     if (!resultBlock || resultBlock.type !== "tool_result") continue;
-    const out = resultBlock.output as Record<string, unknown> | null;
-    if (out?.exit_code !== 0) continue;
+    if (!bashSucceeded(resultBlock)) continue;
     results.push({ appId });
   }
 
   return results;
+}
+
+/** Whether a Bash tool result succeeded. A result without `isError` (recorded
+ *  before the flag existed, or from a producer that cannot tell) falls back
+ *  to the shell's exit code. */
+function bashSucceeded(result: Extract<TraceEventDto, { type: "tool_result" }>): boolean {
+  if (result.isError !== undefined) return !result.isError;
+  const out = result.output as Record<string, unknown> | null;
+  return (out?.exit_code ?? out?.exitCode) === 0;
 }
 
 // A few apps are carriers, not destinations: their own page is just a redirect.
@@ -106,6 +117,19 @@ const CARRIER_REDIRECTS: Record<string, string> = { "user-skills": "skills" };
  * thing we *show* is redirected. Pass-through for every non-carrier app. */
 export function resolveAppToOpen(appId: string): string {
   return CARRIER_REDIRECTS[appId] ?? appId;
+}
+
+/** Carriers stay installed (their skills must reach the catalog) but get no
+ * launcher tile or search result: the app they redirect to is the way in. */
+export function isCarrierApp(appId: string): boolean {
+  return Object.hasOwn(CARRIER_REDIRECTS, appId);
+}
+
+/** Whether `app` stays off the launcher surfaces: the Apps page, the sidebar,
+ * search, and the app picker. A carrier is always hidden. Any other app opts
+ * out with `hideInLauncher: true` in its app.yaml, and still opens by URL. */
+export function isHiddenInLauncher(app: { id: string; hideInLauncher?: boolean }): boolean {
+  return isCarrierApp(app.id) || app.hideInLauncher === true;
 }
 
 export function sameApproval(a: ApprovalRecord | null, b: ApprovalRecord): boolean {
@@ -125,10 +149,6 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 export function getProjectDisplayName(projectName: string): string {
   const segments = projectName.split("/").filter(Boolean);
   return segments.at(-1) ?? projectName;
-}
-
-export function formatProjectLabel(projectName: string): string {
-  return getProjectDisplayName(projectName);
 }
 
 export function buildOptimisticUserText(

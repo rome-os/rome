@@ -1,8 +1,8 @@
 import { Api, TelegramClient } from "telegram";
 import { NewMessage, type NewMessageEvent } from "telegram/events/NewMessage.js";
 import { StringSession } from "telegram/sessions/StringSession.js";
-import type { ProviderAdapter } from "./adapter.js";
-import type { Attachment, NormalizedMessage, OutgoingMessage } from "./types.js";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type { Attachment, OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import { readFile } from "node:fs/promises";
 import {
@@ -13,7 +13,6 @@ import {
 } from "./attachment-files.js";
 
 const log = createLogger("telegram-user");
-const TELEGRAM_USER_SETTINGS_KEY = "telegram_user";
 type SimpleEntity = string | number;
 
 /**
@@ -22,7 +21,7 @@ type SimpleEntity = string | number;
  * `displayName`/`phoneNumber`), or the connect timestamp; there is no config, so
  * this is NEVER persisted to a settings row. The login ceremony
  * returns it to the route, which splits it into the grant's credential material
- * and profile and writes both into the ledger via a single `importCredential`.
+ * and profile and writes both into the ledger via a single `grant`.
  */
 export interface TelegramUserSettings {
   apiId: number;
@@ -40,7 +39,7 @@ export interface TelegramUserSettings {
 export type TelegramUserLoginOutcome =
   | {
       status: "connected";
-      /** The full connected account — the conferral setup turns it into the
+      /** The full connected account — the setup turns it into the
        *  `session` grant's credential material + profile and writes both to the
        *  ledger in one terminal write. Carries secrets (`sessionString`/`apiHash`);
        *  only the non-secret identity ever crosses to a client. */
@@ -52,7 +51,7 @@ export type TelegramUserLoginOutcome =
     };
 
 /**
- * One in-flight interactive login, held for the lifetime of a conferral setup
+ * One in-flight interactive login, held for the lifetime of a setup
  * coroutine: a single GramJS client + StringSession. The coroutine
  * holds exactly one handle in scope, so — unlike the retired route-era
  * `TelegramUserAuthService` — there is no attempt-id map and no `hasPendingLogin`
@@ -133,10 +132,14 @@ export class TelegramUserSessionNotAuthorizedError extends Error {
   }
 }
 
-export class TelegramUserAdapter implements ProviderAdapter {
-  readonly channelName = "telegram_user";
+/**
+ * The Telegram user-account transport. Inbound messages and history lines
+ * arrive as the channel's own record, a `ChannelMessage` whose `raw` is the
+ * GramJS `Api.Message`, so the Connection integration delivers them as they are.
+ */
+export class TelegramUserAdapter {
   private client: TelegramClient;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
 
   constructor(private settings: TelegramUserSettings) {
     this.client = createTelegramClient(settings.apiId, settings.apiHash, settings.sessionString);
@@ -183,7 +186,8 @@ export class TelegramUserAdapter implements ProviderAdapter {
     }
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = chatId;
     const entity = entityFromThreadId(threadId);
     const replyTo = message.replyToMessageId
       ? Number.parseInt(message.replyToMessageId, 10)
@@ -206,22 +210,27 @@ export class TelegramUserAdapter implements ProviderAdapter {
     }
 
     log.info("telegram user message sent", { threadId });
-    return { messageId, threadId };
+    return { chatId, ...(messageId ? { messageId } : {}) };
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
-    if (message.attachments.length === 0 || !(message.rawEvent instanceof Api.Message)) {
+  /** Download a message's media into the profile. The media lives on the
+   *  GramJS `Api.Message` in `raw`, so a message without one keeps its
+   *  attachments as they are. Only the first attachment is saved, because a
+   *  GramJS message carries one media payload. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
+    const event = message.raw;
+    if (message.attachments.length === 0 || !(event instanceof Api.Message)) {
       return message.attachments;
     }
 
-    const expectedBytes = telegramUserMediaSizeBytes(message.rawEvent);
+    const expectedBytes = telegramUserMediaSizeBytes(event);
     if (expectedBytes !== undefined && expectedBytes > MAX_ATTACHMENT_BYTES) {
       log.warn("telegram user attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: expectedBytes,
       });
       return message.attachments;
@@ -229,7 +238,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
 
     let downloaded: string | Buffer | undefined;
     try {
-      downloaded = await this.client.downloadMedia(message.rawEvent, {
+      downloaded = await this.client.downloadMedia(event, {
         progressCallback(downloadedBytes) {
           const bytes = numericTelegramSize(downloadedBytes);
           if (bytes !== undefined && bytes > MAX_ATTACHMENT_BYTES) {
@@ -240,7 +249,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
     } catch (err) {
       if (!isAttachmentTooLargeError(err)) throw err;
       log.warn("telegram user attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: err.bytes,
       });
       return message.attachments;
@@ -250,7 +259,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
     const data = Buffer.isBuffer(downloaded) ? downloaded : await readFile(downloaded);
     if (data.byteLength > MAX_ATTACHMENT_BYTES) {
       log.warn("telegram user attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: data.byteLength,
       });
       return message.attachments;
@@ -259,56 +268,20 @@ export class TelegramUserAdapter implements ProviderAdapter {
     if (!attachment) return message.attachments;
     if (message.attachments.length > 1) {
       log.warn("telegram user message has additional attachments without separate media payloads", {
-        messageId: message.id,
+        messageId: message.messageId,
         savedAttachments: 1,
         skippedAttachments: message.attachments.length - 1,
       });
     }
 
-    return saveIncomingAttachmentPayloads(message, [
+    return saveIncomingAttachmentPayloads({ ...message, channel: "telegram_user" }, [
       {
         attachment,
         data,
-        mimeType: telegramUserMediaMimeType(message.rawEvent) ?? attachment.mimeType,
-        fileName: telegramUserMediaFileName(message.rawEvent),
+        mimeType: telegramUserMediaMimeType(event) ?? attachment.mimeType,
+        fileName: telegramUserMediaFileName(event),
       },
     ]);
-  }
-
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
-    const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
-    if (threadId) {
-      const messages = await this.client.getMessages(entityFromThreadId(threadId), {
-        limit: 100,
-      });
-      return messages
-        .filter((message) => message instanceof Api.Message)
-        .map((message) => this.normalizeMessage(message, { threadId }))
-        .filter((message) => message.timestamp.getTime() >= cutoffMs)
-        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-    }
-
-    const dialogs = await this.client.getDialogs({ limit: 50 });
-    const allMessages: NormalizedMessage[] = [];
-    for (const dialog of dialogs) {
-      const dialogId = dialog.id?.toString();
-      if (!dialogId) continue;
-
-      const messages = await this.client.getMessages(dialog.inputEntity, { limit: 50 });
-      for (const message of messages) {
-        if (!(message instanceof Api.Message)) continue;
-        const normalized = this.normalizeMessage(message, {
-          threadId: dialogId,
-          threadName: dialog.title ?? dialog.name,
-          threadType: dialog.isUser ? "private" : "group",
-        });
-        if (normalized.timestamp.getTime() >= cutoffMs) {
-          allMessages.push(normalized);
-        }
-      }
-    }
-
-    return allMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
 
   async listDialogs(limit = 50): Promise<TelegramUserDialogSummary[]> {
@@ -327,43 +300,41 @@ export class TelegramUserAdapter implements ProviderAdapter {
 
   private async handleNewMessage(event: NewMessageEvent): Promise<void> {
     if (!this.handler) return;
-    const normalized = this.normalizeMessage(event.message);
-    await this.handler(normalized);
+    await this.handler(this.normalizeMessage(event.message));
   }
 
-  private normalizeMessage(
-    message: Api.Message,
-    context: {
-      threadId?: string;
-      threadName?: string;
-      threadType?: "private" | "group";
-    } = {},
-  ): NormalizedMessage {
-    const threadId = context.threadId ?? peerToThreadId(message.peerId);
+  private normalizeMessage(message: Api.Message): ChannelMessage {
+    const threadId = peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
+    // A sender's name is known only for the guardian's own lines: a live
+    // message carries no name, and an id would read as a name to every
+    // consumer.
+    const senderDisplayName = isOutgoing ? this.settings.displayName : undefined;
     return {
-      id: String(message.id),
       channel: "telegram_user",
-      channelUserId: isOutgoing ? this.settings.userId : fromId,
-      displayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
-      threadId,
-      threadName: context.threadName,
-      threadType: context.threadType ?? "group",
-      timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
+      direction: "inbound",
+      messageId: String(message.id),
+      chatId: threadId as ChatId,
+      senderId: isOutgoing ? this.settings.userId : fromId,
+      ...(senderDisplayName ? { senderDisplayName } : {}),
       text: message.message ?? "",
       attachments: extractTelegramAttachments(message.media),
-      replyTo: message.replyTo?.replyToMsgId
-        ? { messageId: String(message.replyTo.replyToMsgId) }
-        : undefined,
-      rawEvent: message,
+      timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
+      ...(message.replyTo?.replyToMsgId
+        ? { replyTo: { messageId: String(message.replyTo.replyToMsgId) } }
+        : {}),
+      // A live message carries no dialog context, so it reads as a group even
+      // in a private chat.
+      thread: { kind: "group" },
+      raw: message,
     };
   }
 }
 
 /**
  * The interactive-login implementation behind {@link openTelegramUserLogin}: one
- * throwaway GramJS client + StringSession driven by the conferral setup coroutine.
+ * throwaway GramJS client + StringSession driven by the setup coroutine.
  * `sendCode` connects and requests the phone code; `submitCode` /
  * `submitPassword` complete the phone-code + optional 2FA handshake and serialize
  * the authorized session into a {@link TelegramUserSettings} account. The
@@ -459,7 +430,7 @@ class TelegramUserLogin implements TelegramUserLoginHandle {
   }
 
   /** Serialize the authorized client + session into the connected-account payload
-   *  the terminal conferral records (credential material + profile). */
+   *  the terminal grant records (credential material + profile). */
   private finalize(user: Api.TypeUser): TelegramUserSettings {
     if (!(user instanceof Api.User)) {
       throw new TelegramUserAuthError("Telegram login did not return a user account");
@@ -486,10 +457,6 @@ function toTelegramUserAuthError(
   if (err instanceof TelegramUserAuthError) return err;
   const message = safeErrorMessage(err);
   return new TelegramUserAuthError(message || fallback, statusCode);
-}
-
-export function telegramUserSettingsKey(): string {
-  return TELEGRAM_USER_SETTINGS_KEY;
 }
 
 function createTelegramClient(

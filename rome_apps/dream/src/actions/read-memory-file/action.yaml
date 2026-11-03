@@ -1,0 +1,9 @@
+name: read_memory_file
+type: custom
+description: Read a file in the guardian's memory directory. Refuses any path outside it.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only
+visibility: explicit

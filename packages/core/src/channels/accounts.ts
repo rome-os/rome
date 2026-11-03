@@ -1,6 +1,6 @@
 /**
- * A channel's address book. `ProviderAdapter` (adapter.ts) moves text; this
- * is who a channel can reach, and which of the identifiers a channel hands out
+ * A channel's address book. A channel's `send` and `inbound` ports
+ * (channel.ts) move messages; this is who a channel can reach, and which of the identifiers a channel hands out
  * name one and the same account. Vocabulary: docs/concepts/people.md.
  *
  * An account answers *who*. What was said to it — a last message, a count, a
@@ -34,6 +34,10 @@ export interface Account {
    * something falls back on its own terms — to a name the account's sender put
    * on a message, or to an identifier written for a human — and it cannot
    * choose if a name and a rendered identifier arrive as one value.
+   *
+   * Where a platform lets names repeat and shows each with what tells it
+   * apart, as Rome Cloud shows an agent with its kind and its owner's handle,
+   * the name carries that too, so two accounts never read the same.
    */
   name: string | null;
   /**

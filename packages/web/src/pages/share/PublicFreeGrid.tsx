@@ -65,7 +65,7 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
   const [mobileTab, setMobileTab] = useState<"chat" | string>("chat");
 
   return (
-    <div className={`relative min-h-dvh ${hasApps ? "" : "pt-safe"}`}>
+    <div className={`relative min-h-[var(--rome-viewport-height)] ${hasApps ? "" : "pt-safe"}`}>
       {/* Mobile tab pill */}
       {hasApps && (
         <div className="sticky top-0 z-30 flex h-[var(--rome-mobile-header-height)] items-center gap-1 overflow-x-auto border-b border-border bg-background/90 px-2 pt-safe backdrop-blur-md md:hidden">
@@ -105,8 +105,8 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
         className={`relative ${
           hasApps
             ? "min-h-[var(--rome-mobile-content-height)]"
-            : "min-h-[calc(100dvh-var(--rome-safe-area-top))]"
-        } md:min-h-dvh ${
+            : "min-h-[calc(var(--rome-viewport-height)-var(--rome-safe-area-top))]"
+        } md:min-h-[var(--rome-viewport-height)] ${
           hasApps ? "md:w-[var(--rome-chat-col)]" : "w-full"
         } ${hasApps && mobileTab !== "chat" ? "max-md:hidden" : ""}`}
       >
@@ -123,7 +123,7 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
       {hasApps && (
         <aside
           style={{ "--rome-apps-left": CHAT_COLUMN_WIDTH } as CSSProperties}
-          className={`fixed inset-0 z-20 bg-background md:left-[var(--rome-apps-left)] md:h-dvh max-md:top-[var(--rome-mobile-header-height)] ${
+          className={`fixed inset-0 z-20 bg-background md:left-[var(--rome-apps-left)] md:h-[var(--rome-viewport-height)] max-md:top-[var(--rome-mobile-header-height)] ${
             mobileTab === "chat" ? "max-md:hidden" : ""
           }`}
         >

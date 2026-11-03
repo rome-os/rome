@@ -2,7 +2,7 @@
 //   packages/web/src/components/agent-trace/TraceRunRow.tsx
 // Import and typography seams are adapted (see ../VENDOR.md "seams"):
 //   - "@rome/api-types/trace-segments"      -> ../../../trace/types.js
-import type { TraceBlockDto, TraceRunSegment } from "../../../trace/types.js";
+import type { TraceEventDto, TraceRunSegment } from "../../../trace/types.js";
 import { formatDuration } from "./CollapsedTraceSummary";
 import { CollapsibleTraceRow } from "./CollapsibleTraceRow";
 
@@ -12,7 +12,7 @@ export function TraceRunRow({
   live = false,
 }: {
   run: TraceRunSegment;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   live?: boolean;
 }) {
   const durationStr = formatDuration(run.durationMs);

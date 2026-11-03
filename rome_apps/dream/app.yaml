@@ -2,9 +2,10 @@ formatVersion: 1
 id: dream
 name: Dream
 icon: assets/icon.svg
-version: 0.1.5
-description: Periodic self-review agent that summarizes recent conversations and updates memory
+version: 0.3.0
+description: Periodic self-review agent that updates memory from recent chats, fixes the guardian's apps that broke, and turns repeated work into skills and tools
 tagline: "Your Rome reflects on recent conversations and remembers what matters."
+hideInLauncher: true
 appRoot: dist
 
 web:
@@ -12,12 +13,29 @@ web:
   displayName: Dream
   navLabel: Dream
 
+api:
+  entry: api/index
+
+db:
+  migrations: db/migrations
+  tablePrefix: dream
+
 agents:
   - agents/dream.yaml
+  - agents/dream-practice.yaml
   - agents/skill-review.yaml
 
 actions:
   - actions/dream
   - actions/skill-review
   - actions/get-webchat-conversations
+  - actions/get-account-chats
   - actions/get-action-logs
+  - actions/search-chats
+  - actions/list-memory-files
+  - actions/read-memory-file
+  - actions/write-memory-file
+  - actions/edit-memory-file
+
+hooks:
+  - hooks/app-started

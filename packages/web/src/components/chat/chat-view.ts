@@ -1,7 +1,7 @@
-import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
+import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { prettyAgentName } from "@/lib/agent-name";
-import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
+import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: many flat per-session message lists → one renderable view.
 // This is the single place the multi-session handoff tree is merged. No React,
@@ -47,19 +47,12 @@ export interface ChatView {
   interactionResults: Map<string, Record<string, unknown>>;
 }
 
-// Exported for the timeline rail, which labels its dots with the same plain
-// text the transcript renders in the bubble.
+// Shared by the user bubble and the timeline rail, so the rail labels its dots
+// with the same plain text the bubble renders.
 export function userMessageText(content: string): string {
-  try {
-    const parsed = JSON.parse(content);
-    if (!Array.isArray(parsed)) return content;
-    return parsed
-      .filter((b) => b?.type === "text" && typeof b.content === "string")
-      .map((b) => b.content as string)
-      .join("\n");
-  } catch {
-    return content;
-  }
+  return parseEntries(content)
+    .flatMap((b) => (b.type === "text" ? [b.content] : []))
+    .join("\n");
 }
 
 // Index every handoff reachable from `sessionId`, recursing into child sessions.
@@ -73,24 +66,19 @@ function indexHandoffs(
   const msgs = messagesBySession.get(sessionId) ?? [];
   const openByToolUseId = new Map<string, HandoffNode>();
   for (const msg of msgs) {
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (msg.role === "user") {
-        if (b.type === "interaction_result" && b.toolUseId) {
+        if (b.type === "interaction_result") {
           const node = openByToolUseId.get(b.toolUseId);
           if (node) {
-            node.status =
-              b.output &&
-              typeof b.output === "object" &&
-              (b.output as Record<string, unknown>).dismissed === true
-                ? "cancelled"
-                : "done";
+            node.status = b.output.dismissed === true ? "cancelled" : "done";
             openByToolUseId.delete(b.toolUseId);
           }
         }
         continue;
       }
       if (msg.role !== "assistant" || b.type !== "handoff") continue;
-      if (!b.toolUseId || !b.appId || !b.childSessionId) continue;
+      if (!b.childSessionId) continue;
       const node: HandoffNode = {
         toolUseId: b.toolUseId,
         appId: b.appId,
@@ -153,7 +141,7 @@ function buildDisplayMessages(
       if (seedText && userMessageText(msg.content).trim() === seedText.trim()) continue;
     }
     out.push(msg);
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (b.type === "handoff" && b.childSessionId) pendingChildren.push(b.childSessionId);
     }
   }
@@ -180,11 +168,11 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 // guardian is.
 const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
 
-function isAutoDismissedCard(b: StreamBlock): boolean {
+function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (
     b.type === "pending_interaction" &&
-    b.render?.builtin === true &&
-    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId ?? "")
+    b.render.builtin === true &&
+    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId)
   );
 }
 
@@ -201,31 +189,18 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   const openCards = new Map<string, Set<string>>();
   for (const msg of messages) {
     let userTextReply = false;
-    for (const b of parseMessageBlocks(msg)) {
-      if (
-        msg.role === "assistant" &&
-        (b.type === "pending_interaction" || b.type === "handoff") &&
-        b.toolUseId
-      ) {
+    for (const b of parseMessageEntries(msg)) {
+      if (msg.role === "assistant" && (b.type === "pending_interaction" || b.type === "handoff")) {
         map.delete(interactionResultKey(msg.sessionId, b.toolUseId));
         if (isAutoDismissedCard(b)) {
           const open = openCards.get(msg.sessionId) ?? new Set<string>();
           open.add(b.toolUseId);
           openCards.set(msg.sessionId, open);
         }
-      } else if (
-        msg.role === "user" &&
-        b.type === "interaction_result" &&
-        b.toolUseId &&
-        b.output &&
-        typeof b.output === "object"
-      ) {
-        map.set(
-          interactionResultKey(msg.sessionId, b.toolUseId),
-          b.output as Record<string, unknown>,
-        );
+      } else if (msg.role === "user" && b.type === "interaction_result") {
+        map.set(interactionResultKey(msg.sessionId, b.toolUseId), b.output);
         openCards.get(msg.sessionId)?.delete(b.toolUseId);
-      } else if (msg.role === "user" && b.type === "text" && (b.content ?? "").trim()) {
+      } else if (msg.role === "user" && b.type === "text" && b.content.trim()) {
         // A genuine typed reply (not a card resolution, which is parts-only).
         userTextReply = true;
       }
@@ -241,6 +216,19 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
     }
   }
   return map;
+}
+
+/**
+ * Whether the open chat's model picker shows. A side chat promoted to a chat
+ * still runs on its branch (#1384), and during an open handoff the composer
+ * talks to the specialist, whose model the picker does not hold.
+ */
+export function canPickChatModel(chat: {
+  mainSessionId: string;
+  floorSessionId: string;
+  isSideChat: boolean;
+}): boolean {
+  return !chat.isSideChat && chat.floorSessionId === chat.mainSessionId;
 }
 
 export function buildChatView(
@@ -284,6 +272,90 @@ export function buildChatView(
   };
 }
 
+/** Assistant messages in the floor's latest turn, after its last guardian input.
+ * An unpersisted running turn supersedes the saved reply as well. */
+export function currentReplyMessages(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
+  runningTurnId: string | null = null,
+): ChatMessage[] {
+  const floor = view.displayMessages.filter((m) => m.sessionId === view.floorSessionId);
+  const latestTurnId = floor.at(-1)?.turnId;
+  if (runningTurnId !== null && latestTurnId !== runningTurnId) return [];
+  const reply: ChatMessage[] = [];
+  for (let i = floor.length - 1; i >= 0; i--) {
+    const msg = floor[i];
+    if (msg.turnId !== latestTurnId || msg.role === "user") break;
+    if (msg.role === "assistant") reply.push(msg);
+  }
+  return reply.reverse();
+}
+
+// Whether the floor session is parked on a card the guardian has not answered
+// yet (an ask_question card, a connect-AI card, an app component). Only the
+// floor session's latest turn counts, meaning every assistant message that
+// shares the turn id of its last message: the card is saved mid-turn and the
+// turn's closing text and recap land after it under the same id. A card from
+// an earlier turn is no longer what the agent waits on, and a backend-initiated
+// turn (an approval continuation) starts a new id without a user message.
+// Pass the floor's running turn while one streams. A backend task that runs no
+// recorded turn persists its messages only when it ends, so until then the
+// transcript still closes on the previous turn, whose cards it has moved past.
+// A recorded backend turn saves its cards mid-turn under its own id, which is
+// then the running turn id, so its cards count as they land.
+export function isAwaitingGuardian(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  return openFloorCards(view, runningTurnId).length > 0;
+}
+
+// Whether the floor session waits on a card that is the only way to answer
+// (`render.requiresCard`), in the same window as isAwaitingGuardian. The
+// composer locks while this holds.
+export function isLockedByCard(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  return openFloorCards(view, runningTurnId).some((card) => card.render.requiresCard === true);
+}
+
+type PendingCard = Extract<TranscriptPart, { type: "pending_interaction" }>;
+
+// The unanswered cards of the floor session's latest turn, in the window
+// isAwaitingGuardian describes.
+function openFloorCards(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null,
+): PendingCard[] {
+  const cards: PendingCard[] = [];
+  for (const msg of currentReplyMessages(view, runningTurnId)) {
+    for (const b of parseMessageEntries(msg)) {
+      if (
+        b.type === "pending_interaction" &&
+        !view.interactionResults.has(interactionResultKey(view.floorSessionId, b.toolUseId))
+      ) {
+        cards.push(b);
+      }
+    }
+  }
+  return cards;
+}
+
+// Whether the floor session's latest finished turn ended with an error: the
+// same turn_end status the sidebar's failed mark reads.
+export function isLastTurnFailed(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
+): boolean {
+  const { displayMessages, floorSessionId } = view;
+  for (let i = displayMessages.length - 1; i >= 0; i--) {
+    const msg = displayMessages[i];
+    if (msg.sessionId === floorSessionId && msg.role === "trace" && msg.traceSummary) {
+      return msg.traceSummary.turnStatus === "error";
+    }
+  }
+  return false;
+}
+
 // Render rows: group the flat transcript into speaker blocks. Pure data — the
 // view layer turns rows into JSX. Depends on runningTurnId/isStreaming, but
 // those only change at turn boundaries (not per token), so a memo on these
@@ -305,7 +377,48 @@ export type ChatRow =
       identity: AgentIdentity;
       trace: ChatMessage | null;
       messages: ChatMessage[];
-    });
+    })
+  // The chat moved to another model: the turn after it ran on `model`, the
+  // session's turn before it on another one.
+  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string });
+
+// The rows the last build made, by the message each starts from. A build hands
+// back the row object it made before when nothing the row shows has changed, so
+// the memoized row views skip a render when a message arrives. Weak, so a
+// message that leaves the transcript takes its row along.
+const builtRows = new WeakMap<ChatMessage, ChatRow>();
+// A model-switch notice is keyed by the row it stands before.
+const builtSwitches = new WeakMap<ChatRow, ChatRow>();
+
+function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
+  return a === b || (a.name === b.name && a.iconUrl === b.iconUrl);
+}
+
+function sameRow(a: ChatRow, b: ChatRow): boolean {
+  if (a.kind !== b.kind || a.key !== b.key) return false;
+  if (a.kind === "user") return true;
+  if (a.kind === "model_switch") {
+    return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
+  }
+  if (a.kind === "trace") {
+    return b.kind === "trace" && a.message === b.message && sameIdentity(a.identity, b.identity);
+  }
+  return (
+    b.kind === "agent" &&
+    sameIdentity(a.identity, b.identity) &&
+    a.trace === b.trace &&
+    a.messages.length === b.messages.length &&
+    a.messages.every((message, index) => message === b.messages[index])
+  );
+}
+
+/** `next`, or the row the last build made for `anchor` when it shows the same. */
+function reuseRow(anchor: ChatMessage, next: ChatRow): ChatRow {
+  const built = builtRows.get(anchor);
+  if (built && sameRow(built, next)) return built;
+  builtRows.set(anchor, next);
+  return next;
+}
 
 export function buildRows(
   messages: ChatMessage[],
@@ -318,7 +431,8 @@ export function buildRows(
   const tracesByTurn = new Map<string, ChatMessage>();
   const turnsWithAssistant = new Set<string>();
   for (const m of messages) {
-    if (m.role === "trace" && m.turnId && m.traceSummary) tracesByTurn.set(m.turnId, m);
+    if (m.role === "trace" && m.turnId && (m.traceSummary || m.traceArchived))
+      tracesByTurn.set(m.turnId, m);
     if (m.role === "assistant" && m.turnId) turnsWithAssistant.add(m.turnId);
   }
   const isRunningTurn = (turnId: string | null | undefined) =>
@@ -329,17 +443,24 @@ export function buildRows(
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role === "user") {
-      rows.push({ kind: "user", key: msg.id, message: msg });
+      rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: msg }));
       continue;
     }
     if (msg.role === "trace") {
-      if (!msg.traceSummary) continue;
+      if (!msg.traceSummary && !msg.traceArchived) continue;
       // Merged into the turn's grouped row when it has assistant replies; only
       // stands alone for a reply-less turn. Never mid-stream for the running
       // turn (the live trace button carries it).
       if (msg.turnId && turnsWithAssistant.has(msg.turnId)) continue;
       if (isRunningTurn(msg.turnId)) continue;
-      rows.push({ kind: "trace", key: msg.id, message: msg, identity: identityOf(msg.sessionId) });
+      rows.push(
+        reuseRow(msg, {
+          kind: "trace",
+          key: msg.id,
+          message: msg,
+          identity: identityOf(msg.sessionId),
+        }),
+      );
       continue;
     }
     // Group a whole turn under one header: gather this turn's assistant
@@ -364,13 +485,62 @@ export function buildRows(
     const showTrace =
       !!turnTrace && !renderedTraceTurns.has(msg.turnId!) && !isRunningTurn(msg.turnId);
     if (showTrace) renderedTraceTurns.add(msg.turnId!);
-    rows.push({
-      kind: "agent",
-      key: msg.id,
-      identity: identityOf(msg.sessionId),
-      trace: showTrace ? turnTrace! : null,
-      messages: group,
-    });
+    rows.push(
+      reuseRow(msg, {
+        kind: "agent",
+        key: msg.id,
+        identity: identityOf(msg.sessionId),
+        trace: showTrace ? turnTrace! : null,
+        messages: group,
+      }),
+    );
   }
-  return rows;
+  return withModelSwitches(rows, tracesByTurn);
+}
+
+/** The turn and session a row belongs to, or null for a row with no turn. */
+function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
+  if (row.kind === "model_switch") return null;
+  const message = row.kind === "agent" ? row.messages[0] : row.message;
+  return message?.turnId ? { turnId: message.turnId, sessionId: message.sessionId } : null;
+}
+
+/**
+ * Put a model-switch notice before the first row of each turn that ran on
+ * another model than the same session's last turn with a known model. A turn's
+ * model comes from its trace summary, so a running turn shows its notice once
+ * it ends, and a turn without one changes nothing.
+ */
+function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
+  const lastModelBySession = new Map<string, string>();
+  const seenTurns = new Set<string>();
+  const out: ChatRow[] = [];
+  for (const row of rows) {
+    const turn = rowTurn(row);
+    if (turn && !seenTurns.has(turn.turnId)) {
+      seenTurns.add(turn.turnId);
+      const model = tracesByTurn.get(turn.turnId)?.traceSummary?.model;
+      if (model) {
+        const previous = lastModelBySession.get(turn.sessionId);
+        if (previous && previous !== model) {
+          const notice: ChatRow = {
+            kind: "model_switch",
+            key: `model-switch:${turn.turnId}`,
+            model,
+            turnId: turn.turnId,
+            sessionId: turn.sessionId,
+          };
+          const built = builtSwitches.get(row);
+          if (built && sameRow(built, notice)) out.push(built);
+          else {
+            builtSwitches.set(row, notice);
+            out.push(notice);
+          }
+        }
+        lastModelBySession.set(turn.sessionId, model);
+      }
+    }
+    out.push(row);
+  }
+  return out;
 }

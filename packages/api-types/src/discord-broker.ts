@@ -5,6 +5,9 @@ export const DISCORD_BROKER_RESPONSE_LIMIT_BYTES = 16 * 1024 * 1024;
 export const DISCORD_DEFAULT_TIMEOUT_MS = 30_000;
 export const DISCORD_MIN_TIMEOUT_MS = 1_000;
 export const DISCORD_MAX_TIMEOUT_MS = 120_000;
+/** Names the channel the calling session's turns arrive on, so the broker acts
+ *  as the bot backing it. */
+export const DISCORD_BROKER_CHANNEL_HEADER = "x-rome-channel";
 
 export const DISCORD_BROKER_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type DiscordBrokerHttpMethod = (typeof DISCORD_BROKER_METHODS)[number];

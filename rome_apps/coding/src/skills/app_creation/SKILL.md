@@ -45,11 +45,13 @@ mkdir -p "$REPO" && cd "$REPO"
 ```
 
 ```jsonc
-// 2. Call `system:app_management` to scaffold the template into the empty dir. rootPath is required and
-//    absolute — the daemon does not pick a default. It refuses a non-empty
-//    directory, so this must run BEFORE `git init` (a `.git/` dir counts as
-//    non-empty and would make the scaffold fail).
-{ "op": "create", "appId": "<appId>", "rootPath": "<absolute $REPO>" }
+// 2. Call `system:app_management` to scaffold the template into the empty dir. rootPath
+//    (absolute) and template are both required — the daemon picks no default for
+//    either. Use "default" for a plain app; workflows use "workflow" via
+//    `coding:workflow_creation`. It refuses a non-empty directory, so this must
+//    run BEFORE `git init` (a `.git/` dir counts as non-empty and would make the
+//    scaffold fail).
+{ "op": "create", "appId": "<appId>", "rootPath": "<absolute $REPO>", "template": "default" }
 ```
 
 ```bash
@@ -103,6 +105,10 @@ verdict with evidence, issues, gaps, and suggested extra checks. It also fails
 an app whose manifest has no `tagline`, so fill that in before handing off.
 Include that verdict in the final handoff.
 
+## After it works
+
+Installing makes the app usable only by the guardian. To let other people use it through a URL, or to publish it to the Rome App Store, read `system:app-lifecycle`.
+
 ## After setup, before writing code
 
 Read both companion docs before editing any source file. They are split by purpose, not by topic — most features touch both:
@@ -118,7 +124,7 @@ Read both companion docs before editing any source file. They are split by purpo
 - **`op: "install"` fails because `source` is missing** — every install requires `source`. Pass `{ mode: "source", path: "<absolute $REPO>" }` on every iteration, exactly as shown in step 6.
 - **`op: "install"` fails with ARTIFACT_INVALID naming a mode/shape mismatch** — the declared `source.mode` disagrees with what's on disk (e.g. `mode: "source"` pointing at `$REPO/.rome/artifact`, or `mode: "bundle"` pointing at the repo root). The error names the exact source to pass — follow it verbatim; do not delete or restructure the directory to "fix" the shape.
 - **`pnpm add` in step 3 fails to reach the registry** — skip it and continue. The template floor installs, and `pnpm up` from `$REPO` takes the app to the current release once the network returns.
-- **`op: "install"` fails with "App build failed in …"** — the workspace's own `pnpm install` / `pnpm build` failed inside the daemon. The previously installed version keeps running. Reproduce locally with `pnpm --dir "$REPO" install && pnpm --dir "$REPO" run build`, fix the error, re-install.
+- **`op: "install"` fails with "App build failed in …"** — the workspace's own `pnpm install` / `pnpm build` failed inside the daemon. The previously installed version keeps running. Reproduce locally with `pnpm --dir "$REPO" install && pnpm --dir "$REPO" run build`, fix the error, re-install. If the error carries a native-build hint or `ERR_PNPM_IGNORED_BUILDS`, follow the hint and `system:custom-dependencies`.
 
 ## Scope
 

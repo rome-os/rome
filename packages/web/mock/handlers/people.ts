@@ -1,35 +1,22 @@
-import { http, HttpResponse } from "msw";
-import { talkConnections } from "./connections-store";
-import {
-  generatePersonSlug,
-  nextAvailablePersonId,
-  STRANGER_PERSON_DISPLAY_NAME,
-  STRANGER_PERSON_ID,
-} from "@rome/api-types/persons";
+import { generatePersonSlug, nextAvailablePersonId } from "@rome/api-types/persons";
 import { whatsAppDisplayName } from "@rome/api-types/people";
 import { compareMessages, type Message } from "@rome/api-types/message";
 
 /**
  * The People tab's in-memory store: the curated people, the sentinel log, and
- * the channel mirrors behind them — plus the per-channel message and send
- * endpoints served straight off it.
+ * the channel mirrors behind them.
  *
  * The store is exported because the /people contract (./people-api.ts) is
- * served from it too: one store, so a link made through the contract is visible
- * to the thread a mirror endpoint opens, and a send lands where the next read
- * of either surface will find it.
+ * served from it.
  */
 
 // The WhatsApp mirror's own shapes, which are on neither noun of the /people
 // contract: a thread is a conversation rather than an account, so nothing here
 // reaches a /accounts row.
 //
-// They live in this file because this file is their only reader. The dashboard
-// reads the channel-blind contract instead, and core still serves
-// `/api/whatsapp/contacts*` for callers outside it — so the mock keeps standing
-// in for routes that exist, and nothing else needs the definitions to do it.
+// They live in this file because this file is their only reader.
 
-/** One row of `/api/whatsapp/contacts/:jid/messages`. */
+/** One mirrored message, as `wa_messages` stores it. */
 interface WhatsAppMessage {
   id: string;
   senderJid: string | null;
@@ -43,23 +30,6 @@ interface WhatsAppMessage {
   hasMedia: boolean;
   pushName: string | null;
   reactsToId: string | null;
-}
-
-/** One row of `/api/whatsapp/contacts`. */
-interface WhatsAppContact {
-  jid: string;
-  phoneNumber: string | null;
-  name: string | null;
-  notify: string | null;
-  verifiedName: string | null;
-  imgUrl: string | null;
-  chatName: string | null;
-  isGroup: boolean;
-  linkedPersonId: string | null;
-  linkedPersonName: string | null;
-  lastMessageAt: number | null;
-  lastMessagePreview: string | null;
-  messageCount: number;
 }
 
 const MINUTE = 60;
@@ -136,22 +106,25 @@ interface PersonFixture {
   id: string;
   displayName: string;
   bondLevel: string;
-  channelMappings: { channel: string; channelUserId: string }[];
+  channelMappings: { channel: string; channelUserId: string; delegate?: true }[];
 }
 
 /**
- * What a contact row actually stores: address-book facts, and nothing derived.
- *
- * The five omitted fields are all projections on the real API — the pair
- * naming the account is a join onto `channel_mappings`, and the summary trio is a subquery
- * over `wa_messages`. Storing any of them here would let a link or a send leave
- * the card disagreeing with the thread behind it, which is the one thing these
- * fixtures exist to keep honest.
+ * What a contact row stores: address-book facts, and nothing derived. The
+ * linked person and the last-message summary are projections on the real
+ * repository, so storing them here would let a link or a send leave the row
+ * disagreeing with the thread behind it.
  */
-type WhatsAppContactRow = Omit<
-  WhatsAppContact,
-  "linkedPersonId" | "linkedPersonName" | "lastMessageAt" | "lastMessagePreview" | "messageCount"
->;
+interface WhatsAppContactRow {
+  jid: string;
+  phoneNumber: string | null;
+  name: string | null;
+  notify: string | null;
+  verifiedName: string | null;
+  imgUrl: string | null;
+  chatName: string | null;
+  isGroup: boolean;
+}
 
 // The curated graph. Bond levels are chosen to cover each branch the page
 // takes on them rather than to look like a plausible address book.
@@ -166,7 +139,19 @@ export const persons: PersonFixture[] = [
     id: "mock-guardian",
     displayName: "Mock Guardian",
     bondLevel: "guardian",
-    channelMappings: [],
+    // The guardian's own accounts: a signed-in Telegram, WhatsApp and email, which
+    // are theirs the moment they connect, and a Feishu account linked by code. The
+    // directory row lists them under the name.
+    channelMappings: [
+      { channel: "telegram_user", channelUserId: "201447" },
+      { channel: "whatsapp", channelUserId: "15550100999@s.whatsapp.net" },
+      { channel: "feishu", channelUserId: "ou_7c3e19d2aa" },
+      // Longer than a phone row, so the row's wrapping is exercised.
+      { channel: "email", channelUserId: "guardian.work.account@example-company.com" },
+      // One of the guardian's own Rome Cloud agents, which Rome links to them
+      // as a delegate link.
+      { channel: "agents", channelUserId: "agt_atlas", delegate: true },
+    ],
   },
   {
     id: "ray-oster",
@@ -184,7 +169,12 @@ export const persons: PersonFixture[] = [
     id: "mira-chen",
     displayName: "Mira Chen",
     bondLevel: "acquaintance",
-    channelMappings: [{ channel: "whatsapp", channelUserId: MIRA_JID }],
+    // The email account is the contact an app's access dialog offers when the
+    // guardian types "mira" into its Rome Cloud email list.
+    channelMappings: [
+      { channel: "whatsapp", channelUserId: MIRA_JID },
+      { channel: "email", channelUserId: "mira.chen@example.com" },
+    ],
   },
   {
     // Reachable on LinkedIn and nowhere else. LinkedIn used to be a section of
@@ -222,17 +212,20 @@ export const persons: PersonFixture[] = [
     bondLevel: "inner-circle",
     channelMappings: [],
   },
-  {
-    // The sentinel row core seeds at boot, carrying one already-dismissed
-    // sender. `/api/people` withholds it and `/api/accounts` surfaces its
-    // holdings as dismissed rows — it is here to keep those honest, not to be
-    // looked at.
-    id: STRANGER_PERSON_ID,
-    displayName: STRANGER_PERSON_DISPLAY_NAME,
-    bondLevel: "other",
-    channelMappings: [{ channel: "telegram", channelUserId: "770144238" }],
-  },
 ];
+
+// Accounts the guardian dismissed: decided to belong to nobody they track. One
+// already-dismissed sender keeps the dismissed rows of `/api/accounts` honest.
+export const dismissedAccounts: { channel: string; channelUserId: string }[] = [
+  { channel: "telegram", channelUserId: "770144238" },
+];
+
+/** The index of the account's dismissal, or -1 when it is not dismissed. */
+export function dismissalOf(channel: string, channelUserId: string): number {
+  return dismissedAccounts.findIndex(
+    (account) => account.channel === channel && account.channelUserId === channelUserId,
+  );
+}
 
 // Senders seen in `sentinel_log`. `?state=unlinked` on the account directory
 // is the half of these with no row in `channel_mappings`, so this list is the
@@ -565,51 +558,6 @@ const threads: Record<string, WhatsAppMessage[]> = {
   // with nothing ever said. The dialog's empty thread, not a load failure.
 };
 
-/** The repository's tiebreaker for two contacts with the same last-message
- *  time: the first name field that has anything in it, lower-cased. Distinct
- *  from the page's own display choice, which is a rendering decision made
- *  against the same fields. */
-function displayNameOf(contact: WhatsAppContactRow): string {
-  return (
-    contact.name ??
-    contact.notify ??
-    contact.verifiedName ??
-    contact.chatName ??
-    contact.phoneNumber ??
-    contact.jid
-  ).toLowerCase();
-}
-
-/**
- * A contact's summary trio, projected from its thread the way the repository's
- * subqueries do.
- *
- * Reactions are emoji pinned to another message rather than a line of their
- * own, so they are excluded from the preview and its timestamp — but not from
- * `messageCount`, which the repository takes as a plain `COUNT(*)` over the
- * chat.
- */
-export function summarize(
-  jid: string,
-): Pick<WhatsAppContact, "lastMessageAt" | "lastMessagePreview" | "messageCount"> {
-  const thread = threads[jid] ?? [];
-  // `>`, not `>=`: the repository orders by `timestamp DESC, rowid DESC`, so
-  // the last row inserted wins a tie. Threads here are append-ordered, which
-  // makes the later element the higher rowid. Reachable rather than
-  // theoretical — sends stamp whole seconds, so two in the same second tie.
-  const newest = thread
-    .filter((message) => message.type !== "reaction")
-    .reduce<WhatsAppMessage | null>(
-      (latest, message) => (latest && latest.timestamp > message.timestamp ? latest : message),
-      null,
-    );
-  return {
-    lastMessageAt: newest?.timestamp ?? null,
-    lastMessagePreview: newest?.text ?? null,
-    messageCount: thread.length,
-  };
-}
-
 /** The person an account currently maps to, or `undefined` while it is
  *  still unmapped. The `channel_mappings` lookup both the unknown-sender query
  *  and the contacts join run. */
@@ -679,19 +627,12 @@ export function accountTimeline(ref: AccountRef): Message[] {
 }
 
 /**
- * What Rome has said through the send route and the channel has since surfaced.
- *
- * The mock's stand-in for the store a real channel's mirror would put a
- * delivered message into. It is a store of its own rather than a flag on an
- * outbox row for the reason the contract gives: an outbox row is exactly a send
- * whose message is not on the timeline yet, so the outbox read has to be able
- * to look the message up here and find it — the same comparison the route runs,
- * rather than a delivery bit someone remembered to set.
+ * What Rome has said through the send route: the mock's stand-in for Rome's
+ * own transcript of a send the channel took.
  */
 const deliveredEntries: (Message & { channelUserId: string })[] = [];
 
-/** Put a sent message where the timeline will find it. The `ref` is the one the
- *  outbox row is waiting on, which is what clears the row. */
+/** Put a sent message where the timeline will find it. */
 export function recordDelivered(
   account: AccountRef,
   entry: Omit<Message, "source" | "direction">,
@@ -727,10 +668,10 @@ function timelineForChannels(channels: AccountRef[]): Message[] {
         continue;
       }
       for (const message of mirrored) {
-        // A reaction is not its own dynamic — `summarize` skips them when it
-        // picks `latest`, so carrying them here would let one account report
-        // two different newest things. Whether the page renders them against
-        // the line they answer is the page rebuild's call.
+        // A reaction is not its own dynamic — it is an emoji pinned to another
+        // line, so carrying it here would let it stand in as the account's
+        // newest message. Whether the page renders them against the line they
+        // answer is the page rebuild's call.
         if (message.type === "reaction") continue;
         entries.push({
           source: "whatsapp",
@@ -776,67 +717,3 @@ function sentinelEntriesFor(mapping: AccountRef): Message[] {
   }
   return entries;
 }
-
-/** The WhatsApp mirror's message and send endpoints. Not the people contract —
- *  a thread is a conversation rather than an account — so they keep their own
- *  paths and are served straight off the store above. Nothing in the dashboard
- *  reads them; they stand in for routes core still serves to other callers. */
-export const channelMirrorHandlers = [
-  http.get("/api/whatsapp/contacts", () => {
-    const rows = whatsappContacts.map((contact) => {
-      const owner = ownerOf("whatsapp", contact.jid);
-      return {
-        ...contact,
-        ...summarize(contact.jid),
-        linkedPersonId: owner?.id ?? null,
-        linkedPersonName: owner?.displayName ?? null,
-      } satisfies WhatsAppContact;
-    });
-    // The repository's ORDER BY: threads that have said something first, newest
-    // first, then the silent ones by name. Sorting here rather than in the
-    // fixture is what makes a send move its contact to the top.
-    rows.sort((a, b) => {
-      if ((a.lastMessageAt === null) !== (b.lastMessageAt === null)) {
-        return a.lastMessageAt === null ? 1 : -1;
-      }
-      if (a.lastMessageAt !== b.lastMessageAt) {
-        return (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0);
-      }
-      return displayNameOf(a).localeCompare(displayNameOf(b));
-    });
-    return HttpResponse.json(rows);
-  }),
-
-  http.get("/api/whatsapp/contacts/:jid/messages", ({ params, request }) => {
-    const thread = threads[String(params.jid)] ?? [];
-    const raw = Number(new URL(request.url).searchParams.get("limit"));
-    // The route reads the newest `limit` and hands them back oldest-first, so a
-    // long thread opens on its tail rather than its beginning.
-    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 500) : 50;
-    return HttpResponse.json(thread.slice(-limit));
-  }),
-
-  // The real route hands the text to the adapter and persists nothing; Baileys
-  // echoes it back as a `fromMe` message, which the mirror picks up and the
-  // next poll shows. Appending here is that echo — without it the composer's
-  // optimistic bubble would never reconcile and would sit "sending" forever.
-  http.post("/api/whatsapp/contacts/:jid/send", async ({ params, request }) => {
-    const jid = String(params.jid);
-    const body = (await request.json().catch(() => ({}))) as { text?: unknown };
-    const text = typeof body.text === "string" ? body.text.trim() : "";
-    if (!text) return HttpResponse.json({ error: "text is required" }, { status: 400 });
-
-    // The route sends through a live transport, so it refuses when the channel
-    // has none — and the composer has its own copy for that 503. Disconnecting
-    // WhatsApp on the Connections page is what makes this reachable; without
-    // the check, a visibly disconnected account would keep sending.
-    if (talkConnections("whatsapp").length !== 1) {
-      return HttpResponse.json({ error: "WhatsApp is not connected" }, { status: 503 });
-    }
-
-    const thread = (threads[jid] ??= []);
-    thread.push(guardianText(`wa-sent-${jid}-${thread.length}`, text, secondsAgo(0)));
-
-    return HttpResponse.json({ ok: true });
-  }),
-];

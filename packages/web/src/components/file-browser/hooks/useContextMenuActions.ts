@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ContextMenuActions } from "../ContextMenu";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "../store/context";
+import { findTreeNode } from "../store/utils";
 
 export function useContextMenuActions({
   rootLabel,
@@ -29,6 +30,7 @@ export function useContextMenuActions({
       canStartChatFromFolder: Boolean(onStartChatFromFolder),
       onCreatePath: (type, parentPath) => store.getState().ui.createPath(type, parentPath),
       onCopyPath: (text) => void store.getState().ui.copyPath(text),
+      getPathKind: (path) => findTreeNode(store.getState().tree.nodes, path)?.type ?? null,
       onDownloadPaths: (paths) => store.getState().ui.downloadPaths(paths),
       onUploadForFolder: (path) => store.getState().ui.triggerUploadForFolder(path),
       onUploadFolderForFolder: (path) => store.getState().ui.triggerFolderUploadForFolder(path),
@@ -40,6 +42,7 @@ export function useContextMenuActions({
       labelNewFile: t("contextMenu.newFile"),
       labelNewFolder: t("contextMenu.newFolder"),
       labelCopyPath: t("contextMenu.copyPath"),
+      labelCopyPaths: t("contextMenu.copyPaths"),
       labelDownload: t("contextMenu.download"),
       labelUploadFiles: t("contextMenu.uploadFiles"),
       labelUploadFolder: t("contextMenu.uploadFolder"),

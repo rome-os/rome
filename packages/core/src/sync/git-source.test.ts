@@ -1,15 +1,20 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { afterEach, describe, expect, it } from "@rstest/core";
-import {
-  OAUTH_PROVIDER_GRANTS,
-  type GithubGrantProfile,
-} from "../connections/integrations/oauth-providers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
+import type { GithubGrantProfile } from "../connections/integrations/oauth-providers.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
 import {
@@ -23,7 +28,12 @@ import {
 } from "./git-source.js";
 
 const tempDirs: string[] = [];
+let templateRepo: string | undefined;
 const savedTokenFileEnv = process.env.ROME_GITHUB_TOKEN_FILE;
+
+afterAll(() => {
+  if (templateRepo) rmSync(templateRepo, { recursive: true, force: true });
+});
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -41,31 +51,39 @@ function useTokenFile(): string {
   return path;
 }
 
-/** Seed a connected GitHub grant carrying `profile` in the ledger. */
+/** Seed a connected GitHub grant carrying `profile` in the store. */
 async function seedGithubGrant(
   db: ReturnType<typeof createTestDb>["db"],
   profile: GithubGrantProfile | undefined,
   id = "conn-github",
 ): Promise<void> {
-  const ledger = new DrizzleGrantLedger(db);
-  await ledger.createConnection({ id, service: "github", label: "github", createdAt: new Date() });
-  await ledger.ensureGrant(id, OAUTH_PROVIDER_GRANTS.github);
-  await ledger.updateGrant(id, OAUTH_PROVIDER_GRANTS.github, {
-    state: "authorized",
-    ...(profile ? { profile } : {}),
+  const ledger = new DrizzleConnectionsRepository(db);
+  ledger.save(db, {
+    id,
+    connectionKind: "github",
+    label: "github",
+    createdAt: new Date(),
+    grant: { state: "authorized", ...(profile ? { profile } : {}) },
   });
 }
 
+/** A private repo on `main` with one committed `tracked.txt`. Copies one
+ *  template, since building it runs six git processes. */
 function createRepo(): string {
+  if (!templateRepo) {
+    templateRepo = mkdtempSync(join(tmpdir(), "rome-sync-template-"));
+    const cwd = templateRepo;
+    execFileSync("git", ["init", "-q"], { cwd });
+    execFileSync("git", ["config", "user.name", "Rome Test"], { cwd });
+    execFileSync("git", ["config", "user.email", "rome@example.com"], { cwd });
+    writeFileSync(join(cwd, "tracked.txt"), "baseline\n");
+    execFileSync("git", ["add", "."], { cwd });
+    execFileSync("git", ["commit", "-qm", "baseline"], { cwd });
+    execFileSync("git", ["branch", "-M", "main"], { cwd });
+  }
   const dir = mkdtempSync(join(tmpdir(), "rome-sync-restore-"));
   tempDirs.push(dir);
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  execFileSync("git", ["config", "user.name", "Rome Test"], { cwd: dir });
-  execFileSync("git", ["config", "user.email", "rome@example.com"], { cwd: dir });
-  writeFileSync(join(dir, "tracked.txt"), "baseline\n");
-  execFileSync("git", ["add", "."], { cwd: dir });
-  execFileSync("git", ["commit", "-qm", "baseline"], { cwd: dir });
-  execFileSync("git", ["branch", "-M", "main"], { cwd: dir });
+  cpSync(templateRepo, dir, { recursive: true });
   return dir;
 }
 
@@ -345,7 +363,7 @@ describe("GitSyncSource.availability", () => {
 });
 
 describe("githubCommitterIdentity", () => {
-  it("attributes commits to the conferred grant identity", async () => {
+  it("attributes commits to the granted grant identity", async () => {
     const { db, close } = createTestDb();
     try {
       await seedGithubGrant(db, {
@@ -425,21 +443,22 @@ describe("githubCommitterIdentity", () => {
     sqlite.exec(`
       CREATE TABLE connections (
         id text PRIMARY KEY NOT NULL,
-        service text NOT NULL,
+        connection_kind text NOT NULL,
         label text NOT NULL,
         created_at integer NOT NULL
       );
       CREATE TABLE connection_grants (
-        custody text NOT NULL,
-        name text NOT NULL,
+        custody text PRIMARY KEY NOT NULL,
         state text NOT NULL,
         credential text,
         profile text,
-        conferred_at integer,
+        granted_at integer,
+        grant_epoch text,
         last_renewed_at integer,
         degraded_at integer,
         degraded_reason text,
-        PRIMARY KEY (custody, name)
+        platform text,
+        account_id text
       );
     `);
     const db = drizzle(sqlite) as unknown as DrizzleDb;

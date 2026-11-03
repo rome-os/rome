@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import {
+  adoptAgentTurnId,
   endStream,
+  runningTurnIdOf,
   startStream,
-  updateAssistantText,
+  updateAssistantBlock,
   updateSnapshot,
   type StreamingSessionMap,
 } from "./use-streaming-sessions";
@@ -19,12 +21,13 @@ const segmentIdAt = (state: StreamingSessionMap, sessionId: string): string | un
 };
 
 describe("streaming-sessions state", () => {
-  it("preserves the live tail and trace when another input joins the same turn", () => {
+  it("preserves the live block and trace when another input joins the same turn", () => {
     let state = startStream(new Map(), "session", "turn");
     state = updateSnapshot(state, "session", "turn", snapshotFor("trace"));
-    state = updateAssistantText(state, "session", "turn", 0, "Still working");
+    state = updateAssistantBlock(state, "session", "turn", 0, true);
     expect(startStream(state, "session", "turn")).toBe(state);
-    expect(state.get("session")?.assistantText).toBe("Still working");
+    expect(segmentIdAt(state, "session")).toBe("trace");
+    expect(state.get("session")?.assistantBlockIx).toBe(0);
   });
   it("isolates per-session snapshots when concurrent streams update each other", () => {
     let state: StreamingSessionMap = new Map();
@@ -89,34 +92,68 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.turnId).toBe("turn-2");
   });
 
-  it("updateAssistantText accumulates within a block and replaces on a higher blockIx", () => {
+  it("updateAssistantBlock moves to a higher blockIx and stays put for more text in a block", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
-    state = updateAssistantText(state, "A", "turn-1", 0, "Hel");
-    state = updateAssistantText(state, "A", "turn-1", 0, "Hello");
-    expect(state.get("A")?.assistantText).toBe("Hello");
+    state = updateSnapshot(state, "A", "turn-1", snapshotFor("trace"));
+    state = updateAssistantBlock(state, "A", "turn-1", 0, true);
     expect(state.get("A")?.assistantBlockIx).toBe(0);
+    // More text in the same block changes nothing the chat draws from state.
+    expect(updateAssistantBlock(state, "A", "turn-1", 0, true)).toBe(state);
     // Higher blockIx: the completed block is now its own message; the live tail
     // moves to the new block (the server clears it with an empty text first).
-    state = updateAssistantText(state, "A", "turn-1", 1, "");
-    expect(state.get("A")?.assistantText).toBe("");
+    state = updateAssistantBlock(state, "A", "turn-1", 1, false);
     expect(state.get("A")?.assistantBlockIx).toBe(1);
-    state = updateAssistantText(state, "A", "turn-1", 1, "Final answer");
-    expect(state.get("A")?.assistantText).toBe("Final answer");
   });
 
-  it("updateAssistantText never regresses to an earlier block", () => {
+  it("updateAssistantBlock keeps the thinking watermark through an empty block boundary", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
-    state = updateAssistantText(state, "A", "turn-1", 1, "current block");
-    const after = updateAssistantText(state, "A", "turn-1", 0, "stale block");
-    expect(after).toBe(state);
-    expect(state.get("A")?.assistantText).toBe("current block");
+    state = updateSnapshot(state, "A", "turn-1", {
+      segments: [{ id: "s", ordinal: 4 } as unknown as TraceSegment],
+      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+    });
+    state = updateAssistantBlock(state, "A", "turn-1", 0, true);
+    expect(state.get("A")?.textThroughOrdinal).toBe(4);
+    state = updateAssistantBlock(state, "A", "turn-1", 1, false);
+    expect(state.get("A")?.textThroughOrdinal).toBe(4);
   });
 
-  it("updateAssistantText ignores writes from a stale turn", () => {
+  it("updateAssistantBlock never regresses to an earlier block", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = updateAssistantBlock(state, "A", "turn-1", 1, true);
+    const after = updateAssistantBlock(state, "A", "turn-1", 0, true);
+    expect(after).toBe(state);
+    expect(state.get("A")?.assistantBlockIx).toBe(1);
+  });
+
+  it("names the running turn by its agent turn id while keeping the stream's turnId", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "backend:wake");
+    state = updateSnapshot(state, "A", "backend:wake", snapshotFor("live"));
+    expect(runningTurnIdOf(state.get("A"))).toBe("backend:wake");
+
+    state = adoptAgentTurnId(state, "A", "backend:wake", "turn-real");
+    expect(state.get("A")?.turnId).toBe("backend:wake");
+    expect(segmentIdAt(state, "A")).toBe("live");
+    expect(runningTurnIdOf(state.get("A"))).toBe("turn-real");
+    // Updates and the end still go through the turnId the stream was opened under.
+    state = updateSnapshot(state, "A", "backend:wake", snapshotFor("next"));
+    expect(segmentIdAt(state, "A")).toBe("next");
+    expect(endStream(state, "A", "backend:wake").has("A")).toBe(false);
+    expect(runningTurnIdOf(undefined)).toBeNull();
+  });
+
+  it("adoptAgentTurnId ignores a stale turn and a repeated id", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
     state = startStream(state, "A", "turn-2");
-    const after = updateAssistantText(state, "A", "turn-1", 0, "stale");
+    expect(adoptAgentTurnId(state, "A", "turn-1", "turn-real")).toBe(state);
+    state = adoptAgentTurnId(state, "A", "turn-2", "turn-real");
+    expect(adoptAgentTurnId(state, "A", "turn-2", "turn-real")).toBe(state);
+  });
+
+  it("updateAssistantBlock ignores writes from a stale turn", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = startStream(state, "A", "turn-2");
+    const after = updateAssistantBlock(state, "A", "turn-1", 3, true);
     expect(after).toBe(state);
-    expect(state.get("A")?.assistantText).toBe("");
+    expect(state.get("A")?.assistantBlockIx).toBe(0);
   });
 });

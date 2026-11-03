@@ -12,3 +12,4 @@ speed: moderate
 reliability: medium
 sideEffects: write
 cancellable: false
+visibility: explicit

@@ -4,7 +4,5 @@ import { pairingPresentation } from "../src/components/pairing/pairing-presentat
 
 export function pairingStory(channelIndex = 0) {
   const approval = pairingFixtures(Date.UTC(2026, 8, 10, 10, 0))[channelIndex];
-  return pairingPresentation(approval, pairingPayload(approval)!, true);
+  return pairingPresentation(approval, pairingPayload(approval)!);
 }
-
-export const ignorePairingAction = () => undefined;

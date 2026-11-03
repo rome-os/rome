@@ -4,7 +4,7 @@
 // is custody-external: the signed-in session lives in Rome's server-side
 // Chrome profile (the one opencli drives over CDP), so the ledger holds only a
 // custody marker plus the account identity — there is no secret Rome could
-// hold. Conferral is therefore observational: the setup opens the LinkedIn
+// hold. Grant is therefore observational: the setup opens the LinkedIn
 // login page in the server browser, the guardian signs in through the
 // dashboard's /desktop view, and the coroutine polls `opencli linkedin whoami`
 // until the session reads authenticated.
@@ -13,18 +13,14 @@
 // valid in Chrome after a transient auth-shaped failure (LinkedIn checkpoint
 // interstitials look like auth walls), so renew re-probes whoami — a healthy
 // probe keeps the credential, and only a definite signed-out answer degrades
-// to "re-confer".
+// to "needs-fix".
 //
 // The inbox poller mirrors history without delivering inbound agent turns.
-// Replies use the same browser session and the shared People outbox.
+// Replies use the same browser session and the shared People send.
 
 import { z } from "zod";
-import type {
-  ConversationId,
-  NormalizedMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
+import type { TalkFeatures } from "../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
@@ -36,7 +32,7 @@ import {
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
 import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
-import type { LinkedInHistoryMessage, LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -48,7 +44,6 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import { historyFeature } from "./talk-features.js";
 import { createLogger } from "../../logger.js";
 
 const log = createLogger("linkedin-reply");
@@ -60,7 +55,7 @@ const LOGIN_WAIT_TIMEOUT_MS = 10 * 60_000;
 const LOGIN_POLL_INTERVAL_MS = 5_000;
 
 // ── Grant profile ─────────────────────────────────────────────────────────
-// The non-secret conferral outcome recorded beside the custody marker: who the
+// The non-secret grant outcome recorded beside the custody marker: who the
 // signed-in LinkedIn account is, per `whoami`.
 
 const linkedinGrantProfileSchema = z
@@ -111,31 +106,31 @@ function browserSessionCredential(): Credential {
 }
 
 /**
- * The `session` scheme. Conferral is driven by the setup below. renew()
+ * The `session` scheme. Grant is driven by the setup below. renew()
  * re-probes the browser session: still signed in → the credential is still
- * good verbatim; definitely signed out → "re-confer". A transient probe
+ * good verbatim; definitely signed out → "needs-fix". A transient probe
  * failure (Chrome restarting, CDP briefly unreachable) also keeps the
  * credential — degrading the grant on a probe blip would demand a pointless
  * re-login, and a genuinely dead session re-faults on the next poll tick.
  */
 export function linkedinSessionScheme(run: RunOpencli): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       try {
         parseWhoami(await run(["linkedin", "whoami"], { timeoutMs: WHOAMI_TIMEOUT_MS }));
         return cred;
       } catch (err) {
-        if (err instanceof OpencliAuthError) return "re-confer";
+        if (err instanceof OpencliAuthError) return "needs-fix";
         return cred;
       }
     },
   };
 }
 
-// ── conferral setup ───────────────────────────────────────────────────────
+// ── setup ───────────────────────────────────────────────────────
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -152,14 +147,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Build the LinkedIn conferral setup. A linear coroutine:
- *   1. `ctx.step("probe-session")` — an already-signed-in browser confers
+ * Build the LinkedIn setup. A linear coroutine:
+ *   1. `ctx.step("probe-session")` — an already-signed-in browser grants
  *      immediately with no guardian interaction,
  *   2. open the LinkedIn login page in the server browser (best-effort) and
  *      show the sign-in walkthrough,
  *   3. `ctx.step("await-login")` — poll `whoami` until the session reads
  *      authenticated (or time out after 10 minutes),
- *   4. return the terminal conferral: custody marker + whoami identity.
+ *   4. return the terminal grant: custody marker + whoami identity.
  * Nothing durable exists before the terminal return — cancelling writes
  * nothing, and the only state "accumulated" is LinkedIn's own browser cookie.
  */
@@ -262,42 +257,6 @@ interface LinkedInTalker extends Talker {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
-/**
- * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
- *
- * The bare member id is the address the mirror keys on — `linkedin_participants`
- * is primary-keyed by it and promotion writes it into the mapping — so a promoted
- * participant is recognised on their next message with nothing else wired up.
- *
- * The stored profile URL stays the fallback rather than being replaced by one:
- * a URL carrying no member id is a vanity handle (`/in/ada-lovelace`), which is
- * the form the guardian's own mapping is conferred in at connect time. Narrowing
- * to the member id alone would strand it.
- */
-function linkedInChannelUserId(row: LinkedInHistoryMessage): string {
-  return (
-    linkedInMemberIdFromProfileUrl(row.senderProfileUrl) ??
-    row.senderProfileUrl ??
-    (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown")
-  );
-}
-
-function toHistoryNormalizedMessage(row: LinkedInHistoryMessage): NormalizedMessage {
-  return {
-    id: row.messageId,
-    channel: "linkedin",
-    channelUserId: linkedInChannelUserId(row),
-    displayName: row.senderName ?? "",
-    threadId: row.threadId,
-    ...(row.threadName ? { threadName: row.threadName } : {}),
-    threadType: "private",
-    timestamp: row.sentAt,
-    text: row.subject ? `${row.subject}\n${row.text ?? ""}`.trim() : (row.text ?? ""),
-    attachments: [],
-    rawEvent: row,
-  };
-}
-
 export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): ConnectionDescriptor {
   const run = deps.run ?? runOpencli;
   const sessionScheme = linkedinSessionScheme(run);
@@ -307,14 +266,16 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
   });
 
   return {
-    service: "linkedin",
-    reviveProfile: (_grant, record) => reviveLinkedInProfile(record),
-    auth: {
-      session: sessionScheme,
-    },
+    connectionKind: "linkedin",
+    reviveProfile: (record) => reviveLinkedInProfile(record),
+    accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
+    grant: "session",
+    auth: sessionScheme,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
+        // The inbox is mirrored into the store by the poller; nothing is
+        // delivered as an inbound turn.
+        receives: false,
         build(): Talker {
           const poller = new LinkedInInboxPoller({
             sink: deps.syncSink,
@@ -323,6 +284,17 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             maxIntervalMs: deps.maxIntervalMs,
           });
 
+          const sink = deps.syncSink;
+          const features: TalkFeatures = {};
+          if (sink.findReplyTarget) {
+            features.directMessaging = {
+              async chatFor(address: string) {
+                const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
+                const target = await sink.findReplyTarget?.({ participantId });
+                return target ? (target.threadId as ChatId) : null;
+              },
+            };
+          }
           const talker: LinkedInTalker = {
             // v1 is a mirror: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused until LinkedIn messages join the routed
@@ -336,7 +308,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             stop(): void {
               poller.stop();
             },
-            async send(conversationId: ConversationId, msg) {
+            async send(chatId: ChatId, msg) {
               if (
                 !msg.text?.trim() ||
                 msg.attachments?.length ||
@@ -346,12 +318,12 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               ) {
                 throw new Error("LinkedIn replies support plain text only");
               }
-              const target = await deps.syncSink.findReplyTarget?.({ threadId: conversationId });
+              const target = await deps.syncSink.findReplyTarget?.({ threadId: chatId });
               if (!target)
                 throw new Error("No verified LinkedIn direct conversation for this reply");
               if (
-                target.threadId !== conversationId ||
-                target.threadUrl !== `https://www.linkedin.com/messaging/thread/${conversationId}/`
+                target.threadId !== chatId ||
+                target.threadUrl !== `https://www.linkedin.com/messaging/thread/${chatId}/`
               ) {
                 throw new Error("LinkedIn reply target does not match the selected conversation");
               }
@@ -374,7 +346,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                     ],
                     { timeoutMs: 180_000 },
                   ),
-                  conversationId,
+                  chatId,
                 );
               } catch (error) {
                 if (error instanceof OpencliAuthError) {
@@ -382,41 +354,26 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                 }
                 throw error;
               }
+              if (message.textMatches === false) {
+                // Sent, so never resent. The mirror below holds the text LinkedIn stored.
+                log.warn("LinkedIn stored the reply with different text or line breaks", {
+                  threadId: chatId,
+                  messageId: message.messageId,
+                });
+              }
               try {
                 await deps.syncSink.upsertMessages([message]);
               } catch (error) {
                 // Provider acceptance survives a local mirror failure. The next poll repairs it.
                 log.warn("LinkedIn reply accepted but mirror write failed", {
-                  threadId: conversationId,
+                  threadId: chatId,
                   messageId: message.messageId,
                   error: error instanceof Error ? error.message : String(error),
                 });
               }
-              return { conversationId, messageId: message.messageId };
+              return { chatId, messageId: message.messageId };
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const sink = deps.syncSink;
-              const features: Partial<TalkFeatureMap> = {};
-              if (sink.findReplyTarget) {
-                features.directMessaging = {
-                  async conversationFor(address: string) {
-                    const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
-                    const target = await sink.findReplyTarget?.({ participantId });
-                    return target ? (target.threadId as ConversationId) : null;
-                  },
-                };
-              }
-              if (sink.fetchHistory) {
-                features.history = historyFeature({
-                  fetchHistory: async (conversationId, windowHours) => {
-                    const since = new Date(Date.now() - windowHours * 3_600_000);
-                    const rows = await sink.fetchHistory?.(conversationId, since);
-                    return (rows ?? []).map(toHistoryNormalizedMessage);
-                  },
-                });
-              }
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {
               return poller.getRuntimeDegradation();
             },

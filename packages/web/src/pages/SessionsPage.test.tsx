@@ -1,7 +1,23 @@
 // @rstest-environment jsdom
+import type { ComponentProps } from "react";
+import type { ChatRow } from "@/components/chat/chat-view";
+import type { LiveTextStore } from "@/hooks/live-text";
+import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
+import * as traceDrawerModule from "@/components/agent-trace/TraceDrawer" with {
+  rstest: "importActual",
+};
+import i18n from "@/i18n";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
 import {
@@ -14,17 +30,18 @@ import {
   openTurnStream,
   postSessionTurn,
 } from "@/lib/chat-api";
-import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
-import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
+import SessionsPage from "./SessionsPage";
 
+const realTraceDrawer = rs.hoisted(() => ({ enabled: false }));
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
-  TraceDrawer: () => null,
+  TraceDrawer: (props: ComponentProps<typeof traceDrawerModule.TraceDrawer>) =>
+    realTraceDrawer.enabled ? <traceDrawerModule.TraceDrawer {...props} /> : null,
   traceDrawerContentInsetClass: () => "",
 }));
 
-rs.mock("@/components/chat/blocks", () => ({
-  renderFlatBlocks: () => null,
-  renderSingleBlock: () => null,
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
 }));
 
 rs.mock("@/components/chat/ChatComposer", () => ({
@@ -48,9 +65,45 @@ rs.mock("@/components/chat/ChatComposer", () => ({
 }));
 
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: ({ live }: { live: { isStreaming: boolean; text: string } }) => (
-    <div data-testid="session-messages" data-streaming={String(live.isStreaming)}>
-      {live.text}
+  MessageList: ({
+    live,
+    rows,
+    onOpenStoredTrace,
+  }: {
+    live: { isStreaming: boolean; textStore: LiveTextStore };
+    rows: ChatRow[];
+    onOpenStoredTrace: (target: TraceDrawerTarget) => void;
+  }) => (
+    <div
+      data-testid="session-messages"
+      data-streaming={String(live.isStreaming)}
+      data-trace-rows={rows
+        .filter((row) => row.kind === "trace")
+        .map((row) => row.key)
+        .join(",")}
+    >
+      {live.textStore.get().text}
+      {realTraceDrawer.enabled
+        ? rows.map((row) =>
+            row.kind === "trace" && row.message.traceSummary ? (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() =>
+                  onOpenStoredTrace({
+                    kind: "stored",
+                    messageId: row.message.id,
+                    sessionId: row.message.sessionId,
+                    turnId: row.message.turnId ?? null,
+                    summary: row.message.traceSummary!,
+                  })
+                }
+              >
+                Open stored steps
+              </button>
+            ) : null,
+          )
+        : null}
     </div>
   ),
 }));
@@ -127,15 +180,48 @@ const FORK_SESSION = {
   },
 } as const;
 
-function renderDetail() {
-  return render(
-    <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
-      <Routes>
-        <Route path="/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+function ChatHomeProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="chat-home">
+      {location.pathname}
+      {location.search} {navigationType}
+    </output>
   );
 }
+
+function OpenMissingTileSession() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/full/apps/sessions/missing")}>
+      Open missing session
+    </button>
+  );
+}
+
+function renderDetail(initialEntry = "/sessions/feedback-fork-session", container?: HTMLElement) {
+  return render(
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        {container ? <OpenMissingTileSession /> : null}
+        <Routes>
+          <Route path="/sessions/*" element={<SessionsPage />} />
+          <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+          <Route path="/chat" element={<ChatHomeProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+    { container },
+  );
+}
+
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+/** Approvals the Activity page's pending banner and Events tab read. */
+let approvals: Record<string, unknown>[] = [];
 
 function setRouterHistoryIndex(idx: number) {
   window.history.replaceState({ ...window.history.state, idx }, "");
@@ -143,27 +229,40 @@ function setRouterHistoryIndex(idx: number) {
 
 function renderIndex(initialEntry = "/sessions") {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/sessions/*" element={<SessionsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 /** The shell-less mount: /full/apps/sessions/* routes outside RomeShellLayout. */
 function renderFullMode(initialEntry: string) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient()}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
   setRouterHistoryIndex(0);
+  approvals = [];
+  const realFetch = globalThis.fetch;
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url === "/api/approvals") return Response.json(approvals);
+    if (url.startsWith("/api/action-executions") || url.startsWith("/api/webhook-invocations"))
+      return Response.json([]);
+    return realFetch(input, init);
+  });
   rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
   rs.mocked(listRomeSessions).mockResolvedValue({
     sessions: [],
@@ -191,18 +290,103 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  realTraceDrawer.enabled = false;
+  rs.restoreAllMocks();
   rs.clearAllMocks();
 });
 
-describe("sessionsViewportClass", () => {
-  it("keeps the standard mobile shell surface edge-to-edge", () => {
-    expect(sessionsViewportClass(false)).toContain("h-[var(--rome-mobile-content-height)]");
-    expect(sessionsViewportClass(false)).not.toContain("pb-safe");
+describe("Sessions viewer archived traces", () => {
+  it("shows the archived note instead of an error and Retry for a stale trace button", async () => {
+    await i18n.changeLanguage("en");
+    realTraceDrawer.enabled = true;
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "old-trace",
+        sessionId: FORK_SESSION.id,
+        turnId: "old-turn",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-09-24T12:00:00Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    const fetchTrace = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ trace: null, traceArchived: true })));
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "Open stored steps" }));
+    expect(await screen.findByText("Steps from this turn are archived.")).toBeTruthy();
+    expect(fetchTrace).toHaveBeenCalledWith(
+      "/api/sessions/messages/old-trace/content?includeSubagentUsage=true",
+      { credentials: "include" },
+    );
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+describe("SessionsPage missing sessions", () => {
+  it.each([
+    "/sessions/missing",
+    "/full/apps/sessions/missing",
+  ])("replaces %s with the main chat page", async (path) => {
+    rs.mocked(getRomeSession).mockResolvedValue(null);
+    renderDetail(path);
+
+    expect((await screen.findByTestId("chat-home")).textContent).toBe("/chat REPLACE");
+    expect(screen.queryByText("Session not found")).toBeNull();
   });
 
-  it("protects the top edge in full mode without shrinking its bottom surface", () => {
-    expect(sessionsViewportClass(true)).toContain("pt-safe");
-    expect(sessionsViewportClass(true)).not.toContain("pb-safe");
+  it("returns home when the session disappears before its messages load", async () => {
+    rs.mocked(listRomeSessionMessages).mockResolvedValue(null);
+    renderDetail("/sessions/feedback-fork-session?hideSidebar=1");
+
+    expect((await screen.findByTestId("chat-home")).textContent).toBe(
+      "/chat?hideSidebar=1 REPLACE",
+    );
+  });
+
+  it.each([
+    ["/full/apps/sessions/missing", false],
+    ["/full/apps/sessions/feedback-fork-session", true],
+  ])("keeps a missing workspace tile inside its frame from %s", async (entry, navigatesToMissing) => {
+    const frame = document.createElement("iframe");
+    frame.src = "/full/apps/sessions/missing";
+    document.body.appendChild(frame);
+    frame.contentDocument!.write("<!doctype html><html><body></body></html>");
+    const parentWindow = frame.contentWindow!.parent;
+    const postMessage = rs.spyOn(parentWindow, "postMessage").mockImplementation(() => {});
+    rs.stubGlobal("window", frame.contentWindow!);
+    rs.mocked(getRomeSession).mockImplementation(async (id) =>
+      id === FORK_SESSION.id ? FORK_SESSION : null,
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+
+    try {
+      const view = renderDetail(entry, frame.contentDocument!.body);
+      if (navigatesToMissing) {
+        expect(await view.findByText("Feedback")).toBeTruthy();
+        fireEvent.click(view.getByRole("button", { name: "Open missing session" }));
+      }
+
+      expect(await view.findByText("Session not found")).toBeTruthy();
+      // An existing-to-missing move must not keep showing the previous session.
+      expect(view.queryByText("Feedback")).toBeNull();
+      expect(view.queryByTestId("chat-home")).toBeNull();
+      expect(postMessage).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      rs.unstubAllGlobals();
+      frame.remove();
+    }
+  });
+
+  it("keeps temporary server errors on the session page", async () => {
+    rs.mocked(getRomeSession).mockRejectedValue(new Error("Service unavailable"));
+    renderDetail();
+
+    expect(await screen.findByText("Service unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("chat-home")).toBeNull();
   });
 });
 
@@ -236,7 +420,6 @@ describe("SessionsPage landmarks", () => {
         const mains = view.container.querySelectorAll("main");
         expect(mains.length, `${entry} should carry exactly one main`).toBe(1);
         expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
-        expect(mains[0].className).toContain("pt-safe");
       });
       cleanup();
     }
@@ -256,14 +439,16 @@ describe("SessionsPage live fork details", () => {
     setRouterHistoryIndex(1);
 
     render(
-      <MemoryRouter
-        initialEntries={["/sessions/all", "/sessions/feedback-fork-session"]}
-        initialIndex={1}
-      >
-        <Routes>
-          <Route path="/sessions/*" element={<SessionsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter
+          initialEntries={["/sessions/all", "/sessions/feedback-fork-session"]}
+          initialIndex={1}
+        >
+          <Routes>
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
@@ -277,12 +462,14 @@ describe("SessionsPage live fork details", () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     render(
-      <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
-        <Routes>
-          <Route path="/sessions" element={<div>Sessions index</div>} />
-          <Route path="/sessions/*" element={<SessionsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
+          <Routes>
+            <Route path="/sessions" element={<div>Sessions index</div>} />
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
 
@@ -325,6 +512,91 @@ describe("SessionsPage live fork details", () => {
     await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalledTimes(2));
   });
 
+  it("hides a backend turn's saved trace behind its live row once the stream names the turn", async () => {
+    // A defer wake-up streams under a synthetic `backend:` turnId but saves
+    // its trace under the agent's own turn id.
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "trace-real",
+        sessionId: FORK_SESSION.id,
+        turnId: "turn-real",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "backend:wake", streamId: "stream-wake", startedAt: "", status: "running" },
+    ]);
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+        },
+      });
+      return new Response(body);
+    });
+
+    renderDetail();
+
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(AbortSignal)),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-messages").dataset.streaming).toBe("true"),
+    );
+    act(() => {
+      streamController?.enqueue(
+        new TextEncoder().encode('event: turn_id\ndata: {"turnId":"turn-real"}\n\n'),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId("session-messages").dataset.traceRows).toBe(""));
+  });
+
+  it("hides a backend turn's saved trace from the first render when the listing names the turn", async () => {
+    // The listing already reports `agentTurnId`, so the stream need not send
+    // a `turn_id` event before the live row carries the saved trace.
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "trace-real",
+        sessionId: FORK_SESSION.id,
+        turnId: "turn-real",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "backend:wake",
+        agentTurnId: "turn-real",
+        streamId: "stream-wake",
+        startedAt: "",
+        status: "running",
+      },
+    ]);
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({ start() {} });
+      return new Response(body);
+    });
+
+    renderDetail();
+
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(AbortSignal)),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-messages").dataset.streaming).toBe("true"),
+    );
+    await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.getByTestId("session-messages").dataset.traceRows).toBe("");
+  });
+
   it("refreshes messages when a turn finishes during initial attachment", async () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
 
@@ -364,41 +636,6 @@ describe("SessionsPage live fork details", () => {
 });
 
 describe("SessionsPage explorer", () => {
-  it("only exposes identity-oriented overview groups and ignores legacy query state", async () => {
-    expect(SESSION_OVERVIEW_GROUPS).toEqual(["app", "agent", "model", "project"]);
-    rs.mocked(getSessionMetrics).mockResolvedValue({
-      scope: {
-        from: "2026-07-08T00:00:00.000Z",
-        to: "2026-07-15T00:00:00.000Z",
-        timeZone: "UTC",
-      },
-      totals: {
-        sessionCount: 0,
-        runCount: 0,
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          totalTokens: 0,
-          costUsd: null,
-          costedRunCount: 0,
-        },
-        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
-      },
-      projections: [],
-    });
-
-    renderIndex("/sessions?groupBy=source&range=all");
-
-    await waitFor(() =>
-      expect(getSessionMetrics).toHaveBeenCalledWith(
-        expect.objectContaining({ groupBy: "app", range: "7d" }),
-      ),
-    );
-    expect(screen.getByRole("combobox", { name: "Group by" }).textContent).toContain("Apps");
-  });
-
   it("shows usage overview and switches to the human-readable inventory", async () => {
     rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
@@ -621,5 +858,95 @@ describe("SessionsPage explorer", () => {
       ),
     );
     expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+  });
+});
+
+describe("Activity page tabs", () => {
+  function PathProbe() {
+    const location = useLocation();
+    return (
+      <output data-testid="path">
+        {location.pathname}
+        {location.search}
+      </output>
+    );
+  }
+
+  function renderWithProbe(initialEntry: string) {
+    return render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/sessions/*" element={<SessionsPage />} />
+          </Routes>
+          <PathProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("switches to Events, which holds the event log", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe("/sessions/all");
+    const events = await screen.findByRole("radio", { name: "Events" });
+    expect(screen.getByRole("radio", { name: "Overview" })).toBeTruthy();
+    fireEvent.click(events);
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/sessions/events"));
+    expect(await screen.findByRole("radiogroup", { name: "Activity status" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Events" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("says a pending approval waits on the other tabs, and Review opens it on Events", async () => {
+    await i18n.changeLanguage("en");
+    approvals = [
+      {
+        id: "a1",
+        type: "action_execution",
+        status: "pending",
+        requestedBy: "main",
+        description: "Approval needing a decision",
+        createdAt: new Date().toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        payload: null,
+      },
+    ];
+    renderWithProbe("/sessions/all");
+    const review = await screen.findByRole("button", { name: /1 pending approval/ });
+    fireEvent.click(review);
+    await waitFor(() =>
+      expect(screen.getByTestId("path").textContent).toBe("/sessions/events?status=pending"),
+    );
+    const filters = await screen.findByRole("radiogroup", { name: "Activity status" });
+    expect(filters.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe(
+      "Pending",
+    );
+  });
+
+  it("shows no pending banner while nothing waits", async () => {
+    await i18n.changeLanguage("en");
+    renderWithProbe("/sessions/all");
+    await screen.findByRole("radio", { name: "Events" });
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/approvals", expect.anything()),
+    );
+    expect(screen.queryByRole("button", { name: /pending approval/ })).toBeNull();
+  });
+
+  it("gives the full-mode Events tab one main with the safe-area frame", async () => {
+    await i18n.changeLanguage("en");
+    const view = render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/full/apps/sessions/events"]}>
+          <Routes>
+            <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("radiogroup", { name: "Activity status" });
+    const mains = view.container.querySelectorAll("main");
+    expect(mains.length).toBe(1);
+    expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
   });
 });

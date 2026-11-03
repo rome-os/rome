@@ -5,10 +5,10 @@
 // (`/api/connections/:id/grants/:name/setup` + `/api/setups/:cid/input`); the
 // bespoke `/api/channels/*` connect/verify-status routes are gone. These tests
 // cover the shared frame once (via Discord) plus the per-service config
-// variations, the generic conversation-settings link, and Feishu's registered
+// variations, the generic chat settings link, and Feishu's registered
 // QR renderer.
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -29,10 +29,11 @@ function unconnected(grant: string): ConnectionSlot {
     key: "bot",
     connectionId: null,
     grant,
-    state: "unauthorized",
+    state: null,
     display: null,
     identity: null,
     activeSetupCid: null,
+    link: "own_account",
   };
 }
 
@@ -41,12 +42,13 @@ function connected(grant: string, identity: string | null): ConnectionSlot {
     key: "bot",
     connectionId: "conn-1",
     grant,
-    state: "authorized",
+    state: "working",
     display: identity
       ? { displayName: null, handle: identity, email: null, avatarUrl: null }
       : null,
     identity,
     activeSetupCid: null,
+    link: "own_account",
   };
 }
 
@@ -81,10 +83,9 @@ function stubFetch(overrides: (url: string, init?: RequestInit) => Response | nu
       }
       if (url.includes("/api/setups/") && url.endsWith("/input")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({ accepted: true, state: { status: "done", conferral: {} } }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ accepted: true, state: { status: "done", grant: {} } }), {
+            status: 200,
+          }),
         );
       }
       return Promise.resolve(
@@ -110,6 +111,55 @@ it.each([
   );
   expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
   expect(screen.queryByText(/linked as guardian/)).toBeNull();
+});
+
+it("renews a degraded account in place instead of only offering Disconnect", async () => {
+  const fetchMock = stubFetch();
+  renderCard(
+    <ChannelConnectCard
+      config={CHANNEL_CONFIGS.discord}
+      slot={{ ...connected("bot", "@rome_helper"), state: "broken" }}
+      role="primary"
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+  await waitFor(() => expect(screen.getByLabelText("Discord bot token")).toBeTruthy());
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/connections/conn-1/grants/bot/setup"),
+    ),
+  ).toBe(true);
+});
+
+it("offers Reconnect again when a renewed account degrades a second time", async () => {
+  stubFetch();
+  const degraded = { ...connected("bot", "@rome_helper"), state: "broken" as const };
+  const card = (slot: ConnectionSlot) => (
+    <MemoryRouter>
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.discord}
+        slot={slot}
+        role="primary"
+        onRefresh={() => {}}
+      />
+    </MemoryRouter>
+  );
+  const { rerender } = render(card(degraded));
+
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  const token = await screen.findByLabelText("Discord bot token");
+  fireEvent.change(token, { target: { value: "new-token" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(screen.queryByLabelText("Discord bot token")).toBeNull());
+
+  rerender(card(connected("bot", "@rome_helper")));
+  rerender(card(degraded));
+
+  expect(await screen.findByRole("button", { name: "Reconnect" })).toBeTruthy();
 });
 
 // ── Shared frame (via Discord) ──────────────────────────────────────────────
@@ -202,7 +252,7 @@ describe("ChannelConnectCard — shared frame", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/setups/live-cid"));
   });
 
-  it("Disconnect DELETEs the slot's grant on the connections registry and refreshes", async () => {
+  it("Disconnect asks first, then DELETEs the slot's grant and refreshes", async () => {
     const fetchMock = stubFetch();
     const onRefresh = rs.fn();
     renderCard(
@@ -214,6 +264,11 @@ describe("ChannelConnectCard — shared frame", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(screen.getByText("Disconnect @rome_helper?")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
     expect(fetchMock).toHaveBeenCalledWith("/api/connections/conn-1/grants/bot", {
       method: "DELETE",
@@ -240,12 +295,29 @@ describe("ChannelConnectCard — config variations", () => {
     }
   });
 
+  it("disconnects an account of a kind that takes no agent without asking", async () => {
+    const fetchMock = stubFetch();
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.email}
+        slot={{ ...connected("inbox", "agent@rome.computer"), link: null }}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true),
+    );
+  });
+
   it("shows no guardian note for email when connected", () => {
     stubFetch();
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.email}
-        slot={connected("inbox", "agent@rome.computer")}
+        slot={{ ...connected("inbox", "agent@rome.computer"), link: null }}
         role="primary"
         onRefresh={() => {}}
       />,
@@ -259,7 +331,7 @@ describe("ChannelConnectCard — config variations", () => {
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.telegram_user}
-        slot={{ ...connected("session", null) }}
+        slot={{ ...connected("session", null), link: "delegate" }}
         role="secondary"
         onRefresh={() => {}}
       />,
@@ -281,7 +353,7 @@ describe("ChannelConnectCard — custom components", () => {
         onRefresh={() => {}}
       />,
     );
-    expect(screen.getByRole("link", { name: "Configure conversations" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Configure chats" }).getAttribute("href")).toBe(
       "/settings/channels?connectionId=conn-1",
     );
     expect(fetchMock).not.toHaveBeenCalledWith("/api/channels/discord/channels");
@@ -297,7 +369,7 @@ describe("ChannelConnectCard — custom components", () => {
         onRefresh={() => {}}
       />,
     );
-    expect(screen.getByRole("link", { name: "Configure conversations" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Configure chats" }).getAttribute("href")).toBe(
       "/settings/channels?connectionId=conn-1",
     );
   });

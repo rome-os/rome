@@ -5,7 +5,6 @@ import {
   buildThemeCss,
   DEFAULT_THEME_NAME,
   getThemeDefinitions,
-  SUPERSEDED_THEME_CSS_CACHE_KEYS,
   THEME_CSS_CACHE_KEY,
   THEME_NAME_STORAGE_KEY,
   THEME_STORAGE_KEY,
@@ -289,14 +288,6 @@ describe("no-flash bootstrap", () => {
 
   it("targets the same style element injectThemeCss replaces", () => {
     expect(html).toContain(`style.id = "${THEME_STYLE_ELEMENT_ID}"`);
-  });
-
-  it("never replays a superseded cache key", () => {
-    // A key left behind by an older payload shape names primitives this build
-    // may no longer define.
-    for (const key of SUPERSEDED_THEME_CSS_CACHE_KEYS) {
-      expect(html).not.toContain(`"${key}"`);
-    }
   });
 
   it("caches a payload that fits under the bootstrap's size cap", () => {

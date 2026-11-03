@@ -1,10 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import i18n, {
-  LANGUAGE_LABELS,
-  normalizeDetectedLanguage,
-  resources,
-  SUPPORTED_LANGUAGES,
-} from "./index";
+import i18n, { normalizeDetectedLanguage, resources, SUPPORTED_LANGUAGES } from "./index";
 
 type Resource = Record<string, unknown>;
 
@@ -104,16 +99,6 @@ describe("i18n default policy", () => {
     // and t() would silently return keys. Resources are bundled inline so
     // there is no async work; assert the contract holds.
     expect(i18n.isInitialized).toBe(true);
-  });
-});
-
-describe("LANGUAGE_LABELS picker contract", () => {
-  it("has a native-script label for every supported language", () => {
-    for (const lang of SUPPORTED_LANGUAGES) {
-      expect(LANGUAGE_LABELS[lang], `missing label for ${lang}`).toBeTruthy();
-    }
-    // And no extras: keys of LANGUAGE_LABELS must not exceed SUPPORTED_LANGUAGES.
-    expect(Object.keys(LANGUAGE_LABELS).sort()).toEqual([...SUPPORTED_LANGUAGES].sort());
   });
 });
 

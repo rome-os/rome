@@ -1,15 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
-import { DEFAULT_SIDEBAR_PINS, normalizeSidebarPins } from "./AppGrid";
+import { normalizeSidebarPins } from "./AppGrid";
 
 describe("sidebar pins", () => {
-  it("defaults first-run sidebars to Apps, Chat, and Projects", () => {
-    expect(DEFAULT_SIDEBAR_PINS).toEqual([
-      { type: "builtin", id: "apps" },
-      { type: "builtin", id: "chat" },
-      { type: "builtin", id: "projects" },
-    ]);
-  });
-
   it("keeps required pins ahead of optional pins when normalizing", () => {
     expect(
       normalizeSidebarPins([
@@ -20,6 +12,36 @@ describe("sidebar pins", () => {
       { type: "builtin", id: "apps" },
       { type: "builtin", id: "chat" },
       { type: "builtin", id: "projects" },
+    ]);
+  });
+
+  it("moves Projects up to the fixed three ahead of an older pin list", () => {
+    expect(
+      normalizeSidebarPins([
+        { type: "app", id: "recipe-box" },
+        { type: "builtin", id: "projects" },
+      ]),
+    ).toEqual([
+      { type: "builtin", id: "apps" },
+      { type: "builtin", id: "chat" },
+      { type: "builtin", id: "projects" },
+      { type: "app", id: "recipe-box" },
+    ]);
+  });
+
+  it("carries a Sessions pin over to Activity, which replaced it, without doubling it", () => {
+    expect(
+      normalizeSidebarPins([
+        { type: "builtin", id: "sessions" },
+        { type: "app", id: "recipe-box" },
+        { type: "builtin", id: "activity" },
+      ]),
+    ).toEqual([
+      { type: "builtin", id: "apps" },
+      { type: "builtin", id: "chat" },
+      { type: "builtin", id: "projects" },
+      { type: "builtin", id: "activity" },
+      { type: "app", id: "recipe-box" },
     ]);
   });
 });

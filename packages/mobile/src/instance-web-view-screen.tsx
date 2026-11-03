@@ -13,7 +13,7 @@ import { WebView, type WebViewProps } from "react-native-webview";
 import { LauncherMessage } from "./launcher-screens";
 import { EMBER } from "./mobile-theme";
 import { sessionCoordinator } from "./mobile-runtime";
-import type { CloudInstance, InstanceSession } from "./native-auth-types";
+import type { CloudInstance, InstanceSession } from "@rome-os/libs/native-auth";
 import { configureTokenUsageWidget } from "./widget-usage-runtime";
 
 interface InstanceWebViewScreenProps {

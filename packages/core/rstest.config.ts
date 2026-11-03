@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 const junitReport = process.env.RSTEST_JUNIT === "1";
+// Channel scenario traces for packages/channel-test-ui, written only on request.
+const channelTraces = process.env.ROME_CHANNEL_TRACES;
+const channelTraceReporter = channelTraces
+  ? new (await import("./src/test/kit/im/trace-reporter.js")).ChannelTraceReporter(
+      path.resolve(channelTraces),
+    )
+  : undefined;
 
 export default defineConfig({
   root: rootDir,
@@ -22,6 +29,7 @@ export default defineConfig({
   include: [
     "src/**/*.test.ts",
     "../app-runtime-sdk/src/**/*.test.ts",
+    "../channel-test-ui/src/**/*.test.ts",
     "../../rome_apps/*/src/**/*.test.ts",
     "../../scripts/**/*.test.ts",
     "../../infra/**/*.test.ts",
@@ -57,7 +65,11 @@ export default defineConfig({
       lines: 50,
     },
   },
-  reporters: junitReport ? ["default", ["junit", { outputPath: "test-results.xml" }]] : ["default"],
+  reporters: [
+    "default",
+    ...(junitReport ? [["junit", { outputPath: "test-results.xml" }] as const] : []),
+    ...(channelTraceReporter ? [channelTraceReporter] : []),
+  ],
   testTimeout: 10_000,
   hookTimeout: 10_000,
 });

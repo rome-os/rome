@@ -17,8 +17,10 @@
    shadow boundary, and the shell toggles `.dark` on an ancestor of the mount,
    so `var(--background)` etc. resolve to whatever Rome currently has set
    (including its `.dark` overrides) and repaint live when the shell theme
-   changes. That is what makes an app follow the shell theme by default —
-   nothing is injected.
+   changes. The app host maps `--background` onto `--app-canvas` for existing
+   page bundles, while inline app components inherit the surrounding chat
+   canvas. New app roots can paint `bg-app-canvas` directly. That small context
+   alias is the only theme declaration the host injects.
 
    To override the host theme, an app author re-declares its semantic values in
    its own `styles.css` (a `:root` block, and `.dark` if needed). The host scopes

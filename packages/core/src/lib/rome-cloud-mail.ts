@@ -4,6 +4,9 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("rome-cloud-mail");
 
+/** How long one Rome Cloud mail API request may take before it aborts. */
+export const MAIL_REQUEST_TIMEOUT_MS = 15_000;
+
 // The instance-side client for Rome Cloud's provider-agnostic "Rome Mail" API
 // (Phase 1 as-built). The AgentMail key lives only in Rome Cloud (the
 // `romeCloud` codename in the repo); the instance authenticates every call with
@@ -229,7 +232,7 @@ export class RomeCloudMailProvider implements MailProvider {
         headers,
         cache: "no-store",
         body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(MAIL_REQUEST_TIMEOUT_MS),
       });
     } catch (err) {
       throw new MailProviderError(
@@ -288,10 +291,17 @@ export class RomeCloudMailProvider implements MailProvider {
       "/api/instance/mail/send",
       { method: "POST", body: input },
     );
-    const messageId = typeof data.messageId === "string" ? data.messageId : "";
-    const threadId = typeof data.threadId === "string" ? data.threadId : "";
-    if (!messageId) {
-      throw new MailProviderError("send returned an invalid payload", undefined, "invalid_payload");
+    const messageId = typeof data.messageId === "string" ? data.messageId.trim() : "";
+    const threadId = typeof data.threadId === "string" ? data.threadId.trim() : "";
+    // Rome Cloud answered 200, so the mail may have gone out. Say so, rather
+    // than invite a retry that could send it twice.
+    if (!messageId || !threadId) {
+      throw new MailProviderError(
+        "Email delivery is unconfirmed: Rome Cloud did not return valid message and thread IDs. " +
+          "Check email history before retrying to avoid sending a duplicate.",
+        undefined,
+        "invalid_payload",
+      );
     }
     return { messageId, threadId };
   }

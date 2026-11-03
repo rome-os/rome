@@ -39,7 +39,8 @@ changes to the webchat route, storage, or the front-end Chat component.
 - `db/` — the singleton progress table. `node` is the state-machine cursor.
   Captured artifacts are cached so a reload or restart resumes mid-conversation,
   which is how a Codex browser login that leaves the page lands back on the
-  connect step.
+  connect step. `session_id` records the chat that last took a welcome turn,
+  so the landing screen can send the guardian back to it.
 - The idea picker ends the conversation: the build button opens a fresh chat
   with the idea's kickoff prompt in the composer, and the explore button opens
   an empty one.
@@ -50,16 +51,34 @@ changes to the webchat route, storage, or the front-end Chat component.
 sign-in callback and the local onboarding page both land a freshly set-up
 guardian on `/full/apps/welcome-to-rome` (see `resolveAuthRouting` in
 `packages/web/src/lib/auth-routing.ts`), so this app's web bundle is the entry
-point into the product. It is also the reset point: its one button clears the
-progress row and replays the welcome.
+point into the product. It reads `GET /state` and shows where the welcome run
+stands:
+
+- **First run** (cursor at `greet`): the greeting and a **Start chat** button.
+- **Partway through**: the four steps with the current one marked, a
+  **Continue setup** button that opens the run's chat, and **Start over**. When
+  the run's chat is gone, **Start over** is the only button.
+- **Finished**: the four steps (a skipped AI connect is marked), **New chat**,
+  **Open the welcome chat**, and **Start over**.
+- **State unreadable**: a short error and **Try again**. A failed read never
+  shows the first run, because **Start chat** resets the run.
+
+Only a 404 from the chat route counts as a deleted chat. Any other lookup
+failure keeps **Continue setup**, and the chat page reports its own error.
+
+A run from before `session_id` existed has no chat id, so the screen picks the
+newest welcome chat, archived ones included, and records it through
+`POST /session`, which never replaces a recorded chat. Every start from this screen resets the run, so that chat
+is the run's own.
 
 It is deliberately a moment of delight rather than a form: a confetti burst on
-mount (`canvas-confetti`, lazily code-split, honouring `prefers-reduced-motion`),
-a floating hero mark with staggered entrance animation (keyframes in
-`styles.css`), and a single **Start chat** button.
+a first run (`canvas-confetti`, lazily code-split, honouring
+`prefers-reduced-motion`), and a floating hero mark with staggered entrance animation (keyframes in
+`styles.css`).
 
-Pressing it calls `startChat({ agentName: "welcome-to-rome", … })` from
-`@rome-os/app-web-sdk`, which creates the session, posts the kickoff turn, and
+**Start chat** and **Start over** call `POST /reset`, then
+`startChat({ agentName: "welcome-to-rome", … })` from `@rome-os/app-web-sdk`,
+which creates the session, posts the kickoff turn, and
 soft-navigates to `/chat/<id>` — where the scripted conversation below takes over.
 (The kickoff text is ignored by the `greet` node; the state machine greets on
 first contact regardless.)

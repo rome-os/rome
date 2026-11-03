@@ -100,9 +100,9 @@ const PEOPLE = [
 export function DisplaySection() {
   const [selectedTile, setSelectedTile] = useState("private");
   const [mountedAt] = useState(() => Date.now());
-  // Prose paints from inherited tokens on its own; Mermaid is the one part that
-  // needs handing an explicit sRGB palette, because its color parser can't read
-  // the OKLCH primitives Slate and Ember dark are built on.
+  // Prose paints from inherited tokens on its own; diagrams are the one part
+  // that needs handing an explicit sRGB palette, because the theme resolver
+  // can't read the OKLCH primitives Slate and Ember dark are built on.
   const { theme, resolved } = useTheme();
   const mermaidTheme = getBuiltinMermaidTheme(theme, resolved);
 
@@ -505,13 +505,13 @@ export function DisplaySection() {
           <Row>
             <Item label="sm — replacing the icon">
               <Button size="sm" disabled>
-                <Spinner size="sm" />
+                <Spinner data-icon="inline-start" size="sm" />
                 Installing
               </Button>
             </Item>
             <Item label="md — destructive tone">
               <Button variant="destructive" disabled>
-                <Spinner />
+                <Spinner data-icon="inline-start" />
                 Deleting
               </Button>
             </Item>
@@ -595,7 +595,7 @@ export function DisplaySection() {
       <Component id="markdown" name="Markdown" source="@rome-os/ui/markdown">
         <Specimen
           label="Markdown — prose, code, math, diagram"
-          note="Streamdown with the Shiki, KaTeX and Mermaid plugins. Everything paints from inherited semantic tokens, so switching theme or mode above repaints it — Mermaid included, via the explicit sRGB palette the host passes through `theme`."
+          note="Streamdown with Shiki, KaTeX, and Pele for Mermaid diagrams. Everything paints from inherited semantic tokens, so switching theme or mode above repaints it, diagrams included, via the explicit sRGB palette the host passes through `theme`."
         >
           <Markdown theme={mermaidTheme}>{MARKDOWN_SPECIMEN}</Markdown>
         </Specimen>

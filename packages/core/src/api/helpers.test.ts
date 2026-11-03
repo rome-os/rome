@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { decodeAppIdPathSegment, toTraceBlock } from "./helpers.js";
+import { decodeAppIdPathSegment, toTraceEvent } from "./helpers.js";
 
 describe("decodeAppIdPathSegment", () => {
   it("decodes a complete scoped app id from one route segment", () => {
@@ -11,10 +11,21 @@ describe("decodeAppIdPathSegment", () => {
   });
 });
 
-describe("toTraceBlock", () => {
+describe("toTraceEvent", () => {
+  it("keeps a tool result's isError flag, including false", () => {
+    for (const isError of [true, false]) {
+      expect(
+        toTraceEvent({ type: "tool_result", toolUseId: "t1", tool: "Bash", output: "x", isError }),
+      ).toMatchObject({ type: "tool_result", toolUseId: "t1", isError });
+    }
+    expect(
+      toTraceEvent({ type: "tool_result", toolUseId: "t1", tool: "Bash", output: "x" }),
+    ).not.toHaveProperty("isError");
+  });
+
   it("preserves an opaque Rome session reference on session_init", () => {
     expect(
-      toTraceBlock({
+      toTraceEvent({
         type: "session_init",
         sessionId: "runtime-session",
         romeSession: { _romeSessionId: "action:execution-1:reviewer", _type: "action" },
@@ -32,7 +43,7 @@ describe("toTraceBlock", () => {
   });
 
   it("keeps legacy session_init blocks valid without a Rome reference", () => {
-    expect(toTraceBlock({ type: "session_init", sessionId: "runtime-session" })).toMatchObject({
+    expect(toTraceEvent({ type: "session_init", sessionId: "runtime-session" })).toMatchObject({
       type: "session_init",
       sessionId: "runtime-session",
       romeSession: undefined,
@@ -41,7 +52,7 @@ describe("toTraceBlock", () => {
 
   it("maps provider-neutral plan updates to durable trace blocks", () => {
     expect(
-      toTraceBlock({
+      toTraceEvent({
         type: "plan_update",
         plan: {
           explanation: "Working through the request",

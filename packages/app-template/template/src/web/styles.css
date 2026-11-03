@@ -17,7 +17,9 @@
    it. Paint with the tokens the imports below supply, and nothing else. */
 @import "@rome-os/app-web-sdk/styles";
 
-/* App-specific rules go below. Paint only with the registered tokens
-   (`bg-card`, `text-muted-foreground`, `rounded-lg`, …) — never raw shades
-   (`bg-gray-100`) or scrims (`bg-black/40`). To override a host token (e.g. pin
+/* App-specific rules go below. Paint only with semantic tokens
+   (`bg-[var(--app-canvas)]`, `text-muted-foreground`, `rounded-lg`, …) — never raw shades
+   (`bg-gray-100`) or scrims (`bg-black/40`). The scaffold uses the arbitrary
+   semantic-token form for its canvas because its published UI dependency floor
+   predates the named `bg-app-canvas` utility. To override a host token (e.g. pin
    a corner radius), re-declare it in a `:root` block here. */

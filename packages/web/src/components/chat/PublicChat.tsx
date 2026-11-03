@@ -6,9 +6,10 @@ import {
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
-import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
+import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
 // Default agent identity for the public feed. The frozen snapshot doesn't carry
@@ -79,7 +80,7 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="@container/chat relative flex min-h-full md:min-h-dvh">
+      <div className="@container/chat relative flex min-h-full md:min-h-[var(--rome-viewport-height)]">
         {/* Mirror Chat.tsx: in the wide / no-apps layout (@5xl/chat) the trace
             drawer is `fixed` and out of flow, so reserve its 480px here to keep
             the messages clear of it. */}
@@ -95,7 +96,7 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
               isStreaming: false,
               runningTurnId: null,
               snapshot: null,
-              text: "",
+              textStore: EMPTY_LIVE_TEXT,
               identity: PUBLIC_MAIN_IDENTITY,
             }}
             contentRef={NO_OP}
@@ -112,13 +113,13 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
           allowSubagentUsage={false}
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,

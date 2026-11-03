@@ -79,7 +79,7 @@ function ListSpecimen() {
             Import
           </Button>
           <Button size="sm">
-            <Plus aria-hidden />
+            <Plus data-icon="inline-start" aria-hidden />
             Install app
           </Button>
         </PageActions>

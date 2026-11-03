@@ -4,8 +4,7 @@
 // import the redeemed bundle into the provider's grant (credential + the
 // service-parsed profile in one update). The grant transition drives the registry's
 // custody hook, which materializes the tmpfs token file + gh/git shell auth —
-// the route never touches those artifacts, and there is NO legacy
-// `provider_accounts` write anymore. The import is fail-closed: a missing
+// the route never touches those artifacts. The import is fail-closed: a missing
 // registry, or a bundle that yields no usable credential, or a ledger write that
 // throws all fail the redeem so nothing reports connected.
 //
@@ -15,9 +14,6 @@
 
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
-  rstest: "importActual",
-};
 
 const {
   redeemRomeCloudOAuthHandoff,
@@ -33,14 +29,6 @@ rs.mock("../../lib/rome-cloud-oauth.js", () => ({
   redeemRomeCloudOAuthHandoff,
   createRomeCloudOAuthStartRedirect: rs.fn(),
   createRomeCloudOAuthStartUrl: rs.fn(() => ({ connectUrl: "", available: true })),
-}));
-// Spread the real module so exports the route path relies on transitively
-// (e.g. `normalizeScopes`, consumed by the connections bundle mapper) resolve
-// against the actual implementation; only the network/disk side effects below
-// are stubbed.
-rs.mock("../../lib/provider-accounts.js", () => ({
-  ...providerAccountsModule,
-  getProviderTokenBundle: rs.fn(async () => null),
 }));
 rs.mock("../../lib/provider-token-files.js", () => ({
   syncProviderTokenFile,
@@ -70,31 +58,37 @@ rs.mock("../../lib/oauth-providers.js", () => ({
 }));
 
 import { createTestDb } from "../../test/helpers.js";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
 import { oauthRoutes } from "./oauth.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function makeRegistry(): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   for (const provider of ["github", "slack", "google"] as const) {
     registry.register(makeOAuthProviderDescriptor(provider));
   }
   return registry;
 }
 
+const logins: string[] = [];
+
 function makeDeps(registry?: ConnectionRegistry): ApiDeps {
-  return { db: {}, connectionRegistry: registry } as unknown as ApiDeps;
+  return {
+    db: {},
+    connectionRegistry: registry,
+    loginUsage: { recordLogin: (method: string) => logins.push(method) },
+  } as unknown as ApiDeps;
 }
 
 async function postRedeem(deps: ApiDeps) {
@@ -109,6 +103,7 @@ async function postRedeem(deps: ApiDeps) {
 describe("POST /oauth/redeem — ledger-only provider write path", () => {
   beforeEach(() => {
     rs.clearAllMocks();
+    logins.length = 0;
   });
   afterEach(() => {
     while (openDbs.length) openDbs.pop()?.();
@@ -127,11 +122,11 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
 
     expect(res.status).toBe(200);
     // Ledger import happened — a github connection holds an authorized grant that
-    // carries the non-secret conferral outcome (identity + scopes).
+    // carries the non-secret grant outcome (identity + scopes).
     const conn = registry.find("github")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().user).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id, "user");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.profile).toMatchObject({ login: "octocat", scopes: ["repo", "read:org"] });
     // Custody ran off the grant transition (not the route), driven by the grant's
     // secret material + non-secret profile.
@@ -146,6 +141,8 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     // Only github was minted.
     expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("google")).toHaveLength(0);
+    // A redeem with no session yet is a sign-in.
+    expect(logins).toEqual(["oauth"]);
   });
 
   it("slack: imports the two-token bundle into the workspace grant", async () => {
@@ -166,7 +163,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const conn = registry.find("slack")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().workspace).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id, "workspace");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.profile).toMatchObject({ teamId: "T123" });
     expect(registry.find("github")).toHaveLength(0);
   });
@@ -200,9 +197,9 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       metadata: null,
     });
     const registry = makeRegistry();
-    // Force the sole write to fail. The connection is minted first, so it exists —
-    // but its grant must NOT reach authorized, and custody must never fire.
-    rs.spyOn(registry, "importCredential").mockRejectedValueOnce(new Error("ledger down"));
+    // Force the grant to fail: the grant must NOT reach authorized, and
+    // custody must never fire.
+    rs.spyOn(registry, "giveGrant").mockRejectedValueOnce(new Error("ledger down"));
 
     const res = await postRedeem(makeDeps(registry));
 

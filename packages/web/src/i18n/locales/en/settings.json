@@ -14,7 +14,8 @@
     "Trust": "Trust",
     "Channels": "Channels",
     "AI Tools": "AI Tools",
-    "Advanced": "Advanced"
+    "Advanced": "Advanced",
+    "Devices": "Devices"
   },
   "appearance": {
     "title": "Appearance",
@@ -51,7 +52,70 @@
     "loading": "Loading connections",
     "errorTitle": "Connections couldn't be loaded",
     "emptyTitle": "No connections available",
+    "connect": "Connect",
+    "search": {
+      "placeholder": "Search connections",
+      "clear": "Clear search",
+      "noMatch": {
+        "connected": "No connected service matches “{{query}}”.",
+        "available": "No available service matches “{{query}}”."
+      }
+    },
+    "tabs": {
+      "label": "Connections",
+      "connected": "Connected",
+      "available": "Available",
+      "empty": {
+        "connected": "Nothing is connected yet.",
+        "available": "Everything here is connected."
+      },
+      "show": {
+        "connected": "Show {{count}} in Connected",
+        "available": "Show {{count}} in Available"
+      }
+    },
+    "groups": {
+      "messaging": "Messaging",
+      "accounts": "Accounts and tools",
+      "other": "Other"
+    },
+    "composioServices": {
+      "group": "Via Composio",
+      "via": "via Composio",
+      "viaLong": "Rome reaches this service through your Composio account.",
+      "signInBanner": "Sign in to Composio to connect these services.",
+      "signIn": "Sign in",
+      "authorize": "Authorize {{name}} in the new tab, then come back.",
+      "alreadyConnected": "{{name}} is already connected.",
+      "openTab": "Open tab",
+      "returnConnected": "{{name}} connected.",
+      "returnFailed": "Couldn't finish connecting {{name}}. Try again.",
+      "connectFailed": "Couldn't start the connection. Try again.",
+      "reconnect": "Reconnect",
+      "disconnectConfirm": "Disconnect {{name}}? Rome can't reach it until you connect it again.",
+      "disconnected": "{{name}} disconnected.",
+      "loadFailed": "Couldn't load the Composio services.",
+      "webhook": {
+        "title": "Event delivery",
+        "ready": "Ready",
+        "notReady": "Needs setup",
+        "unavailable": "Unavailable on this instance",
+        "setUp": "Set up again",
+        "done": "Event delivery is set up."
+      }
+    },
     "loadFailedFallback": "Failed to load connections.",
+    "accounts": {
+      "add": "Add another account",
+      "addedNotShown": "Account connected. Find it in the Connections list.",
+      "newAccount": "New account",
+      "noAgent": "None. Rome does not listen to this account.",
+      "changeInEnvoys": "Change in Envoys",
+      "agentSpeaksAs": "Speaks as this account",
+      "agentAnswersForYou": "Answers for you from this account",
+      "noAgentTitle": "No agent",
+      "agentNone": "Rome does not listen to this account"
+    },
     "headings": {
       "connected": "This connection lets your agent",
       "primary": "This connection will let your agent",
@@ -64,7 +128,12 @@
       "accessExpired": "Access expired — reconnect to keep it working",
       "reconnect": "Reconnect",
       "reconnecting": "Reconnecting account…",
-      "resumePending": "You started connecting {{label}} but didn't finish. Continue on {{label}}, or cancel."
+      "resumePending": "You started connecting {{label}} but didn't finish. Continue on {{label}}, or cancel.",
+      "shopify": {
+        "connect": "Connect in Shopify",
+        "ownApp": "Use your own Shopify app",
+        "installNote": "Shopify opens in a new tab, where you pick the store and approve Rome OS."
+      }
     },
     "composio": {
       "unavailable": "Composio is not available on this host."
@@ -72,14 +141,14 @@
     "cards": {
       "telegram": {
         "bot": {
-          "titleFallback": "Your Telegram bot",
-          "subtitle": "Add a bot from @BotFather.",
+          "titleFallback": "Your agent's Telegram account",
+          "subtitle": "Create the account with @BotFather.",
           "bullets": {
             "reply": "Reply when people message {{identity}}",
             "start": "Start a task when a new message arrives"
           },
           "bulletsFallback": {
-            "reply": "Reply when people message your bot",
+            "reply": "Reply when people message this account",
             "start": "Start a task when a new message arrives"
           }
         },
@@ -126,26 +195,39 @@
           "title": "Your LinkedIn",
           "bullets": {
             "read": "Keep a synced copy of your LinkedIn inbox",
-            "recap": "Read and recap your LinkedIn conversations"
+            "recap": "Read and recap your LinkedIn chats"
           }
         }
       },
       "discord": {
         "bot": {
-          "titleFallback": "Your Discord bot",
+          "titleFallback": "Your agent's Discord account",
           "bullets": {
             "reply": "Reply when people message {{identity}} in your servers",
             "start": "Start a task when a new message arrives"
           },
           "bulletsFallback": {
-            "reply": "Reply when people message your bot in your servers",
+            "reply": "Reply when people message this account in your servers",
+            "start": "Start a task when a new message arrives"
+          }
+        }
+      },
+      "slack_bot": {
+        "bot": {
+          "titleFallback": "Your agent's Slack account",
+          "bullets": {
+            "reply": "Reply when people message {{identity}} or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          },
+          "bulletsFallback": {
+            "reply": "Reply when people message this account or mention it in a channel",
             "start": "Start a task when a new message arrives"
           }
         }
       },
       "feishu": {
         "bot": {
-          "title": "Your Feishu app",
+          "title": "Your agent's Feishu account",
           "bullets": {
             "reply": "Reply when people message your agent on Feishu",
             "start": "Start a task when a new message arrives"
@@ -161,13 +243,13 @@
           }
         }
       },
-      "webchat": {
+      "agents": {
         "bot": {
-          "title": "Dashboard chat",
+          "title": "Messages with your other agents",
           "bullets": {
-            "chat": "Chat with your agent right here in the dashboard"
-          },
-          "alwaysOn": "Always on — nothing to configure."
+            "reply": "Your dots message your agent through Rome Cloud",
+            "start": "Your agent messages a dot when something needs its attention"
+          }
         }
       },
       "github": {
@@ -196,6 +278,15 @@
             "work": "Send and read messages in your Slack workspace as you"
           },
           "privacyNote": "You approve access on Slack; you can disconnect here anytime."
+        }
+      },
+      "shopify": {
+        "user": {
+          "title": "Your Shopify store",
+          "bullets": {
+            "work": "Update products and inventory, and read orders, in your store"
+          },
+          "privacyNote": "You approve access on Shopify; you can disconnect here anytime."
         }
       },
       "composio": {
@@ -247,11 +338,30 @@
       "consent": "Any app installed on your Rome will be able to read this.",
       "save": "Save for all apps",
       "saving": "Saving…",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "inputMethod": "How to add keys",
+      "singleKey": "Single key",
+      "pasteEnv": "Paste .env",
+      "envContent": ".env content",
+      "envHint": "Paste KEY=value lines, including comments and quoted values. Matching keys are replaced. Variable references stay literal.",
+      "envEmpty": "Paste at least one KEY=value entry",
+      "envError": "Line {{line}}: {{reason}}",
+      "envErrors": {
+        "assignment": "Expected KEY=value",
+        "quote": "Unclosed quote or unexpected text after a quoted value",
+        "duplicate": "Duplicate key name",
+        "emptyValue": "Enter a non-empty value",
+        "longValue": "Value exceeds 32,768 characters",
+        "name": "Invalid key name"
+      },
+      "batchFailed": "{{saved}} saved, {{count}} failed. Only failed entries remain in the form. Retry to save them."
     },
     "saved": "Saved. Apps can now read {{name}}.",
     "savedOverridden": "Saved, but a server setting with the same name takes precedence — the value you entered is not in use.",
-    "removed": "Removed {{name}}."
+    "removed": "Removed {{name}}.",
+    "batchSaved_one": "Saved {{count}} key for all apps.",
+    "batchSaved_other": "Saved {{count}} keys for all apps.",
+    "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use."
   },
   "trust": {
     "title": "Bond Level Rules",
@@ -271,10 +381,9 @@
     }
   },
   "channels": {
-    "title": "Channel Connections",
     "conversationSettings": {
-      "configure": "Configure conversations",
-      "searchPlaceholder": "Search provider, workspace, or conversation",
+      "configure": "Configure chats",
+      "searchPlaceholder": "Search provider, workspace, or chat",
       "allConnections": "All connections",
       "anyStatus": "Any status",
       "connectionFilterAria": "Filter by connection",
@@ -290,9 +399,9 @@
         "dm": "Direct message",
         "topic": "Topic"
       },
-      "loading": "Loading conversations…",
-      "emptyTitle": "No configurable conversations found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the conversation.",
+      "loading": "Loading chats…",
+      "emptyTitle": "No configurable chats found",
+      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",
@@ -304,16 +413,16 @@
         "routing": "Routing"
       },
       "fields": {
-        "enabled": "Rome in this conversation",
+        "enabled": "Rome in this chat",
         "respond": "Respond",
-        "botMessages": "Bot messages",
+        "botMessages": "Messages from automated accounts",
         "whenOthersMentioned": "When others are mentioned",
         "replies": "Reply placement",
         "agent": "Agent",
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "sessionReset": "Clears the provider-side conversation memory"
+        "sessionReset": "Clears the agent's memory kept by the model provider"
       },
       "source": {
         "overridden": "Overridden"
@@ -328,6 +437,10 @@
         "inline": "Inline"
       },
       "mainAgent": "main (default)",
+      "accountAgent": "{{agent}} (this account's agent)",
+      "silentAccount": "Messages here do not reach Rome until this account has an agent.",
+      "silentAccountLink": "<account>Link one on the account</account>.",
+      "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
         "afterInactivity": "After inactivity",
@@ -347,6 +460,10 @@
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",
+    "reconnect": "Reconnect",
+    "disconnectConfirmTitle": "Disconnect {{name}}?",
+    "disconnectConfirmTitleUnnamed": "Disconnect this account?",
+    "disconnectConfirmBody": "Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
     "status": {
       "connected": "Connected",
       "disconnected": "Disconnected",
@@ -361,7 +478,7 @@
       "linkAccount": "Link your Telegram account",
       "sendCodeTo": "Send this code to <link>{{target}}</link> on Telegram:",
       "sendCodeToPlain": "Send this code to {{target}} on Telegram:",
-      "yourBot": "your bot",
+      "yourBot": "your agent's account",
       "waitingVerification": "Waiting for verification...",
       "codeShownEarlier": "Verification code was shown when you first connected. Disconnect and reconnect to generate a new code.",
       "botTokenLabel": "Bot Token",
@@ -407,7 +524,7 @@
         "addCancel": "Cancel",
         "addPickBoth": "Pick both a channel and an agent first.",
         "addAllBound": "Every discoverable channel already has a binding — edit one above to rebind.",
-        "addDiscordOffline": "Discord isn't connected. Connect the bot above to populate this list.",
+        "addDiscordOffline": "Discord isn't connected. Connect the account above to populate this list.",
         "suggestionsTitle": "App suggestions",
         "suggestionFromApp": "{{app}} suggests routing a Discord channel to"
       }
@@ -518,6 +635,19 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshFailed": "Could not refresh AI tools. Please try again.",
+    "romeCredits": {
+      "name": "Rome credits",
+      "status": {
+        "inUse": "In use",
+        "ready": "Ready",
+        "standby": "Standby",
+        "usedUp": "Used up",
+        "usedUpWithClaude": "Used up",
+        "paused": "Paused"
+      },
+      "ofGranted": "of {{amount}}",
+      "meterLabel": "Rome credits left"
+    },
     "providers": {
       "claudeCode": {
         "name": "Claude"
@@ -547,6 +677,7 @@
       "environmentApiKey": "Environment API key"
     },
     "usage": {
+      "unavailable": "Usage is unavailable right now.",
       "fiveHour": "5H USED",
       "sevenDay": "7D USED",
       "resetsIn": "Resets in <1>{{time}}</1>"
@@ -633,13 +764,43 @@
       "description": "Hides pinned-agent names, avatars, and the composer chip. Applies to this browser only.",
       "toggleLabel": "Mask agent identity in chat"
     },
+    "experimental": {
+      "title": "Experimental features",
+      "description": "Features still being tried out. Each is off until switched on, and may change or be removed.",
+      "replyStreaming": {
+        "title": "Reply streaming",
+        "description": "Applies to the guardian's direct chats on Telegram and Feishu. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
+        "toggleLabel": "Stream replies as they are written"
+      },
+      "concierge": {
+        "title": "Concierge",
+        "description": "Adds one chat under Chats where your agent texts with you in short messages and hands longer work to task chats you can open.",
+        "toggleLabel": "Show Concierge in Chats"
+      },
+      "feishuStreamingStyle": {
+        "title": "Feishu streaming style",
+        "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",
+        "message": "Messages",
+        "card": "Cards"
+      }
+    },
     "developerSettings": {
       "title": "Developer Settings"
     },
-    "fable": {
-      "title": "Fable",
-      "description": "Only applies when Claude is available.",
-      "toggleLabel": "Route large models to Fable"
+    "tierModelMappings": {
+      "title": "Model ID mappings",
+      "description": "Set the model ID each tier uses for a provider. Leave an ID blank to keep its default.",
+      "openai": {
+        "large": "Codex large model ID",
+        "medium": "Codex medium model ID",
+        "small": "Codex small model ID"
+      },
+      "anthropic": {
+        "large": "Claude large model ID",
+        "medium": "Claude medium model ID",
+        "small": "Claude small model ID"
+      },
+      "save": "Save mappings"
     },
     "modelSelector": {
       "title": "Model selector",
@@ -719,7 +880,15 @@
       "noChannels": "None active",
       "apps": "Apps",
       "appsHealthy": "{{count}} loaded, none failed",
-      "appsUnhealthy": "{{count}} loaded; failed: {{ids}}"
+      "appsUnhealthy": "{{count}} loaded; failed: {{ids}}",
+      "memory": "Memory",
+      "disk": "Disk",
+      "free": "{{free}} of {{total}} free",
+      "ok": "OK",
+      "short": "Short",
+      "low": "Low",
+      "memoryShortHint": "Memory is short. Queued work waits until memory frees up, and running work may slow down.",
+      "diskLowHint": "Disk is nearly full. Free space before saves start failing."
     },
     "uptimePrefix": "running for {{uptime}}",
     "buildPrefix": "build {{sha}} · built {{builtAt}}",
@@ -746,6 +915,45 @@
       "lastSeen": "Last seen",
       "notReported": "Not reported",
       "installExtension": "Install OpenCLI extension"
+    },
+    "feedback": {
+      "title": "Feedback",
+      "agentReports": {
+        "title": "Agent platform reports",
+        "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
+        "toggleLabel": "Allow agent reports"
+      }
+    },
+    "spokenRecaps": {
+      "title": "Spoken recaps",
+      "description": "A short summary after substantial chat turns, with optional audio to listen hands-free. Recaps appear in the chat.",
+      "enabled": {
+        "title": "Create recaps",
+        "description": "Each recap uses an extra model call. Off by default. Turning recaps off stops new summaries and audio, but keeps existing recaps."
+      },
+      "threshold": {
+        "title": "Length threshold",
+        "description": "Based on response length and tool activity, not recap length.",
+        "short": "Shorter turns",
+        "medium": "Substantial turns",
+        "long": "Longer turns only"
+      },
+      "createAudio": {
+        "title": "Create audio",
+        "description": "Send recap text to Microsoft Edge Text to Speech to create a playable recording."
+      },
+      "audioSpeed": {
+        "title": "Audio speed",
+        "description": "Applies to newly created recordings.",
+        "slower": "Slower (−15%)",
+        "normal": "Normal",
+        "faster": "Faster (+15%)",
+        "fastest": "Fastest (+30%)"
+      },
+      "loadFailed": "Recap settings could not be saved or loaded. Try again.",
+      "loading": "Loading recap settings…",
+      "saving": "Saving…",
+      "retry": "Try again"
     }
   },
   "system": {
@@ -778,16 +986,45 @@
     "restartTimeoutBody": "Rome hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud."
   },
-  "sentinel": {
-    "title": "Sentinel Settings",
-    "intervalLabel": "Review interval (minutes)",
-    "intervalHelp": "How often the guardian is reminded to review sentinel log entries."
-  },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",
     "console": "Console",
     "artLabel": "Advanced easter egg",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "Devices",
+    "description": "Devices linked to your Rome account.",
+    "loadFailed": "Failed to load devices",
+    "connectionLabel": "Rome connection",
+    "connection": {
+      "not_running": "Service not running",
+      "online": "Connected",
+      "stopped": "Idle",
+      "connecting": "Connecting",
+      "retrying": "Reconnecting",
+      "revoked": "Access revoked",
+      "superseded": "Connection replaced",
+      "not_configured": "Not configured",
+      "unavailable": "Unavailable",
+      "incompatible": "Restart required"
+    },
+    "help": {
+      "not_running": "Start the service on this Rome instance to check linked computers.",
+      "unavailable": "Device status is unavailable. This page checks again on its own.",
+      "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
+      "incompatible": "On the Rome instance, run rome-node daemon stop, then rome-node daemon start. This restarts the shared service and interrupts device requests in progress."
+    },
+    "start": "Start service",
+    "starting": "Starting…",
+    "startFailed": "Could not start the device service",
+    "setup": {
+      "title": "Connect a computer",
+      "description": "The device service runs on your Rome instance. Each computer you want to use needs its own connection.",
+      "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
+      "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
+      "instructions": "Installation and connection guide"
+    }
   }
 }

@@ -2,30 +2,31 @@
 //
 // Each provider is brokered by Rome Cloud OAuth: the guardian delegates access by
 // clicking Connect, Rome Cloud runs the provider authorization, and the instance
-// redeems a handoff for an OAuthTokenBundle. Conferral is route-driven
-// (`romeCloudOAuth` — see schemes.ts), and renew() is "re-confer" until a
+// redeems a handoff for an OAuthTokenBundle. Grant is route-driven
+// (`romeCloudOAuth` — see schemes.ts), and renew() is "needs-fix" until a
 // Rome Cloud refresh exchange exists.
 //
 // This phase migrates ONLY the connection state into the registry: the grant
 // ledger becomes the system of record for whether a provider is connected, while
 // the legacy consumers (the tmpfs token files written at connect time, the
 // gh/git shell auth, `connector_proxy`'s direct proxy path) are untouched and
-// keep reading the legacy providerAccounts row/file. The Act seam (registry-built
+// keep reading the token file. The Act seam (registry-built
 // Actors) is a follow-up — `capabilities` is deliberately empty, which the
 // registry supports (`capabilities` is `Partial<…>`); a capability-less
 // connection still carries full grant state.
 //
-// Grant names follow the grant table: grants are about conferrals, not
+// Grant names follow the grant table: grants are about grants, not
 // token count. GitHub and Google each mint one user credential → one `user`
 // grant. Slack's single OAuth dance mints TWO tokens (bot + user) that live
-// together in ONE `workspace` grant's material.
+// together in ONE `workspace` grant's material. Shopify mints one offline token
+// for a store, not a person → one `store` grant.
 
 import { z } from "zod";
 import {
   clearGithubShellIntegrationForProvider,
   syncGithubShellIntegrationForProvider,
 } from "../../lib/github-shell-integration.js";
-import type { OAuthProvider } from "../../lib/oauth-providers.js";
+import { normalizeShopifyShopDomain, type OAuthProvider } from "../../lib/oauth-providers.js";
 import { clearProviderTokenFile, syncProviderTokenFile } from "../../lib/provider-token-files.js";
 import { romeCloudOAuth } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
@@ -38,10 +39,10 @@ import type {
   ProfileRecord,
 } from "../types.js";
 
-// Per-service grant-profile schemas. Rome Cloud's redeem hands over a RAW JSON
-// object; each service parses that raw object against its own schema, and the
+// Per-kind grant-profile schemas. Rome Cloud's redeem hands over a RAW JSON
+// object; each connection kind parses that raw object against its own schema, and the
 // parse OUTPUT is exactly what lands on the grant row as the opaque
-// ProfileRecord. There is no shared normalization DTO in the service path.
+// ProfileRecord. There is no shared normalization DTO on this path.
 // The same schema re-runs on revive, so a stored record that no longer matches
 // fails loudly instead of yielding a silently sparse display.
 
@@ -97,15 +98,38 @@ export const googleGrantProfileSchema = z
   .strict();
 export type GoogleGrantProfile = z.infer<typeof googleGrantProfileSchema>;
 
+/** Shopify's grant profile: the connected store. A store has no handle of its
+ *  own beyond its domain, so `login` is the `<store>.myshopify.com` domain. */
+export const shopifyGrantProfileSchema = z
+  .object({
+    /** The store's `.myshopify.com` domain, which Shopify never changes. */
+    subject: identityField,
+    /** Also the `.myshopify.com` domain: the Admin API host, and the store's
+     *  label in Settings. The token-file custody writes it beside the token. */
+    login: identityField,
+    /** The store's name. */
+    displayName: identityField,
+    /** The store owner's email. */
+    email: identityField,
+    scopes: scopesField,
+  })
+  .strict();
+export type ShopifyGrantProfile = z.infer<typeof shopifyGrantProfileSchema>;
+
 export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
   github: githubGrantProfileSchema,
   slack: slackGrantProfileSchema,
   google: googleGrantProfileSchema,
+  shopify: shopifyGrantProfileSchema,
 } as const;
 
-/** Any service-owned OAuth grant profile, for OAuth-layer code that fans out
+/** Any kind-specific OAuth grant profile, for OAuth-layer code that fans out
  *  per provider (e.g. the token-file serializer). */
-export type OAuthProviderGrantProfile = GithubGrantProfile | SlackGrantProfile | GoogleGrantProfile;
+export type OAuthProviderGrantProfile =
+  | GithubGrantProfile
+  | SlackGrantProfile
+  | GoogleGrantProfile
+  | ShopifyGrantProfile;
 
 /** Validate a record against `provider`'s own schema. Fail-closed: a value that
  *  doesn't match throws (ZodError) — callers never see a partial profile. */
@@ -121,11 +145,12 @@ export const OAUTH_PROVIDER_GRANTS: Record<OAuthProvider, GrantName> = {
   github: "user",
   google: "user",
   slack: "workspace",
+  shopify: "store",
 };
 
-// Pure display mappings: parsed service profile (plain data) in, frozen display
+// Pure display mappings: parsed profile (plain data) in, frozen display
 // object out. The returned object is what satisfies the readonly
-// `ProfileDisplay` interface — there are no profile classes. Service-specific
+// `ProfileDisplay` interface — there are no profile classes. Kind-specific
 // values a generic reader can't render (subject, scopes, Slack's teamId) stay
 // on the parsed profile for owner-side readers and never reach the display.
 
@@ -158,13 +183,25 @@ export function toGoogleDisplay(profile: GoogleGrantProfile): ProfileDisplay {
   });
 }
 
-/** Each service revives a stored record by re-running its OWN parse, then
+export function toShopifyDisplay(profile: ShopifyGrantProfile): ProfileDisplay {
+  return Object.freeze({
+    displayName: profile.displayName,
+    /** The `.myshopify.com` domain reads as Shopify's handle. */
+    handle: profile.login,
+    email: profile.email,
+    // Shopify has no store avatar.
+    avatarUrl: undefined,
+  });
+}
+
+/** Each connection kind revives a stored record by re-running its OWN parse, then
  *  mapping the parsed plain data through its pure display function. A record
  *  that no longer matches the schema throws instead of displaying sparsely. */
 const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => ProfileDisplay> = {
   github: (record) => toGithubDisplay(githubGrantProfileSchema.parse(record)),
   slack: (record) => toSlackDisplay(slackGrantProfileSchema.parse(record)),
   google: (record) => toGoogleDisplay(googleGrantProfileSchema.parse(record)),
+  shopify: (record) => toShopifyDisplay(shopifyGrantProfileSchema.parse(record)),
 };
 
 /**
@@ -177,7 +214,7 @@ const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => 
  */
 function makeOAuthProviderCustody(provider: OAuthProvider): GrantCustody {
   return {
-    async sync(_grant, material, profile) {
+    async sync(material, profile) {
       await syncGithubShellIntegrationForProvider(provider, material);
       await syncProviderTokenFile(provider, material, parseOAuthProviderProfile(provider, profile));
     },
@@ -193,17 +230,18 @@ const OAUTH_PROVIDER_LABELS: Record<OAuthProvider, string> = {
   github: "GitHub",
   slack: "Slack",
   google: "Google",
+  shopify: "Shopify",
 };
 
 /**
  * The db-bound halves of the Rome Cloud-OAuth setup, injected from the wire stage
- * (index.ts) so the descriptor module stays free of the DB handle and the
- * transitional `provider_accounts` mappers.
+ * (index.ts) so the descriptor module stays free of the DB handle.
  */
 export interface OAuthProviderSetupDeps {
   /** Mint the PKCE attempt and return the broker authorize URL the guardian is
-   *  handed off to. Its `state` query param is the return-leg correlation. */
-  beginRedirect: () => Promise<string>;
+   *  handed off to. Its `state` query param is the return-leg correlation.
+   *  `shop` names the store for Shopify, which authorizes per store. */
+  beginRedirect: (opts?: { shop?: string }) => Promise<string>;
   /** Redeem the return-leg handoff into a proven credential + parsed grant
    *  profile. Throws when the bundle carries no usable credential (fail-closed:
    *  the setup fails and nothing is written). */
@@ -211,30 +249,70 @@ export interface OAuthProviderSetupDeps {
     handoff: string,
     state: string,
   ) => Promise<{ credential: Credential; profile?: ProfileRecord }>;
+  /** Exchange the grant's refresh token for a renewed credential through Rome
+   *  Cloud. Lets an expiring grant (Shopify's hourly token) renew without the
+   *  guardian; it throws when Rome Cloud can't refresh it. */
+  refresh?: (refreshToken: string) => Promise<Credential>;
+}
+
+/** The form that asks which store to connect, for a guardian's own Shopify app. */
+const SHOPIFY_STORE_FORM = {
+  instructions:
+    "Enter the store your own Shopify app connects to, like acme.myshopify.com, or paste the store's admin address.",
+  fields: [{ name: "shop", label: "Store address", secret: false }],
+  note: "Only for a Shopify app you saved in Rome Cloud. To connect Rome OS, use Connect in Shopify instead.",
+} as const;
+
+/**
+ * Ask the guardian which Shopify store to connect, re-asking until the answer is
+ * a `.myshopify.com` store. Shopify authorizes per store, so Rome Cloud needs the
+ * store before it can send the guardian to Shopify's consent screen.
+ *
+ * Only a guardian's own Shopify app needs this. Rome OS connects through
+ * `SHOPIFY_INSTALL_URL`, where Shopify asks which store, because Shopify's App
+ * Store rules forbid a public app from asking the merchant to type it. An own
+ * app has no install link Rome knows, and Rome Cloud picks the own app only when
+ * the guardian saved one there, which this instance cannot see.
+ */
+async function promptShopifyStore(interact: Parameters<SetupFn>[0]): Promise<string> {
+  let error: string | undefined;
+  for (;;) {
+    const answers = await interact.prompt({
+      ...SHOPIFY_STORE_FORM,
+      fields: [...SHOPIFY_STORE_FORM.fields],
+      ...(error ? { error } : {}),
+    });
+    const shop = normalizeShopifyShopDomain(answers.shop);
+    if (shop) return shop;
+    error =
+      "Enter a store address like acme.myshopify.com, or paste your admin address like admin.shopify.com/store/acme.";
+  }
 }
 
 /**
- * The conferral setup for a Rome Cloud-brokered OAuth provider. A linear
+ * The setup for a Rome Cloud-brokered OAuth provider. A linear
  * coroutine of the `redirect` mechanic:
+ *   0. Shopify only: `promptShopifyStore` asks which store to connect,
  *   1. `beginRedirect` mints the PKCE attempt + authorize URL,
  *   2. `interact.redirect(url)` hands the guardian off to the broker and
  *      suspends until the return leg (the browser navigates fully away and back;
  *      the setup route resumes this coroutine, correlated by the `state` param),
  *   3. `ctx.step` redeems the handoff into a credential + profile (cancellable),
- *   4. return the terminal conferral — the single durable write of credential +
+ *   4. return the terminal grant — the single durable write of credential +
  *      profile lands only once the redeem proves the grant, via the manager's
- *      `registry.confer` (which re-materializes the tmpfs token file + gh/git
+ *      `registry.giveGrant` (which re-materializes the tmpfs token file + gh/git
  *      shell auth through custody). Abandoning at any point writes nothing.
  *
  * There is no guardian-channel mapping (OAuth providers are not channels), so
- * the conferral omits `guardianChannelUserId`.
+ * the grant omits `guardianChannelUserId`.
  */
 export function makeOAuthProviderSetup(
   provider: OAuthProvider,
   deps: OAuthProviderSetupDeps,
 ): SetupFn {
   return async (interact, ctx) => {
-    const url = await deps.beginRedirect();
+    const shop = provider === "shopify" ? await promptShopifyStore(interact) : undefined;
+    const url = await deps.beginRedirect(shop ? { shop } : undefined);
     const returned = await interact.redirect(url);
 
     // A denied consent (or any broker-reported error) fails the setup cleanly —
@@ -275,10 +353,9 @@ export function makeOAuthProviderSetup(
  * Build a provider's ConnectionDescriptor: one Rome Cloud-OAuth grant, no
  * capabilities, and grant-state-driven custody of its out-of-process artifacts
  * (the tmpfs token file + gh/git shell auth). The descriptor holds the provider's
- * connection/grant state (imported by the oauth redeem route and the boot
- * providerAccounts import); Actor/Watcher capabilities land in follow-ups.
+ * connection/grant state (imported by the oauth redeem route); Actor/Watcher capabilities land in follow-ups.
  *
- * `setupDeps` attaches the conferral setup (the redirect cutover) to the
+ * `setupDeps` attaches the setup (the redirect cutover) to the
  * grant's scheme. Omitted in tests that exercise connection state only;
  * threaded from index.ts at boot so the setup can reach the DB.
  */
@@ -286,14 +363,16 @@ export function makeOAuthProviderDescriptor(
   provider: OAuthProvider,
   setupDeps?: OAuthProviderSetupDeps,
 ): ConnectionDescriptor {
-  const scheme = romeCloudOAuth({ provider });
+  const scheme = romeCloudOAuth({ provider, refresh: setupDeps?.refresh });
   if (setupDeps) scheme.setup = makeOAuthProviderSetup(provider, setupDeps);
   return {
-    service: provider,
-    auth: {
-      [OAUTH_PROVIDER_GRANTS[provider]]: scheme,
-    },
-    reviveProfile: (_grant, record) => OAUTH_PROVIDER_REVIVERS[provider](record),
+    connectionKind: provider,
+    grant: OAUTH_PROVIDER_GRANTS[provider],
+    auth: scheme,
+    reviveProfile: (record) => OAUTH_PROVIDER_REVIVERS[provider](record),
+    // The provider's own id for the signed-in identity: the user, or for Slack
+    // the installer in its workspace, and for Shopify the store.
+    accountIdOf: (record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
     capabilities: {},
   };

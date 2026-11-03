@@ -4,42 +4,40 @@
 // Here rather than in the route because every write on this surface answers
 // with the person it changed — create, link, unlink, transfer, dismiss, merge —
 // so a serializer living in one handler is a serializer the next five copy.
-//
-// The stranger sentinel is a row in the persons table that every dismissed
-// account is linked to, not someone the guardian knows. It is excluded here,
-// once, so no route can serve it by forgetting to.
 
 import { readdir } from "node:fs/promises";
+import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, PersonResource } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
 import type { AccountNames } from "../channels/account-names.js";
-import type { Channels } from "../channels/channel.js";
+import type { Channels, PlatformOfChannel } from "../channels/channel.js";
 import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { readActivity } from "./activity.js";
-import { readSendStates, type SendDeps } from "./send.js";
+import { readSendStates, sendersOf, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
-  personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
+  peopleRepo: Pick<PeopleRepository, "all" | "byId">;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
+  platformOfChannel: PlatformOfChannel;
+  /** Rome's own account on a channel, to name a sender by. Absent, no sender
+   *  is named. */
+  accountOf?: ChannelRecordsRepository["accountOf"];
 }
 
 /** A person as the repository reads them: the row and the accounts linked to
  *  it. */
-export type PersonRow = Awaited<ReturnType<PersonMappingRepository["findAllWithMappings"]>>[number];
+export type PersonRow = Awaited<ReturnType<PeopleRepository["all"]>>[number];
 
 /** Every curated person. */
 export async function readPeople(deps: PeopleReadDeps): Promise<PersonResource[]> {
-  const persons = (await deps.personMappingRepo.findAllWithMappings()).filter(
-    (person) => person.id !== STRANGER_PERSON_ID,
-  );
-  return serialize(deps, persons);
+  return serialize(deps, await deps.peopleRepo.all());
 }
 
 /** One curated person, or null when the id names none. */
@@ -48,13 +46,13 @@ export async function readPerson(deps: PeopleReadDeps, id: string): Promise<Pers
   return person && (await serialize(deps, [person]))[0];
 }
 
-/** The person an id names, as stored — for a caller that needs the mappings
- *  rather than the resource. Null for the sentinel, which is structure. */
+/** The person an id names, as stored — for a caller that needs the links
+ *  rather than the resource. */
 export async function findPerson(
-  deps: Pick<PeopleReadDeps, "personMappingRepo">,
+  deps: Pick<PeopleReadDeps, "peopleRepo">,
   id: string,
 ): Promise<PersonRow | null> {
-  return id === STRANGER_PERSON_ID ? null : await deps.personMappingRepo.findById(id);
+  return deps.peopleRepo.byId(id);
 }
 
 /**
@@ -67,11 +65,11 @@ async function serialize(
   deps: PeopleReadDeps,
   persons: readonly PersonRow[],
 ): Promise<PersonResource[]> {
-  // One mapping is one account on the wire, so a client can address the link
-  // it sees. The activity fold is the one place two mappings of a single
-  // account collapse — reporting one person's history twice would be a wrong
+  // One link is one account on the wire, so a client can address the link it
+  // sees. The activity fold is the one place two links of a single account
+  // collapse — reporting one person's history twice would be a wrong
   // number, whereas showing both addresses is only what the guardian stored.
-  const refs = persons.flatMap((person) => person.channelMappings);
+  const refs = persons.flatMap((person) => person.links);
 
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
@@ -79,10 +77,10 @@ async function serialize(
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
     timelineAccounts(
       deps,
-      persons.map((person) => person.channelMappings),
+      persons.map((person) => person.links),
     ),
     deps.accountNames.displayNames(refs),
-    // Whether each mapping can be written to, asked of the live connections
+    // Whether each link can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
     readSendStates(deps, refs),
@@ -90,19 +88,32 @@ async function serialize(
   ]);
   const activity = await readActivity(personMessageStores(deps), accountsByPerson);
 
+  // Asked once per platform, since each answer reads the channel records.
+  const senders = new Map<string, Account[]>();
+  const sendersOn = (platform: string) => {
+    let found = senders.get(platform);
+    if (!found) {
+      found = sendersOf(deps, platform).flatMap((channel) => deps.accountOf?.(channel) ?? []);
+      senders.set(platform, found);
+    }
+    return found;
+  };
+
   let next = 0;
   return persons.map((person, i) => ({
     id: person.id,
     displayName: person.displayName,
     bondLevel: person.bondLevel,
-    accounts: person.channelMappings.map((mapping) => {
+    accounts: person.links.map((link) => {
       const index = next++;
       return {
-        channel: mapping.channel,
-        channelUserId: mapping.channelUserId,
+        channel: link.platform,
+        channelUserId: link.id,
         displayName: names[index],
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
-        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
+        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], link),
+        from: sendersOn(link.platform),
+        ...(link.delegate ? { delegate: true as const } : {}),
       };
     }),
     memoryPath: memoryPaths[i],
@@ -142,22 +153,26 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
 }
 
 /**
- * When the account behind one mapping was last active.
+ * When the account behind one link was last active.
  *
- * The activity read is keyed by folded account and this is asked per mapping,
- * and the two are not the same count: a channel that folds a phone JID and its
- * `@lid` form onto one account answers one head for the two links naming it.
- * So the mapping is matched by the address the fold put on its account, which
+ * The activity read is keyed by folded account and this is asked per link,
+ * and the two are not the same count: a platform that folds a phone JID and
+ * its `@lid` form onto one account answers one head for the two links naming
+ * it. So the link is matched by the address the fold put on its account, which
  * is the same rule `timelineAccounts` grouped by.
  */
 function latestAtOf(
   heads: Map<MessageAccount, Message>,
   accounts: readonly MessageAccount[] | undefined,
-  mapping: { channel: string; channelUserId: string },
+  link: Account,
 ): number | null {
-  const account = accounts?.find(
-    (candidate) =>
-      candidate.channel === mapping.channel && candidate.addresses.includes(mapping.channelUserId),
-  );
-  return (account && heads.get(account)?.timestamp) ?? null;
+  // One account is read once per channel it is stored under, so its newest
+  // entry is the newest of those reads.
+  const latest = (accounts ?? [])
+    .filter(
+      (candidate) => candidate.channel === link.platform && candidate.addresses.includes(link.id),
+    )
+    .map((candidate) => heads.get(candidate)?.timestamp ?? null)
+    .filter((timestamp) => timestamp !== null);
+  return latest.length > 0 ? Math.max(...latest) : null;
 }

@@ -1,8 +1,8 @@
 /**
- * Client types + fetchers for the generic conferral-setup surface.
+ * Client types + fetchers for the generic grant-setup surface.
  * The state/content types mirror the backend `SetupState` verbatim — payloads
  * are semantically complete (copy authored server-side), so the standard
- * renderers narrate any setup from these shapes alone. Per-`(service, state)`
+ * renderers narrate any setup from these shapes alone. Per-`(connection kind, state)`
  * custom components override rendering only; they never need extra data.
  */
 
@@ -50,13 +50,16 @@ export interface SetupView {
 
 export interface SetupDoneView {
   summary?: SetupView;
+  /** The connection the setup connected, so a setup for a new account can
+   *  open the account it made. Absent from a core that predates it. */
+  connectionId?: string;
 }
 
 export type SetupState =
   | { status: "awaiting-input"; form: SetupForm; error?: string }
   | { status: "awaiting-redirect"; url: string }
   | { status: "presenting"; view: SetupView }
-  | { status: "done"; conferral: SetupDoneView }
+  | { status: "done"; grant: SetupDoneView }
   | { status: "failed"; reason: string }
   | { status: "cancelled" };
 
@@ -75,20 +78,24 @@ export interface SetupStart {
 
 export type SetupStartResult = { ok: true; start: SetupStart } | { ok: false; error: string };
 
-/** Start or re-attach a setup for one grant. `idOrService` is the connection
- *  id, or the bare service name for a never-connected service (the terminal
- *  conferral mints the row). */
+/** Start or re-attach a setup for one grant. `idOrKind` is the connection
+ *  id, or the bare connection kind for a never-connected connection kind (the terminal
+ *  grant mints the row). With `another`, `idOrKind` is the connection kind and
+ *  the setup connects a new account of it. */
 export async function startSetup(
-  idOrService: string,
+  idOrKind: string,
   grant: string,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; another?: boolean } = {},
 ): Promise<SetupStartResult> {
   const res = await fetch(
-    `/api/connections/${encodeURIComponent(idOrService)}/grants/${encodeURIComponent(grant)}/setup`,
+    `/api/connections/${encodeURIComponent(idOrKind)}/grants/${encodeURIComponent(grant)}/setup`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: opts.force ?? false }),
+      body: JSON.stringify({
+        force: opts.force ?? false,
+        ...(opts.another ? { another: true } : {}),
+      }),
     },
   );
   if (!res.ok) {
@@ -157,9 +164,9 @@ export interface SetupReturnResult {
    *  confusing error for a setup that actually connected); it re-polls instead. */
   ambiguous?: boolean;
   cid?: string;
-  /** The service the matched setup belongs to — where the guardian returns to
+  /** The connection kind of the matched setup — where the guardian returns to
    *  watch it settle. Absent when nothing matched. */
-  service?: string;
+  connectionKind?: string;
   state?: SetupState;
 }
 
@@ -189,11 +196,13 @@ export async function submitSetupReturn(params: {
       matched: true,
       accepted: payload.accepted === true,
       cid: payload.cid,
-      ...(typeof payload.service === "string" ? { service: payload.service } : {}),
+      ...(typeof payload.connectionKind === "string"
+        ? { connectionKind: payload.connectionKind }
+        : {}),
       state: payload.state,
     };
   }
-  // Not matched. A 5xx is ambiguous (the confer may have landed); a 404 (or any
+  // Not matched. A 5xx is ambiguous (the grant may have landed); a 404 (or any
   // 4xx) is a definitive no-match the caller can fall back on.
   return res.status >= 500 ? { matched: false, ambiguous: true } : { matched: false };
 }

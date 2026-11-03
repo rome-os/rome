@@ -1,9 +1,7 @@
-import { pairingPayload } from "@rome/api-types/approvals";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
-import { notifyPairingResolution } from "../../channels/pairing.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -13,7 +11,7 @@ type ApprovalStatus = "pending" | "approved" | "rejected" | "auto_approved";
 const VALID_STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected", "auto_approved"];
 
 async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "reject") {
-  const { approvalHandler, approvalsRepo, personMappingRepo } = deps;
+  const { approvalHandler, approvalsRepo, peopleRepo, platformOfChannel } = deps;
   const approvalId = c.req.param("id") as string;
   const actor = await currentSessionActor();
   if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
@@ -26,15 +24,6 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
   }
 
   const approval = resolveResult.approval;
-  if (pairingPayload(approval)?.resolution === "account_linked") {
-    return c.json(
-      { error: "This account is already linked. Pairing was not approved.", approval },
-      409,
-    );
-  }
-  void notifyPairingResolution(deps.talkRouter, approval).catch(() => {
-    log.warn("pairing notification failed", { approvalId });
-  });
   if (action === "approve" && approval.type === "action_execution") {
     approvalHandler.onApproved(approvalId).catch((err) => {
       log.error("approval execution failed", {
@@ -60,7 +49,7 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
       const channelUserId = payload.channelUserId;
       if (typeof channel === "string" && typeof channelUserId === "string") {
         try {
-          await personMappingRepo.deleteChannelMapping(channel, channelUserId);
+          await peopleRepo.unlink({ platform: platformOfChannel(channel), id: channelUserId });
         } catch (err) {
           log.error("failed to cleanup auto-mapped channel mapping on rejection", {
             approvalId,
@@ -93,12 +82,6 @@ export function approvalsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Guardian authentication required" }, 403);
     await next();
   });
-  app.get("/approvals/:id/code", async (c) => {
-    c.header("Cache-Control", "no-store");
-    const code = await deps.approvalsRepo.pairingCode(c.req.param("id"));
-    return c.json({ code });
-  });
-
   app.get("/approvals", async (c) => {
     const status = c.req.query("status");
     const offset = Number(c.req.query("pairingHistoryOffset") ?? "0");

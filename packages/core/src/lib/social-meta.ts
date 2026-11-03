@@ -5,6 +5,14 @@
 // fallback image lives only in packages/web/index.html; a card without one
 // keeps whatever og:image the shell already has.
 
+// The document title carries the site name; og:title does not. Every platform
+// renders the site beside the card, so repeating it there reads twice, while a
+// tab tooltip that omits it names no instance. Mirrors SITE_NAME and SEPARATOR
+// in packages/web/src/lib/page-title.ts, which composes the same title once the
+// SPA takes over — social-meta.test.ts fails if the two drift.
+const SITE_NAME = "Rome";
+const TITLE_SEPARATOR = " · ";
+
 const START_MARKER = "<!-- rome:social:start -->";
 const END_MARKER = "<!-- rome:social:end -->";
 const TITLE_RE = /<title>[^<]*<\/title>/;
@@ -74,9 +82,10 @@ function socialTags(card: SocialCard, imageValue: string | null): string {
 }
 
 /**
- * Swap the shell's `<title>` and the marked social block for `card`. Returns
- * the input unchanged when there is no card or the markers are absent, so a
- * shell built without them still serves.
+ * Swap the shell's `<title>` and the marked social block for `card`. The
+ * document title gains the site name; `og:title` keeps `card.title` alone.
+ * Returns the input unchanged when there is no card or the markers are absent,
+ * so a shell built without them still serves.
  */
 export function renderSocialMeta(indexHtml: string, card: SocialCard | null): string {
   if (card === null) return indexHtml;
@@ -90,5 +99,50 @@ export function renderSocialMeta(indexHtml: string, card: SocialCard | null): st
   const before = indexHtml.slice(0, start + START_MARKER.length);
   const after = indexHtml.slice(end);
   const withBlock = `${before}\n${socialTags(card, imageValue)}\n    ${after}`;
-  return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(card.title)}</title>`);
+  const documentTitle = `${card.title}${TITLE_SEPARATOR}${SITE_NAME}`;
+  return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(documentTitle)}</title>`);
+}
+
+// Home-screen identity: the manifest, iOS icon and name tags, marked as their
+// own block in packages/web/index.html. Every tag is replaced rather than
+// added to, since iOS reads the first apple-mobile-web-app-title it finds.
+const IDENTITY_START_MARKER = "<!-- rome:app-identity:start -->";
+const IDENTITY_END_MARKER = "<!-- rome:app-identity:end -->";
+const SHELL_TOUCH_ICON_RE = /<link rel="apple-touch-icon" href="([^"]*)"/;
+
+export interface AppIdentity {
+  name: string;
+  /** Same-origin path of the app's web manifest. */
+  manifestUrl: string;
+  /** Same-origin path of the app's PNG icon; omitted → the shell's own icon is kept. */
+  iconUrl?: string;
+}
+
+/**
+ * Swap the marked home-screen block for `identity`. Returns the input
+ * unchanged when there is no identity or the markers are absent.
+ */
+export function renderAppIdentity(indexHtml: string, identity: AppIdentity | null): string {
+  if (identity === null) return indexHtml;
+  const start = indexHtml.indexOf(IDENTITY_START_MARKER);
+  const end = indexHtml.indexOf(IDENTITY_END_MARKER);
+  if (start === -1 || end === -1 || end < start) return indexHtml;
+
+  const existingBlock = indexHtml.slice(start + IDENTITY_START_MARKER.length, end);
+  const iconValue =
+    identity.iconUrl !== undefined
+      ? escapeHtml(identity.iconUrl)
+      : (existingBlock.match(SHELL_TOUCH_ICON_RE)?.[1] ?? null);
+  const name = escapeHtml(identity.name);
+  const lines = [`<link rel="manifest" href="${escapeHtml(identity.manifestUrl)}" />`];
+  if (iconValue !== null) lines.push(`<link rel="apple-touch-icon" href="${iconValue}" />`);
+  lines.push(
+    `<meta name="apple-mobile-web-app-title" content="${name}" />`,
+    `<meta name="application-name" content="${name}" />`,
+  );
+
+  const before = indexHtml.slice(0, start + IDENTITY_START_MARKER.length);
+  const after = indexHtml.slice(end);
+  const block = lines.map((line) => `    ${line}`).join("\n");
+  return `${before}\n${block}\n    ${after}`;
 }

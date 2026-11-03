@@ -33,17 +33,6 @@ function renderPage(ui: React.ReactElement) {
 }
 
 describe("LoginPage validation", () => {
-  it("keeps the standalone auth surface inside both safe-area edges", () => {
-    renderPage(<LoginPage />);
-
-    const main = screen.getByRole("main");
-    expect(main.className).toContain("pt-safe");
-    expect(main.className).toContain("pb-safe");
-    expect(
-      screen.getByRole("combobox", { name: "Language" }).parentElement?.parentElement?.className,
-    ).toContain("top-[calc(1rem+var(--rome-safe-area-top))]");
-  });
-
   it("shows required errors and does not submit when both fields are empty", async () => {
     const fetchSpy = rs.spyOn(globalThis, "fetch");
     const user = userEvent.setup();

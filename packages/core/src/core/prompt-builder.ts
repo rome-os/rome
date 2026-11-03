@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { AgentConfig } from "../types.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -12,9 +12,11 @@ import {
   getProfileMemoryDir,
   getProjectRoot,
   getRepoAppsDir,
+  getRepoDocsDir,
 } from "../paths.js";
 import { getInternalApiBaseUrl } from "../internal-api-url.js";
-import { getWebchatProjectPath, getWebchatProjectsRoot } from "../webchat/projects.js";
+import { getWebchatProjectsRoot, resolveWebchatProjectPath } from "../webchat/projects.js";
+import { resolveSessionPolicy } from "./session-policy.js";
 
 // Workspace context injection.
 //
@@ -74,6 +76,11 @@ export function buildInteractiveSurfaceGuidanceSection(): string {
  */
 function xmlEscape(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** {@link xmlEscape} for a value inside a double-quoted attribute. */
+function xmlAttr(value: string): string {
+  return xmlEscape(value).replace(/"/g, "&quot;");
 }
 
 /**
@@ -205,6 +212,55 @@ export function buildThreadContextBlock(
   return `<thread_context>\n${lines.join("\n")}\n</thread_context>`;
 }
 
+export const FETCH_CHANNEL_HISTORY_ACTION = "system:fetch_channel_history";
+
+/**
+ * Render a `<continuation>` block for the first turn of a provider thread that
+ * replaced the one holding the chat, after a move to another provider. Rome's
+ * transcript still has every message; the agent reads what it needs. It names
+ * no channel: the thread's channel and id are in its thread context.
+ */
+export function buildContinuationBlock(input: {
+  /** The model the chat ran on before this thread. */
+  previousModel?: string;
+  /** The agent may call `system:fetch_channel_history`. */
+  canReadHistory: boolean;
+}): string {
+  const open = input.previousModel
+    ? `<continuation previous_model="${xmlAttr(input.previousModel)}">`
+    : "<continuation>";
+  const lines = [
+    "This conversation started before your current context, so its earlier messages are not in your context.",
+  ];
+  if (input.canReadHistory) {
+    lines.push(
+      `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.`,
+    );
+  }
+  return `${open}\n${lines.join("\n")}\n</continuation>`;
+}
+
+/**
+ * Render the chat's device folder as a `<device_folder>` block. Unlike
+ * `<thread_context>`, AgentSession prepends it to EVERY user message, so the
+ * agent still knows where to work after context compaction drops the first
+ * message. Returns null when the chat has no device folder.
+ */
+export function buildDeviceFolderBlock(
+  threadContext: ThreadContext | undefined | null,
+): string | null {
+  const folder = threadContext?.deviceFolder;
+  if (!folder) return null;
+  const device = [folder.deviceId, folder.platform].filter(Boolean).join(", ");
+  return [
+    "<device_folder>",
+    `Work in folder "${xmlEscape(folder.path)}" on Rome node device "${xmlEscape(folder.deviceName)}" (id ${xmlEscape(device)}).` +
+      " Your local working directory is NOT this folder.",
+    `Run programs there with \`rome-node device run ${xmlEscape(folder.deviceId)} exec\` and cwd set to that folder.`,
+    "</device_folder>",
+  ].join("\n");
+}
+
 /**
  * The project's path relative to the webchat projects root — the same value
  * webchat already shows (e.g. `default`) and that the `/projects/...` web route
@@ -240,6 +296,8 @@ export class PromptBuilder {
   private readonly profileMemoryDir: string;
   private readonly profileInstalledAppsDir: string;
   private readonly repoAppsDir: string;
+  /** Null when the docs did not ship, so the prompt never points at a missing path. */
+  private readonly repoDocsDir: string | null;
 
   /**
    * @param romeEmailAddress Synchronous accessor for Rome's own provisioned
@@ -265,6 +323,8 @@ export class PromptBuilder {
     this.profileMemoryDir = getProfileMemoryDir();
     this.profileInstalledAppsDir = getProfileInstalledAppsDir();
     this.repoAppsDir = getRepoAppsDir(this.projectRoot);
+    const repoDocsDir = getRepoDocsDir(this.projectRoot);
+    this.repoDocsDir = existsSync(repoDocsDir) ? repoDocsDir : null;
   }
 
   build(config: AgentConfig, options: PromptBuildOptions): string {
@@ -378,14 +438,17 @@ export class PromptBuilder {
   }
 
   /**
-   * Behavioral directive steering general-purpose agents toward the built-in
-   * `ask_question` tool (an interactive card) instead of asking clarifying
-   * questions in prose. Reinforces the tool's own description from the system
-   * prompt. Lives here (rather than in a single agent's systemPromptPrefix) so
-   * every @-mentionable core agent gets the same behavior.
+   * Behavioral directive for clarifying questions: ask only when the answer
+   * would change the direction of the work, otherwise proceed on the agent's
+   * recommendation; before long-running work, state a short plan (without
+   * waiting for approval) so a wrong direction is caught early; and when asking,
+   * use the built-in `ask_question` tool (an interactive card) instead of prose.
+   * Reinforces the tool's own description from the system prompt. Lives here
+   * (rather than in a single agent's systemPromptPrefix) so every
+   * @-mentionable core agent gets the same behavior.
    *
    * Gated on the agent holding the `*` action grant — the conversational agents
-   * (main, assistant, planning, coding, explore) that actually talk to the
+   * (main, assistant, coding, explore) that actually talk to the
    * guardian. The tool itself is registered per-session on interactive surfaces
    * (`supportsInteractiveSurface`); the cached prefix can't see the surface, so
    * `*` is the closest stable per-agent proxy for "should reach for the card".
@@ -398,14 +461,16 @@ export class PromptBuilder {
     return [
       "# Asking The Guardian For Input",
       "",
-      "Whenever a clarifying question blocks you — one you'd otherwise write out and wait for a reply on — you MUST ask via the `ask_question` tool, never in your text reply; listing such questions in prose (even a numbered list or inline options) is not allowed.",
+      "Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.",
       "",
-      "This applies most often when a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know: invoke `ask_question` first to collect those answers as an interactive card, then continue once the guardian replies — do not guess a generic result. Ask only the few questions that actually change what you do next, and prefer single-choice questions with concrete options when the likely answers are enumerable.",
+      "Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.",
+      "",
+      "When you do need to ask, use the `ask_question` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.",
     ].join("\n");
   }
 
   private buildRuntimeContextSection(config: AgentConfig): string | null {
-    if (config.name !== "main") {
+    if (!resolveSessionPolicy(config).loadMemory) {
       return null;
     }
 
@@ -434,6 +499,13 @@ export class PromptBuilder {
       `- In the agent browser, visit \`${internalApiBaseUrl}\` to open the Rome dashboard, or \`${internalApiBaseUrl}/apps/<appId>\` to use a specific app.`,
     ];
 
+    if (this.repoDocsDir) {
+      lines.push(
+        "",
+        `Rome's docs are in \`${this.repoDocsDir}\`. Search them before answering whether Rome supports something.`,
+      );
+    }
+
     const publicOrigin = this.romePublicOrigin?.trim();
     if (publicOrigin) {
       lines.push(
@@ -459,6 +531,7 @@ export class PromptBuilder {
       "# Command Line Tools",
       "",
       "- A global `discord` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer `discord api` over memory because it is live and authoritative. Run `discord api --help` when needed.",
+      '- Run `rome-node help` to learn the remote computer CLI and `rome-node help device run` for action arguments and result handling. Use `rome-node device` to list authorized remote computers. Authorization does not mean online. Use `rome-node device describe <id>` to query its platform and supported actions. Execute a program with `rome-node device run <id> exec --args \'{"command":"git","args":["status"],"cwd":"/workspace"}\'`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.',
     ].join("\n");
   }
 
@@ -484,7 +557,7 @@ export class PromptBuilder {
   }
 
   private buildMemorySection(config: AgentConfig): string | null {
-    if (config.name !== "main") {
+    if (!resolveSessionPolicy(config).loadMemory) {
       return null;
     }
 
@@ -497,7 +570,7 @@ export class PromptBuilder {
   }
 
   private buildProjectSummariesSection(config: AgentConfig): string | null {
-    if (config.name !== "main") {
+    if (!resolveSessionPolicy(config).loadMemory) {
       return null;
     }
 
@@ -521,8 +594,11 @@ export class PromptBuilder {
         continue;
       }
 
+      const location = this.resolveProjectLocation(projectName);
       projectLines.push(
-        `- \`${projectName}\` (\`${getWebchatProjectPath(projectName)}\`): ${summary}`,
+        location
+          ? `- \`${projectName}\` (\`${location}\`): ${summary}`
+          : `- \`${projectName}\`: ${summary}`,
       );
     }
 
@@ -531,6 +607,28 @@ export class PromptBuilder {
     }
 
     return ["# Projects", "", ...projectLines].join("\n");
+  }
+
+  /**
+   * Where a memory project's files live on disk. `memory/projects/<name>` only
+   * mirrors `projects/<name>` best-effort (see memory/projects/README.md), and
+   * app projects keep their source under the custom app authoring root, so
+   * point at whichever directory actually exists — and show no path rather
+   * than a made-up one.
+   */
+  private resolveProjectLocation(projectName: string): string | null {
+    const candidates = [
+      resolveWebchatProjectPath(projectName),
+      join(this.customAppAuthoringRoot, projectName),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (statSync(candidate).isDirectory()) return candidate;
+      } catch {
+        // Missing or unreadable — try the next candidate.
+      }
+    }
+    return null;
   }
 
   private readFirstParagraph(filePath: string): string | null {

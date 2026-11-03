@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "@rstest/core";
-import { ROLE_CLASS, ROLES } from "./TypographyPage";
+import { ROLES } from "./TypographyPage";
 
 // The kit deliberately doesn't export `TYPOGRAPHY_ROLES` (it isn't published
 // API), so the specimen page carries its own role list. That list must track
@@ -29,11 +29,5 @@ const declaredRoles = [
 describe("typography specimen role coverage", () => {
   it("renders exactly the roles the kit stylesheet declares", () => {
     expect([...ROLES].sort()).toEqual([...declaredRoles].sort());
-  });
-
-  it("applies each role through its own utility class", () => {
-    for (const role of ROLES) {
-      expect(ROLE_CLASS[role]).toBe(`text-${role}`);
-    }
   });
 });

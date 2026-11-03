@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { createTurnMiddlewareChain } from "./turn-middleware.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactRef } from "../apps/state.js";
-import type { AgentMessage, TurnMiddlewareContext } from "@rome-os/app-runtime";
+import type { AgentEvent, TurnMiddlewareContext } from "@rome-os/app-runtime";
 
 describe("TurnMiddlewareChain", () => {
   const tempDirs: string[] = [];
@@ -58,7 +58,7 @@ describe("TurnMiddlewareChain", () => {
     await chain.loadFromCatalog(catalogWithHooks([hookRef("app.scripted", dir)]));
 
     // Matching session → short-circuit, terminal never runs.
-    const emitted: AgentMessage[] = [];
+    const emitted: AgentEvent[] = [];
     let terminalRan = false;
     await chain.run(makeCtx("welcome-to-rome", emitted), async () => {
       terminalRan = true;
@@ -173,7 +173,7 @@ describe("TurnMiddlewareChain", () => {
   }
 });
 
-function makeCtx(agentName = "main", emitInto: AgentMessage[] = []): TurnMiddlewareContext {
+function makeCtx(agentName = "main", emitInto: AgentEvent[] = []): TurnMiddlewareContext {
   return {
     input: { prompt: "hello" },
     session: { id: "session-1", agentName, channelThreadKey: `webchat:${agentName}` },

@@ -2,12 +2,13 @@ formatVersion: 1
 id: coding
 name: Coding
 icon: assets/icon.svg
-version: 0.3.1
+version: 0.3.2
 description: >-
-  Planning and coding agents, the app_creation skill, and a frontend gallery of
-  live UI mocks. Use app_creation when visuals are important, such as for apps,
+  The coding agent, the app_creation skill, and a frontend gallery of live UI
+  mocks. Use app_creation when visuals are important, such as for apps,
   dashboards, games, and other Rome experiences that need a polished UI.
 tagline: "Plan, build, and preview apps with agents that write the code."
+hideInLauncher: true
 appRoot: dist
 
 web:
@@ -19,7 +20,6 @@ api:
   entry: api/index
 
 agents:
-  - agents/planning.yaml
   - agents/coding.yaml
 
 actions:

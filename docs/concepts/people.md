@@ -1,4 +1,6 @@
-# People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Outbox
+# People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Sending
+
+What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor and address.
 
 ## Guardian
 
@@ -26,6 +28,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 - A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard when the guardian keeps a dashboard allow-list. A visitor can never hold guardian privileges.
 - The visitor's email is authoritative from the Rome Cloud sign-in exchange. Nothing the browser supplies can set or change it.
 - Every request re-checks allow-list membership, so removing an email revokes access immediately rather than at the next sign-in. The email comparison is case-insensitive.
+- Each sign-in keeps the visitor's email and Rome Cloud picture in `visitor_profiles`, replacing the last one. Chat reads it to show who sent a message, so it is display only and never authenticates anyone.
 
 **Not to be confused with:**
 
@@ -34,7 +37,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Person
 
-Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [channels](messaging.md#channels).
+Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across Rome's own [accounts](../domains/chats.md#account).
 
 **Contracts:**
 
@@ -52,10 +55,10 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 **Contracts:**
 
-- An account is identified by its [channel](messaging.md#channels) plus its own [address](#address). The same pair always names the same account.
+- An account is identified by its [channel](../architecture/channels.md) plus its own [address](#address). The same pair always names the same account.
 - Rome never creates or deletes an account. Platforms own the account lifecycle, and Rome learns of accounts from inbound messages.
 - An account resolves to a person only through its [link](#link). An account with no link resolves to no one.
-- An account is in exactly one of three states: unlinked, linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
+- An account is in exactly one of three states: unlinked (a [stranger](../domains/people.md#stranger)), linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
 - The state is derived from the account's link. No surface stores or reports a state that can disagree with the link behind it.
 - The guardian's own accounts on a platform are accounts like any other, linked to the guardian.
 
@@ -63,12 +66,12 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 - **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
 - **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
-- **[Channel](messaging.md#channels)** — a channel is the platform integration messages arrive through. An account is one party on that platform.
+- **[Account in Chats](../domains/chats.md#account)** — the domain language names every identity on a platform an account, Rome's own included. An account here is one party Rome sees through one of its own.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
 
 ## Address
 
-An address is a form an [account](#account) is reachable at on its [channel](messaging.md#channels) — a phone number, a member id, a mailbox. The platform owns the form and Rome carries it whole. Deprecated alias: *channel user id*.
+An address is a form an [account](#account) is reachable at on its [channel](../architecture/channels.md) — a phone number, a member id, a mailbox. The platform owns the form and Rome carries it whole. Deprecated alias: *channel user id*.
 
 **Contracts:**
 
@@ -91,6 +94,8 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
+- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it.
+- Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that agent to the guardian when its first message arrives. Rome makes this link at most once per agent, and never over an existing link or a dismissal, so a guardian who unlinks or dismisses the agent keeps it that way.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 
 **Not to be confused with:**
@@ -98,24 +103,18 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - **[Bond level](#bond-levels)** — a bond level grades trust in a person. A link attributes an account to a person.
 - **Connection** — a connection joins the Rome instance to a service. A link joins an account to a person.
 
-## Outbox
+## Sending
 
-The outbox holds messages Rome has been asked to send and has not yet seen arrive. A message leaves it by appearing on the recipient's [timeline](#account). Nothing marks one delivered.
+A send names its account and Rome's account, and fails loudly. It is one call to the channel, answered in the request: the channel took the message, or the channel refused it and the request says why. A message the channel took joins the [timeline](#account) once the store that answers for its conversation holds it. Rome records its own copy before answering, and a channel with a mirror of its own answers for the conversation with the mirror's copy, which may land after the send answered, so a client keeps reading the timeline while it is open. Rome keeps no record of a send beyond that copy, so a refused send is the client's to retry or drop.
 
 **Contracts:**
 
 - A send names the [account](#account) it is for. Rome never chooses one on the guardian's behalf, on any evidence: a timeline entry names its channel and not its address, so no rule can tell two accounts on one channel apart, and reaching for a second channel when the first is down delivers somewhere nobody picked. A surface may preselect an account, and must show which one it picked.
-- A channel can be sent to only if it says so. `talk.feature("directMessaging")` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
-- An outbox row is exactly a send whose message is not on the timeline yet. It is derived from that comparison rather than cleared by anything, so no delivery callback can be missed and the two reads cannot disagree.
-- A message is recognized as arrived by the id the channel gave back, never by its text or its timing. A channel offering direct messaging must return one.
-- A failed send stays until the guardian retries it or discards it. A retry reuses the row, so it never reads as a second message they did not write.
-- A client may name a send with an optional UUID v4 idempotency key. It creates one key for each composed message and reuses it only when repeating that request. The key joins a local sending row to the server outbox. Repeating the same key, account, and text returns its recorded response without sending again. Reusing a key with another account or text is refused.
-- Removing an outbox row saves its response in a separate receipt in the same transaction. Receipts survive restarts and expire 24 hours after delivery cleanup or explicit discard. New sends and outbox removals prune expired receipts. After expiry, the same id can start a new send.
-
-**Not to be confused with:**
-
-- **Timeline** — a timeline entry is a message that happened. An outbox row is one that has not, and may never.
-- **[Link](#link)** — a link says who an account belongs to. An outbox row is addressed to the account itself, so a merge moving the link leaves it true.
+- A send leaves no doubt about either end. It names the person's account it goes to, and `from` names which of [Rome's accounts](messaging.md#romes-accounts) it goes out from. `from` names Rome's account by its platform and the platform's own id, as any account is named. The person read lists, as `from` on each account, Rome's accounts on that account's platform that can be named. A `from` that is not among them is refused, and Rome never substitutes another account for it.
+- Rome never picks among its own accounts on one platform. A link keys an account by its platform, so a send that names no `from` goes out only while Rome holds exactly one account on that platform that can send. While Rome holds several, the account reads as sendable, since a send may name any of them, but a send that names none is refused as `not-connected`. The account's timeline reads its conversations with every one of Rome's accounts on the platform. A send without `from` stays accepted only until the dashboard names it on every send.
+- A channel can be sent to only if it says so. Its `send` port's `direct` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
+- A send that cannot go out is refused before the channel is called, with a 409 naming why (`SendRefusal`). A send the channel refuses answers 502 with the channel's own words. A send the channel took answers 200, even when Rome then fails to record its copy, since the message went out and a retry would send it twice.
+- There is no idempotency key. A client that lost the answer to a send cannot tell whether it went out, and a retry may send it twice. Delivery guarantees come back with Chats.
 
 ## Bond levels
 

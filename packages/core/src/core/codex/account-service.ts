@@ -140,6 +140,7 @@ export class SharedCodexAccountService implements CodexAccountService {
   private readonly unsubscribers: Array<() => void>;
   private activeLogin: ActiveLogin | null = null;
   private loginStartPending = false;
+  private loginStartEpoch = 0;
   private cancelPendingLoginStart = false;
   private earlyLoginCompletion: LoginCompletedNotification | null = null;
   private lastLoginError: string | null = null;
@@ -171,14 +172,18 @@ export class SharedCodexAccountService implements CodexAccountService {
   }
 
   async getStatus(): Promise<AIToolStatusProbeResult> {
+    const loginStartEpoch = this.isLoginIdle() ? this.loginStartEpoch : null;
     let response: CodexAccountReadResponse;
     try {
       response = await this.manager.request<CodexAccountReadResponse>(Method.accountRead, {
         refreshToken: true,
       });
     } catch (err) {
+      // A workspace routing 401 also matches. When the refresh succeeds but the
+      // workspace keeps refusing the account, the next refresh clears the mark,
+      // so the payer switches back and forth at each hourly status refresh.
       if (isCodexAuthRevokedError(err)) {
-        await this.markAuthRevoked();
+        if (this.noLoginSince(loginStartEpoch)) await this.markAuthRevoked();
       } else {
         log.warn("codex account/read failed; using auth file fallback", {
           error: getErrorMessage(err),
@@ -194,6 +199,26 @@ export class SharedCodexAccountService implements CodexAccountService {
       response.account && typeof response.account === "object"
         ? (response.account as Record<string, unknown>)
         : null;
+    // A custom default provider has no OpenAI account of its own. Preserve the
+    // saved guardian login so the payer resolver can select it again later.
+    if (!account && !response.requiresOpenaiAuth) return statusFromFile(fileStatus);
+    if (
+      !account &&
+      fileStatus.authMode === "chatgpt" &&
+      fileStatus.loggedIn &&
+      this.noLoginSince(loginStartEpoch)
+    ) {
+      // This account/read asked Codex to refresh the login. As of Codex 0.160
+      // it hides the account of a saved ChatGPT login only once a refresh of
+      // that login failed permanently, and it never records a transient
+      // failure. It also hides an auth.json written after the app-server
+      // started, which this marks too, and only a new sign-in clears that mark
+      // until Codex restarts and refreshes the token. Marking the login keeps
+      // the credits branch above, which cannot see the account, from reading
+      // it as signed in.
+      await this.markAuthRevoked();
+      return statusFromFile(await this.readFileStatus());
+    }
     if (!account) return { loggedIn: false, authMode: fileStatus.authMode ?? null };
     if (account.type === "apiKey") {
       return { loggedIn: true, authMode: "apikey", accountType: "api_key" };
@@ -221,6 +246,16 @@ export class SharedCodexAccountService implements CodexAccountService {
       accountType: typeof account.type === "string" ? account.type : fileStatus.accountType,
       email: fileStatus.email,
     };
+  }
+
+  private isLoginIdle(): boolean {
+    return !this.activeLogin && !this.loginStartPending;
+  }
+
+  // A login that starts after account/read can write new tokens before
+  // markAuthRevoked reads auth.json, which would fingerprint the new token.
+  private noLoginSince(loginStartEpoch: number | null): boolean {
+    return loginStartEpoch === this.loginStartEpoch && this.isLoginIdle();
   }
 
   async getUsage(): Promise<AIToolUsageStatus | null> {
@@ -264,6 +299,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     await this.cancelLogin();
     this.assertOpen();
     if (this.loginStartPending) throw new Error("Codex login is already starting");
+    const loginStartEpoch = ++this.loginStartEpoch;
     this.lastLoginError = null;
     this.loginStartPending = true;
     this.cancelPendingLoginStart = false;
@@ -277,16 +313,18 @@ export class SharedCodexAccountService implements CodexAccountService {
       if (typeof result.loginId !== "string" || typeof result.authUrl !== "string") {
         throw new Error("Codex login response did not include an auth URL");
       }
-      if (await this.cancelStartedLoginIfRequested(result.loginId)) {
+      if (
+        !this.isCurrentLoginStart(loginStartEpoch) ||
+        (await this.cancelStartedLoginIfRequested(result.loginId)) ||
+        !this.isCurrentLoginStart(loginStartEpoch)
+      ) {
         throw new Error("Codex login was canceled");
       }
       this.setActiveLogin(result.loginId, "browser", null, null);
       this.finishPendingLoginStart();
       return { loginId: result.loginId, authUrl: result.authUrl };
     } catch (err) {
-      this.loginStartPending = false;
-      this.cancelPendingLoginStart = false;
-      this.earlyLoginCompletion = null;
+      this.clearPendingLoginStart(loginStartEpoch);
       throw err;
     }
   }
@@ -295,6 +333,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     await this.cancelLogin();
     this.assertOpen();
     if (this.loginStartPending) throw new Error("Codex login is already starting");
+    const loginStartEpoch = ++this.loginStartEpoch;
     this.lastLoginError = null;
     this.loginStartPending = true;
     this.cancelPendingLoginStart = false;
@@ -310,7 +349,11 @@ export class SharedCodexAccountService implements CodexAccountService {
       ) {
         throw new Error("Codex device login response did not include a device code");
       }
-      if (await this.cancelStartedLoginIfRequested(result.loginId)) {
+      if (
+        !this.isCurrentLoginStart(loginStartEpoch) ||
+        (await this.cancelStartedLoginIfRequested(result.loginId)) ||
+        !this.isCurrentLoginStart(loginStartEpoch)
+      ) {
         throw new Error("Codex login was canceled");
       }
       this.setActiveLogin(result.loginId, "device", result.userCode, result.verificationUrl);
@@ -321,9 +364,7 @@ export class SharedCodexAccountService implements CodexAccountService {
         verificationUrl: result.verificationUrl,
       };
     } catch (err) {
-      this.loginStartPending = false;
-      this.cancelPendingLoginStart = false;
-      this.earlyLoginCompletion = null;
+      this.clearPendingLoginStart(loginStartEpoch);
       throw err;
     }
   }
@@ -363,6 +404,7 @@ export class SharedCodexAccountService implements CodexAccountService {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.loginStartEpoch += 1;
     this.loginStartPending = false;
     this.cancelPendingLoginStart = false;
     this.earlyLoginCompletion = null;
@@ -431,6 +473,17 @@ export class SharedCodexAccountService implements CodexAccountService {
     if (completion) this.handleLoginCompleted(completion);
   }
 
+  private isCurrentLoginStart(loginStartEpoch: number): boolean {
+    return !this.closed && this.loginStartEpoch === loginStartEpoch && this.loginStartPending;
+  }
+
+  private clearPendingLoginStart(loginStartEpoch: number): void {
+    if (this.loginStartEpoch !== loginStartEpoch) return;
+    this.loginStartPending = false;
+    this.cancelPendingLoginStart = false;
+    this.earlyLoginCompletion = null;
+  }
+
   private async cancelStartedLoginIfRequested(loginId: string): Promise<boolean> {
     if (!this.cancelPendingLoginStart) return false;
     this.loginStartPending = false;
@@ -459,6 +512,7 @@ export class SharedCodexAccountService implements CodexAccountService {
 
   private handleManagerExit(error: Error): void {
     if (!this.activeLogin && !this.loginStartPending) return;
+    this.loginStartEpoch += 1;
     this.takeActiveLogin();
     this.loginStartPending = false;
     this.cancelPendingLoginStart = false;

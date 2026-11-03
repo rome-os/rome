@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.3.8](https://github.com/rome-os/rome/compare/ui-v0.3.7...ui-v0.3.8) (2026-10-31)
+
+
+### Bug Fixes
+
+* **ui:** end bare URLs at CJK punctuation ([#1556](https://github.com/rome-os/rome/issues/1556)) ([e8eec9f](https://github.com/rome-os/rome/commit/e8eec9f03b6bfac96416bf6b6ff7589977b11050))
+
+
+### Performance Improvements
+
+* **web:** stop re-rendering whole transcripts, the chat and the sidebar on every update ([#1548](https://github.com/rome-os/rome/issues/1548)) ([d3b7a58](https://github.com/rome-os/rome/commit/d3b7a5828269dcbb4809c58edfff6be0a53ac0bc))
+
+## [0.3.7](https://github.com/rome-os/rome/compare/ui-v0.3.6...ui-v0.3.7) (2026-10-27)
+
+
+### Performance Improvements
+
+* page chat history by turn and trim chat-open requests ([#1468](https://github.com/rome-os/rome/issues/1468)) ([3f3ae7a](https://github.com/rome-os/rome/commit/3f3ae7a8d45e7006510ab2e508d9e8ee81a08455))
+
+## [0.3.6](https://github.com/rome-os/rome/compare/ui-v0.3.5...ui-v0.3.6) (2026-10-21)
+
+
+### Features
+
+* **ui:** render Mermaid diagrams with Pele ([#1201](https://github.com/rome-os/rome/issues/1201)) ([ef4f645](https://github.com/rome-os/rome/commit/ef4f6458016f0e0aaf84010b7233d88aecad2316))
+
+## [0.3.5](https://github.com/rome-os/rome/compare/ui-v0.3.4...ui-v0.3.5) (2026-10-12)
+
+
+### Bug Fixes
+
+* **ui:** give fenced-block chrome its own row where hover does not exist ([#926](https://github.com/rome-os/rome/issues/926)) ([488722b](https://github.com/rome-os/rome/commit/488722b496dbd6933acce2b3a5f454cfb79979bd))
+
+## [0.3.4](https://github.com/rome-os/rome/compare/ui-v0.3.3...ui-v0.3.4) (2026-10-10)
+
+
+### Features
+
+* message an agent from Cmd-K ([#502](https://github.com/rome-os/rome/issues/502)) ([9298dc3](https://github.com/rome-os/rome/commit/9298dc39ba17c079c2a26e0159b96e014bd3db14))
+* **ui:** add adaptive platform scales for shared controls ([#605](https://github.com/rome-os/rome/issues/605)) ([4af451a](https://github.com/rome-os/rome/commit/4af451a8c905cb0a63fbbcc4493f7ea4e8c1a072))
+
+
+### Bug Fixes
+
+* **ui:** apply interface-polish rules to the component kit ([#820](https://github.com/rome-os/rome/issues/820)) ([765a989](https://github.com/rome-os/rome/commit/765a98963e1174a705c043baa7d560b6c18a3752))
+* **ui:** drop a markdown list's trailing empty items ([#542](https://github.com/rome-os/rome/issues/542)) ([30d3213](https://github.com/rome-os/rome/commit/30d32137cf52ee687c20975e4a170fcfb122b352))
+* **ui:** keep Markdown table columns readable on narrow screens ([#782](https://github.com/rome-os/rome/issues/782)) ([af34f20](https://github.com/rome-os/rome/commit/af34f206994928e94c5a08836b93cc0aefb22315))
+* **ui:** let Dialog and Sheet content scroll inside an app's shadow root ([#777](https://github.com/rome-os/rome/issues/777)) ([1367eb1](https://github.com/rome-os/rome/commit/1367eb171e06512f70839566f935590f6acbb8af))
+* **ui:** let markdown tables grow to their full height ([#571](https://github.com/rome-os/rome/issues/571)) ([b7b0dd4](https://github.com/rome-os/rome/commit/b7b0dd47cd99165d4eb93c4049171ef470ba8920))
+* **ui:** optically center Button glyphs against their labels ([#823](https://github.com/rome-os/rome/issues/823)) ([c202693](https://github.com/rome-os/rome/commit/c2026939301b6ade4b79aa21ad0e90c584bbdfd7))
+* **ui:** repair Mermaid diagram downloads ([#521](https://github.com/rome-os/rome/issues/521)) ([a23a01a](https://github.com/rome-os/rome/commit/a23a01a1dca75604791f766e303b2a736e98a5b6))
+* **ui:** show a chevron on clipped ends of scrolling PageNav and FilterChipGroup rows ([#748](https://github.com/rome-os/rome/issues/748)) ([16aa640](https://github.com/rome-os/rome/commit/16aa6404db5be16f5dbc0029c33da7bfa4db5cb9))
+
+
+### Performance Improvements
+
+* **ui:** load the mermaid, KaTeX and Shiki plugins only when a message needs them ([#794](https://github.com/rome-os/rome/issues/794)) ([772fda4](https://github.com/rome-os/rome/commit/772fda469f39f4bbce5257c1f0cfd5178a934123))
+
+## [0.3.3](https://github.com/rome-os/rome/compare/ui-v0.3.2...ui-v0.3.3) (2026-09-25)
+
+
+### Features
+
+* **ui:** split chat and app canvas tokens ([#447](https://github.com/rome-os/rome/issues/447)) ([d9a491f](https://github.com/rome-os/rome/commit/d9a491f4a2bf8be5dabfb50824d976f19d0fc7f6))
+* **web:** preview inline hex colors in chat ([#445](https://github.com/rome-os/rome/issues/445)) ([3c3b4de](https://github.com/rome-os/rome/commit/3c3b4de1850f0c7bf722af9b47dc5bce49279793))
+
+
+### Bug Fixes
+
+* **ui:** resolve the Markdown Mermaid theme once per page ([#507](https://github.com/rome-os/rome/issues/507)) ([ad51f0e](https://github.com/rome-os/rome/commit/ad51f0e5ef6ac026b9d526a4ea057c8eb593acac))
+* **web:** resolve Markdown file images through asset endpoints ([#472](https://github.com/rome-os/rome/issues/472)) ([739b8aa](https://github.com/rome-os/rome/commit/739b8aaf5101723ee1cf43219395d27bd55ec46d))
+
+## [0.3.2](https://github.com/rome-os/rome/compare/ui-v0.3.1...ui-v0.3.2) (2026-09-17)
+
+
+### Features
+
+* **web:** isolate pairing views and add Storybook previews ([#353](https://github.com/rome-os/rome/issues/353)) ([3595492](https://github.com/rome-os/rome/commit/35954927cd9958a2494c3cbc5854e1e5028ff9bb))
+
+
+### Bug Fixes
+
+* **ui:** pull the Markdown heading ladder back to 1.5x the body ([#410](https://github.com/rome-os/rome/issues/410)) ([3a8b183](https://github.com/rome-os/rome/commit/3a8b18344ea62d52a3314e668a52d88346af4a8e))
+
 ## [0.3.1](https://github.com/rome-os/rome/compare/ui-v0.3.0...ui-v0.3.1) (2026-09-16)
 
 

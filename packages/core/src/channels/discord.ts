@@ -6,6 +6,7 @@ import {
   MessageReferenceType,
   MessageType,
   AttachmentBuilder,
+  DiscordAPIError,
   REST,
   RESTEvents,
   Routes,
@@ -19,7 +20,13 @@ import {
   type AutocompleteInteraction,
 } from "discord.js";
 import { chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
-import type { APIRequest, RateLimitData, RequestMethod, ResponseLike } from "discord.js";
+import type {
+  APIRequest,
+  RateLimitData,
+  RequestMethod,
+  ResponseLike,
+  RESTOptions,
+} from "discord.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import {
   filterChannelApiResponseHeaders,
@@ -27,22 +34,18 @@ import {
   type ChannelApiRequest,
   type ChannelApiResult,
 } from "./api-request.js";
-import type { ProviderAdapter } from "./adapter.js";
 import type {
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChannelMessage,
+  ChatDescriptor,
+  ChatId,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
   ChatStopHandler,
   MessageAddressing,
+  MessageReceipt,
   PersonRecord,
 } from "@rome-os/app-runtime";
-import type {
-  NormalizedMessage,
-  Attachment,
-  OutgoingMessage,
-  OutgoingAttachment,
-} from "./types.js";
+import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import { createLogger } from "../logger.js";
 import { saveUrlAttachments } from "./attachment-files.js";
 import { createReadStream } from "node:fs";
@@ -52,14 +55,9 @@ import {
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
-
-interface DiscordRestMessage {
-  id: string;
-  content: string;
-  author: { id: string; username: string; global_name?: string | null; bot?: boolean };
-  timestamp: string;
-  attachments: { filename: string; title?: string; url: string; content_type?: string }[];
-}
+import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
+import { preserveMentionOnlyText } from "./mention-only.js";
+import { isLinkCodeMessage } from "./guardian-link-code.js";
 
 /**
  * The human-readable attachment name as the uploader saw it. Discord sanitizes
@@ -72,56 +70,6 @@ function discordAttachmentName(filename: string, title?: string | null): string 
   if (!title) return filename;
   const ext = extname(filename);
   return ext && !title.toLowerCase().endsWith(ext.toLowerCase()) ? `${title}${ext}` : title;
-}
-
-interface DiscordRestChannel {
-  id: string;
-  name?: string;
-  /** 0=GUILD_TEXT, 5=GUILD_ANNOUNCEMENT, 11=PUBLIC_THREAD, 12=PRIVATE_THREAD */
-  type: number;
-}
-
-interface DiscordRestGuild {
-  id: string;
-  name: string;
-}
-
-const HISTORY_CHANNEL_TYPES = new Set([0, 5, 11, 12]);
-
-function timestampToSnowflake(timestampMs: number): string {
-  const discordEpoch = 1420070400000n;
-  return ((BigInt(Math.floor(timestampMs)) - discordEpoch) << 22n).toString();
-}
-
-function restMessageToNormalized(
-  msg: DiscordRestMessage,
-  guildName: string,
-  channelId: string,
-  channelName: string,
-): NormalizedMessage {
-  const attachments: Attachment[] = msg.attachments.map((a) => {
-    const mime = a.content_type;
-    const fileName = discordAttachmentName(a.filename, a.title);
-    if (mime?.startsWith("image/")) return { type: "image", url: a.url, fileName };
-    if (mime?.startsWith("video/")) return { type: "video", url: a.url, mimeType: mime, fileName };
-    if (mime?.startsWith("audio/")) return { type: "audio", url: a.url, mimeType: mime, fileName };
-    return { type: "document", url: a.url, mimeType: mime ?? undefined, fileName };
-  });
-
-  return {
-    id: msg.id,
-    channel: "discord",
-    channelUserId: msg.author.id,
-    displayName: msg.author.global_name ?? msg.author.username,
-    username: msg.author.username,
-    threadId: channelId,
-    threadName: `${guildName}/#${channelName}`,
-    threadType: "group",
-    timestamp: new Date(msg.timestamp),
-    text: msg.content,
-    attachments,
-    rawEvent: msg,
-  };
 }
 
 const log = createLogger("discord");
@@ -291,6 +239,21 @@ export function normalizeDiscordMessageText(content: string, botId?: string): st
   return content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
 }
 
+/**
+ * Builds the agent-facing text for an inbound message: the bot mention is
+ * stripped from prose, and a message that was only the mention keeps it as
+ * `@<bot name>`. Only a typed `<@id>` token counts; a reply that merely pings
+ * the bot puts it in `message.mentions` without any token, and stays as-is.
+ */
+export function discordInboundText(
+  content: string,
+  bot?: { id: string; displayName?: string },
+): string {
+  const text = normalizeDiscordMessageText(content, bot?.id);
+  const typedMention = bot ? new RegExp(`<@!?${bot.id}>`).test(content) : false;
+  return preserveMentionOnlyText(text, typedMention, bot?.displayName);
+}
+
 /** A guild channel as surfaced to callers resolving a "#name" → snowflake. */
 export interface GuildChannelInfo {
   id: string;
@@ -303,8 +266,7 @@ export interface GuildChannelInfo {
 
 /**
  * Narrow structural view of {@link DiscordAdapter} for cross-module callers
- * (e.g. `worker-rpc.ts`) that hold a generic `ProviderAdapter` and need the
- * Discord-specific methods. Keeping the surface in one exported interface lets
+ * that need the Discord-specific methods. Keeping the surface in one exported interface lets
  * TypeScript catch signature drift at those call sites instead of letting a
  * hand-written structural cast silently rot.
  */
@@ -313,16 +275,52 @@ export interface DiscordAdapterLike {
   executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult>;
 }
 
-export class DiscordAdapter implements ProviderAdapter {
-  readonly channelName = "discord";
+function projectDiscordBody(
+  status: number,
+  headers: ResponseLike["headers"],
+  bytes: Uint8Array,
+): ChannelApiResult {
+  if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
+    return {
+      error: {
+        type: "response_too_large",
+        message: "Discord response exceeded the 16 MiB broker limit.",
+      },
+    };
+  }
+
+  const text = new TextDecoder().decode(bytes);
+  let body: unknown = null;
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  return {
+    response: {
+      status,
+      headers: filterChannelApiResponseHeaders(headers.entries()),
+      body,
+    },
+  };
+}
+
+/**
+ * The Discord bot transport. Inbound gateway messages arrive as the channel's
+ * own record, a `ChannelMessage` whose `raw` is the discord.js `Message`, so
+ * the Connection integration delivers them as they are.
+ */
+export class DiscordAdapter {
   private client: Client;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
-  private conversationSettings?: ConversationSettingsControl & {
-    observe?(descriptor: ConversationDescriptor): void;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private chatSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
   };
   private connectionId?: string;
   private slashCommandsRegistered = false;
-  private maxMessagesPerChannel: number;
   /**
    * Returns the names of all agents currently loaded in the catalog. Used by
    * `/channel agent set <name>` to validate the guardian's input and reject
@@ -331,6 +329,8 @@ export class DiscordAdapter implements ProviderAdapter {
    * disappears later).
    */
   private listAgents?: () => string[];
+  private accountAgent?: () => string | null | undefined;
+  private hasAgent?: (name: string) => boolean;
   private resolveDiscordPerson?: (
     channelUserId: string,
   ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
@@ -353,21 +353,30 @@ export class DiscordAdapter implements ProviderAdapter {
   constructor(config: {
     botToken: string;
     connectionId?: string;
-    conversationSettings?: ConversationSettingsControl & {
-      observe?(descriptor: ConversationDescriptor): void;
+    chatSettings?: ChatSettingsControl & {
+      observe?(descriptor: ChatDescriptor): void;
     };
-    maxMessagesPerChannel?: number;
     listAgents?: () => string[];
+    /** The agent linked to this adapter's channel, as `accountAgentResolver`
+     *  answers it. Absent, the channel reads as one that takes no link. */
+    accountAgent?: () => string | null | undefined;
+    /** Whether an agent is loaded, aliases included. Absent, every agent
+     *  counts as loaded. */
+    hasAgent?: (name: string) => boolean;
     resolveDiscordPerson?: (
       channelUserId: string,
     ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
     chatStop?: ChatStopHandler;
     onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
+    /** Where the gateway client and the broker send REST requests. Defaults to
+     *  Discord's API; tests point it at a local peer. */
+    rest?: Partial<RESTOptions>;
   }) {
     this.connectionId = config.connectionId;
-    this.conversationSettings = config.conversationSettings;
-    this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
+    this.chatSettings = config.chatSettings;
     this.listAgents = config.listAgents;
+    this.accountAgent = config.accountAgent;
+    this.hasAgent = config.hasAgent;
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
@@ -380,11 +389,13 @@ export class DiscordAdapter implements ProviderAdapter {
         GatewayIntentBits.DirectMessageReactions,
       ],
       partials: [Partials.Channel, Partials.Message],
+      ...(config.rest ? { rest: config.rest } : {}),
     });
     this._botToken = config.botToken;
     this.rest = new REST({
       version: DISCORD_API_VERSION,
       userAgentAppendix: "Rome Discord broker/1",
+      ...config.rest,
     }).setToken(config.botToken);
   }
 
@@ -485,7 +496,7 @@ export class DiscordAdapter implements ProviderAdapter {
       void queuedRequest.catch(() => undefined);
       const response = await Promise.race([queuedRequest, aborted]);
       return await this.projectDiscordResponse(response);
-    } catch {
+    } catch (error) {
       // A deadline or epoch teardown wins over any Response event emitted by an
       // intermediate discord.js attempt (for example, a 429 it plans to retry).
       if (controller.signal.aborted) {
@@ -515,10 +526,16 @@ export class DiscordAdapter implements ProviderAdapter {
         };
       }
       // discord.js parses and throws for non-2xx responses. Its Response event
-      // gives us a clone first, preserving status, safe headers, and the raw
-      // Discord error payload without serializing the thrown request object.
-      if (capturedResponse) {
-        const projected = await this.projectDiscordResponse(capturedResponse);
+      // gives us the status and safe headers. Under the default undici
+      // transport that event object shares its body with the response
+      // discord.js already read for a 4xx, so the Discord error payload comes
+      // from the thrown DiscordAPIError instead of the event body.
+      const observedResponse = capturedResponse as ResponseLike | null;
+      if (observedResponse) {
+        const projected =
+          error instanceof DiscordAPIError
+            ? this.projectDiscordApiError(error, observedResponse)
+            : await this.projectDiscordResponse(observedResponse);
         if (projected.response?.status === 401) {
           this.onGatewayFault?.({
             kind: "credential",
@@ -544,30 +561,20 @@ export class DiscordAdapter implements ProviderAdapter {
 
   private async projectDiscordResponse(response: ResponseLike): Promise<ChannelApiResult> {
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
-      return {
-        error: {
-          type: "response_too_large",
-          message: "Discord response exceeded the 16 MiB broker limit.",
-        },
-      };
-    }
+    return projectDiscordBody(response.status, response.headers, bytes);
+  }
 
-    const text = new TextDecoder().decode(bytes);
-    let body: unknown = null;
-    if (text.length > 0) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = text;
-      }
+  private projectDiscordApiError(error: DiscordAPIError, response: ResponseLike): ChannelApiResult {
+    // discord.js keeps parsed JSON, or raw bytes for a non-JSON error body.
+    const raw: unknown = error.rawError;
+    if (raw instanceof ArrayBuffer) {
+      return projectDiscordBody(error.status, response.headers, new Uint8Array(raw));
     }
-
     return {
       response: {
-        status: response.status,
+        status: error.status,
         headers: filterChannelApiResponseHeaders(response.headers.entries()),
-        body,
+        body: raw,
       },
     };
   }
@@ -577,11 +584,12 @@ export class DiscordAdapter implements ProviderAdapter {
     displayName?: string,
     parentId?: string | null,
     containerName?: string,
-  ): ConversationDescriptor {
+  ): ChatDescriptor {
     if (!this.connectionId) throw new Error("Discord connection id is unavailable");
-    const ref = { connectionId: this.connectionId, conversationId: channelId as ConversationId };
+    const ref = { connectionId: this.connectionId, chatId: channelId as ChatId };
     return {
       ref,
+      connectionKind: "discord",
       service: "discord",
       kind: parentId ? "topic" : "channel",
       displayName: displayName ?? channelId,
@@ -590,15 +598,15 @@ export class DiscordAdapter implements ProviderAdapter {
         ? {
             parent: {
               connectionId: this.connectionId,
-              conversationId: parentId as ConversationId,
+              chatId: parentId as ChatId,
             },
           }
         : {}),
     };
   }
 
-  private async settingsForMessage(message: Message): Promise<ConversationSettingsSnapshot | null> {
-    if (!this.conversationSettings) return null;
+  private async settingsForMessage(message: Message): Promise<ChatSettingsSnapshot | null> {
+    if (!this.chatSettings) return null;
     const parentId =
       message.channel && "isThread" in message.channel && message.channel.isThread()
         ? message.channel.parentId
@@ -606,11 +614,11 @@ export class DiscordAdapter implements ProviderAdapter {
     const displayName = "name" in message.channel ? (message.channel.name ?? undefined) : undefined;
     const containerName = message.guild?.name;
     const descriptor = this.descriptor(message.channelId, displayName, parentId, containerName);
-    this.conversationSettings.observe?.(descriptor);
-    return this.conversationSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(descriptor);
+    return this.chatSettings.get(descriptor.ref);
   }
 
-  private legacyConfig(snapshot: ConversationSettingsSnapshot | null): DiscordChannelConfig {
+  private legacyConfig(snapshot: ChatSettingsSnapshot | null): DiscordChannelConfig {
     if (!snapshot) return {};
     return {
       mode: snapshot.effective.enabled ? "allow" : "ignore",
@@ -686,6 +694,22 @@ export class DiscordAdapter implements ProviderAdapter {
       await this.handleSlashCommand(interaction);
     });
 
+    // discord.js 14 builds a DM's channel only from a message whose channel
+    // it has cached, and a bot's READY caches none, so a person's first DM
+    // would be dropped. The raw event runs before the message's handler, so
+    // the DM is cached here, partial, with its sender as the recipient.
+    this.client.on("raw", (packet: { t?: string; d?: Record<string, unknown> }) => {
+      const data = packet.d;
+      if (packet.t !== "MESSAGE_CREATE" || !data || "guild_id" in data) return;
+      const channelId = data.channel_id;
+      if (typeof channelId !== "string" || this.client.channels.cache.has(channelId)) return;
+      (
+        this.client.channels as unknown as {
+          _add(data: { id: string; type: ChannelType; recipients: unknown[] }): unknown;
+        }
+      )._add({ id: channelId, type: ChannelType.DM, recipients: [data.author] });
+    });
+
     this.client.on("messageCreate", async (message: Message) => {
       if (!this.handler) return;
 
@@ -700,6 +724,13 @@ export class DiscordAdapter implements ProviderAdapter {
 
       const isThread = isThreadType(message.channel.type);
 
+      // A link code said in a guild channel must void the code, so it skips
+      // the filters below. Admission voids it and keeps it from every agent.
+      if (!isDm && isLinkCodeMessage(message.content)) {
+        await this.dispatchMessage(message, isDm, isThread, "ambient");
+        return;
+      }
+
       const cfg = this.legacyConfig(await this.settingsForMessage(message));
       const botId = this.client.user?.id;
       const botMentioned = botId ? message.mentions.users.has(botId) : false;
@@ -711,7 +742,7 @@ export class DiscordAdapter implements ProviderAdapter {
 
       // ── Layer 2: Bot filter ───────────────────────────────────────────────
       if (message.author.bot) {
-        const allowBots = cfg?.allowBots ?? "none";
+        const allowBots = cfg.allowBots ?? "none";
         if (allowBots === "none") {
           log.debug("ignoring bot message (allowBots=none)", { from: message.author.id });
           return;
@@ -729,7 +760,7 @@ export class DiscordAdapter implements ProviderAdapter {
       }
 
       // ── Layer 3: Intent recognition ───────────────────────────────────────
-      const ignoreNoMention = cfg?.ignoreNoMention ?? true;
+      const ignoreNoMention = cfg.ignoreNoMention ?? true;
       if (!isDm && ignoreNoMention && message.mentions.users.size > 0) {
         const botId = this.client.user?.id;
         if (!botId || !message.mentions.users.has(botId)) {
@@ -768,7 +799,7 @@ export class DiscordAdapter implements ProviderAdapter {
         isStopCommand(normalizeDiscordMessageText(message.content, botId));
 
       // ── Layer 4: Channel permission ───────────────────────────────────────
-      if (cfg?.mode === "ignore" && !directedStop) {
+      if (cfg.mode === "ignore" && !directedStop) {
         log.debug("ignoring message in channel with mode=ignore", {
           channelId: message.channelId,
         });
@@ -779,7 +810,7 @@ export class DiscordAdapter implements ProviderAdapter {
       // Threads the bot itself started (e.g. auto-thread replies) are treated
       // as ongoing conversations and skip the mention requirement. Threads
       // created by other users still need an @mention or a reply-to-bot.
-      const requireMention = cfg?.requireMention ?? true;
+      const requireMention = cfg.requireMention ?? true;
       if (requireMention && addressing === "ambient") {
         log.debug("ignoring guild message not directed at bot", {
           from: message.author.id,
@@ -805,7 +836,16 @@ export class DiscordAdapter implements ProviderAdapter {
     if (!this.handler) return;
 
     // Strip the bot @mention from message text so the agent sees clean input
-    const text = normalizeDiscordMessageText(message.content, this.client.user?.id);
+    const botUser = this.client.user;
+    const text = discordInboundText(
+      message.content,
+      botUser
+        ? {
+            id: botUser.id,
+            displayName: message.guild?.members.me?.displayName ?? botUser.displayName,
+          }
+        : undefined,
+    );
 
     let threadName: string | undefined;
     if (!isDm && "name" in message.channel) {
@@ -816,29 +856,33 @@ export class DiscordAdapter implements ProviderAdapter {
       isThread && message.channel.isThread() ? (message.channel.parentId ?? null) : null;
     const replyToMessageId = resolveDiscordReplyToMessageId(message);
 
-    const msg: NormalizedMessage = {
-      id: message.id,
+    const msg: ChannelMessage = {
       channel: "discord",
-      channelUserId: message.author.id,
-      displayName:
+      direction: "inbound",
+      messageId: message.id,
+      chatId: message.channelId as ChatId,
+      ...(parentId ? { parentChatId: parentId as ChatId } : {}),
+      senderId: message.author.id,
+      senderDisplayName:
         message.member?.displayName ?? message.author.displayName ?? message.author.username,
-      username: message.author.username,
-      threadId: message.channelId,
-      parentThreadId: parentId ?? undefined,
-      threadName,
-      threadType: isDm ? "private" : "group",
-      timestamp: message.createdAt,
+      ...(message.author.username ? { senderUsername: message.author.username } : {}),
       text,
       attachments: this.extractAttachments(message),
-      replyTo: replyToMessageId ? { messageId: replyToMessageId } : undefined,
+      timestamp: message.createdAt,
+      ...(replyToMessageId ? { replyTo: { messageId: replyToMessageId } } : {}),
       addressing,
-      rawEvent: message,
+      // A native thread is a topic under the channel it was opened in.
+      thread: {
+        kind: isDm ? "dm" : parentId ? "topic" : "group",
+        ...(threadName ? { name: threadName } : {}),
+      },
+      raw: message,
     };
 
     log.info("message received", {
-      from: msg.channelUserId,
-      threadId: msg.threadId,
-      threadType: msg.threadType,
+      from: msg.senderId,
+      chatId: msg.chatId,
+      threadKind: msg.thread?.kind,
       isDm,
       isThread,
     });
@@ -847,7 +891,7 @@ export class DiscordAdapter implements ProviderAdapter {
       await this.handler!(msg);
     } catch (err) {
       log.error("message handler error", {
-        messageId: msg.id,
+        messageId: msg.messageId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -866,7 +910,7 @@ export class DiscordAdapter implements ProviderAdapter {
         const result = await this.chatStop({
           ref: {
             connectionId: this.connectionId,
-            conversationId: interaction.channelId as ConversationId,
+            chatId: interaction.channelId as ChatId,
           },
           service: "discord",
           senderId: interaction.user.id,
@@ -896,7 +940,7 @@ export class DiscordAdapter implements ProviderAdapter {
             "  `/channel bots none|mentions|all` — how to handle messages from other bots",
             "  `/channel quiet on|off` — stay silent when others are @mentioned",
             "  `/channel thread off|on` — disable/enable auto-thread for replies",
-            "  `/channel agent set <name>` — route this channel to a specific agent (default main)",
+            "  `/channel agent set <name>` — route this channel to a specific agent, or pin it to main (default: the account's agent)",
             "  `/channel agent clear` — clear the agent binding for this channel",
             "  `/channel reset` — clear all overrides for this channel",
             "  `/channel status` — show current channel configuration",
@@ -913,9 +957,9 @@ export class DiscordAdapter implements ProviderAdapter {
 
       if (cmd === "bot" && sub === "status") {
         const entries =
-          this.conversationSettings && this.connectionId
+          this.chatSettings && this.connectionId
             ? (
-                await this.conversationSettings.list({
+                await this.chatSettings.list({
                   connectionId: this.connectionId,
                   limit: 100,
                 })
@@ -941,6 +985,13 @@ export class DiscordAdapter implements ProviderAdapter {
             ? (interaction.channel.name as string)
             : undefined;
         const mention = `${channelName ? `#${channelName}` : `<#${channelId}>`}`;
+        const answering = (choice: string | undefined) =>
+          answeringAgentOf(
+            this.accountAgent?.(),
+            choice,
+            interaction.guildId ? "group" : "private",
+            this.hasAgent,
+          );
 
         if (sub === "status") {
           const snapshot = await this.getConversationSettings(
@@ -950,7 +1001,8 @@ export class DiscordAdapter implements ProviderAdapter {
             interaction.guild?.name,
           );
           const cfg = this.legacyConfig(snapshot);
-          const agentLine = `agent: ${cfg.agentName ?? "main"}${
+          const agent = answering(snapshot ? storedAgentChoice(snapshot) : undefined);
+          const agentLine = `agent: ${describeAnsweringAgent(agent)}${
             snapshot?.inheritedFrom ? " (inherited)" : ""
           }`;
           const lines = [
@@ -1073,7 +1125,7 @@ export class DiscordAdapter implements ProviderAdapter {
           if (sub === "clear") {
             await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
             await interaction.editReply({
-              content: `✓ ${mention} agent binding removed — messages now route to main`,
+              content: `✓ ${mention} agent binding removed — ${answersLine(answering(undefined))}`,
             });
             return;
           }
@@ -1086,12 +1138,13 @@ export class DiscordAdapter implements ProviderAdapter {
               });
               return;
             }
-            // "main" is the default — treat `set main` as a clear so we don't
-            // store a redundant named binding.
+            // `set main` pins the channel to main, so it stops following the
+            // account's agent. `clear` is how it follows the link again.
             if (isCoreMainAgentId(name)) {
-              await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
+              await this.updateChannelConfig(channelId, { agentName: "main", ...audit });
               await interaction.editReply({
-                content: `✓ ${mention} binding removed — messages now route to main`,
+                content: `✓ ${mention} pinned to main — ${answersLine(answering("main"))}
+Use \`/channel agent clear\` to undo.`,
               });
               return;
             }
@@ -1106,9 +1159,12 @@ export class DiscordAdapter implements ProviderAdapter {
               return;
             }
             await this.updateChannelConfig(channelId, { agentName: name, ...audit });
+            const agent = answering(name);
             await interaction.editReply({
               content:
-                `✓ ${mention} now routes to agent \`${name}\`\n` +
+                (agent === name
+                  ? `✓ ${mention} now routes to agent \`${name}\`\n`
+                  : `✓ ${mention} stored agent \`${name}\`, but ${answersLine(agent)}\n`) +
                 `Use \`/channel agent clear\` to undo.`,
             });
             return;
@@ -1231,7 +1287,7 @@ export class DiscordAdapter implements ProviderAdapter {
     parentId?: string | null,
     containerName?: string,
   ): Promise<void> {
-    if (!this.conversationSettings) return;
+    if (!this.chatSettings) return;
     const snapshot = await this.getConversationSettings(
       channelId,
       channelName,
@@ -1240,15 +1296,15 @@ export class DiscordAdapter implements ProviderAdapter {
     );
     if (!snapshot) return;
     if (patch === null) {
-      await this.conversationSettings.reset({
+      await this.chatSettings.reset({
         ref: snapshot.conversation.ref,
         actor: { kind: "guardian", id: "discord-slash" },
       });
       return;
     }
 
-    const set: import("@rome-os/app-runtime").PartialConversationSettings = {};
-    const clear: import("@rome-os/app-runtime").ConversationSettingField[] = [];
+    const set: import("@rome-os/app-runtime").PartialChatSettings = {};
+    const clear: import("@rome-os/app-runtime").ChatSettingField[] = [];
     const owns = (key: keyof DiscordChannelConfig) => Object.hasOwn(patch, key);
     if (owns("mode")) {
       if (patch.mode === "ignore") set.enabled = false;
@@ -1276,7 +1332,7 @@ export class DiscordAdapter implements ProviderAdapter {
       if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
       else clear.push("routing.agentName");
     }
-    await this.conversationSettings.update({
+    await this.chatSettings.update({
       ref: snapshot.conversation.ref,
       set,
       clear,
@@ -1289,8 +1345,8 @@ export class DiscordAdapter implements ProviderAdapter {
     channelName?: string,
     parentId?: string | null,
     containerName?: string,
-  ): Promise<ConversationSettingsSnapshot | null> {
-    if (!this.conversationSettings) return null;
+  ): Promise<ChatSettingsSnapshot | null> {
+    if (!this.chatSettings) return null;
     if (!channelName || parentId === undefined || !containerName) {
       const channel = await this.client.channels.fetch(channelId).catch(() => null);
       if (channel) {
@@ -1300,8 +1356,8 @@ export class DiscordAdapter implements ProviderAdapter {
       }
     }
     const descriptor = this.descriptor(channelId, channelName, parentId, containerName);
-    this.conversationSettings.observe?.(descriptor);
-    return this.conversationSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(descriptor);
+    return this.chatSettings.get(descriptor.ref);
   }
 
   async stop(): Promise<void> {
@@ -1316,11 +1372,23 @@ export class DiscordAdapter implements ProviderAdapter {
     log.info("bot stopped");
   }
 
+  /** The Discord channel at `address`: the channel itself, or the DM channel
+   *  with the user it names. */
+  private async channelOf(address: string): Promise<string> {
+    const channel = await this.client.channels.fetch(address).catch(() => null);
+    if (channel) return address;
+    return this.directConversationFor(address);
+  }
+
   async directConversationFor(channelUserId: string): Promise<string> {
     return (await this.client.users.createDM(channelUserId)).id;
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    // A direct message is addressed by the other party's user id, which Chats
+    // keys it by (docs/architecture/channels.md#direct-messages): Discord's
+    // DM channel for that user is opened, or found, here.
+    const threadId: string = await this.channelOf(chatId);
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Channel ${threadId} is not a text channel`);
@@ -1361,7 +1429,12 @@ export class DiscordAdapter implements ProviderAdapter {
       }
 
       log.info("message sent", { threadId, targetChannelId: targetChannel.id });
-      return { messageId, threadId: targetChannel.id };
+      // A reply posted into an auto-thread lands in that thread, so the
+      // receipt names the thread, not the channel it was asked for.
+      return {
+        chatId: targetChannel.id as ChatId,
+        ...(messageId ? { messageId } : {}),
+      };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -1402,107 +1475,14 @@ export class DiscordAdapter implements ProviderAdapter {
     return thread;
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
-    return saveUrlAttachments(message);
-  }
-
-  /**
-   * Fetch recent Discord messages via the REST API (no live gateway needed).
-   *
-   * - `threadId = null`  → all text channels across all guilds
-   * - `threadId = <id>`  → only that specific channel
-   */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
-    const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
-    const afterSnowflake = timestampToSnowflake(cutoffMs);
-    const maxPerChannel = Math.min(this.maxMessagesPerChannel, 100);
-
-    if (threadId !== null) {
-      // Single-channel fetch — normalize consistently with the all-guilds path:
-      // reverse to chronological order and filter out bot messages.
-      const messages = await this.fetchChannelMessages(
-        this.rest,
-        threadId,
-        afterSnowflake,
-        maxPerChannel,
-      );
-      messages.reverse();
-      return messages
-        .filter((m) => !m.author.bot)
-        .map((m) => restMessageToNormalized(m, "discord", threadId, threadId));
-    }
-
-    // All-guilds fetch — channels and messages are fetched in parallel across guilds
-    const guilds = (await this.rest.get(Routes.userGuilds())) as DiscordRestGuild[];
-    log.info("fetchHistory: guilds found", { count: guilds.length });
-
-    const perGuild = await Promise.all(
-      guilds.map(async (guild) => {
-        let channels: DiscordRestChannel[];
-        try {
-          channels = (await this.rest.get(Routes.guildChannels(guild.id))) as DiscordRestChannel[];
-        } catch (err) {
-          log.warn("fetchHistory: failed to list channels", {
-            guild: guild.name,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return [];
-        }
-
-        const readable = channels.filter((c) => HISTORY_CHANNEL_TYPES.has(c.type));
-
-        const perChannel = await Promise.all(
-          readable.map(async (channel) => {
-            const channelName = channel.name ?? channel.id;
-            let messages: DiscordRestMessage[];
-            try {
-              messages = await this.fetchChannelMessages(
-                this.rest,
-                channel.id,
-                afterSnowflake,
-                maxPerChannel,
-              );
-            } catch (err) {
-              if ((err as { status?: number }).status !== 403) {
-                log.warn("fetchHistory: failed to read channel", {
-                  guild: guild.name,
-                  channel: channelName,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-              return [] as NormalizedMessage[];
-            }
-
-            // Discord returns newest-first; reverse to chronological order
-            messages.reverse();
-            return messages
-              .filter((m) => !m.author.bot)
-              .map((m) => restMessageToNormalized(m, guild.name, channel.id, channelName));
-          }),
-        );
-
-        return perChannel.flat();
-      }),
-    );
-
-    const allMessages = perGuild.flat();
-    log.info("fetchHistory: complete", { messageCount: allMessages.length, windowHours });
-    return allMessages;
-  }
-
-  private async fetchChannelMessages(
-    rest: REST,
-    channelId: string,
-    afterSnowflake: string,
-    limit: number,
-  ): Promise<DiscordRestMessage[]> {
-    return (await rest.get(Routes.channelMessages(channelId), {
-      query: new URLSearchParams({ after: afterSnowflake, limit: String(limit) }),
-    })) as DiscordRestMessage[];
+  /** Download a message's files into the profile. Each attachment's `url` is
+   *  its Discord CDN link, so the message needs no provider event. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
+    return saveUrlAttachments({ ...message, channel: "discord" });
   }
 
   async notifyTyping(threadId: string): Promise<void> {
@@ -1553,6 +1533,12 @@ export class DiscordAdapter implements ProviderAdapter {
     });
     return sent.id;
   }
+}
+
+function answersLine(agent: string | null): string {
+  return agent
+    ? `messages now route to ${agent}`
+    : "no agent answers here: this account has no agent, or it is not loaded";
 }
 
 /** Breaks at newlines where possible. */

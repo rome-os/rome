@@ -1,0 +1,11 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# tailscaled starts alongside init, not after it, because init's Caddyfile
+# generator reads the tailnet name. That also means it starts before init
+# removes SSH_USER_PASSWORD from the service environment.
+unset SSH_USER_PASSWORD
+echo "Starting tailscaled ..."
+exec tailscaled \
+  --state=/var/lib/tailscale/tailscaled.state \
+  --socket=/var/run/tailscale/tailscaled.sock \
+  --tun=userspace-networking

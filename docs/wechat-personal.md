@@ -5,36 +5,55 @@ The personal WeChat connection reads the guardian's account through the Linux de
 ## Runtime requirements
 
 - An x86-64 Linux VM running the Rome container.
-- The [host helper](../packages/host-helper/README.md) installed and enabled on that VM, with its socket directory mounted into the container.
-- `WECHAT_USER_ENABLED=true` and `ROME_HOST_EXECUTION_ENABLED=true` in the container environment.
-- `ROME_HOST_EXECUTION_SOCKET` set to the mounted helper socket.
-- `ROME_DOCKER_USER_MODE=root` so the client and the reader can access the same files under `/home/rome`.
+- `WECHAT_USER_ENABLED=true` in the container environment.
+- The default `ROME_DOCKER_USER_MODE=multi`. Rome, the client, key capture, and the reader run as `rome` and share files under `/home/rome`.
 - At least 1 GB of container shared memory (`shm_size: 1gb` in Compose).
+- The container's default `docker-compose.yml` capabilities (`SYS_ADMIN`, AppArmor unconfined), which let the runtime launch the client under a debugger to recover its store key.
 
-Set `WECHAT_USER_ENABLED` to `true` to offer this connection. `false` keeps it disabled. If host execution is disabled, setup stops before downloading the client.
+Set `WECHAT_USER_ENABLED` to `true` to offer this connection. `false` keeps it disabled. Key recovery runs entirely inside the container, so this connection needs no host helper and no host execution.
 
 ## Enable on a Compose deployment
 
-The production [`docker-compose.yml`](../docker-compose.yml) reads every knob below from the `.env` file beside it, and defaults all of them to off. Add these four lines to that `.env` on a VM that runs the host helper:
+The production [`docker-compose.yml`](../docker-compose.yml) reads every knob below from the `.env` file beside it, and keeps the connection disabled by default. Add this line to that `.env`:
 
 ```sh
 WECHAT_USER_ENABLED=true
-ROME_HOST_EXECUTION_ENABLED=true
-ROME_DOCKER_USER_MODE=root
-# Host directory holding the helper's control socket. Bound into the container
-# at /run/rome-host, which is where ROME_HOST_EXECUTION_SOCKET points.
-ROME_HOST_EXECUTION_SOCKET_DIR=/run/rome-host
 ```
 
-Then run `docker compose up -d rome`. Compose recreates the container with the socket directory bound and the connection registered. `docker compose config` prints the resolved values.
+Then run `docker compose up -d rome`. Compose recreates the container with the connection registered. `docker-compose.yml` already fixes `shm_size` at 1 GB and grants the capabilities the debugger needs, so no other knob is required. `docker compose config` prints the resolved values.
 
-The container mounts the socket directory whether or not the helper is installed, so a deployment that leaves these off is unchanged. Rome rejects every submission while `ROME_HOST_EXECUTION_ENABLED` is `false`.
-
-`ROME_DOCKER_USER_MODE=root` changes the whole container, not only WeChat: every process runs as root instead of the `rome` user. Enable it on an instance whose WeChat account the guardian owns.
+Enabling WeChat does not change the Rome service user. The entrypoint prepares the client link and a private session directory before starting Rome and its desktop as `rome`. Explicit `root` mode remains supported, but WeChat does not require it.
 
 The older `scripts/setup.sh` writes its own Compose file, which sets no `shm_size`. The client faults during startup there. Use `docker-compose.yml` for this connection.
 
-The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction. The reader dependencies are pinned separately.
+The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction.
+
+The reader is the [`wechat-bridge`](https://www.npmjs.com/package/wechat-bridge) package, pinned to an exact version in `packages/core`. Rome runs its `wechat-cli` command with `-f json` for sessions and messages, so the image needs no Python reader environment. The bridge never writes to WeChat's databases. It keeps decrypted copies of them under its home, `~/.local/share/wechat/bridge`, private to `rome`.
+
+## WeChat's own display
+
+The client runs on a display of its own, `:100`, not on the shared desktop beside Rome's Chrome. Before Rome starts the client or captures its keys, it starts that display with [`rome-start-desktop.sh`](../scripts/docker/rome-start-desktop.sh), or reuses it. That is a second TigerVNC server at 1280x800 on `localhost:5901`, plus:
+
+- An Openbox with no key bindings (`scripts/docker/wechat-openbox-rc.xml`), which keeps the client's main window maximized without a title bar.
+- A second websockify on `6081`.
+
+The display outlives Rome, so a Rome restart finds the client still running and signed in. The guardian watches and signs in at `/desktop/wechat`, which is served the way `/desktop` is. The runtime captures keys, detects the login window and runs its health check on the display the client runs on. [Named desktops](architecture/named-desktops.md) covers the mechanism.
+
+`WECHAT_USER_DISPLAY`, `ROME_WECHAT_VNC_PORT` and `ROME_WECHAT_NOVNC_PORT` still override the display and ports.
+
+A client that was already running on the shared desktop stays there until it next exits. Until then the connection's status says so. To finish the move, quit WeChat at `/desktop`. Within a few minutes Rome starts it again on its own display, which can need one sign-in confirmed on the phone. Open `/desktop/wechat` then, so the login window is visible when it appears.
+
+### The WeChat app
+
+`/desktop/wechat` works without a connection ([`wechat-app.ts`](../packages/core/src/desktop-apps/wechat-app.ts)):
+
+- **Not installed:** the page offers **Install WeChat**. It downloads the pinned client, which takes a few minutes, then opens it. The download runs in Rome, so the guardian can leave the page.
+- **Installed but not running:** opening the page starts the client, once per visit. A start that failed waits for **Try again**, so it cannot loop.
+- **Running:** the page shows WeChat's desktop. While the client starts, a small "Starting WeChat" banner sits over it, and the desktop stays mounted, so the login window shows the moment it appears.
+
+Rome does not keep the client running on its own. A connection starts it when it finds it missing. `GET /api/wechat/app` reports the state, and `POST /api/wechat/app/install` and `POST /api/wechat/app/start` act on it.
+
+Connect's key capture kills the client and relaunches it under the debugger. From the moment Connect's setup takes that path, through its install and preparation to the end of the capture, it holds a lease on the runtime, and `start()` launches nothing: not for the page, and not for the connection's health check. The page reports starting until the capture's own client runs, with the desktop view under the banner, then shows the desktop, where the guardian signs in. The desktop view reconnects whenever the client reaches running, because the VNC client does not reconnect by itself and may have connected before the desktop was up. A client signed in from the app has not had its store key captured, so reading history still needs **Connect**, which can ask for one more confirmation on the phone.
 
 ## Connect
 
@@ -45,11 +64,11 @@ The Rome image includes the client libraries, debugger, and QR screenshot tools.
 5. Open People and link a direct WeChat contact to a person.
 6. Open that person's timeline and check the message bodies, latest message, and count.
 
-Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Persisted reader keys have mode `0600` in a mode `0700` directory. The privileged helper matches both the container PID and its PID namespace before entering it.
+Rome captures the keys with wechat-bridge's `init`, which launches the client under gdb as a child of the runtime user, waits for the login, and writes the per-database keys to the bridge's `keys.json`. Rome keeps no passphrase. The capture runs with a private `TMPDIR` under `/run`, and Rome removes the bridge's capture files from it afterwards, including on failure or cancellation. The directory stays because the client the capture launched keeps using it. An account connected before the bridge captures once more after upgrading, because keys the earlier Python reader stored are not carried over. No host helper is involved.
 
-Setup verifies the session database and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
+Rome reads only when the stored keys fit the session database, the contact database, and every message shard, and at least one shard exists. A key fits when it was derived for the salt the database starts with. A shard the client creates, recreates or deletes after the capture keeps the store locked until **Connect** captures again. A readable contact list alone does not establish that message history is readable.
 
-The client can create the message databases after key capture finishes, and it can finish writing a database after creating it. Setup keeps the captured passphrase and waits while it opens some databases but not yet every required one. A passphrase that opens none of them fails immediately. An unlocked but empty store needs messages synced from the phone before People can show history.
+If the login had not created every message shard when the capture ran, setup fails and asks for another try. An unlocked but empty store needs messages synced from the phone before People can show history.
 
 ## Desktop recovery
 
@@ -67,6 +86,16 @@ After a restart, check both stored history and live reception:
 4. Check that the test message appears in the desktop store through the reader.
 
 A running process and no visible login window are local readiness checks. Only receipt of a new message verifies live synchronization.
+
+## Accessibility
+
+Rome runs an accessibility bus for the client, so it can later reply from the guardian's account by driving the client through its accessibility tree.
+
+- The image carries `at-spi2-core`, `xdotool`, and `python3-jeepney`.
+- Rome starts the AT-SPI launcher on the client's private session bus whenever it prepares the client's session. The launcher reports accessibility as enabled and starts the AT-SPI registry.
+- The client's Qt AT-SPI bridge watches that bus. A client that is already running and signed in joins at the next desktop check, with no restart and no sign-in.
+- Nothing outside the WeChat session joins. The launcher and the session bus run without `DISPLAY`, so the accessibility bus is never published on the X display that Rome's browser shares.
+- Reading and login do not depend on accessibility. When the launcher is missing or fails, Rome logs `wechat_user.accessibility_unavailable` and the connection keeps reading.
 
 ## Clean-login verification
 

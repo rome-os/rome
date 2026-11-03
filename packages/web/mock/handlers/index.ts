@@ -1,13 +1,13 @@
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import type {
-  ConversationId,
-  ConversationSettings,
-  ConversationSettingsListItem,
-  PartialConversationSettings,
-} from "@rome/api-types/conversation-settings";
+  ChatId,
+  ChatSettings,
+  ChatSettingsListItem,
+  PartialChatSettings,
+} from "@rome/api-types/chat-settings";
 import type {
   AppRefDto,
-  TraceBlockDto,
+  TraceEventDto,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
@@ -15,18 +15,20 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import { http, HttpResponse } from "msw";
-import type { ApiConnection, Capability } from "@/lib/connections-api";
+import type { Capability } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import type { SettingsMap } from "@/hooks/use-settings";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
+  TranscriptPart,
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
+  ChatLocations,
   ProjectCatalog,
   ProjectOption,
-  StreamBlock,
+  SkillSummary,
   TurnInfo,
 } from "@/lib/chat-types";
 import type {
@@ -40,14 +42,19 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { connectorHandlers } from "./connector";
+import { liveEventsHandlers } from "./live-events";
+import { nodeConsoleHandlers } from "./node-console";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
-import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
+import { assistantHandlers } from "./assistants";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { settingsHandlers } from "./settings";
+import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { curatedChats } from "../fixtures/chats";
 
@@ -70,7 +77,21 @@ const identity: DashboardIdentity = {
   avatarUrl: null,
 };
 
-const text = (content: string, turnPhase?: "commentary" | "final"): StreamBlock =>
+const skills: SkillSummary[] = [
+  {
+    name: "@ray/scoped-app:identity_probe",
+    localName: "identity_probe",
+    description: "Scoped identity probe",
+    tools: [],
+    ownerType: "app",
+    ownerId: "@ray/scoped-app",
+    ownerLabel: "Scoped App",
+    ownerDescription: "Scoped app test fixture",
+    iconUrl: null,
+  },
+];
+
+const text = (content: string, turnPhase?: "commentary" | "final"): TranscriptPart =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
 
 // Tool steps, thinking, subagent runs and the usage footer belong to the
@@ -106,9 +127,9 @@ const millisBetween = (from?: string, to?: string): number | undefined => {
  * else stands alone as a `block` segment. `ordinal` is the drawer's render
  * order and runs across both kinds.
  */
-function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
+function traceSegmentsOf(blocks: TraceEventDto[]): TraceSegment[] {
   const segments: TraceSegment[] = [];
-  let run: TraceBlockDto[] = [];
+  let run: TraceEventDto[] = [];
   const flushRun = () => {
     if (run.length === 0) return;
     const steps = run.filter((b) => b.type === "tool_use" || b.type === "subagent_start");
@@ -118,7 +139,7 @@ function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
     const durations = steps.map((start) => {
       const id = start.type === "tool_use" ? start.id : start.toolUseId;
       const end = run.find(
-        (block): block is Extract<TraceBlockDto, { type: "tool_result" | "subagent_result" }> =>
+        (block): block is Extract<TraceEventDto, { type: "tool_result" | "subagent_result" }> =>
           (block.type === "tool_result" || block.type === "subagent_result") &&
           block.toolUseId === id,
       );
@@ -164,7 +185,7 @@ function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
 
 /** Read-time aggregation over the turn's blocks — never stored beside them, so
  *  deriving it here is what keeps the trigger's counts honest. */
-function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
+function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
   // Both invocation-start kinds count. A delegated turn is a step and observes
   // an app exactly as a tool call does, so counting only `tool_use` would leave
   // a turn showing a subagent chip while its trigger claimed nothing ran.
@@ -191,6 +212,13 @@ function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
   // through `terminalError` alone — the error block never leaves the trace.
   const lastError = blocks.filter((block) => block.type === "error").at(-1);
   const failed = turnEnd?.type === "turn_end" && turnEnd.status === "error";
+  const terminal = blocks
+    .filter((block) => block.type === "result" || block.type === "error")
+    .at(-1);
+  const model =
+    terminal?.type === "result" || terminal?.type === "error"
+      ? terminal.accounting?.model
+      : undefined;
   return {
     distinctApps: totalSteps > 0 ? [ROME_APP] : [],
     totalSteps,
@@ -201,6 +229,7 @@ function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
       ? { stoppedByUser: true }
       : {}),
     ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
@@ -211,15 +240,15 @@ function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
  * the grouped layout (and its trace subtitle slot) reachable in mock mode.
  *
  * `reply` carries only what the real API persists as MessagePart[] — text,
- * cards, recaps. Anything a run produced goes in `traceBlocks`.
+ * cards, recaps. Anything a run produced goes in `traceEvents`.
  */
 const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string | StreamBlock[],
-  reply: StreamBlock[],
-  traceBlocks?: TraceBlockDto[],
+  prompt: string | TranscriptPart[],
+  reply: TranscriptPart[],
+  traceEvents?: TraceEventDto[],
 ): ChatMessage[] => {
   const turnId = `${sessionId}-t${index}`;
   const at = (offsetMs: number) => new Date(Date.parse(startedAt) + offsetMs).toISOString();
@@ -231,12 +260,13 @@ const turn = (
       role: "user",
       content: JSON.stringify(typeof prompt === "string" ? [text(prompt)] : prompt),
       createdAt: startedAt,
+      sender: { kind: "guardian", name: identity.displayName, avatarUrl: identity.avatarUrl },
     },
   ];
-  if (traceBlocks?.length) {
+  if (traceEvents?.length) {
     const traceId = `${turnId}-trace`;
-    const summary = traceSummaryOf(traceBlocks);
-    traceSnapshots[traceId] = { segments: traceSegmentsOf(traceBlocks), summary };
+    const summary = traceSummaryOf(traceEvents);
+    traceSnapshots[traceId] = { segments: traceSegmentsOf(traceEvents), summary };
     rows.push({
       id: traceId,
       sessionId,
@@ -262,7 +292,7 @@ const turn = (
 
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
-// StreamBlocks exactly as the real API stores it, so what renders here goes
+// ChatEntries exactly as the real API stores it, so what renders here goes
 // through the production parse path rather than a mock-only shortcut.
 //
 // ChatSearchDialog ranks title/project matches itself and *appends* sessions
@@ -459,6 +489,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         // without audio: an audioUrl would need a real asset behind it.
         {
           type: "turn_recap",
+          turnId: "mock-chat-2-t2",
           content: "Rewrote the closing paragraph and handed over a themed banner component.",
         },
       ],
@@ -564,6 +595,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         {
           type: "routine_draft_card",
           toolUseId: "mock-chat-3-draft-1",
+          routineKey: "chat-routine:mock-chat-3-draft-1",
           draft: {
             sentence: "Every Monday at 9:00 AM, list anything that has stalled and nudge me.",
             name: "Weekly stall check",
@@ -572,11 +604,35 @@ const transcripts: Record<string, ChatMessage[]> = {
             trigger: {
               type: "schedule",
               tzid: "America/Los_Angeles",
+              tzMode: "floating",
               localTime: "09:00",
               rrule: "FREQ=WEEKLY;BYDAY=MO",
             },
             actionName: "daily_summary",
             args: { filter: "stalled" },
+          },
+        },
+        // An activated card: the agent created the routine on an explicit
+        // request (`propose_routine` with `activate: true`), so it opens saved
+        // with Pause / Delete / run history instead of "Turn it on".
+        {
+          type: "routine_draft_card",
+          toolUseId: "mock-chat-3-active-1",
+          routineKey: "chat-routine:mock-chat-3-active-1",
+          draft: {
+            sentence: "Every day at 7:00 AM, Rome will send you a morning brief.",
+            name: "Morning brief",
+            watchLabel: "Every day at 7:00 AM",
+            thenSummary: "send you your inbox and weather brief",
+            trigger: {
+              type: "schedule",
+              tzid: "America/Los_Angeles",
+              tzMode: "floating",
+              localTime: "07:00",
+              rrule: "FREQ=DAILY",
+            },
+            actionName: "daily_summary",
+            args: { sections: ["inbox", "weather"] },
           },
         },
       ],
@@ -691,16 +747,36 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
-  session("mock-chat-1", "Morning brief tweaks", "default"),
-  session("mock-chat-2", "Draft launch email", "website-redesign"),
-  session("mock-chat-3", "Weekly planning"),
-  session("mock-chat-4", "Plumber for the leak"),
+  // One chat per sidebar mark: running, failed, done with new replies, waiting.
+  {
+    ...session("mock-chat-1", "Morning brief tweaks", "default"),
+    running: true,
+    model: "claude-opus-5-5[1m]",
+    reasoningEffort: "high",
+  },
+  {
+    ...session("mock-chat-2", "Draft launch email", "website-redesign"),
+    unread: true,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
+  { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
+  // A chat that works in a folder on another computer groups under that folder.
+  {
+    ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
+    deviceFolder: {
+      deviceId: "mac",
+      deviceName: "MacBook Pro",
+      platform: "macos",
+      path: "/Users/ray/code/rome",
+    },
+  },
 ];
 
 const messageText = (message: ChatMessage): string =>
-  (JSON.parse(message.content) as StreamBlock[])
-    .filter((b) => b.type === "text" && typeof b.content === "string")
-    .map((b) => b.content)
+  (JSON.parse(message.content) as TranscriptPart[])
+    .flatMap((b) => (b.type === "text" ? [b.content] : []))
     .join(" ");
 
 /** Elided window around the hit, mirroring the snippet the real route returns. */
@@ -757,6 +833,10 @@ const chatAgents: AgentCatalogGroup[] = [
     ],
   },
 ];
+
+/** The loaded agents `GET /api/agents` lists, which the account link picker
+ *  offers and its PUT accepts. */
+const mockAgentNames = [MAIN_AGENT_ID, "build", "sales:agent"];
 
 // Long enough to overflow the project picker's 260px list, so the pinned
 // "no project selected" row can be exercised against a scrolling list.
@@ -824,6 +904,7 @@ const actionCatalog: ActionCatalogEntry[] = [
     name: "send_message",
     description: "Send a message to a person over a connected channel (Telegram, WhatsApp, …)",
     type: "system",
+    visibility: "public",
     sideEffects: "write",
     requiresApproval: false,
     ownerType: "system",
@@ -834,6 +915,7 @@ const actionCatalog: ActionCatalogEntry[] = [
     name: "web_search",
     description: "Search the web and return result snippets",
     type: "system",
+    visibility: "public",
     sideEffects: "read-only",
     requiresApproval: false,
     ownerType: "system",
@@ -914,10 +996,9 @@ const projectFileHandlers = fileBrowserHandlers({
 /**
  * The two remaining reads the Settings page makes. The page holds its
  * loading gate until `/api/tailscale/devices` settles, and the Connections tab
- * waits on the Composio status alongside `/api/connections`. Left unhandled
- * they fall through to the dev proxy, which only resolves quickly when a
- * refused connection is waiting on the other end — so the page renders on a
- * developer's machine and hangs where nothing is listening.
+ * waits on the Composio status alongside `/api/connections`. In strict E2E
+ * mode, unhandled reads hit the 503 fallback and leave those panels in an
+ * error state. These fixtures keep the page usable without a backend.
  */
 const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
 
@@ -933,7 +1014,7 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ConversationSettings = {
+const conversationDefaults: ChatSettings = {
   enabled: true,
   activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
   replies: { placement: "thread" },
@@ -941,14 +1022,15 @@ const conversationDefaults: ConversationSettings = {
   session: { reset: { mode: "idle", idleMinutes: 10_080 } },
 };
 
-const conversationSettings: { items: ConversationSettingsListItem[] } = {
+const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
     {
       availability: "online",
       source: "configured",
       snapshot: {
         conversation: {
-          ref: { connectionId: "discord-1", conversationId: "engineering" as ConversationId },
+          ref: { connectionId: "discord-1", chatId: "engineering" as ChatId },
+          connectionKind: "discord",
           service: "discord",
           kind: "group",
           displayName: "can you see active chats?",
@@ -974,7 +1056,8 @@ const conversationSettings: { items: ConversationSettingsListItem[] } = {
       source: "known",
       snapshot: {
         conversation: {
-          ref: { connectionId: "telegram-1", conversationId: "dm-42" as ConversationId },
+          ref: { connectionId: "telegram-1", chatId: "dm-42" as ChatId },
+          connectionKind: "telegram",
           service: "telegram",
           kind: "dm",
           displayName: "Ray",
@@ -995,7 +1078,7 @@ const conversationSettings: { items: ConversationSettingsListItem[] } = {
  * One level of nesting is all the settings shape has (`activation.mode`,
  * `session.reset`, …), so a targeted merge beats pulling in a deep-merge dep.
  */
-function mergeSettings<T extends object>(base: T, patch: PartialConversationSettings): T {
+function mergeSettings<T extends object>(base: T, patch: PartialChatSettings): T {
   const merged: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [key, value] of Object.entries(patch)) {
     merged[key] =
@@ -1017,14 +1100,45 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 
 export const handlers = [
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
+  // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
+  // section shows the account row rather than a reconnect prompt.
+  http.get("/api/diagnosis", () =>
+    HttpResponse.json({
+      status: "ok",
+      checkedAt: new Date().toISOString(),
+      uptimeSeconds: 3 * 86_400 + 4 * 3_600 + 12 * 60,
+      build: {
+        version: "1.1.154",
+        sha: "c2f71ed6",
+        builtAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      },
+      upgradedSinceLastBoot: false,
+      previousVersion: null,
+      instance: { auth: "ok", accountId: "acct_mock", instanceId: "inst_mock" },
+      database: { ok: true },
+      relay: { configured: true, depositUrlConfigured: true },
+      channels: ["telegram", "webchat"],
+      apps: { total: 12, failed: [], broken: [] },
+      resources: {
+        memory: { limitBytes: 4 * 1024 ** 3, availableBytes: 2.6 * 1024 ** 3, short: false },
+        disk: { totalBytes: 40 * 1024 ** 3, freeBytes: 21 * 1024 ** 3, low: false },
+      },
+    }),
+  ),
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
+  // Held open without events: the fixture's running flags never change.
+  http.get("/api/chat/status/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
   http.get("/api/chat/sessions/search", ({ request }) => {
     const query = new URL(request.url).searchParams.get("q") ?? "";
     return HttpResponse.json(searchMatches(query));
   }),
   http.get("/api/chat/agents", () => HttpResponse.json(chatAgents)),
+  http.get("/api/skills", () => HttpResponse.json({ skills })),
   // The trace drawer's two loaders. Both answer `{ trace }` and both return a
   // null trace rather than a 404 for a turn that produced no run, which is the
   // drawer's "nothing recorded" state rather than its error state.
@@ -1043,11 +1157,25 @@ export const handlers = [
       ? HttpResponse.json(found)
       : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
   }),
-  http.get("/api/chat/sessions/:sessionId/messages", ({ params }) => {
+  http.get("/api/chat/sessions/:sessionId/messages", ({ params, request }) => {
     const messages = transcripts[String(params.sessionId)];
-    return messages
-      ? HttpResponse.json(messages)
-      : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const query = new URL(request.url).searchParams;
+    const limit = Number(query.get("limit"));
+    if (!limit) return HttpResponse.json(messages);
+    // Pages by turn like the server; the cursor is the index of the page's first turn.
+    const turns = new Map<string, typeof messages>();
+    for (const message of messages) {
+      const key = message.turnId ?? message.id;
+      turns.set(key, [...(turns.get(key) ?? []), message]);
+    }
+    const groups = [...turns.values()];
+    const end = query.has("before") ? Number(query.get("before")) : groups.length;
+    const start = Math.max(0, end - limit);
+    return HttpResponse.json({
+      messages: groups.slice(start, end).flat(),
+      nextCursor: start > 0 ? String(start) : null,
+    });
   }),
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
@@ -1062,6 +1190,23 @@ export const handlers = [
       lastSeenActivityAt: found.lastSeenActivityAt,
       unread: found.unread,
     });
+  }),
+  // Pin or unpin a chat from its row menu. Kept in memory, so the chat moves
+  // into the Pinned section and stays there until the page reloads.
+  http.patch("/api/chat/sessions/:sessionId/pin", async ({ params, request }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { pinned } = (await request.json()) as { pinned: boolean };
+    found.pinnedAt = pinned ? new Date().toISOString() : null;
+    return HttpResponse.json(found);
+  }),
+  // The open chat's model picker. Kept in memory like the pin.
+  http.patch("/api/chat/sessions/:sessionId/model", async ({ params, request }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { largeModelSelection } = (await request.json()) as { largeModelSelection: string };
+    found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
+    return HttpResponse.json(found);
   }),
   // Thumbs on an assistant turn. Each row hydrates lazily as it scrolls into
   // view, so this only became reachable once sessions had a transcript. Kept in
@@ -1098,13 +1243,22 @@ export const handlers = [
     return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
   }),
   http.get("/api/chat/projects", () => HttpResponse.json(projectCatalog)),
+  // Cloud's device list is the slow half of the real answer; the delay shows the
+  // menu's placeholder devices.
+  http.get("/api/chat/locations", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return HttpResponse.json({
+      projects: projectCatalog,
+      devices: pickerDevices,
+    } satisfies ChatLocations);
+  }),
   http.post("/api/chat/projects", async ({ request }) => {
     const body = (await request.json()) as { name: string };
     const created: ProjectOption = { name: body.name, path: body.name };
     return HttpResponse.json(created);
   }),
   // The Memory page's folder panel leads with this read, so an unhandled
-  // status leaves the landing view spinning on the dev proxy. Unlinked, which
+  // status leaves the landing view without a usable fixture. Unlinked, which
   // is the state a fresh instance is in and the one that offers Connect.
   http.get("/api/sync/status", () => HttpResponse.json({ state: "unlinked" } satisfies SyncStatus)),
   http.get("/api/sync/sources", () => HttpResponse.json({ sources: syncSources })),
@@ -1171,15 +1325,40 @@ export const handlers = [
     return HttpResponse.json({ status: "set", tzid: body.timezone });
   }),
   http.get("/api/system/upgrade/status/snapshot", () => HttpResponse.json(upgradeStatus())),
-  http.get("/api/agents", () => HttpResponse.json({ agents: [{ name: "build" }] })),
+  http.get("/api/agents", () =>
+    HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
+  ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
+  // Link an agent to a connected account, named by its connection's id. Only
+  // this account changes: an agent may be linked to any number of accounts,
+  // several on one platform included.
+  http.put("/api/accounts/:id/agent", async ({ params, request }) => {
+    const id = String(params.id);
+    const body = (await request.json()) as { agent: string | null };
+    // Core stores main by its canonical id and accepts the short name.
+    const agent = body.agent === "main" ? MAIN_AGENT_ID : body.agent;
+    const target = connections.connections.find((candidate) => candidate.id === id);
+    if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
+    if (agent !== null && !mockAgentNames.includes(agent)) {
+      return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
+    }
+    if (agent !== null && !target.link) {
+      return HttpResponse.json(
+        { error: `${target.connectionKind} accounts do not take an agent.` },
+        { status: 400 },
+      );
+    }
+    target.agent = agent;
+    return HttpResponse.json({ account: { id, agent, link: target.link ?? null } });
+  }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
-  // above without this would leave every one of those buttons escaping to the
-  // dev proxy. Teardown is real here, the way the route runs it: the grant
-  // relocks, its identity clears, and the row itself stays so the service is
-  // still offered. Reconnecting needs a setup ceremony mock mode does not have
-  // (see "What mock mode cannot do"), so a disconnect here is one-way until
-  // reload — which is the honest depiction of a fixture with no ceremony
+  // above without this would make every one of those buttons fail locally.
+  // Teardown is real here, the way the route runs it: the grant relocks and
+  // its identity clears. A channel account that holds no grant then is
+  // removed, as core removes it, and a service left with none is offered as a
+  // placeholder again. Reconnecting needs a setup ceremony mock mode does not
+  // have (see "What mock mode cannot do"), so a disconnect here is one-way
+  // until reload — which is the honest depiction of a fixture with no ceremony
   // behind it, not a gap this handler can paper over.
   http.delete("/api/connections/:id/grants/:name", ({ params }) => {
     const connection = connections.connections.find(
@@ -1191,6 +1370,7 @@ export const handlers = [
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
     connection.grants[grant] = "unauthorized";
+    connection.state = null;
     connection.display[grant] = null;
     // Which capability a grant backs is the registry's to know, and a fixture
     // cannot reproduce that map without inventing it. What it can say without
@@ -1205,26 +1385,54 @@ export const handlers = [
         missingGrants: [grant],
       };
     }
-    return HttpResponse.json({ ok: true, connection });
+    // Core removes an account of a service that names its accounts, which
+    // the services that take an agent are.
+    const unconnectedAccount = Boolean(connection.link);
+    if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
+    const others = connections.connections.filter(
+      (candidate) =>
+        candidate !== connection && candidate.connectionKind === connection.connectionKind,
+    );
+    if (others.length > 0) {
+      connections.connections.splice(connections.connections.indexOf(connection), 1);
+    } else {
+      connection.id = null;
+      connection.label = connection.connectionKind;
+      connection.channel = null;
+      connection.agent = null;
+    }
+    return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/tailscale/devices", () => HttpResponse.json(tailscale)),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/conversation-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
-  http.patch("/api/conversation-settings", async ({ request }) => {
+  http.patch("/api/chat-settings", async ({ request }) => {
     const body = (await request.json()) as {
-      ref: { connectionId: string; conversationId: string };
-      set: PartialConversationSettings;
+      ref: { connectionId: string; chatId: string };
+      set: PartialChatSettings;
+      clear?: string[];
     };
     const found = conversationSettings.items.find(
       (candidate) =>
         candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId === body.ref.conversationId,
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
     );
     if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
     found.snapshot.effective = mergeSettings(found.snapshot.effective, body.set);
     found.snapshot.overrides = mergeSettings(found.snapshot.overrides, body.set);
+    // Core stores a pin to main as null, and clearing the agent choice (the
+    // only clear the dashboard sends) leaves the conversation with none.
+    const agentName = body.set.routing?.agentName;
+    if (agentName === "main" || agentName === MAIN_AGENT_ID) {
+      found.snapshot.overrides.routing = { ...found.snapshot.overrides.routing, agentName: null };
+      found.snapshot.effective.routing.agentName = null;
+    }
+    if (body.clear?.includes("routing.agentName")) {
+      delete found.snapshot.overrides.routing;
+      found.snapshot.effective.routing.agentName = null;
+    }
     found.snapshot.updatedAt = new Date().toISOString();
     found.snapshot.updatedBy = { kind: "guardian", displayName: identity.displayName ?? undefined };
     return HttpResponse.json(found.snapshot);
@@ -1234,21 +1442,34 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...activityHandlers,
-  // The WhatsApp mirror, and the /people contract over the same fixture store.
-  // Disjoint path families (/api/whatsapp against /api/people and
-  // /api/accounts), so the order between them is free.
-  ...channelMirrorHandlers,
   ...peopleHandlers,
+  ...assistantHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded
   // chats the conversation routes serve — one inventory row per chat, its run
   // and message counts read off that chat's transcript.
   ...sessionQueryHandlers(chatSessions, transcripts),
   ...settingsHandlers,
+  ...connectorHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
+  ...liveEventsHandlers,
+  ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
   // dir and the memory dir a person's dossier links into.
   ...projectFileHandlers,
   ...memoryFileHandlers,
+];
+
+export const strictE2eHandlers = [
+  http.post("/api/chat/sessions", () =>
+    HttpResponse.json({ error: "/api/chat/sessions is unavailable in mock mode" }, { status: 503 }),
+  ),
+  http.post("/api/auth/login", () => HttpResponse.json({ error: "Login failed" }, { status: 401 })),
+  http.all("/api/*", ({ request }) =>
+    HttpResponse.json(
+      { error: `Unmocked API request: ${request.method} ${new URL(request.url).pathname}` },
+      { status: 503 },
+    ),
+  ),
 ];

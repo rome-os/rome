@@ -2,12 +2,16 @@ import { runWithSessionActor } from "../../lib/session-actor.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";
-import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
+import {
+  createTestDb,
+  buildTestDeps,
+  type TestDb,
+  identityConnectionKindOf,
+} from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../db/repositories/people.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import type { ApprovalHandler } from "../../actions/approval-handler.js";
-import type { TalkRouter } from "@rome-os/app-runtime";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {
@@ -39,71 +43,37 @@ describe("Approvals API", () => {
     rs.restoreAllMocks();
   });
 
-  it.each([
-    "lookup",
-    "send",
-  ])("returns approval success while notification %s never settles", async (stage) => {
+  it("closes a stored pairing request and refuses to approve it", async () => {
     const repo = new ApprovalsRepository(testDb.db);
-    const request = repo.requestPairing({
-      channel: "telegram",
-      connectionId: "bot",
-      channelUserId: "123",
-      displayName: "Alice",
-      ...(stage === "send" ? { conversationId: "dm" } : {}),
-    })!;
-    const stalled = () => new Promise<never>(() => {});
-    const send = rs.fn(stalled);
-    const conversationFor = rs.fn(stalled);
-    const deps = {
-      ...(await buildTestDeps(testDb.db)),
-      approvalHandler,
-      talkRouter: { send, feature: () => ({ conversationFor }) } as unknown as TalkRouter,
-    };
-    const guarded = new Hono();
-    guarded.use("*", (_c, next) =>
-      runWithSessionActor({ kind: "guardian", userId: "test-owner", via: "cookie" }, next),
-    );
-    guarded.route("/", approvalsRoutes(deps));
-    const response = await guarded.request(`/approvals/${request.approval.id}/approve`, {
+    const id = await repo.create({
+      type: "person_mapping",
+      requestedBy: "telegram:123",
+      description: "Pair Alice on telegram",
+      payload: {
+        action: "channel_pairing",
+        channel: "telegram",
+        connectionId: "bot",
+        channelUserId: "123",
+        displayName: "Alice",
+        expiresAt: Date.now() + 60_000,
+        failedAttempts: 0,
+        lastGuidanceAt: 0,
+      },
+    });
+    const response = await app.request(`/approvals/${id}/approve`, {
       method: "POST",
       headers: { "sec-fetch-site": "same-origin" },
     });
-    expect(response.status).toBe(202);
-    expect((await repo.findById(request.approval.id))?.status).toBe("approved");
-    const person = await new PersonMappingRepository(testDb.db).findByChannelUser(
-      "telegram",
-      "123",
-    );
-    expect(person?.bondLevel).toBe("guardian");
-    expect(stage === "send" ? send : conversationFor).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns a conflict when an account is linked after its pairing request", async () => {
-    const repo = new ApprovalsRepository(testDb.db);
-    const people = new PersonMappingRepository(testDb.db);
-    const request = repo.requestPairing({
-      channel: "telegram",
-      connectionId: "test-bot",
-      channelUserId: "unclaimed",
-      displayName: "Alice",
-    })!;
-    await people.create({
-      displayName: "Alice",
-      bondLevel: "acquaintance",
-      channelMappings: [{ channel: "telegram", channelUserId: "unclaimed" }],
-    });
-    const before = await people.findByChannelUser("telegram", "unclaimed");
-    const response = await app.request(`/approvals/${request.approval.id}/resolve`, {
-      method: "POST",
-      headers: { "sec-fetch-site": "same-origin", "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "approve" }),
-    });
     expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({
-      error: "This account is already linked. Pairing was not approved.",
-      approval: { status: "rejected", payload: { resolution: "account_linked" } },
+    expect(await repo.findById(id)).toMatchObject({
+      status: "rejected",
+      payload: { resolution: "expired" },
     });
-    expect(await people.findByChannelUser("telegram", "unclaimed")).toEqual(before);
+    const person = await new PeopleRepository(testDb.db).byAccount({
+      platform: "telegram",
+      id: "123",
+    });
+    expect(person).toBeNull();
     expect(approvalHandler.onApproved).not.toHaveBeenCalled();
   });
 
@@ -146,11 +116,7 @@ describe("Approvals API", () => {
         const guarded = new Hono();
         guarded.use("*", (_c, next) => runWithSessionActor(actor, next));
         guarded.route("/", approvalsRoutes(deps));
-        for (const path of [
-          "/approvals",
-          `/approvals/${baseline.approvals.pendingId}`,
-          `/approvals/${baseline.approvals.pendingId}/code`,
-        ]) {
+        for (const path of ["/approvals", `/approvals/${baseline.approvals.pendingId}`]) {
           expect((await guarded.request(path)).status).toBe(403);
         }
         for (const action of ["resolve", "approve", "reject", "retry"]) {
@@ -206,45 +172,6 @@ describe("Approvals API", () => {
   });
 
   describe("POST /approvals/:id/resolve", () => {
-    it("shares pairing records and atomic resolution across route aliases", async () => {
-      const repo = new ApprovalsRepository(testDb.db, () => Buffer.alloc(32, 3));
-      const deps = { ...(await buildTestDeps(testDb.db)), approvalsRepo: repo, approvalHandler };
-      const pairingApp = new Hono();
-      pairingApp.use("*", (_c, next) =>
-        runWithSessionActor({ kind: "guardian", userId: "verified-owner", via: "cookie" }, next),
-      );
-      pairingApp.route("/", approvalsRoutes(deps));
-      const id = repo.requestPairing({
-        channel: "telegram",
-        connectionId: "test-telegram",
-        channelUserId: "new-account",
-        displayName: "New account",
-      })!.approval.id;
-      const codeResponse = await pairingApp.request(`/approvals/${id}/code`);
-      expect(codeResponse.headers.get("cache-control")).toBe("no-store");
-      const { code } = (await codeResponse.json()) as { code: string };
-      expect(code).toMatch(/^RP-/);
-      expect(await (await pairingApp.request("/approvals")).text()).not.toContain(code);
-      const resolved = await pairingApp.request(`/approvals/${id}/approve`, {
-        method: "POST",
-        headers: { "sec-fetch-site": "same-origin" },
-      });
-      expect(resolved.status).toBe(202);
-      expect((await repo.findById(id))?.resolvedBy).toBe("verified-owner");
-      expect(
-        (await deps.personMappingRepo.findByChannelUser("telegram", "new-account"))?.bondLevel,
-      ).toBe("guardian");
-      const second = await pairingApp.request(`/approvals/${id}/resolve`, {
-        method: "POST",
-        headers: { "sec-fetch-site": "same-origin", "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reject" }),
-      });
-      expect(second.status).toBe(409);
-      expect(await (await pairingApp.request(`/approvals/${id}/code`)).json()).toEqual({
-        code: null,
-      });
-    });
-
     it("rejects invalid actions with 400", async () => {
       const res = await app.request(`/approvals/${baseline.approvals.pendingId}/resolve`, {
         method: "POST",
@@ -286,17 +213,6 @@ describe("Approvals API", () => {
   });
 
   describe("POST /approvals/:id/approve and /reject", () => {
-    it("approves via the dedicated route", async () => {
-      const id = baseline.approvals.pendingId;
-      const res = await app.request(`/approvals/${id}/approve`, {
-        method: "POST",
-        headers: { "sec-fetch-site": "same-origin" },
-      });
-      expect(res.status).toBe(202);
-      await new Promise((r) => setTimeout(r, 5));
-      expect(approvalHandler.onApproved).toHaveBeenCalledWith(id);
-    });
-
     it("rejects via the dedicated route", async () => {
       const id = baseline.approvals.pendingId;
       const res = await app.request(`/approvals/${id}/reject`, {
@@ -363,6 +279,8 @@ describe("Approvals API", () => {
 
       const after = await repo.findById(id);
       expect(after?.status).toBe("approved");
+      await new Promise((r) => setTimeout(r, 5));
+      expect(approvalHandler.onApproved).toHaveBeenCalledWith(id);
     });
   });
 

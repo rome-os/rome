@@ -1,6 +1,6 @@
 import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { EMBER } from "./mobile-theme";
-import type { CloudInstance } from "./native-auth-types";
+import type { CloudInstance } from "@rome-os/libs/native-auth";
 import { RomeMark } from "./rome-mark";
 import { ScreenEntrance } from "./screen-motion";
 import { TactilePressable } from "./tactile-pressable";

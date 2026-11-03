@@ -9,22 +9,22 @@
 //   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
 //   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
-//   GET    /api/people/:id/outbox   -> OutboxPage
-//   POST   /api/people/:id/messages -> OutboxMessage (202) | SendRefusal (409)
-//   POST   /api/people/:id/outbox/:messageId/retry -> OutboxMessage (202)
-//   DELETE /api/people/:id/outbox/:messageId       -> 204
+//   POST   /api/people/:id/messages -> SentMessage (200) | SendRefusal (409) | { error } (502)
 //
 // The rest are request types that lead, with the backend following (issues
 // #64, #65):
 //
 //   PATCH  /api/people/:id           -> PersonResource
 //   POST   /api/people/:id/merge     -> PersonResource
+//   DELETE /api/people/:id           -> 204
 //   POST   /api/accounts/:channel/:channelUserId/dismiss  -> DirectoryAccount
 //   POST   /api/accounts/:channel/:channelUserId/restore  -> DirectoryAccount
 //
 // The vocabulary is docs/concepts/people.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId) —
-// its channel and its own address — and the only fact about who is who that
+// its platform and its own address. The field keeps the name `channel`, and a
+// core that predates platform-keyed links sent the kind of connection in it.
+// The only fact about who is who that
 // Rome contributes is which person it belongs to. So the writes here move a
 // link between people; none of them creates or destroys the account under it.
 //
@@ -47,8 +47,8 @@
 // on. Each has its own row shape and its own cursor, so neither pays for the
 // other's fields and neither order can be resumed with the other's position.
 
+import type { Account } from "@rome-os/app-runtime";
 import { compareCodePoints, type Message } from "./message.js";
-import { STRANGER_PERSON_ID } from "./persons.js";
 
 // ---------------------------------------------------------------------------
 // The bond ladder
@@ -57,25 +57,26 @@ import { STRANGER_PERSON_ID } from "./persons.js";
 /**
  * Every position on the bond ladder a surface renders, in display order.
  *
- * "unknown" and "stranger" are positions on the same ladder as the curated
+ * "stranger" and "dismissed" are positions on the same ladder as the curated
  * bonds, not separate kinds of thing, and neither is ever stored on a person:
- * an account is unknown by having no link, and dismissed by being linked to
- * the stranger sentinel. Both are read off the links.
+ * they are the two states of an account nobody is behind
+ * (docs/domains/people.md#account). A stranger has no link and no dismissal,
+ * and a dismissed account has a dismissal. Both are read off the account.
  */
 export const BOND_LADDER = [
-  "unknown",
+  "stranger",
   "guardian",
   "inner-circle",
   "acquaintance",
   "other",
-  "stranger",
+  "dismissed",
 ] as const;
 
 export type BondLadderLevel = (typeof BOND_LADDER)[number];
 
 /** A level a person row can actually hold: the ladder minus its two computed
  *  positions. */
-export type PlacedBondLevel = Exclude<BondLadderLevel, "unknown" | "stranger">;
+export type PlacedBondLevel = Exclude<BondLadderLevel, "stranger" | "dismissed">;
 
 /**
  * The levels a guardian may place a person at.
@@ -98,7 +99,9 @@ export function isAssignableBondLevel(value: unknown): value is AssignableBondLe
  * from every group.
  */
 export function normalizeBondLevel(raw: string): PlacedBondLevel {
-  return (BOND_LADDER as readonly string[]).includes(raw) && raw !== "unknown" && raw !== "stranger"
+  return (BOND_LADDER as readonly string[]).includes(raw) &&
+    raw !== "stranger" &&
+    raw !== "dismissed"
     ? (raw as PlacedBondLevel)
     : "other";
 }
@@ -133,7 +136,7 @@ export { compareCodePoints };
 export function compareDisplayNames(a: string, b: string): number {
   const normalizedA = a.normalize("NFC");
   const normalizedB = b.normalize("NFC");
-  const byFolded = compareCodePoints(normalizedA.toLowerCase(), normalizedB.toLowerCase());
+  const byFolded = compareCodePoints(caseFold(normalizedA), caseFold(normalizedB));
   return byFolded !== 0 ? byFolded : compareCodePoints(normalizedA, normalizedB);
 }
 
@@ -148,9 +151,40 @@ export function compareDisplayNames(a: string, b: string): number {
  * should find a row that stored it decomposed, and the reverse.
  */
 export function matchesQuery(query: string, haystack: readonly string[]): boolean {
-  const q = query.normalize("NFC").trim().toLowerCase();
+  const q = caseFold(query.normalize("NFC").trim());
   if (!q) return true;
-  return haystack.join(" ").normalize("NFC").toLowerCase().includes(q);
+  return caseFold(haystack.join(" ").normalize("NFC")).includes(q);
+}
+
+/**
+ * Unicode case folding, which JavaScript has no built-in for, shared by the
+ * name orderings and search so they fold alike.
+ *
+ * Lowercasing alone misses the folds that expand or merge letters: "ß" and
+ * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
+ * up, except for the dotless "ı", which folds to itself but would come back
+ * as "i", so it stays out of the round trip. Then final sigma becomes the
+ * medial one and Cherokee its uppercase, as folding does, and the result is
+ * normalized again, since the round trip can decompose a letter.
+ *
+ * A directory sort folds every name on each comparison, so text that folds
+ * exactly as it lowercases skips the round trip: printable ASCII, and the
+ * caseless CJK punctuation, kana, ideographs and Hangul syllables most names
+ * here are written in. That holds for NFC input, which both callers pass; a
+ * decomposed kana voicing mark would otherwise stay apart from its letter.
+ */
+function caseFold(value: string): string {
+  if (!/[^ -~\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(value)) {
+    return value.toLowerCase();
+  }
+  return value
+    .toLowerCase()
+    .split("ı")
+    .map((part) => part.toUpperCase().toLowerCase())
+    .join("ı")
+    .replaceAll("ς", "σ")
+    .replace(/[\u13f8-\u13fd\uab70-\uabbf]/g, (letter) => letter.toUpperCase())
+    .normalize("NFC");
 }
 
 /**
@@ -274,8 +308,8 @@ export interface AccountDynamic {
  *
  * "unlinked" is the absence of a decision rather than one Rome writes down: an
  * account it has observed and nobody has placed. The other two are decisions —
- * a link onto a person, and a dismissal, which files the account under the
- * stranger sentinel.
+ * a link onto a person, and a dismissal, which says the account belongs to
+ * nobody the guardian tracks and names no person.
  *
  * The three partition the directory, so their counts sum to it.
  */
@@ -299,22 +333,17 @@ export interface AccountPresentation {
   personName: string | null;
 }
 
+/** What the guardian decided about an account: the person it is linked to,
+ *  or that they dismissed it. */
+export type AccountLink = { personId: string; displayName: string } | { dismissed: true };
+
 /**
- * Read a link the way every surface has to read it.
- *
- * The stranger sentinel is a row in the persons table that every dismissed
- * account is mapped onto, not someone the guardian knows. So a dismissal
- * answers a state and no person: a caller handed the sentinel's id would render
- * it as a person, open a timeline merging everyone ever dismissed, and address
- * writes at a row no write may touch.
+ * Read a link the way every surface has to read it. A dismissal answers a state
+ * and no person: it is a decision about the account, and nobody is behind it.
  */
-export function accountPresentation(
-  link: { personId: string; displayName: string } | null | undefined,
-): AccountPresentation {
+export function accountPresentation(link: AccountLink | null | undefined): AccountPresentation {
   if (link == null) return { state: "unlinked", personId: null, personName: null };
-  if (link.personId === STRANGER_PERSON_ID) {
-    return { state: "dismissed", personId: null, personName: null };
-  }
+  if ("dismissed" in link) return { state: "dismissed", personId: null, personName: null };
   return { state: "linked", personId: link.personId, personName: link.displayName };
 }
 
@@ -353,7 +382,7 @@ export interface DirectoryAccount {
    */
   displayName: string;
   state: AccountState;
-  /** Never the stranger sentinel's id — see {@link accountPresentation}. */
+  /** The linked person, or null when the account is a stranger or dismissed. */
   personId: string | null;
   personName: string | null;
 }
@@ -443,12 +472,20 @@ export function accountRef(account: { channel: string; channelUserId: string }):
 
 /** What `?q=` matches: the display name, the linked person's name, and every
  *  address — so a phone number finds an account the platform named something
- *  else, and a person's name finds the accounts they were placed on. */
-export function accountMatchesQuery(account: DirectoryAccount, query: string): boolean {
+ *  else, and a person's name finds the accounts they were placed on.
+ *
+ *  The channel's name too, unless the caller has already fixed the channel:
+ *  then every row shares it, and a term that happens to fall inside it
+ *  ("mail", "ai") would answer every row instead of the ones it names. */
+export function accountMatchesQuery(
+  account: DirectoryAccount,
+  query: string,
+  options: { matchChannel?: boolean } = {},
+): boolean {
   return matchesQuery(query, [
     account.displayName,
     account.personName ?? "",
-    account.channel,
+    ...(options.matchChannel === false ? [] : [account.channel]),
     ...account.addresses,
   ]);
 }
@@ -512,12 +549,7 @@ export function parseAccountCursor(raw: string | undefined | null): AccountCurso
   return { displayName, ref };
 }
 
-/** {@link compareAccountCursors} over the accounts themselves. */
-export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
-  return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareAccounts} order —
+/** Whether an account falls after a cursor in {@link compareAccountCursors} order —
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
@@ -608,13 +640,7 @@ export function streamCursorOf(account: StreamAccount): StreamCursor {
   return activityPosition(account, accountRef(account));
 }
 
-/** The stream's order: newest activity first, ties broken by name and then ref
- *  so the sequence is total. */
-export function compareStreamAccounts(a: StreamAccount, b: StreamAccount): number {
-  return compareStreamCursors(streamCursorOf(a), streamCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareStreamAccounts}
+/** Whether an account falls after a cursor in {@link compareStreamCursors}
  *  order — i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
   return compareStreamCursors(cursor, streamCursorOf(account)) < 0;
@@ -638,7 +664,8 @@ export function accountPageLimit(raw: string | number | null | undefined): numbe
  * Takes every account there is, in any order: the order is this function's, so
  * a producer cannot page one order while a client renders another.
  *
- * `query` scopes everything, including the counts. `state` and the cursor scope
+ * `query` and `channel` scope everything, including the counts — a listing
+ * fixed to one channel is that channel's directory. `state` and the cursor scope
  * the page alone, so a client filtered to one chip still reads every chip's
  * number, and a client on page four reads the same numbers it read on page one.
  *
@@ -651,13 +678,18 @@ export function sliceAccountDirectory(
   directory: readonly DirectoryAccount[],
   options: {
     query?: string | null;
+    channel?: string | null;
     state?: AccountState | null;
     cursor?: AccountCursor | null;
     limit?: number | null;
   } = {},
 ): AccountDirectory {
   const query = options.query?.trim() ?? "";
-  const matching = query ? directory.filter((a) => accountMatchesQuery(a, query)) : directory;
+  const channel = options.channel || null;
+  const onChannel = channel ? directory.filter((a) => a.channel === channel) : directory;
+  const matching = query
+    ? onChannel.filter((a) => accountMatchesQuery(a, query, { matchChannel: !channel }))
+    : onChannel;
 
   const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
   for (const account of matching) counts[account.state] += 1;
@@ -756,6 +788,19 @@ export interface LinkedAccount {
    * heard from without inventing the answer.
    */
   latestAt: number | null;
+  /**
+   * Rome's own accounts a send to this account may name as
+   * `SendMessageRequest.from`: each account on its platform a connection
+   * backs, oldest first. Asked when the person is read, never stored. Absent
+   * from a core that predates it.
+   */
+  from?: Account[];
+  /**
+   * True on a delegate link (docs/domains/people.md#delegate-link): the account
+   * is an agent's, acting for this person, so whoever reads it is talking to
+   * their agent and not to them. Absent on the person's own accounts.
+   */
+  delegate?: true;
 }
 
 /**
@@ -838,10 +883,6 @@ export interface PersonResource {
  * Unpaged, unlike the account directory: curated people are entered one at a
  * time by a guardian, so the listing is bounded by hand. The account directory
  * is a mirrored address book of thousands and pages.
- *
- * The stranger sentinel never appears. It is a row in the persons table that
- * dismissed accounts are linked to — structure, not someone the guardian knows
- * — and `GET /api/people/:id` answers 404 for its id.
  */
 export interface PeopleList {
   people: PersonResource[];
@@ -858,11 +899,9 @@ export const PERSON_BOND_LEVELS: readonly PlacedBondLevel[] = [
   "other",
 ];
 
-export type PersonBondLevel = PlacedBondLevel;
-
 /** A level the listing can be filtered and counted by: a bond level, or "all"
  *  — every curated person whatever their level. */
-export type PersonFilterLevel = "all" | PersonBondLevel;
+export type PersonFilterLevel = "all" | PlacedBondLevel;
 
 /**
  * How many people sit at each level.
@@ -1049,6 +1088,18 @@ export function parseUpdatePersonRequest(
 }
 
 /**
+ * `POST /api/people/link-code`: a code the guardian sends, in a direct message
+ * from their own account, to any of Rome's accounts on any platform. Redeeming
+ * it links that account to the guardian.
+ * One code is outstanding at a time and it is used once.
+ */
+export interface LinkCodeResponse {
+  code: string;
+  /** Epoch milliseconds. */
+  expiresAt: number;
+}
+
+/**
  * `POST /api/people/:id/accounts` — the link verb.
  *
  * Compare-and-swap on the account's current owner: linking an unlinked or
@@ -1082,8 +1133,8 @@ export function parseLinkAccountRequest(body: unknown): LinkAccountRequest | nul
 
 /**
  * The 409 body for a refused link or dismissal: names the current owner so the
- * caller can render the conflict and offer an explicit transfer. Never the
- * stranger sentinel — a dismissal-held account never conflicts.
+ * caller can render the conflict and offer an explicit transfer. A dismissed
+ * account never conflicts: a dismissal holds the account against nobody.
  *
  * The owner is null in one case: a `transferFrom` naming someone who does not
  * hold the account, where the account is now held by nobody. The caller's view
@@ -1198,7 +1249,7 @@ export function whatsAppDisplayName(contact: {
 }
 
 // ---------------------------------------------------------------------------
-// Sending, and the outbox a send lives in until it lands
+// Sending
 // ---------------------------------------------------------------------------
 
 /**
@@ -1215,14 +1266,25 @@ export function whatsAppDisplayName(contact: {
  * account, and it is a default on screen rather than a decision off it.
  */
 export interface SendMessageRequest {
-  /** Optional UUID v4 idempotency key. A client creates one for each composed
-   * message and reuses it only when repeating that request. The same id,
-   * account, and text returns its recorded response until 24 hours after
-   * outbox removal. */
-  id?: string;
   channel: string;
   channelUserId: string;
   text: string;
+  /**
+   * Rome's account the message goes out from, one of the person's account's
+   * `LinkedAccount.from`. Rome never substitutes another account for it.
+   * Absent, the send goes out from Rome's only account on the platform and is
+   * refused while Rome holds several there.
+   */
+  from?: Account;
+}
+
+/** An `Account` as a body spells it, or null where it names none. */
+function accountOf(value: unknown): Account | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { platform, id } = value as Record<string, unknown>;
+  if (typeof platform !== "string" || typeof id !== "string") return null;
+  const named = { platform: platform.trim(), id: id.trim() };
+  return named.platform && named.id && isChannelIdentifier(named.platform) ? named : null;
 }
 
 export function parseSendMessageRequest(
@@ -1230,16 +1292,13 @@ export function parseSendMessageRequest(
 ): { request: SendMessageRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
-  if (
-    raw.id !== undefined &&
-    (typeof raw.id !== "string" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(raw.id))
-  ) {
-    return { error: "id must be a UUID v4" };
-  }
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
+  const from = accountOf(raw.from);
+  if (raw.from !== undefined && !from) {
+    return { error: "from must name one of Rome's accounts" };
+  }
   if (!channel) return { error: "channel is required" };
   if (!isChannelIdentifier(channel)) return { error: "channel must not contain ':'" };
   if (!channelUserId) return { error: "channelUserId is required" };
@@ -1249,25 +1308,13 @@ export function parseSendMessageRequest(
   }
   return {
     request: {
-      ...(raw.id === undefined ? {} : { id: raw.id as string }),
       channel,
       channelUserId,
       text,
+      ...(from ? { from } : {}),
     },
   };
 }
-
-/** A repeated send id may only refer to its original account and text. */
-export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
-  return (
-    message.channel === request.channel &&
-    message.channelUserId === request.channelUserId &&
-    message.text === request.text
-  );
-}
-
-/** Receipt lifetime after delivery cleanup or explicit discard, in milliseconds. */
-export const SEND_IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /** Long enough for anything a person types, short enough that no adapter has to
  *  defend itself against a megabyte. Channels with tighter limits of their own
@@ -1275,58 +1322,21 @@ export const SEND_IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const SEND_MESSAGE_MAX_LENGTH = 8000;
 
 /**
- * Where a send is between the guardian pressing Send and the message appearing
- * on the timeline.
+ * `POST /api/people/:id/messages` answered: the channel took the message.
  *
- * - `sending` — handed to the channel, no answer yet.
- * - `unconfirmed` — the channel accepted it and named it, but it has not
- *   surfaced in the store the timeline reads. Normally under a second; a state
- *   at all because "we sent it and cannot see it" is a thing that happens and
- *   is worth saying rather than papering over.
- * - `failed` — the channel refused. The only state a guardian can act on, and
- *   the only one that persists without something else having gone wrong.
+ * Not a {@link Message}. The message joins the timeline once the store that
+ * answers for its conversation holds it: Rome's own record, or on a channel
+ * with a mirror, the mirror's copy, which may arrive after this answer.
+ * Nothing here is to be deduped against it: `ref` names the entry it becomes
+ * at the address it was sent to, and a channel that folds several addresses
+ * onto one account may deliver under another of them.
  */
-export type OutboxState = "sending" | "unconfirmed" | "failed";
-
-/**
- * One message Rome is still trying to deliver.
- *
- * Deliberately not a {@link Message} with a status on it. A message is
- * something that happened; these have not, and some never will. Two nouns keep
- * the message contract — its `ref` uniqueness and the ordering its cursor is
- * written against — free of rows that may yet be withdrawn, and keep each
- * account owned by exactly one store.
- *
- * `ref` is the entry this message would become at the address it was sent to.
- * It is a hint and not a key: a channel that folds several addresses onto one
- * account may deliver under another of them, and then the landed entry carries
- * that address instead. Recognizing an arrival is the server's job, which is
- * why it enumerates every folded address and why a client must not dedupe the
- * timeline against this value — the row is gone from the outbox by the time
- * there is anything to dedupe against.
- */
-export interface OutboxMessage {
-  id: string;
-  channel: string;
-  channelUserId: string;
-  text: string;
-  /** Epoch seconds of the attempt, which is also the entry's timestamp once it
-   *  lands. */
-  timestamp: number;
-  state: OutboxState;
-  /** The entry this would become at the address it was sent to, or null while
-   *  the channel has not named the message yet. A hint — see above. */
+export interface SentMessage {
+  /** The entry this becomes at the address it was sent to, or null when the
+   *  channel named no message. */
   ref: string | null;
-  /** Why the channel refused, for a `failed` row. Provider text, shown as
-   *  detail beneath copy the dashboard owns. */
-  error: string | null;
-}
-
-/** `GET /api/people/:id/outbox` — every send of this person's that has not
- *  reached their timeline. Unpaged: an outbox with enough rows to page is an
- *  incident, not a listing. */
-export interface OutboxPage {
-  messages: OutboxMessage[];
+  /** Epoch seconds of the send. */
+  timestamp: number;
 }
 
 /**
@@ -1342,4 +1352,17 @@ export interface OutboxPage {
 export interface SendRefusal {
   error: string;
   send: Exclude<AccountSendState, "yes">;
+}
+
+/** The {@link SendRefusal} `error` line for each reason. A fallback, not the
+ *  copy: the dashboard renders `send` through its own locale files. */
+export function sendRefusalMessage(send: Exclude<AccountSendState, "yes">): string {
+  switch (send) {
+    case "not-connected":
+      return "That channel is not connected";
+    case "unsupported":
+      return "Rome cannot send on that channel";
+    case "no-conversation":
+      return "Rome has no conversation open with that account";
+  }
 }

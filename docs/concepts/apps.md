@@ -7,6 +7,7 @@ Apps are the extension system. An app bundles related [agents](agents.md), [acti
 - Only manifest-declared artifacts are loaded. An artifact not listed in the manifest does not exist as far as the runtime is concerned.
 - Disabling an app removes its artifacts (agents, actions, skills, hooks) from the running registries. Enabling it puts them back.
 - First-party apps (shipped with Rome) are required and immutable to users: they cannot be uninstalled or replaced, and enable/disable is the only user control — except the system app, which cannot be disabled either ([boot convergence](../architecture/app-lifecycle.md#boot-convergence)).
+- `app.yaml#hideInLauncher: true` keeps an app off the dashboard's launcher surfaces: the Apps page, the sidebar, search, and the app picker. The app still loads, and its pages still open by URL or from a chat link.
 
 **Not to be confused with:**
 
@@ -100,6 +101,74 @@ The caller is the request identity an app observes: the [guardian](people.md#gua
 
 - **[Actor](actions.md#actor)** — the actor is stamped on every action execution in the chain. The caller is what one app observes for the request it handles.
 
+## Connection access
+
+An app uses an existing [Connection](../domains/connections.md#connection) through
+`ctx.connections`. Core brokers the call. The app never receives the provider
+credential, client, or unrestricted transport. Provider grants say what the guardian
+has let Rome access. App access says which installed app may use one granted
+identity for one operation.
+
+**Contracts:**
+
+- Access defaults to denied. A Core-owned policy names the app, Connection, identity,
+  operation, side-effect classification, approval mode, optional input constraints, and
+  optional expiry. A descriptor change from read to write requires a new policy. Disabling
+  or removing the app revokes its policies. The policy is bound to the provider
+  grant's current epoch. Reconnecting the Connection creates a new epoch and requires
+  new App access. Fixing or otherwise giving its grant again does the same. Automatic
+  renewal keeps the current epoch. Guardian policy listings label a replaced grant
+  instead of presenting its policy as current.
+- A provider operation is invisible until its Connection descriptor explicitly opts it
+  into app access. A policy cannot expose an arbitrary HTTP request, provider client,
+  credential read, or global Connection mutation.
+- `list`, `describe`, and `operations` reveal only Connections and identities covered by
+  the app's active policies. Their pages and payloads are bounded. `operations`
+  distinguishes provider support from permission to invoke. Each `list` summary names
+  the identity the App passes to the other calls.
+- The host worker runtime stamps the executing Action from Core-owned execution context,
+  and Core maps that registered Action to its owning App. App request fields cannot
+  select an App id. In a cross-app Action call, the callee runs with the callee App's
+  access. Caller fields do not transfer the caller's access or let it claim the callee's
+  id. A system Action has no App connection access unless Core built a context for a
+  concrete App entry point. This binding assumes the trusted-plugin model described
+  below, not a hostile worker process.
+- Core validates the operation schema and every policy constraint before execution. A
+  resource constraint that cannot be resolved from the input denies the call instead of
+  broadening it.
+- Invocation uses the Action engine for approval and execution. A write requires a
+  stable request id. Request ids on reads are ignored. Write operations declare the
+  bounded, non-secret fields Core may show in an approval preview. Core persists that
+  safe preview with the approval and delivers it to the originating conversation when
+  one exists. Reusing a request id within the seven-day retention
+  window never repeats the effect, and an interrupted write whose provider outcome is
+  unknown is not retried automatically. Records become eligible for pruning after that
+  window and are removed by Core's periodic cleanup even when the App is idle. Disabling
+  or removing an App also rejects its pending invocations and clears their stored input.
+  Startup preserves a pending invocation only when its durable approval exists. A duplicate
+  of a failed invocation includes the original structured error code.
+- Read operations execute synchronously and cannot use deferred approval. An
+  approval-gated write returns `pending_approval`. Its later provider output is not
+  delivered to the App. Providers should expose a follow-up read when the App needs to
+  resolve the created resource.
+- Core rechecks the policy revision and the provider grant immediately before calling
+  the live capability. Revocation, expiry, degradation, or replacement cannot leave a
+  captured authority usable. Startup reconciles persisted policies against the current
+  App catalog before the broker accepts work.
+- The audit trail records attribution, authorization and approval outcomes, an execution
+  id, and a hash of the request id. It does not record credentials, operation input, or
+  provider output. This first version retains audit rows for the same bounded seven-day
+  window as invocation records.
+- This boundary governs supported runtime paths in the trusted-plugin model. It is not
+  a sandbox against arbitrary code already executing in the Core process.
+
+**Not to be confused with:**
+
+- **Provider grant** — the guardian's authorization for Rome to reach an external
+  identity. App access neither duplicates nor owns that credential.
+- **Connection setup** — the guardian flow that creates or repairs a provider grant.
+  Apps cannot start setup through `ctx.connections`.
+
 ## Lockfile
 
 Durable state for every applied app lives in a single per-profile lockfile. Each entry records the app's source, enabled flag, terminal state, installed hash and version, and last error. See [`architecture/app-lifecycle.md`](../architecture/app-lifecycle.md) for the components that maintain it.
@@ -139,8 +208,9 @@ The lifecycle operations apply apps to a profile: install, uninstall, and enable
 **Contracts:**
 
 - Install is a completion barrier: when the call returns success, the new bundle is live and the runtime has finished reloading it. The caller never polls.
+- A reinstall keeps the previous bundle live until the install ends. The app's agents, actions, skills, hooks, web pages and API answer while the new bundle materializes. A failed reinstall unloads the app until a later install succeeds, because only installed entries load.
 - An invalid local source is rejected before any state is written. The declared install mode must agree with the observed directory shape, and a bundle missing a manifest-declared output is rejected up front. A healthy installed app cannot be flipped to failed by a bad install attempt.
-- A failed install preserves the previous state: the live bundle and the recorded hash and version stay unchanged. Only the failure fields move.
+- A failed install keeps the recorded hash and version, and the previous bundle stays on disk. Only the state and the failure fields move.
 - Uninstall always drops the lockfile entry, even when disk cleanup fails part-way. A later install of the same id recovers the disk state.
 - Dependency installation applies no minimum release age, so a bundle can consume an SDK published in the same release window.
 
@@ -215,17 +285,41 @@ Each app gets a persistent data directory for files outside the database, plus d
 
 Hooks are event handlers that trigger behavior in response to system events. An app declares its hooks in its manifest.
 
-The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives on any [channel](messaging.md#channels) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing.
+The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives through any of Rome's [accounts](../domains/chats.md#account) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
 
 Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available.
 
+An app sets up the state it depends on, such as a routine it must always have, with the **app-started** hook. An *app start* is one installed bundle of one enabled app becoming active in the daemon. Boot starts every enabled app, and an install, an upgrade, or a re-enable starts that app again. A re-install of identical content is not a new start. Rome calls the hook's `onAppStarted(event)` once per app start, and `event` carries the app id and its manifest version.
+
 **Contracts:**
 
+- A channel-message hook subscribes in `register`, through `deps.channels`. The host calls `register` once per activation, and again only after `unregister`, so a hook handles `register`, `unregister`, then `register` again. When the host adds a channel to `deps.channels` while the hook is active, it calls the hook's optional `addChannels` with the new channels. On a hook without one, the host calls `unregister` then `register` at once, which drops events still waiting on the hook's existing subscriptions. A hook with neither hears them only after the next restart. It never calls the hook per Connection, because a channel's subscription follows whatever backs it. A hook written against the removed `registerConnection` hears nothing until it subscribes this way. Its deps carry no `talkRouter`: a hook hears through `channel.inbound` and answers through `channel.send`. Through the 0.7 release, reading `deps.talkRouter` throws an error that says so.
 - Lifecycle hooks are best-effort and non-blocking: Rome schedules every loaded app hook for the event, logs failures, and does not delay or fail the agent turn when a hook throws.
 - Lifecycle payloads never include the prompt text (start metrics carry only its length).
 - Lifecycle hooks fire for root agent turns and subagent turns. Subagent events carry a parent reference (parent session, turn, and agent). Apps that only care about root turns filter for events without one.
+- An app-started hook runs after boot finishes, so the actions, routines, and agents of every app are available to it. Its deps always carry `appContext`.
+- An app-started hook is best-effort and non-blocking. Neither boot nor the install waits for it. Rome logs a throw and does not call the hook again until the next app start.
+- Every boot is a new app start, so an app-started hook must be idempotent. It checks that its state exists before it creates the state.
+- An app-started module that does not export `createHook`, or whose hook has no `onAppStarted`, marks the app failed in its runtime status.
 
 **Not to be confused with:**
 
 - **[Action](actions.md)** — a hook reacts to a system event and routes into an action. The action is what runs.
 - **[Routine](data.md#routines)** — a routine is a guardian- or agent-authored trigger→action binding managed as data. A hook is app-owned code declared in the app's manifest.
+
+## Event sources
+
+An event source is an app's declaration, under `eventSources` in its manifest, that it delivers a family of event-bus events and can subscribe to them at the provider. Each entry names the event-name glob (`events`, one `*`), the event `types` that fill the `*`, the filter fields that pick the subscription target (`keys`), and the action that checks or creates the subscription (`ensureAction`). The connector app declares `provider:event:github.*`, keyed by `repository.full_name` or `organization.login`.
+
+**Contracts:**
+
+- A `defer` on a declared event calls the `ensureAction` before it creates the wait, and fails with the action's reason when the subscription cannot be made. The filter must cover every field of one `keys` entry.
+- A `defer` on an event no app declares always creates the wait. When nothing has emitted the event since Rome started, the result carries a warning, because the event catalog starts empty on every start and cannot tell a misspelled name from an event that has not happened yet.
+- Rome runs one subscribing call per event source at a time, because a provider subscription can be shared state that two concurrent calls would overwrite.
+- Rome never removes a subscription that a wait created, because other routines may depend on it.
+- `search_event_catalog` lists every declared type, even one not yet emitted, with `subscribable` and `keys`. Its `match` input calls the `ensureAction` in check-only mode (`dryRun`) and reports `active` per type. Without `match` it makes no provider calls.
+- The `ensureAction` takes `{ eventName, filter, dryRun }` and returns `subscription`: `existing` or `created`, or with `dryRun`, `active` or `inactive`.
+
+**Not to be confused with:**
+
+- **[Hook](#hooks)** — a hook is app code that reacts to a Rome event. An event source tells Rome which provider events an app can deliver onto the bus.

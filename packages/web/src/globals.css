@@ -5,7 +5,8 @@
    element defaults. This file supplies the host-owned theme values through
    `src/lib/themes.ts` and the dashboard-specific shell CSS. */
 @import "@rome-os/ui/styles.css";
-/* The kit's Markdown stylesheet (Streamdown + KaTeX + the Shiki/Mermaid
+@import "@rome-os/node-ui/styles.css";
+/* The kit's Markdown stylesheet (Streamdown + KaTeX + the Shiki/diagram
    overrides). Kept out of the canon above so app bundles that render no prose
    don't carry it — the dashboard does, so it opts in here. */
 @import "@rome-os/ui/markdown.css";
@@ -239,6 +240,164 @@
   }
 }
 
+/* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
+   color tokens markdown reads are re-mapped onto the primary foreground for
+   the bubble's children. The bubble itself keeps the real `--primary` for its
+   own fill. */
+.rome-bubble-on-primary > * {
+  --foreground: var(--primary-foreground);
+  --muted-foreground: color-mix(in oklab, var(--primary-foreground) 75%, transparent);
+  --primary: var(--primary-foreground);
+  --muted: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
+  --border: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+  --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
+}
+
+/* A fenced block inside the sent bubble keeps the page's light `--surface` for
+   its card (the remap above leaves `--surface` and the Streamdown frame's
+   tokens alone), so the remapped white ink reads near-white on that card: the
+   language label, a fence no highlighter covers, and the action buttons all
+   disappear. The ink tokens a surface carries (`--surface-foreground` and
+   `--surface-muted-foreground`) are theme-scoped and never remapped, so they
+   restore the card's own ink in both halves of every theme. `color` is set
+   outright because the markdown root's `text-foreground` already resolved the
+   remapped token there and flows down as a computed value; borders are
+   re-mixed from the surface ink the way the remap mixes from the primary's,
+   and `--muted` (the action buttons' hover tint, the highlight skeleton)
+   returns to the surface's own. */
+.rome-bubble-on-primary [data-chat-code-block] {
+  color: var(--surface-foreground);
+  --foreground: var(--surface-foreground);
+  --muted-foreground: var(--surface-muted-foreground);
+  --muted: var(--surface-muted);
+  --border: color-mix(in oklab, var(--surface-foreground) 15%, transparent);
+  --border-strong: color-mix(in oklab, var(--surface-foreground) 25%, transparent);
+}
+
+/* Typing bubble (chat TypingBubble): three dots rising in turn while the agent
+   works and has no text to show. Under reduced motion the dots rest. */
+.rome-typing-dot {
+  animation: rome-typing-dot 1.2s ease-in-out infinite;
+}
+
+.rome-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.rome-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes rome-typing-dot {
+
+  0%,
+  60%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* The status line in the typing bubble fades in each time it changes. */
+.rome-status-fade {
+  animation: rome-status-fade 0.2s ease-out;
+}
+
+@keyframes rome-status-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* The sidebar's running mark. It rotates the HTML box that holds the icon,
+   not the SVG: Chrome runs a transform animation on an SVG on the main thread,
+   which paints and layerizes the whole page on every display frame. On an
+   HTML box the compositor runs it and the main thread stays idle. */
+.rome-status-spin {
+  animation: rome-status-spin 1s linear infinite;
+}
+
+@keyframes rome-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rome-typing-dot,
+  .rome-status-fade,
+  .rome-status-spin {
+    animation: none;
+  }
+}
+
+/* Pending user bubble (chat UserMessage): the normal bubble, breathing while
+   the agent has not taken the input in yet. The delay keeps an input the agent
+   picks up at once from blinking. Under reduced motion it rests dimmed, so the
+   state still reads. */
+.rome-bubble-pending {
+  animation: rome-bubble-breathe 1.8s ease-in-out 0.6s infinite;
+}
+
+@keyframes rome-bubble-breathe {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rome-bubble-pending {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* Arriving bubble (chat ConciergeTranscript): a bubble that comes in
+   while the chat is open fades and rises into place. A batch steps in 60ms
+   apart, three steps at most. Under reduced motion it appears in place. */
+[data-arrival] {
+  animation: rome-bubble-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+[data-arrival="1"] {
+  animation-delay: 60ms;
+}
+
+[data-arrival="2"] {
+  animation-delay: 120ms;
+}
+
+@keyframes rome-bubble-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  [data-arrival] {
+    animation: none;
+  }
+}
+
 @keyframes rome-sheet-rise {
   from {
     transform: translateY(100%);
@@ -375,9 +534,24 @@
        example inside the Expo WKWebView). Indirect the system env() values so
        layout tests can exercise real, non-zero safe-area geometry. */
     --rome-safe-area-top: env(safe-area-inset-top);
-    --rome-safe-area-bottom: env(safe-area-inset-bottom);
+    --rome-safe-area-inset-bottom: env(safe-area-inset-bottom);
+    /* An open keyboard covers the home indicator, but iOS keeps reporting its
+       inset. lib/visual-viewport.ts publishes the covered height inline on
+       <html>, and only the inset still showing above it pads the page. */
+    --rome-keyboard-height: 0px;
+    --rome-safe-area-bottom: max(
+      0px,
+      var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
+    );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
-    --rome-mobile-content-height: calc(100dvh - var(--rome-mobile-header-height));
+    /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
+       overrides this inline on <html>; the fallback serves browsers without
+       `visualViewport`. A page sized to the screen reads this rather than
+       `100dvh`, which iOS keeps at full height under the keyboard. */
+    --rome-viewport-height: 100dvh;
+    --rome-mobile-content-height: calc(
+      var(--rome-viewport-height) - var(--rome-mobile-header-height)
+    );
   }
 
   html,
@@ -418,7 +592,7 @@
 
   /* Default routes use normal document flow and document scrolling. */
   body {
-    min-height: 100dvh;
+    min-height: var(--rome-viewport-height);
   }
 }
 
@@ -498,6 +672,10 @@
 }
 
 @theme inline {
+  /* Status colour for a running chat (the sidebar spinner). Only the host
+     gets the utility: `--running` is not in the app token contract. */
+  --color-running: var(--running);
+
   @keyframes tw-shimmer {
     from {
       background-position: 100% 0;
@@ -565,14 +743,13 @@
 
    Drag-region model: `-webkit-app-region` resolves to a flat geometric
    mask (drag minus no-drag), independent of z-index / paint order. So
-   any interactive element that lives *underneath* a drag region (e.g.
-   the absolute-positioned top strip below) would otherwise be eaten by
-   window-drag. We pre-emptively mark every interactive primitive
-   `no-drag` site-wide; the titlebar rule below then re-adds the
-   background of titlebar containers as drag, which leaves clickable
-   children punched out. `[data-no-drag]` is an escape hatch for
-   non-semantic clickable wrappers (e.g. Radix `asChild` rendering a
-   `<div>`). */
+   any interactive element that lives inside a drag region would otherwise
+   be eaten by window-drag. We pre-emptively mark every interactive
+   primitive `no-drag` site-wide; the titlebar rule below then re-adds the
+   background of the title bar (shell/DesktopTitlebar.tsx) as drag, which
+   leaves clickable children punched out. `[data-no-drag]` is an escape
+   hatch for non-semantic clickable wrappers (e.g. Radix `asChild`
+   rendering a `<div>`). */
 html.is-electron
   :where(
     button,
@@ -596,31 +773,6 @@ html.is-electron
 html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
 }
-/* Header band (sidebar / mobile) sits at the very top-left, where the inset
-   traffic lights live — pad the top to keep their hitbox clear. */
-html.is-electron.platform-darwin [data-app-titlebar="header"] {
-  padding-top: 2.5rem;
-}
-/* Thin drag strip rendered at the top edge of the viewport, so the user
-   can grab the window from anywhere along the top — not just the
-   sidebar corner. Fixed-positioned (vs. taking flex flow space) so pages
-   using `min-h-dvh` don't end up 32px taller than the viewport and gain
-   a phantom scroll. Spanning the sidebar's 256px overlaps the sidebar
-   header's drag region, which is fine — drag ∪ drag is still drag.
-   Underlying buttons stay clickable via the global no-drag rule above.
-   Hidden in pure web. */
-[data-app-titlebar="strip"] {
-  display: none;
-}
-html.is-electron [data-app-titlebar="strip"] {
-  display: block;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2rem;
-  z-index: 1;
-}
 
 /* Set for ~900ms on the question a timeline dot jumped to. Every user bubble
    carries the same tint, so without a confirmation you cannot tell whether the
@@ -632,4 +784,18 @@ html.is-electron [data-app-titlebar="strip"] {
 }
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+/* A Concierge bubble is as wide as its anchor, so the tint alone hides behind
+   it. The ring shows around the bubble. */
+[data-concierge-transcript] [data-timeline-anchor] {
+  transition:
+    background 300ms ease-out,
+    box-shadow 300ms ease-out;
+}
+[data-concierge-transcript] [data-timeline-landed] {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+[data-chat-pending-card]:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--ring) 50%, transparent);
+  outline-offset: -1px;
 }

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { describeOutcome, describeSchedule, type ScheduleTrigger } from "./routine-language";
+import {
+  describeEvent,
+  describeOutcome,
+  describeSchedule,
+  describeTrigger,
+  type ScheduleTrigger,
+} from "./routine-language";
 
 /** Pin the "browser" timezone that `tzDiffersFromBrowser` reads, without
  * disturbing the formatting `Intl.DateTimeFormat(locale, opts)` calls (which
@@ -22,6 +28,7 @@ const daily = (extra: Partial<ScheduleTrigger>): ScheduleTrigger => ({
   type: "schedule",
   tzid: "Asia/Tokyo",
   localTime: "09:00",
+  tzMode: "floating",
   rrule: "FREQ=DAILY",
   ...extra,
 });
@@ -34,11 +41,6 @@ describe("describeSchedule timezone suffix", () => {
     const sentence = describeSchedule(daily({ tzMode: "floating" }));
     expect(sentence).toBe("Every day at 9:00 AM");
     expect(sentence).not.toContain("Asia/Tokyo");
-  });
-
-  it("treats an absent tzMode (draft/legacy) as floating — no suffix", () => {
-    mockBrowserTz("UTC");
-    expect(describeSchedule(daily({}))).toBe("Every day at 9:00 AM");
   });
 
   it("keeps the tz suffix for a fixed schedule pinned to a different zone", () => {
@@ -59,5 +61,27 @@ describe("describeOutcome artifact ids", () => {
 
   it("applies known action wording to canonical ids", () => {
     expect(describeOutcome("system:summon", {})).toBe("spin up an agent to help");
+  });
+});
+
+describe("describeEvent", () => {
+  it("names the event from its raw type, whatever its first letter", () => {
+    expect(describeEvent({ type: "event-bus", eventName: "user.created" })).toBe(
+      "the user created event happens",
+    );
+    expect(
+      describeEvent({ type: "event-bus", eventName: "provider:event:github.pull_request" }),
+    ).toBe("the github pull request event happens");
+  });
+});
+
+describe("describeTrigger for a one-shot event wait", () => {
+  it("says it fires the next time, not whenever", () => {
+    expect(describeTrigger({ type: "event-bus", eventName: "ci.done", once: true })).toBe(
+      "The next time the ci done event happens",
+    );
+    expect(describeTrigger({ type: "event-bus", eventName: "ci.done" })).toBe(
+      "Whenever the ci done event happens",
+    );
   });
 });

@@ -21,12 +21,12 @@
     "days": "{{count}}d ago"
   },
   "levels": {
-    "unknown": "Unknown",
+    "stranger": "Stranger",
     "guardian": "Guardian",
     "innerCircle": "Inner circle",
     "acquaintance": "Acquaintance",
     "other": "Other",
-    "stranger": "Stranger"
+    "dismissed": "Dismissed"
   },
   "channels": {
     "telegram": "Telegram",
@@ -36,7 +36,9 @@
     "linkedin": "LinkedIn",
     "wechat": "WeChat",
     "email": "Email",
-    "feishu": "Feishu"
+    "agents": "Agents",
+    "feishu": "Feishu",
+    "slack": "Slack"
   },
   "filters": {
     "groupLabel": "Filter people by bond level",
@@ -49,7 +51,8 @@
     "noActivity": "No activity yet"
   },
   "guardian": {
-    "meta": "That is you. Full access to every surface."
+    "you": "You",
+    "noAccounts": "That is you. No accounts linked yet. Use Link my account to add one."
   },
   "actions": {
     "select": "Select {{name}}",
@@ -61,15 +64,18 @@
     "close": "Close",
     "create": "Create",
     "link": "Link",
-    "markStranger": "Treat as stranger",
+    "dismiss": "Dismiss",
     "createProfile": "Create profile",
     "creating": "Creating…",
     "linkSubmit": "Link",
     "linking": "Linking…",
-    "markingStranger": "Marking…",
+    "dismissing": "Dismissing…",
     "restore": "Restore",
     "restoring": "Restoring…",
-    "transfer": "Move it here"
+    "transfer": "Move it here",
+    "deletePerson": "Delete person…",
+    "delete": "Delete",
+    "deleting": "Deleting…"
   },
   "bulk": {
     "selected": "selected",
@@ -81,11 +87,15 @@
   },
   "merge": {
     "title": "Merge into another person",
-    "description": "Their channels move onto the person you pick, and the duplicate row goes away.",
+    "description": "Their accounts move onto the person you pick, and the duplicate row goes away.",
     "selectLabel": "Person to merge into",
     "confirm": "Merge",
     "searchPlaceholder": "Search by name, phone, or handle",
     "noCandidates": "Nobody matches that search."
+  },
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "{{name}} is removed from People. Their accounts become strangers again, and every chat keeps its history."
   },
   "errors": {
     "requestFailed": "Something went wrong. The change wasn't saved.",
@@ -112,7 +122,7 @@
     "changeBond": "Change bond",
     "memoryProfile": "Memory profile",
     "timeline": "Timeline",
-    "timelineEmpty": "Nothing has happened on any channel yet.",
+    "timelineEmpty": "Nothing has happened on any account yet.",
     "loadOlder": "Load older",
     "outboundPrefix": "You:",
     "sendVia": "Send via",
@@ -120,9 +130,10 @@
     "composerLabel": "Message text",
     "composerPlaceholder": "Message {{name}}…",
     "missingTitle": "That person is not here",
-    "missingBody": "This person may have been merged into someone else. Head back to People to find them.",
+    "missingBody": "This person may have been merged into someone else or deleted. Head back to People to find them.",
     "linkDescription": "The account you pick starts resolving to this person, and its history joins this timeline.",
-    "noAccounts": "No accounts yet"
+    "noAccounts": "No accounts yet",
+    "delegate": "agent"
   },
   "send": {
     "to": "To",
@@ -134,17 +145,15 @@
     "submit": "Send",
     "retry": "Retry",
     "discard": "Discard this message",
-    "outbox": {
-      "label": "Outbox"
+    "pending": {
+      "label": "Not sent"
     },
     "state": {
-      "sending": "Sending",
-      "unconfirmed": "Sent, not confirmed yet",
-      "stopped": "Rome stopped trying to send this"
+      "sending": "Sending"
     },
     "refusal": {
       "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",
-      "noConversation": "Rome could not identify a direct {{channel}} conversation for this account. Open {{channel}} to reply.",
+      "noConversation": "Rome could not identify a direct {{channel}} chat for this account. Open {{channel}} to reply.",
       "unsupported": {
         "default": "Rome cannot send on {{channel}} yet."
       }
@@ -168,18 +177,27 @@
   },
   "linkPicker": {
     "columns": {
-      "channel": "Channel",
+      "channel": "Platform",
       "name": "Name",
       "handle": "Handle",
       "heldBy": "Held by"
     }
   },
-  "strangerConfirm": {
-    "title": "Treat {{name}} as a stranger?",
-    "description": "{{name}} no longer appears under {{section}}. Restore them anytime from the Stranger view."
+  "dismissConfirm": {
+    "title": "Dismiss {{name}}?",
+    "description": "{{name}} no longer appears under {{section}}. Restore them anytime from the Dismissed view."
   },
   "transfer": {
     "title": "Move this account?",
     "description": "{{account}} resolves to {{owner}} today. Moving it re-attributes every message on it, and {{owner}} keeps whatever else they hold."
+  },
+  "linkCode": {
+    "open": "Link my account",
+    "title": "Link your account",
+    "description": "Send this code from your own account, in a direct message, to any of Rome's accounts. The account you send it from is linked to you. The code works once.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "expires": "Valid until {{time}}. Opening this again shows a new code.",
+    "failed": "Failed to get a code"
   }
 }

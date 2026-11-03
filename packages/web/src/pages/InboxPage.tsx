@@ -4,10 +4,10 @@ import { Link } from "react-router-dom";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { Timestamp } from "@rome-os/ui/timestamp";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // ── Types ──────────────────────────────────────────────
@@ -16,7 +16,6 @@ import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 // /api/sentinel-log (triage activity), /api/connections (source overview).
 
 interface InboxSettings {
-  sentinelReviewIntervalMinutes?: number;
   trustedBondLevels?: string[];
   replyToBondLevels?: string[];
 }
@@ -34,17 +33,23 @@ interface SentinelEntry {
 }
 
 // Lean subset of /api/connections — only what the read-only source overview
-// needs: per-service grant states (conferred or not) and whether the Talk
+// needs: per-kind connection state (connected or not) and whether the Talk
 // capability is actually unlocked (the live transport).
 interface ConnectionLite {
-  service: string;
-  grants: Record<string, "unauthorized" | "authorized" | "degraded">;
-  capabilities: { talk: { state: string } };
+  connectionKind: string;
+  state: "working" | "broken" | null;
+  capabilities: { chat: { state: string } };
 }
 
-// "configured" = set up but the live connection is not currently open (pending
-// QR/login, reconnecting, or errored) — distinct from a confirmed "connected".
-type SourceStatus = "connected" | "configured" | "awaiting" | "disconnected" | "alwaysOn";
+// "configured" = a working connection whose Talk is not unlocked yet; "broken" =
+// the platform stopped accepting Rome's access, so the guardian must fix it.
+type SourceStatus =
+  | "connected"
+  | "configured"
+  | "broken"
+  | "awaiting"
+  | "disconnected"
+  | "alwaysOn";
 
 const ALL_BOND_LEVELS = ["guardian", "inner-circle", "acquaintance", "other"] as const;
 const DEFAULT_TRUSTED_LEVELS = ["guardian"];
@@ -62,6 +67,7 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  useDocumentTitle(t("page.title"));
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -80,10 +86,7 @@ export default function InboxPage() {
       // body (e.g. `{ error }`), so never feed it straight into state — that
       // would crash the sentinel-log `.map` and the settings reads.
       if (sRes.ok) setSettings((await sRes.json()) as InboxSettings);
-      if (slRes.ok) {
-        const log = await slRes.json();
-        setSentinelLog(Array.isArray(log) ? (log as SentinelEntry[]) : []);
-      }
+      if (slRes.ok) setSentinelLog((await slRes.json()) as SentinelEntry[]);
       if (cRes.ok) {
         const payload = (await cRes.json()) as {
           connections?: ConnectionLite[];
@@ -264,17 +267,7 @@ function TriagePolicySection({
 }) {
   const { t } = useTranslation("inbox");
   const { t: ts } = useTranslation("settings");
-  // Keep the interval as a raw string so clearing the field doesn't coerce to 0
-  // and decimals don't silently persist; only a positive integer is saveable.
-  const savedInterval = settings.sentinelReviewIntervalMinutes ?? 60;
-  const [reviewInterval, setReviewInterval] = useState(String(savedInterval));
-  useEffect(() => {
-    setReviewInterval(String(savedInterval));
-  }, [savedInterval]);
-  const parsedInterval = Number(reviewInterval);
-  const intervalValid = Number.isInteger(parsedInterval) && parsedInterval >= 1;
-  const intervalDirty = parsedInterval !== savedInterval;
-  // Like the interval, the toggle arrays resync whenever `settings` refreshes
+  // The toggle arrays resync whenever `settings` refreshes
   // (loadAll runs again after e.g. mark-reviewed), so the policy UI can't keep
   // showing stale local state over newer server truth.
   const savedTrusted = settings.trustedBondLevels ?? DEFAULT_TRUSTED_LEVELS;
@@ -319,35 +312,6 @@ function TriagePolicySection({
       <p className="mb-6 mt-1 text-ui text-muted-foreground">{t("policy.description")}</p>
 
       <div className="space-y-8">
-        {/* Review interval */}
-        <div>
-          <h3 className="mb-2 text-section text-foreground">{ts("sentinel.title")}</h3>
-          <div className="flex items-center gap-2">
-            <FieldLabel htmlFor="sentinel-review-interval">
-              {ts("sentinel.intervalLabel")}
-            </FieldLabel>
-            <Input
-              id="sentinel-review-interval"
-              type="number"
-              min={1}
-              step={1}
-              value={reviewInterval}
-              disabled={saving}
-              onChange={(e) => setReviewInterval(e.target.value)}
-              aria-invalid={!intervalValid}
-              className="w-24"
-            />
-            <Button
-              disabled={saving || !intervalValid || !intervalDirty}
-              onClick={() => onSave({ sentinelReviewIntervalMinutes: parsedInterval })}
-              className="ml-3"
-            >
-              {saving ? ts("common.saving") : ts("common.save")}
-            </Button>
-          </div>
-          <FieldDescription className="mt-1">{ts("sentinel.intervalHelp")}</FieldDescription>
-        </div>
-
         {/* Trusted levels */}
         <div>
           <h3 className="mb-2 text-section text-foreground">{ts("trust.trustedLevels.title")}</h3>
@@ -404,7 +368,7 @@ function BondLevelToggle({
   return (
     <FieldLabel
       className={cn(
-        "flex items-center gap-3 text-left",
+        "flex items-center gap-3 text-left min-h-[var(--control-min-h)]",
         disabled && "cursor-not-allowed opacity-50",
       )}
     >
@@ -417,34 +381,36 @@ function BondLevelToggle({
 // ── Section: Message sources (read-only overview + deep link) ───────────
 
 // One shared rule over the registry-native projection: a service whose Talk is
-// unlocked is connected; a conferred credential (authorized or degraded) whose
-// transport is not up reads "configured"; nothing conferred is disconnected.
+// unlocked is connected; a broken connection reads "broken", as it does in
+// Settings → Connections; a working connection whose Talk is still locked
+// reads "configured"; a connection with no state is disconnected.
 // The old per-channel nuances (guardian-awaiting, live-socket "open") are
 // ceremony detail that lives in Settings → Connections, not this overview.
 function sourceStatus(conn: ConnectionLite | undefined): SourceStatus {
   if (!conn) return "disconnected";
-  if (conn.capabilities.talk.state === "unlocked") return "connected";
-  const conferred = Object.values(conn.grants).some((state) => state !== "unauthorized");
-  return conferred ? "configured" : "disconnected";
+  if (conn.capabilities.chat.state === "unlocked") return "connected";
+  if (conn.state === "broken") return "broken";
+  return conn.state !== null ? "configured" : "disconnected";
 }
 
 function MessageSourcesSection({ connections }: { connections: ConnectionLite[] | null }) {
   const { t } = useTranslation("inbox");
 
-  const byService = (service: string) => connections?.find((c) => c.service === service);
+  const byKind = (kind: string) => connections?.find((c) => c.connectionKind === kind);
 
   const rows: { key: string; status: SourceStatus }[] = [
-    { key: "telegram", status: sourceStatus(byService("telegram")) },
-    { key: "telegramUser", status: sourceStatus(byService("telegram_user")) },
-    { key: "whatsapp", status: sourceStatus(byService("whatsapp")) },
-    { key: "wechat", status: sourceStatus(byService("wechat")) },
-    { key: "discord", status: sourceStatus(byService("discord")) },
+    { key: "telegram", status: sourceStatus(byKind("telegram")) },
+    { key: "telegramUser", status: sourceStatus(byKind("telegram_user")) },
+    { key: "whatsapp", status: sourceStatus(byKind("whatsapp")) },
+    { key: "wechat", status: sourceStatus(byKind("wechat")) },
+    { key: "discord", status: sourceStatus(byKind("discord")) },
     { key: "webchat", status: "alwaysOn" },
   ];
 
   const statusTone: Record<SourceStatus, string> = {
     connected: "bg-success-bg text-success-fg",
     configured: "bg-warning-bg text-warning-fg",
+    broken: "bg-warning-bg text-warning-fg",
     awaiting: "bg-warning-bg text-warning-fg",
     disconnected: "bg-surface-muted text-muted-foreground",
     alwaysOn: "bg-info-bg text-info-fg",

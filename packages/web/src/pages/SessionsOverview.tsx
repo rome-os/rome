@@ -22,12 +22,18 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@rome-os/ui/spinner";
-import type { RomeSessionRecord } from "@/lib/chat-types";
+import type { RomeSessionExplorerRecord } from "@/lib/chat-types";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { cn } from "@/lib/utils";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import { SessionsTrendChart } from "./SessionsTrendChart";
-import { costCoverage, formatCompactNumber, formatCost, formatOutcome } from "./sessions-format";
+import {
+  costCoverage,
+  formatCompactNumber,
+  formatCost,
+  formatOutcome,
+  metricGroupLabel,
+} from "./sessions-format";
 
 const METRIC_LABELS: Record<SessionsMetric, string> = {
   runs: "Runs",
@@ -36,7 +42,7 @@ const METRIC_LABELS: Record<SessionsMetric, string> = {
   errors: "Errors",
 };
 
-export const SESSION_OVERVIEW_GROUPS = [
+const SESSION_OVERVIEW_GROUPS = [
   "app",
   "agent",
   "model",
@@ -86,7 +92,7 @@ function OverviewIdentity({
         </Avatar>
       )}
       <div className="min-w-0">
-        <div className="truncate text-ui text-foreground">{group.label}</div>
+        <div className="truncate text-ui text-foreground">{metricGroupLabel(group)}</div>
         {group.description && !model ? (
           <div className="truncate text-aux text-muted-foreground">{group.description}</div>
         ) : null}
@@ -102,10 +108,10 @@ function RecentSessions({
   onOpen,
   onViewAll,
 }: {
-  sessions: RomeSessionRecord[];
+  sessions: RomeSessionExplorerRecord[];
   error: string | null;
   loading: boolean;
-  onOpen: (session: RomeSessionRecord) => void;
+  onOpen: (session: RomeSessionExplorerRecord) => void;
   onViewAll: () => void;
 }) {
   return (
@@ -206,14 +212,14 @@ export function SessionsOverview({
   metric: SessionsMetric;
   trendBy: "app" | "model";
   groupBy: SessionOverviewGroupDimension;
-  recentSessions: RomeSessionRecord[];
+  recentSessions: RomeSessionExplorerRecord[];
   recentSessionsError: string | null;
   recentSessionsLoading: boolean;
   onMetricChange: (metric: SessionsMetric) => void;
   onTrendByChange: (trendBy: "app" | "model") => void;
   onGroupByChange: (groupBy: SessionOverviewGroupDimension) => void;
   onGroupSelect: (group: SessionMetricGroup) => void;
-  onRecentSessionOpen: (session: RomeSessionRecord) => void;
+  onRecentSessionOpen: (session: RomeSessionExplorerRecord) => void;
   onSeriesSelect: (series: SessionMetricGroup) => void;
   onViewAllSessions: () => void;
 }) {
@@ -427,7 +433,7 @@ export function SessionsOverview({
               onSeriesSelect={onSeriesSelect}
             />
           </section>
-          <div className="order-first xl:order-last xl:border-l xl:border-border-subtle xl:pl-8">
+          <div className="order-first min-w-0 xl:order-last xl:border-l xl:border-border-subtle xl:pl-8">
             <RecentSessions
               sessions={recentSessions}
               error={recentSessionsError}

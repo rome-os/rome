@@ -49,7 +49,7 @@ describe("ConnectionSlotCard", () => {
     // The action node renders.
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
     // Setup guidance yields to the connected-state line once connected.
-    expect(screen.queryByText("Add a bot from @BotFather.")).toBeNull();
+    expect(screen.queryByText("Create the account with @BotFather.")).toBeNull();
     // No identity detail means no subtitle; the dialog header already carries
     // the connected status.
     expect(screen.queryByText("Connected")).toBeNull();
@@ -73,9 +73,9 @@ describe("ConnectionSlotCard", () => {
     );
 
     // No identity yet: falls back to the copy title and the identity-free bullets.
-    expect(screen.getByText("Your Telegram bot")).toBeTruthy();
+    expect(screen.getByText("Your agent's Telegram account")).toBeTruthy();
     expect(screen.getByText("This connection will let your agent")).toBeTruthy();
-    expect(screen.getByText("Reply when people message your bot")).toBeTruthy();
+    expect(screen.getByText("Reply when people message this account")).toBeTruthy();
     // Ceremony children render inside the card.
     expect(screen.getByTestId("ceremony")).toBeTruthy();
     // No action node when none is supplied.
@@ -160,15 +160,15 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
       </SoleSlotScope>,
     );
 
-    // No inner card box, no duplicate brand icon, no "Your Telegram bot" title
+    // No inner card box, no duplicate brand icon, no "Your agent's Telegram account" title
     // echo — the dialog header already carries brand + name — and no setup
     // subtitle: the ceremony below carries the how-to. Telegram is the service
     // under test because it is the only one that carries a subtitle to drop.
     const section = container.querySelector("section");
     expect(section?.className).not.toContain("border");
     expect(screen.queryByTestId("icon")).toBeNull();
-    expect(screen.queryByText("Your Telegram bot")).toBeNull();
-    expect(screen.queryByText("Add a bot from @BotFather.")).toBeNull();
+    expect(screen.queryByText("Your agent's Telegram account")).toBeNull();
+    expect(screen.queryByText("Create the account with @BotFather.")).toBeNull();
     // Bullets and ceremony are unchanged.
     expect(screen.getByText("This connection will let your agent")).toBeTruthy();
     expect(screen.getByTestId("ceremony")).toBeTruthy();

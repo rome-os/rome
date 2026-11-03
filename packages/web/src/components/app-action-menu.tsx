@@ -24,7 +24,7 @@ import {
   dropdownMenuItemVariants,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import type { AppLifecycle } from "@/hooks/use-app-lifecycle";
+import { type AppLifecycle, canChatWithApp } from "@/hooks/use-app-lifecycle";
 import { cn } from "@/lib/utils";
 
 // One installed app's actions menu as data, shared by every surface that
@@ -66,10 +66,10 @@ export interface AppActionMenuOptions {
   t: TFunction<"apps">;
   /** True while any lifecycle/access write is in flight — grays mutating entries. */
   disabled: boolean;
-  /** null hides Pin/Unpin (the entry also needs an embedded frontend href). */
-  pin: { pinned: boolean; onToggle: () => void } | null;
-  /** null hides Remix (the entry also needs canRemixApp to pass). */
-  onRemix: (() => void) | null;
+  /** Pin/Unpin shows only for an app with an embedded frontend href. */
+  pin: { pinned: boolean; onToggle: () => void };
+  /** Remix shows only when canRemixApp passes. */
+  onRemix: () => void;
 }
 
 // Always yields at least "View details", so the menu never collapses to empty
@@ -87,7 +87,7 @@ export function getAppActionMenuEntries({
   const embeddedHref = app.hasFrontend && app.href ? app.href : null;
   const entries: AppActionMenuEntry[] = [];
 
-  if (onRemix && canRemixApp(app)) {
+  if (canRemixApp(app)) {
     entries.push({
       type: "action",
       key: "remix",
@@ -118,13 +118,13 @@ export function getAppActionMenuEntries({
     icon: Info,
     to: `/app-details/${encodeURIComponent(app.id)}`,
   });
-  if (app.projectPath !== null) {
+  if (canChatWithApp(app)) {
     entries.push({
       type: "action",
       key: "chat",
-      label: t("installed.chatToUpdate"),
+      label: t("installed.chatWithApp"),
       icon: MessageCircle,
-      onSelect: () => lifecycle.startChatToUpdate(app),
+      onSelect: () => lifecycle.chatWithApp(app),
     });
   }
   if (app.fullHref) {
@@ -136,7 +136,7 @@ export function getAppActionMenuEntries({
       to: app.fullHref,
     });
   }
-  if (embeddedHref && pin) {
+  if (embeddedHref) {
     entries.push({
       type: "action",
       key: "pin",

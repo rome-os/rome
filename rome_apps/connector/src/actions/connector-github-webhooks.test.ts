@@ -254,6 +254,18 @@ describe("unsubscribeGithubWebhook", () => {
 });
 
 describe("connector_github_subscribe action", () => {
+  it("directs a disconnected GitHub subscription to the native connect card", async () => {
+    readGithubOAuthToken.mockResolvedValueOnce(null);
+    const result = await createAction(config, {} as AppActionRuntimeDeps).execute({
+      repo: "acme/widgets",
+      events: ["push"],
+    });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`got ${result.status}`);
+    expect(result.error).toContain('connector_connect({"toolkit":"github"})');
+    expect(result.error).not.toMatch(/can.t be connected from here/);
+  });
+
   it("fails before calling GitHub when the relay mailbox is missing", async () => {
     readGithubOAuthToken.mockResolvedValueOnce("gho_token");
     const deps = {

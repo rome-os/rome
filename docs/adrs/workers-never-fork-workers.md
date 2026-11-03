@@ -46,3 +46,65 @@ Future diffs must respect:
 - Main handles a new worker-callable service on the connection it holds to that worker, and the service joins the [Worker RPC surface](../architecture/api.md#worker-rpc). No intermediate worker relays it.
 - Nested delegation stays a process-layer command. Main runs the already-approved payload and does not re-dispatch it through its own action dispatch, which would create a second logical root. The one request that does enter main's action dispatch is the explicit detached one, because its contract is a new root. Main accepts that request only when the payload names no parent and its execution id equals its root execution id.
 - Per-worker state keys off execution identity, not process parentage. Main hands the same pooled worker to a root action and to a delegated nested call, so a reused worker carries nothing from an earlier root.
+
+## Amendment (2026-10-07): a root whose caller holds no worker queues
+
+The decision above failed every call at the worker cap, and it stands for nested calls and for any root whose caller may hold a worker. A root run that opts into `whenWorkersBusy: "queue"` waits instead. It waits in arrival order for a slot, and it fails with the same capacity error once a ten-minute deadline passes.
+
+Three callers opt in, because no worker waits on any of them. A routine fire starts from the routine engine in main. An app API request from outside the instance (an external webhook, a relay replay, a browser session) gets an app context whose `runAction` queues. A detached dispatch counts as accepted once it joins the queue, so a worker that dispatches never waits on capacity.
+
+Every other caller stays fail-fast. An agent session lives in main, but the `summon` or `send_message` that drives its turn usually holds a worker, so a queued tool call could wait on the slot its own ancestor occupies. The same holds for app code that runs during such a turn, such as turn middleware, and for a loopback API request, which can come from the agent itself. A missing execution store does not prove independence, because main clears that store at every worker ingress, so the opt-in is set where the caller is known rather than inferred from ambient context.
+
+Queued roots never take the last two slots. Those stay with fail-fast callers, so a backlog of background roots cannot fail every agent tool call and interactive turn until it drains.
+
+Alternatives rejected for this amendment:
+
+- **Queue every root.** Rejected because an agent tool call is a root in main whose caller is a worker waiting on the turn, so a full pool of turn-holding workers would wait on each other until the deadline.
+- **Retry at each caller.** Rejected because every scheduling boundary would reimplement the same backoff, and a caller that gives up drops work such as a routine fire with no second delivery.
+- **Raise the cap.** Rejected because a burst of long agent roots fills any fixed cap, and the cap exists to bound memory on the smallest instance.
+
+This amends the consequence that reaching the cap fails the call immediately. Future diffs must respect: a caller opts into queueing only when it holds no worker and no worker waits on it synchronously, and the queue never admits a root into a reserved slot.
+
+## Amendment (2026-10-18): a queued root also waits for memory
+
+The queue above admits on slot count alone. On the smallest instance, memory runs out before slots do. A few builds and test runs push the container into swap, the core stops answering health checks, and every running task is interrupted. Slots count processes, not bytes: eight light lookups fit where two builds do not.
+
+A queued root starts only when the instance also has memory headroom. Main reads memory each time a slot could go to a queued root. A cgroup memory limit supplies the reading when one applies and fits in the host's memory, with reclaimable file cache counted as free. A hosted instance often sits at the root of its cgroup namespace with the limit set a level above it, so where the cgroup reports no limit, the Linux kernel's own `MemAvailable` estimate from `/proc/meminfo` stands in. A queued root starts only while available memory is at least 15% of the limit. There is one line and no latch: a held queue re-reads memory every five seconds, because memory recovers without any worker exiting, and every root is admitted against a fresh reading. Roots admitted on one reading start together, since none has allocated anything yet when the next is judged. A started root stops the next start once its usage shows in a later reading, and a finished root lets the next one go. A root that waits out the deadline fails with the same capacity error, which names memory when the gate held that root. Only where neither a cgroup limit nor `/proc/meminfo` exists, such as a bare process on macOS, is there no reading, and the gate never holds.
+
+The gate applies to every root that already queues, and only to those. That set includes an app API request from the guardian's own browser session, which already waits for a slot today: such a request can now also wait for memory. Priority for foreground work over background work is a separate decision, not made here. Fail-fast callers never see the gate, for the reason they never queue: their caller may hold a worker, and holding them would wait on the slot an ancestor occupies. Heavy work an agent starts inside a conversation turn therefore still starts at once.
+
+Alternatives rejected for this amendment:
+
+- **Estimate each task's memory**, from a declared class, measured history, or a model's prediction, and admit against the estimate. Rejected because estimates go stale and app authors do not maintain them, while a live reading of the instance costs nothing to keep right.
+- **Hold fail-fast roots under memory pressure too.** Rejected because a held tool call keeps its ancestor's worker open, and a full pool of turn-holding workers would then wait on each other, which is the deadlock the decision above exists to prevent.
+- **Read the host's free-page count through Node's `os` module where no cgroup limit applies.** Rejected because on macOS that count excludes reclaimable cache and reads as a few percent on a healthy machine, so a bare development process on a Mac would hold every queued routine. Linux is different: `MemAvailable` is the kernel's estimate with reclaimable cache included, and it is the fallback the decision takes.
+- **Two lines, hold under 15% and resume over 25%, so the gate does not flap around one value.** Rejected because on a 4 GB instance available memory sits between those lines for the length of a coding task. One dip under the lower line then held every queued root, the guardian's own dashboard calls among them, until the task ended, and they timed out instead. Around one line the gate only alternates between starting a root and waiting one re-read, which is the behaviour wanted.
+- **Pace admissions after a hold**, one root per re-read, so each started root shows in a reading before the next starts. Rejected for the same stretch between the lines: pacing held every queued root to one start per five seconds for hours. The line already stops the next start once a burst shows in a reading.
+- **Lower the worker cap on small plans instead.** Rejected as a replacement because a cap still counts processes, not bytes. A cap sized to the plan remains a complement.
+
+Future diffs must respect: a queued root never starts while the memory gate holds, the gate reads the instance and never the task, and the gate reaches only callers that already queue.
+
+## Amendment (2026-10-19): the cap's default follows the instance's memory
+
+The cap exists to bound memory, yet its default was one number, 8, for every instance. On a 4 GB instance that admitted more concurrent work than the memory could carry, and on a 16 GB instance it left memory idle while roots queued. Unless an operator pins `ROME_ACTION_MAX_WORKERS`, main now derives the default from the instance's memory at startup, read through the same reader the memory gate uses, so the two never size one instance differently: about 1.5 workers per GiB, no fewer than 4 and no more than 16, so 6 on 4 GiB, 12 on 8 GiB and 16 from 11 GiB up. The higher caps on larger instances assume the memory gate on queued roots, so this amendment lands after it. The floor of 4 keeps slots beside the two reserved ones for queued roots. Main logs the chosen cap and its source at startup.
+
+Alternatives rejected for this amendment:
+
+- **Keep one fixed default.** Rejected because no single number fits both ends: the number that protects a 4 GB instance idles a 16 GB one, and the number that uses a 16 GB instance overruns a 4 GB one.
+- **Lower the cap under memory pressure at run time.** Rejected because the queue waits on a live memory reading (the amendment of 2026-10-18), which answers pressure directly. A moving cap would answer the same signal a second way and make the two disagree.
+
+Future diffs must respect: the cap's default is derived from the instance's memory and never from the work in flight, and an explicit `ROME_ACTION_MAX_WORKERS` always wins.
+
+## Amendment (2026-10-19): four coordination roots run in main
+
+Every root dispatched from main took a worker, whatever the action did. Four first-party actions are short writes to main-owned services: `send_message`, `send_user_message`, `create_routine` and `send_feedback`. In a worker each reached back into main over RPC, so the worker added a fork and an IPC hop and made a 50 ms call compete with hour-long jobs for the capped budget. When the pool was full, an agent could not send its reply, schedule a wake-up or file feedback, and the final answer of a webchat turn could be lost.
+
+A root run of one of these four actions, named by canonical id so no other app's action of the same local name joins by accident, executes in main when the lockfile marks the owning app first-party and the action is not cancellable. Such a root may not call or dispatch other actions: the engine refuses both, so no app code reaches main through this door. Trust comes from the install record, never from the action's own manifest. The list grows only with actions that, inside their own async context, start no agent and call or dispatch no action, and that leave behind nothing which would later call one from that context. Work that leaves the context first is fine: `send_user_message` starts an agent turn through a loopback HTTP request, and the routine `create_routine` schedules fires through a dispatch that leaves the action's replay, execution, trace and session contexts.
+
+Alternatives rejected for this amendment:
+
+- **Run every first-party `type: system` root in main.** Rejected because `summon` and its kin are `type: system` and run whole agent loops, whose tool calls would become nested in-process calls in main and run third-party app code there.
+- **Rely on the two reserved slots.** Rejected because a reserve counts workers, not callers: a burst of fail-fast roots from agent turns fills it, and the coordination call then fails anyway.
+- **Retry at each caller.** Rejected because every scheduling boundary would reimplement the same backoff, and a caller that gives up drops work such as a deferred wake-up.
+
+This accepts that an in-process root cannot be killed by `cancel()` and that an unhandled error in one of these handlers reaches main. Future diffs must respect: a root runs in main only when it is on the coordination list, first-party and not cancellable, and a coordination root never calls or dispatches another action.

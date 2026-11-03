@@ -15,16 +15,12 @@ export interface ResolveAuthoringAppRootOptions {
   preferCustom?: boolean;
 }
 
-export function getSeedAppsRoot(projectRoot: string = getProjectRoot()): string {
-  return getRepoAppsDir(projectRoot);
-}
-
 export function getCoreAgentsRoot(projectRoot: string = getProjectRoot()): string {
   return join(projectRoot, "packages", "core", "agents");
 }
 
 export function getFirstPartySeedAppPath(projectRoot: string, appId: string): string {
-  return join(getSeedAppsRoot(projectRoot), appId);
+  return join(getRepoAppsDir(projectRoot), appId);
 }
 
 export function getCustomAppAuthoringPath(
@@ -68,6 +64,6 @@ export function resolveAuthoringAppRoot(
   }
 
   throw new Error(
-    `App "${appId}" was not found in the custom authoring root (${customAppsRoot}) or the seed apps root (${getSeedAppsRoot(projectRoot)}).`,
+    `App "${appId}" was not found in the custom authoring root (${customAppsRoot}) or the seed apps root (${getRepoAppsDir(projectRoot)}).`,
   );
 }

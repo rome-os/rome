@@ -38,10 +38,10 @@ function openAuthorizeUrl(url: string): void {
  * self-composing pattern (see `discord-connect-card.tsx`). Serves
  * github/google/slack.
  *
- * Connect/reconnect run through the generic conferral setup (#1611): the
+ * Connect/reconnect run through the generic setup (#1611): the
  * setup's first state is `awaiting-redirect`, so clicking Connect hands the
  * guardian off to the broker; the return leg (handled by the OAuth callback
- * page) resumes the setup, which redeems and confers. There is NO bespoke
+ * page) resumes the setup, which redeems and grants. There is NO bespoke
  * per-provider fetch logic here — the card renders from generic setup states and
  * an availability hint carried on the connection payload.
  *
@@ -54,6 +54,12 @@ function openAuthorizeUrl(url: string): void {
  *   with optional account detail, Disconnect + Reconnect.
  * - Degraded → the connected layout with an attention-toned "Access expired"
  *   subtitle and Reconnect promoted to the primary action.
+ *
+ * Shopify's connect hint is Shopify's install link, so its Connect and Reconnect
+ * open that link in a new tab instead of starting the setup. Shopify asks which
+ * store there, and the connection lands through Rome Cloud while this card
+ * refetches. The setup, which asks for the store, runs only for a guardian's own
+ * Shopify app.
  */
 export function OAuthConnectionSection({
   card,
@@ -72,11 +78,12 @@ export function OAuthConnectionSection({
   const [disconnecting, setDisconnecting] = useState(false);
 
   const label = card.label;
+  const shopifyInstallUrl = card.service === "shopify" ? (card.connect?.url ?? null) : null;
 
   // The setup addresses the connection by id, or by the bare service name when
-  // the guardian has never connected (the terminal conferral mints the row).
+  // the guardian has never connected (the terminal grant mints the row).
   const setup = useSetup({
-    idOrService: slot.connectionId ?? card.service,
+    idOrKind: slot.connectionId ?? card.service,
     grant: slot.grant ?? "",
     activeCid: slot.activeSetupCid,
     onDone: () => {
@@ -93,6 +100,15 @@ export function OAuthConnectionSection({
   function beginConnect(force = false) {
     initiatedRef.current = true;
     setup.start(force);
+  }
+
+  // A setup that asks something before the hand-off (Shopify's store) parks at
+  // `awaiting-input`, which clears the initiation intent. Submitting the form is
+  // the guardian continuing the same connect, so re-arm it: the redirect that
+  // follows opens on its own.
+  function submitSetup(answers: Record<string, string>) {
+    initiatedRef.current = true;
+    return setup.submit(answers);
   }
 
   const redirectUrl = setup.state?.status === "awaiting-redirect" ? setup.state.url : null;
@@ -169,7 +185,7 @@ export function OAuthConnectionSection({
     );
   }
 
-  if (slot.state === "unauthorized") {
+  if (slot.state === null) {
     return (
       <ConnectionSlotCard
         service={card.service}
@@ -188,15 +204,31 @@ export function OAuthConnectionSection({
           pendingRedirectControls
         ) : setup.state && setup.state.status !== "cancelled" ? (
           <SetupRenderer
-            service={card.service}
             state={setup.state}
             busy={setup.busy}
             error={setup.error}
-            onSubmit={setup.submit}
+            onSubmit={submitSetup}
             onCancel={setup.cancel}
             onRetry={() => beginConnect(true)}
             labels={{ continue: t("common.connect") }}
           />
+        ) : shopifyInstallUrl ? (
+          <div>
+            {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <a href={shopifyInstallUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connections.oauth.shopify.connect")}
+                </a>
+              </Button>
+              <Button variant="ghost" disabled={setup.busy} onClick={() => beginConnect()}>
+                {t("connections.oauth.shopify.ownApp")}
+              </Button>
+            </div>
+            <p className="mt-2 text-ui text-muted-foreground">
+              {t("connections.oauth.shopify.installNote")}
+            </p>
+          </div>
         ) : (
           <div>
             {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
@@ -205,7 +237,7 @@ export function OAuthConnectionSection({
               aria-label={setup.busy ? t("common.connecting") : undefined}
               onClick={() => beginConnect()}
             >
-              {setup.busy && <Spinner label={t("common.connecting")} />}
+              {setup.busy && <Spinner data-icon="inline-start" label={t("common.connecting")} />}
               {t("common.connect")}
             </Button>
           </div>
@@ -214,11 +246,11 @@ export function OAuthConnectionSection({
     );
   }
 
-  // Conferred (authorized or degraded): the account identity is the card
+  // Connected (working or broken): the account identity is the card
   // title; avatar (when present) replaces the brand badge in the header. The
   // handle/email becomes the connected subtitle when it adds information
   // beyond the title.
-  const expired = slot.state === "degraded";
+  const expired = slot.state === "broken";
   const accountLine = slot.identity ?? label;
   const accountDetail =
     (slot.display?.email !== accountLine ? slot.display?.email : null) ||
@@ -241,7 +273,9 @@ export function OAuthConnectionSection({
       aria-label={disconnecting ? t("common.disconnecting") : undefined}
       onClick={() => void handleDisconnect()}
     >
-      {disconnecting && <Spinner size="sm" label={t("common.disconnecting")} />}
+      {disconnecting && (
+        <Spinner data-icon="inline-start" size="sm" label={t("common.disconnecting")} />
+      )}
       {t("common.disconnect")}
     </Button>
   );
@@ -261,17 +295,58 @@ export function OAuthConnectionSection({
         {expired && (
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
-        {pendingRedirectControls ?? (
-          <Button
-            variant={expired ? "default" : "outline"}
-            size="sm"
-            disabled={setup.busy}
-            aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-            onClick={() => beginConnect(true)}
-          >
-            {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
-            {t("connections.oauth.reconnect")}
-          </Button>
+        {setup.state?.status === "awaiting-input" ? (
+          // A reconnect whose setup asks something before the hand-off (Shopify
+          // asks which store) renders that form here, as the unconnected card does.
+          <SetupRenderer
+            state={setup.state}
+            busy={setup.busy}
+            error={setup.error}
+            onSubmit={submitSetup}
+            onCancel={setup.cancel}
+            onRetry={() => beginConnect(true)}
+            labels={{ continue: t("connections.oauth.reconnect") }}
+          />
+        ) : shopifyInstallUrl && !pendingRedirectControls ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant={expired ? "default" : "outline"} size="sm">
+                <a href={shopifyInstallUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connections.oauth.reconnect")}
+                </a>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={setup.busy}
+                onClick={() => beginConnect(true)}
+              >
+                {t("connections.oauth.shopify.ownApp")}
+              </Button>
+            </div>
+            <p className="text-ui text-muted-foreground">
+              {t("connections.oauth.shopify.installNote")}
+            </p>
+          </>
+        ) : (
+          (pendingRedirectControls ?? (
+            <Button
+              variant={expired ? "default" : "outline"}
+              size="sm"
+              disabled={setup.busy}
+              aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+              onClick={() => beginConnect(true)}
+            >
+              {setup.busy && (
+                <Spinner
+                  data-icon="inline-start"
+                  size="sm"
+                  label={t("connections.oauth.reconnecting")}
+                />
+              )}
+              {t("connections.oauth.reconnect")}
+            </Button>
+          ))
         )}
       </div>
     </ConnectionSlotCard>

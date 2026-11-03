@@ -27,7 +27,7 @@ export interface ChatShareSnapshot {
 }
 
 // Minimal block shape for snapshot building — we only read handoff links here.
-interface ShareBlock {
+interface ShareEvent {
   type?: string;
   childSessionId?: string;
 }
@@ -42,7 +42,7 @@ export function handoffChildSessionIds(content: string): string[] {
   }
   if (!Array.isArray(parsed)) return [];
   const out: string[] = [];
-  for (const block of parsed as ShareBlock[]) {
+  for (const block of parsed as ShareEvent[]) {
     if (block && block.type === "handoff" && typeof block.childSessionId === "string") {
       out.push(block.childSessionId);
     }

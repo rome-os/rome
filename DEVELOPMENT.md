@@ -31,13 +31,13 @@ source ~/.zshrc
 
 ```toml
 [whitelist]
-prefix = ["/path/to/rome-internal"]
+prefix = ["/path/to/rome"]
 ```
 
 5. Set up the project:
 
 ```bash
-cd rome-internal
+cd rome
 direnv allow          # activates Nix shell (provides node, pnpm)
 pnpm install          # install JS dependencies on the host (used by editor tooling)
 ```
@@ -86,7 +86,7 @@ Chrome's CDP listener stays available for login tabs and URL opening in either m
 - Before adding a component or hook, search [shared UI](packages/ui/src/), [dashboard hooks](packages/web/src/hooks/), and the neighboring feature.
 - Use TanStack Query and [`fetchJson`](packages/web/src/lib/fetch-json.ts) for server state. After a successful write, [invalidate its query key](packages/web/src/hooks/use-apps.ts) to fetch server truth again.
 - Keep local state in React. Use Zustand only for complex, feature-scoped state such as the [file browser store](packages/web/src/components/file-browser/store/).
-- Use [`useSseEvent` or `useSseEvents`](packages/web/src/hooks/use-sse-events.ts) for SSE. Validate external data with Zod at the boundary.
+- Use [`useLiveEvents`](packages/web/src/hooks/use-live-events.ts) for a stream that has a live-events topic, so it shares the tab's one WebSocket instead of holding an HTTP connection. Use [`useSseEvents`](packages/web/src/hooks/use-sse-events.ts) for other SSE. Validate external data with Zod at the boundary.
 - Keep the backend flow: [Hono route](packages/core/src/api/index.ts) → injected [service or dependency](packages/core/src/api/deps.ts) → Drizzle [repository](packages/core/src/db/repositories/).
 - Validate [configuration with Zod](packages/core/src/config.ts). Log through [`createLogger(component)`](packages/core/src/logger.ts).
 - Use [DnD](packages/web/src/components/ui/sortable.tsx), [Motion](packages/web/src/pages/free/FreeGrid.tsx), [Monaco](packages/web/src/components/monaco-file-editor.tsx), and [Recharts](packages/web/src/pages/SessionsTrendChart.tsx) only when a feature needs them. They are not default abstractions.
@@ -176,6 +176,25 @@ rm -rf ~/.rome-worktrees/<slug>
 
 `git worktree remove` without first running `down -v` leaves an orphan
 host dir, but it cannot pollute any other worktree.
+
+The slug is the branch name, so switching branches in one checkout starts a
+different stack with its own data and address. To keep one stack across
+branches, pass `ROME_DEV_SLUG` with that checkout's commands:
+
+```bash
+ROME_DEV_SLUG=rome pnpm dev:all   # always http://rome.rome.localhost:3000
+ROME_DEV_SLUG=rome ./r pnpm test  # ./r finds the container by the same slug
+```
+
+Pass it per command, not from a shell profile or a direnv `.envrc`: both reach
+other worktrees, including the ones nested under the main checkout, and pin
+them all to one stack. Use a value from one checkout only: another checkout
+passing the same value starts the same stack, database included, once it is
+stopped. Every branch then shares that stack's data, so a
+migration from one branch stays applied after a switch. Do not give the pin
+the name of a worktree directory: `pnpm gc:worktrees` names a worktree's
+stack after its directory, and keeps it only while its containers show
+another checkout started it (#1314).
 
 **Gotcha:** bare-metal `pnpm start` (host Node, no container) still
 writes to `~/.rome/<profile>/`, so it does *not* share state with

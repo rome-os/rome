@@ -2,14 +2,16 @@
 //
 // Feishu is a Talker with a single `app` grant: the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
-// the SDK long connection, inbound normalization, markdown send, and the
+// the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
 // `FeishuAdapter` (packages/core/src/channels/feishu.ts), wrapped here so the
-// runtime's grant-epoch lifecycle and fault→grant-state mapping drive it.
+// runtime's grant-epoch lifecycle and fault→grant-state mapping drive it. The
+// transport already speaks the channel's record, so inbound and send pass
+// through without a projection.
 //
-// The `app` grant is conferred by pasting the two fields (`credentialsPaste`);
+// The `app` grant is granted by pasting the two fields (`credentialsPaste`);
 // `validate` mints a tenant-access-token via a transient connect so a bad
-// appId/appSecret is refused at confer time.
+// appId/appSecret is refused at grant time.
 //
 // Fault mapping: a tenant-access-token auth failure
 // (`isFeishuAuthError`) is a CredentialRejected{ grant: "app" }; every other
@@ -25,8 +27,9 @@ import {
   LoggerLevel,
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { ChatSettingsService } from "../../chat-settings/service.js";
+import type { FeishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
@@ -37,12 +40,8 @@ import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
-import type {
-  TalkActivity,
-  TalkDirectory,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ChannelActivity } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
@@ -50,12 +49,10 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  addressIsConversationFeature,
-  directoryPage,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("feishu-setup");
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -68,24 +65,27 @@ export interface FeishuAppMaterial {
 }
 
 // The `app` grant's profile — the non-secret half of the custom-app identity
-// (appId + which tenant domain + app type). Declared next to the material shape;
-// parse-then-store, and the same schema re-runs on revive (fail-closed). `appId`
-// is the sole display field; `domain`/`appType` stay owner-side. All optional so
-// a bridge-era grant with no captured identity stays sparse-but-valid.
+// (appId, the bot's name, which tenant domain, app type). Declared next to the
+// material shape; parse-then-store, and the same schema re-runs on revive
+// (fail-closed). `botName` and `appId` are the display fields; `domain`/`appType`
+// stay owner-side. All optional so a bridge-era grant with no captured identity
+// stays sparse-but-valid.
 export const feishuGrantProfileSchema = z
   .object({
     appId: z.string().min(1).optional(),
+    botName: z.string().min(1).optional(),
     domain: z.enum(["feishu", "lark"]).optional(),
     appType: z.string().min(1).optional(),
   })
   .strict();
 export type FeishuGrantProfile = z.infer<typeof feishuGrantProfileSchema>;
 
-/** Pure display projection: the appId reads as the handle. `domain`/`appType` are
- *  owner-side and never widen the display surface. */
+/** Pure display projection: the bot's name reads as the display name and the
+ *  appId as the handle. `domain`/`appType` are owner-side and never widen the
+ *  display surface. */
 export function toFeishuDisplay(profile: FeishuGrantProfile): ProfileDisplay {
   return Object.freeze({
-    displayName: undefined,
+    displayName: profile.botName,
     handle: profile.appId,
     email: undefined,
     avatarUrl: undefined,
@@ -103,6 +103,7 @@ export function reviveFeishuProfile(record: ProfileRecord): ProfileDisplay {
  *  enum parse instead of being dropped before it. */
 export interface FeishuProfileSource {
   appId?: string;
+  botName?: string;
   domain?: unknown;
   appType?: string;
 }
@@ -117,6 +118,7 @@ export function feishuProfileFromSettings(
 ): FeishuGrantProfile | null {
   const raw: Record<string, unknown> = {};
   if (settings.appId != null && settings.appId !== "") raw.appId = settings.appId;
+  if (settings.botName != null && settings.botName !== "") raw.botName = settings.botName;
   if (settings.domain != null && settings.domain !== "") raw.domain = settings.domain;
   if (settings.appType != null && settings.appType !== "") raw.appType = settings.appType;
   if (Object.keys(raw).length === 0) return null;
@@ -130,17 +132,25 @@ export function feishuProfileFromSettings(
  * card offers. `createChannel` is injectable so tests drive a fake LarkChannel.
  */
 export interface FeishuDescriptorDeps {
-  conversationSettings: ConversationSettingsService;
-  personMappingRepo: PersonMappingRepository;
+  chatSettings: ChatSettingsService;
+  peopleRepo: PeopleRepository;
   listAgents: () => string[];
+  /** The agent linked to a Connection's channel, as `accountAgentResolver`
+   *  answers it for that channel. */
+  accountAgentOf?: (connectionId: string) => string | null | undefined;
+  /** Whether an agent is loaded, aliases included. */
+  hasAgent?: (name: string) => boolean;
+  /** How a streamed reply shows, read for each message it creates. */
+  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
   probeCredentials?: FeishuSetupDeps["probeCredentials"];
   registerAgentApp?: FeishuSetupDeps["registerAgentApp"];
+  fetchBotName?: FeishuSetupDeps["fetchBotName"];
 }
 
-/** The credential fields a Feishu setup holds before conferral (the pending,
+/** The credential fields a Feishu setup holds before grant (the pending,
  *  un-set-up material the in-ceremony probes run against). */
 export interface FeishuPendingMaterial {
   appId: string;
@@ -163,6 +173,9 @@ export interface FeishuSetupDeps {
   /** Probe-validate pasted credentials (mint a tenant access token). Throws
    *  with a guardian-readable message when the pair is refused. */
   probeCredentials: (material: FeishuPendingMaterial, signal?: AbortSignal) => Promise<void>;
+  /** The bot's name as Feishu shows it, or null when it has none. Setup goes
+   *  on without a name when this rejects: the account then reads as its appId. */
+  fetchBotName: (material: FeishuPendingMaterial, signal: AbortSignal) => Promise<string | null>;
   /**
    * The agent-ready dance: drive the SDK's `registerApp` QR flow (which MINTS
    * fresh app credentials — it runs against no adapter and no prior
@@ -176,6 +189,13 @@ export interface FeishuSetupDeps {
     onQrCode: (qr: FeishuAgentReadyQr) => void;
   }) => Promise<FeishuPendingMaterial>;
 }
+
+const FEISHU_RENEW_FORM = {
+  instructions:
+    "Paste this app's App ID and App Secret again on the next step. " +
+    "Domain: feishu = open.feishu.cn (China), lark = open.larksuite.com (International).",
+  fields: [{ name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] }],
+};
 
 const FEISHU_MODE_FORM = {
   instructions:
@@ -221,9 +241,27 @@ function agentReadyQrView(qr: FeishuAgentReadyQr): SetupView {
   };
 }
 
+/** How long setup waits for the bot's name before going on without it. */
+const BOT_NAME_TIMEOUT_MS = 5_000;
+
+/** `work`, or a rejection once `signal` aborts, whichever comes first. A
+ *  fetcher that ignores its signal still cannot hold the setup past it. */
+function settledBefore<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
   return async (interact, ctx) => {
-    const { mode, domain: domainChoice } = await interact.prompt(FEISHU_MODE_FORM);
+    // Agent-ready always registers a new app, which a renewal must refuse, so
+    // renewing goes straight to the existing app's credentials.
+    const { mode, domain: domainChoice } = ctx.renewing
+      ? { ...(await interact.prompt(FEISHU_RENEW_FORM)), mode: "manual" }
+      : await interact.prompt(FEISHU_MODE_FORM);
     const domain: "feishu" | "lark" = domainChoice === "lark" ? "lark" : "feishu";
 
     let pending: FeishuPendingMaterial;
@@ -262,18 +300,37 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       );
     }
 
-    // Same material shape the boot importer's FEISHU_SETTINGS_IMPORT_ROW
-    // extracts: domain (and appType) duplicated into material and profile by
-    // the one atomic write, so the two halves cannot disagree.
+    // Domain (and appType) are duplicated into material and profile by the one
+    // atomic write, so the two halves cannot disagree.
     const material: SecretRecord = {
       appId: pending.appId,
       appSecret: pending.appSecret,
       domain: pending.domain,
       appType,
     };
+    let botName: string | undefined;
+    interact.show({ title: "Finishing setup", body: ["Reading the bot's name…"], progress: true });
+    try {
+      botName =
+        (await ctx.step("bot-name", (signal) => {
+          const bounded = AbortSignal.any([signal, AbortSignal.timeout(BOT_NAME_TIMEOUT_MS)]);
+          return settledBefore(bounded, deps.fetchBotName(pending, bounded));
+        })) ?? undefined;
+    } catch (err) {
+      // A cancel unwinds the setup; any other failure only costs the name.
+      if (ctx.signal.aborted) throw err;
+      log.warn("feishu_setup.bot_name_unread", {
+        appId: pending.appId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     const profile =
-      feishuProfileFromSettings({ appId: pending.appId, domain: pending.domain, appType }) ??
-      undefined;
+      feishuProfileFromSettings({
+        appId: pending.appId,
+        botName,
+        domain: pending.domain,
+        appType,
+      }) ?? undefined;
     return {
       credential: { material, expiresAt: "never" },
       profile,
@@ -291,12 +348,7 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
  *  (targets the right host for the chosen domain). A non-zero response code
  *  means the pair is refused. */
 async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<void> {
-  const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
-  const client = new Client({
-    appId: material.appId,
-    appSecret: material.appSecret,
-    domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
-  });
+  const client = await feishuClient(material);
   let res: { code?: number; msg?: string };
   try {
     res = await client.auth.v3.tenantAccessToken.internal({
@@ -308,6 +360,43 @@ async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<
   if (res.code !== 0) {
     throw new Error(res.msg || "Invalid App ID or App Secret");
   }
+}
+
+/** Discards the SDK's own logging. Its default logs a failed request's whole
+ *  error, whose headers carry the tenant access token; callers report the
+ *  failure themselves. */
+const silentSdkLogger = {
+  error: () => {},
+  warn: () => {},
+  info: () => {},
+  debug: () => {},
+  trace: () => {},
+};
+
+/** An SDK client for `material`'s app, on the host of its domain. */
+async function feishuClient(material: FeishuPendingMaterial) {
+  const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
+  return new Client({
+    appId: material.appId,
+    appSecret: material.appSecret,
+    domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
+    logger: silentSdkLogger,
+  });
+}
+
+/** Default bot-name read: `GET /open-apis/bot/v3/info` through the SDK client,
+ *  which mints the tenant access token it needs. */
+async function fetchFeishuBotName(
+  material: FeishuPendingMaterial,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const client = await feishuClient(material);
+  const res = await client.request<{ bot?: { app_name?: string } }>({
+    method: "GET",
+    url: "/open-apis/bot/v3/info",
+    signal,
+  });
+  return res.bot?.app_name?.trim() || null;
 }
 
 function feishuAccountDomain(domain: "feishu" | "lark"): string {
@@ -408,6 +497,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   const createChannel = deps.createChannel ?? defaultCreateChannel;
   const probeCredentials = deps.probeCredentials ?? probeFeishuCredentials;
   const registerAgentApp = deps.registerAgentApp ?? registerFeishuAgentApp;
+  const fetchBotName = deps.fetchBotName ?? fetchFeishuBotName;
   const appScheme = credentialsPaste({
     instructions: "Paste your Feishu/Lark custom-app App ID and App Secret.",
     fields: [
@@ -416,7 +506,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       { name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] },
     ],
     // A transient connect mints the tenant-access-token; a bad appId/appSecret
-    // rejects here so confer refuses invalid credentials.
+    // rejects here so grant refuses invalid credentials.
     validate: async (material) => {
       const channel = createChannel({
         appId: material.appId,
@@ -430,27 +520,29 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       }
     },
   });
-  // The Feishu conferral setup: mode + domain prompt, then either the
+  // The Feishu setup: mode + domain prompt, then either the
   // manual credential probe or the agent-ready registerApp QR dance, then the
   // before the single terminal write of credential and profile.
   appScheme.setup = makeFeishuSetup({
     probeCredentials,
     registerAgentApp,
+    fetchBotName,
   });
 
   return {
-    service: "feishu",
-    reviveProfile: (_grant, record) => reviveFeishuProfile(record),
-    auth: {
-      app: appScheme,
-    },
+    connectionKind: "feishu",
+    severalAccounts: true,
+    reviveProfile: (record) => reviveFeishuProfile(record),
+    accountIdOf: (record) => (typeof record.appId === "string" && record.appId) || null,
+    link: "own_account",
+    grant: "app",
+    auth: appScheme,
     capabilities: {
       talker: {
-        needs: ["app"] as const,
-        build(creds, kit): Talker {
+        build(cred, kit): Talker {
           // Inline material for the `app` grant (never an external resolver for
           // a Talk grant); credentialsPaste packs these fields.
-          const app = creds.app.material as unknown as FeishuAppMaterial;
+          const app = cred.material as unknown as FeishuAppMaterial;
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
             faultSink?.(
@@ -465,17 +557,70 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             appSecret: app.appSecret,
             domain: app.domain,
             connectionId: kit.connectionId,
-            conversationSettings: deps.conversationSettings,
-            personMappingRepo: deps.personMappingRepo,
+            chatSettings: deps.chatSettings,
+            peopleRepo: deps.peopleRepo,
             listAgents: deps.listAgents,
+            accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
+            hasAgent: deps.hasAgent,
+            replyStreamingStyle: deps.replyStreamingStyle,
             onFault: routeFault,
           };
           const adapter = new FeishuAdapter(config, createChannel);
 
+          const activity: ChannelActivity = {
+            async begin(input) {
+              if (!input.messageId) return null;
+              const messageId = input.messageId;
+              const reactionId = await adapter.addProcessingReaction(messageId);
+              if (!reactionId) return null;
+              return {
+                update: async () => {},
+                finish: async () => adapter.removeProcessingReaction(messageId, reactionId),
+              };
+            },
+          };
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                adapter
+                  .listObservedConversations()
+                  .filter(
+                    (conversation) =>
+                      !query || conversation.displayName.toLocaleLowerCase().includes(query),
+                  )
+                  .sort((left, right) =>
+                    `${left.displayName}\0${left.id}`.localeCompare(
+                      `${right.displayName}\0${right.id}`,
+                    ),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((conversation) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    chatId: conversation.id as import("@rome-os/app-runtime").ChatId,
+                  },
+                  connectionKind: "feishu",
+                  service: "feishu",
+                  kind: conversation.kind,
+                  displayName: conversation.displayName,
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            directMessaging: addressIsConversationFeature(),
+            activity,
+            directory,
+            replyDelivery: adapter.replyDelivery(),
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // start() awaits channel.connect(), which rejects on bad
               // credentials, so a refused `app` grant surfaces here; ongoing
               // long-connection errors route through the adapter's onFault seam.
@@ -484,12 +629,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return toMessageReceipt(
-                  conversationId,
-                  await adapter.sendMessage(conversationId, conversationId, msg),
-                );
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A tenant-access-token failure from send is a refused credential.
                 if (isFeishuAuthError(err)) {
@@ -498,58 +640,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const activity: TalkActivity = {
-                async begin(input) {
-                  if (!input.messageId) return null;
-                  const messageId = input.messageId;
-                  const reactionId = await adapter.addProcessingReaction(messageId);
-                  if (!reactionId) return null;
-                  return {
-                    update: async () => {},
-                    finish: async () => adapter.removeProcessingReaction(messageId, reactionId),
-                  };
-                },
-              };
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    adapter
-                      .listObservedConversations()
-                      .filter(
-                        (conversation) =>
-                          !query || conversation.displayName.toLocaleLowerCase().includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.displayName}\0${left.id}`.localeCompare(
-                          `${right.displayName}\0${right.id}`,
-                        ),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((conversation) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId:
-                          conversation.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "feishu",
-                      kind: conversation.kind,
-                      displayName: conversation.displayName,
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                directMessaging: addressIsConversationFeature(),
-                activity,
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

@@ -1,0 +1,44 @@
+cases:
+  - name: ONBOARD-01 Finish first-run onboarding with a connected model
+    tags:
+      - onboarding
+    steps:
+      - app.open:
+          path: /
+          session: none
+          waitUntil: onboard
+      - aiAct: >-
+          Create the local account. Enter "${guardianUser}" in the Username field and
+          "${guardianPassword}" in the Password field, then click Continue. Finish when a welcome
+          page with a "Start chat" button is visible.
+      - aiAssert: The welcome page is visible and shows a "Start chat" button.
+      - backend.connectModel: {}
+      - aiAct: >-
+          Click "Start chat". Wait until the chat shows a greeting and a card with a "Looks good"
+          button, then click "Looks good". Finish when the card is confirmed and the chat moves
+          on to connecting an AI.
+      - aiWaitFor:
+          prompt: >-
+            The chat shows "Connected an AI" (or "AI connected") and below it a question card
+            asking "Which of these sounds most like your week?".
+          options:
+            timeoutMs: 60000
+      - aiAct: >-
+          In the question card, choose "Twelve tabs open, none of them read", then click the
+          card's own Send button (not the message composer at the bottom). Finish when the
+          answer is submitted.
+      - aiWaitFor:
+          prompt: >-
+            Below the answered question, the chat shows either a "What I took away" summary, a
+            card titled "Add scouts to your briefing", or a card titled "Pick your first app to
+            build". No "Something went wrong" message is visible.
+          options:
+            timeoutMs: 300000
+            checkIntervalMs: 10000
+      - aiAct: >-
+          If a card titled "Add scouts to your briefing" is waiting for an answer, click its
+          "Skip for now" button. Then wait until a card titled "Pick your first app to build"
+          appears and click "I'll explore on my own". Finish after that click.
+      - aiAssert: >-
+          The welcome conversation has handed off to a new, empty chat: the page greets
+          "${guardianUser}" above an empty message composer, and no error message is visible.

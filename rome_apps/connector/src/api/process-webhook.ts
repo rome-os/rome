@@ -1,4 +1,5 @@
-import { EventsRepo } from "./events-repo.js";
+import type { Logger } from "@rome-os/app-runtime";
+import { EventsRepo, MAX_PUBLISH_ATTEMPTS, publishRetryDelayMs } from "./events-repo.js";
 import { normalizeGithubPayload } from "./github-webhook.js";
 import {
   extractEventType,
@@ -28,27 +29,68 @@ const EVENT_SOURCE = "connector";
 
 export type RunAction = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
+/** An owed event older than this is abandoned rather than published, since a
+ * routine fired for a day-old webhook (a stale PR review) does more harm than
+ * good. */
+export const MAX_EVENT_AGE_MS = 24 * 60 * 60_000;
+
 /**
- * Forward a freshly-emitted Composio trigger event onto Rome's central event
- * bus (via the system `publish_event` action) so routines with a matching
- * `event-bus` trigger fire.
+ * Drains the outbox: publishes each stored event that is owed a publish and
+ * due for an attempt onto Rome's central bus through the system
+ * `publish_event` action, oldest first, so routines with a matching
+ * `event-bus` trigger fire. The bus event's `name` is the event's topic, the
+ * same string `POST /feeds` returned to the feed creator.
  *
- * Gated on `kind === "emitted"`: a `deduped` result is a Composio retry of an
- * event we already recorded, and republishing it would fire the routine again
- * for the same PR update on every retry. `ignored` carries no event at all.
- * The bus event's `name` is the same `topic` returned by `POST /feeds`, so a
- * routine's `eventName` is the exact string the feed creator already holds.
+ * A failed publish backs off (publishRetryDelayMs) and ends the drain. After
+ * MAX_PUBLISH_ATTEMPTS failures, or past MAX_EVENT_AGE_MS, an event is
+ * abandoned with an error log. Delivery is at-least-once: a process that dies
+ * between publishing and recording it publishes the event again once its
+ * claim lapses. Safe to run concurrently. A deduped webhook retry never
+ * republishes, because the stored row is already published or claimed.
  */
-export async function publishEmittedEvent(
+export async function publishPendingEvents(
+  repo: EventsRepo,
   runAction: RunAction,
-  result: ProcessResult,
+  log: Logger,
+  now: () => Date = () => new Date(),
 ): Promise<void> {
-  if (result.kind !== "emitted") return;
-  await runAction(PUBLISH_EVENT_ACTION, {
-    name: result.topic,
-    source: EVENT_SOURCE,
-    payload: result.event.data,
-  });
+  for (;;) {
+    const claimedAt = now();
+    const event = await repo.claimNextUnpublished(claimedAt);
+    if (!event) return;
+    const fields = { eventId: event.eventId, topic: event.topic, provider: event.provider };
+    if (claimedAt.getTime() - event.receivedAt.getTime() > MAX_EVENT_AGE_MS) {
+      await repo.abandon(event.eventId);
+      log.error("gave up publishing event to bus", { ...fields, reason: "expired" });
+      continue;
+    }
+    try {
+      await runAction(PUBLISH_EVENT_ACTION, {
+        name: event.topic,
+        source: EVENT_SOURCE,
+        payload: JSON.parse(event.payloadJson) as unknown,
+      });
+    } catch (err) {
+      const failures = event.publishAttempts + 1;
+      const error = err instanceof Error ? err.message : String(err);
+      if (failures >= MAX_PUBLISH_ATTEMPTS) {
+        await repo.abandon(event.eventId);
+        log.error("gave up publishing event to bus", { ...fields, attempts: failures, error });
+      } else {
+        const retryAt = new Date(now().getTime() + publishRetryDelayMs(failures));
+        await repo.recordFailedPublish(event.eventId, failures, retryAt);
+        log.warn("event publish failed, will retry", {
+          ...fields,
+          attempts: failures,
+          retryAt: retryAt.toISOString(),
+          error,
+        });
+      }
+      return;
+    }
+    await repo.markPublished(event.eventId, now());
+    log.info("published event to bus", fields);
+  }
 }
 
 /**
@@ -118,7 +160,8 @@ export async function processVerifiedWebhook(
  * `github` and the event type comes from the trusted `X-GitHub-Event` header, so
  * there is no trigger-slug → toolkit lookup: the topic is `github.<event>`
  * directly. `deliveryId` is GitHub's `X-GitHub-Delivery` GUID, which dedups
- * retries (GitHub redelivers on a non-2xx) exactly like the Composio webhook id.
+ * redeliveries (a manual redelivery or a relay replay reuses it) exactly like
+ * the Composio webhook id.
  */
 export async function processGithubWebhook(
   repo: EventsRepo,

@@ -1,8 +1,21 @@
 import { useEffect } from "react";
-import { useFileBrowserStoreApi } from "../store/context";
+import { useFileBrowserStore, useFileBrowserStoreApi } from "../store/context";
 
 export function useBeforeUnloadGuard() {
   const store = useFileBrowserStoreApi();
+  const uploading = useFileBrowserStore((state) => state.ui.uploadProgress !== null);
+
+  // Upload protection must not inherit the editor's one-shot navigation exemption.
+  useEffect(() => {
+    if (!uploading) return;
+    const handleUploadBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleUploadBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleUploadBeforeUnload);
+  }, [uploading]);
+
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       const file = store.getState().file;

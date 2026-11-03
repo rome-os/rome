@@ -17,7 +17,7 @@
  *     per slot lives in {@link BULLET_KEYS} here (i18n JSON has no arrays), so the
  *     card renders them in a stable order. Bullets may interpolate `{{identity}}`.
  *   - `bulletsFallback.*` — the bullet set to use before the identity is known
- *     (so an unconnected bot reads "Reply when people message your bot", not a
+ *     (so an unconnected bot reads "Reply when people message this account", not a
  *     dangling `{{identity}}`). Only services that interpolate identity carry it.
  *   - `privacyNote` — the lock-box reassurance line, only where warranted
  *     (personal-account sessions, OAuth token storage).
@@ -63,11 +63,13 @@ const BULLET_KEYS: Record<string, string[]> = {
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
+  "slack_bot.bot": ["reply", "start"],
   "email.bot": ["reply", "start"],
-  "webchat.bot": ["chat"],
+  "agents.bot": ["reply", "start"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],
   "slack.user": ["work"],
+  "shopify.user": ["work"],
   "composio.user": ["act"],
 };
 
@@ -76,7 +78,7 @@ const BULLET_KEYS: Record<string, string[]> = {
  * known these read from `bulletsFallback` (and the title from `titleFallback`)
  * instead, so an unconnected bot never shows a dangling `{{identity}}`.
  */
-const IDENTITY_SLOTS = new Set(["telegram.bot", "discord.bot"]);
+const IDENTITY_SLOTS = new Set(["telegram.bot", "discord.bot", "slack_bot.bot"]);
 
 /**
  * Resolve the full copy for one slot card. `identityKnown` selects the
@@ -134,9 +136,5 @@ const PRIVACY_SLOTS = new Set([
   "github.user",
   "google.user",
   "slack.user",
+  "shopify.user",
 ]);
-
-/** The card heading for a slot given its connected/primary/secondary role. */
-export function slotHeadingKey(role: "connected" | "primary" | "secondary"): string {
-  return `connections.headings.${role}`;
-}

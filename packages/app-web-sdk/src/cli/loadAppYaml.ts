@@ -3,7 +3,6 @@ import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 
 export interface AppYamlWeb {
-  manifest?: string;
   displayName: string;
   navLabel?: string;
   entry?: string;
@@ -63,7 +62,6 @@ export function loadAppYaml(startDir: string): LoadedAppYaml {
       icon: typeof parsed.icon === "string" && parsed.icon.length > 0 ? parsed.icon : undefined,
       appRoot,
       web: {
-        manifest: web.manifest,
         displayName: web.displayName,
         navLabel: web.navLabel,
         entry: web.entry,
@@ -72,7 +70,8 @@ export function loadAppYaml(startDir: string): LoadedAppYaml {
   };
 }
 
-function findAppDir(start: string): string | null {
+/** The nearest directory at or above `start` that holds an app.yaml, or null. */
+export function findAppDir(start: string): string | null {
   let current = resolve(start);
   while (true) {
     if (existsSync(join(current, "app.yaml"))) {

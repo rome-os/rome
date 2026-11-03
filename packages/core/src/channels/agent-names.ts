@@ -1,0 +1,53 @@
+/**
+ * An agent's id from its name, for `system:send_message` when it sends on
+ * `agents` by name. It is handed to the system app alone, and reads Cloud's
+ * listing of the agents this Rome can message: the guardian's own agents and
+ * those of linked accounts.
+ *
+ * Names are labels two agents can share, so a name resolves only when one
+ * agent has it. A whole label, such as `Atlas (@ouou's dot)`, is matched
+ * before a bare name, which is how a caller picks between agents that share
+ * one. A bare name resolves only to the guardian's own agent; a linked
+ * account's agent is reached by its whole label. Nothing is guessed between
+ * matches.
+ */
+
+import { agentLabel } from "../lib/rome-cloud-agents.js";
+import type { ExternalAgents } from "./agents-accounts.js";
+
+export type AgentNameResolution =
+  | { status: "found"; agentId: string }
+  | { status: "ambiguous"; matches: { label: string; agentId: string }[] }
+  | { status: "none" }
+  | { status: "not_connected" };
+
+export interface AgentNamesService {
+  resolve(name: string): Promise<AgentNameResolution>;
+}
+
+export function createAgentNames(agents: ExternalAgents): AgentNamesService {
+  return {
+    async resolve(name) {
+      if (!agents.connected()) return { status: "not_connected" };
+      const wanted = name.trim().toLowerCase();
+      const listed = await agents.list();
+      const labelled = listed.filter((agent) => agentLabel(agent).toLowerCase() === wanted);
+      const matches =
+        labelled.length > 0
+          ? labelled
+          : listed.filter((agent) => agent.name.trim().toLowerCase() === wanted);
+      if (matches.length === 0) return { status: "none" };
+      // A bare name reaches only the guardian's own agent. Another account's
+      // agent takes its whole label, so a message to someone else's agent
+      // never goes out under a name that reads as the guardian's.
+      const [only] = matches;
+      if (matches.length === 1 && (labelled.length > 0 || only.sameAccount)) {
+        return { status: "found", agentId: only.agentId };
+      }
+      return {
+        status: "ambiguous",
+        matches: matches.map((agent) => ({ label: agentLabel(agent), agentId: agent.agentId })),
+      };
+    },
+  };
+}

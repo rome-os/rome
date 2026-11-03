@@ -3,7 +3,7 @@ import type { ExecutionJournalRepository } from "../db/repositories/execution-jo
 import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
 import type { AgentRunnerInterface, ThreadContext } from "../core/types.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import type { JournalEntry } from "./replay.js";
 import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { createLogger } from "../logger.js";
@@ -13,15 +13,19 @@ const log = createLogger("approval-handler");
 interface ApprovalPayload {
   actionName: string;
   args: Record<string, unknown>;
-  rootActionName?: string;
-  rootArgs?: Record<string, unknown>;
-  rootExecutionId?: string;
-  replayJournal?: JournalEntry[];
+  rootActionName: string;
+  rootArgs: Record<string, unknown>;
+  rootExecutionId: string;
+  replayJournal: JournalEntry[];
   channelContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   sessionId?: string;
   agentName?: string;
   channelThreadKey?: string;
+}
+
+export interface ActionApprovalResolutionObserver {
+  approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> | void;
 }
 
 function formatResultForAgent(result: ActionResult): string {
@@ -61,6 +65,7 @@ export class ApprovalHandler {
      * default project and the per-cwd transcript resume fails with "No
      * conversation found". Undefined ⇒ keep the default-dir fallback. */
     private resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>,
+    private resolutionObserver?: ActionApprovalResolutionObserver,
   ) {}
 
   async onApproved(approvalId: string): Promise<void> {
@@ -107,6 +112,15 @@ export class ApprovalHandler {
       return;
     }
 
+    if (typeof rawPayload.rootActionName !== "string" || !Array.isArray(rawPayload.replayJournal)) {
+      log.error("approval payload missing its root call", { approvalId });
+      await this.approvalsRepo.markExecutionFailed(
+        approvalId,
+        "approval payload missing required fields: rootActionName, replayJournal",
+      );
+      return;
+    }
+
     const payload = rawPayload as unknown as ApprovalPayload;
 
     // Claim execution atomically (queued -> running) so only one worker runs it.
@@ -122,7 +136,6 @@ export class ApprovalHandler {
     log.info("processing approved action", {
       approvalId,
       actionName: payload.actionName,
-      hasReplayJournal: !!payload.replayJournal,
       hasSessionId: !!payload.sessionId,
     });
 
@@ -142,10 +155,10 @@ export class ApprovalHandler {
   private async executeApprovedAction(
     approvalId: string,
     payload: ApprovalPayload,
-    emit?: (msg: AgentMessage & { agent?: string }) => void,
+    emit?: (msg: AgentEvent & { agent?: string }) => void,
   ): Promise<void> {
     const agentName = payload.agentName ?? "main";
-    // The trace stream is shaped around AgentMessage, so we synthesize a
+    // The trace stream is shaped around AgentEvent, so we synthesize a
     // tool_use/tool_result pair to make this deferred execution visible in
     // the chat. The `approval:` prefix keeps the id distinguishable from
     // SDK-issued `toolu_*` ids and makes it queryable back to the approval row.
@@ -160,34 +173,30 @@ export class ApprovalHandler {
         agent: agentName,
       });
 
-      let result: ActionResult;
-      if (payload.replayJournal && payload.rootActionName) {
-        const runContext: ActionRunContext = {
-          initiator: `approval:${approvalId}`,
-          replayJournal: payload.replayJournal,
-          replayRootExecutionId: payload.rootExecutionId,
-          channelContext: payload.channelContext,
-          sharedContext: payload.sharedContext,
-          sessionId: payload.sessionId,
-          agentName: payload.agentName,
-          channelThreadKey: payload.channelThreadKey,
-        };
-        result = await this.actionEngine.run(
-          payload.rootActionName,
-          payload.rootArgs ?? {},
-          runContext,
-        );
-      } else {
-        result = await this.actionEngine.run(payload.actionName, payload.args, {
-          initiator: `approval:${approvalId}`,
-        });
-      }
+      // The engine records the root call and its journal with every approval,
+      // so approving replays the root and resumes at the approved call.
+      const runContext: ActionRunContext = {
+        initiator: `approval:${approvalId}`,
+        replayJournal: payload.replayJournal,
+        replayRootExecutionId: payload.rootExecutionId,
+        channelContext: payload.channelContext,
+        sharedContext: payload.sharedContext,
+        sessionId: payload.sessionId,
+        agentName: payload.agentName,
+        channelThreadKey: payload.channelThreadKey,
+      };
+      const result = await this.actionEngine.run(
+        payload.rootActionName,
+        payload.rootArgs,
+        runContext,
+      );
 
       emit?.({
         type: "tool_result",
         toolUseId: traceId,
         tool: payload.actionName,
         output: result,
+        isError: result.status === "error",
         agent: agentName,
       });
 
@@ -226,6 +235,7 @@ export class ApprovalHandler {
         toolUseId: traceId,
         tool: payload.actionName,
         output: { error: "Action execution failed. See server logs for details." },
+        isError: true,
         agent: agentName,
       });
       try {
@@ -241,6 +251,18 @@ export class ApprovalHandler {
     if (!approval) return;
 
     const payload = approval.payload as ApprovalPayload | null;
+
+    if (payload?.actionName && payload.args) {
+      try {
+        await this.resolutionObserver?.approvalRejected(payload.actionName, payload.args);
+      } catch (err) {
+        log.error("approval rejection observer failed", {
+          approvalId,
+          actionName: payload.actionName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     if (payload?.sessionId) {
       try {

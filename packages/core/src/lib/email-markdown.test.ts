@@ -61,6 +61,35 @@ describe("inboundBodyToMarkdown", () => {
     expect(inboundBodyToMarkdown({ text: "from text" })).toBe("from text");
     expect(inboundBodyToMarkdown({}, "the preview")).toBe("the preview");
   });
+
+  it("falls back to the preview when stripped text cleans to empty", () => {
+    for (const strippedText of ["https://track.example/message", "\u200B\u00AD", "&nbsp;"]) {
+      expect(inboundBodyToMarkdown({ strippedText }, "  The message preview  ")).toBe(
+        "The message preview",
+      );
+    }
+  });
+
+  it("preserves the preview when all body alternatives clean to empty", () => {
+    expect(
+      inboundBodyToMarkdown(
+        {
+          html: '<img src="https://track.example/pixel.png">',
+          text: "https://track.example/message",
+          strippedHtml: "<p>&nbsp;</p>",
+          strippedText: "https://track.example/message",
+        },
+        "The message preview",
+      ),
+    ).toBe("The message preview");
+  });
+
+  it("uses nonempty stripped text before the preview", () => {
+    expect(inboundBodyToMarkdown({ strippedText: "  Useful body  " }, "preview")).toBe(
+      "Useful body",
+    );
+    expect(inboundBodyToMarkdown({ strippedText: "https://track.example/message" })).toBe("");
+  });
 });
 
 describe("markdownToEmailHtml (outbound Markdown → HTML)", () => {
@@ -84,6 +113,116 @@ describe("markdownToEmailHtml (outbound Markdown → HTML)", () => {
     expect(html).toContain("https://romeos.cc/public-transparent.png");
     expect(html).toMatch(/public-transparent\.png"[^>]*width="16"/);
     expect(html).toMatch(/opacity: 0\.55/);
+  });
+});
+
+describe("dashboard links in outbound mail", () => {
+  const origin = "https://acme.romeos.cc";
+  const hrefs = (html: string) =>
+    [...html.matchAll(/<a\b[^>]*?\bhref="([^"]*)"/g)].map((m) => m[1]);
+
+  it("resolves root-relative links against the instance origin in HTML and text", () => {
+    const { html, text } = markdownToEmailHtml(
+      [
+        'See [file.md](</memory/topics/file.md>) and [plan](/projects/demo/plan.md#todo "Plan").',
+        "Watch the [browser](/desktop), or read [notes][n].",
+        "",
+        "[n]: /memory/notes.md",
+      ].join("\n"),
+      origin,
+    );
+    expect(hrefs(html)).toEqual([
+      "https://acme.romeos.cc/memory/topics/file.md",
+      "https://acme.romeos.cc/projects/demo/plan.md#todo",
+      "https://acme.romeos.cc/desktop",
+      "https://acme.romeos.cc/memory/notes.md",
+      "https://acme.romeos.cc/settings",
+    ]);
+    expect(text).toBe(
+      [
+        'See [file.md](<https://acme.romeos.cc/memory/topics/file.md>) and [plan](https://acme.romeos.cc/projects/demo/plan.md#todo "Plan").',
+        "Watch the [browser](https://acme.romeos.cc/desktop), or read [notes][n].",
+        "",
+        "[n]: https://acme.romeos.cc/memory/notes.md",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves external links, other hosts, fragments and code samples as written", () => {
+    const markdown = [
+      "[docs](https://example.com/docs) [cdn](//cdn.example/x) [top](#top)",
+      "",
+      "Write `[file.md](</memory/topics/file.md>)` to link a file:",
+      "",
+      "```md",
+      "[plan](/projects/demo/plan.md)",
+      "```",
+    ].join("\n");
+    const { html, text } = markdownToEmailHtml(markdown, origin);
+    expect(hrefs(html)).toEqual([
+      "https://example.com/docs",
+      "//cdn.example/x",
+      "#top",
+      "https://acme.romeos.cc/settings",
+    ]);
+    expect(html).toContain("[file.md](&lt;/memory/topics/file.md&gt;)");
+    expect(html).toContain("[plan](/projects/demo/plan.md)");
+    expect(text).toBe(markdown);
+  });
+
+  it("keeps code samples in text/plain as written, a link's label included", () => {
+    const { html, text } = markdownToEmailHtml(
+      [
+        "Write `[a](/memory/a.md)` for [a](/memory/a.md).",
+        "The [`[b](/memory/b.md)` form](/memory/b.md) works too.",
+      ].join("\n"),
+      origin,
+    );
+    expect(hrefs(html).slice(0, 2)).toEqual([
+      "https://acme.romeos.cc/memory/a.md",
+      "https://acme.romeos.cc/memory/b.md",
+    ]);
+    expect(html).toContain(">[a](/memory/a.md)</code>");
+    expect(html).toContain(">[b](/memory/b.md)</code>");
+    // The first link's source text also sits in a code sample, so text/plain
+    // keeps both occurrences as written.
+    expect(text).toBe(
+      [
+        "Write `[a](/memory/a.md)` for [a](/memory/a.md).",
+        "The [`[b](/memory/b.md)` form](https://acme.romeos.cc/memory/b.md) works too.",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves links relative and the footer on romeos.cc without an instance origin", () => {
+    const { html, text } = markdownToEmailHtml("[file.md](</memory/topics/file.md>)");
+    expect(hrefs(html)).toEqual(["/memory/topics/file.md", "https://romeos.cc"]);
+    expect(text).toBe("[file.md](</memory/topics/file.md>)");
+    expect(hrefs(htmlToEmailMultipart('<a href="/desktop">browser</a>').html)).toEqual([
+      "/desktop",
+      "https://romeos.cc",
+    ]);
+  });
+
+  it("resolves links in app HTML, the text derived from it, and the agent's text", () => {
+    const app =
+      '<p>See <a href="/projects/demo/report.html?v=2">the report</a> or <a href="https://example.com/">example</a>.</p>';
+    const derived = htmlToEmailMultipart(app, undefined, origin);
+    expect(hrefs(derived.html)).toEqual([
+      "https://acme.romeos.cc/projects/demo/report.html?v=2",
+      "https://example.com/",
+      "https://acme.romeos.cc/settings",
+    ]);
+    expect(derived.text).toContain(
+      "[the report](https://acme.romeos.cc/projects/demo/report.html?v=2)",
+    );
+
+    const { text } = htmlToEmailMultipart(
+      app,
+      "Read [the report](/projects/demo/report.html).",
+      origin,
+    );
+    expect(text).toBe("Read [the report](https://acme.romeos.cc/projects/demo/report.html).");
   });
 });
 

@@ -1,0 +1,8 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+echo "$$" >process-group
+# The retry job must be cancellable while s6-rc shuts down the service graph.
+trap 'exit 0' TERM INT
+/etc/s6-overlay/scripts/rome-tailscale-setup &
+wait "$!" || true
+exec sleep infinity

@@ -1,17 +1,26 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { v4 as uuid } from "uuid";
-import type { Attachment, NormalizedMessage, OutgoingMessage } from "@rome-os/app-runtime";
-import type { ProviderAdapter } from "./adapter.js";
+import type {
+  Attachment,
+  ChannelMessage,
+  ChatId,
+  MessageReceipt,
+  OutgoingMessage,
+} from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
-import { InMemoryInboundDedup, type InboundDedup } from "./inbound-dedup.js";
+import { InboundDedup } from "./inbound-dedup.js";
+import {
+  type EmailReplyTarget,
+  type ResolvedEmailReplyTarget,
+  resolveEmailReplyTarget,
+} from "./email-reply-target.js";
 import type {
   MailProvider,
   RomeMailEvent,
-  RomeMailMessage,
-  RomeMailListItem,
+  SendMailResult,
   EmailAddress,
   EmailBodyPart,
 } from "../lib/rome-cloud-mail.js";
@@ -27,6 +36,7 @@ import {
   type IncomingAttachmentPayload,
 } from "./attachment-files.js";
 import { proveIdentity } from "../lib/instance-identity.js";
+import { getConfiguredInstanceOrigin } from "../lib/rome-cloud-origin.js";
 
 const log = createLogger("channel-email");
 
@@ -58,19 +68,13 @@ export interface EmailInboxCoordinates {
 export interface EmailAdapterDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   config: EmailInboxCoordinates;
   /**
    * Resolve the account owner's (guardian's) email from Rome Cloud when none is
    * configured. Defaults to the `whoami` lookup; injectable for tests.
    */
   ownerEmailResolver?: () => Promise<string | undefined>;
-  /**
-   * Idempotency guard for at-least-once relay redelivery. Defaults to an
-   * in-memory LRU; injectable so a persistent implementation can be swapped in
-   * (or a deterministic one used in tests).
-   */
-  inboundDedup?: InboundDedup;
 }
 
 /** Default owner-email resolver: the whoami identity carries the
@@ -94,53 +98,7 @@ function firstAddress(list: EmailAddress[] | undefined): EmailAddress | undefine
   return list && list.length > 0 ? list[0] : undefined;
 }
 
-// Pull the display-name out of an RFC 5322 From string (`"Ray" <ray@x>` →
-// `Ray`). Only used on the history fallback path, where a body hydration miss
-// leaves us with the list item's raw `from` string instead of AgentMail's
-// parsed name/email pair.
-function parseDisplayName(value: string | undefined): string {
-  if (!value) return "";
-  const match = value.match(/^\s*"?([^"<]+?)"?\s*</u);
-  return match ? match[1].trim() : "";
-}
-
-// Bounded-concurrency map, preserving input order. Hydrates history message
-// bodies without firing one request per message at once against the mail API.
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let i = cursor++; i < items.length; i = cursor++) {
-      results[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
-// Default look-back when the caller's window is missing or invalid (matches the
-// other history adapters, e.g. webchat).
-const DEFAULT_HISTORY_WINDOW_HOURS = 24;
-// History fetch bounds: cap total matched messages so an unbounded window can't
-// pull the whole mailbox, page in chunks, and hydrate a few bodies at a time.
-const HISTORY_MAX_MESSAGES = 200;
-const HISTORY_PAGE_LIMIT = 100;
-const HISTORY_HYDRATE_CONCURRENCY = 5;
-// AgentMail's list has no server-side thread filter, so a thread-scoped fetch
-// narrows client-side. This bounds how many messages we'll scan looking for
-// matches before giving up, so a sparse thread in a busy inbox can't make us
-// page the entire mailbox. Only relevant when threadId is set (otherwise the
-// message cap is reached first).
-const HISTORY_MAX_SCAN = 2000;
-// Hard backstop on paging iterations. The scan cap counts *messages*, so it
-// can't bound a misbehaving provider that returns empty pages with a non-null
-// cursor (0 messages ⇒ scan count never advances). This caps the number of
-// list calls regardless of what each page contains, guaranteeing termination.
-const HISTORY_MAX_PAGES = 50;
+const REPLY_TARGET_CACHE_SIZE = 2000;
 
 function attachmentTypeFromMime(mime: string | undefined): Attachment["type"] {
   const m = (mime ?? "").toLowerCase();
@@ -177,35 +135,31 @@ function textFromParts(parts: OutgoingMessage["parts"]): string {
 }
 
 /**
- * Email as a first-class channel. Outbound reuses the standard
- * `ProviderAdapter.sendMessage` path; inbound is push-driven by Rome Cloud: the
+ * Email as a first-class channel. Inbound is push-driven by Rome Cloud: the
  * `email_inbound` core-side action calls `ingestInbound()` with the raw relay
  * deposit, which this adapter verifies (HMAC), gates (authentication + From),
- * pulls the body for, normalizes, and feeds into the same `onMessage` pipeline
- * every other channel uses.
+ * pulls the body for, and hands to `onInbound` as the channel's own record, a
+ * `ChannelMessage` whose `raw` is the `RomeMailEvent`. The Connection
+ * integration delivers it as it is.
  */
-export class EmailAdapter implements ProviderAdapter {
-  readonly channelName = "email";
-
+export class EmailAdapter {
   private readonly provider: MailProvider;
   private readonly settingsRepo: SettingsRepository;
-  private readonly personMappingRepo: PersonMappingRepository;
+  private readonly peopleRepo: PeopleRepository;
   private readonly ownerEmailResolver: () => Promise<string | undefined>;
-  private readonly inboundDedup: InboundDedup;
+  private readonly inboundDedup = new InboundDedup();
 
   private address: string;
   private inboundSecret: string;
   private guardianEmail: string;
 
-  private messageHandler: ((msg: NormalizedMessage) => Promise<void>) | null = null;
+  private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
-  // AgentMail wants a provider message id to keep a reply on-thread, but Rome's
-  // thread key is the (stable) AgentMail thread id. Map the latest inbound
-  // message id per thread so a reply can address the thread correctly. In-memory
-  // is fine: a reply follows its inbound within the same process lifetime, and a
-  // miss falls back to a fresh `to:` send.
-  private readonly threadReplyTarget = new Map<string, string>();
-  private readonly threadSubject = new Map<string, string>();
+  // The message each thread's replies target: the newest inbound, or the newest
+  // message Rome sent, for a thread with no inbound. The mailbox scan applies
+  // the same rule. This bounded cache saves that scan per reply but is not
+  // durable state; a miss falls back to the scan.
+  private readonly threadReplyTarget = new Map<string, EmailReplyTarget>();
 
   // Per-inbound attachment manifest (provider message id → downloadable body
   // parts), set in ingestInbound and consumed by saveIncomingAttachments to pull
@@ -216,14 +170,13 @@ export class EmailAdapter implements ProviderAdapter {
   constructor(deps: EmailAdapterDeps) {
     this.provider = deps.provider;
     this.settingsRepo = deps.settingsRepo;
-    this.personMappingRepo = deps.personMappingRepo;
+    this.peopleRepo = deps.peopleRepo;
     this.address = deps.config.address;
     this.inboundSecret = deps.config.inboundSecret;
     // guardianEmail is durable settings config, resolved from the settings row
     // (or self-healed from Rome Cloud) in start() — never carried in the grant.
     this.guardianEmail = "";
     this.ownerEmailResolver = deps.ownerEmailResolver ?? resolveOwnerEmailFromCloud;
-    this.inboundDedup = deps.inboundDedup ?? new InMemoryInboundDedup();
   }
 
   /** The provisioned `<slug>@romeos.cc` address, once known. */
@@ -233,7 +186,7 @@ export class EmailAdapter implements ProviderAdapter {
 
   async start(): Promise<void> {
     // Provisioning is route-driven: the connect ceremony calls
-    // MailProvider.provision() and confers the `inbox` grant directly, so the
+    // MailProvider.provision() and grants the `inbox` grant directly, so the
     // registry only ever builds this adapter from complete grant material —
     // there is no secretless start here to self-provision.
 
@@ -278,13 +231,11 @@ export class EmailAdapter implements ProviderAdapter {
     // known address lands on the trusted path. The inbound gate still enforces
     // authentication before honoring this mapping (see ingestInbound).
     if (this.guardianEmail) {
-      await mapGuardianToChannel(this.personMappingRepo, "email", this.guardianEmail).catch(
-        (err) => {
-          log.warn("failed to preset guardian email mapping", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        },
-      );
+      await mapGuardianToChannel(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
+        log.warn("failed to preset guardian email mapping", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
 
     log.info("email channel started", { address: this.address });
@@ -292,12 +243,11 @@ export class EmailAdapter implements ProviderAdapter {
 
   async stop(): Promise<void> {
     this.threadReplyTarget.clear();
-    this.threadSubject.clear();
     this.pendingAttachments.clear();
     log.info("email channel stopped");
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.messageHandler = handler;
   }
 
@@ -318,57 +268,173 @@ export class EmailAdapter implements ProviderAdapter {
     return resolved.includes("@") ? resolved : "";
   }
 
-  async sendMessage(channelUserId: string, threadId: string, message: OutgoingMessage) {
+  /**
+   * Send into a conversation and return the provider's receipt: its message ID
+   * and thread ID. Unresolved threads, unresolved recipients, and attachments
+   * throw before anything is sent. A provider answer without both IDs throws as
+   * unconfirmed, since the mail may have gone out.
+   *
+   * An empty body is the one exception that neither sends nor throws, unless the
+   * caller asked for an email explicitly (`kind: "email"`). Parts-only messages
+   * such as approval cards have no email rendering, so the adapter skips them and
+   * receipts the conversation it was asked for, without a `messageId`.
+   *
+   * A thread reply targets the newest received message in the thread, falling
+   * back to the newest message Rome sent for a thread nobody else wrote in.
+   */
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const outcome = await this.sendMail(chatId, message);
+    if (!outcome) return { chatId };
+    const { sent, startedThread } = outcome;
+    // An explicit reply on an uncached thread says nothing about whether the
+    // thread has inbound mail, so only a new or cached thread records the send.
+    if (startedThread || this.threadReplyTarget.has(sent.threadId)) {
+      this.rememberReplyTarget(sent.threadId, { messageId: sent.messageId, outbound: true });
+    }
+    log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
+    return { chatId: sent.threadId as ChatId, messageId: sent.messageId };
+  }
+
+  // A sent message never replaces a received one, so once a thread has inbound
+  // mail, replies keep addressing the other party.
+  private rememberReplyTarget(threadId: string, target: EmailReplyTarget): void {
+    if (!threadId || !target.messageId) return;
+    const cached = this.threadReplyTarget.get(threadId);
+    const next = target.outbound && cached && !cached.outbound ? cached : target;
+    this.threadReplyTarget.delete(threadId);
+    this.threadReplyTarget.set(threadId, next);
+    if (this.threadReplyTarget.size > REPLY_TARGET_CACHE_SIZE) {
+      const oldest = this.threadReplyTarget.keys().next().value;
+      if (oldest !== undefined) this.threadReplyTarget.delete(oldest);
+    }
+  }
+
+  private async threadReplyTargetFor(threadId: string): Promise<EmailReplyTarget> {
+    const cached = this.threadReplyTarget.get(threadId);
+    if (cached) return cached;
+    let resolved: ResolvedEmailReplyTarget;
+    try {
+      resolved = await resolveEmailReplyTarget(this.provider, threadId, {
+        isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
+      });
+    } catch (err) {
+      // A target cached while the lookup ran is as good as a cache hit.
+      const live = this.threadReplyTarget.get(threadId);
+      if (live) return live;
+      throw err;
+    }
+    const target = { messageId: resolved.messageId, outbound: resolved.outbound };
+    // A target cached while the lookup ran is newer than anything it found,
+    // unless it is Rome's own message and the lookup found an inbound one.
+    const live = this.threadReplyTarget.get(threadId);
+    if (live && (!live.outbound || target.outbound)) return live;
+    // A fallback from a lookup cut short serves this send only, so the next
+    // reply looks for the inbound again.
+    if (resolved.complete) this.rememberReplyTarget(threadId, target);
+    return target;
+  }
+
+  // AgentMail labels this inbox's own sends "sent". A `from` equal to the inbox
+  // address also counts, so the rule survives a change in label vocabulary.
+  private isOwnMessage(labels: string[], fromAddress: string): boolean {
+    const selfAddress = normalizeAddress(this.address);
+    return labels.includes("sent") || (selfAddress !== "" && fromAddress === selfAddress);
+  }
+
+  /** Returns undefined only when an empty body was skipped without sending. */
+  private async sendMail(
+    threadId: string,
+    message: OutgoingMessage,
+  ): Promise<{ sent: SendMailResult; startedThread: boolean } | undefined> {
+    // The mail transport has no attachment field. Reject before sending a body
+    // that would falsely appear to deliver the requested files.
+    if (message.attachments?.length) {
+      throw new Error(
+        "Email attachments are not supported by the mail transport. No email was sent.",
+      );
+    }
     const email = message.kind === "email" ? message : undefined;
+    if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
+      throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+    }
     const bodyText = (message.text ?? textFromParts(message.parts)).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.
     // Always send both `text` and `html`.
+    const instanceOrigin = getConfiguredInstanceOrigin();
     let text: string | undefined;
     let html: string | undefined;
     if (email?.html?.trim()) {
-      const multi = htmlToEmailMultipart(email.html, bodyText || undefined);
+      const multi = htmlToEmailMultipart(email.html, bodyText || undefined, instanceOrigin);
       html = multi.html;
       text = multi.text;
     } else if (bodyText) {
-      const multi = markdownToEmailHtml(bodyText);
+      const multi = markdownToEmailHtml(bodyText, instanceOrigin);
       html = multi.html;
       text = multi.text;
     }
     if (!text && !html) {
+      if (email) throw new Error("Email requires non-empty text or HTML. No email was sent.");
       log.debug("skipping empty outbound email", { threadId: threadId || null });
-      return;
+      return undefined;
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
     const bcc = email?.bcc?.length ? email.bcc : undefined;
 
-    // Reply on-thread when we have a provider message id — either passed
-    // explicitly (survives restarts) or remembered from the inbound this process
-    // handled. The provider keeps the subject/recipients of the original thread.
-    const inReplyToMessageId = email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId);
-    if (inReplyToMessageId) {
+    // An explicit message ID wins. A thread miss must not become a fresh send,
+    // even when the caller also supplied `to`.
+    if (email?.inReplyToMessageId) {
+      const inReplyToMessageId = email.inReplyToMessageId;
       const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
-      log.info("sent email reply", { threadId: threadId || null });
-      return sent;
+      return { sent, startedThread: false };
+    }
+    // A chat-style conversation id that names an address or the guardian alias
+    // starts a new email, so a missing guardian address gets its own error.
+    const addressTarget =
+      !email &&
+      (!!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian");
+    if (threadId && (this.threadReplyTarget.has(threadId) || !addressTarget)) {
+      const target = await this.threadReplyTargetFor(threadId);
+      if (target.outbound) {
+        // Where the provider delivers a reply to Rome's own message is
+        // unverified, so leave a trace for anyone checking that path.
+        log.info("email reply targets a message Rome sent", {
+          threadId,
+          inReplyToMessageId: target.messageId,
+        });
+      }
+      const inReplyToMessageId = target.messageId;
+      const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
+      return { sent, startedThread: false };
     }
 
     // No thread: start a fresh email. Recipients come from `email.to`,
-    // falling back to channelUserId for the legacy path.
-    const recipients = this.resolveRecipients(email?.to ?? channelUserId);
+    // falling back to the conversation id, which then names the address.
+    const to = email?.to ?? threadId;
+    const recipients = this.resolveRecipients(to);
     const hasRecipient = Array.isArray(recipients) ? recipients.length > 0 : !!recipients;
-    if (!hasRecipient) {
-      log.warn("cannot send email: no recipient resolved", { threadId: threadId || null });
-      return;
-    }
-    const subject =
-      email?.subject?.trim() || this.threadSubject.get(threadId) || "Message from Rome";
+    if (!hasRecipient) throw new Error(this.noRecipientMessage(to));
+    const subject = email?.subject?.trim() || "Message from Rome";
     const sent = await this.provider.send({ to: recipients, cc, bcc, subject, text, html });
-    log.info("sent new email", {
-      recipients: Array.isArray(recipients) ? recipients.length : 1,
-    });
-    return sent;
+    return { sent, startedThread: true };
+  }
+
+  private noRecipientMessage(to: string | string[]): string {
+    const values = (Array.isArray(to) ? to : [to]).map((value) => value.trim());
+    if (values.some((value) => value.toLowerCase() === "guardian") && !this.guardianEmail) {
+      return (
+        'Cannot send email to "guardian": Rome has no guardian email address yet. ' +
+        "No email was sent. Set `to` to an email address."
+      );
+    }
+    const shown = values.map((value) => JSON.stringify(value)).join(", ") || '""';
+    const verdict = values.length > 1 ? `none of ${shown} is` : `${shown} is not`;
+    return (
+      `Cannot send email: ${verdict} an email address. No email was sent. ` +
+      'Set `to` to an email address or "guardian", or reply on a thread with `threadId`.'
+    );
   }
 
   /**
@@ -376,10 +442,12 @@ export class EmailAdapter implements ProviderAdapter {
    * this once per inbound that carries attachments. We resolve a short-lived
    * presigned URL per part via Rome Cloud, download directly, and persist under
    * the standard channel-attachment directory. Failures are logged and skipped
-   * so one bad attachment never blocks the message.
+   * so one bad attachment never blocks the message. The parts come from what
+   * `ingestInbound` recorded under `message.messageId`, not from `raw`, so a
+   * message this adapter did not ingest returns its attachments unchanged.
    */
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
-    const parts = this.pendingAttachments.get(message.id);
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
+    const parts = this.pendingAttachments.get(message.messageId);
     if (!parts || parts.length === 0) return message.attachments;
 
     const payloads: IncomingAttachmentPayload[] = [];
@@ -387,7 +455,7 @@ export class EmailAdapter implements ProviderAdapter {
       const attachment = message.attachments[index];
       if (!attachment || !part.blobId) continue;
       try {
-        const download = await this.provider.getAttachment(message.id, part.blobId);
+        const download = await this.provider.getAttachment(message.messageId, part.blobId);
         const response = await fetch(download.downloadUrl, {
           signal: AbortSignal.timeout(120_000),
         });
@@ -403,29 +471,29 @@ export class EmailAdapter implements ProviderAdapter {
       } catch (err) {
         if (isAttachmentTooLargeError(err)) {
           log.warn("email attachment too large, skipping save", {
-            messageId: message.id,
+            messageId: message.messageId,
             bytes: err.bytes,
             fileName: part.name ?? null,
           });
           continue;
         }
         log.warn("failed to download email attachment, continuing", {
-          messageId: message.id,
+          messageId: message.messageId,
           fileName: part.name ?? null,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
 
-    this.pendingAttachments.delete(message.id);
-    return saveIncomingAttachmentPayloads(message, payloads);
+    this.pendingAttachments.delete(message.messageId);
+    return saveIncomingAttachmentPayloads({ ...message, channel: "email" }, payloads);
   }
 
   /**
    * Consume one inbound relay deposit (a signed `RomeMailEvent` JSON string).
    * Called by the `email_inbound` action after the connector transports the
    * deposit in. Verifies the per-inbox HMAC, applies the guardian gate, pulls
-   * the body on demand, and dispatches a NormalizedMessage into the standard
+   * the body on demand, and dispatches a ChannelMessage into the standard
    * channel pipeline. Returns the disposition for logging/tests.
    */
   async ingestInbound(
@@ -464,7 +532,7 @@ export class EmailAdapter implements ProviderAdapter {
     // used below, which would defeat dedup. With neither id present we can't
     // dedup, so fall through and process.
     const dedupKey = event.providerMessageId || event.id;
-    if (dedupKey && (await this.inboundDedup.checkAndRecord(dedupKey))) {
+    if (dedupKey && this.inboundDedup.checkAndRecord(dedupKey)) {
       log.info("inbound email skipped: duplicate redelivery", { dedupKey });
       return { status: "skipped", reason: "duplicate" };
     }
@@ -484,7 +552,7 @@ export class EmailAdapter implements ProviderAdapter {
     const authenticated =
       event.authentication?.authenticated === true && !event.authentication.blocked;
     const claimsGuardian = !!this.guardianEmail && fromAddress === this.guardianEmail;
-    const channelUserId = authenticated ? fromAddress : `unauthenticated:${fromAddress}`;
+    const senderId = authenticated ? fromAddress : `unauthenticated:${fromAddress}`;
     if (!authenticated) {
       log.warn("inbound email failed authentication; routing untrusted", {
         from: fromAddress,
@@ -507,8 +575,7 @@ export class EmailAdapter implements ProviderAdapter {
     }
 
     const threadId = event.threadId;
-    this.threadReplyTarget.set(threadId, event.providerMessageId);
-    this.threadSubject.set(threadId, event.subject ? `Re: ${event.subject}` : "Message from Rome");
+    this.rememberReplyTarget(threadId, { messageId: event.providerMessageId, outbound: false });
 
     // Attachment manifest from the event (bytes pulled lazily by
     // saveIncomingAttachments). Keep the parts list aligned with the surfaced
@@ -518,163 +585,27 @@ export class EmailAdapter implements ProviderAdapter {
     const messageId = event.providerMessageId || uuid();
     if (parts.length > 0) this.pendingAttachments.set(messageId, parts);
 
-    const normalized: NormalizedMessage = {
-      id: messageId,
+    const message: ChannelMessage = {
       channel: "email",
-      channelUserId,
-      displayName: fromName,
-      threadId,
-      threadName: event.subject,
-      threadType: "private",
-      timestamp: new Date(event.receivedAt ?? Date.now()),
+      direction: "inbound",
+      messageId,
+      chatId: threadId as ChatId,
+      senderId,
+      senderDisplayName: fromName,
       text,
       attachments,
-      rawEvent: event,
+      timestamp: new Date(event.receivedAt ?? Date.now()),
+      thread: { kind: "dm", ...(event.subject ? { name: event.subject } : {}) },
+      raw: event,
     };
 
-    await this.messageHandler(normalized);
+    await this.messageHandler(message);
     log.info("inbound email dispatched", {
       threadId,
       from: fromAddress,
       trusted: claimsGuardian && authenticated,
     });
     return { status: "dispatched" };
-  }
-
-  /**
-   * Read-only history fetch (powers `fetch_channel_history` for email). Pages the
-   * provider's `list` (newest-first, server-side filtered by `after` and with
-   * spam/blocked/unauthenticated excluded by default), optionally narrows to one
-   * thread, hydrates each message's full body via the on-demand pull path, and
-   * returns NormalizedMessages oldest-first. This path is pure: unlike
-   * `ingestInbound` it records no dedup, mutates no reply-target/subject/attachment
-   * state, and dispatches nothing — it only reads and shapes.
-   */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
-    // `fetch_channel_history` accepts arbitrary numeric input from agents, so a
-    // NaN/Infinity/negative window would throw on `toISOString()` or invert the
-    // window into the future. Clamp to the default first, matching the other
-    // history adapters.
-    const effectiveWindowHours =
-      Number.isFinite(windowHours) && windowHours > 0 ? windowHours : DEFAULT_HISTORY_WINDOW_HOURS;
-    const afterIso = new Date(Date.now() - effectiveWindowHours * 60 * 60 * 1000).toISOString();
-
-    // 1. Page newest-first, applying the optional thread filter *per page* so the
-    //    cap counts matching messages, not raw mailbox volume. Without this, a
-    //    thread-scoped fetch in a busy inbox could exhaust the cap on the newest
-    //    200 messages overall — none of them in the requested thread — and return
-    //    nothing even though the thread has messages in the window. Stop when we've
-    //    collected enough matches, the cursor is exhausted, or we hit the scan
-    //    ceiling (the latter only bites a sparse thread in a huge mailbox).
-    const matched: RomeMailListItem[] = [];
-    let pageToken: string | undefined;
-    let scanned = 0;
-    let pages = 0;
-    let capHit = false;
-    let scanCapHit = false;
-    do {
-      const page = await this.provider.listMessages({
-        after: afterIso,
-        limit: HISTORY_PAGE_LIMIT,
-        ascending: false,
-        pageToken,
-      });
-      pages += 1;
-      scanned += page.messages.length;
-      for (const m of page.messages) {
-        if (threadId && m.threadId !== threadId) continue;
-        matched.push(m);
-        if (matched.length >= HISTORY_MAX_MESSAGES) {
-          capHit = true;
-          break;
-        }
-      }
-      pageToken = page.nextPageToken;
-      if (capHit) break;
-      // Termination guards. An empty page means nothing more to collect, so stop
-      // regardless of the cursor. The scan/page caps bound the worst case even
-      // if the provider keeps handing back a non-null cursor — the loop can't run
-      // away on a misbehaving list API.
-      if (page.messages.length === 0) break;
-      if (scanned >= HISTORY_MAX_SCAN || pages >= HISTORY_MAX_PAGES) {
-        scanCapHit = true;
-        break;
-      }
-    } while (pageToken);
-
-    // Truncated only if we stopped early with more pages still available.
-    if (capHit || (scanCapHit && Boolean(pageToken))) {
-      log.warn("email history truncated", {
-        reason: capHit ? "message-cap" : "scan-cap",
-        cap: HISTORY_MAX_MESSAGES,
-        scanCap: HISTORY_MAX_SCAN,
-        scanned,
-        matched: matched.length,
-        windowHours: effectiveWindowHours,
-        threadId: threadId ?? null,
-      });
-    }
-
-    // 2. Hydrate full bodies (bounded concurrency); a pull miss falls back to the
-    //    list preview rather than dropping the message.
-    const normalized = await mapWithConcurrency(matched, HISTORY_HYDRATE_CONCURRENCY, (item) =>
-      this.historyItemToMessage(item),
-    );
-
-    // 3. Oldest-first, matching the other channels' fetchHistory contract.
-    return normalized.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }
-
-  // Shape one listed message into a NormalizedMessage, hydrating its body. No
-  // side effects — see fetchHistory.
-  private async historyItemToMessage(item: RomeMailListItem): Promise<NormalizedMessage> {
-    let text = (item.preview ?? "").trim();
-    let full: RomeMailMessage | undefined;
-    try {
-      full = await this.provider.getMessage(item.providerMessageId);
-      text = inboundBodyToMarkdown(full.body, item.preview);
-    } catch (err) {
-      log.warn("failed to hydrate email history body; falling back to preview", {
-        messageId: item.providerMessageId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    const fromContact = firstAddress(full?.from);
-    const fromAddress = normalizeAddress(fromContact?.email ?? item.from);
-    const fromName = fromContact?.name?.trim() || parseDisplayName(item.from) || fromAddress;
-
-    // A thread mixes inbound (counterparty) mail and outbound mail Rome itself
-    // sent. AgentMail labels our own sends "sent"; we also treat a `from` that
-    // matches our own inbox as outbound so attribution survives a label-vocabulary
-    // change. Attributing outbound to Rome (rather than to the recipient) keeps
-    // the transcript a readable two-sided conversation: received lines show the
-    // counterparty, sent lines show Rome — mirroring the telegram-user adapter.
-    const selfAddress = normalizeAddress(this.address);
-    const isOutbound =
-      item.labels.includes("sent") || (selfAddress !== "" && fromAddress === selfAddress);
-    const channelUserId = isOutbound ? selfAddress : fromAddress;
-    const displayName = isOutbound ? selfAddress : fromName;
-
-    // Surface attachment metadata only (no lazy-download wiring on the read path).
-    const parts = downloadableParts(full?.attachments ?? []);
-    const attachments: Attachment[] = attachmentsFromParts(parts);
-
-    return {
-      id: item.providerMessageId,
-      channel: "email",
-      // The list already excludes unauthenticated mail, so no `unauthenticated:`
-      // namespacing is needed here (unlike ingestInbound).
-      channelUserId,
-      displayName,
-      threadId: item.threadId,
-      threadName: full?.subject ?? item.subject,
-      threadType: "private",
-      timestamp: new Date(item.receivedAt || full?.receivedAt || Date.now()),
-      text,
-      attachments,
-      rawEvent: full ?? item,
-    };
   }
 
   private verifySignature(rawBody: string, signature: string): boolean {

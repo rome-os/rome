@@ -71,6 +71,31 @@ describe("TurnBranchButton", () => {
     );
   });
 
+  it("submits on Enter but not on Shift+Enter or while composing", async () => {
+    const fetchMock = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json({ sessionId: "enter-branch-session", placement: null }, { status: 201 }),
+      );
+    render(<TurnBranchButton sessionId="chat-session" turnId="turn-5" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "message.branch.open" }));
+    const textarea = screen.getByPlaceholderText("message.branch.promptPlaceholder");
+    fireEvent.change(textarea, { target: { value: "Go deeper" } });
+
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(placeChatWidget).toHaveBeenCalledWith("enter-branch-session"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/chat/sessions/chat-session/turns/turn-5/forks",
+      expect.objectContaining({ body: JSON.stringify({ prompt: "Go deeper" }) }),
+    );
+  });
+
   it("explains a turn with no branch point instead of the generic failure", async () => {
     rs.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json(

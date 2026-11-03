@@ -10,8 +10,8 @@ export async function promptLine(question: string): Promise<string> {
   }
 }
 
-// Prompt without echoing. Falls back to a warning + visible read if stdin is
-// not a TTY (e.g., piped), which lets `--password-stdin` style usage work.
+// Prompt without echoing. When stdin is not a TTY (e.g., piped), reads it to
+// EOF instead, which lets `--password-stdin` style usage work.
 export async function promptSecret(question: string): Promise<string> {
   if (!input.isTTY) {
     const chunks: Buffer[] = [];

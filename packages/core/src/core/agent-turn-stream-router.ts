@@ -1,13 +1,13 @@
-import type { StreamAgentMessage } from "@rome-os/app-runtime";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { IpcRpc } from "../actions/ipc.js";
 
 export interface AgentTurnStreamSink {
-  push(message: StreamAgentMessage): void;
+  push(message: StreamAgentEvent): void;
   end(error?: Error): void;
 }
 
 interface TurnEntry {
-  values: StreamAgentMessage[];
+  values: StreamAgentEvent[];
   done: boolean;
   error?: Error;
   sink?: AgentTurnStreamSink;
@@ -31,7 +31,7 @@ export class AgentTurnStreamRouter {
   private entries = new Map<string, TurnEntry>();
 
   constructor(ipc: IpcRpc) {
-    ipc.onStream<StreamAgentMessage>(/^agent\.turn:/, async (stream) => {
+    ipc.onStream<StreamAgentEvent>(/^agent\.turn:/, async (stream) => {
       const entry = this.entryFor(stream.name);
       try {
         for await (const message of stream.iter()) {

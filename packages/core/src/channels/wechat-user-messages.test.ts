@@ -2,12 +2,16 @@
 // address book, both over the reader.
 //
 // Seams under test:
-//   1. read maps reader rows to the timeline shape, newest-first, and pages
+//   1. query asks the reader and maps its rows to the channel's message record.
+//   2. read maps reader rows to the timeline shape, newest-first, and pages
 //      after a cursor.
-//   2. count sums per-contact counts; latest is the newest across contacts.
-//   3. the address book lists direct contacts (never groups) and resolves a wxid.
+//   3. count sums per-contact counts; latest is the newest across contacts,
+//      re-read for a chat only when its last activity changes. A sweep of
+//      cold lookups leaves room in the reader's queue for a history read.
+//   4. the address book lists direct contacts (never groups) and resolves a wxid.
 
 import { describe, expect, it } from "@rstest/core";
+import type { ChatId } from "@rome-os/app-runtime";
 import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
 import {
   WechatUserSessionRejected,
@@ -15,14 +19,16 @@ import {
   WechatUserRuntimeError,
   WechatUserRuntime,
   WechatUserReader,
-  type WechatUserConversation,
+  type WechatUserChat,
   type WechatUserMessage,
 } from "./wechat-user.js";
+import type { AccountMessages } from "./messages.js";
+import { testMessagesQueryContract } from "./messages-contract.js";
 import { wechatUserAccounts, wechatUserMessages } from "./wechat-user-messages.js";
 
 const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
   id: "wxid_a:1",
-  conversationId: "wxid_a",
+  chatId: "wxid_a",
   isGroup: false,
   senderId: "wxid_a",
   isSelf: false,
@@ -32,7 +38,7 @@ const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
   ...over,
 });
 
-const convo = (over: Partial<WechatUserConversation>): WechatUserConversation => ({
+const convo = (over: Partial<WechatUserChat>): WechatUserChat => ({
   id: "wxid_a",
   name: "Alice",
   isGroup: false,
@@ -42,17 +48,22 @@ const convo = (over: Partial<WechatUserConversation>): WechatUserConversation =>
 
 function fakeReader(opts: {
   byConversation?: Record<string, WechatUserMessage[]>;
-  conversations?: WechatUserConversation[];
+  conversations?: WechatUserChat[];
+  activity?: () => Map<string, string>;
 }): WechatUserReader {
   return {
+    async lastActivity() {
+      if (!opts.activity) throw new WechatUserRuntimeError("no session list");
+      return opts.activity();
+    },
     async messages(input: {
-      conversationId?: string;
+      chatId?: string;
       before?: Date;
       since?: Date;
       limit: number;
       includeBoundaryTies?: boolean;
     }) {
-      let rows = opts.byConversation?.[input.conversationId ?? ""] ?? [];
+      let rows = opts.byConversation?.[input.chatId ?? ""] ?? [];
       if (input.before) {
         const before = Math.floor(input.before.getTime() / 1000);
         rows = rows.filter((m) => m.timestamp <= before);
@@ -69,8 +80,8 @@ function fakeReader(opts: {
           (edge !== undefined && row.timestamp >= edge),
       );
     },
-    async count(conversationId: string) {
-      return (opts.byConversation?.[conversationId] ?? []).length;
+    async count(chatId: string) {
+      return (opts.byConversation?.[chatId] ?? []).length;
     },
     async conversations(input: { query?: string; limit: number }) {
       let rows = opts.conversations ?? [];
@@ -81,6 +92,13 @@ function fakeReader(opts: {
 }
 
 const account = (address: string) => ({ channel: "wechat_user", addresses: [address] });
+
+/** The store's per-account reads, which the WeChat store answers. */
+function accountReads(reader: WechatUserReader): AccountMessages {
+  const reads = wechatUserMessages(reader).byAccount;
+  if (!reads) throw new Error("the WeChat store answers per-account reads");
+  return reads;
+}
 
 describe("wechatUserMessages", () => {
   it("lists an empty directory before the reader is installed", async () => {
@@ -95,26 +113,59 @@ describe("wechatUserMessages", () => {
       msg({ id: `wxid_a:${i}`, isSelf: i % 2 === 0 }),
     );
     rows.push(msg({ id: "wxid_a:older", timestamp: 999 }));
-    const store = wechatUserMessages(fakeReader({ byConversation: { wxid_a: rows } }));
-    for (const conversation of [false, true]) {
-      const found = [];
-      let after: Message | undefined;
-      for (;;) {
-        const page = conversation
-          ? await store.readConversation({
-              conversation: { channel: "wechat_user", id: "wxid_a" },
-              after,
-              limit: 100,
-            })
-          : await store.read({ accounts: [account("wxid_a")], after, limit: 100 });
-        if (!page.length) break;
-        found.push(...page);
-        after = page.at(-1);
-        expect(found.length).toBeLessThanOrEqual(651);
-      }
-      expect(new Set(found.map((row) => row.ref)).size).toBe(651);
-      expect(found.at(-1)?.ref).toBe("wxid_a:older");
+    const store = accountReads(fakeReader({ byConversation: { wxid_a: rows } }));
+    const found = [];
+    let after: Message | undefined;
+    for (;;) {
+      const page = await store.read({ accounts: [account("wxid_a")], after, limit: 100 });
+      if (!page.length) break;
+      found.push(...page);
+      after = page.at(-1);
+      expect(found.length).toBeLessThanOrEqual(651);
     }
+    expect(new Set(found.map((row) => row.ref)).size).toBe(651);
+    expect(found.at(-1)?.ref).toBe("wxid_a:older");
+  });
+  it("queries the reader and answers the channel's message record, newest first", async () => {
+    const asked: unknown[] = [];
+    const reader = {
+      // The reader's own order: oldest first.
+      async messages(input: unknown) {
+        asked.push(input);
+        return [
+          msg({ id: "room@chatroom:1", chatId: "room@chatroom", isSelf: true }),
+          msg({
+            id: "room@chatroom:2",
+            chatId: "room@chatroom",
+            conversationName: "Team",
+            isGroup: true,
+            senderId: "wxid_b",
+            senderName: "Bob",
+            timestamp: 2000,
+          }),
+        ];
+      },
+    } as unknown as WechatUserReader;
+    const since = new Date(500_000);
+
+    const page = await wechatUserMessages(reader).query({
+      chatId: "room@chatroom" as ChatId,
+      since,
+      limit: 5,
+    });
+
+    expect(asked).toEqual([{ chatId: "room@chatroom", since, limit: 5 }]);
+    expect(page[0]).toMatchObject({
+      channel: "wechat_user",
+      direction: "inbound",
+      messageId: "room@chatroom:2",
+      chatId: "room@chatroom",
+      senderId: "wxid_b",
+      senderDisplayName: "Bob",
+      timestamp: new Date(2_000_000),
+      thread: { kind: "group", name: "Team" },
+    });
+    expect(page[1]?.direction).toBe("outbound");
   });
   it.each([
     new WechatUserSessionRejected("not connected"),
@@ -138,7 +189,7 @@ describe("wechatUserMessages", () => {
     await expect(wechatUserAccounts(reader).listAccounts({ limit: 10 })).rejects.toThrow("broken");
   });
   it("maps reader rows to the timeline shape, newest-first", async () => {
-    const store = wechatUserMessages(
+    const store = accountReads(
       fakeReader({
         byConversation: {
           wxid_a: [
@@ -157,12 +208,14 @@ describe("wechatUserMessages", () => {
       timestamp: 2000,
       body: "second",
       direction: "outbound",
+      sender: { id: "wxid_a", name: null },
+      conversation: { id: "wxid_a", name: null, kind: "dm" },
     });
     expect(page[1]).toMatchObject({ direction: "inbound", body: "first" });
   });
 
   it("pages strictly after a cursor", async () => {
-    const store = wechatUserMessages(
+    const store = accountReads(
       fakeReader({
         byConversation: {
           wxid_a: [
@@ -188,13 +241,13 @@ describe("wechatUserMessages", () => {
   });
 
   it("counts and previews across a person's contacts", async () => {
-    const store = wechatUserMessages(
+    const store = accountReads(
       fakeReader({
         byConversation: {
           wxid_a: [msg({ id: "wxid_a:1", timestamp: 1000 })],
           wxid_b: [
-            msg({ id: "wxid_b:1", conversationId: "wxid_b", timestamp: 500 }),
-            msg({ id: "wxid_b:2", conversationId: "wxid_b", timestamp: 4000 }),
+            msg({ id: "wxid_b:1", chatId: "wxid_b", timestamp: 500 }),
+            msg({ id: "wxid_b:2", chatId: "wxid_b", timestamp: 4000 }),
           ],
         },
       }),
@@ -205,8 +258,108 @@ describe("wechatUserMessages", () => {
     expect((await store.latest(accounts))?.ref).toBe("wxid_b:2");
   });
 
+  it("re-reads a chat's newest message only when its last activity changes", async () => {
+    const byConversation = {
+      wxid_a: [msg({ id: "wxid_a:1", timestamp: 1000 })],
+      gh_news: [] as WechatUserMessage[],
+    };
+    let activity = new Map([
+      ["wxid_a", "1000"],
+      ["gh_news", "900"],
+    ]);
+    const reader = fakeReader({ byConversation, activity: () => activity });
+    const asked: string[] = [];
+    const messages = reader.messages.bind(reader);
+    reader.messages = async (input) => {
+      asked.push(input.chatId ?? "");
+      return messages(input);
+    };
+    const store = accountReads(reader);
+
+    expect((await store.latest([account("wxid_a")]))?.ref).toBe("wxid_a:1");
+    expect(await store.latest([account("gh_news")])).toBeNull();
+    expect(await store.latest([account("wxid_a")])).toMatchObject({ ref: "wxid_a:1" });
+    expect(await store.latest([account("gh_news")])).toBeNull();
+    expect(asked).toEqual(["wxid_a", "gh_news"]);
+
+    byConversation.wxid_a.push(msg({ id: "wxid_a:2", timestamp: 2000 }));
+    activity = new Map([...activity, ["wxid_a", "2000"]]);
+    expect((await store.latest([account("wxid_a")]))?.ref).toBe("wxid_a:2");
+    expect(await store.latest([account("gh_news")])).toBeNull();
+    expect(asked).toEqual(["wxid_a", "gh_news", "wxid_a"]);
+  });
+
+  it("reads live, keeping nothing, when it cannot tell a chat's activity", async () => {
+    const byConversation = { wxid_a: [msg({ id: "wxid_a:1", timestamp: 1000 })] };
+    let failing = false;
+    let asked = 0;
+    const base = fakeReader({ byConversation, activity: () => new Map() });
+    const reader = {
+      ...base,
+      lastActivity: base.lastActivity,
+      async messages(input: Parameters<WechatUserReader["messages"]>[0]) {
+        asked += 1;
+        if (failing) throw new WechatUserRuntimeError("busy");
+        return base.messages(input);
+      },
+    } as unknown as WechatUserReader;
+    const store = accountReads(reader);
+
+    // Unknown to the session list: read every time.
+    await store.latest([account("wxid_a")]);
+    await store.latest([account("wxid_a")]);
+    expect(asked).toBe(2);
+
+    // A failed read answers null and is not remembered.
+    failing = true;
+    expect(await store.latest([account("wxid_a")])).toBeNull();
+    failing = false;
+    expect((await store.latest([account("wxid_a")]))?.ref).toBe("wxid_a:1");
+  });
+
+  it("lets a history read run between a cold sweep's head lookups", async () => {
+    // A reader as serial as the bridge: one call runs at a time, each a macrotask.
+    const chats = Array.from({ length: 200 }, (_, i) => `wxid_${i}`);
+    const ran: string[] = [];
+    let queue: Promise<unknown> = Promise.resolve();
+    const serial = <T>(label: string, answer: () => T): Promise<T> => {
+      const turn = queue.then(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        ran.push(label);
+        return answer();
+      });
+      queue = turn.catch(() => {});
+      return turn;
+    };
+    const reader = {
+      lastActivity: () =>
+        serial("sessions", () => new Map(chats.map((chatId) => [chatId, "1000"]))),
+      messages: (input: { chatId?: string; limit: number }) =>
+        serial(`query ${input.chatId} -n ${input.limit}`, () => [
+          msg({ id: `${input.chatId}:1`, chatId: input.chatId ?? "" }),
+        ]),
+    } as unknown as WechatUserReader;
+    const store = wechatUserMessages(reader);
+    const reads = store.byAccount;
+    if (!reads) throw new Error("the WeChat store answers per-account reads");
+
+    const sweep = Promise.all(chats.map((chatId) => reads.latest([account(chatId)])));
+    // Ask only once the sweep's lookups have reached the reader's queue.
+    while (!ran.some((label) => label.endsWith("-n 1"))) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await store.query({ chatId: "wxid_7" as ChatId, limit: 5 });
+
+    const ahead = ran.indexOf("query wxid_7 -n 5");
+    expect(
+      ran.slice(0, ahead).filter((label) => label.endsWith("-n 1")).length,
+    ).toBeLessThanOrEqual(4);
+    const heads = await sweep;
+    expect(heads.map((head) => head?.ref)).toEqual(chats.map((chatId) => `${chatId}:1`));
+  });
+
   it("answers nothing for a set naming no wechat address", async () => {
-    const store = wechatUserMessages(fakeReader({}));
+    const store = accountReads(fakeReader({}));
     expect(
       await store.read({ accounts: [{ channel: "linkedin", addresses: ["x"] }], limit: 5 }),
     ).toEqual([]);
@@ -236,6 +389,62 @@ describe("wechatUserAccounts", () => {
     });
   });
 
+  it("shares one session-list read between a listing and the resolves made meanwhile", async () => {
+    let reads = 0;
+    let release!: () => void;
+    const reader = {
+      async conversations() {
+        reads += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return [
+          convo({ id: "wxid_a", name: "Alice" }),
+          convo({ id: "wxid_b", name: "Bob" }),
+          convo({ id: "room@chatroom", name: "Team", isGroup: true }),
+        ];
+      },
+    } as unknown as WechatUserReader;
+    const accounts = wechatUserAccounts(reader);
+
+    const answers = Promise.all([
+      accounts.listAccounts({ limit: 50 }),
+      accounts.resolve("wxid_a"),
+      accounts.resolve("wxid_b"),
+      accounts.resolve("room@chatroom"),
+    ]);
+    release();
+    const [listed, alice, bob, room] = await answers;
+    expect(reads).toBe(1);
+    expect(listed.accounts.map((account) => account.id)).toEqual(["wxid_a", "wxid_b"]);
+    expect(alice?.name).toBe("Alice");
+    expect(bob?.name).toBe("Bob");
+    expect(room).toBeNull();
+
+    // Not a cache: once the read has settled, the next call reads again.
+    const again = accounts.resolve("wxid_a");
+    await Promise.resolve();
+    release();
+    expect((await again)?.name).toBe("Alice");
+    expect(reads).toBe(2);
+  });
+
+  it("searches the listing by name or wxid, ignoring case", async () => {
+    const accounts = wechatUserAccounts(
+      fakeReader({
+        conversations: [
+          convo({ id: "wxid_a", name: "Alice" }),
+          convo({ id: "wxid_bob", name: "Robert" }),
+          convo({ id: "wxid_c", name: "Carol" }),
+        ],
+      }),
+    );
+    const ids = async (query: string) =>
+      (await accounts.listAccounts({ query, limit: 50 })).accounts.map((account) => account.id);
+    expect(await ids("ALI")).toEqual(["wxid_a"]);
+    expect(await ids("bob")).toEqual(["wxid_bob"]);
+  });
+
   it("resolves a wxid to its account and misses a group", async () => {
     const accounts = wechatUserAccounts(
       fakeReader({
@@ -251,3 +460,79 @@ describe("wechatUserAccounts", () => {
     expect(await accounts.resolve("wxid_unknown")).toBeNull();
   });
 });
+
+/**
+ * A reader that answers `messages` the way the real one does: every conversation
+ * unless one is named, at or after `since` and at or before `before`, the newest
+ * `limit` of them, oldest first. With `includeBoundaryTies`, every message of the
+ * `before` second plus the newest `limit` older ones.
+ */
+function readerOrderReader(rows: WechatUserMessage[]): WechatUserReader {
+  return {
+    async lastActivity() {
+      return new Map<string, string>();
+    },
+    async messages(input: {
+      chatId?: string;
+      since?: Date;
+      before?: Date;
+      limit: number;
+      includeBoundaryTies?: boolean;
+    }) {
+      const since = input.since ? Math.floor(input.since.getTime() / 1000) : null;
+      const before = input.before ? Math.floor(input.before.getTime() / 1000) : null;
+      const held = rows
+        .filter((row) => !input.chatId || row.chatId === input.chatId)
+        .filter((row) => since === null || row.timestamp >= since)
+        .filter((row) => before === null || row.timestamp <= before)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      if (!input.includeBoundaryTies || before === null) return held.slice(-input.limit);
+      const atBefore = held.filter((row) => row.timestamp === before);
+      const older = held.filter((row) => row.timestamp < before).slice(-input.limit);
+      return [...older, ...atBefore];
+    },
+  } as unknown as WechatUserReader;
+}
+
+describe("wechatUserMessages query order", () => {
+  it("answers same-second messages newest first", async () => {
+    const store = wechatUserMessages(
+      readerOrderReader([
+        msg({ id: "wxid_a:1", timestamp: 1000, text: "first" }),
+        msg({ id: "wxid_a:2", timestamp: 1000, text: "second" }),
+      ]),
+    );
+    const page = await store.query({ chatId: "wxid_a" as ChatId });
+    expect(page.map((entry) => entry.messageId)).toEqual(["wxid_a:2", "wxid_a:1"]);
+  });
+});
+
+testMessagesQueryContract("wechatUserMessages", () => ({
+  messages: wechatUserMessages(
+    readerOrderReader([
+      msg({
+        id: "room@chatroom:1",
+        chatId: "room@chatroom",
+        isGroup: true,
+        timestamp: 100,
+      }),
+      msg({
+        id: "room@chatroom:2",
+        chatId: "room@chatroom",
+        isGroup: true,
+        timestamp: 200,
+      }),
+      msg({
+        id: "room@chatroom:3",
+        chatId: "room@chatroom",
+        isGroup: true,
+        isSelf: true,
+        timestamp: 300,
+      }),
+      msg({ id: "wxid_a:1", chatId: "wxid_a", timestamp: 250 }),
+    ]),
+  ),
+  channel: "wechat_user",
+  conversation: "room@chatroom" as ChatId,
+  silentConversation: "quiet@chatroom" as ChatId,
+}));

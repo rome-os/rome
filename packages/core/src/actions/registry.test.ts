@@ -1,15 +1,23 @@
 import { describe, expect, it } from "@rstest/core";
 import { ActionRegistryImpl } from "./registry.js";
 import type { Action } from "./types.js";
-import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import {
+  claimLegacyArtifactName,
+  createEmptyLegacyArtifactBindings,
+  formatArtifactId,
+} from "../apps/artifact-id.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 
-function callableAction(name: string): Action {
+function callableAction(
+  name: string,
+  visibility: Action["config"]["visibility"] = "public",
+): Action {
   return {
     config: {
       name,
       type: "system",
       description: `${name} action`,
+      visibility,
       complexity: "simple",
       speed: "fast",
       reliability: "high",
@@ -36,9 +44,15 @@ function eventOnlyAction(name: string): Action {
 }
 
 describe("ActionRegistryImpl", () => {
-  it("stores app actions by canonical ID while preserving a legacy bare binding", () => {
+  it("stores app actions by canonical ID and resolves a bound legacy bare name", () => {
     const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    const registry = new ActionRegistryImpl([], identity);
+    claimLegacyArtifactName(
+      identity.legacyBindings,
+      "action",
+      "foo",
+      formatArtifactId("legacy-app", "foo"),
+    );
+    const registry = new ActionRegistryImpl(identity);
     const metadata: ArtifactMetadata = {
       kind: "action",
       ownerType: "app",
@@ -57,7 +71,7 @@ describe("ActionRegistryImpl", () => {
 
   it("allows v2 apps to reuse a local name without creating a bare binding", () => {
     const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    const registry = new ActionRegistryImpl([], identity);
+    const registry = new ActionRegistryImpl(identity);
     for (const ownerId of ["review-one", "review-two"]) {
       registry.register(callableAction("review"), {
         kind: "action",
@@ -77,7 +91,7 @@ describe("ActionRegistryImpl", () => {
   });
 
   it("returns all agent-callable actions when names includes '*'", () => {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(callableAction("alpha"));
     registry.register(callableAction("beta"));
     registry.register(eventOnlyAction("workflow_only"));
@@ -87,30 +101,75 @@ describe("ActionRegistryImpl", () => {
     expect(actions.map((action) => action.config.name)).toEqual(["alpha", "beta"]);
   });
 
-  it("grants a globally-granted action to an agent whose allow-list omits it", () => {
-    const registry = new ActionRegistryImpl(["ask_question"]);
-    registry.register(callableAction("ask_question"));
-    registry.register(callableAction("scoped_tool"));
-    registry.register(callableAction("secret_tool"));
+  it("does not grant an explicit action through '*'", () => {
+    const registry = new ActionRegistryImpl();
+    registry.register(callableAction("public_tool"));
+    registry.register(callableAction("internal_tool", "explicit"));
 
-    const names = registry.getForAgent(["scoped_tool"]).map((a) => a.config.name);
-
-    expect(names).toContain("scoped_tool");
-    expect(names).toContain("ask_question");
-    expect(names).not.toContain("secret_tool");
+    expect(registry.getForAgent(["*"]).map((action) => action.config.name)).toEqual([
+      "public_tool",
+    ]);
   });
 
-  it("grants globally-granted actions even when the allow-list is empty", () => {
-    const registry = new ActionRegistryImpl(["ask_question"]);
-    registry.register(callableAction("ask_question"));
+  it("grants an explicit action by exact name alongside '*'", () => {
+    const registry = new ActionRegistryImpl();
+    registry.register(callableAction("public_tool"));
+    registry.register(callableAction("internal_tool", "explicit"));
 
-    expect(registry.getForAgent([]).map((a) => a.config.name)).toEqual(["ask_question"]);
+    expect(
+      registry.getForAgent(["*", "internal_tool"]).map((action) => action.config.name),
+    ).toEqual(["public_tool", "internal_tool"]);
+  });
+});
+
+describe("ActionRegistryImpl.validateArgs", () => {
+  function promptAction(name: string): Action {
+    return {
+      ...callableAction(name),
+      inputSchema: {
+        type: "object",
+        properties: { prompt: { type: "string", minLength: 1, pattern: "\\S" } },
+        required: ["prompt"],
+      },
+    };
+  }
+
+  it("rejects args that fail the action's input schema", () => {
+    const registry = new ActionRegistryImpl();
+    registry.register(promptAction("coding_task"));
+
+    expect(registry.validateArgs("coding_task", {})).toMatch(
+      /args do not satisfy the input schema for action "coding_task": .*prompt/,
+    );
+    expect(registry.validateArgs("coding_task", { prompt: "  " })).toMatch(/pattern/);
+    expect(registry.validateArgs("coding_task", { prompt: "fix the test" })).toBeNull();
   });
 
-  it("does not grant a globally-granted name that is not agent-callable", () => {
-    const registry = new ActionRegistryImpl(["event_global"]);
-    registry.register(eventOnlyAction("event_global"));
+  it("checks a legacy bare name against the canonical action's schema", () => {
+    const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    claimLegacyArtifactName(
+      identity.legacyBindings,
+      "action",
+      "coding_task",
+      formatArtifactId("coding", "coding_task"),
+    );
+    const registry = new ActionRegistryImpl(identity);
+    registry.register(promptAction("coding_task"), {
+      kind: "action",
+      ownerType: "app",
+      ownerId: "coding",
+      publicName: "coding_task",
+      aliases: [],
+      sourcePath: "/coding/actions/coding_task",
+    });
 
-    expect(registry.getForAgent([])).toEqual([]);
+    expect(registry.validateArgs("coding_task", {})).toMatch(
+      /input schema for action "coding:coding_task"/,
+    );
+    expect(registry.validateArgs("coding_task", { prompt: "fix the test" })).toBeNull();
+  });
+
+  it("returns null for an unknown action, which has() reports", () => {
+    expect(new ActionRegistryImpl().validateArgs("missing", {})).toBeNull();
   });
 });

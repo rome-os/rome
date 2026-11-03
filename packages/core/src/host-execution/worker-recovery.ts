@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import type { InterruptedAction } from "../actions/engine.js";
 import type { ActionResult } from "../actions/types.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import { hostJobId } from "./service.js";
 
-const HOST_ACTION = "system:execute_root_script";
+export const HOST_ACTION = "system:execute_root_script";
 
 /** Lost workers cannot establish host completion. Preserve receipts without submitting replacement jobs. */
 export function createHostWorkerRecovery(repo: ActionExecutionsRepository) {
@@ -35,7 +35,7 @@ export function createHostWorkerRecovery(repo: ActionExecutionsRepository) {
     }
     if (executions.length === 0) return undefined;
     const jobs = executions.map((execution) => ({
-      jobId: createHash("sha256").update(execution.id).digest("hex"),
+      jobId: hostJobId(execution.id),
       executionId: execution.id,
       rootExecutionId: execution.rootExecutionId,
       target: "hosting-vm",

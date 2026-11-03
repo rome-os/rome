@@ -5,7 +5,12 @@ import { RELAY_DRAINED_HEADER, stripInternalHeaders, type ServerFrame } from "./
 
 const log = createLogger("relay-drainer");
 
+// A socket that misses one pong is terminated at the next ping, so a stalled
+// path is dropped within two intervals instead of when TCP gives up minutes
+// later. While the relay keeps such a socket, its mailbox DO cannot hibernate
+// and bills Durable Object duration.
 const PING_INTERVAL_MS = 30_000;
+const HANDSHAKE_TIMEOUT_MS = 10_000;
 const DELIVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
 // Node clamps larger setTimeout values to 1ms. Keep status and the scheduled
 // timer aligned instead of turning a large Retry-After into an immediate retry.
@@ -318,6 +323,7 @@ class DrainConnection {
     url.password = "";
     const ws = new WebSocket(url.toString(), {
       headers: { Authorization: `Bearer ${this.drain.drainKey}` },
+      handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
     });
     this.ws = ws;
 
@@ -326,7 +332,7 @@ class DrainConnection {
       this.connected = true;
       this.connectedSince = Date.now();
       this.lastTransportError = null;
-      this.startPing();
+      this.startPing(ws);
       // Deliberately NOT resetting backoff here — see DrainTiming.stableResetMs.
       this.stableTimer = setTimeout(() => {
         this.stableTimer = null;
@@ -368,8 +374,14 @@ class DrainConnection {
         Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec * 1000 : undefined;
       if (!this.stopped) this.scheduleReconnect(minDelayMs);
     });
-    ws.on("close", () => {
+    ws.on("close", (code: number, reason: Buffer) => {
       if (this.ws !== ws) return;
+      log.info("relay drain closed", {
+        target: this.drain.targetAppId,
+        code,
+        reason: reason.toString(),
+        connectedForMs: this.connectedSince === null ? null : Date.now() - this.connectedSince,
+      });
       this.connected = false;
       this.connectedSince = null;
       this.stopPing();
@@ -599,11 +611,24 @@ class DrainConnection {
     }, delay);
   }
 
-  private startPing(): void {
+  private startPing(ws: WebSocket): void {
     this.stopPing();
+    let awaitingPong = false;
+    ws.on("pong", () => {
+      awaitingPong = false;
+    });
     this.pingTimer = setInterval(() => {
+      if (awaitingPong) {
+        log.warn("relay drain missed a heartbeat; dropping the socket", {
+          target: this.drain.targetAppId,
+        });
+        // terminate() emits close, which schedules the reconnect.
+        ws.terminate();
+        return;
+      }
+      awaitingPong = true;
       try {
-        this.ws?.ping();
+        ws.ping();
       } catch {
         // ignore
       }

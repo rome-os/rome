@@ -3,20 +3,21 @@
 // Unlike the bot channel (integrations/telegram.ts), this is a *user* session:
 // a single `session` grant holding a GramJS StringSession plus the account
 // identity fields (apiId/apiHash/phoneNumber/userId/…). There is no interactive
-// confer() — conferral runs the setup coroutine (`makeTelegramUserSetup`
+// `obtain()`. The grant comes from the setup coroutine (`makeTelegramUserSetup`
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
-// identity profile. The transport core — connect, NewMessage streaming,
-// normalization, media download, send, history — is the existing
-// `TelegramUserAdapter`
-// (packages/core/src/channels/telegram-user.ts), wrapped here so the runtime's
-// grant-epoch lifecycle and fault→grant-state mapping drive it.
+// identity profile. The transport core — connect, NewMessage streaming, the
+// inbound `ChannelMessage`, media download, send — is
+// `TelegramUserAdapter` (packages/core/src/channels/telegram-user.ts), wrapped
+// here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
+// drive it. The transport already speaks the channel's record, so inbound and
+// send pass through without a projection.
 //
 // GramJS owns transient reconnection (connectionRetries); only TERMINAL failures
 // reach `fault`:
 //   - a 401 / AUTH_KEY_UNREGISTERED / SESSION_REVOKED (at start, or observed by
 //     the in-epoch session probe) → CredentialRejected{ grant: "session" } →
-//     runtime renews once ("re-confer"), then degrades.
+//     runtime renews once ("needs-fix"), then degrades.
 //   - any other terminal transport failure → Disconnected → runtime backs off
 //     and rebuilds.
 //
@@ -34,7 +35,7 @@
 // epoch and the old epoch's in-flight probe fault is discarded).
 
 import { z } from "zod";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
   isTelegramUserSessionRejected,
   openTelegramUserLogin,
@@ -53,14 +54,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  directoryCursorOffset,
-  directoryPage,
-  historyFeature,
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { directoryCursorOffset, directoryPage } from "./talk-features.js";
 
 // The `session` grant's profile — the non-secret half of the user-account login
 // (who the account is, its phone, when it connected). Declared next to the
@@ -134,19 +128,19 @@ export function telegramUserProfileFromSettings(
 }
 
 /**
- * A setup-driven session scheme: there is no headless `confer()` — conferral runs
+ * A setup-driven session scheme: there is no headless `obtain()` — grant runs
  * the interactive phone-code + optional 2FA login coroutine attached in
  * `makeTelegramUserDescriptor`, whose terminal return is the single
  * ledger write. `renew()` cannot refresh a user session without the guardian, so
- * it answers "re-confer", driving the runtime's renew-once → degrade path.
+ * it answers "needs-fix", driving the runtime's renew-once → degrade path.
  */
 function telegramUserSession(): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(): Promise<Credential | "re-confer"> {
-      return "re-confer";
+    async renew(): Promise<Credential | "needs-fix"> {
+      return "needs-fix";
     },
   };
 }
@@ -155,8 +149,7 @@ function telegramUserSession(): AuthScheme {
  * Serialize a `TelegramUserSettings` row into the flat `SecretRecord` the grant
  * ledger stores. Every field is a string (SecretRecord = Record<string,string>);
  * `apiId` is stringified and `username` (nullable) becomes `""` when absent so
- * the round-trip is lossless. Exported so the settings-import row (wire stage)
- * and the connect route build material the same way.
+ * the round-trip is lossless.
  */
 export function telegramUserMaterialFromSettings(settings: TelegramUserSettings): SecretRecord {
   return {
@@ -186,7 +179,7 @@ export function telegramUserSettingsFromMaterial(material: SecretRecord): Telegr
   };
 }
 
-// ── conferral setup ───────────────────────────────────────────────
+// ── setup ───────────────────────────────────────────────
 
 /** Validate + normalize the API credentials and phone number the guardian
  *  enters. Returns the parsed values, or a re-prompt error message. */
@@ -210,15 +203,15 @@ function parseTelegramUserCredentials(
 }
 
 /**
- * Build the Telegram user-account conferral setup. A linear coroutine:
+ * Build the Telegram user-account setup. A linear coroutine:
  *   1. prompt the API ID / API hash / phone number (re-prompt on invalid input),
  *   2. `ctx.step("send-code")` — connect a throwaway client and request the code,
  *   3. prompt the phone code and sign in (re-prompt on an invalid/expired code),
  *   4. when Telegram asks for 2FA, prompt the cloud password with the wrong-
  *      password re-prompt loop (`prompt(form, { error })`),
- *   5. stop the login client, then return the terminal conferral: the serialized
+ *   5. stop the login client, then return the terminal grant: the serialized
  *      session material + identity profile.
- * The runtime performs the single durable write from the returned conferral;
+ * The runtime performs the single durable write from the returned grant;
  * cancel/abandon stops the login client and writes nothing. Unlike the bot
  * channels there is no guardian-link step — a user session IS the guardian's own
  * account, so no `guardianChannelUserId` is mapped.
@@ -250,7 +243,7 @@ export function makeTelegramUserSetup(deps: {
     }
 
     const login = deps.openLogin(creds.apiId, creds.apiHash);
-    let conferred = false;
+    let granted = false;
     try {
       // 2. Send the phone code (external event → ctx.step).
       const { isCodeViaApp } = await ctx.step("send-code", () => login.sendCode(creds.phoneNumber));
@@ -313,7 +306,7 @@ export function makeTelegramUserSetup(deps: {
       //    the real Talk from the ledger the moment the credential lands, and a
       //    second live GramJS client on the same session risks AUTH_KEY_DUPLICATED.
       await login.stop();
-      conferred = true;
+      granted = true;
 
       const material = telegramUserMaterialFromSettings(account);
       const profile = telegramUserProfileFromSettings(account) ?? undefined;
@@ -330,7 +323,7 @@ export function makeTelegramUserSetup(deps: {
     } finally {
       // Cancel, fault, or any throw above: disconnect the pending client. Nothing
       // durable exists — the session lived in the login client's memory only.
-      if (!conferred) await login.stop().catch(() => {});
+      if (!granted) await login.stop().catch(() => {});
     }
   };
 }
@@ -363,16 +356,16 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   // is the single ledger write (credential material + identity profile).
   session.setup = makeTelegramUserSetup({ openLogin: deps.openLogin ?? openTelegramUserLogin });
   return {
-    service: "telegram_user",
-    reviveProfile: (_grant, record) => reviveTelegramUserProfile(record),
-    auth: {
-      session,
-    },
+    connectionKind: "telegram_user",
+    reviveProfile: (record) => reviveTelegramUserProfile(record),
+    accountIdOf: (record) => (typeof record.userId === "string" && record.userId) || null,
+    link: "delegate",
+    grant: "session",
+    auth: session,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
-        build(creds, kit): Talker {
-          const settings = telegramUserSettingsFromMaterial(creds.session.material as SecretRecord);
+        build(cred, kit): Talker {
+          const settings = telegramUserSettingsFromMaterial(cred.material as SecretRecord);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let probeTimer: ReturnType<typeof setInterval> | null = null;
           let probeInFlight = false;
@@ -410,10 +403,50 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             }
           };
 
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const dialogs = await adapter.listDialogs(
+                directoryCursorOffset(input.cursor) + input.limit,
+              );
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                dialogs
+                  .filter((dialog) => !query || dialog.title.toLocaleLowerCase().includes(query))
+                  .sort((left, right) =>
+                    `${left.title}\0${left.id}`.localeCompare(`${right.title}\0${right.id}`),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((dialog) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    chatId: dialog.id as import("@rome-os/app-runtime").ChatId,
+                  },
+                  connectionKind: "telegram_user",
+                  service: "telegram_user",
+                  kind:
+                    dialog.type === "private"
+                      ? ("dm" as const)
+                      : dialog.type === "group"
+                        ? ("group" as const)
+                        : ("channel" as const),
+                  displayName: dialog.title,
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            directory,
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // adapter.start() connects then checks authorization, throwing a
               // TelegramUserSessionNotAuthorizedError (→ CredentialRejected) on a
               // revoked session; other terminal transport errors → Disconnected.
@@ -430,12 +463,9 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
               }
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return toMessageReceipt(
-                  conversationId,
-                  await adapter.sendMessage(conversationId, conversationId, msg),
-                );
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A 401 / session-revoked from send() is a refused credential.
                 if (isTelegramUserSessionRejected(err)) {
@@ -444,49 +474,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const dialogs = await adapter.listDialogs(
-                    directoryCursorOffset(input.cursor) + input.limit,
-                  );
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    dialogs
-                      .filter(
-                        (dialog) => !query || dialog.title.toLocaleLowerCase().includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.title}\0${left.id}`.localeCompare(`${right.title}\0${right.id}`),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((dialog) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "telegram_user",
-                      kind:
-                        dialog.type === "private"
-                          ? ("dm" as const)
-                          : dialog.type === "group"
-                            ? ("group" as const)
-                            : ("channel" as const),
-                      displayName: dialog.title,
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter),
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

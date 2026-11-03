@@ -4,7 +4,7 @@
 
 ## Consumers
 
-The consumers are the dashboard (`packages/web`), first-party apps (`rome_apps/*`), and scaffolded apps. Rome Cloud, desktop-base-web, and mobile are explicit non-goals. Do not shape an API around them.
+The consumers are the dashboard (`packages/web`), first-party apps (`rome_apps/*`), and scaffolded apps. `packages/channel-test-ui`, the browser UI for the channel scenario tests, is a development tool that imports the kit as published. It shapes no API, and it reads the dashboard's theme helpers (`packages/web/src/lib/theme.ts`) for the theme values the kit leaves to the host. Rome Cloud, desktop-base-web, and mobile are explicit non-goals. Do not shape an API around them.
 
 The app scaffold (`packages/app-template/template/package.json`) depends on this package through a concrete `^` range. A release here therefore reaches external apps that no monorepo typecheck covers. Treat the published surface accordingly, and bump the scaffold's range when a new app should start on a newer minor.
 
@@ -18,7 +18,7 @@ Add the `./<component>` entry to `exports` alongside the barrel re-export in `sr
 
 `react`, `react-dom`, and `lucide-react` are peers. `clsx` and `tailwind-merge` are regular deps. Radix primitives and `class-variance-authority` belong to that same tier. Install them only when the first component that needs them lands. Declaring a dep before it has a consumer is the same waste in reverse.
 
-Heavy libraries never become regular deps: `streamdown` with its code, math, and mermaid plugins, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`, and `sonner`. They arrive as optional-peer subpath exports, so an app that imports a button does not pay for a calendar. Mirror each optional peer into `devDependencies` as well, or `tsc` and vitest cannot resolve it in this workspace.
+Heavy libraries never become regular deps: `streamdown` with its code and math plugins, `pele` for diagrams, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`, and `sonner`. They arrive as optional-peer subpath exports, so an app that imports a button does not pay for a calendar. Mirror each optional peer into `devDependencies` as well, or `tsc` and vitest cannot resolve it in this workspace.
 
 ## A component's CSS is opt-in when the component is
 
@@ -28,4 +28,4 @@ An app bundle in a Shadow DOM needs that import in its own stylesheet. The host 
 
 ## The kit ships style vocabulary, not values
 
-Tokens, variants, and base-layer defaults belong in `src/styles.css`. Concrete theme values stay host-owned in `packages/web` and the app-web SDK. The layer rules that keep this sound are in [design-system.md](design-system.md#rules-that-keep-the-two-layers-sound).
+The platform sizing scales, tokens, variants, and base-layer defaults belong in `src/styles.css`. Concrete theme values stay host-owned in `packages/web` and the app-web SDK. The layer rules that keep this sound are in [design-system.md](design-system.md#rules-that-keep-the-two-layers-sound).

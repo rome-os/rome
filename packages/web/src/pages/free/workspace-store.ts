@@ -3,7 +3,6 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 export interface WorkspaceStore {
   get<T>(key: string): T | undefined;
   set<T>(key: string, value: T): void;
-  delete(key: string): void;
   subscribe<T>(key: string, listener: (value: T | undefined) => void): () => void;
 }
 
@@ -16,10 +15,6 @@ export function createWorkspaceStore(): WorkspaceStore {
     set: (key, value) => {
       data.set(key, value);
       subs.get(key)?.forEach((fn) => fn(value));
-    },
-    delete: (key) => {
-      data.delete(key);
-      subs.get(key)?.forEach((fn) => fn(undefined));
     },
     subscribe: (key, listener) => {
       let bucket = subs.get(key);

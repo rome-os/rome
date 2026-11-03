@@ -23,7 +23,7 @@ import {
 import { Avatar } from "@/pages/people/avatar";
 import { CHANNEL_META, ChannelGlyph, channelLabel } from "@/pages/people/channel-meta";
 import { FILTER_ORDER, type PeopleRow, type RowLevel } from "@/pages/people/people-model";
-import { DirectoryRow, StreamRow, UnknownRow, levelLabelKey } from "@/pages/people/rows";
+import { DirectoryRow, StreamRow, StrangerRow, levelLabelKey } from "@/pages/people/rows";
 import { List } from "@/components/ui/list-row";
 
 // Live specimens for the People-page design note (people-page.mdx).
@@ -49,7 +49,7 @@ function row(
 ): PeopleRow {
   const account = over.accounts?.[0];
   return {
-    kind: over.level === "unknown" || over.level === "stranger" ? "account" : "person",
+    kind: over.level === "stranger" || over.level === "dismissed" ? "account" : "person",
     accounts: [],
     addresses: account ? [account.channelUserId] : [],
     latest: null,
@@ -112,7 +112,7 @@ export function ChannelGlyphSet() {
  */
 function RowMenu({ row: subject }: { row: PeopleRow }) {
   const { t } = useTranslation("people");
-  const targets = (["inner-circle", "acquaintance", "other", "stranger"] as RowLevel[]).filter(
+  const targets = (["inner-circle", "acquaintance", "other", "dismissed"] as RowLevel[]).filter(
     (level) => level !== subject.level,
   );
   return (
@@ -130,7 +130,7 @@ function RowMenu({ row: subject }: { row: PeopleRow }) {
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>{t("actions.moveTo")}</DropdownMenuLabel>
         {targets.map((level) => (
-          <DropdownMenuItem key={level} variant={level === "stranger" ? "destructive" : "default"}>
+          <DropdownMenuItem key={level} variant={level === "dismissed" ? "destructive" : "default"}>
             {t(levelLabelKey(level))}
           </DropdownMenuItem>
         ))}
@@ -192,7 +192,7 @@ const STREAM: PeopleRow[] = [
   row({
     id: "unplaced",
     displayName: "+1 415 555 0142",
-    level: "unknown",
+    level: "stranger",
     accounts: on("whatsapp", "14155550142@s.whatsapp.net"),
     latest: dynamic("whatsapp", HOUR, "Hi — is this the right number for Rome?"),
     messageCount: 3,
@@ -236,7 +236,7 @@ const UNKNOWN: PeopleRow[] = [
   row({
     id: "u1",
     displayName: "+1 415 555 0142",
-    level: "unknown",
+    level: "stranger",
     accounts: on("whatsapp", "14155550142@s.whatsapp.net"),
     latest: dynamic("whatsapp", HOUR, "Hi — is this the right number for Rome?"),
     messageCount: 3,
@@ -244,7 +244,7 @@ const UNKNOWN: PeopleRow[] = [
   row({
     id: "u2",
     displayName: "@quietstorm",
-    level: "unknown",
+    level: "stranger",
     accounts: on("telegram", "@quietstorm"),
     latest: dynamic("telegram", 2 * DAY, "hey, saw your talk"),
     messageCount: 1,
@@ -252,20 +252,20 @@ const UNKNOWN: PeopleRow[] = [
   row({
     id: "u3",
     displayName: "+44 7700 900321",
-    level: "unknown",
+    level: "stranger",
     accounts: on("whatsapp", "447700900321@s.whatsapp.net"),
     latest: dynamic("whatsapp", 5 * DAY, "CLAIM YOUR PRIZE NOW"),
     messageCount: 12,
   }),
 ];
 
-/** The Unknown chip's row: dense, because the placement decision runs on the
+/** The Stranger chip's row: dense, because the placement decision runs on the
  *  evidence — which channel, which number, how much they have said. */
-export function UnknownDemo() {
+export function StrangerDemo() {
   return (
-    <Frame label="Unknown">
+    <Frame label="Stranger">
       {UNKNOWN.map((subject) => (
-        <UnknownRow key={subject.id} row={subject} actions={<RowMenu row={subject} />} />
+        <StrangerRow key={subject.id} row={subject} actions={<RowMenu row={subject} />} />
       ))}
     </Frame>
   );
@@ -412,7 +412,7 @@ export function ViewSwitcherDemo() {
         options={FILTER_ORDER.map((option) => ({
           value: option,
           label: option === "all" ? t("filters.all") : t(levelLabelKey(option)),
-          count: option === "unknown" ? 6 : undefined,
+          count: option === "stranger" ? 6 : undefined,
         }))}
       />
     </div>
@@ -454,7 +454,7 @@ export function PersonPageDemo() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(["inner-circle", "acquaintance", "other", "stranger"] as RowLevel[]).map(
+              {(["inner-circle", "acquaintance", "other", "dismissed"] as RowLevel[]).map(
                 (level) => (
                   <SelectItem key={level} value={level}>
                     {t(levelLabelKey(level))}

@@ -4,6 +4,7 @@ import type { ComposioClient } from "./api/composio-client.js";
 import {
   buildProxyEndpoint,
   isSupportedToolkit,
+  ROME_MANAGED_TOOLKITS,
   SUPPORTED_TOOLKITS,
   subscribeTriggerFeed,
   TOOLKIT_API_HOSTS,
@@ -26,6 +27,14 @@ describe("SUPPORTED_TOOLKITS mirrors the web catalog", () => {
   it("recognizes a catalog toolkit case-insensitively and rejects one outside it", () => {
     expect(isSupportedToolkit("Slack")).toBe(true);
     expect(isSupportedToolkit("twitter")).toBe(false);
+  });
+
+  it("marks exactly the Rome-managed toolkits as romeManaged in the catalog", () => {
+    expect(
+      CATALOG.filter((e) => e.romeManaged)
+        .map((e) => e.slug)
+        .sort(),
+    ).toEqual([...ROME_MANAGED_TOOLKITS].sort());
   });
 });
 
@@ -60,6 +69,9 @@ describe("connector_proxy endpoint validation", () => {
     ).toBeNull();
     expect(validateProxyEndpoint("metaads", "https://graph.facebook.com/v20.0/me")).toBeNull();
     expect(validateProxyEndpoint("supabase", "https://abcdef.supabase.co/rest/v1/x")).toBeNull();
+    expect(
+      validateProxyEndpoint("shopify", "https://acme.myshopify.com/admin/api/2026-10/graphql.json"),
+    ).toBeNull();
   });
 
   it("rejects an off-provider host (credential exfiltration)", () => {
@@ -159,11 +171,11 @@ describe("connector_proxy path/host assembly", () => {
     expect(rejected.message).toMatch(/begin/);
   });
 
-  it("supabase is the only connectable toolkit without a default host", () => {
+  it("only per-connection and tool-only toolkits lack a default host", () => {
     const withoutDefault = [...SUPPORTED_TOOLKITS]
       .filter((t) => !TOOLKIT_DEFAULT_API_HOST[t])
       .sort();
-    expect(withoutDefault).toEqual(["supabase"]);
+    expect(withoutDefault).toEqual(["otter_ai_mcp", "shopify", "supabase"]);
   });
 
   it("every default host clears its toolkit's allowlist (default route never fails open)", () => {
@@ -249,20 +261,29 @@ describe("subscribeTriggerFeed", () => {
     expect(result).toMatchObject({ ok: false, code: "no_connected_account" });
   });
 
-  it("routes an unlinked Rome-managed toolkit to Settings, not connector_connect", async () => {
+  it.each([
+    "github",
+    "shopify",
+    "slack",
+  ])("routes an unlinked %s trigger to its supported connection flow", async (toolkit) => {
     const client = fakeClient({
-      triggerType: { slug: "GITHUB_STAR_ADDED", toolkit: { slug: "github" } },
+      triggerType: { slug: "NEW_EVENT", toolkit: { slug: toolkit } },
       account: { kind: "none" },
     });
     const result = await subscribeTriggerFeed(client, {
-      slug: "GITHUB_STAR_ADDED",
+      slug: "NEW_EVENT",
       config: {},
-      expectedToolkit: "github",
+      expectedToolkit: toolkit,
     });
     expect(result).toMatchObject({ ok: false, code: "no_connected_account" });
     if (result.ok) throw new Error("expected failure");
-    expect(result.message).toMatch(/settings/i);
-    expect(result.message).not.toMatch(/connector_connect/);
+    expect(result.message).toContain("Settings → Connections");
+    if (toolkit === "slack") {
+      expect(result.message).not.toContain("connector_connect");
+    } else {
+      expect(result.message).toContain(`connector_connect(${JSON.stringify({ toolkit })})`);
+      expect(result.message).not.toMatch(/can.t be connected from here/);
+    }
   });
 
   it("rejects an ambiguous account rather than guessing which to subscribe", async () => {

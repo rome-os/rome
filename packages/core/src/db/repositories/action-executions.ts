@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { actionExecutions } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -149,6 +149,34 @@ export class ActionExecutionsRepository {
     return Number(result.changes ?? 0);
   }
 
+  /**
+   * Ends every `running` execution as `error` at `finishedAt`, with the message
+   * `errorFor` returns for it, and returns how many it ended. Call only at boot,
+   * before anything can start an execution: every row still `running` then was
+   * left by a process that is gone. An approval replay resumes a pre-boot row,
+   * so a timestamp cutoff cannot stand in for that ordering. `pending_approval`
+   * rows are kept: they wait on a guardian approval, which outlives a restart.
+   */
+  async markRunningInterrupted(
+    finishedAt: Date,
+    errorFor: (row: { id: string; actionName: string }) => string,
+  ): Promise<number> {
+    return this.db.transaction((tx) => {
+      const rows = tx
+        .select({ id: actionExecutions.id, actionName: actionExecutions.actionName })
+        .from(actionExecutions)
+        .where(eq(actionExecutions.status, "running"))
+        .all();
+      for (const row of rows) {
+        tx.update(actionExecutions)
+          .set({ status: "error", finishedAt, error: errorFor(row) })
+          .where(eq(actionExecutions.id, row.id))
+          .run();
+      }
+      return rows.length;
+    });
+  }
+
   async findRecent(limit = 50, offset = 0) {
     return this.db
       .select()
@@ -188,6 +216,49 @@ export class ActionExecutionsRepository {
       .from(actionExecutions)
       .where(eq(actionExecutions.actionName, actionName));
     return result[0]?.count ?? 0;
+  }
+
+  /**
+   * Top-level executions (no parent) that finished as success, error, or
+   * cancelled, in (finishedAt, id) order: strictly after `after` and no later
+   * than `until`. Pass the last row's (finishedAt, id) as the next `after` to
+   * page. A routine's top-level execution carries the routine run's root id,
+   * not its own, so `parentId` is the test for top level.
+   */
+  async findFinishedTopLevelAfter(params: {
+    after: { finishedAt: Date; id: string };
+    until: Date;
+    limit: number;
+  }) {
+    const { after } = params;
+    return this.db
+      .select({
+        id: actionExecutions.id,
+        actionName: actionExecutions.actionName,
+        status: actionExecutions.status,
+        initiator: actionExecutions.initiator,
+        actor: actionExecutions.actor,
+        rootExecutionId: actionExecutions.rootExecutionId,
+        durationMs: actionExecutions.durationMs,
+        finishedAt: actionExecutions.finishedAt,
+      })
+      .from(actionExecutions)
+      .where(
+        and(
+          isNull(actionExecutions.parentId),
+          inArray(actionExecutions.status, ["success", "error", "cancelled"]),
+          lte(actionExecutions.finishedAt, params.until),
+          or(
+            gt(actionExecutions.finishedAt, after.finishedAt),
+            and(
+              eq(actionExecutions.finishedAt, after.finishedAt),
+              gt(actionExecutions.id, after.id),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(actionExecutions.finishedAt), asc(actionExecutions.id))
+      .limit(params.limit);
   }
 
   async findByRootExecutionIds(rootExecutionIds: string[]) {

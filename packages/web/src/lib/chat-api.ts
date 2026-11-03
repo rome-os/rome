@@ -1,3 +1,4 @@
+import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
   ApprovalRecord,
@@ -8,7 +9,7 @@ import type {
   ChatSearchMessageMatch,
   ChatSession,
   CreateTurnResponse,
-  ProjectCatalog,
+  ChatLocations,
   ProjectOption,
   ReasoningEffort,
   RomeSessionsPageResult,
@@ -31,6 +32,7 @@ import type {
 } from "@rome/api-types/sessions";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
+import { randomUUID } from "./random-uuid";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 const SSE_HEADERS = { Accept: "text/event-stream" } as const;
@@ -75,9 +77,18 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 
 export type SessionStatusFilter = "active" | "archived" | "all";
 
-export async function listSessions(status: SessionStatusFilter = "active"): Promise<ChatSession[]> {
-  const query = status === "active" ? "" : `?status=${status}`;
-  const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include" });
+export type SessionScope = "mine" | "all";
+
+export async function listSessions(
+  status: SessionStatusFilter = "active",
+  scope?: SessionScope,
+  signal?: AbortSignal,
+): Promise<ChatSession[]> {
+  const params = new URLSearchParams();
+  if (status !== "active") params.set("status", status);
+  if (scope) params.set("scope", scope);
+  const query = params.size ? `?${params}` : "";
+  const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include", signal });
   return jsonOrThrow<ChatSession[]>(res);
 }
 
@@ -125,10 +136,43 @@ export async function renameSession(sessionId: string, name: string): Promise<Ch
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function getSession(sessionId: string): Promise<ChatSession | null> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
-  if (res.status === 404) return null;
+/** Store the model an open chat runs on from its next turn. "auto" clears it. */
+export async function updateSessionModel(
+  sessionId: string,
+  largeModelSelection: string,
+): Promise<ChatSession> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/model`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ largeModelSelection }),
+  });
   return jsonOrThrow<ChatSession>(res);
+}
+
+const inFlightReads = new Map<string, Promise<unknown>>();
+
+/**
+ * Callers that ask for the same read while one is in flight share its result.
+ * Mounting the chat fires the same read from several components at once, and
+ * nothing is cached once it settles, so a later call fetches fresh data.
+ */
+function shareInFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const pending = inFlightReads.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+  const run = load().finally(() => {
+    if (inFlightReads.get(key) === run) inFlightReads.delete(key);
+  });
+  inFlightReads.set(key, run);
+  return run;
+}
+
+export function getSession(sessionId: string): Promise<ChatSession | null> {
+  return shareInFlight(`session:${sessionId}`, async () => {
+    const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
+    if (res.status === 404) return null;
+    return jsonOrThrow<ChatSession>(res);
+  });
 }
 
 /**
@@ -142,6 +186,30 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   });
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessage[]>(res);
+}
+
+/** One page of a session's history: whole turns, oldest first within the page. */
+export interface ChatMessagePage {
+  messages: ChatMessage[];
+  /** Pass as `before` for the page of older turns; null when this page reaches the start. */
+  nextCursor: string | null;
+}
+
+/**
+ * The newest `limit` turns of a session, or the `limit` turns before `before`.
+ * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
+ */
+export async function listSessionMessagePage(
+  sessionId: string,
+  options: { limit: number; before?: string | null },
+): Promise<ChatMessagePage | null> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.before) params.set("before", options.before);
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
+    credentials: "include",
+  });
+  if (res.status === 404) return null;
+  return jsonOrThrow<ChatMessagePage>(res);
 }
 
 export interface ListRomeSessionsOptions {
@@ -275,20 +343,25 @@ export interface CreateSessionInput {
   personaId?: string;
   projectPath: string;
   largeModelSelection?: string;
-  reasoningEffort: ReasoningEffort;
+  // The turn, not the session, carries reasoning effort; a turn that omits it
+  // gets the guardian's stored preference.
+  reasoningEffort?: ReasoningEffort;
   agentName?: string;
+  /** Folder on a rome-node device the chat works in. Core checks it before saving. */
+  deviceFolder?: { deviceId: string; path: string };
 }
 
-export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
-  const res = await fetch("/api/chat/agents", { credentials: "include" });
-  if (!res.ok) return [];
-  return (await res.json()) as AgentCatalogGroup[];
+export function listChatAgents(): Promise<AgentCatalogGroup[]> {
+  return shareInFlight("agents", async () => {
+    const res = await fetch("/api/chat/agents", { credentials: "include" });
+    return jsonOrThrow<AgentCatalogGroup[]>(res);
+  });
 }
 
 export async function listSkills(): Promise<SkillSummary[]> {
   const res = await fetch("/api/skills", { credentials: "include" });
-  const data = await jsonOrThrow<{ skills?: SkillSummary[] }>(res);
-  return data.skills ?? [];
+  const data = await jsonOrThrow<{ skills: SkillSummary[] }>(res);
+  return data.skills;
 }
 
 export async function createSession(input: CreateSessionInput): Promise<ChatSession> {
@@ -299,6 +372,29 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
     body: JSON.stringify(input),
   });
   return jsonOrThrow<ChatSession>(res);
+}
+
+/** Projects and Cloud's devices for the new-chat location menu. Probes no device. */
+export async function listChatLocations(): Promise<ChatLocations> {
+  const res = await fetch("/api/chat/locations", { credentials: "include" });
+  return jsonOrThrow<ChatLocations>(res);
+}
+
+/**
+ * Lists one folder on a device; no path means the device user's home. A
+ * failure throws `ChatApiError` whose message is a `DeviceFilesErrorCode`.
+ */
+export async function listDeviceFiles(
+  deviceId: string,
+  path?: string,
+  signal?: AbortSignal,
+): Promise<DeviceFilesResponse> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/files${query}`, {
+    credentials: "include",
+    signal,
+  });
+  return jsonOrThrow<DeviceFilesResponse>(res);
 }
 
 export async function updateSessionProject(
@@ -333,11 +429,6 @@ export async function markSessionRead(
   );
 }
 
-export async function listProjects(): Promise<ProjectCatalog> {
-  const res = await fetch("/api/chat/projects", { credentials: "include" });
-  return jsonOrThrow<ProjectCatalog>(res);
-}
-
 export async function createProject(name: string): Promise<ProjectOption> {
   const res = await fetch("/api/chat/projects", {
     method: "POST",
@@ -359,6 +450,19 @@ export type PostTurnResult =
       reason?: ChatErrorReason;
     };
 
+export interface PostSessionTurnOptions {
+  /**
+   * Reports the fraction of the attached files' bytes transferred to the
+   * server. `null` means the browser did not expose a computable total.
+   */
+  onUploadProgress?: (progress: number | null) => void;
+  /**
+   * Aborts the in-flight request. Rejects with an `AbortError`, which callers
+   * treat as a user-initiated cancel rather than a transport failure.
+   */
+  signal?: AbortSignal;
+}
+
 export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | null> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, { credentials: "include" });
   if (!res.ok) return null;
@@ -373,49 +477,45 @@ export async function postSessionTurnJson(
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ inputId: crypto.randomUUID(), ...body }),
+    body: JSON.stringify({ inputId: randomUUID(), ...body }),
   });
   return parseTurnResponse(res);
 }
 
-async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
-  if (res.ok) {
+function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTurnResult {
+  if (ok) {
     try {
-      const data = (await res.json()) as CreateTurnResponse;
+      const data = JSON.parse(raw) as CreateTurnResponse;
       return { ok: true, data };
     } catch {
-      return { ok: false, status: res.status, message: "" };
+      return { ok: false, status, message: "" };
     }
   }
   let message = "";
   let code: ChatErrorCode | undefined;
   let provider: ChatErrorProvider | undefined;
   let reason: ChatErrorReason | undefined;
-  try {
-    const raw = (await res.text()).trim();
-    if (raw) {
-      try {
-        const payload = JSON.parse(raw) as {
-          error?: string;
-          message?: string;
-          code?: ChatErrorCode;
-          provider?: ChatErrorProvider;
-          reason?: ChatErrorReason;
-        };
-        message = payload.error ?? payload.message ?? "";
-        code = payload.code;
-        provider = payload.provider;
-        reason = payload.reason;
-      } catch {
-        message = raw.slice(0, 200);
-      }
+  const trimmed = raw.trim();
+  if (trimmed) {
+    try {
+      const payload = JSON.parse(trimmed) as {
+        error?: string;
+        message?: string;
+        code?: ChatErrorCode;
+        provider?: ChatErrorProvider;
+        reason?: ChatErrorReason;
+      };
+      message = payload.error ?? payload.message ?? "";
+      code = payload.code;
+      provider = payload.provider;
+      reason = payload.reason;
+    } catch {
+      message = trimmed.slice(0, 200);
     }
-  } catch {
-    // ignore
   }
   return {
     ok: false,
-    status: res.status,
+    status,
     message,
     ...(code ? { code } : {}),
     ...(provider ? { provider } : {}),
@@ -423,12 +523,93 @@ async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
   };
 }
 
-export async function postSessionTurn(sessionId: string, body: FormData): Promise<PostTurnResult> {
-  if (!body.has("inputId")) body.set("inputId", crypto.randomUUID());
+async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
+  const raw = await res.text().catch(() => "");
+  return parseTurnResponseText(res.status, res.ok, raw);
+}
+
+function postSessionTurnWithProgress(
+  sessionId: string,
+  body: FormData,
+  onUploadProgress: (progress: number | null) => void,
+  signal?: AbortSignal,
+): Promise<PostTurnResult> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The request was aborted", "AbortError"));
+      return;
+    }
+    // The body is written in entry order, so moving the files to the end puts
+    // them in its last `fileBytes`. Progress is then measured over those bytes
+    // alone; the text, workspace JSON and part headers sent first do not count
+    // as attachment progress.
+    const fileEntries = [...body].filter(
+      (entry): entry is [string, File] => entry[1] instanceof File,
+    );
+    for (const name of new Set(fileEntries.map(([name]) => name))) body.delete(name);
+    for (const [name, file] of fileEntries) body.append(name, file);
+    const fileBytes = fileEntries.reduce((sum, [, file]) => sum + file.size, 0);
+    const request = new XMLHttpRequest();
+    // Attach upload listeners before open(): despite the spec allowing either
+    // order, browsers have historically required this ordering for upload
+    // events to fire reliably.
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || event.total <= 0) {
+        onUploadProgress(null);
+        return;
+      }
+      if (fileBytes === 0) {
+        onUploadProgress(event.loaded / event.total);
+        return;
+      }
+      const fileStart = event.total - fileBytes;
+      onUploadProgress(Math.max(0, Math.min(1, (event.loaded - fileStart) / fileBytes)));
+    };
+    // The last progress event is not guaranteed to report the exact total.
+    // `load` is the browser's authoritative boundary for a fully transferred
+    // request body; response processing may continue after it fires.
+    request.upload.onload = () => onUploadProgress(1);
+    request.open("POST", `/api/chat/sessions/${sessionId}/turns`);
+    request.withCredentials = true;
+    // One detach point for every terminal path, so a cancelled turn cannot
+    // leave a listener pinned to a long-lived controller.
+    const abort = () => request.abort();
+    const settle = (run: () => void) => {
+      signal?.removeEventListener("abort", abort);
+      run();
+    };
+    request.onload = () =>
+      settle(() =>
+        resolve(
+          parseTurnResponseText(
+            request.status,
+            request.status >= 200 && request.status < 300,
+            request.responseText,
+          ),
+        ),
+      );
+    request.onerror = () => settle(() => reject(new TypeError("Failed to fetch")));
+    request.onabort = () =>
+      settle(() => reject(new DOMException("The request was aborted", "AbortError")));
+    signal?.addEventListener("abort", abort);
+    request.send(body);
+  });
+}
+
+export async function postSessionTurn(
+  sessionId: string,
+  body: FormData,
+  options: PostSessionTurnOptions = {},
+): Promise<PostTurnResult> {
+  if (!body.has("inputId")) body.set("inputId", randomUUID());
+  if (options.onUploadProgress) {
+    return postSessionTurnWithProgress(sessionId, body, options.onUploadProgress, options.signal);
+  }
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, {
     method: "POST",
     credentials: "include",
     body,
+    signal: options.signal,
   });
   return parseTurnResponse(res);
 }
@@ -481,6 +662,10 @@ export interface CreateRoutinePayload {
   trigger: unknown;
   actionName: string;
   args: Record<string, unknown>;
+  /** Unique routine key; the route accepts only `chat-routine:<id>` keys
+   * (other prefixes belong to apps' managed routines). A repeat create with
+   * the same key returns the routine that already holds it, not a duplicate. */
+  key?: string;
 }
 
 export interface CreateRoutineResult {
@@ -497,27 +682,71 @@ export async function createRoutine(payload: CreateRoutinePayload): Promise<Crea
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, enabled: true }),
   });
+  const row = (await res.json().catch(() => null)) as { id?: string; error?: string } | null;
   if (res.ok) {
-    const row = (await res.json().catch(() => null)) as { id?: string } | null;
     return { ok: true, status: res.status, routineId: row?.id };
   }
-  const payloadErr = (await res.json().catch(() => null)) as { error?: string } | null;
-  return { ok: false, status: res.status, error: payloadErr?.error };
+  // 409 on a keyed create: this routine was already created (a retried click,
+  // another tab). Treat it as success and hand back the existing id.
+  if (res.status === 409 && payload.key !== undefined && row?.id) {
+    return { ok: true, status: res.status, routineId: row.id };
+  }
+  return { ok: false, status: res.status, error: row?.error };
 }
 
-/** Names of existing routines, used by the draft card to detect a routine it
- * already created (so a reload doesn't offer to create a duplicate). */
-export async function listRoutineNames(): Promise<string[]> {
-  const res = await fetch("/api/routines", { credentials: "include" });
-  if (!res.ok) return [];
-  const rows = (await res.json().catch(() => [])) as Array<{ name?: string }>;
-  return rows.map((r) => r.name ?? "").filter(Boolean);
+/** Identity and state of existing routines, used by the routine card to find
+ * the routine it created (so a reload links to it instead of offering to
+ * create a duplicate) and to show whether it is paused. */
+export interface RoutineRef {
+  id: string;
+  name: string;
+  key: string | null;
+  enabled: boolean;
 }
 
-export async function loadSettings(): Promise<Record<string, unknown>> {
-  const res = await fetch("/api/settings", { credentials: "include" });
-  if (!res.ok) return {};
-  return (await res.json()) as Record<string, unknown>;
+/** Null when the list can't be loaded, so a failed fetch never reads as "the
+ * routine is gone". */
+export async function listRoutineRefs(): Promise<RoutineRef[] | null> {
+  const res = await fetch("/api/routines", { credentials: "include" }).catch(() => null);
+  if (!res?.ok) return null;
+  const rows = (await res.json().catch(() => null)) as Array<Partial<RoutineRef>> | null;
+  if (!Array.isArray(rows)) return null;
+  return rows.flatMap((r) =>
+    typeof r.id === "string"
+      ? [{ id: r.id, name: r.name ?? "", key: r.key ?? null, enabled: r.enabled !== false }]
+      : [],
+  );
+}
+
+export interface RoutineMutationResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function routineMutation(
+  id: string,
+  init: RequestInit,
+  fallback: string,
+): Promise<RoutineMutationResult> {
+  const res = await fetch(`/api/routines/${encodeURIComponent(id)}`, {
+    credentials: "include",
+    ...init,
+  }).catch(() => null);
+  if (res?.ok) return { ok: true };
+  const payload = (await res?.json().catch(() => null)) as { error?: string } | null;
+  return { ok: false, error: payload?.error ?? fallback };
+}
+
+export function setRoutineEnabled(id: string, enabled: boolean): Promise<RoutineMutationResult> {
+  return routineMutation(
+    id,
+    { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ enabled }) },
+    enabled ? "Couldn't resume the routine." : "Couldn't pause the routine.",
+  );
+}
+
+export function deleteRoutine(id: string): Promise<RoutineMutationResult> {
+  return routineMutation(id, { method: "DELETE" }, "Couldn't delete the routine.");
 }
 
 export async function saveSetting(key: string, value: unknown): Promise<boolean> {

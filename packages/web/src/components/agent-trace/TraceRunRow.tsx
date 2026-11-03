@@ -1,4 +1,4 @@
-import type { TraceBlockDto, TraceRunSegment } from "@rome/api-types/trace-segments";
+import type { TraceEventDto, TraceRunSegment } from "@rome/api-types/trace-segments";
 import { formatDuration } from "./CollapsedTraceSummary";
 import { CollapsibleTraceRow } from "./CollapsibleTraceRow";
 
@@ -8,7 +8,7 @@ export function TraceRunRow({
   live = false,
 }: {
   run: TraceRunSegment;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   live?: boolean;
 }) {
   const durationStr = formatDuration(run.durationMs);

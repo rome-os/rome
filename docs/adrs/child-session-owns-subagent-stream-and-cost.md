@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-11
-- **Concept**: [Sessions — Agent run](../concepts/sessions.md#agent-run)
+- **Concept**: [Sessions — Turn](../concepts/sessions.md#turn)
 
 ## Context
 
@@ -10,7 +10,7 @@ A subagent is delegated work. The parent agent calls a subagent tool, the child 
 
 Delivery is where the split can collapse. The common shape for nested agents relays child events into the parent stream, so the guardian watches nested progress inline in the parent conversation, and rolls child token usage into an inclusive parent total. Both moves put child data under a parent owner.
 
-Four forces push the other way. First, only the parent terminal may become the guardian-facing reply, and a stream carrying both parent and child terminals lets a child result stand in for a parent that failed after it. Second, a trace holding child text and tool calls without a complete child lifecycle has no durable parent-child relation, so the trace UI reconstructs structure from agent tags and event adjacency. Third, global usage sums every stored accounting row, so a stored inclusive parent total is correct only while children own no [runs](../concepts/sessions.md#agent-run) of their own. It double-counts the moment they do. Fourth, `/sessions` is the debugging surface for every session, and a child that a parent swallowed is not inspectable there.
+Four forces push the other way. First, only the parent terminal may become the guardian-facing reply, and a stream carrying both parent and child terminals lets a child result stand in for a parent that failed after it. Second, a trace holding child text and tool calls without a complete child lifecycle has no durable parent-child relation, so the trace UI reconstructs structure from agent tags and event adjacency. Third, global usage sums every stored accounting row, so a stored inclusive parent total is correct only while children own no [turns](../concepts/sessions.md#turn) of their own. It double-counts the moment they do. Fourth, `/sessions` is the debugging surface for every session, and a child that a parent swallowed is not inspectable there.
 
 Two constraints bound the answer. The model-facing subagent tool stays blocking and keeps one input shape, so the child cannot become an interactive handoff by accident. The parent-child relation has to survive a browser refresh and a completed turn, while an in-flight child cannot survive a Rome process crash at all.
 

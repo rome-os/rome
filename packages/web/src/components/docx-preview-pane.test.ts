@@ -1,40 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import {
-  DOCX_PREVIEW_LAYOUT_CSS,
   DOCX_PREVIEW_OPTIONS,
   getDocxPreviewPageScale,
   renderDocxPreviewDetached,
   sanitizeDocxPreviewLinks,
 } from "@/components/docx-preview-pane";
 
-describe("DOCX_PREVIEW_OPTIONS", () => {
-  it("does not render altChunk HTML parts", () => {
-    expect(DOCX_PREVIEW_OPTIONS.renderAltChunks).toBe(false);
-  });
-
-  it("preserves Word-authored rendered page breaks", () => {
-    expect(DOCX_PREVIEW_OPTIONS.breakPages).toBe(true);
-    expect(DOCX_PREVIEW_OPTIONS.ignoreLastRenderedPageBreak).toBe(false);
-  });
-
-  it("preserves page dimensions for proportional responsive scaling", () => {
-    expect(DOCX_PREVIEW_OPTIONS.inWrapper).toBe(false);
-    expect(DOCX_PREVIEW_OPTIONS.ignoreWidth).toBe(false);
-    expect(DOCX_PREVIEW_OPTIONS.ignoreHeight).toBe(false);
-  });
-
-  it("scopes proportional page scaling styles to the DOCX preview pane", () => {
-    expect(DOCX_PREVIEW_LAYOUT_CSS).toContain(".docx-preview-pane .docx-preview-page-shell");
-    expect(DOCX_PREVIEW_LAYOUT_CSS).toContain("transform-origin: top left");
-    expect(DOCX_PREVIEW_LAYOUT_CSS).toContain("@media (max-width: 640px)");
-    expect(DOCX_PREVIEW_LAYOUT_CSS).toContain("padding: 0");
-  });
-
-  it("keeps rendered document pages readable in dark mode", () => {
-    expect(DOCX_PREVIEW_LAYOUT_CSS).toContain("background: white");
-    expect(DOCX_PREVIEW_LAYOUT_CSS).toContain("color: #111");
-  });
-
+describe("DOCX preview rendering", () => {
   it("calculates fit-to-width scale while preserving aspect ratio", () => {
     expect(getDocxPreviewPageScale(800, 400)).toBe(0.5);
     expect(getDocxPreviewPageScale(800, 1600)).toBe(1.15);

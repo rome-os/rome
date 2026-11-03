@@ -57,7 +57,7 @@ function NameCard({ ctx }: { ctx: AppComponentContext }) {
         </label>
       </div>
       <Button size="sm" className="mt-3" disabled={resolved} onClick={confirm}>
-        <Check /> {copy.names.confirm}
+        <Check data-icon="inline-start" /> {copy.names.confirm}
       </Button>
     </div>
   );

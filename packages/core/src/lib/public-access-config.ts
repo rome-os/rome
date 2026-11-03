@@ -6,6 +6,8 @@ export interface PublicAccessConfig {
   cloudEmailAccess: Record<string, string[]>;
 }
 
+export const PUBLIC_ACCESS_SETTING_KEY = "publicAccess";
+
 export const DEFAULT_PUBLIC_ACCESS_CONFIG: PublicAccessConfig = {
   enableAccessControl: false,
   allowedApps: [],

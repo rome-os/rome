@@ -1,0 +1,9 @@
+name: search_chats
+type: custom
+description: Search what the guardian asked for in the dashboard's chats over the past months, beyond the window a dream reviews. With a query, returns the chats whose guardian messages contain the most query words, quoting the matching requests. Without one, lists the opening request of every chat in the period, newest first. Each chat comes with the get_webchat_conversations arguments that open it in full. Chats on Rome's accounts, which other people write, are not searched.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only
+visibility: explicit

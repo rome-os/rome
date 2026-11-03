@@ -1,13 +1,16 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
-  forwardRef,
   useCallback,
   useEffect,
-  useImperativeHandle,
+  useId,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
+  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import {
   Archive,
@@ -30,70 +33,106 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { SlotContent } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
+import { usePresentationMode } from "@/lib/presentation-mode";
 import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  TraceDrawer,
-  traceDrawerContentInsetClass,
-  type TraceDrawerTarget,
-} from "@/components/agent-trace/TraceDrawer";
-import { AgentAvatar } from "@/components/chat/AgentAvatar";
-import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
+import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
+import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { senderFromIdentity } from "@/components/chat/SenderAvatar";
+import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  canPickChatModel,
+  currentReplyMessages,
+  isAwaitingGuardian,
+  isLockedByCard,
+  isLastTurnFailed,
   type AgentIdentity,
   type HandoffNode,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
-import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/trace-segments";
-import { useSmoothText } from "@/hooks/use-smooth-text";
-import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import { useToolTrace } from "@/pages/free/tool-trace";
+import type {
+  TraceSegment,
+  TraceSnapshot,
+  TraceSubagentSummary,
+  TraceSummary,
+} from "@rome/api-types/trace-segments";
+import { useStableMap } from "@/hooks/use-stable-map";
+import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
+import {
+  CHAT_PAGE_TURNS,
+  CONCIERGE_PAGE_TURNS,
+  useOlderMessages,
+} from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
+import {
+  ReplyDraftProvider,
+  replyFormFields,
+  useReplyDraftState,
+} from "@/components/chat/reply/reply-draft";
+import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
-import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
-import { useSseEvents } from "@/hooks/use-sse-events";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
+import { useChatTabStatus } from "@/hooks/use-tab-status";
+import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import {
   MessageList,
   type BlockActions,
+  type ChatVariant,
   findActiveSubmission,
   findLastSubmission,
   hasPendingApprovalConfirmation,
 } from "@/components/chat/MessageList";
-import type { DelegatedSubagentNode } from "@/components/chat/DelegatedSubagentGroup";
 import {
   ChatComposer,
   type ChatComposerHandle,
+  type ChatComposerSendControls,
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
+import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
+import { onConciergeJump } from "@/components/concierge/concierge-jump";
+import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
   ChatErrorNotice,
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
-  StreamBlock,
 } from "@/lib/chat-types";
-import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
-import { parseSSEEvents } from "@/lib/chat-sse";
+import {
+  parseSSEEvents,
+  STREAM_STALL_TIMEOUT_MS,
+  TURN_RESUME_BASE_DELAY_MS,
+  TURN_RESUME_MAX_DELAY_MS,
+} from "@/lib/chat-sse";
 import {
   mergeChatMessage,
-  mergeFetchedChatMessages,
+  mergeLatestMessagePage,
   orderChatMessages,
+  startsNewHistory,
 } from "@/lib/chat-message-ordering";
 import {
+  ChatApiError,
+  createSession,
   deleteSession,
   interruptTurn,
   listChatAgents,
+  listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
   markSessionRead as apiMarkSessionRead,
@@ -101,33 +140,30 @@ import {
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  updateSessionModel,
 } from "@/lib/chat-api";
 import { useArchiveSession, usePinSession } from "@/lib/session-events";
 import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
-import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { applyAgentPlacement } from "@/pages/free/use-free-cells";
+import { randomUUID } from "@/lib/random-uuid";
+import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
 const TIMELINE_JUMP_OFFSET_PX = 24;
 // How long the landed-on question stays tinted.
 const TIMELINE_LANDING_MS = 900;
+/** How many older pages a jump to a Concierge message loads before it gives up. */
+const MAX_JUMP_PAGES = 20;
 
 // Chat Component
 
 // Stable empty list so `messages.get(sid) ?? EMPTY_MESSAGES` keeps a constant
 // reference (avoids re-running submission gates every render).
 const EMPTY_MESSAGES: ChatMessage[] = [];
-
-// The turn SSE server emits a keepalive every 15s (TURN_STREAM_KEEPALIVE_
-// INTERVAL_MS in webchat.ts). If nothing arrives for this long the connection
-// is dead — mobile background/lock, proxy idle timeout, network swap — and the
-// reader would otherwise hang forever with no error, leaving the streaming UI
-// (and the Stop button's turnId) stuck on a stale turn. Three missed
-// keepalives + margin.
-const STREAM_STALL_TIMEOUT_MS = 50_000;
 
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
@@ -169,6 +205,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     stoppedByUser: z.boolean().optional(),
     terminalError: z.string().optional(),
     plan: agentPlanSchema.optional(),
+    model: z.string().optional(),
   }),
 );
 
@@ -176,7 +213,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   id: z.string(),
   sessionId: z.string(),
   turnId: z.string().nullable().optional(),
-  role: z.enum(["user", "assistant", "trace"]),
+  role: z.enum(["user", "assistant", "trace", "notification"]),
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
@@ -187,10 +224,13 @@ const sessionNameSchema = z.object({
   name: z.string(),
 });
 
+const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
+  onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
 }
 
@@ -198,10 +238,11 @@ function ChatSessionEvents({
   sessionId,
   onMessageInsert,
   onSessionName,
+  onSessionRunning,
   onReconnect,
 }: ChatSessionEventsProps) {
-  useSseEvents(
-    `/api/chat/sessions/${encodeURIComponent(sessionId)}/events`,
+  useLiveEvents(
+    chatSessionTopic(sessionId),
     {
       message_insert: {
         schema: chatMessageSchema,
@@ -210,6 +251,12 @@ function ChatSessionEvents({
       session_name: {
         schema: sessionNameSchema,
         fn: (event) => onSessionName(sessionId, event),
+      },
+      session_running: {
+        schema: sessionRunningSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onSessionRunning(event);
+        },
       },
     },
     {
@@ -230,11 +277,6 @@ function isModelResolutionErrorCode(code: DoneEventData["code"]): boolean {
   );
 }
 
-export interface ChatHandle {
-  focus: () => void;
-  insertText: (text: string) => void;
-}
-
 export interface SessionMessage {
   sessionId: string;
   turnId: string | null;
@@ -242,27 +284,88 @@ export interface SessionMessage {
 }
 
 export interface ChatProps {
-  sessionId: string;
+  /**
+   * The session to open. Without one the chat is a draft: it shows
+   * `emptyState`, and its first send creates a session that the same instance
+   * then keeps, so the composer never remounts.
+   */
+  sessionId?: string | null;
   /** Guardian-chosen display name for the default main agent. */
   mainAgentDisplayName?: string;
   onSessionsChanged?: () => void;
   onSessionNotFound?: (sessionId: string) => void;
+  /**
+   * Asked before a missing session is reported to `onSessionNotFound`: resolve
+   * true if the session exists now (it was being created), and the load tries
+   * once more.
+   */
+  recoverMissingSession?: (sessionId: string) => Promise<boolean>;
   onSessionMessage?: (message: SessionMessage) => void;
+  /**
+   * Called once with the id of the session a draft's first send created,
+   * before that turn is posted. A host that navigates to the session must keep
+   * this instance mounted for it.
+   */
+  onSessionCreated?: (sessionId: string) => void;
+  /** Rendered in place of the transcript while the chat has no session. */
+  emptyState?: ReactNode;
+  /**
+   * Centers the draft's empty state and composer as one group from `md` up,
+   * instead of docking the composer at the bottom. For an empty state that is
+   * only a short greeting, which would otherwise float far above the composer.
+   */
+  centerDraftComposer?: boolean;
+  /** Draft seeds for the composer, read when it mounts. */
+  initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
+  initialAgentMention?: AgentMention | null;
+  /** Receives the composer's handle, for a host that seeds or focuses the draft. */
+  composerRef?: RefObject<ChatComposerHandle | null>;
+  /**
+   * A slot to draw the chat's bar into instead of a row above the transcript.
+   * The Mac app passes its title bar's, so the window has one row on top.
+   */
+  navbarSlot?: string;
+  /**
+   * `concierge` makes this the texting-style Concierge chat: a new message
+   * interrupts the running turn, and the transcript and composer drop the
+   * trace, turn summary, pickers, and Stop.
+   */
+  variant?: ChatVariant;
 }
 
-export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
-  { sessionId, mainAgentDisplayName, onSessionsChanged, onSessionNotFound, onSessionMessage },
-  ref,
-) {
+export function Chat({
+  sessionId,
+  mainAgentDisplayName,
+  onSessionsChanged,
+  onSessionNotFound,
+  recoverMissingSession,
+  onSessionMessage,
+  onSessionCreated,
+  emptyState,
+  centerDraftComposer = false,
+  initialProjectName,
+  initialDeviceFolder,
+  initialAgentMention,
+  composerRef: hostComposerRef,
+  navbarSlot,
+  variant = "default",
+}: ChatProps) {
+  const concierge = variant === "concierge";
+  const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
+  const presentationMode = usePresentationMode();
   // `null` outside the workspace shell; sends simply skip injection.
   const workspaceContextRegistry = useWorkspaceContextRegistry();
-  const { toolView, setToolsCollapsed } = useFreeCells();
-  const isAppsPanelOpen = !toolView.collapsed;
+  const { toolView } = useFreeCells();
+  // The tool pane: its Trace tab shows this chat's trace, and its open state
+  // includes a pane a trace holds open.
+  const toolTrace = useToolTrace();
   // Multiple sessions are in scope at once. Pick the right one deliberately:
-  //   • mainSessionId  — the session THIS <Chat> owns (the prop). Use for the
-  //     owned transcript's load / delete / agent lookup / scroll / navigation.
+  //   • mainSessionId  — the session THIS <Chat> owns: the prop, or the one its
+  //     draft created, and null while a draft has none. Use for the owned
+  //     transcript's load / delete / agent lookup / scroll / navigation.
   //   • floorSessionId — the session currently being interacted with / streamed:
   //     the deepest open handoff's child, else main. Use for anything paired
   //     with the running turn or live stream (send, stop, reattach, live trace,
@@ -272,11 +375,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // Never key shared interaction state by a bare toolUseId — provider ids recycle
   // per turn AND across sessions, so namespace by session (interactionResultKey).
   //
-  // ChatPage remounts <Chat> with key={sessionId} on every navigation, so the
-  // prop is effectively the source of truth.
-  const mainSessionId = sessionId;
+  // The host remounts <Chat> with a new key for every other session, so the
+  // main session changes at most once: from null to the one the draft created.
+  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+  const mainSessionId = sessionId || createdSessionId;
   const mainSessionIdRef = useRef(mainSessionId);
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const traceArchivedSessionsRef = useRef(new Set<string>());
   const [subagentIconByName, setSubagentIconByName] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
   );
@@ -302,12 +409,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const {
     streams: streamingSessions,
     streamsRef: streamingSessionsRef,
+    liveText: liveTextOf,
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
+    adoptAgentTurn: adoptSessionAgentTurn,
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
+  // Turns in this chat the server reported finished (a terminal stream event).
+  // A dropped connection ends the local stream but not the turn, so it never
+  // counts here.
+  const [turnEnds, setTurnEnds] = useState(0);
   const [streamReconnectRevision, setStreamReconnectRevision] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
@@ -319,8 +432,40 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // The session's bound agent (`null` ⇒ default "main") and display name. The
   // composer renders the agent as a non-removable chip and the navbar shows the
   // name as the title; the mobile header bar (FreeGrid) reuses the same hook.
-  const { sessionName, model, pinnedAgentMention, archivedAt, pinnedAt } =
-    useSessionIdentity(mainSessionId);
+  const {
+    sessionName,
+    model,
+    largeModelSelection: storedModelSelection,
+    isSideChat,
+    reasoningEffort,
+    pinnedAgentMention: identityAgentMention,
+    archivedAt,
+    pinnedAt,
+  } = useSessionIdentity(mainSessionId);
+  // The open chat's model pick, shown as soon as the guardian makes it. It is
+  // stored on the chat and the next turn runs on it.
+  const [pickedModel, setPickedModel] = useState<{ sessionId: string; value: string } | null>(null);
+  const chatModelValue =
+    (pickedModel && pickedModel.sessionId === mainSessionId ? pickedModel.value : null) ??
+    storedModelSelection ??
+    DEFAULT_LARGE_MODEL_SELECTION;
+  const pickChatModel = useCallback(
+    (next: string) => {
+      if (!mainSessionId) return;
+      const sessionId = mainSessionId;
+      const previous = chatModelValue;
+      setPickedModel({ sessionId, value: next });
+      updateSessionModel(sessionId, next).catch(() => {
+        setPickedModel({ sessionId, value: previous });
+        setStreamError(t("modelSelector.saveFailed"));
+      });
+    },
+    [mainSessionId, chatModelValue, t],
+  );
+  // The agent a draft's first send picked stands in until the new session's
+  // identity loads, so its chip does not drop out when the composer locks.
+  const [createdAgentMention, setCreatedAgentMention] = useState<AgentMention | null>(null);
+  const pinnedAgentMention = identityAgentMention ?? createdAgentMention;
   // Local override so archive/unarchive from the navbar flips the read-only
   // composer immediately; `undefined` defers to the session read (`archivedAt`).
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
@@ -336,9 +481,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     setArchivedOverride(undefined);
   }, [archivedAt]);
 
-  const composerRef = useRef<ChatComposerHandle>(null);
+  const ownComposerRef = useRef<ChatComposerHandle>(null);
+  const composerRef = hostComposerRef ?? ownComposerRef;
+  const creatingSessionRef = useRef(false);
   const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
+  // Handoff children load whole: their messages are spliced into the main
+  // transcript, so a partial child would leave a hole in the middle of it.
+  const wholeSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -353,14 +503,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // on that node preserve the iPad touch feel that an unstyled nested scroller
   // regressed before. The hook re-pins on content resize; we hand it the
   // scroller explicitly via `scrollRef` so it skips ancestor detection.
+  //
+  // A draft's empty state reads from the top, so only a session starts pinned.
+  // The first send pins the draft through runTurnLifecycle's scrollToBottom.
   const {
     contentRef: stickContentRef,
     scrollRef: stickScrollRef,
     isAtBottom,
     scrollToBottom,
-  } = useStickToBottom({
-    thresholdPx: SCROLL_BOTTOM_THRESHOLD_PX,
-  });
+  } = useStickToBottom({ initialStuck: Boolean(sessionId) });
+
+  const [floorEl, setFloorEl] = useState<HTMLDivElement | null>(null);
 
   // The timeline rail measures against these two nodes, so they are held as
   // state rather than refs: its effect has to re-run once they mount. Both
@@ -384,14 +537,19 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     [stickContentRef],
   );
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      focus: () => composerRef.current?.focus(),
-      insertText: (text: string) => composerRef.current?.insertText(text),
-    }),
-    [],
-  );
+  // The main session loads its newest turns first and pages older ones in as
+  // the transcript scrolls toward the top.
+  const {
+    setCursor: setOlderCursor,
+    hasOlder,
+    sentinelRef: olderSentinelRef,
+    loadOlder,
+  } = useOlderMessages(mainSessionId || null, {
+    pageTurns,
+    scroller: scrollerEl,
+    pinned: isAtBottom,
+    setMessages,
+  });
 
   // One <Chat> owns the main session but displays & talks to the child sessions
   // of any open handoff. The whole merge / index / floor / identity derivation
@@ -406,12 +564,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     }),
     [mainAgentDisplayName, pinnedAgentMention, t],
   );
+  // A draft builds from the empty id: the view is empty and its floor is falsy,
+  // which every session-keyed effect below already skips.
   const view = useMemo(
-    () => buildChatView(messages, mainSessionId, mainIdentity),
+    () => buildChatView(messages, mainSessionId ?? "", mainIdentity),
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
     view;
+  const chatModelPickable =
+    !!mainSessionId && canPickChatModel({ mainSessionId, floorSessionId, isSideChat });
 
   // Ordered, unique turn ids of the MAIN session — the selectable share unit.
   // Handoff child turns aren't listed here; they ride along with their parent.
@@ -437,18 +599,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const landingTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(landingTimerRef.current), []);
 
-  const jumpToQuestion = useCallback(
+  // Scrolls to a message and tints it. An anchor names one message id, or
+  // every id of an agent turn separated by spaces.
+  const jumpToMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
       if (!scroller) return;
-      const anchor = [...scroller.querySelectorAll<HTMLElement>("[data-timeline-anchor]")].find(
-        (el) => el.getAttribute("data-timeline-anchor") === messageId,
-      );
+      const anchor = findMessageAnchor(scroller, messageId);
       if (!anchor) return;
       const top =
         anchor.getBoundingClientRect().top -
         scroller.getBoundingClientRect().top +
         scroller.scrollTop;
+      // A jump that follows loading older pages comes long after the click, so
+      // the pin would read it as drift and snap back to the bottom.
+      anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
       // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
       // scroll outside its 300ms user-gesture window as accidental drift and
       // snaps back to the bottom while pinned; an instant scroll emits its one
@@ -471,6 +636,68 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [scrollerEl],
   );
+
+  // A row of the task panel points to a Concierge message that may sit pages
+  // above the loaded ones, so the jump pages older history in until it renders.
+  const olderRef = useRef({ hasOlder, loadOlder });
+  olderRef.current = { hasOlder, loadOlder };
+  const shownCountRef = useRef(0);
+  useEffect(() => {
+    shownCountRef.current = displayMessages.length;
+  }, [displayMessages]);
+  const findingMessageRef = useRef(false);
+  const showSourceMessage = useCallback(
+    async (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller || !mainSessionId || findingMessageRef.current) return;
+      if (findMessageAnchor(scroller, messageId)) {
+        jumpToMessage(messageId);
+        return;
+      }
+      findingMessageRef.current = true;
+      const loading = toast.loading(t("concierge.tasks.findingMessage"));
+      try {
+        let stalled = 0;
+        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+          if (!olderRef.current.hasOlder(mainSessionId)) break;
+          const before = shownCountRef.current;
+          await olderRef.current.loadOlder(mainSessionId);
+          // The page lands in state first and renders a moment later.
+          for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          if (findMessageAnchor(scroller, messageId)) {
+            jumpToMessage(messageId);
+            return;
+          }
+          // A page that fails to load changes nothing; two in a row end the search.
+          stalled = shownCountRef.current === before ? stalled + 1 : 0;
+          if (stalled >= 2) break;
+        }
+        toast.error(t("concierge.tasks.sourceMissing"));
+      } finally {
+        toast.dismiss(loading);
+        findingMessageRef.current = false;
+      }
+    },
+    [scrollerEl, mainSessionId, jumpToMessage, t],
+  );
+  useEffect(() => {
+    if (!concierge) return;
+    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+  }, [concierge, showSourceMessage]);
+
+  const displayedMessageIds = useMemo(
+    () => new Set(displayMessages.map((message) => message.id)),
+    [displayMessages],
+  );
+  const replyDraft = useReplyDraftState({
+    chatId: mainSessionId ?? undefined,
+    sessionId: floorSessionId || null,
+    messageIds: displayedMessageIds,
+    jump: jumpToMessage,
+    focusComposer: () => composerRef.current?.focus(),
+  });
 
   const enterShareMode = useCallback(() => {
     setSelectedShareTurns(new Set(mainTurnIds));
@@ -511,6 +738,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     floorSessionIdRef.current = floorSessionId;
   }, [floorSessionId]);
+  // A message shows its sender before the server has it, so the signed-in
+  // person's avatar appears on their bubble as they send.
+  const { data: viewer } = useDashboardIdentity();
+  const viewerSenderRef = useRef(senderFromIdentity(viewer));
+  useEffect(() => {
+    viewerSenderRef.current = senderFromIdentity(viewer);
+  }, [viewer]);
   const isReadVisibleSession = useCallback(
     (id: string) => id === mainSessionIdRef.current || id === floorSessionIdRef.current,
     [],
@@ -527,18 +761,25 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // Only the floor session streams (every shallower caller is suspended).
   const floorSessionStream = streamingSessions.get(floorSessionId) ?? null;
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
-  const runningTurnId = floorSessionStream?.turnId ?? null;
+  // The `turnId` the stream was opened under addresses the follower and Stop.
+  // The transcript matches the turn by its runningTurnId, which differs for a
+  // backend task.
+  const floorStreamTurnId = floorSessionStream?.turnId ?? null;
+  const runningTurnId = runningTurnIdOf(floorSessionStream);
   const isActiveSessionStreaming = !!floorSessionStream;
-  // Typewriter-paced reveal of the latest assistant text block — the SSE
-  // stream updates in provider-sized chunks; this smooths them into typing.
-  // Keyed by turn + block: a new block retypes from zero (delayed fold — it
-  // replaces the previous block the moment its first delta arrives).
-  const liveAssistantText = useSmoothText(
-    floorSessionStream?.assistantText ?? "",
-    floorSessionStream
-      ? `${floorSessionStream.turnId}:${floorSessionStream.assistantBlockIx}`
-      : "idle",
+  const awaitingGuardian = useMemo(
+    () => isAwaitingGuardian(view, runningTurnId),
+    [view, runningTurnId],
   );
+  const lockedByCard = useMemo(() => isLockedByCard(view, runningTurnId), [view, runningTurnId]);
+  const currentReplyMessageIds = useMemo(
+    () => new Set(currentReplyMessages(view, runningTurnId).map((message) => message.id)),
+    [view, runningTurnId],
+  );
+  const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
+  // The latest assistant text block. The live row follows it (and smooths it
+  // into typing, see LiveTail); the chat does not render for it.
+  const liveTextStore = liveTextOf(floorSessionId);
 
   // Pull host callbacks through refs so the many internal `useCallback`s
   // depending on them don't need to re-create whenever the host swaps in a
@@ -546,11 +787,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const onSessionsChangedRef = useRef(onSessionsChanged);
   const onSessionNotFoundRef = useRef(onSessionNotFound);
   const onSessionMessageRef = useRef(onSessionMessage);
+  const recoverMissingSessionRef = useRef(recoverMissingSession);
+  recoverMissingSessionRef.current = recoverMissingSession;
   useEffect(() => {
     onSessionsChangedRef.current = onSessionsChanged;
   }, [onSessionsChanged]);
   useEffect(() => {
     onSessionNotFoundRef.current = onSessionNotFound;
+    return () => {
+      // A late 404 from a chat we left must not redirect the current page.
+      onSessionNotFoundRef.current = undefined;
+    };
   }, [onSessionNotFound]);
   useEffect(() => {
     onSessionMessageRef.current = onSessionMessage;
@@ -572,8 +819,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     }
   }, []);
 
+  const isMountedRef = useRef(true);
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -581,8 +831,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     };
   }, []);
 
+  // A chat that changes while its tab is hidden stays unread, so the sidebar
+  // and other devices show it as new until the guardian comes back.
+  const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        hiddenReadsRef.current.add(id);
+        return;
+      }
       try {
         await apiMarkSessionRead(id);
         notifySessionsChanged();
@@ -592,12 +849,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [notifySessionsChanged],
   );
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === "hidden") return;
+      const ids = [...hiddenReadsRef.current];
+      hiddenReadsRef.current.clear();
+      for (const id of ids) void markSessionRead(id);
+    };
+    document.addEventListener("visibilitychange", flush);
+    return () => document.removeEventListener("visibilitychange", flush);
+  }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat.
   const handleDeleteSession = useCallback(async () => {
-    if (!mainSessionId) return;
     setDeleteConfirmOpen(false);
+    if (!mainSessionId) return;
     try {
       await deleteSession(mainSessionId);
     } catch {
@@ -643,8 +910,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     // The running turn lives in the floor session (the specialist during a
     // handoff), so report that — not main — to the host's turn-follow.
-    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: runningTurnId });
-  }, [runningTurnId, floorSessionId]);
+    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: floorStreamTurnId });
+  }, [floorStreamTurnId, floorSessionId]);
 
   // Fetch messages for a session
   const loadMessages = useCallback(
@@ -654,15 +921,31 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
       try {
-        const data = await listSessionMessages(id);
-        if (data === null) {
+        const whole = wholeSessionsRef.current.has(id);
+        const fetchPage = () =>
+          whole
+            ? listSessionMessages(id).then((all) =>
+                all ? { messages: all, nextCursor: null } : null,
+              )
+            : listSessionMessagePage(id, { limit: pageTurns });
+        let page = await fetchPage();
+        if (page === null && (await recoverMissingSessionRef.current?.(id)))
+          page = await fetchPage();
+        if (page === null) {
           // Server says this session doesn't exist (HTTP 404). Hand it back
           // to the host so they can redirect to the draft surface instead of
           // leaving the user staring at an empty active-chat shell.
           onSessionNotFoundRef.current?.(id);
           return;
         }
-        const fetchedMessages = orderChatMessages(data);
+        const fetchedMessages = orderChatMessages(page.messages);
+        const restart = startsNewHistory(messagesRef.current.get(id) ?? [], {
+          messages: fetchedMessages,
+          hasOlder: page.nextCursor !== null,
+        });
+        if (fetchedMessages.some((message) => message.traceArchived))
+          traceArchivedSessionsRef.current.add(id);
+        else traceArchivedSessionsRef.current.delete(id);
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
@@ -670,10 +953,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           const next = new Map(prev);
           next.set(
             id,
-            mergeFetchedChatMessages(next.get(id) ?? [], fetchedMessages, { dropMessageIds }),
+            mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
+              restart,
+              dropMessageIds,
+            }),
           );
           return next;
         });
+        // A refetch of the newest page leaves older loaded pages, and the
+        // cursor that reaches past them, as they are.
+        if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
         if (options.dropLocalOptimistic) {
           localOptimisticMessageIdsRef.current.delete(id);
         }
@@ -686,7 +975,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // refresh) can retry on the next trigger.
       }
     },
-    [isReadVisibleSession, markSessionRead],
+    [isReadVisibleSession, markSessionRead, pageTurns, setOlderCursor],
+  );
+
+  // A new message reactivates every turn's steps. Fetch server truth once,
+  // rather than waiting for the new turn to finish or guessing the cutoff here.
+  const refreshArchivedSession = useCallback(
+    (sid: string) => {
+      if (traceArchivedSessionsRef.current.delete(sid)) void loadMessages(sid, { force: true });
+    },
+    [loadMessages],
   );
 
   // Load messages when the main session changes (also covers initial mount).
@@ -699,14 +997,20 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // Load every child session referenced by a handoff so its conversation can be
   // spliced into the flat transcript (Q4 — load the whole tree).
   useEffect(() => {
-    for (const h of handoffList) loadMessages(h.childSessionId);
+    for (const h of handoffList) {
+      wholeSessionsRef.current.add(h.childSessionId);
+      loadMessages(h.childSessionId);
+    }
   }, [handoffList, loadMessages]);
 
   // Subscribe to the main session and the floor (the only one streaming): a
   // handoff's child streams while it holds the floor; the main session streams
-  // again once it resumes. Each child owns one EventSource through useSseEvents.
+  // again once it resumes. Each child holds one subscription through useLiveEvents.
   const sessionEventIds = useMemo(
-    () => Array.from(new Set([mainSessionId, floorSessionId])).filter(Boolean),
+    () =>
+      Array.from(new Set([mainSessionId, floorSessionId])).filter((id): id is string =>
+        Boolean(id),
+      ),
     [mainSessionId, floorSessionId],
   );
   const handleMessageInsert = useCallback(
@@ -718,10 +1022,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         next.set(sid, mergeChatMessage(existing, message));
         return next;
       });
+      refreshArchivedSession(sid);
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead],
+    [markSessionRead, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -740,14 +1045,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // growth (streaming text, late media) is followed by the hook's ResizeObserver
   // — no per-render scroll effect needed.
   useEffect(() => {
-    scrollToBottom("auto");
+    if (mainSessionId) scrollToBottom("auto");
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
-    async (res: Response, sessionId: string, turnId: string) => {
+    // Resolves true once the turn reported a terminal event (`done` or
+    // `stream_error`); false means the transport ended first.
+    async (res: Response, sessionId: string, turnId: string): Promise<boolean> => {
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
-        return;
+        return false;
       }
 
       const reader = res.body.getReader();
@@ -783,10 +1090,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }),
         ]).finally(() => clearTimeout(stallTimer));
         if (result === "stalled") {
-          // Dead connection. Release the reader and fall through to the
-          // final reload; the caller's finally block tears the streaming
-          // entry down and the floor reattach poll re-attaches from
-          // GET /turns if the turn is in fact still running server-side.
+          // Dead connection. Release the reader; followTurn reopens the
+          // same turn's stream.
           void reader.cancel().catch(() => {});
           break;
         }
@@ -813,7 +1118,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               // Model-resolution failures are persisted as assistant error
               // messages, so they render once in the conversation rather than
               // being duplicated above the composer.
-              if (!payload.success && payload.error && !isModelResolutionErrorCode(payload.code)) {
+              // The composer banner belongs to the floor, as for reconnect
+              // errors below; a background turn's failure stays off it.
+              if (
+                !payload.success &&
+                payload.error &&
+                !isModelResolutionErrorCode(payload.code) &&
+                sessionId === floorSessionIdRef.current
+              ) {
                 setStreamError({
                   message: payload.error,
                   ...(payload.code ? { code: payload.code } : {}),
@@ -824,13 +1136,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            if (isReadVisibleSession(sessionId)) setTurnEnds((n) => n + 1);
             shouldStop = true;
             break;
           }
           if (evt.event === "stream_error") {
             try {
               const payload = JSON.parse(evt.data) as Partial<DoneEventData>;
-              if (payload.error && !isModelResolutionErrorCode(payload.code)) {
+              if (
+                payload.error &&
+                !isModelResolutionErrorCode(payload.code) &&
+                sessionId === floorSessionIdRef.current
+              ) {
                 setStreamError({
                   message: payload.error,
                   ...(payload.code ? { code: payload.code } : {}),
@@ -841,6 +1158,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            if (isReadVisibleSession(sessionId)) setTurnEnds((n) => n + 1);
             shouldStop = true;
             break;
           }
@@ -855,11 +1173,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 segArr.push(seg);
               }
               flushSnapshot();
-              onSessionMessageRef.current?.({
-                sessionId,
-                turnId,
-                segment: seg,
-              });
+              // Only the floor's turn drives the host's workspace follow. A
+              // background turn (e.g. a parent that handed off) keeps its own
+              // trace without retargeting the host.
+              if (sessionId === floorSessionIdRef.current) {
+                onSessionMessageRef.current?.({ sessionId, turnId, segment: seg });
+              }
             } catch {
               // ignore parse errors
             }
@@ -894,7 +1213,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             try {
               const status = JSON.parse(
                 evt.data,
-              ) as import("@rome/api-types/trace-segments").InputStatusMessage;
+              ) as import("@rome/api-types/trace-segments").InputStatusEvent;
               setMessages((prev) => {
                 const next = new Map(prev);
                 next.set(
@@ -912,6 +1231,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             }
             continue;
           }
+          if (evt.event === "turn_id") {
+            // A backend task names the agent turn it runs. The entry keeps the
+            // `turnId` its stream was opened under; the transcript matches the
+            // turn by this id.
+            try {
+              const { turnId: agentTurnId } = JSON.parse(evt.data) as { turnId?: string };
+              if (agentTurnId) adoptSessionAgentTurn(sessionId, turnId, agentTurnId);
+            } catch {
+              // ignore parse errors
+            }
+            continue;
+          }
           if (evt.event === "session_status") {
             // SSE-driven status lets the UI flip the
             // Send/Stop button without polling /stream-status.
@@ -921,16 +1252,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
           if (evt.event === "widget_placement") {
             // An action returned `place_widget`: mount the app's widget on the
-            // freegrid without parking the agent. autoPlaceApp keys by appId, so
-            // a repeat placement retargets the existing tile (to the new
-            // route/params) in place rather than stacking duplicates.
+            // freegrid without parking the agent. Placement keys by appId, so a
+            // repeat placement retargets the existing tile (to the new
+            // route/params) in place rather than stacking duplicates, and a
+            // replayed `placementId` the layout already applied is skipped.
             try {
-              const { appId, route, params } = JSON.parse(evt.data) as {
+              const { placementId, appId, route, params } = JSON.parse(evt.data) as {
+                placementId?: string;
                 appId?: string;
                 route?: string;
                 params?: Record<string, string | number | boolean>;
               };
-              if (appId) autoPlaceApp(appId, route, params);
+              // The floor owns the workspace; a background turn's replayed
+              // placement would remount (and reset) a widget in use.
+              if (appId && sessionId === floorSessionIdRef.current) {
+                applyAgentPlacement(placementId, appId, route, params);
+              }
             } catch {
               // ignore parse errors
             }
@@ -939,34 +1276,102 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
       }
 
-      // After stream ends, reload messages from DB (gets both trace + assistant)
-      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      return shouldStop;
     },
-    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
+    [
+      t,
+      updateSessionSnapshot,
+      updateSessionAssistantText,
+      adoptSessionAgentTurn,
+      isReadVisibleSession,
+    ],
   );
 
-  useEffect(() => {
-    // Reattach to whichever session holds the floor — during a handoff that's
-    // the specialist's child session, not the main one (only the floor can have
-    // an in-flight turn, since shallower callers are suspended). On reload this
-    // re-runs as the floor resolves, so the live preview reattaches correctly.
-    const reattachSessionId = floorSessionId;
-    if (!reattachSessionId) return;
-    if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
+  // Follow one turn to its end. A dropped SSE connection (mobile background,
+  // network swap, stall) is not a turn outcome, so the live entry stays up and
+  // the same turn's stream is reopened. The server replays a turn's stream —
+  // including its terminal `done` for 30 s after it ends — and 404s once the
+  // turn is gone, so each retry gets a definitive answer. Settlement is keyed
+  // to this turnId: if Stop or a newer turn took the entry over, we just leave.
+  // The persisted answer loads before the live preview is released.
+  const followTurn = useCallback(
+    async (sessionId: string, turnId: string): Promise<void> => {
+      const ownsEntry = () =>
+        isMountedRef.current && streamingSessionsRef.current.get(sessionId)?.turnId === turnId;
+      let delayMs = TURN_RESUME_BASE_DELAY_MS;
+      let shownError: string | null = null;
+      let controller: AbortController;
+      for (;;) {
+        controller = createTurnStreamController(turnId);
+        try {
+          const res = await openTurnStream(turnId, controller.signal);
+          if (res.status === 404) break;
+          if (res.ok && res.body) {
+            if (shownError) {
+              const cleared = shownError;
+              setStreamError((current) => (current === cleared ? null : current));
+              shownError = null;
+            }
+            const openedAt = Date.now();
+            if (await consumeStream(res, sessionId, turnId)) break;
+            // Retry fast after a connection that held; keep backing off when
+            // streams keep closing right away.
+            if (Date.now() - openedAt >= TURN_RESUME_MAX_DELAY_MS) {
+              delayMs = TURN_RESUME_BASE_DELAY_MS;
+            }
+          } else if (sessionId === floorSessionIdRef.current) {
+            // The composer banner belongs to the floor; a background turn
+            // retries quietly.
+            shownError = t("stream.errors.reconnectStatus", { status: res.status });
+            setStreamError(shownError);
+          }
+        } catch {
+          // Network blip or aborted reader: retry below.
+        }
+        // Hold the controller through the backoff so Stop's force-release or
+        // unmount can still abort this follower. Both already settled the
+        // turn, so an abort ends the follower at once; waiting out the
+        // backoff would hold the send bookkeeping and swallow a new send.
+        const { signal } = controller;
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve();
+          const timer = setTimeout(resolve, delayMs);
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        releaseTurnStreamController(turnId, controller);
+        if (signal.aborted) return;
+        delayMs = Math.min(delayMs * 2, TURN_RESUME_MAX_DELAY_MS);
+        if (!ownsEntry()) return;
+      }
+      releaseTurnStreamController(turnId, controller);
+      if (!isMountedRef.current) return;
+      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      endSessionStream(sessionId, turnId);
+    },
+    [
+      consumeStream,
+      createTurnStreamController,
+      releaseTurnStreamController,
+      loadMessages,
+      endSessionStream,
+      streamingSessionsRef,
+      t,
+    ],
+  );
 
-    let cancelled = false;
-    let pollTimer: ReturnType<typeof setTimeout> | null = null;
-    let streamController: AbortController | null = null;
-
-    const schedule = (delayMs: number) => {
-      if (cancelled) return;
-      pollTimer = setTimeout(() => {
-        void runOnce();
-      }, delayMs);
-    };
-
-    const runOnce = async () => {
-      if (cancelled) return;
+  // Reattach to whichever session holds the floor — during a handoff that's
+  // the specialist's child session, not the main one (only the floor can have
+  // an in-flight turn, since shallower callers are suspended). On reload this
+  // re-runs as the floor resolves, so the live preview reattaches correctly.
+  const pollTurns = useCallback(
+    async (reattachSessionId: string, isCancelled: () => boolean): Promise<TurnPollOutcome> => {
       // Skip if the foreground send is mid-flight (locallyStreaming was added
       // before its POST, so it catches the window before its per-session
       // entry exists) or a prior reattach hasn't drained yet.
@@ -974,81 +1379,76 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
         streamingSessionsRef.current.has(reattachSessionId)
       ) {
-        schedule(2000);
-        return;
+        return "busy";
       }
-      let attachedTurnId: string | null = null;
-      try {
-        // List in-flight turns by turnId. Reattach to the running
-        // one (or the first queued one) — its events stream is keyed by
-        // turnId, so reattach is unambiguous even if more turns arrive
-        // while we're polling.
-        const turns = await listSessionTurns(reattachSessionId);
-        if (!turns || turns.length === 0 || cancelled) return;
+      // List in-flight turns by turnId. Reattach to the running
+      // one (or the first queued one) — its events stream is keyed by
+      // turnId, so reattach is unambiguous even if more turns arrive
+      // while we're polling.
+      const turns = await listSessionTurns(reattachSessionId);
+      if (!turns || turns.length === 0 || isCancelled()) return "idle";
+      // A foreground send may have started while the lookup was in flight.
+      // It already follows its turn; a second follower would fight it for
+      // the stream controller.
+      if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return "busy";
 
-        const target = turns.find((t) => t.status === "running") ?? turns[0];
-        attachedTurnId = target.turnId;
-        startSessionStream(reattachSessionId, attachedTurnId);
-        setStreamError(null);
-
-        streamController = createTurnStreamController(attachedTurnId);
-        const streamRes = await openTurnStream(attachedTurnId, streamController.signal);
-        if (!streamRes.ok) {
-          if (streamRes.status !== 404 && !cancelled) {
-            setStreamError(t("stream.errors.reconnectStatus", { status: streamRes.status }));
-          }
-          return;
-        }
-
-        await consumeStream(streamRes, reattachSessionId, attachedTurnId);
-      } catch {
-        // Silent on poll/network blips — keep trying so backend-initiated
-        // streams (e.g. queued approvals) eventually attach.
-      } finally {
-        if (attachedTurnId) {
-          if (streamController) {
-            releaseTurnStreamController(attachedTurnId, streamController);
-            streamController = null;
-          }
-          // Turn-guarded: this reattach finalizer must only clear the entry
-          // it installed. If a newer turn (foreground send or fresh reattach)
-          // has replaced it in the meantime, endSessionStream is a no-op.
-          endSessionStream(reattachSessionId, attachedTurnId);
-        }
-        if (!cancelled) {
-          schedule(2000);
-        }
+      const target = turns.find((t) => t.status === "running") ?? turns[0];
+      startSessionStream(reattachSessionId, target.turnId, target.quiet);
+      // A backend turn already listed under its agent turn id hides its saved
+      // trace from the first render, before the replayed `turn_id` arrives.
+      if (target.agentTurnId) {
+        adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
       }
-    };
-
-    void runOnce();
-
-    return () => {
-      cancelled = true;
-      streamController?.abort();
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-  }, [
+      setStreamError(null);
+      // Not cancelled with the poll: followTurn ends with its turn (or on
+      // unmount), and the entry it holds pauses the poll meanwhile.
+      await followTurn(reattachSessionId, target.turnId);
+      return "followed";
+    },
+    [followTurn, startSessionStream, adoptSessionAgentTurn, streamingSessionsRef],
+  );
+  // A `session_running` event or a reconnect kicks the poll, so its timer is
+  // only a fallback for a lost event.
+  const kickTurnPoll = useTurnPoll(
     floorSessionId,
-    consumeStream,
-    streamReconnectRevision,
-    startSessionStream,
-    endSessionStream,
-    createTurnStreamController,
-    releaseTurnStreamController,
-    t,
-  ]);
+    { paused: isActiveSessionStreaming, revision: streamReconnectRevision },
+    pollTurns,
+  );
+  const handleSessionRunning = useCallback(
+    (event: z.infer<typeof sessionRunningSchema>) => {
+      // A turn queued or ended with the chat still running is one to follow.
+      if (event.running && event.sessionId === floorSessionIdRef.current) kickTurnPoll();
+    },
+    [kickTurnPoll],
+  );
+  // Events missed while the stream was down may include a turn's start.
+  const handleSessionEventsReconnect = useCallback(
+    (sid: string) => {
+      resyncSessionMessages(sid);
+      if (sid === floorSessionIdRef.current) kickTurnPoll();
+    },
+    [resyncSessionMessages, kickTurnPoll],
+  );
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
   // bookkeeping (inflight turn set, optimistic user row, stream attach,
   // teardown). Callers supply the post payload + the optimistic user message
   // content (already JSON-serialized MessagePart[]).
+  // DOMException("AbortError") from an aborted XHR/fetch; matched by name so
+  // it survives the structured-clone boundaries these errors cross.
+  const isAbortError = (err: unknown): boolean =>
+    err instanceof DOMException ? err.name === "AbortError" : (err as Error)?.name === "AbortError";
+
   const runTurnLifecycle = useCallback(
     async (
       sendingSessionId: string,
       postTurn: () => Promise<PostTurnResult>,
       optimisticUserContent: string,
+      // The client-minted input id, when the row may show before the POST
+      // settles. The server keeps it as the message id, so the accepted row
+      // replaces this one in place instead of mounting a second bubble.
+      immediateInputId?: string,
     ): Promise<void> => {
       setStreamError(null);
       // Sending re-engages stickiness so the user follows their own message and
@@ -1056,6 +1456,46 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       scrollToBottom("auto");
       const wasLocallyStreaming = locallyStreamingSessionIdsRef.current.has(sendingSessionId);
       locallyStreamingSessionIdsRef.current.add(sendingSessionId);
+      const sentAt = new Date().toISOString();
+
+      const putUserMessage = (message: ChatMessage, replacesId?: string) => {
+        const localIds =
+          localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
+        localIds.add(message.id);
+        localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
+        setMessages((prev) => {
+          const next = new Map(prev);
+          const existing = (next.get(sendingSessionId) ?? []).filter((m) => m.id !== replacesId);
+          next.set(sendingSessionId, mergeChatMessage(existing, message));
+          return next;
+        });
+      };
+      const dropImmediateMessage = () => {
+        if (!immediateInputId) return;
+        localOptimisticMessageIdsRef.current.get(sendingSessionId)?.delete(immediateInputId);
+        setMessages((prev) => {
+          const existing = prev.get(sendingSessionId);
+          if (!existing?.some((m) => m.id === immediateInputId)) return prev;
+          const next = new Map(prev);
+          next.set(
+            sendingSessionId,
+            existing.filter((m) => m.id !== immediateInputId),
+          );
+          return next;
+        });
+      };
+      if (immediateInputId) {
+        putUserMessage({
+          id: immediateInputId,
+          sessionId: sendingSessionId,
+          turnId: null,
+          inputState: "submitted",
+          role: "user",
+          content: optimisticUserContent,
+          createdAt: sentAt,
+          sender: viewerSenderRef.current,
+        });
+      }
 
       // The POST result is the acceptance boundary. Whether the composer clears
       // or restores the user's input hinges on this result alone — never on the
@@ -1066,12 +1506,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // dropped stream never does.
       const result = await postTurn().catch((err: unknown) => {
         // Transport failure posting the turn — a genuine failed submit.
+        dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
-        setStreamError(t("stream.errors.sendInvalidResponse"));
+        // A cancelled attachment upload is a deliberate act, not a failure:
+        // the composer already restored the draft, so an error banner would
+        // just be noise about something the user chose.
+        if (!isAbortError(err)) setStreamError(t("stream.errors.sendInvalidResponse"));
         throw err;
       });
       if (!result.ok) {
+        dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         const message =
@@ -1088,29 +1533,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         throw new Error(result.message || `post turn failed (${result.status})`);
       }
 
+      refreshArchivedSession(sendingSessionId);
       const createResp: CreateTurnResponse = result.data;
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
 
       const userMsg: ChatMessage = {
-        id: createResp.inputId ?? crypto.randomUUID(),
+        id: createResp.inputId ?? immediateInputId ?? randomUUID(),
         sessionId: sendingSessionId,
         turnId: pendingTurnId,
         inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
         role: "user",
         content: optimisticUserContent,
-        createdAt: new Date().toISOString(),
+        createdAt: sentAt,
+        sender: viewerSenderRef.current,
       };
-      const localIds =
-        localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
-      localIds.add(userMsg.id);
-      localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
-      setMessages((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(sendingSessionId) ?? [];
-        next.set(sendingSessionId, mergeChatMessage(existing, userMsg));
-        return next;
-      });
+      putUserMessage(userMsg, immediateInputId);
 
       // Appending input does not own a second stream or replace the live tail.
       // Late follow-up turns are discovered by the existing reattach loop.
@@ -1127,28 +1565,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       inflightTurnsRef.current.set(sendingSessionId, turnsForSession);
       startSessionStream(sendingSessionId, pendingTurnId);
 
-      // turn is already submitted, so a failed attach or a mid-stream drop must
-      // never reject this function — that rejection is what used to restore the
-      // already-sent input. On any stream failure we just tear our bookkeeping
-      // down and let the floor reattach effect re-attach from GET /turns; the
-      // turn keeps running server-side.
+      // The turn is already submitted, so a failed attach or a mid-stream drop
+      // must never reject this function — that rejection is what used to
+      // restore the already-sent input. followTurn rides out dropped
+      // connections and settles only when the turn itself ends.
       void (async () => {
-        const streamController = createTurnStreamController(pendingTurnId);
         try {
-          const streamRes = await openTurnStream(pendingTurnId, streamController.signal);
-          if (!streamRes.ok || !streamRes.body) {
-            setStreamError(
-              t("stream.errors.attachStreamStatus", {
-                turnId: pendingTurnId,
-                status: streamRes.status,
-              }),
-            );
-            return;
-          }
-          await consumeStream(streamRes, sendingSessionId, pendingTurnId);
-        } catch {
-          // Mid-stream drop (reader rejected, network blip). Silent like the
-          // reattach poll: bumping the reconnect revision below re-triggers it.
+          await followTurn(sendingSessionId, pendingTurnId);
         } finally {
           const turns = inflightTurnsRef.current.get(sendingSessionId);
           if (turns) {
@@ -1168,19 +1591,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             setStreamReconnectRevision((revision) => revision + 1);
             endSessionStream(sendingSessionId, pendingTurnId);
           }
-          releaseTurnStreamController(pendingTurnId, streamController);
         }
       })();
     },
     [
-      consumeStream,
+      followTurn,
       endSessionStream,
       startSessionStream,
       streamingSessionsRef,
       t,
       scrollToBottom,
-      createTurnStreamController,
-      releaseTurnStreamController,
+      refreshArchivedSession,
     ],
   );
 
@@ -1190,13 +1611,52 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   //
   // The session decides whether input joins the active run or starts the next.
   const handleComposerSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
+    async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       // The single composer talks to whoever holds the floor — the open
       // handoff's specialist, or the main agent.
-      const sendingSessionId = floorSessionIdRef.current;
+      let sendingSessionId = floorSessionIdRef.current;
       if (!sendingSessionId) {
-        setStreamError(t("stream.errors.sendFallback"));
-        throw new Error("Chat: handleComposerSend called without an active session");
+        // A repeat submit (a double Enter) would otherwise create a second session.
+        if (creatingSessionRef.current) return;
+        creatingSessionRef.current = true;
+        try {
+          const created = await createSession({
+            name: t("sidebar.newChat"),
+            personaId: snapshot.personaId,
+            projectPath: snapshot.projectPath,
+            largeModelSelection: snapshot.largeModelSelection,
+            reasoningEffort: snapshot.reasoningEffort,
+            agentName: snapshot.agentMention?.agentName,
+            deviceFolder: snapshot.deviceFolder
+              ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
+              : undefined,
+          });
+          sendingSessionId = created.id;
+          controls.onSessionCreated?.();
+        } catch (error) {
+          setStreamError(
+            error instanceof ChatApiError && error.message
+              ? snapshot.deviceFolder && error.status === 409
+                ? // Core answers a folder it could not check with a DeviceFilesErrorCode.
+                  t(`project.devices.errors.${error.message}`, {
+                    defaultValue: t("project.devices.errors.unavailable"),
+                  })
+                : error.message
+              : t("stream.errors.createChatFallback"),
+          );
+          throw error;
+        } finally {
+          creatingSessionRef.current = false;
+        }
+        // The refs normally follow the render that adopts the session. The turn
+        // below starts before that render, and its stream reads them to decide
+        // which session's end counts as read and which may move the workspace.
+        mainSessionIdRef.current = sendingSessionId;
+        floorSessionIdRef.current = sendingSessionId;
+        setCreatedAgentMention(snapshot.agentMention ?? null);
+        setCreatedSessionId(sendingSessionId);
+        onSessionCreated?.(sendingSessionId);
+        notifySessionsChanged();
       }
       const baseOptimisticText = buildOptimisticUserText(snapshot.text, snapshot.uploads);
       // Mirror the server's persisted form for a structured skill turn
@@ -1206,30 +1666,66 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             baseOptimisticText.trim() ? ` ${baseOptimisticText}` : ""
           }`
         : baseOptimisticText;
-      const optimisticContent = JSON.stringify([{ type: "text", content: optimisticText }]);
+      const replyTo = snapshot.replyTo;
+      // The quote shows at once; the accepted row carries the server's snapshot of it.
+      const optimisticContent = JSON.stringify([
+        ...(replyTo
+          ? [
+              {
+                type: "reply_to",
+                messageId: replyTo.messageId,
+                author: replyTo.author,
+                ...(replyTo.name ? { name: replyTo.name } : {}),
+                text: replyTo.preview,
+              },
+            ]
+          : []),
+        { type: "text", content: optimisticText },
+      ]);
       await runTurnLifecycle(
         sendingSessionId,
         async () => {
           const formData = new FormData();
           formData.set("text", snapshot.text);
+          if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
           if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
           if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
           if (snapshot.largeModelSelection)
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
+          if (concierge) formData.set("priority", "now");
+          if (replyTo) {
+            for (const [name, value] of Object.entries(replyFormFields(replyTo))) {
+              formData.set(name, value);
+            }
+          }
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }
-          const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
+          // Concierge hands work to task chats, which see their own workspace.
+          const ws = concierge ? null : snapshotWorkspaceForSend(workspaceContextRegistry);
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          return postSessionTurn(sendingSessionId, formData);
+          return postSessionTurn(sendingSessionId, formData, {
+            onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+            signal: controls.signal,
+          });
         },
         optimisticContent,
+        // A text-only send shows its bubble at once. An upload keeps its text
+        // in the composer until the server accepts it, so its bubble waits too.
+        snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
       );
     },
-    [runTurnLifecycle, workspaceContextRegistry, t],
+    [
+      runTurnLifecycle,
+      workspaceContextRegistry,
+      t,
+      onSessionCreated,
+      notifySessionsChanged,
+      concierge,
+    ],
   );
 
   // An inline app component submitted its result. Posts an `interaction_result`
@@ -1363,7 +1859,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const displayedStreaming = isActiveSessionStreaming;
 
   // The grouped speaker rows. Memoized so a streaming turn never rebuilds the
-  // transcript — runningTurnId/isStreaming only change at turn boundaries.
+  // transcript. runningTurnId and isStreaming change only at turn boundaries,
+  // and once more when a backend turn names its agent turn.
   const rows = useMemo(
     () =>
       buildRows(displayMessages, identityBySession, mainIdentity, {
@@ -1373,16 +1870,29 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     [displayMessages, identityBySession, mainIdentity, runningTurnId, isActiveSessionStreaming],
   );
 
+  // Concierge before its first message. It waits for the history fetch, so a
+  // chat with messages never flashes the guidance while they load.
+  const conciergeEmpty =
+    concierge &&
+    !!mainSessionId &&
+    messages.has(mainSessionId) &&
+    rows.length === 0 &&
+    !displayedStreaming;
+
   // The composer's pinned chip = the floor agent (the specialist during a
   // handoff, the main agent otherwise).
-  const floorAgentMention: AgentMention | null = floorHandoff
-    ? {
-        appId: floorHandoff.appId,
-        appLabel: floorHandoff.agentLabel,
-        agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
-        iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
-      }
-    : pinnedAgentMention;
+  const floorAgentMention = useMemo<AgentMention | null>(
+    () =>
+      floorHandoff
+        ? {
+            appId: floorHandoff.appId,
+            appLabel: floorHandoff.agentLabel,
+            agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
+            iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
+          }
+        : pinnedAgentMention,
+    [floorHandoff, pinnedAgentMention],
+  );
   // The floor's own (raw, chronological) messages drive the approve /
   // verbal-approval gates — reordering doesn't affect submission detection.
   const floorMessages = messages.get(floorSessionId) ?? EMPTY_MESSAGES;
@@ -1398,6 +1908,39 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const activeSubmission = useMemo(
     () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
     [floorHandoff, floorMessages],
+  );
+
+  // The composer is memoized so a streaming turn does not render it, which only
+  // holds while what it is handed keeps its identity.
+  const composerModelSelection = useMemo(
+    () => (chatModelPickable ? { value: chatModelValue, onChange: pickChatModel } : undefined),
+    [chatModelPickable, chatModelValue, pickChatModel],
+  );
+  const composerDesigning = useMemo(
+    () =>
+      floorHandoff
+        ? {
+            agentLabel: floorHandoff.agentLabel,
+            // A pending submission turns the banner into an Approve
+            // that resolves the handoff with that payload.
+            onApprove: activeSubmission
+              ? () => void handleResolveHandoff(floorHandoff, activeSubmission.payload, "Approved")
+              : undefined,
+            // Cancel lives here now (off the @mention seam): dismiss
+            // the handoff and hand the floor back to the caller.
+            onCancel: () => handleCancelHandoff(floorHandoff),
+          }
+        : null,
+    [floorHandoff, activeSubmission, handleResolveHandoff, handleCancelHandoff],
+  );
+  const stopComposerTurn = useCallback(() => void stopMessage(), [stopMessage]);
+  // A submission waiting on Approve is the specialist asking the guardian, the
+  // same as an open card.
+  useChatTabStatus(
+    isActiveSessionStreaming,
+    awaitingGuardian || activeSubmission !== null,
+    lastTurnFailed && !isActiveSessionStreaming,
+    turnEnds,
   );
 
   // Verbal approval: the specialist relays the guardian's "yes" via
@@ -1481,14 +2024,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
   // The block-level callbacks + resolved-interaction map, bundled once so the
   // memoized StaticTranscript stays stable across a streaming turn.
+  // `interactionResults` is rebuilt whenever a message changes; kept by value, a
+  // new message does not hand every transcript row new actions.
+  const stableInteractionResults = useStableMap(interactionResults);
   const blockActions = useMemo<BlockActions>(
     () => ({
       onApprovalResolved: refreshActiveSession,
       onSubmitAppComponent: handleSubmitAppComponent,
       onDismissAppComponent: handleDismissAppComponent,
-      interactionResults,
+      interactionResults: stableInteractionResults,
     }),
-    [refreshActiveSession, handleSubmitAppComponent, handleDismissAppComponent, interactionResults],
+    [
+      refreshActiveSession,
+      handleSubmitAppComponent,
+      handleDismissAppComponent,
+      stableInteractionResults,
+    ],
   );
 
   // Keyed by (session, turn) so dismissal naturally clears when the turn
@@ -1524,26 +2075,41 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [floorSessionId, runningTurnId]);
 
   // Open the live trace drawer on demand (e.g. via the trace trigger button).
+  const revealTrace = toolTrace.reveal;
   const openLiveTraceDrawer = useCallback(() => {
     const target = buildLiveTraceTarget();
     if (!target) return;
     liveDismissedRef.current = null;
     setTraceDrawerTarget(target);
-  }, [buildLiveTraceTarget]);
+    revealTrace();
+  }, [buildLiveTraceTarget, revealTrace]);
 
-  const openSubagentTraceDrawer = useCallback((node: DelegatedSubagentNode) => {
-    setTraceDrawerTarget({
-      kind: "turn",
-      sessionId: node.sessionId,
-      turnId: node.turnId,
-      summary: node.traceSummary ?? {
-        distinctApps: [],
-        totalSteps: 0,
-        invocationCounts: {},
-      },
-      dumpHref: `/api/sessions/${encodeURIComponent(node.sessionId)}/turns/${encodeURIComponent(node.turnId)}/trace.json`,
-    });
-  }, []);
+  const openStoredTraceDrawer = useCallback(
+    (target: TraceDrawerTarget) => {
+      setTraceDrawerTarget(target);
+      revealTrace();
+    },
+    [revealTrace],
+  );
+
+  const openSubagentTraceDrawer = useCallback(
+    (node: TraceSubagentSummary) => {
+      setTraceDrawerTarget({
+        kind: "turn",
+        sessionId: node.sessionId,
+        turnId: node.turnId,
+        summary: node.traceSummary ?? {
+          distinctApps: [],
+          totalSteps: 0,
+          invocationCounts: {},
+        },
+        dumpHref: `/api/sessions/${encodeURIComponent(node.sessionId)}/turns/${encodeURIComponent(node.turnId)}/trace.json`,
+        running: node.status === "running",
+      });
+      revealTrace();
+    },
+    [revealTrace],
+  );
 
   // Keep a live trace target in sync when the user has already opened it,
   // but don't auto-open the drawer on new streams.
@@ -1567,7 +2133,111 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     setTraceDrawerTarget(null);
   }, [mainSessionId]);
 
-  return (
+  // Offer the open trace to the tool pane as its Trace tab. The tab's close
+  // button calls back into `closeTraceDrawer`, so closing there and closing
+  // from here end the same way.
+  const traceOwner = useId();
+  const setToolTrace = toolTrace.set;
+  const traceOpen = traceDrawerTarget !== null;
+  const traceStreaming = traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming;
+  const closeTraceRef = useRef(closeTraceDrawer);
+  closeTraceRef.current = closeTraceDrawer;
+  useEffect(() => {
+    setToolTrace(
+      traceOwner,
+      traceOpen ? { streaming: traceStreaming, onClose: () => closeTraceRef.current() } : null,
+    );
+  }, [setToolTrace, traceOwner, traceOpen, traceStreaming]);
+  useEffect(() => () => setToolTrace(traceOwner, null), [setToolTrace, traceOwner]);
+
+  const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
+
+  const navbar = (
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {untitledEmptyChat ? null : (
+          <>
+            <SessionAvatar
+              iconUrl={pinnedAgentMention?.iconUrl}
+              label={pinnedAgentMention?.appLabel}
+              model={model}
+              reasoningEffort={reasoningEffort}
+            />
+            <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
+              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+            </span>
+            {concierge ? <ConciergeTasksPill /> : null}
+            {/* The agent's app beside a titled chat. The Concierge's is always
+                Rome, so it shows none. */}
+            {!concierge && sessionName?.trim() && pinnedAgentMention && (
+              <span className="shrink-0 truncate text-aux text-muted-foreground">
+                {pinnedAgentMention.appLabel}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      {mainSessionId && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              size="sm"
+              label={t("navbar.more")}
+              icon={<MoreHorizontal />}
+              className="text-muted-foreground hover:text-foreground"
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => void handlePin()}>
+              {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+              {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => enterShareMode()}>
+              <Share2 className="size-4" />
+              {t("share.title", "Share chat")}
+            </DropdownMenuItem>
+            {isArchived ? (
+              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+                <ArchiveRestore className="size-4" />
+                {t("navbar.unarchive")}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onSelect={() => void handleArchive()}>
+                <Archive className="size-4" />
+                {t("navbar.archive")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
+              <Trash2 className="size-4" />
+              {t("navbar.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {!toolTrace.paneOpen && (
+        <IconButton
+          size="sm"
+          data-coach="add-widget"
+          aria-expanded={false}
+          onClick={() => toolTrace.setPaneCollapsed(false)}
+          label={t("chat.expandTools", { ns: "common" })}
+          icon={
+            <span className="relative">
+              <PanelRightOpen />
+              {toolView.unreadIds.length > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+                  aria-label={t("chat.toolUpdated", { ns: "common" })}
+                />
+              )}
+            </span>
+          }
+        />
+      )}
+    </>
+  );
+
+  const page = (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
         <ChatSessionEvents
@@ -1575,107 +2245,37 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
           onSessionName={handleSessionName}
-          onReconnect={resyncSessionMessages}
+          onSessionRunning={handleSessionRunning}
+          onReconnect={handleSessionEventsReconnect}
         />
       ))}
       <div
-        className="@container/chat relative flex h-full overflow-hidden"
+        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
         {/* ---- Main Chat Area ---- */}
-        {/* When the trace drawer is open as a side panel (wide / apps panel closed,
-            @5xl/chat) it's `fixed` and out of flow, so reserve its 480px here to
-            keep the toolbar, messages, and composer clear of it. In the narrow /
-            apps-open layout the drawer covers the chat instead, so no reserve. */}
-        <div
-          className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
-            traceDrawerTarget !== null,
-            isAppsPanelOpen,
-          )}`}
-        >
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {isDraggingFiles && (
             <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
               {t("composer.dropFiles")}
             </div>
           )}
 
-          <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-background/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 max-md:hidden">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AgentAvatar
-                iconUrl={pinnedAgentMention?.iconUrl}
-                label={pinnedAgentMention?.appLabel}
-                size="sm"
-                className="shrink-0"
-              />
-              <span className="truncate text-ui text-foreground">
-                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-              </span>
-              <SessionModelLabel model={model} />
-              {sessionName?.trim() && pinnedAgentMention && (
-                <span className="shrink-0 truncate text-aux text-muted-foreground">
-                  {pinnedAgentMention.appLabel}
-                </span>
-              )}
+          {/* No rule under the bar: the chat canvas runs up to the top. A new
+              chat with no app has nothing to name yet, since the welcome below
+              says it already, so the bar keeps only its height and controls
+              and the page does not move when the first message starts the
+              session. */}
+          {navbarSlot ? (
+            <SlotContent name={navbarSlot}>{navbar}</SlotContent>
+          ) : (
+            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
+              {navbar}
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  size="sm"
-                  label={t("navbar.more")}
-                  icon={<MoreHorizontal />}
-                  className="text-muted-foreground hover:text-foreground"
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void handlePin()}>
-                  {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                  {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => enterShareMode()}>
-                  <Share2 className="size-4" />
-                  {t("share.title", "Share chat")}
-                </DropdownMenuItem>
-                {isArchived ? (
-                  <DropdownMenuItem onSelect={() => void handleUnarchive()}>
-                    <ArchiveRestore className="size-4" />
-                    {t("navbar.unarchive")}
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onSelect={() => void handleArchive()}>
-                    <Archive className="size-4" />
-                    {t("navbar.archive")}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-                  <Trash2 className="size-4" />
-                  {t("navbar.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {toolView.collapsed && (
-              <IconButton
-                size="sm"
-                data-coach="add-widget"
-                aria-expanded={false}
-                onClick={() => setToolsCollapsed(false)}
-                label={t("chat.expandTools", { ns: "common" })}
-                icon={
-                  <span className="relative">
-                    <PanelRightOpen />
-                    {toolView.unreadIds.length > 0 && (
-                      <span
-                        className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
-                        aria-label={t("chat.toolUpdated", { ns: "common" })}
-                      />
-                    )}
-                  </span>
-                }
-              />
-            )}
-          </div>
+          )}
           {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
               late media) stays inside here and never resizes the document or
@@ -1684,9 +2284,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               touch feel. */}
           {/* Positioning + measurement parent for the timeline rail. Its own
               container name matters: `@container/chat` is declared on the outer
-              element and does NOT narrow when the trace drawer reserves its
-              480px on this column, so a gate keyed to it would show the rail at
-              widths where the transcript has no gutter left. */}
+              element, which also holds the standalone trace overlay, so a gate
+              keyed to it would not follow the transcript column itself. */}
           <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
             {/* The left inset opens the timeline rail's lane. Without it the
                 transcript's own `max-w-5xl` body reaches the container edge
@@ -1696,47 +2295,82 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 query MUST match ChatTimelineRail's visibility gate. */}
             <div
               ref={attachScroller}
-              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pl-8"
+              className={cn(
+                "relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                // Concierge has no timeline rail, so no lane for it.
+                !concierge && "@min-[48rem]/transcript:pl-8",
+              )}
             >
-              <MessageList
-                rows={rows}
-                live={{
-                  isStreaming: displayedStreaming,
-                  runningTurnId,
-                  snapshot: currentSnapshot,
-                  text: liveAssistantText,
-                  blockIx: floorSessionStream?.assistantBlockIx,
-                  sourceText: floorSessionStream?.assistantText,
-                  textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
-                  identity: floorIdentity,
-                }}
-                selection={
-                  shareMode
-                    ? {
-                        active: true,
-                        selectedTurns: selectedShareTurns,
-                        selectableSessionId: mainSessionId,
-                        onToggleTurn: toggleShareTurn,
-                      }
-                    : undefined
-                }
-                contentRef={attachContent}
-                onOpenLiveTrace={openLiveTraceDrawer}
-                onOpenStoredTrace={setTraceDrawerTarget}
-                onOpenSubagentTrace={openSubagentTraceDrawer}
-                activeTraceTarget={traceDrawerTarget}
-                subagentIconByName={subagentIconByName}
-                actions={blockActions}
-                feedback
-              />
+              {conciergeEmpty ? (
+                <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
+              ) : mainSessionId ? (
+                <>
+                  {hasOlder(mainSessionId) ? (
+                    <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
+                  ) : null}
+                  <MessageList
+                    rows={rows}
+                    live={{
+                      isStreaming: displayedStreaming,
+                      runningTurnId,
+                      quiet: floorSessionStream?.quiet,
+                      snapshot: currentSnapshot,
+                      textStore: liveTextStore,
+                      blockIx: floorSessionStream?.assistantBlockIx,
+                      textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
+                      identity: floorIdentity,
+                    }}
+                    selection={
+                      shareMode
+                        ? {
+                            selectedTurns: selectedShareTurns,
+                            selectableSessionId: mainSessionId,
+                            onToggleTurn: toggleShareTurn,
+                          }
+                        : undefined
+                    }
+                    contentRef={attachContent}
+                    onOpenLiveTrace={openLiveTraceDrawer}
+                    onOpenStoredTrace={openStoredTraceDrawer}
+                    onOpenSubagentTrace={openSubagentTraceDrawer}
+                    activeTraceTarget={traceDrawerTarget}
+                    subagentIconByName={subagentIconByName}
+                    actions={blockActions}
+                    feedback
+                    variant={variant}
+                  />
+                </>
+              ) : (
+                emptyState
+              )}
 
               {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
                 ("scroll under the composer") instead of stopping at a solid dock.
                 It talks to whoever holds the floor (the open handoff's specialist,
                 or the main agent). In share mode it's swapped for the ShareBar,
-                which configures + mints the link for the turns selected above. */}
-              <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
+                which configures + mints the link for the turns selected above.
+
+                Below md the floor paints the canvas instead. Its side gutters
+                and bottom padding sit outside the box's blur, and on a phone a
+                transparent strip there shows table rows and text beside and
+                below the box, which reads as a second transcript. The floor
+                also takes pointer events there, so a tap on the canvas cannot
+                land on a link it hides. It stays inside the scroller, so the
+                scroll and keyboard geometry match the desktop layout. */}
+              <div
+                ref={setFloorEl}
+                data-chat-floor
+                className={cn(
+                  "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",
+                  // Presentation mode gives the draft's bottom gap 5x its normal
+                  // size so a recording framed on the empty state keeps the
+                  // composer clear of the capture's lower edge.
+                  presentationMode && !mainSessionId
+                    ? "pb-[calc(var(--rome-safe-area-bottom)+5rem)] md:pb-[calc(var(--rome-safe-area-bottom)+7.5rem)]"
+                    : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
+                )}
+              >
                 {/* Back to the live tail. It rides the sticky floor rather than the
                     scroller, so it tracks a composer whose height changes with the
                     draft, and it sits in every floor state — scrolling has nothing
@@ -1769,11 +2403,23 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                     // rail, has no width gate: it is reachable on a phone, where
                     // the 36px step is under the 44px floor.
                     "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                   )}
                 />
-                <div className="pointer-events-auto mx-auto max-w-5xl">
-                  {shareMode ? (
+                <div className="pointer-events-auto relative mx-auto max-w-5xl">
+                  {/* Sits on the composer's top-right corner, clear of the
+                      centered jump to latest. */}
+                  {mainSessionId && (
+                    <div className="pointer-events-none absolute right-0 bottom-full mb-2">
+                      <ChatPendingCardJump
+                        scroller={scrollerEl}
+                        content={contentEl}
+                        floor={floorEl}
+                        currentReplyMessageIds={currentReplyMessageIds}
+                      />
+                    </div>
+                  )}
+                  {shareMode && mainSessionId ? (
                     <ShareBar
                       sessionId={mainSessionId}
                       selectedTurnIds={[...selectedShareTurns]}
@@ -1792,65 +2438,85 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                         {t("archived.unarchive")}
                       </Button>
                     </div>
+                  ) : concierge ? (
+                    <ConciergeComposer
+                      ref={composerRef}
+                      boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                      onSend={handleComposerSend}
+                      isStreaming={displayedStreaming}
+                      onStop={stopComposerTurn}
+                      streamError={streamError}
+                      modelSelection={
+                        chatModelPickable
+                          ? { value: chatModelValue, onChange: pickChatModel }
+                          : undefined
+                      }
+                    />
                   ) : (
                     <ChatComposer
+                      persistNewChatDraft={!mainSessionId}
                       ref={composerRef}
                       // The box look lives on the composer now so the chip row can sit
                       // outside it; this mount adds the floating blur/translucency.
                       boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                       onSend={handleComposerSend}
+                      // A draft picks the session's project, model, and agent.
+                      // A session keeps its project and agent, and its model
+                      // can change from the next turn.
+                      showProjectSelector={!mainSessionId}
+                      showModelSelector={!mainSessionId || chatModelPickable}
+                      chatModelSelection={composerModelSelection}
+                      initialProjectName={initialProjectName}
+                      initialDeviceFolder={initialDeviceFolder}
+                      initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
-                      onStop={() => void stopMessage()}
+                      onStop={stopComposerTurn}
                       streamError={streamError}
                       // The chip names the floor agent — the specialist during a
                       // handoff, the main agent otherwise.
                       pinnedAgentMention={floorAgentMention}
-                      lockAgentMention
-                      designingInteraction={
-                        floorHandoff
-                          ? {
-                              agentLabel: floorHandoff.agentLabel,
-                              // A pending submission turns the banner into an Approve
-                              // that resolves the handoff with that payload.
-                              onApprove: activeSubmission
-                                ? () =>
-                                    void handleResolveHandoff(
-                                      floorHandoff,
-                                      activeSubmission.payload,
-                                      "Approved",
-                                    )
-                                : undefined,
-                              // Cancel lives here now (off the @mention seam): dismiss
-                              // the handoff and hand the floor back to the caller.
-                              onCancel: () => handleCancelHandoff(floorHandoff),
-                            }
-                          : null
+                      lockAgentMention={Boolean(mainSessionId)}
+                      // Locks once the turn that saved the card has ended, so
+                      // Stop stays in reach while it still streams.
+                      lockedReason={
+                        lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
                       }
+                      designingInteraction={composerDesigning}
                     />
                   )}
                 </div>
               </div>
+              {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
+                  so the free space splits evenly above and below the greeting and
+                  composer; a 0 basis (`flex-1`) on either side puts them off-center.
+                  Phones keep the docked composer, where the keyboard owns the
+                  bottom of the screen. */}
+              {centerDraftComposer && !mainSessionId ? (
+                <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
+              ) : null}
             </div>
-            <ChatTimelineRail
-              scroller={scrollerEl}
-              content={contentEl}
-              questions={timelineQuestions}
-              onJump={jumpToQuestion}
-            />
+            {concierge ? null : (
+              <ChatTimelineRail
+                scroller={scrollerEl}
+                content={contentEl}
+                questions={timelineQuestions}
+                onJump={jumpToMessage}
+              />
+            )}
           </div>
         </div>
         <TraceDrawer
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
-          hasApps={isAppsPanelOpen}
+          outlet={toolTrace.outlet}
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
               live,
@@ -1869,4 +2535,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       </div>
     </TooltipProvider>
   );
-});
+
+  return <ReplyDraftProvider value={replyDraft}>{page}</ReplyDraftProvider>;
+}

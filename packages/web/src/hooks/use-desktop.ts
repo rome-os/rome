@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useMediaQuery } from "./use-media-query";
 
 /**
  * Tailwind's `md` breakpoint as a media query. The shell flips the sidebar
@@ -8,26 +8,10 @@ import { useSyncExternalStore } from "react";
  */
 const DESKTOP_QUERY = "(min-width: 48rem)";
 
-function matchMediaAvailable(): boolean {
-  return typeof window !== "undefined" && typeof window.matchMedia === "function";
-}
-
-function subscribe(onStoreChange: () => void): () => void {
-  if (!matchMediaAvailable()) return () => {};
-  const mql = window.matchMedia(DESKTOP_QUERY);
-  mql.addEventListener("change", onStoreChange);
-  return () => mql.removeEventListener("change", onStoreChange);
-}
-
-function getSnapshot(): boolean {
-  if (!matchMediaAvailable()) return false;
-  return window.matchMedia(DESKTOP_QUERY).matches;
-}
-
 /**
  * True from Tailwind `md` up — the widths where the sidebar renders as an
  * in-flow column rather than a slide-over. Live-updates on window resize.
  */
 export function useDesktop(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, () => false);
+  return useMediaQuery(DESKTOP_QUERY);
 }

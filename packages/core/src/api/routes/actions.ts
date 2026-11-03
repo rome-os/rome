@@ -3,14 +3,15 @@ import type { ApiDeps } from "../deps.js";
 
 /** One catalog entry of `GET /actions`. Mirrors what the agent-facing
  * `list_actions`/`read_action` MCP tools expose, shaped for dashboard pickers:
- * the summary fields plus the full JSON Schema (`inputSchema`) so the client
- * can render argument help and validate args before submitting. `inputSchema`
- * is `null` for event-only actions (workflows), which declare no schema but
- * are still bindable by name (e.g. from a routine). */
+ * the summary fields plus visibility and the full JSON Schema (`inputSchema`)
+ * so the client can render argument help and validate args before submitting.
+ * `inputSchema` is `null` for event-only actions (workflows), which declare no
+ * schema but are still bindable by name (e.g. from a routine). */
 export interface ActionCatalogEntry {
   name: string;
   description: string;
   type: "system" | "custom";
+  visibility: "public" | "explicit";
   sideEffects: "read-only" | "write";
   requiresApproval: boolean;
   ownerType: string;
@@ -37,6 +38,7 @@ export function actionsRoutes(deps: ApiDeps): Hono {
             name,
             description: action.config.description,
             type: action.config.type,
+            visibility: action.config.visibility ?? "public",
             sideEffects: action.config.sideEffects,
             requiresApproval: !!action.config.requiresApproval,
             ownerType: metadata?.ownerType ?? "core",

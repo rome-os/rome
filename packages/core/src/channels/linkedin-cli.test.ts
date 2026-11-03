@@ -1,4 +1,4 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { describe, expect, it } from "@rstest/core";
 import {
   OpencliAuthError,
   OpencliCommandError,
@@ -7,7 +7,6 @@ import {
   parseThreadParticipants,
   parseThreadSnapshot,
   parseWhoami,
-  readLinkedInThreadParticipants,
   type OpencliResult,
 } from "./linkedin-cli.js";
 
@@ -41,6 +40,14 @@ describe("parseLinkedInReply", () => {
         "outcome is unknown",
       );
     }
+  });
+
+  it("keeps the stored text's line breaks and whether it matched the sent text", () => {
+    const text = "See https://example.com/demo\n\nExample signature";
+    expect(
+      parseLinkedInReply(ok(JSON.stringify([{ ...receipt, text, text_matches: false }])), "thread"),
+    ).toMatchObject({ text, textMatches: false });
+    expect(parseLinkedInReply(ok(JSON.stringify([receipt])), "thread").textMatches).toBeNull();
   });
 
   it("reports killed commands and malformed output as unknown, while preserving auth failures", () => {
@@ -330,44 +337,5 @@ describe("parseThreadParticipants", () => {
     // An empty read must never reach the store: the store treats an empty set
     // as "everyone left" and would wipe the thread's membership.
     expect(() => parseThreadParticipants(ok(JSON.stringify([])))).toThrow(OpencliCommandError);
-  });
-});
-
-describe("readLinkedInThreadParticipants", () => {
-  it("invokes the thread-participants command for the requested thread", async () => {
-    const run = rs.fn(async () =>
-      ok(
-        JSON.stringify([
-          {
-            thread_url: "https://www.linkedin.com/messaging/thread/2-abc==/",
-            thread_id: "2-abc==",
-            participant_index: 1,
-            participant_count: 1,
-            participant_id: "ACoAAAda0001",
-            name: "Ada Lovelace",
-            headline: "Engineer",
-            type: "member",
-            is_self: false,
-            profile_url: "https://www.linkedin.com/in/ACoAAAda0001/",
-          },
-        ]),
-      ),
-    );
-
-    const participants = await readLinkedInThreadParticipants(
-      { threadUrl: "https://www.linkedin.com/messaging/thread/2-abc==/" },
-      run,
-    );
-
-    expect(run).toHaveBeenCalledWith(
-      [
-        "linkedin",
-        "thread-participants",
-        "--thread-url",
-        "https://www.linkedin.com/messaging/thread/2-abc==/",
-      ],
-      {},
-    );
-    expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001"]);
   });
 });

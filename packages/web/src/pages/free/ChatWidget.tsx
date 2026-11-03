@@ -1,24 +1,23 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { useCallback, useRef } from "react";
 import { ChatComponent, type SessionMessage } from "@/components/chat/ChatComponent";
+import { useSlotOutlet } from "@/components/slot";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import { detectAppInstalls } from "@/lib/chat-helpers";
-import { extractFilePathsFromText, isProjectPath } from "@/lib/extract-file-paths";
+import { extractFilePathsFromText } from "@/lib/extract-file-paths";
 import type { AgentMention } from "@/lib/chat-types";
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import { useWorkspaceEventBus } from "./workspace-event-bus";
 import { useWorkspaceStore } from "./workspace-store";
 
-function extractProjectPathsFromBlocks(blocks: TraceBlockDto[]): string[] {
+function extractProjectPathsFromBlocks(blocks: TraceEventDto[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
 
   for (const block of blocks) {
     if (block.type !== "text") continue;
-    const paths = extractFilePathsFromText({
-      type: "text",
-      content: block.content,
-    });
-    for (const p of paths) {
-      if (isProjectPath(p) && !seen.has(p)) {
+    for (const p of extractFilePathsFromText(block.content)) {
+      if (!seen.has(p)) {
         seen.add(p);
         result.push(p);
       }
@@ -31,6 +30,7 @@ interface ChatWidgetProps {
   sessionId?: string;
   onSessionChosen: (sessionId: string) => void;
   initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
   initialDraftText?: string;
   initialSkillName?: string;
@@ -40,10 +40,14 @@ export function ChatWidget({
   sessionId,
   onSessionChosen,
   initialProjectName,
+  initialDeviceFolder,
   initialAgentMention,
   initialDraftText,
   initialSkillName,
 }: ChatWidgetProps) {
+  // The Mac app's title bar takes the chat's bar, so the window has one row on
+  // top. Elsewhere the chat draws its own.
+  const inTitlebar = useSlotOutlet(TITLEBAR_SLOT);
   const store = useWorkspaceStore();
   const eventBus = useWorkspaceEventBus();
   const emittedAppInstallsRef = useRef(new Set<string>());
@@ -112,9 +116,11 @@ export function ChatWidget({
       onSessionCreated={onSessionChosen}
       onSessionMessage={handleSessionMessage}
       initialProjectName={initialProjectName}
+      initialDeviceFolder={initialDeviceFolder}
       initialAgentMention={initialAgentMention}
       initialDraftText={initialDraftText}
       initialSkillName={initialSkillName}
+      navbarSlot={inTitlebar ? TITLEBAR_SLOT : undefined}
     />
   );
 }

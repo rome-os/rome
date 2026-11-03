@@ -103,10 +103,6 @@ export function webhookRoutes(deps: ApiDeps, webhookApiKey: string | undefined):
 
   app.get("/webhooks/executions/:id", async (c) => {
     const { webhookInvocationsRepo } = deps;
-    if (!webhookInvocationsRepo) {
-      return c.json({ error: "Webhook APIs are not configured" }, 501);
-    }
-
     let executionId: string;
     try {
       executionId = decodeAppApiPathSegment(c.req.param("id"));
@@ -126,10 +122,6 @@ export function webhookRoutes(deps: ApiDeps, webhookApiKey: string | undefined):
 
   app.post("/webhooks/:actionName", async (c) => {
     const { actionLoader, webhookInvocationsRepo, actionEngine } = deps;
-    if (!actionLoader || !webhookInvocationsRepo) {
-      return c.json({ error: "Webhook APIs are not configured" }, 501);
-    }
-
     let actionName: string;
     try {
       actionName = decodeAppApiPathSegment(c.req.param("actionName"));

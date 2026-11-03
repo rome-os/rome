@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  buildProjectProviderUsageRows,
   buildProjectUsageChartTotals,
   buildProjectUsageTokenBreakdown,
 } from "./project-usage-totals";
@@ -50,5 +51,40 @@ describe("project usage totals", () => {
       total: 77,
     });
     expect(totals.cost).toBeCloseTo(0.3);
+  });
+
+  it("folds providers into Claude, Codex, and Other rows and drops empty ones", () => {
+    const usage = (provider: string, inputTokens: number, costUsd: number) => ({
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd,
+      inputTokens,
+      outputTokens: 3,
+      provider,
+    });
+
+    expect(
+      buildProjectProviderUsageRows([
+        usage("openai", 10, 0.5),
+        usage("google", 4, 0.1),
+        usage("anthropic", 20, 1),
+        usage("unknown", 6, 0.2),
+        { ...usage("anthropic", 0, 0), cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 },
+      ]),
+    ).toEqual([
+      { cached: 2, cost: 1, input: 21, key: "claude", output: 3, total: 26 },
+      { cached: 2, cost: 0.5, input: 11, key: "codex", output: 3, total: 16 },
+      { cached: 4, cost: expect.closeTo(0.3), input: 12, key: "other", output: 6, total: 22 },
+    ]);
+    expect(
+      buildProjectProviderUsageRows(
+        [usage("openai", 0, 0)].map((entry) => ({
+          ...entry,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 0,
+        })),
+      ),
+    ).toEqual([]);
   });
 });

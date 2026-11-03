@@ -12,7 +12,7 @@
 
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
-import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
@@ -32,9 +32,8 @@ const fakeState: {
   lastConfig?: FakeConfig;
   startError: unknown;
   typedThread?: string;
-  sent: Array<{ channelUserId: string; threadId: string; message: unknown }>;
-  historyCalls: Array<{ threadId: string | null; windowHours: number }>;
-  historyMessages: NormalizedMessage[];
+  inbound?: (msg: ChannelMessage) => Promise<void>;
+  sent: Array<{ chatId: ChatId; message: unknown }>;
   apiRequests: ChannelApiRequest[];
   apiResult: ChannelApiResult;
   stopCalls: number;
@@ -49,8 +48,6 @@ const fakeState: {
 } = {
   startError: null,
   sent: [],
-  historyCalls: [],
-  historyMessages: [],
   apiRequests: [],
   apiResult: { response: { status: 200, headers: {}, body: { ok: true } } },
   stopCalls: 0,
@@ -62,7 +59,9 @@ rs.mock("../../channels/discord.js", () => ({
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;
     }
-    onMessage(): void {}
+    onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+      fakeState.inbound = handler;
+    }
     async directConversationFor(userId: string): Promise<string> {
       return `dm-${userId}`;
     }
@@ -72,15 +71,12 @@ rs.mock("../../channels/discord.js", () => ({
     async stop(): Promise<void> {
       fakeState.stopCalls++;
     }
-    async sendMessage(channelUserId: string, threadId: string, message: unknown): Promise<void> {
-      fakeState.sent.push({ channelUserId, threadId, message });
+    async send(chatId: ChatId, message: unknown): Promise<MessageReceipt> {
+      fakeState.sent.push({ chatId, message });
+      return { chatId, messageId: "sent-1" };
     }
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
-    }
-    async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
-      fakeState.historyCalls.push({ threadId, windowHours });
-      return fakeState.historyMessages;
     }
     async notifyTyping(threadId: string): Promise<void> {
       fakeState.typedThread = threadId;
@@ -103,8 +99,8 @@ function flush(): Promise<void> {
 }
 
 const deps = {
-  conversationSettings: {} as never,
-  personMappingRepo: { findByChannelUser: rs.fn(async () => null) } as never,
+  chatSettings: {} as never,
+  peopleRepo: { byAccount: rs.fn(async () => null) } as never,
   listAgents: () => [],
   validateToken: async () => {},
 };
@@ -126,14 +122,11 @@ function buildTalker(startError: unknown = null): {
 } {
   fakeState.startError = startError;
   const desc = makeDiscordDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
-    { bot: validCred() },
-    {
-      connectionId: "discord-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "discord-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -150,9 +143,8 @@ beforeEach(() => {
   fakeState.lastConfig = undefined;
   fakeState.startError = null;
   fakeState.typedThread = undefined;
+  fakeState.inbound = undefined;
   fakeState.sent = [];
-  fakeState.historyCalls = [];
-  fakeState.historyMessages = [];
   fakeState.apiRequests = [];
   fakeState.apiResult = { response: { status: 200, headers: {}, body: { ok: true } } };
   fakeState.stopCalls = 0;
@@ -172,17 +164,15 @@ describe("isDiscordAuthError", () => {
 describe("discord descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeDiscordDescriptor(deps);
-    expect(desc.service).toBe("discord");
-    expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
-    expect(desc.capabilities.actor?.needs).toEqual(["bot"]);
+    expect(desc.connectionKind).toBe("discord");
+    expect(desc.grant).toBe("bot");
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("runs the injected token validator on confer", async () => {
+  it("runs the injected token validator on grant", async () => {
     const validate = rs.fn(async () => {});
     const desc = makeDiscordDescriptor({ ...deps, validateToken: validate });
-    await desc.auth.bot.confer({
+    await desc.auth.obtain({
       prompt: async () => ({ token: "abc" }),
     });
     expect(validate).toHaveBeenCalledWith("abc");
@@ -190,20 +180,19 @@ describe("discord descriptor shape", () => {
 
   it("exposes inbound media and returns an awaitable stop()", async () => {
     const h = buildTalker();
-    await expect(h.talker.feature("directMessaging")?.conversationFor("alice")).resolves.toBe(
-      "dm-alice",
-    );
+    await expect(h.talker.directMessaging?.chatFor("alice")).resolves.toBe("dm-alice");
     h.start();
-    const inboundMedia = h.talker.feature("inboundMedia");
+    const inboundMedia = h.talker.inboundMedia;
     const message = {
+      channel: "discord",
+      direction: "inbound",
       messageId: "message-1",
-      conversationId: "chan-1" as ConversationId,
+      chatId: "chan-1" as ChatId,
       senderId: "user-1",
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "discord", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
+    } satisfies ChannelMessage;
     await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
     const stopped = h.talker.stop();
     expect(stopped).toBeInstanceOf(Promise);
@@ -215,63 +204,37 @@ describe("discord descriptor shape", () => {
     const findByChannelUser = rs.fn(async () => guardian);
     const desc = makeDiscordDescriptor({
       ...deps,
-      personMappingRepo: { findByChannelUser } as never,
+      peopleRepo: { byAccount: findByChannelUser } as never,
     });
-    desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    desc.capabilities.talker!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     await expect(fakeState.lastConfig?.resolveDiscordPerson?.("guardian-777")).resolves.toEqual(
       guardian,
     );
-    expect(findByChannelUser).toHaveBeenCalledWith("discord", "guardian-777");
+    expect(findByChannelUser).toHaveBeenCalledWith({
+      platform: "discord",
+      id: "guardian-777",
+    });
   });
 
-  it("passes the opaque conversation id to the adapter", async () => {
+  it("passes the opaque conversation id to the adapter and returns its receipt", async () => {
     const h = buildTalker();
     h.start();
-    await h.talker.send("chan-1" as ConversationId, { text: "hi" });
-    expect(fakeState.sent).toEqual([
-      { channelUserId: "chan-1", threadId: "chan-1", message: { text: "hi" } },
-    ]);
-  });
-
-  it("exposes provider-neutral history", async () => {
-    fakeState.historyMessages = [
-      {
-        id: "message-1",
-        channel: "discord",
-        channelUserId: "user-1",
-        displayName: "User",
-        threadId: "chan-1",
-        threadType: "group",
-        timestamp: new Date("2026-01-01T00:00:00.000Z"),
-        text: "hello",
-        attachments: [],
-        rawEvent: {},
-      },
-    ];
-    const h = buildTalker();
-    h.start();
-    await expect(
-      h.talker.feature("history")?.query({
-        conversationId: "chan-1" as ConversationId,
-      }),
-    ).resolves.toMatchObject([{ messageId: "message-1", text: "hello" }]);
-    expect(fakeState.historyCalls).toEqual([{ threadId: "chan-1", windowHours: 24 }]);
+    await expect(h.talker.send("chan-1" as ChatId, { text: "hi" })).resolves.toStrictEqual({
+      chatId: "chan-1",
+      messageId: "sent-1",
+    });
+    expect(fakeState.sent).toEqual([{ chatId: "chan-1", message: { text: "hi" } }]);
   });
 
   it("exposes provider-neutral activity", async () => {
     const h = buildTalker();
     h.start();
-    const session = await h.talker
-      .feature("activity")
-      ?.begin({ conversationId: "chan-2" as ConversationId });
+    const session = await h.talker.activity?.begin({ chatId: "chan-2" as ChatId });
     await session?.update("working");
     expect(fakeState.typedThread).toBe("chan-2");
   });
@@ -284,12 +247,12 @@ describe("discord descriptor shape", () => {
       guildName: "Rome",
       type: "text" as const,
     }));
-    const directory = buildTalker().talker.feature("directory");
+    const directory = buildTalker().talker.directory;
 
     const first = await directory?.listConversations({ limit: 2 });
     expect(first?.conversations.map((entry) => entry.ref)).toEqual([
-      { connectionId: "discord-test", conversationId: "channel-0" },
-      { connectionId: "discord-test", conversationId: "channel-1" },
+      { connectionId: "discord-test", chatId: "channel-0" },
+      { connectionId: "discord-test", chatId: "channel-1" },
     ]);
     expect(first?.nextCursor).toBeTruthy();
 
@@ -297,7 +260,7 @@ describe("discord descriptor shape", () => {
       limit: 2,
       cursor: first?.nextCursor,
     });
-    expect(second?.conversations.map((entry) => entry.ref.conversationId)).toEqual(["channel-2"]);
+    expect(second?.conversations.map((entry) => entry.ref.chatId)).toEqual(["channel-2"]);
     expect(second?.nextCursor).toBeUndefined();
   });
 
@@ -336,20 +299,20 @@ describe("discord descriptor shape", () => {
         parentId: "text-1",
       },
     ];
-    const directory = buildTalker().talker.feature("directory");
+    const directory = buildTalker().talker.directory;
 
     const settingsOwners = await directory?.listConversations({ limit: 10 });
     expect(settingsOwners?.conversations).toEqual([
       expect.objectContaining({
-        ref: { connectionId: "discord-test", conversationId: "news-1" },
+        ref: { connectionId: "discord-test", chatId: "news-1" },
         kind: "channel",
       }),
       expect.objectContaining({
-        ref: { connectionId: "discord-test", conversationId: "text-1" },
+        ref: { connectionId: "discord-test", chatId: "text-1" },
         kind: "channel",
       }),
       expect.objectContaining({
-        ref: { connectionId: "discord-test", conversationId: "forum-1" },
+        ref: { connectionId: "discord-test", chatId: "forum-1" },
         kind: "channel",
       }),
     ]);
@@ -358,24 +321,21 @@ describe("discord descriptor shape", () => {
     }
 
     const withThreads = await directory?.listConversations({ limit: 10, includeTopics: true });
-    expect(withThreads?.conversations.find(({ ref }) => ref.conversationId === "thread-1")).toEqual(
+    expect(withThreads?.conversations.find(({ ref }) => ref.chatId === "thread-1")).toEqual(
       expect.objectContaining({
         kind: "topic",
-        parent: { connectionId: "discord-test", conversationId: "text-1" },
+        parent: { connectionId: "discord-test", chatId: "text-1" },
       }),
     );
   });
 
   it("exposes Discord REST through Act", async () => {
     const desc = makeDiscordDescriptor(deps);
-    const actor = desc.capabilities.actor!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const actor = desc.capabilities.actor!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const request: ChannelApiRequest = {
       method: "GET",
       path: "/users/@me",
@@ -396,14 +356,11 @@ describe("discord descriptor shape", () => {
     fakeState.apiResult = {
       response: { status: 401, headers: {}, body: { message: "Unauthorized" } },
     };
-    const actor = makeDiscordDescriptor(deps).capabilities.actor!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const actor = makeDiscordDescriptor(deps).capabilities.actor!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     const request = actor.invoke({
       operation: "discord.api.request",
@@ -420,6 +377,79 @@ describe("discord descriptor shape", () => {
     await expect(request).rejects.toMatchObject({ name: "CredentialRejected", grant: "bot" });
     await actor.stop?.();
     expect(fakeState.stopCalls).toBe(1);
+  });
+});
+
+describe("discord inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const desc = makeDiscordDescriptor(deps);
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
+    const delivered: ChannelMessage[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+
+    // A native-thread reply that mentions the bot and carries an image, so
+    // every optional field Discord sets is present.
+    const raw = { id: "msg-7", channelId: "thread-1" };
+    const timestamp = new Date("2026-05-10T00:00:00Z");
+    const emitted: ChannelMessage = {
+      channel: "discord",
+      direction: "inbound",
+      messageId: "msg-7",
+      chatId: "thread-1" as ChatId,
+      parentChatId: "channel-1" as ChatId,
+      senderId: "user-1",
+      senderDisplayName: "Alice Smith",
+      senderUsername: "alice",
+      text: "see this",
+      attachments: [
+        {
+          type: "image",
+          url: "https://cdn.discordapp.com/attachments/1/2/photo.png",
+          fileName: "photo.png",
+        },
+      ],
+      timestamp,
+      replyTo: { messageId: "msg-5" },
+      addressing: "mention",
+      thread: { kind: "topic", name: "launch" },
+      raw,
+    };
+    await fakeState.inbound?.(emitted);
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "discord",
+        direction: "inbound",
+        messageId: "msg-7",
+        chatId: "thread-1",
+        parentChatId: "channel-1",
+        senderId: "user-1",
+        senderDisplayName: "Alice Smith",
+        senderUsername: "alice",
+        text: "see this",
+        attachments: [
+          {
+            type: "image",
+            url: "https://cdn.discordapp.com/attachments/1/2/photo.png",
+            fileName: "photo.png",
+          },
+        ],
+        timestamp,
+        replyTo: { messageId: "msg-5" },
+        addressing: "mention",
+        thread: { kind: "topic", name: "launch" },
+        raw,
+      },
+    ]);
+    expect(delivered[0].raw).toBe(raw);
+    await talker.stop();
   });
 });
 

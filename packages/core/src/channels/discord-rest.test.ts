@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   Client,
@@ -112,6 +114,35 @@ describe("DiscordAdapter REST broker capability", () => {
       kind: "credential",
       cause: expect.any(Error),
     });
+  });
+
+  it("returns Discord's 404 payload through the default undici transport", async () => {
+    // The default transport shares one body between the Response event and
+    // the response discord.js reads before it throws.
+    const server = createServer((_request, response) => {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "Unknown Message", code: 10008 }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const adapter = new DiscordAdapter({
+        botToken: "not-exposed",
+        rest: { api: `http://127.0.0.1:${port}/api` },
+      });
+
+      await expect(
+        adapter.executeApiRequest({ ...BASE_REQUEST, path: "/channels/1/messages/2" }),
+      ).resolves.toMatchObject({
+        response: {
+          status: 404,
+          headers: { "content-type": "application/json" },
+          body: { message: "Unknown Message", code: 10008 },
+        },
+      });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it("returns a rate-limit failure instead of an intermediate 429 at the deadline", async () => {

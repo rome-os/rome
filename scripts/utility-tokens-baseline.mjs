@@ -17,11 +17,6 @@
  * onto `warning` and `success`.
  */
 export const BASELINE = {
-  "packages/app-template/template/src/web/App.tsx": {
-    "rounded-md": 2,
-    "text-3xl": 1,
-    "text-sm": 4,
-  },
   "packages/app-template/workflow/src/web/App.tsx": {
     "mb-1.5": 1,
     "pb-2.5": 1,
@@ -44,28 +39,26 @@ export const BASELINE = {
   "packages/ui/src/dialog.tsx": { "ring-black/5": 1 },
   "packages/web/src/components/ai-tools-panel.tsx": { "text-[#4285f4]": 1, "text-[#d97757]": 2 },
   "packages/web/src/components/brand-icons/ai-tool-icons.tsx": {
-    "bg-[#fbf4eb]": 1,
-    "bg-white": 3,
-    "border-[#ead8c7]": 1,
-    "text-[#111111]": 2,
-    "text-[#4285f4]": 2,
-    "text-[#d97757]": 2,
+    "bg-white": 1,
+    "text-[#111111]": 1,
+    "text-[#4285f4]": 1,
+    "text-[#d97757]": 1,
   },
   "packages/web/src/components/brand-icons/connection-badges.tsx": {
     "bg-[#07C160]": 1,
     "bg-[#0A66C2]": 1,
-    "bg-[#229ED9]": 2,
+    "bg-[#229ED9]": 1,
     "bg-[#25D366]": 1,
     "bg-[#5865F2]": 1,
     "bg-white": 3,
-    "text-white": 6,
+    "text-white": 5,
   },
   "packages/web/src/components/channels/channel-connect-card.tsx": { "bg-white": 1 },
   "packages/web/src/components/chat/ChatEmptyState.tsx": {
     "md:text-[3.35rem]": 1,
     "text-[2.65rem]": 1,
   },
-  "packages/web/src/components/chat/blocks/TracePayload.tsx": { "border-black/10": 2 },
+  "packages/web/src/components/chat/entries/TracePayload.tsx": { "border-black/10": 2 },
   "packages/web/src/components/codex-device-login-modal.tsx": {
     "bg-[#f59e0b]": 1,
     "text-[#f59e0b]": 1,
@@ -158,20 +151,6 @@ export const BASELINE = {
   "rome_apps/briefing/src/web/components/ui/label.tsx": { "text-sm": 1 },
   "rome_apps/briefing/src/web/components/ui/select.tsx": { "py-1.5": 2, "text-sm": 3 },
   "rome_apps/briefing/src/web/components/ui/textarea.tsx": { "md:text-sm": 1, "text-base": 1 },
-  "rome_apps/connector/src/web/App.tsx": {
-    "gap-1.5": 5,
-    "gap-2.5": 1,
-    "gap-3.5": 1,
-    "gap-x-2.5": 1,
-    "mt-1.5": 2,
-    "px-2.5": 4,
-    "py-0.5": 5,
-    "text-2xl": 1,
-    "text-base": 5,
-    "text-sm": 10,
-    "text-xs": 7,
-  },
-  "rome_apps/connector/src/web/components/ui/button.tsx": { "text-sm": 1, "text-xs": 1 },
   "rome_apps/connector/src/web/connect-card.tsx": { "py-1.5": 5, "text-sm": 10, "text-xs": 4 },
   "rome_apps/connector/src/web/login-card.tsx": {
     "gap-1.5": 1,
@@ -179,16 +158,6 @@ export const BASELINE = {
     "py-1.5": 4,
     "text-sm": 7,
     "text-xs": 3,
-  },
-  "rome_apps/recap/src/web/App.tsx": {
-    "gap-2.5": 1,
-    "gap-3.5": 1,
-    "mt-[18px]": 2,
-    "px-2.5": 1,
-    "px-3.5": 1,
-    "text-3xl": 1,
-    "text-base": 3,
-    "text-xs": 2,
   },
   "rome_apps/showcases/src/web/components/PresetCard.tsx": {
     "gap-1.5": 1,

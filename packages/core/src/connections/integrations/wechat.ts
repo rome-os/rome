@@ -2,16 +2,18 @@
 //
 // WeChat is a Talker with a single `account` grant: the bot token + the account
 // coordinates (baseUrl, accountId, optional userId) minted by the QR pairing
-// flow. The transport core — long-poll, normalization, attachment
-// download/decrypt, media send — is the existing `WechatAdapter`
+// flow. The transport core — long-poll, the inbound `ChannelMessage`,
+// attachment download/decrypt, media send — is `WechatAdapter`
 // (packages/core/src/channels/wechat.ts), wrapped here so the runtime's
-// grant-epoch lifecycle and fault→grant-state mapping drive it.
+// grant-epoch lifecycle and fault→grant-state mapping drive it. The transport
+// already speaks the channel's record, so inbound and send pass through
+// without a projection.
 //
-// The pairing conferral is the setup on the `account` scheme
+// The pairing grant is the setup on the `account` scheme
 // (`makeWechatSetup`): the coroutine mints the QR via `WechatAuthService`,
 // presents it (`show`), waits for the scan confirm inside `ctx.step`, and
-// returns the terminal conferral — the runtime performs the single ledger
-// write. The scheme's `confer()` still throws — there is no headless confer
+// returns the terminal grant — the runtime performs the single ledger
+// write. The scheme's `obtain()` still throws — there is no headless grant
 // for WeChat.
 //
 // Fault mapping: the adapter retries transient getupdates
@@ -20,7 +22,7 @@
 // CredentialRejected{ grant: "account" }. Any other terminal poll failure is a
 // Disconnected.
 
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatures } from "../types.js";
 import {
   getDefaultWechatStatePath,
   isWechatAuthError,
@@ -42,12 +44,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-  typingActivityFeature,
-} from "./talk-features.js";
+import { typingActivityFeature } from "./talk-features.js";
 
 /** The `account` grant material — the pairing flow's output (see wechat.ts). */
 export interface WechatAccountMaterial {
@@ -58,9 +55,7 @@ export interface WechatAccountMaterial {
   statePath?: string;
 }
 
-/** Build the `account` grant material from a pairing outcome or settings row.
- *  Single source of the material shape for both conferral paths (the setup
- *  and `WECHAT_SETTINGS_IMPORT_ROW`) so they can never drift: token +
+/** Build the `account` grant material from a pairing outcome: token +
  *  account coordinates, accountId duplicated into material,
  *  sparse fields absent, `connectedAt` out. Null when the secrets are missing. */
 export function wechatAccountMaterial(source: {
@@ -195,16 +190,16 @@ function wechatQrView(qr: string, qrContent: string, scanned: boolean): SetupVie
 }
 
 /**
- * Build the WeChat conferral setup. A linear coroutine:
+ * Build the WeChat setup. A linear coroutine:
  *   1. mint a QR login attempt (ilinkai),
  *   2. `show` the QR (server-rendered `data:` image + raw open link),
  *   3. `ctx.step("scan-confirmed", …)` — poll the login until the guardian's
  *      scan is confirmed (a `scaned` report repaints the view with the scan
  *      step done); an expired QR loops back to 1 (refresh via repeated `show`),
- *   4. return the terminal conferral: the account credential (material built by
- *      `wechatAccountMaterial`, shared with `WECHAT_SETTINGS_IMPORT_ROW`) +
+ *   4. return the terminal grant: the account credential (material built by
+ *      `wechatAccountMaterial`) +
  *      wechat profile + the bound guardian identity when the login carries one.
- * The runtime performs the single durable write from the returned conferral;
+ * The runtime performs the single durable write from the returned grant;
  * abandoning at the QR (or cancelling) leaves zero durable state.
  */
 export function makeWechatSetup(deps: {
@@ -238,7 +233,7 @@ export function makeWechatSetup(deps: {
       if (!account) continue;
 
       // The confirmed account now lives in this coroutine; the attempt cache
-      // (the route era's conferral-retry seam) has nothing left to protect.
+      // (the route era's grant-retry seam) has nothing left to protect.
       deps.auth.completeLogin(login.attemptId);
 
       const material = wechatAccountMaterial(account);
@@ -266,17 +261,17 @@ async function renderQrDataUrl(content: string): Promise<string> {
 }
 
 /**
- * The `account` grant scheme. Conferral is the setup (attached by
- * `createWechatDescriptor`), so `confer` throws; `renew` always answers
- * "re-confer" (a refused token needs a fresh pairing).
+ * The `account` grant scheme. Grant is the setup (attached by
+ * `createWechatDescriptor`), so `grant` throws; `renew` always answers
+ * "needs-fix" (a refused token needs a fresh pairing).
  */
 function wechatAccountScheme(): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(): Promise<Credential | "re-confer"> {
-      return "re-confer";
+    async renew(): Promise<Credential | "needs-fix"> {
+      return "needs-fix";
     },
   };
 }
@@ -292,7 +287,7 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
   const liveAdapters = new WeakMap<Talker, WechatAdapter>();
 
   const accountScheme = wechatAccountScheme();
-  // The WeChat conferral setup: QR show → scan-confirmed wait →
+  // The WeChat setup: QR show → scan-confirmed wait →
   // single terminal write of credential + profile + guardian mapping.
   accountScheme.setup = makeWechatSetup({
     auth: deps.auth ?? new WechatAuthService(),
@@ -301,18 +296,17 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
   });
 
   return {
-    service: "wechat",
-    reviveProfile: (_grant, record) => reviveWechatProfile(record),
-    auth: {
-      account: accountScheme,
-    },
+    connectionKind: "wechat",
+    reviveProfile: (record) => reviveWechatProfile(record),
+    accountIdOf: (record) => (typeof record.accountId === "string" && record.accountId) || null,
+    grant: "account",
+    auth: accountScheme,
     capabilities: {
       talker: {
-        needs: ["account"] as const,
-        build(creds): Talker {
+        build(cred): Talker {
           // Inline material for the `account` grant (never an external
           // resolver for a Talk grant); the pairing flow packs these fields.
-          const account = creds.account.material as unknown as WechatAccountMaterial;
+          const account = cred.material as unknown as WechatAccountMaterial;
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
             faultSink?.(
@@ -334,10 +328,16 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
 
           const adapter = createAdapter(config);
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            activity: typingActivityFeature(adapter),
+          };
           const talker: Talker = {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // start() kicks off the long-poll; terminal poll failures route
               // through onFault → routeFault. start() itself only reads local
               // state, so it does not reject on a bad token — that surfaces from
@@ -347,19 +347,10 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(chatId, msg) {
+              return adapter.send(chatId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                activity: typingActivityFeature(adapter),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
           liveAdapters.set(talker, adapter);
           return talker;

@@ -1,43 +1,55 @@
 // Long-lived, serialized agent sessions. Session model: docs/concepts/sessions.md.
 
 import { createHash } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { Mutex } from "async-mutex";
 import {
   AgentInputQueue,
   type AgentInputReceipt,
+  SUPERSEDED_INTERRUPT_REASON,
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
-import { v4 as uuidv4 } from "uuid";
+import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
-import { getChannelFromThreadKey } from "./session-manager.js";
+import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
+import type { SessionsRepository } from "../db/repositories/sessions.js";
+import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
+  buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
+  buildDeviceFolderBlock,
   buildThreadContextBlock,
+  FETCH_CHANNEL_HISTORY_ACTION,
   type PromptBuilder,
 } from "./prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
+import { validateActionArgs } from "../actions/validate-action-args.js";
+import type { RoutineActivationGate } from "./mcp-facade.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
-import type { AgentMessage, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
+import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
 import type {
+  AgentStop,
   AgentTurnOutput,
   AgentTurnStatus,
-  ErrorMessage,
+  TurnErrorEvent,
   MessageReplyReference,
-  ResultMessage,
+  TurnResultEvent,
   RomeSessionRef,
   RomeSessionType,
-  StreamAgentMessage,
+  StreamAgentEvent,
   TurnMiddlewareContext,
-  ConversationId,
-  ConversationRef,
+  ChatId,
+  ChatRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
+import type { EventSources } from "../events/event-sources.js";
 import type {
   ActionMcpDefinition,
   ModelSession,
@@ -57,14 +69,10 @@ import {
   type ModelResolver,
 } from "./model-resolver.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import {
-  resolveWebchatLargeModelSelection,
-  type ModelSelectionId,
-  type WebchatLargeModelSelection,
-} from "./model-selector.js";
+import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
-import { ensureDefaultAgentWorkingDir } from "../paths.js";
+import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
 import { enterSession } from "../telemetry-context.js";
 import {
   getTracer,
@@ -85,7 +93,7 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
-import { isTerminalBlock } from "./agent-message.js";
+import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -98,7 +106,7 @@ import {
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
 } from "../apps/packaging/output-schema-validator.js";
-import { translateTurnSpans, type CapturedBlock } from "./turn-span-translator.js";
+import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
 import {
   buildRequiredTiming,
   classifyAgentTurnStatus,
@@ -106,14 +114,31 @@ import {
   type AgentLifecycleDispatcher,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
+import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
+import type { UsageFunding } from "../usage/events.js";
+import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
+import { resolveSessionPolicy } from "./session-policy.js";
+import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type {
   StoredConversationContextMessage,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import { evaluateProviderSessionReset } from "../conversation-settings/reset-policy.js";
+import type { PlatformOfChannel } from "../channels/channel.js";
+import { ChatEvents, type Via } from "../chats/events.js";
+import type { SaidMessage } from "../chats/message.js";
+import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";
+import { chatKey, placeIn, type Place } from "../chats/place.js";
+import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
+import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
+import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
+import {
+  forkSessionKey,
+  sessionKeyChannel,
+  webchatConversationOfKey,
+} from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
@@ -138,22 +163,92 @@ function conversationMessageText(content: string): string {
   }
 }
 
-type ConversationContextMessage = Omit<StoredConversationContextMessage, "createdAt"> & {
+/** One line of the context a turn's prompt opens with. */
+interface ConversationContextLine {
+  id: string;
+  sender: string | null;
+  text: string;
   createdAt?: Date;
-};
+}
 
-function conversationContextLine(message: ConversationContextMessage): string {
-  const sender = message.senderName?.trim() || "Unknown sender";
-  const timestamp = message.createdAt ? `[${message.createdAt.toISOString()}] ` : "";
-  return `${timestamp}${sender}: ${conversationMessageText(message.content)}`;
+function contextLine(message: ContextLine): ConversationContextLine {
+  return {
+    id: String(message.id),
+    sender: message.senderName,
+    text: message.text,
+    createdAt: message.at,
+  };
+}
+
+function storedContextLine(
+  message: Omit<StoredConversationContextMessage, "createdAt"> & { createdAt?: Date },
+): ConversationContextLine {
+  return {
+    id: message.id,
+    sender: message.senderName,
+    text: conversationMessageText(message.content),
+    ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+  };
+}
+
+function saidContextLine(message: SaidMessage): ConversationContextLine {
+  return {
+    id: message.id,
+    sender: message.senderName ?? null,
+    text: message.body.text,
+    createdAt: message.at,
+  };
+}
+
+function conversationContextLine(line: ConversationContextLine): string {
+  return replyContextLine({
+    createdAt: line.createdAt,
+    sender: line.sender?.trim() || "Unknown sender",
+    text: line.text,
+  });
+}
+
+/** The record of one channel's chats alone, for a manager given no
+ *  {@link MessageRepository}. Nothing is recorded through it. */
+function channelMessages(
+  rows: WebChatRepository,
+  channel: string,
+): Pick<MessageRepository, "find"> {
+  return new StoredMessages(rows, new ChatEvents(), { channelsOn: () => [channel] });
+}
+
+/** How many of the messages the agent has not seen a turn's prompt carries.
+ *  The rest are counted, not shown. */
+const CATCH_UP_LIMIT = 20;
+
+/**
+ * The newest of `unseen` as the place's record holds them, oldest first, at
+ * most {@link CATCH_UP_LIMIT}, and how many more there were
+ * (docs/domains/participation.md#projection), read as the account the agent
+ * was woken on heard it, which is the record the unseen ids name. `unseen`
+ * comes oldest first.
+ */
+async function catchUp(
+  messages: Pick<MessageRepository, "find">,
+  place: Place,
+  via: Pick<Via, "channel">,
+  unseen: readonly { id: string }[],
+): Promise<{ lines: SaidMessage[]; omitted: number }> {
+  const shown = unseen.slice(-CATCH_UP_LIMIT);
+  const lines = await messages.find(
+    place,
+    shown.map((message) => message.id),
+    via,
+  );
+  return { lines, omitted: unseen.length - shown.length };
 }
 
 function prependConversationContext(
   prompt: string,
   context: {
-    notifications: StoredConversationContextMessage[];
+    notifications: ConversationContextLine[];
     omittedNotificationCount: number;
-    repliedTo: ConversationContextMessage | null;
+    repliedTo: ConversationContextLine | null;
   },
 ): string {
   const sections: string[] = [];
@@ -171,14 +266,10 @@ function prependConversationContext(
     );
   }
   if (context.repliedTo) {
-    sections.push(
-      "<reply_context>",
-      conversationContextLine(context.repliedTo),
-      "</reply_context>",
-    );
+    sections.push(...replyContextSection(conversationContextLine(context.repliedTo)));
   }
   if (sections.length === 0) return prompt;
-  sections.push("<current_message>", prompt, "</current_message>");
+  sections.push(...currentMessageSection(prompt));
   return sections.join("\n");
 }
 
@@ -194,7 +285,6 @@ export interface AgentSessionInit {
   /** Stable Rome conversation bound to this provider/runtime session. */
   romeSessionId?: string;
   sharedContext?: Record<string, unknown>;
-  forceNewSession?: boolean;
   /**
    * Set by `AgentSessionBridge` for runs that reach the top-level manager over
    * the worker→main RPC — i.e. an action spawning an agent (blocking `summon`),
@@ -208,8 +298,12 @@ export interface AgentSessionInit {
   resumeSessionId?: string;
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
-  /** Optional exact model selection, used by the WebChat model selector. */
-  selectionId?: ModelSelectionId;
+  /**
+   * Optional exact model selection, used by the WebChat model selector. On a
+   * session that is already open, a value replaces its selection from the next
+   * turn and null clears it; undefined leaves it as it is.
+   */
+  selectionId?: ModelSelectionId | null;
   reasoningEffort?: ModelReasoningEffort;
   /**
    * Open this session with the same tool catalog and system prompt but no live
@@ -219,8 +313,11 @@ export interface AgentSessionInit {
    * same degradation an exact fork's own turn already gets.
    */
   interactiveSurfaceDetached?: boolean;
-  /** Existing inbound platform message id, when this acquire starts its turn. */
-  platformMessageId?: string;
+  /**
+   * This acquire starts a turn for an inbound channel message, so the
+   * connection's provider-session reset policy applies before the session opens.
+   */
+  applyProviderSessionReset?: boolean;
   /**
    * Session-scoped handback contract for a handoff child conversation
    * (handoff + interactive summon). Exposes the `submit_output` tool validated
@@ -232,8 +329,6 @@ export interface AgentSessionInit {
    * It cannot be combined with an agent-declared `outputSchema`.
    */
   handback?: { schema: Record<string, unknown>; validate?: string };
-  /** Runtime-internal id for a generation already created transactionally. */
-  preparedSessionId?: string;
 }
 
 export interface AgentTurnInput {
@@ -267,7 +362,7 @@ export type AgentSessionStatus = "idle" | "running" | "closed";
 
 export interface AgentTurnHandle {
   turnId: string;
-  events: AsyncIterable<StreamAgentMessage>;
+  events: AsyncIterable<StreamAgentEvent>;
   /** Cancel only this turn, including before provider dispatch. */
   interrupt?(reason?: string): Promise<void>;
   /**
@@ -298,6 +393,9 @@ export interface SendTurnOptions {
   romeSessionType?: RomeSessionType;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The line `replyTo` names, as Rome holds it where the turn's session
+   *  stands, or null when Rome holds none. Read only with `turnLinks`. */
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
 }
 
@@ -308,13 +406,20 @@ export interface AgentSessionStatusEvent {
   turnId?: string;
 }
 
-export type AgentSessionSubscriber = (msg: StreamAgentMessage, turnId: string) => void;
+export type AgentSessionSubscriber = (msg: StreamAgentEvent, turnId: string) => void;
 export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => void;
 
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  readonly romeSessionId?: string;
+  /**
+   * The conversation this session serves: the one its opener named, else the
+   * one its row recorded. A turn picks where it records through
+   * `resolveTurnConversation`, which leaves channel and webchat ones to their
+   * owners. Kept on the session so a turn resolves where it records without an
+   * await between acquire and sendTurn.
+   */
+  readonly conversation?: SessionConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -323,11 +428,11 @@ export interface AgentSession {
    * turn actually begins running turn-lock semantics).
    */
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle;
-  submitInput?(
+  submitInput(
     input: AgentTurnInput & { inputId: string },
     options: SubmitInputOptions,
   ): AgentInputReceipt;
-  runForkedTurn?(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage>;
+  runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
@@ -336,12 +441,25 @@ export interface AgentSession {
 
 export interface AgentSessionManager {
   acquire(key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
-  acquireBySessionId?(
+  acquireBySessionId(
     sessionId: string,
     agentName: string,
     init?: AgentSessionInit,
   ): Promise<AgentSession>;
   peek(key: AgentSessionKey): AgentSession | undefined;
+  /**
+   * Working directory of the open session with this runtime id, searching this
+   * manager's sessions and the subagent sessions they own. Undefined when no
+   * open session has the id. Never opens a session.
+   */
+  findWorkingDirBySessionId(sessionId: string): string | undefined;
+  /**
+   * Record the conversation a session serves, for callers that learn it only
+   * after acquire (a subagent's conversation is minted under its own id).
+   * Never overwrites a recorded conversation. Only sessions cached by this
+   * manager see the new value, so call it on the manager that acquired them.
+   */
+  recordConversation(sessionId: string, chatId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -349,6 +467,7 @@ interface ManagerDeps {
   agentLoader: AgentLoader;
   appCatalog?: Pick<AppCatalog, "get">;
   sessionManager: SessionManager;
+  sessionsRepo: SessionsRepository;
   promptBuilder: PromptBuilder;
   actionRegistry: ActionRegistry;
   modelResolver: ModelResolver;
@@ -358,13 +477,68 @@ interface ManagerDeps {
   lifecycleDispatcher: AgentLifecycleDispatcher;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
+  /** What was said in each place, read for the agent's catch-up at a wake.
+   *  Absent, the catch-up reads the woken channel's own record only. */
+  chatMessages?: Pick<MessageRepository, "find">;
+  /** Each session's links to what was said where it stands. Given, a wake's
+   *  catch-up reads and marks them in place of `webchatRepo`'s rows. Nothing
+   *  passes it until the Chats switch. */
+  turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+  /** The platform a channel's accounts live on. Absent, a channel's name
+   *  is its platform. */
+  platformOfChannel?: PlatformOfChannel;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
    *  model terminal directly (behavior identical to a chain of size 0). */
   turnMiddleware?: TurnMiddlewareChain;
   /** Resolve the effective reset policy from the existing external thread identity. */
-  resolveProviderSessionReset?: (ref: ConversationRef) => Promise<ProviderSessionResetPolicy>;
+  resolveProviderSessionReset?: (ref: ChatRef) => Promise<ProviderSessionResetPolicy>;
+  /** Receives every turn this manager's sessions finish, forked turns included. */
+  usageRecorder?: TurnUsageSink;
+  /** What the named channel's surface supports, or null for a name no channel
+   *  has. A null result reads as a messaging channel. */
+  channelSurface: (channel: string) => ChannelSurface | null;
+  /** The connection kind behind a channel id. When absent, every channel id reads as
+   *  its own connection kind, which holds only where no connection kind has a second channel. */
+  connectionKindOfChannel?: ConnectionKindOfChannel;
+  /** App-declared event sources: an event `defer` subscribes through them.
+   *  When absent, an event wait is created without any check. */
+  eventSources?: EventSources;
+  /** Extra tools per session. When absent, no session carries any. */
+  sessionTools?: SessionToolsProvider;
+}
+
+/** The parts of a channel's surface that change how its sessions prompt. */
+export interface ChannelSurface {
+  /** The next human turn arrives on a surface that renders interactive cards. */
+  interactiveCards: boolean;
+  /** Prompts carry the stored messages the agent has not seen. */
+  promptContext: boolean;
+}
+
+const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
+  interactiveCards: false,
+  promptContext: true,
+};
+
+/** The surface a channel's talker declares, with an omitted fact read as a
+ *  messaging channel's. */
+export function talkerChannelSurface(talker: {
+  interactiveCards?: boolean;
+  promptContext?: boolean;
+}): ChannelSurface {
+  return {
+    interactiveCards: talker.interactiveCards ?? MESSAGING_CHANNEL_SURFACE.interactiveCards,
+    promptContext: talker.promptContext ?? MESSAGING_CHANNEL_SURFACE.promptContext,
+  };
+}
+
+function channelSurfaceOf(
+  deps: Pick<ManagerDeps, "channelSurface">,
+  channel: string,
+): ChannelSurface {
+  return deps.channelSurface(channel) ?? MESSAGING_CHANNEL_SURFACE;
 }
 
 interface ManagerOptions {
@@ -439,21 +613,23 @@ export function createAgentSessionManager(
     key: AgentSessionKey,
     span: Span,
     init?: AgentSessionInit,
+    /** Set when the reset policy already ran for this acquire. */
+    resetChecked?: { preparedSessionId?: string; preparedChatId?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
-      init?.platformMessageId &&
+      init?.applyProviderSessionReset &&
       init.threadContext?.connectionId &&
       deps.resolveProviderSessionReset
         ? {
             connectionId: init.threadContext.connectionId,
-            conversationId: init.threadContext.threadId as ConversationId,
+            chatId: init.threadContext.threadId as ChatId,
           }
         : undefined;
-    if (init && resetRef && !init.resumeSessionId && !init.preparedSessionId) {
+    if (init && resetRef && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
       const reset = await deps.resolveProviderSessionReset!(resetRef);
-      const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
+      const chatId = init.romeSessionId ?? init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
         const active = await deps.sessionManager.findReusableSession(
           key.channelThreadKey,
@@ -465,7 +641,7 @@ export function createAgentSessionManager(
         const cached = sessions.get(k);
         if (decision.due) {
           log.info("provider_session.reset_due", {
-            conversationId,
+            chatId,
             agentName: key.agentName,
             provider: active?.provider ?? undefined,
             oldSessionId: active?.id,
@@ -479,15 +655,19 @@ export function createAgentSessionManager(
           }
         }
         let preparedSessionId: string | undefined;
+        let preparedChatId: string | undefined;
         if (decision.due) {
-          const replacement = await deps.sessionManager.rotateProviderGeneration({
+          warnOnConversationMismatch(key, active?.id, active?.chatId, init.romeSessionId);
+          const replacement = await deps.sessionsRepo.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
-            newSessionId: uuidv4(),
+            newSessionId: uuidv7(),
+            chatId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
+          preparedChatId = replacement.chatId ?? undefined;
           log.info("provider_session.rotated", {
-            conversationId,
+            chatId,
             agentName: key.agentName,
             provider: active?.provider ?? undefined,
             oldSessionId: active?.id,
@@ -497,14 +677,12 @@ export function createAgentSessionManager(
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, {
-          ...init,
-          platformMessageId: undefined,
-          ...(preparedSessionId ? { preparedSessionId } : {}),
+        return await acquireInner(key, span, init, {
+          preparedSessionId,
+          preparedChatId,
         });
       });
     }
-    let forceNewSession = init?.forceNewSession === true;
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -552,19 +730,19 @@ export function createAgentSessionManager(
         reopen = true;
       } else if (explicitResume && existingIsQuiescent) {
         await existing.close("idle");
-      } else if (existing.status === "idle") {
+      } else {
         // Provider/model changes are resolved at the serialized turn boundary.
         // Reusing the Rome session here preserves its turn queue and lets the
-        // session swap only the model backend when needed.
-        recordAcquire("reuse");
-        return existing;
-      } else {
+        // session swap only the model backend when needed. A selection made
+        // in the open chat applies from the next turn.
+        if (init?.selectionId !== undefined) existing.selectModel(init.selectionId);
         recordAcquire("reuse");
         return existing;
       }
     }
     const current = sessions.get(k);
     if (current && current.status !== "closed") {
+      if (init?.selectionId !== undefined) current.selectModel(init.selectionId);
       recordAcquire("reuse");
       return current;
     }
@@ -575,16 +753,13 @@ export function createAgentSessionManager(
     }
     recordAcquire(reopen ? "reopen" : "cold");
     const promise = (async () => {
-      const sess = await openSession(
-        deps,
-        key,
-        { ...(init ?? {}), forceNewSession },
-        {
-          keepAlive,
-          onClosed: onSessionClosed,
-          isSubagent,
-        },
-      );
+      const sess = await openSession(deps, key, init ?? {}, {
+        preparedSessionId: resetChecked?.preparedSessionId,
+        preparedChatId: resetChecked?.preparedChatId,
+        keepAlive,
+        onClosed: onSessionClosed,
+        isSubagent,
+      });
       sessions.set(k, sess);
       return sess;
     })();
@@ -638,6 +813,29 @@ export function createAgentSessionManager(
       const sess = sessions.get(keyOf(canonicalKey));
       return sess && sess.status !== "closed" ? sess : undefined;
     },
+    findWorkingDirBySessionId(sessionId) {
+      for (const sess of sessions.values()) {
+        if (sess.status === "closed") continue;
+        if (sess.sessionId === sessionId || sess.hasActiveFork(sessionId)) {
+          return sess.workingDirectory;
+        }
+        const nested = sess.openedChildManager?.findWorkingDirBySessionId(sessionId);
+        if (nested) return nested;
+      }
+      return undefined;
+    },
+    async recordConversation(sessionId, chatId) {
+      const filled = await deps.sessionsRepo.fillChatId(sessionId, chatId);
+      if (!filled) return;
+      // A cached session reads the same value a cold reopen would. A session
+      // still opening is not cached yet and misses this, so callers record
+      // only after their acquire has returned.
+      for (const session of [...sessions.values()]) {
+        if (session.sessionId !== sessionId || session.conversation) continue;
+        const recorded = await findRecordedConversation(deps.webchatRepo, chatId);
+        if (recorded) session.conversation = { origin: "recorded", ...recorded };
+      }
+    },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
       const all = [...sessions.values()];
@@ -648,6 +846,10 @@ export function createAgentSessionManager(
 }
 
 interface OpenOptions {
+  /** Id of a generation the reset path already created transactionally. */
+  preparedSessionId?: string;
+  /** The conversation that prepared generation recorded, if any. */
+  preparedChatId?: string;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -710,7 +912,7 @@ interface ForkTurnContext {
   /**
    * Interleave an out-of-band message into the forked turn's stream.
    */
-  emit: (msg: StreamAgentMessage) => void;
+  emit: (msg: StreamAgentEvent) => void;
   /**
    * Whether this fork will be left resumable. A continuable fork gets no
    * `defer`: its wake-up would resume the fork session while delivering under
@@ -725,7 +927,7 @@ interface ForkTurnContext {
 interface ForkOpen {
   params: ModelSessionForkOpenParams;
   /** Replace provider-generic subagent tool events with semantic ones. */
-  projectProviderMessage: (msg: StreamAgentMessage) => Promise<StreamAgentMessage[]>;
+  projectProviderMessage: (msg: StreamAgentEvent) => Promise<StreamAgentEvent[]>;
   /**
    * Close fork-owned resources (the per-fork subagent child manager, if the
    * fork ran any subagents). runForkedTurn calls this from its finally, so
@@ -736,17 +938,36 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
-function resolveSelectionFromChannelThreadKey(
-  channelThreadKey: string,
-): WebchatLargeModelSelection | undefined {
-  if (!channelThreadKey.startsWith("webchat:")) return undefined;
-  const marker = ":large-model:";
-  const markerIndex = channelThreadKey.lastIndexOf(marker);
-  if (markerIndex < 0) return undefined;
-  return (
-    resolveWebchatLargeModelSelection(channelThreadKey.slice(markerIndex + marker.length)) ??
-    undefined
+/** The recorded dir when it still exists, else undefined. The default project is recreated. */
+async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
+  if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
+  const isDirectory = await stat(recorded).then(
+    (entry) => entry.isDirectory(),
+    () => false,
   );
+  return isDirectory ? recorded : undefined;
+}
+
+/** A channel-thread key maps to one conversation, so a stored row that names
+ *  another one than the caller means the stored value cannot be trusted yet.
+ *  The live session records turns under the caller's conversation, and the
+ *  next rotation writes the caller's value onto the new row. Checked only when
+ *  a row is read (cold open and rotation); a cached live session reads none. */
+function warnOnConversationMismatch(
+  key: AgentSessionKey,
+  sessionId: string | undefined,
+  storedChatId: string | null | undefined,
+  requestedChatId: string | undefined,
+): void {
+  if (!storedChatId || !requestedChatId) return;
+  if (storedChatId === requestedChatId) return;
+  log.warn("agent session serves a different conversation than requested", {
+    sessionId,
+    agentName: key.agentName,
+    channelThreadKey: key.channelThreadKey,
+    storedChatId,
+    requestedChatId,
+  });
 }
 
 async function openSession(
@@ -760,7 +981,6 @@ async function openSession(
     metadata.ownerType === "app" ? deps.appCatalog?.get(metadata.ownerId) : undefined;
   const appStoreListingId =
     owningApp?.source.mode === "appstore" ? owningApp.source.listingId : undefined;
-  const workingDir = init.workingDir ?? (await ensureDefaultAgentWorkingDir());
 
   // Try to resume an existing SDK session through the stable channelThreadKey.
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
@@ -774,13 +994,15 @@ async function openSession(
         provider: string | null;
         providerThreadId: string | null;
         model: string | null;
+        workingDir?: string | null;
+        chatId?: string | null;
       }
     | undefined;
-  if (init.preparedSessionId) {
+  if (opts.preparedSessionId) {
     // The lifecycle transaction already inserted this fresh generation. Keep
     // resumeResult empty so provider open and prompt framing use new-session
     // semantics while retaining the transactionally allocated runtime id.
-  } else if (init.resumeSessionId && !init.forceNewSession) {
+  } else if (init.resumeSessionId) {
     resumeResult = await deps.sessionManager.findResumableSessionById(
       init.resumeSessionId,
       key.agentName,
@@ -791,15 +1013,59 @@ async function openSession(
     if (resumeResult.channelThreadKey !== key.channelThreadKey) {
       throw new Error(`Agent session "${init.resumeSessionId}" does not match this session key`);
     }
-  } else if (key.channelThreadKey && !init.forceNewSession) {
+  } else if (key.channelThreadKey) {
     resumeResult = await deps.sessionManager.findReusableSession(
       key.channelThreadKey,
       key.agentName,
     );
   }
 
-  const sessionId = init.preparedSessionId ?? resumeResult?.id ?? uuidv4();
-  const romeSessionId = requestedRomeSessionId;
+  // The provider keeps a transcript per cwd, so a resumed row reopens where it
+  // was written unless the caller names a dir. Legacy rows record none.
+  let preparedSessionId = opts.preparedSessionId;
+  let preparedChatId = opts.preparedChatId;
+  let recordedWorkingDir: string | undefined;
+  if (init.workingDir === undefined && resumeResult?.workingDir) {
+    recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);
+    if (!recordedWorkingDir) {
+      // The transcript is unreachable. An explicit resume names that exact
+      // conversation, so it fails. An implicit reuse by channel-thread key
+      // retires the row and starts a fresh generation, so the thread keeps working.
+      if (init.resumeSessionId) {
+        throw new Error(
+          `Agent session "${resumeResult.id}" ran in "${resumeResult.workingDir}", which no ` +
+            "longer exists; it cannot be resumed there",
+        );
+      }
+      log.warn("agent session working dir is gone; starting a fresh generation", {
+        sessionId: resumeResult.id,
+        agentName: key.agentName,
+        channelThreadKey: key.channelThreadKey,
+        workingDir: resumeResult.workingDir,
+      });
+      warnOnConversationMismatch(key, resumeResult.id, resumeResult.chatId, requestedRomeSessionId);
+      const replacement = await deps.sessionsRepo.rotateProviderGeneration({
+        agentName: key.agentName,
+        channelThreadKey: key.channelThreadKey,
+        newSessionId: uuidv7(),
+        chatId: requestedRomeSessionId,
+      });
+      preparedSessionId = replacement.id;
+      preparedChatId = replacement.chatId ?? undefined;
+      resumeResult = undefined;
+    }
+  }
+
+  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv7();
+  const workingDir =
+    init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
+  // A caller that names no conversation still serves the one the row recorded.
+  const recordedConversation = requestedRomeSessionId
+    ? undefined
+    : await findRecordedConversation(deps.webchatRepo, resumeResult?.chatId ?? preparedChatId);
+  const conversation: SessionConversation | undefined = requestedRomeSessionId
+    ? { origin: "named", id: requestedRomeSessionId }
+    : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -808,25 +1074,38 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
-  // The channel-thread-key selection restores a webchat thread's chosen model
+  // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
+  // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
+  // Subagent keys carry a suffix, and app sessions use keys of their own.
+  const chatId = webchatConversationOfKey(key.channelThreadKey);
   const persistedSelection =
-    init.resumeSessionId && !sessionPin
-      ? resolveSelectionFromChannelThreadKey(key.channelThreadKey)
+    init.resumeSessionId && !sessionPin && !init.selectionId && chatId
+      ? resolveWebchatLargeModelSelection(
+          (await deps.webchatRepo?.getSession(chatId))?.largeModelSelection,
+        )
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
-  if (isNewSession && !init.preparedSessionId) {
+  if (isNewSession && !preparedSessionId) {
     const dbSession: DbAgentSession = {
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
+      chatId: requestedRomeSessionId,
+      workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
       status: "active",
     };
     await deps.sessionManager.createSession(dbSession);
+  } else if (preparedSessionId) {
+    await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
+  } else if (requestedRomeSessionId && !resumeResult?.chatId) {
+    await deps.sessionsRepo.fillChatId(sessionId, requestedRomeSessionId);
+  } else {
+    warnOnConversationMismatch(key, sessionId, resumeResult?.chatId, requestedRomeSessionId);
   }
 
   if (config.outputSchema && init.handback) {
@@ -863,15 +1142,25 @@ async function openSession(
   }
 
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
-  // agent for a human reply. That only works when (a) the surface can render it
-  // (the webchat surface — dashboard + desktop — does; messaging channels don't),
-  // and (b) this session will actually receive the next user turn. Subagents fail
-  // (b): the parent turn blocks on the child, and the next user turn always routes
-  // to the main agent — so a suspended subagent call would hang forever. Where
-  // this is false, an action that returns `renderComponent` falls back to relaying
-  // its `promptText` as prose; see the executeAction shim below.
+  // agent for a human reply. That only works when (a) the channel's surface can
+  // render it, and (b) this session will actually receive the next user turn.
+  // Subagents fail (b): the parent turn blocks on the child, and the next user
+  // turn always routes to the main agent — so a suspended subagent call would
+  // hang forever. Where this is false, an action that returns `renderComponent`
+  // falls back to relaying its `promptText` as prose; see the executeAction shim
+  // below. The answer feeds the cached system prompt, so the opening caller's
+  // channel decides it for the session's life. An opener without a thread
+  // context falls back to the channel the key names.
+  const keyChannel = sessionKeyChannel(key.channelThreadKey);
+  const openingChannel = init.threadContext?.channel ?? keyChannel;
+  if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
+    log.warn("session opener's channel differs from the channel its key names", {
+      channelThreadKey: key.channelThreadKey,
+      openingChannel,
+    });
+  }
   const supportsInteractiveSurface =
-    key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
+    !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards && !opts.isSubagent;
 
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
@@ -891,8 +1180,7 @@ async function openSession(
     : baseSystemPrompt;
 
   // The registry's `getForAgent` is the single resolution point for what this
-  // agent may call — its allow-list plus the globally-granted actions, or
-  // everything for "*". Both the model-facing catalog and the execution gate
+  // agent may call — its allow-list, or everything for "*". Both the model-facing catalog and the execution gate
   // derive from it, so they can't disagree. It's consulted per-request so an
   // action installed mid-conversation by `app_management` is callable in the
   // same session.
@@ -903,6 +1191,24 @@ async function openSession(
     return deps.actionRegistry
       .getForAgent(allowList)
       .find((action) => action.config.name === requestedAction.config.name);
+  };
+  // `propose_routine` auto-enables only a routine the agent could already
+  // create with `create_routine` itself (the same check, non-throwing), with
+  // args that fit the target action's schema.
+  const routineActivation: RoutineActivationGate = {
+    canCallAction: (name) => {
+      if (!deps.actionRegistry.get(name)) return "unknown";
+      return findPermittedAction(name) ? "permitted" : "denied";
+    },
+    validateArgs: (actionName, args) => {
+      const action = deps.actionRegistry.get(actionName);
+      return validateActionArgs(action?.config.name ?? actionName, args, action?.inputSchema);
+    },
+    // The live turn's id is the one the webchat drain sees on its handle.
+    routineKeyFor: (toolUseId) => {
+      const turnId = impl.currentTurnId;
+      return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
+    },
   };
   const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
     name: a.config.name,
@@ -1109,9 +1415,18 @@ async function openSession(
   // would resume through a path that cannot honor the detached surface, and
   // the first branch turn still carries its parent's delivery address.
   const deferEnabled =
-    isGuardianFacingChannel(key.channelThreadKey) &&
+    isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) &&
     !opts.isSubagent &&
     !init.interactiveSurfaceDetached;
+  const eventSources = deps.eventSources;
+  // Actions `defer` runs on the agent's behalf are attributed to its turn.
+  const agentRunContext = (refs: TurnExecRefs) => ({
+    initiator: `agent:${key.agentName}`,
+    sessionId: refs.sessionId,
+    agentName: key.agentName,
+    channelThreadKey: key.channelThreadKey,
+    turnId: refs.getTurnId(),
+  });
   const makeExecuteDefer =
     (refs: TurnExecRefs) =>
     async (input: DeferInput): Promise<unknown> =>
@@ -1123,19 +1438,23 @@ async function openSession(
             channelContext: refs.getThreadContext(),
           },
           createRoutine: async (createArgs) => {
-            const result = await deps.actionEngine.run("create_routine", createArgs, {
-              initiator: `agent:${key.agentName}`,
-              sessionId: refs.sessionId,
-              agentName: key.agentName,
-              channelThreadKey: key.channelThreadKey,
-              turnId: refs.getTurnId(),
-            });
+            const result = await deps.actionEngine.run(
+              "create_routine",
+              createArgs,
+              agentRunContext(refs),
+            );
             if (result.status === "error") throw new Error(result.error);
             if (result.status !== "ok") {
               throw new Error(`create_routine returned ${result.status}`);
             }
             return result.data;
           },
+          prepareEventWait: eventSources
+            ? (eventName, filter) =>
+                eventSources.prepareWait(eventName, filter, (name, args) =>
+                  deps.actionEngine.run(name, args, agentRunContext(refs)),
+                )
+            : undefined,
           now: Date.now(),
         }),
       );
@@ -1284,6 +1603,13 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
+  // `isNewSession` tells the provider that `sessionId` was never handed to it.
+  // An existing row may already own a transcript under that id even with no
+  // recorded provider (a first turn cut off by a restart), and so does a
+  // session that already opened once (a switch away and back), so only a new
+  // row's first open is new.
+  let sessionIdUnused = isNewSession;
+
   const buildSessionParams = (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1302,14 +1628,17 @@ async function openSession(
     maxTurns: config.maxTurns,
     reasoningEffort,
     workingDir,
+    channel: sessionKeyChannel(key.channelThreadKey),
+    textPrivate: resolveSessionPolicy(config).finalText === "private",
     externalMcpServers,
     sessionId,
-    isNewSession: resumeProviderId !== resolution.modelProvider.id,
+    isNewSession: sessionIdUnused,
     providerThreadId: resumeProviderId === resolution.modelProvider.id ? resumeThreadId : undefined,
     executeAction,
     executeSubagent,
     executeSubmitOutput,
     executeDefer,
+    routineActivation,
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
   });
@@ -1326,7 +1655,17 @@ async function openSession(
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
-    const resumed = params.isNewSession === false;
+    const sessionTools = await deps.sessionTools?.({
+      agentName: key.agentName,
+      channelThreadKey: key.channelThreadKey,
+      sessionId,
+      isSubagent: opts.isSubagent === true,
+      getTurnId: sessionExecRefs.getTurnId,
+      getThreadContext: sessionExecRefs.getThreadContext,
+    });
+    if (sessionTools?.length) params.sessionTools = sessionTools;
+    sessionIdUnused = false;
+    const resumed = params.providerThreadId !== undefined;
     const openStartMs = Date.now();
     const session = await withRomeSpan(
       "model.session.open",
@@ -1410,7 +1749,7 @@ async function openSession(
       string,
       { parent: ParentSubagentRef; execution: SubagentExecution }
     >();
-    const forkPendingSubagentUses = new Map<string, Extract<AgentMessage, { type: "tool_use" }>>();
+    const forkPendingSubagentUses = new Map<string, Extract<AgentEvent, { type: "tool_use" }>>();
     const forkEmittedSubagentStarts = new Set<string>();
     const maybeEmitForkSubagentStart = (toolUseId: string): void => {
       if (forkEmittedSubagentStarts.has(toolUseId)) return;
@@ -1449,7 +1788,7 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childChannelThreadKey: `${key.channelThreadKey}#fork:${fork.forkSessionId}`,
+      childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
       captureSubmittedOutput: () => false,
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
@@ -1481,6 +1820,9 @@ async function openSession(
         executeSubagent: makeExecuteSubagent(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+        sessionTools: liveOpenParams.sessionTools
+          ? detachSessionTools(liveOpenParams.sessionTools)
+          : undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
         // to the source); this flag makes the interactive *runtime* degrade
@@ -1489,6 +1831,9 @@ async function openSession(
         interactiveSurfaceDetached: true,
       },
       projectProviderMessage: async (msg) => {
+        if (msg.type === "tool_input_delta" && subagentToolNames.has(msg.tool)) {
+          return [];
+        }
         if (msg.type === "tool_use" && subagentToolNames.has(msg.tool)) {
           forkPendingSubagentUses.set(msg.id, msg);
           maybeEmitForkSubagentStart(msg.id);
@@ -1537,6 +1882,9 @@ async function openSession(
   // would raise on the second turn (there is no SDK conversation to resume).
   let modelSession: ModelSession;
   let initialResolution: ModelResolution | undefined;
+  // Whether the provider continues a thread it already has, rather than
+  // starting one that has seen nothing of this chat.
+  let threadResumed = false;
   if (config.codeBacked) {
     modelSession = createNullModelSession({
       ...buildSessionParams({
@@ -1561,12 +1909,20 @@ async function openSession(
       resumeResult?.provider,
       providerThreadId,
     );
+    threadResumed =
+      providerThreadId !== undefined &&
+      resumeResult?.provider === initialResolution.modelProvider.id;
+  }
+  // A resume the caller moved to another dir now writes its transcript there,
+  // so the row follows it once the provider has opened.
+  if (resumeResult && resumeResult.workingDir !== workingDir) {
+    await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
   }
 
   impl = new AgentSessionImpl({
     key,
     sessionId,
-    romeSessionId,
+    conversation,
     modelSession,
     deps,
     config,
@@ -1580,6 +1936,11 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
+    threadResumed,
+    // The row recorded a thread this open does not resume: another provider
+    // now runs the chat, and its new thread has seen none of it.
+    replacedThread: !threadResumed && !!resumeResult?.providerThreadId,
+    previousModel: resumeResult?.model ?? undefined,
     openModelSession,
     toolCount:
       (initialResolution
@@ -1606,7 +1967,7 @@ async function openSession(
 interface ImplArgs {
   key: AgentSessionKey;
   sessionId: string;
-  romeSessionId?: string;
+  conversation?: SessionConversation;
   modelSession: ModelSession;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
@@ -1624,6 +1985,12 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
+  /** The opened provider session continues a thread the row recorded. */
+  threadResumed: boolean;
+  /** The opened provider session starts a new thread in place of the row's. */
+  replacedThread: boolean;
+  /** The model the row's thread ran on. */
+  previousModel?: string;
   openModelSession: (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1638,22 +2005,25 @@ interface ImplArgs {
 
 interface TurnSink {
   turnId: string;
+  /** The turn's prompt carries the `<continuation>` notice, which stays due
+   *  until the turn returns a result. */
+  carriesContinuation?: boolean;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
   turnStartEmitted: boolean;
-  values: StreamAgentMessage[];
-  resolvers: Array<(item: IteratorResult<StreamAgentMessage>) => void>;
+  values: StreamAgentEvent[];
+  resolvers: Array<(item: IteratorResult<StreamAgentEvent>) => void>;
   done: boolean;
   /**
-   * Captured block stream for this turn — every AgentMessage yielded by
+   * Captured block stream for this turn — every AgentEvent yielded by
    * `modelSession.events` on this turn, with the wall-clock ts we observed
    * it at. Drained at terminal time by `translateTurnSpans` to emit
    * `tool` spans + thinking/text events under `model.turn`. Includes blocks
    * the sink itself drops (e.g. subagent tool_results) so per-tool spans
    * are reconstructed for subagent dispatch from the parent's view.
    */
-  blocks: CapturedBlock[];
+  blocks: CapturedEvent[];
   /** Captured at turn start; used as the floor for tool startedAt values. */
   modelTurnStartMs: number;
   /**
@@ -1678,15 +2048,26 @@ interface TurnSink {
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
+  quoted?: ContextLine | null;
   initiatedBy?: "user" | "system";
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   subagentExecutions: Map<string, { parent: ParentSubagentRef; execution: SubagentExecution }>;
-  pendingSubagentToolUses: Map<string, Extract<AgentMessage, { type: "tool_use" }>>;
+  pendingSubagentToolUses: Map<string, Extract<AgentEvent, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
   subagentLinksCleared: boolean;
   /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
   outputSchemaSuspended: boolean;
+  /**
+   * The model session's `lastProviderTurnId` when the turn took the turn
+   * mutex. A turn that never reached the provider leaves it unchanged, so an
+   * unchanged id belongs to an earlier turn. Taking it at queue time instead
+   * would hand a queued turn the id of the turn ahead of it.
+   */
+  providerTurnIdAtStart?: string;
+  /** Payer of the provider session that executes this turn. */
+  funding?: UsageFunding;
+  usageRecorded: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1722,10 +2103,10 @@ function toolResultSuspendsTurn(output: unknown): boolean {
 }
 
 function validateProviderStructuredResult(
-  message: AgentMessage,
+  message: AgentEvent,
   compiled: CompiledOutputSchema | undefined,
   suspended = false,
-): AgentMessage {
+): AgentEvent {
   if (!compiled || message.type !== "result") return message;
   if (suspended) {
     return {
@@ -1770,12 +2151,12 @@ function validateProviderStructuredResult(
  * are dropped; anything pushed after the drain loop stops at the terminal
  * block is buffered but never read.
  */
-class ForkStreamQueue implements AsyncIterable<StreamAgentMessage> {
-  private buffer: StreamAgentMessage[] = [];
-  private resolvers: Array<(item: IteratorResult<StreamAgentMessage>) => void> = [];
+class ForkStreamQueue implements AsyncIterable<StreamAgentEvent> {
+  private buffer: StreamAgentEvent[] = [];
+  private resolvers: Array<(item: IteratorResult<StreamAgentEvent>) => void> = [];
   private ended = false;
 
-  push(msg: StreamAgentMessage): void {
+  push(msg: StreamAgentEvent): void {
     if (this.ended) return;
     const resolver = this.resolvers.shift();
     if (resolver) {
@@ -1793,9 +2174,9 @@ class ForkStreamQueue implements AsyncIterable<StreamAgentMessage> {
     }
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<StreamAgentMessage> {
+  [Symbol.asyncIterator](): AsyncIterator<StreamAgentEvent> {
     return {
-      next: async (): Promise<IteratorResult<StreamAgentMessage>> => {
+      next: async (): Promise<IteratorResult<StreamAgentEvent>> => {
         if (this.buffer.length > 0) {
           return { value: this.buffer.shift()!, done: false };
         }
@@ -1811,11 +2192,13 @@ class ForkStreamQueue implements AsyncIterable<StreamAgentMessage> {
 class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  readonly romeSessionId?: string;
+  conversation?: SessionConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
   private activeForkedTurnCount = 0;
+  // Forks run in this session's working dir; actions they call carry the fork's id.
+  private activeForkSessionIds = new Set<string>();
   // Manager built lazily for subagent runs; keeps subagents owned by this session.
   private _childManager?: AgentSessionManager;
   private modelSession: ModelSession;
@@ -1856,6 +2239,19 @@ class AgentSessionImpl implements AgentSession {
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
+  /**
+   * The current provider thread started in this session rather than resuming
+   * one, so its first turn carries the `<thread_context>` block.
+   */
+  private threadFresh: boolean;
+  /**
+   * The current thread replaced one that held this chat, so its turns carry a
+   * `<continuation>` notice to read the earlier messages until one returns a
+   * result: a turn that fails may never have reached the thread.
+   */
+  private continuationPending: boolean;
+  /** The model the chat ran on before the current thread started. */
+  private previousModel?: string;
   private selectionId?: ModelSelectionId;
   /**
    * The session model pin: the concrete model this session's history
@@ -1864,6 +2260,8 @@ class AgentSessionImpl implements AgentSession {
    * this model (never a tier re-map) once a pin exists.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
+  /** Last effort written to the session row, so an unchanged effort skips the write. */
+  private storedReasoningEffort?: string;
   private openModelSession: ImplArgs["openModelSession"];
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
@@ -1887,7 +2285,7 @@ class AgentSessionImpl implements AgentSession {
   constructor(args: ImplArgs) {
     this.key = args.key;
     this.sessionId = args.sessionId;
-    this.romeSessionId = args.romeSessionId;
+    this.conversation = args.conversation;
     this.modelSession = args.modelSession;
     this.deps = args.deps;
     this.config = args.config;
@@ -1901,6 +2299,9 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
+    this.threadFresh = !args.threadResumed;
+    this.continuationPending = args.replacedThread;
+    this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
@@ -1948,6 +2349,19 @@ class AgentSessionImpl implements AgentSession {
     );
   }
 
+  get workingDirectory(): string {
+    return this.workingDir;
+  }
+
+  hasActiveFork(forkSessionId: string): boolean {
+    return this.activeForkSessionIds.has(forkSessionId);
+  }
+
+  /** The subagent manager, or undefined when this session never ran a subagent. */
+  get openedChildManager(): AgentSessionManager | undefined {
+    return this._childManager;
+  }
+
   get childManager(): AgentSessionManager {
     if (!this._childManager) {
       // Children share the same dep wiring + keepAlive setting. Flag the
@@ -1962,12 +2376,21 @@ class AgentSessionImpl implements AgentSession {
     return this._childManager;
   }
 
-  // Per-session events loop: pumps every SDK AgentMessage into the active
+  // Per-session events loop: pumps every SDK AgentEvent into the active
   // turn sink. Turn boundaries are detected by `result` / `error`.
 
   startModelSessionEvents(): void {
     const session = this.modelSession;
     this.modelEventsLoop = this.runEventsLoop(session);
+  }
+
+  /**
+   * The guardian picked a model in the open chat. The next turn resolves it
+   * ahead of the pin, and its successful turn re-pins the session. Null clears
+   * the selection, so the pin decides again.
+   */
+  selectModel(selectionId: ModelSelectionId | null): void {
+    this.selectionId = selectionId ?? undefined;
   }
 
   private async ensureModelSessionForTurn(): Promise<void> {
@@ -2000,6 +2423,15 @@ class AgentSessionImpl implements AgentSession {
       this.modelSession = next;
       this.modelSessionAvailable = true;
       this.providerInfoStored = false;
+      if (resumeThreadId === undefined) {
+        // Another provider: the new thread has seen nothing of this chat.
+        this.threadFresh = true;
+        this.threadContextInjected = false;
+        if (previous.providerThreadId !== undefined) {
+          this.continuationPending = true;
+          this.previousModel = previous.model;
+        }
+      }
       this.toolCount =
         this.config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)).length +
         buildSubagentTools(this.deps.agentLoader, this.config).tools.length;
@@ -2033,7 +2465,7 @@ class AgentSessionImpl implements AgentSession {
         }
         if (msg.type === "result" || msg.type === "error") await this.inputs.seal(sink.turnId);
         // Time-to-first-token: the first *text* event of the turn (a text_delta
-        // preview or a completed text block) marks when the model started
+        // or a completed text block) marks when the model started
         // producing visible output. Gate strictly to text — thinking/tool_use
         // can precede any token (Codex emits tool_use before agentMessageDelta),
         // and counting those would make tool-first turns look artificially fast.
@@ -2054,10 +2486,15 @@ class AgentSessionImpl implements AgentSession {
           });
           this.currentModelSpan?.setAttribute("ttft_ms", ttftMs);
         }
-        // text_delta is a transient preview of an in-flight text block — the
-        // complete block still follows. Fast-path it straight to the sink:
-        // no span-translator capture, no per-delta DB touch, no metrics.
-        if (msg.type === "text_delta") {
+        // Deltas are transient increments of an in-flight block; the complete
+        // block still follows. Fast-path them straight to the sink: no
+        // span-translator capture, no per-delta DB touch, no metrics.
+        if (isTransientDelta(msg)) {
+          // A subagent call publishes `subagent_start` instead of its
+          // `tool_use`, so its input preview would reference nothing.
+          if (msg.type === "tool_input_delta" && this.subagentToolNames.has(msg.tool)) {
+            continue;
+          }
           this.publishOutbound(sink, msg);
           continue;
         }
@@ -2074,7 +2511,7 @@ class AgentSessionImpl implements AgentSession {
           sink.outputSchemaSuspended = true;
         }
         this.trackTurnMetrics(msg);
-        await this.deps.sessionManager.touchSession(this.sessionId);
+        await this.deps.sessionsRepo.touch(this.sessionId);
 
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
           sink.pendingSubagentToolUses.set(msg.id, msg);
@@ -2107,7 +2544,7 @@ class AgentSessionImpl implements AgentSession {
             this.publishOutbound(sink, pendingUse);
           }
         }
-        let outbound: AgentMessage = validateProviderStructuredResult(
+        let outbound: AgentEvent = validateProviderStructuredResult(
           msg,
           this.structuredOutputValidator,
           sink.outputSchemaSuspended,
@@ -2125,15 +2562,17 @@ class AgentSessionImpl implements AgentSession {
 
         this.publishOutbound(sink, outbound);
 
-        if (isTerminalBlock(outbound)) {
+        if (isTerminalEvent(outbound)) {
           // The branch action becomes available when turn_end is published.
           // Persist the provider-native anchor first so an immediate click can
           // never fall back to (or race with) a later provider-thread head.
           if (outbound.type === "result") {
             const interrupted =
-              sink.lifecycleInterrupted || outbound.accounting?.stopReason === "interrupted";
+              sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
+            if (sink.carriesContinuation) this.continuationPending = false;
+            await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2194,7 +2633,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /** Emit the turn_end bracket. `terminal` determines the status. */
-  private publishTurnEnd(sink: TurnSink, terminal: AgentMessage): void {
+  private publishTurnEnd(sink: TurnSink, terminal: AgentEvent): void {
     // Turns that fail before dispatchTurnStarted have no start timestamp;
     // report 0 rather than a since-epoch wall clock.
     const startMs = sink.lifecycleStartedAtMs;
@@ -2204,7 +2643,7 @@ class AgentSessionImpl implements AgentSession {
     // without peeking back into the terminal's accounting.
     const accounting =
       terminal.type === "result" || terminal.type === "error" ? terminal.accounting : undefined;
-    const interrupted = sink.lifecycleInterrupted || accounting?.stopReason === "interrupted";
+    const interrupted = sink.lifecycleInterrupted || isInterruptedAccounting(accounting);
     this.publishOutbound(sink, {
       type: "turn_end",
       turnId: sink.turnId,
@@ -2221,7 +2660,7 @@ class AgentSessionImpl implements AgentSession {
    * synthetic-error exits (failTurn), so a failed turn's spans carry ERROR
    * status instead of being closed as OK by runOneTurn's safety net.
    */
-  private finalizeTurnSpans(sink: TurnSink, outbound: ResultMessage | ErrorMessage): void {
+  private finalizeTurnSpans(sink: TurnSink, outbound: TurnResultEvent | TurnErrorEvent): void {
     const modelSpan = this.currentModelSpan;
     if (modelSpan) {
       const accounting = outbound.accounting;
@@ -2313,13 +2752,48 @@ class AgentSessionImpl implements AgentSession {
     this.currentTurnCtx = null;
   }
 
-  private finalizeTurn(sink: TurnSink, terminal: ResultMessage | ErrorMessage): void {
+  private finalizeTurn(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
     if (this.currentSink === sink) {
       this.finalizeTurnSpans(sink, terminal);
     }
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
+    this.recordTurnUsage(sink, terminal);
     this.closeSink(sink);
+  }
+
+  private recordTurnUsage(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
+    const recorder = this.deps.usageRecorder;
+    if (!recorder || sink.usageRecorded) return;
+    sink.usageRecorded = true;
+    const accounting = terminal.accounting;
+    const stop = resolveTurnStop({
+      accounting,
+      terminalKind: terminal.type,
+      interrupted: sink.lifecycleInterrupted,
+    });
+    const providerTurnId = this.modelSession.lastProviderTurnId;
+    recorder.recordTurn({
+      turnId: sink.turnId,
+      romeSessionId: sink.romeSessionId,
+      romeSessionType: sink.romeSessionType,
+      agentName: this.key.agentName,
+      status: classifyAgentTurnStatus({
+        terminalKind: terminal.type,
+        stop,
+        interrupted: sink.lifecycleInterrupted,
+      }),
+      provider: this.modelSession.providerId,
+      model: this.modelSession.model,
+      funding: sink.funding,
+      providerTurnId: providerTurnId !== sink.providerTurnIdAtStart ? providerTurnId : undefined,
+      accounting,
+      durationMs:
+        sink.lifecycleStartedAtMs === undefined
+          ? accounting?.durationMs
+          : Date.now() - sink.lifecycleStartedAtMs,
+      finishedAt: new Date(),
+    });
   }
 
   /**
@@ -2327,7 +2801,7 @@ class AgentSessionImpl implements AgentSession {
    * and close the turn.
    */
   private failTurn(sink: TurnSink, error: string | ModelResolutionErrorPayload): void {
-    const terminal: ErrorMessage =
+    const terminal: TurnErrorEvent =
       typeof error === "string" ? { type: "error", error } : { type: "error", ...error };
     this.ensureTurnStart(sink);
     this.publishOutbound(sink, terminal);
@@ -2336,12 +2810,32 @@ class AgentSessionImpl implements AgentSession {
 
   private providerInfoStored = false;
 
+  private mayCall(actionName: string): boolean {
+    const canonical = this.deps.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
+    return this.deps.actionRegistry
+      .getForAgent(this.config.actions ?? [])
+      .some((action) => action.config.name === canonical);
+  }
+
+  private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
+    if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
+    try {
+      await this.deps.sessionsRepo.setReasoningEffort(this.sessionId, reasoningEffort);
+      this.storedReasoningEffort = reasoningEffort;
+    } catch (err) {
+      log.warn("failed to persist session reasoning effort", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   private async maybePersistTurnCheckpoint(session: ModelSession, turnId: string): Promise<void> {
     const checkpointId = session.lastCompletedTurnCheckpoint;
     const providerThreadId = session.providerThreadId;
     if (!checkpointId || !providerThreadId) return;
     try {
-      await this.deps.sessionManager.setTurnCheckpoint({
+      await this.deps.sessionsRepo.setTurnCheckpoint({
         sessionId: this.sessionId,
         turnId,
         provider: session.providerId,
@@ -2387,11 +2881,14 @@ class AgentSessionImpl implements AgentSession {
         id: forkSessionId,
         agentName: this.key.agentName,
         channelThreadKey,
+        // A persisted fork's conversation is minted under the fork's own id.
+        chatId: forkSessionId,
+        workingDir: this.workingDir,
         createdAt: new Date(),
         lastActiveAt: new Date(),
         status: "active",
       });
-      await this.deps.sessionManager.setProviderInfo(
+      await this.deps.sessionsRepo.setProviderInfo(
         forkSessionId,
         forkSession.providerId,
         providerThreadId,
@@ -2402,6 +2899,18 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         forkSessionId,
         channelThreadKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const reasoningEffort = forkSession.appliedReasoningEffort;
+    if (!reasoningEffort) return;
+    try {
+      await this.deps.sessionsRepo.setReasoningEffort(forkSessionId, reasoningEffort);
+    } catch (err) {
+      log.warn("failed to persist fork reasoning effort", {
+        sessionId: this.sessionId,
+        forkSessionId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -2419,7 +2928,7 @@ class AgentSessionImpl implements AgentSession {
       model: this.modelSession.model,
     };
     try {
-      await this.deps.sessionManager.setProviderInfo(
+      await this.deps.sessionsRepo.setProviderInfo(
         this.sessionId,
         identity.providerId,
         identity.providerThreadId,
@@ -2439,13 +2948,13 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  private publishOutbound(sink: TurnSink, msg: AgentMessage): StreamAgentMessage {
-    const outbound: StreamAgentMessage = { ...msg, agent: this.key.agentName };
+  private publishOutbound(sink: TurnSink, msg: AgentEvent): StreamAgentEvent {
+    const outbound: StreamAgentEvent = { ...msg, agent: this.key.agentName };
     this.publishToSink(sink, outbound);
     return outbound;
   }
 
-  private publishToSink(sink: TurnSink, msg: StreamAgentMessage): void {
+  private publishToSink(sink: TurnSink, msg: StreamAgentEvent): void {
     if (sink.done) return;
     if (sink.resolvers.length > 0) {
       const r = sink.resolvers.shift()!;
@@ -2464,7 +2973,7 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  private trackTurnMetrics(msg: AgentMessage | StreamAgentMessage): void {
+  private trackTurnMetrics(msg: AgentEvent | StreamAgentEvent): void {
     if (msg.type !== "tool_use") return;
     this.currentTurnToolCallCount++;
     if (
@@ -2525,7 +3034,7 @@ class AgentSessionImpl implements AgentSession {
     });
   }
 
-  private dispatchTurnFinished(sink: TurnSink, terminal?: StreamAgentMessage): void {
+  private dispatchTurnFinished(sink: TurnSink, terminal?: StreamAgentEvent): void {
     const dispatcher = this.deps.lifecycleDispatcher;
     if (
       sink.lifecycleFinishDispatched ||
@@ -2549,9 +3058,14 @@ class AgentSessionImpl implements AgentSession {
         : undefined;
     const stopReason =
       accounting?.stopReason ?? (sink.lifecycleInterrupted ? "interrupted" : undefined);
+    const stop = resolveTurnStop({
+      accounting,
+      terminalKind,
+      interrupted: sink.lifecycleInterrupted,
+    });
     const status = classifyAgentTurnStatus({
       terminalKind,
-      stopReason,
+      stop,
       interrupted: sink.lifecycleInterrupted,
     });
 
@@ -2572,7 +3086,7 @@ class AgentSessionImpl implements AgentSession {
         finishedAt,
         durationMs,
       }),
-      output: buildLifecycleOutput(terminal, status, stopReason),
+      output: buildLifecycleOutput(terminal, status, stop, stopReason),
       metrics: {
         toolCallCount: this.currentTurnToolCallCount,
         skillWritten: this.currentTurnSkillWritten,
@@ -2580,12 +3094,12 @@ class AgentSessionImpl implements AgentSession {
     });
   }
 
-  private buildTurnEvents(sink: TurnSink): AsyncIterable<StreamAgentMessage> {
+  private buildTurnEvents(sink: TurnSink): AsyncIterable<StreamAgentEvent> {
     const clearSubagentLinks = () => this.clearSubagentLinks(sink);
     return {
       [Symbol.asyncIterator]() {
         return {
-          async next(): Promise<IteratorResult<StreamAgentMessage>> {
+          async next(): Promise<IteratorResult<StreamAgentEvent>> {
             if (sink.values.length > 0) {
               return { value: sink.values.shift()!, done: false };
             }
@@ -2593,7 +3107,7 @@ class AgentSessionImpl implements AgentSession {
               clearSubagentLinks();
               return { value: undefined as never, done: true };
             }
-            return await new Promise<IteratorResult<StreamAgentMessage>>((resolve) => {
+            return await new Promise<IteratorResult<StreamAgentEvent>>((resolve) => {
               sink.resolvers.push(resolve);
             });
           },
@@ -2620,7 +3134,7 @@ class AgentSessionImpl implements AgentSession {
     return true;
   }
 
-  async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage> {
+  async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
@@ -2632,8 +3146,9 @@ class AgentSessionImpl implements AgentSession {
     // is synthesized: that re-emission is an ordinary-turn compatibility
     // shim slated for removal (step 2 of the stream-shape cleanup), and
     // forked-stream consumers read identity off turn_start.
-    const forkSessionId = uuidv4();
-    const turnId = uuidv4();
+    const forkSessionId = uuidv7();
+    this.activeForkSessionIds.add(forkSessionId);
+    const turnId = uuidv7();
     const startMs = Date.now();
 
     // Bracketing invariant: once turn_start is out, the stream must end
@@ -2642,9 +3157,12 @@ class AgentSessionImpl implements AgentSession {
     // a terminal. Mirror the failTurn handling of regular turns by
     // synthesizing the error terminal here.
     let forkSession: ModelSession | undefined;
+    let sourceFunding: UsageFunding | undefined;
+    let forkFunding: UsageFunding | undefined;
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
+    let terminalAccounting: TurnResultEvent["accounting"];
     let outputSchemaSuspended = false;
     // Assigned inside the mutex below, after ensureModelSessionForTurn() may
     // have replaced this.modelSession. See the guard in the `finally`.
@@ -2672,6 +3190,7 @@ class AgentSessionImpl implements AgentSession {
           }
           await this.ensureModelSessionForTurn();
           const sourceModelSession = this.modelSession;
+          sourceFunding = sourceModelSession.funding;
           sourceProviderThreadId = sourceModelSession.providerThreadId;
           if (input.sourceCheckpoint) {
             if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
@@ -2723,6 +3242,7 @@ class AgentSessionImpl implements AgentSession {
         });
         disposeForkResources = forkOpen.dispose;
         forkSession = await fork.open(forkOpen.params);
+        forkFunding = forkSession.funding;
         await forkSession.sendUserInput({
           text: input.prompt,
           reasoningEffort: input.reasoningEffort,
@@ -2733,7 +3253,7 @@ class AgentSessionImpl implements AgentSession {
             for await (const msg of providerEvents) {
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
-              if (projected.some(isTerminalBlock)) break;
+              if (projected.some(isTerminalEvent)) break;
             }
           } catch (err) {
             outbound.push({
@@ -2756,20 +3276,23 @@ class AgentSessionImpl implements AgentSession {
             this.structuredOutputValidator,
             outputSchemaSuspended,
           );
-          const projectedOut = out as StreamAgentMessage;
+          const projectedOut = out as StreamAgentEvent;
+          // Settle the outcome before yielding the terminal: a consumer that
+          // stops on it goes straight to `finally`.
+          const terminal = isTerminalEvent(out);
+          if (terminal) {
+            terminalAccounting = out.accounting;
+            status = isInterruptedAccounting(out.accounting)
+              ? "interrupted"
+              : out.type === "error"
+                ? "error"
+                : "completed";
+            terminalSeen = true;
+          }
           // Relayed subagent blocks carry the child's agent tag; everything
           // else is this agent's own output.
           yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
-          if (isTerminalBlock(out)) {
-            status =
-              out.accounting?.stopReason === "interrupted"
-                ? "interrupted"
-                : out.type === "error"
-                  ? "error"
-                  : "completed";
-            terminalSeen = true;
-            break;
-          }
+          if (terminal) break;
         }
         if (!terminalSeen) {
           status = "error";
@@ -2795,6 +3318,22 @@ class AgentSessionImpl implements AgentSession {
         agent: this.key.agentName,
       };
     } finally {
+      // A consumer that abandons the stream before its terminal leaves the
+      // turn with no outcome, which the lifecycle vocabulary calls stopped.
+      this.deps.usageRecorder?.recordTurn({
+        turnId,
+        romeSessionId: forkSessionId,
+        romeSessionType: "fork",
+        agentName: this.key.agentName,
+        status: terminalSeen || status !== "completed" ? status : "stopped",
+        provider: forkSession?.providerId ?? this.modelSession.providerId,
+        model: forkSession?.model ?? this.modelSession.model,
+        funding: forkFunding ?? sourceFunding,
+        providerTurnId: forkSession?.lastProviderTurnId,
+        accounting: terminalAccounting,
+        durationMs: Date.now() - startMs,
+        finishedAt: new Date(),
+      });
       // Before close(): a closed ModelSession no longer reports the thread this
       // needs. Each condition is load-bearing:
       //   • terminalSeen — `status` is initialized to "completed", so a
@@ -2848,10 +3387,11 @@ class AgentSessionImpl implements AgentSession {
         }
       }
       this.activeForkedTurnCount = Math.max(0, this.activeForkedTurnCount - 1);
+      this.activeForkSessionIds.delete(forkSessionId);
       this.lastActiveAt = Date.now();
       this.emitStatus();
       try {
-        await this.deps.sessionManager.touchSession(this.sessionId);
+        await this.deps.sessionsRepo.touch(this.sessionId);
       } catch (err) {
         log.warn("failed to touch source session after fork", {
           sessionId: this.sessionId,
@@ -2896,7 +3436,25 @@ class AgentSessionImpl implements AgentSession {
     options: SubmitInputOptions,
   ): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
-    return this.inputs.submit(input, options);
+    const receipt = this.inputs.submit(input, options);
+    // The queue ends its own turn. A system turn (a backend continuation) runs
+    // outside the queue, so a `now` input ends it here.
+    const sink = this.currentSink;
+    if (
+      options.priority === "now" &&
+      sink &&
+      !sink.done &&
+      sink.turnId !== receipt.turnId &&
+      !this.inputs.owns(sink.turnId)
+    ) {
+      void this.interrupt(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
+        log.warn("superseding the running turn failed", {
+          sessionId: this.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return receipt;
   }
 
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
@@ -2907,7 +3465,7 @@ class AgentSessionImpl implements AgentSession {
     // stack, and threaded back to every consumer (route, tracing, IPC stream
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
-    const turnId = uuidv4();
+    const turnId = uuidv7();
     const sink: TurnSink = {
       turnId,
       userPrompt: input.prompt,
@@ -2932,6 +3490,7 @@ class AgentSessionImpl implements AgentSession {
             ? "channel"
             : "action"),
       replyTo: options?.replyTo,
+      quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
@@ -2940,6 +3499,7 @@ class AgentSessionImpl implements AgentSession {
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
       outputSchemaSuspended: false,
+      usageRecorded: false,
     };
     const events = this.buildTurnEvents(sink);
 
@@ -2951,7 +3511,7 @@ class AgentSessionImpl implements AgentSession {
     // case); when invoked inside one (channel adapter path), that span
     // becomes the parent.
     const channelName = this.key.channelThreadKey
-      ? getChannelFromThreadKey(this.key.channelThreadKey) || undefined
+      ? sessionKeyChannel(this.key.channelThreadKey)
       : undefined;
 
     // Identifying attrs stamped on every span this turn creates. We pass
@@ -2986,6 +3546,7 @@ class AgentSessionImpl implements AgentSession {
     void this.turnMutex
       .runExclusive(
         async () => {
+          sink.providerTurnIdAtStart = this.modelSession.lastProviderTurnId;
           try {
             await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
           } catch (err) {
@@ -3090,7 +3651,7 @@ class AgentSessionImpl implements AgentSession {
       // (including the per-turn session_init below) may become visible while
       // the summary still shows turn N's terminal state.
       this.ensureTurnStart(sink);
-      // Per-turn session_init: trace/UI headers (AgentCallBlock, showcases'
+      // Per-turn session_init: trace/UI headers (AgentCallView, showcases'
       // userPrompt derivation) still key off it. Step 2 of the stream-shape
       // cleanup demotes it to once-per-session — turn_start above is already
       // the authoritative turn boundary.
@@ -3106,33 +3667,113 @@ class AgentSessionImpl implements AgentSession {
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       let pendingConversationMessageIds: string[] = [];
-      if (this.deps.webchatRepo && sink.romeSessionType === "channel" && sink.romeSessionId) {
+      let unseenLineIds: number[] = [];
+      // A channel conversation stores lines the agent never saw as turns. The
+      // surface says whether this channel does; webchat, for one, does not.
+      const channel = sink.threadContext?.channel;
+      const catchesUp =
+        sink.romeSessionType === "channel" &&
+        sink.romeSessionId &&
+        sink.threadContext &&
+        channel &&
+        channelSurfaceOf(this.deps, channel).promptContext;
+      if (catchesUp && this.deps.turnLinks) {
+        // The agent catches up on the lines said where its session stands
+        // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
+        const unseen = this.deps.turnLinks.unseen(sink.romeSessionId);
+        const shown = unseen.slice(-CATCH_UP_LIMIT);
+        // Rome's first line in a thread quotes the line that started it, said
+        // in the chat outside the thread. No line in the thread is a starter.
+        const threadStarter =
+          unseen.find((line) => line.fromRome && line.quotesOutside)?.quoted ?? null;
+        const repliedTo = sink.quoted
+          ? contextLine(sink.quoted)
+          : sink.replyTo?.content
+            ? {
+                id: `runtime-reply:${sink.replyTo.messageId}`,
+                sender: sink.replyTo.senderName ?? null,
+                text: sink.replyTo.content,
+              }
+            : null;
+        unseenLineIds = unseen.map((line) => line.id);
+        userPrompt = prependConversationContext(userPrompt, {
+          notifications: [
+            ...(threadStarter ? [contextLine(threadStarter)] : []),
+            ...shown.map(contextLine),
+          ],
+          omittedNotificationCount: unseen.length - shown.length,
+          repliedTo,
+        });
+      } else if (catchesUp && this.deps.webchatRepo && sink.threadContext && channel) {
         const storedContext = await this.deps.webchatRepo.loadConversationContext(
           sink.romeSessionId,
           sink.replyTo?.messageId,
         );
-        const conversationContext =
-          storedContext.repliedTo || !sink.replyTo?.content
-            ? storedContext
-            : {
-                ...storedContext,
-                repliedTo: {
-                  id: `runtime-reply:${sink.replyTo.messageId}`,
-                  content: JSON.stringify([{ type: "text", content: sink.replyTo.content }]),
-                  senderName: sink.replyTo.senderName ?? null,
-                },
-              };
-        pendingConversationMessageIds = storedContext.pendingNotificationIds;
-        userPrompt = prependConversationContext(userPrompt, conversationContext);
+        // The agent catches up on the place the waking message was said in:
+        // the chat, or the thread in it.
+        const woken = sink.threadContext;
+        const parent = woken.parentThreadId;
+        const place = placeIn(
+          chatKey(
+            this.deps.platformOfChannel?.(channel) ?? channel,
+            (parent ?? woken.threadId) as ChatId,
+          ),
+          parent === undefined ? undefined : (woken.threadId as ChatId),
+        );
+        const caughtUp = await catchUp(
+          this.deps.chatMessages ?? channelMessages(this.deps.webchatRepo, channel),
+          place,
+          { channel },
+          storedContext.unseen,
+        );
+        const repliedTo = storedContext.repliedTo
+          ? storedContextLine(storedContext.repliedTo)
+          : sink.replyTo?.content
+            ? {
+                id: `runtime-reply:${sink.replyTo.messageId}`,
+                sender: sink.replyTo.senderName ?? null,
+                text: sink.replyTo.content,
+              }
+            : null;
+        pendingConversationMessageIds = storedContext.unseen.map((message) => message.id);
+        userPrompt = prependConversationContext(userPrompt, {
+          notifications: [
+            ...(storedContext.threadStarter
+              ? [storedContextLine(storedContext.threadStarter)]
+              : []),
+            ...caughtUp.lines.map(saidContextLine),
+          ],
+          omittedNotificationCount: caughtUp.omitted,
+          repliedTo,
+        });
       }
-      if (!this.isSubagent && this.isNewSession && !this.threadContextInjected && tc) {
+      // Every turn, subagents included: the folder is where the work happens.
+      const deviceFolderBlock = buildDeviceFolderBlock(tc);
+      if (deviceFolderBlock) {
+        userPrompt = `${deviceFolderBlock}\n\n${userPrompt}`;
+      }
+      if (!this.isSubagent && this.continuationPending) {
+        sink.carriesContinuation = true;
+        const previousModel =
+          this.previousModel && this.previousModel !== this.modelSession.model
+            ? this.previousModel
+            : undefined;
+        const block = buildContinuationBlock({
+          ...(previousModel ? { previousModel } : {}),
+          canReadHistory: this.mayCall(FETCH_CHANNEL_HISTORY_ACTION),
+        });
+        userPrompt = `${block}\n\n${userPrompt}`;
+      }
+      // A thread that starts in this session, the first one or one that
+      // replaced it on another provider, has not seen the block yet.
+      if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
         const block = buildThreadContextBlock(tc, this.workingDir);
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
         }
       }
-      const initMsg: AgentMessage = {
+      const initMsg: AgentEvent = {
         type: "session_init",
         sessionId: this.sessionId,
         romeSession: {
@@ -3155,7 +3796,9 @@ class AgentSessionImpl implements AgentSession {
       // turn closes exactly like a model turn and the downstream SSE/persistence
       // pipeline can't tell them apart.
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
-      let emittedTerminal: ResultMessage | ErrorMessage | undefined;
+      let emittedTerminal: TurnResultEvent | TurnErrorEvent | undefined;
+      let droppedAfterTerminal = false;
+      let droppedDuringModel = false;
       let modelRan = false;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
@@ -3166,6 +3809,35 @@ class AgentSessionImpl implements AgentSession {
         },
         emit: (event) => {
           if (sink.done) return;
+          // A middleware's first terminal ends its stream, as the model's
+          // terminal does on the model path, so it publishes exactly one.
+          if (emittedTerminal) {
+            if (!droppedAfterTerminal) {
+              droppedAfterTerminal = true;
+              log.warn("turn middleware emitted after its terminal event; dropping the rest", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
+          // Once next() starts the model, the model owns the stream, so any
+          // middleware emit from then on is dropped, whether it comes from an
+          // unawaited next() or from a task the middleware started earlier.
+          if (modelRan) {
+            if (!droppedDuringModel) {
+              droppedDuringModel = true;
+              log.warn("turn middleware emitted while the model was running; dropping it", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
           if (
             this.structuredOutputValidator &&
             event.type === "tool_result" &&
@@ -3186,8 +3858,32 @@ class AgentSessionImpl implements AgentSession {
         meta: {},
       };
 
+      // The events loop closes the sink on the model's `result`/`error`.
+      const waitForSinkClose = async (): Promise<void> => {
+        if (sink.done) return;
+        await new Promise<void>((resolve) => {
+          const checker = setInterval(() => {
+            if (sink.done) {
+              clearInterval(checker);
+              resolve();
+            }
+          }, 5);
+        });
+      };
+
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
+        if (emittedTerminal) {
+          // Reached through next() after an emit, or through the chain's
+          // fail-open next() after a throw. A model run would publish a second
+          // terminal and pay for a second reply.
+          log.warn("turn middleware continued to the model after its terminal event; skipped", {
+            sessionId: this.sessionId,
+            agentName: this.key.agentName,
+            turnId,
+          });
+          return;
+        }
         if (sink.lifecycleInterrupted) {
           await this.modelSession.interrupt("user-stop");
           this.finalizeTurn(sink, { type: "result", content: "" });
@@ -3197,6 +3893,8 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
+            // The payer this turn is sent under; Codex holds a queued turn to it.
+            sink.funding = this.modelSession.funding;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,
@@ -3205,6 +3903,18 @@ class AgentSessionImpl implements AgentSession {
               injectedToolResult: input.injectedToolResult,
             });
             this.inputs.ready(turnId);
+            if (this.deps.turnLinks && unseenLineIds.length > 0) {
+              try {
+                this.deps.turnLinks.seen(unseenLineIds, sink.romeSessionId, sink.turnId);
+              } catch (err) {
+                // As below: the turn goes on, and a later turn retries.
+                log.warn("failed to mark conversation context seen", {
+                  romeSessionId: sink.romeSessionId,
+                  turnId: sink.turnId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
             if (this.deps.webchatRepo && pendingConversationMessageIds.length > 0) {
               try {
                 await this.deps.webchatRepo.markConversationContextInjected(
@@ -3229,23 +3939,32 @@ class AgentSessionImpl implements AgentSession {
           this.failTurn(sink, err instanceof Error ? err.message : String(err));
         }
 
-        // Wait for sink to close (events loop closes on `result`/`error`).
-        await new Promise<void>((resolve) => {
-          const checker = setInterval(() => {
-            if (sink.done) {
-              clearInterval(checker);
-              resolve();
-            }
-          }, 5);
-        });
+        await waitForSinkClose();
       };
 
       const chain = this.deps.turnMiddleware;
       if (chain) {
-        await chain.run(mwCtx, runModelTerminal);
+        try {
+          await chain.run(mwCtx, runModelTerminal);
+        } catch (err) {
+          // A fail-closed throw after the terminal, or after next() started
+          // the model, cannot change the outcome, so the turn ends on the
+          // terminal already emitted or on the model's.
+          if (!emittedTerminal && !modelRan) throw err;
+          if (err instanceof Error && this.currentAgentSpan === span) span.recordException(err);
+          log.warn("turn middleware threw after its terminal event or after starting the model", {
+            sessionId: this.sessionId,
+            agentName: this.key.agentName,
+            turnId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         await runModelTerminal();
       }
+      // A middleware that did not await next() returns while the model is
+      // still running. The model's terminal ends the turn, not a synthesized one.
+      if (modelRan) await waitForSinkClose();
 
       if (!sink.done) {
         if (!modelRan && input.inputId) {
@@ -3258,16 +3977,19 @@ class AgentSessionImpl implements AgentSession {
             turnId,
           );
         }
-        let terminal: ResultMessage | ErrorMessage = emittedTerminal ?? {
+        let terminal: TurnResultEvent | TurnErrorEvent = emittedTerminal ?? {
           type: "result",
           content: "",
         };
-        if (!emittedTerminal && this.structuredOutputValidator) {
+        // A middleware that short-circuits without a terminal, such as a turn
+        // parked on a question card, still publishes one. An interrupted turn
+        // publishes none, as an interrupt before the model starts does.
+        if (!emittedTerminal && !sink.lifecycleInterrupted) {
           terminal = validateProviderStructuredResult(
             terminal,
             this.structuredOutputValidator,
             sink.outputSchemaSuspended,
-          ) as ResultMessage | ErrorMessage;
+          ) as TurnResultEvent | TurnErrorEvent;
           this.publishOutbound(sink, terminal);
         }
         this.finalizeTurn(sink, terminal);
@@ -3425,6 +4147,14 @@ class AgentSessionImpl implements AgentSession {
 
 // Helpers
 
+/**
+ * The model-facing tool name for delegating to a subagent. Provider tool names
+ * reject the ":" in an artifact id, so the id maps to a stable hash.
+ */
+export function subagentToolName(subagentId: string): string {
+  return `sa_${createHash("sha256").update(subagentId).digest("hex").slice(0, 16)}`;
+}
+
 function buildSubagentTools(
   agentLoader: AgentLoader,
   config: ReturnType<AgentLoader["get"]>,
@@ -3435,9 +4165,7 @@ function buildSubagentTools(
   const targets = new Map<string, string>();
   const tools = config.allowedSubagents.map((subagentName) => {
     const subConfig = agentLoader.get(subagentName);
-    const toolName = subagentName.includes(":")
-      ? `sa_${createHash("sha256").update(subagentName).digest("hex").slice(0, 16)}`
-      : subagentName;
+    const toolName = subagentToolName(subagentName);
     targets.set(toolName, subagentName);
     return {
       name: toolName,
@@ -3461,16 +4189,19 @@ function buildSubagentTools(
 }
 
 function buildLifecycleOutput(
-  terminal: StreamAgentMessage | undefined,
+  terminal: StreamAgentEvent | undefined,
   status: AgentTurnStatus,
+  stop?: AgentStop,
   stopReason?: string,
 ): AgentTurnOutput {
+  const stopField = stop ? { stop } : {};
   if (terminal?.type === "result") {
     return {
       text: terminal.content,
       structuredOutput: terminal.structuredOutput,
       state: status === "interrupted" ? "partial" : "final",
       terminalKind: "result",
+      ...stopField,
       stopReason,
       accounting: terminal.accounting,
     };
@@ -3480,6 +4211,7 @@ function buildLifecycleOutput(
       text: "",
       state: "none",
       terminalKind: "error",
+      ...stopField,
       stopReason,
       error: terminal.error,
       accounting: terminal.accounting,
@@ -3488,10 +4220,7 @@ function buildLifecycleOutput(
   return {
     text: "",
     state: "none",
+    ...stopField,
     stopReason,
   };
 }
-
-// Re-export type aliases for convenience.
-export type { StreamAgentMessage };
-export type { AgentMessage };

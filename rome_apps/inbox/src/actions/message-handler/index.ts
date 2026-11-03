@@ -1,4 +1,4 @@
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -7,11 +7,14 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
-  ConversationRepository,
+  ChatRecord,
+  ChatRepository,
+  EnsureChannelChatInput,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
   PolicyEngine,
+  ReplyDeliveryReport,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -60,7 +63,7 @@ export interface SentinelDecision {
 }
 
 type CollectedAgentResult =
-  | { success: true; content: string; turnId?: string }
+  | { success: true; content: string; turnId?: string; replyDelivery?: ReplyDeliveryReport }
   | { success: false; error: string };
 
 // ---------------------------------------------------------------------------
@@ -285,10 +288,12 @@ async function collectAgentResult(
   let response = "";
   let lastError = "";
   let turnId: string | undefined;
+  let replyDelivery: ReplyDeliveryReport | undefined;
   for await (const msg of runner.run(params)) {
     if (msg.type === "turn_start") {
       turnId = msg.turnId;
     }
+    if (msg.type === "turn_end" && msg.replyDelivery) replyDelivery = msg.replyDelivery;
     if (msg.type === "result") response = msg.content;
     if (msg.type === "error") lastError = msg.error;
     emitAgentMessage?.({ ...msg, agent: agentName });
@@ -297,73 +302,52 @@ async function collectAgentResult(
     log.warn("agent returned error instead of result", { agentName, error: lastError });
     return { success: false, error: lastError };
   }
-  return { success: true, content: response, turnId };
+  return { success: true, content: response, turnId, ...(replyDelivery ? { replyDelivery } : {}) };
 }
 
-function requireConversationRepository(deps: MessageHandlerRuntimeDeps): ConversationRepository {
-  const repository = deps.appContext.repositories.conversations;
-  if (!repository) throw new Error("Conversation repository is unavailable");
+function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
+  const repository =
+    deps.appContext.repositories.chats ?? deps.appContext.repositories.conversations;
+  if (!repository) throw new Error("Chat repository is unavailable");
   return repository;
 }
 
-async function resolveRequestedAgent(
-  deps: MessageHandlerRuntimeDeps,
-  requestedAgent: string,
-): Promise<string> {
-  if (requestedAgent === "main") return "main";
-  try {
-    return (await deps.agentRunner.hasAgent?.(requestedAgent)) === false ? "main" : requestedAgent;
-  } catch (err) {
-    log.warn("hasAgent check failed; honoring requested agent", {
-      requestedAgent,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return requestedAgent;
-  }
+/** Opens the chat for a channel thread, or finds the one already open. A host
+ *  that predates the chat names offers only `ensureChannelConversation`. */
+function ensureChannelChat(
+  repository: ChatRepository,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  return typeof repository.ensureChannelChat === "function"
+    ? repository.ensureChannelChat(input)
+    : repository.ensureChannelConversation(input);
 }
 
-// ---------------------------------------------------------------------------
-// Auto-map unknown sender by display name
-// ---------------------------------------------------------------------------
-
-async function autoMapUnknownSender(
-  deps: MessageHandlerDeps,
-  channel: string,
-  channelUserId: string,
-  displayName: string,
-) {
-  if (!displayName) return null;
-
-  const candidate = await deps.personMappingRepo.findByNameFuzzy(displayName);
-  if (!candidate) return null;
-
-  if (candidate.id === deps.strangerPersonId) return null;
-
-  await deps.personMappingRepo.addChannelMapping(candidate.id, channel, channelUserId, displayName);
-
-  await deps.approvalsRepo.create({
-    type: "person_mapping",
-    requestedBy: "system",
-    description: `Auto-mapped ${displayName} (${channel}:${channelUserId}) to existing person "${candidate.displayName}"`,
-    payload: {
-      action: "auto_mapped_existing",
-      personId: candidate.id,
-      personDisplayName: candidate.displayName,
-      channel,
-      channelUserId,
-      senderDisplayName: displayName,
-    },
-  });
-
-  log.info("auto-mapped unknown sender to existing person", {
-    channel,
-    channelUserId,
-    displayName,
-    personId: candidate.id,
-    personDisplayName: candidate.displayName,
-  });
-
-  return deps.personMappingRepo.findByChannelUser(channel, channelUserId);
+/**
+ * `requested` while it is loaded, or `fallback` when it is not. Main, in
+ * either spelling, is always loaded and resolves to `main`. A failed check
+ * honors `requested`.
+ */
+async function resolveAgent<F extends string | null>(
+  deps: MessageHandlerRuntimeDeps,
+  requested: string,
+  fallback: F,
+): Promise<string | F> {
+  if (isCoreMainAgentId(requested)) return "main";
+  try {
+    if ((await deps.agentRunner.hasAgent?.(requested)) === false) {
+      // Core already warns, once per channel, for an account's agent that is not
+      // loaded, and falling back to main is routine after an app is removed.
+      log.debug("agent is not loaded", { agent: requested, fallback });
+      return fallback;
+    }
+  } catch (err) {
+    log.warn("hasAgent check failed; honoring requested agent", {
+      agent: requested,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return requested;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +359,7 @@ async function handleTrustedMessage(
   args: Record<string, unknown>,
   channelThreadKey: string,
   contextSuffix: string,
-  conversationId: string,
+  chatId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
   const { connectionId, channel, channelUserId, threadId, text, messageId } = args as Record<
@@ -400,15 +384,19 @@ async function handleTrustedMessage(
       agentName: targetAgent,
       prompt: text,
       channelThreadKey,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
+      // The guardian can see the reply as it is written in a direct
+      // conversation. Everyone else's reply passes Envoy whole first. The host
+      // streams only when reply streaming is on and the channel can.
+      ...(bondLevel === "guardian" && args.threadType === "private" ? { streamReply: true } : {}),
       threadContext: {
         connectionId,
         channel,
         threadId,
         parentThreadId: typeof args.parentThreadId === "string" ? args.parentThreadId : undefined,
-        romeSessionId: conversationId,
+        romeSessionId: chatId,
         threadPath,
         channelUserId,
         threadName: typeof args.threadName === "string" ? args.threadName : undefined,
@@ -444,14 +432,26 @@ async function handleTrustedMessage(
   // Skip envoy for guardian — send directly
   if (bondLevel === "guardian") {
     log.info("skipping envoy (guardian)", { channel, channelUserId });
+    // The host streamed the reply. Only a stream that sent nothing at all may
+    // be sent again: any other outcome may already show on the platform.
+    const streamed = mainResult.replyDelivery;
+    if (streamed && streamed.status !== "failed") {
+      await deps.approvalsRepo.create({
+        type: "outgoing_message",
+        requestedBy: targetAgent,
+        description: `Skipped envoy (guardian), streamed: ${streamed.status}`,
+        payload: { response, channel, threadId, messageId, channelUserId, streamed },
+        status: "auto_approved",
+      });
+      return { status: "ok", data: { action: "streamed", response, streamed } };
+    }
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
@@ -472,13 +472,12 @@ async function handleTrustedMessage(
 
   if (envoyResult.action === "approve") {
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
@@ -525,11 +524,13 @@ async function handleUntrustedMessage(
   args: Record<string, unknown>,
   channelThreadKey: string,
   contextSuffix: string,
-  conversationId: string,
+  chatId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
-  const { connectionId, channel, channelUserId, threadId, text, messageId, displayName } =
-    args as Record<string, string>;
+  const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
+    string,
+    string
+  >;
   const bondLevel = (args.bondLevel as string) ?? "other";
   const workingDir =
     typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
@@ -554,13 +555,13 @@ async function handleUntrustedMessage(
       channelUserId,
       error: sentinelResult.error,
     });
-    await requireConversationRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
       channelThreadKey,
       contextSuffix,
-      conversationId,
+      chatId,
       targetAgent,
     );
   }
@@ -582,26 +583,25 @@ async function handleUntrustedMessage(
 
   if (decision.action === "replied" && decision.response) {
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: decision.response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       knownToProvider: false,
     });
     return { status: "ok", data: { action: "sentinel_replied" } };
   }
 
   if (decision.action === "escalated") {
-    await requireConversationRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
       channelThreadKey,
       contextSuffix,
-      conversationId,
+      chatId,
       targetAgent,
     );
   }
@@ -643,22 +643,30 @@ export function createMessageHandlerAction(
       try {
         log.info("message received", { channel, channelUserId, displayName });
 
-        let person = (personOverride ?? null) as PersonRecord | null;
-        if (!personOverride) {
-          person = (await deps.personMappingRepo.findByChannelUser(
+        // An action queued before the rename carries `linkedAgentName`.
+        const accountAgentName = args.accountAgentName ?? args.linkedAgentName;
+        const accountAgent =
+          typeof accountAgentName === "string" && accountAgentName.trim()
+            ? accountAgentName.trim()
+            : undefined;
+        // The host passes no agent it knows is not loaded, so a null here
+        // means the account's agent was unloaded since, and the account is silent.
+        const answeringAgent = accountAgent
+          ? await resolveAgent(deps, accountAgent, null)
+          : undefined;
+        if (answeringAgent === null) {
+          return { status: "ok", data: { action: "silent" } };
+        }
+
+        // Only a link resolves a sender (docs/concepts/people.md#link). The
+        // display name is whatever the sender typed, so an unlinked account
+        // stays a stranger until the guardian links it, even when
+        // its name matches the guardian's or a known person's.
+        const person = (personOverride ??
+          (await deps.personMappingRepo.findByChannelUser(
             channel,
             channelUserId,
-          )) as PersonRecord | null;
-
-          if (!person) {
-            person = (await autoMapUnknownSender(
-              deps,
-              channel,
-              channelUserId,
-              displayName,
-            )) as PersonRecord | null;
-          }
-        }
+          ))) as PersonRecord | null;
 
         const bondLevel = (person?.bondLevel as string) ?? "other";
 
@@ -676,17 +684,17 @@ export function createMessageHandlerAction(
         }
 
         const settings = deps.appContext.repositories.settings;
-        const conversations = requireConversationRepository(deps);
+        const conversations = requireChatRepository(deps);
         const requestedAgent =
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
             ? args.routedAgentName.trim()
             : "main";
-        const initialAgent = await resolveRequestedAgent(deps, requestedAgent);
+        const initialAgent = await resolveAgent(deps, requestedAgent, "main");
         const parentThreadId =
           typeof args.parentThreadId === "string" && args.parentThreadId
             ? args.parentThreadId
             : undefined;
-        const conversation = await conversations.ensureChannelConversation({
+        const conversation = await ensureChannelChat(conversations, {
           channel,
           threadId,
           parentThreadId,
@@ -696,9 +704,32 @@ export function createMessageHandlerAction(
           projectName: selectedProjectName,
           projectPath: selectedProjectPath,
         });
-        // Root conversations retain their persisted binding. Native thread
-        // sessions are refreshed by the repository from their parent binding.
-        const targetAgent = conversation.agentName ?? "main";
+        // Root conversations retain their persisted override, and native
+        // thread sessions are refreshed from their parent's. A group's or
+        // channel's override wins over the account's agent, which answers
+        // private chats and the rest, and is never stored, so switching it
+        // takes effect on the next message.
+        const storedAgent =
+          conversation.agentName && !isCoreMainAgentId(conversation.agentName)
+            ? conversation.agentName
+            : undefined;
+        // The conversation row stores main as null, so only the hook's routing
+        // tells a group pinned to main apart from one with no choice.
+        const pinnedMain =
+          typeof args.routedAgentName === "string" &&
+          isCoreMainAgentId(args.routedAgentName.trim());
+        const override =
+          answeringAgent && threadType === "private"
+            ? undefined
+            : pinnedMain
+              ? "main"
+              : storedAgent;
+        // An override whose app was removed falls back to the account's agent.
+        const targetAgent = !override
+          ? (answeringAgent ?? "main")
+          : answeringAgent
+            ? await resolveAgent(deps, override, answeringAgent)
+            : override;
         const platformMessageId =
           typeof args.messageId === "string" && args.messageId
             ? args.messageId
@@ -713,19 +744,25 @@ export function createMessageHandlerAction(
             : undefined;
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
+        // The host recorded the message before this action ran, as said while
+        // the agent was away. Waking the agent makes it the turn's prompt.
+        const recorded =
+          typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
         if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
-          const stored = await conversations.addMessage({
-            sessionId: conversation.id,
-            role: "notification",
-            content: messageContent,
-            platformMessageId,
-            senderId: channelUserId,
-            senderName: displayName,
-            replyToPlatformMessageId,
-            createdAt,
-          });
+          const stored = recorded
+            ? { inserted: true }
+            : await conversations.addMessage({
+                sessionId: conversation.id,
+                role: "notification",
+                content: messageContent,
+                platformMessageId,
+                senderId: channelUserId,
+                senderName: displayName,
+                replyToPlatformMessageId,
+                createdAt,
+              });
           if (!stored.inserted) {
             return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
           }
@@ -760,16 +797,21 @@ export function createMessageHandlerAction(
 
         const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
         const triggersTargetAgent = trusted || policy.action === "allow";
-        const stored = await conversations.addMessage({
-          sessionId: conversation.id,
-          role: triggersTargetAgent ? "user" : "notification",
-          content: messageContent,
-          platformMessageId,
-          senderId: channelUserId,
-          senderName: displayName,
-          replyToPlatformMessageId,
-          createdAt,
-        });
+        if (recorded && triggersTargetAgent) {
+          await conversations.promoteMessageToUser(conversation.id, platformMessageId);
+        }
+        const stored = recorded
+          ? { inserted: true }
+          : await conversations.addMessage({
+              sessionId: conversation.id,
+              role: triggersTargetAgent ? "user" : "notification",
+              content: messageContent,
+              platformMessageId,
+              senderId: channelUserId,
+              senderName: displayName,
+              replyToPlatformMessageId,
+              createdAt,
+            });
         if (!stored.inserted) {
           return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
         }

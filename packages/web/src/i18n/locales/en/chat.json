@@ -4,6 +4,85 @@
     "mermaid": "Mermaid diagram"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "Typing",
+    "taskChat": "Task chat",
+    "taskStatus": {
+      "running": "Working",
+      "waiting": "Needs you",
+      "failed": "Stopped with an error",
+      "idle": "Done"
+    },
+    "openForwardedChat": "Open task chat {{title}}",
+    "showFullText": "Show full text",
+    "showLess": "Show less",
+    "openTaskChat": "Open",
+    "tasks": {
+      "title": "Tasks",
+      "close": "Close tasks",
+      "groups": {
+        "needsYou": "Needs you",
+        "doing": "Doing",
+        "next": "Up next",
+        "watching": "Watching",
+        "done": "Done"
+      },
+      "stop": "Stop",
+      "done": "Done",
+      "archive": "Archive",
+      "retry": "Try again",
+      "pending": {
+        "stop": "Stopping…",
+        "archive": "Archiving…",
+        "done": "Sending…"
+      },
+      "unchanged": "Concierge did not change it",
+      "timeout": "Concierge has not handled this yet",
+      "failed": "Could not send",
+      "notSynced": "Not synced",
+      "sourceMissing": "Can't find the original message",
+      "findingMessage": "Finding message…",
+      "showMore": "Show {{count}} older",
+      "showLess": "Show less",
+      "openChat": "Open the chat for {{title}}",
+      "actionText": {
+        "stop": "Stop \"{{title}}\"",
+        "archive": "Archive \"{{title}}\"",
+        "done": "Done \"{{title}}\"",
+        "withId": "(task {{id}})"
+      },
+      "replyText": {
+        "done": "I've done this"
+      },
+      "pill": {
+        "needsYou_one": "Tasks, {{count}} needs you",
+        "needsYou_other": "Tasks, {{count}} need you",
+        "doing_one": "Tasks, {{count}} in progress",
+        "doing_other": "Tasks, {{count}} in progress",
+        "idle": "Tasks"
+      },
+      "emptyTitle": "No tasks yet",
+      "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
+    },
+    "messageDetails": "Message details",
+    "composerMenu": "Add files or change the model",
+    "placeholder": "Message",
+    "empty": {
+      "title": "Just tell me what you want to get done",
+      "prompts": {
+        "weather": "What's the weather today?",
+        "reminder": "Remind me to stretch in an hour",
+        "email": "Summarize my unread email",
+        "task": "Build me a simple habit tracker app"
+      }
+    }
+  },
+  "reply": {
+    "action": "Reply",
+    "dismiss": "Cancel reply",
+    "jump": "Go to the original message"
+  },
+  "senderGuardian": "Guardian",
   "inputState": {
     "queued": "Waiting to be included",
     "submitted": "Sending to agent",
@@ -20,6 +99,7 @@
   },
   "navbar": {
     "sessionModel": "Session model: {{model}}",
+    "sessionModelWithEffort": "Session model: {{model}}, reasoning effort: {{effort}}",
     "more": "More actions",
     "pin": "Pin chat",
     "unpin": "Unpin chat",
@@ -59,6 +139,8 @@
   "timeline": {
     "label": "Question timeline"
   },
+  "jumpToWaitingCard": "Needs you: jump to waiting card",
+  "waitingCard": "Needs you",
   "jumpToLatest": "Jump to the latest message",
   "roles": {
     "agent": "Assistant"
@@ -78,7 +160,7 @@
     "branch": {
       "open": "Start a side chat from this turn",
       "title": "Branch into a side chat",
-      "description": "Ask a follow-up without changing this conversation.",
+      "description": "Ask a follow-up without changing this chat.",
       "suggestionsLabel": "Suggested prompts",
       "suggestions": {
         "mermaid": "Visualize this in a Mermaid chart",
@@ -107,7 +189,6 @@
     "emptyList": "(empty list)",
     "emptyObject": "(empty object)",
     "agentRunFailed": "Agent run failed",
-    "unknownTool": "unknown",
     "showMore": "Show more",
     "showLess": "Show less",
     "input": "Input",
@@ -146,6 +227,11 @@
       "title": "No AI provider is available",
       "description": "Connect an AI tool or review its current status."
     },
+    "creditsUsedUp": {
+      "title": "Rome credits used up",
+      "description": "Connect ChatGPT or Claude, or choose a model from one already connected.",
+      "action": "Connect an AI"
+    },
     "openAiTools": "Open AI Tools"
   },
   "usage": {
@@ -176,9 +262,11 @@
       "cacheWrite": "Cache write",
       "input": "Input",
       "output": "Output",
+      "reasoning": "Reasoning",
       "context": "Context",
       "mainContext": "Main context"
-    }
+    },
+    "reasoningHint": "Included in output. Some providers report an estimate, and a total counts only the runs that report it."
   },
   "approvals": {
     "headerPending": "Guardian approval needed",
@@ -216,11 +304,30 @@
   },
   "composer": {
     "placeholderDefault": "How can I help you today?",
+    "lockedByCard": "Answer the card above to continue.",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
+    "hints": {
+      "skill": "Type / to use a skill",
+      "agent": "Type @ to pick an agent",
+      "project": "Pick a project below for the agent to work in",
+      "attach": "Paste or drop files to attach them",
+      "newline": "Shift+Enter for a new line",
+      "search": "{{shortcut}} to search your chats",
+      "sendWhileWorking": "Send anytime, even while the agent is working"
+    },
     "uploadFiles": "Upload files",
     "dropFiles": "Drop files to upload",
     "removeFile": "Remove {{name}}",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Reset",
+    "zoomLevel": "Zoom",
+    "previewImage": "Preview",
+    "playVideo": "Play",
+    "closeImagePreview": "Close",
     "filePill": "#File {{index}}",
+    "uploadProgressFor": "Upload progress for {{name}}",
+    "cancelUpload": "Cancel",
     "send": "Send",
     "sendTitle": "Send",
     "sendWhileRunningTitle": "Send while agent is working",
@@ -237,6 +344,9 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "appComponent": {
+    "dismiss": "Dismiss"
+  },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",
     "hint": "I think with your existing subscription. Sign in to one so I can start working.",
@@ -244,10 +354,24 @@
     "connected": "Connected",
     "skipped": "Skipped for now",
     "skip": "Skip for now",
+    "sendFailed": "That didn't go through.",
+    "retry": "Try again",
     "connectedSummary": "Connected an AI",
     "skippedSummary": "Skipped connecting an AI",
     "connectedTitle": "AI connected",
-    "checking": "Checking your AI connections…"
+    "checking": "Checking your AI connections…",
+    "credits": {
+      "title": "Start with free Rome credits",
+      "hint": "Your account has {{amount}} in Rome credits, so I can start now. Sign in to Claude or ChatGPT any time to use your own subscription instead.",
+      "continue": "Continue with credits",
+      "summary": "Continued with Rome credits",
+      "usingTitle": "Using Rome credits",
+      "using": "Rome credits in use",
+      "ready": "Rome credits ready"
+    }
+  },
+  "modelSwitch": {
+    "notice": "Switched to {{model}}"
   },
   "modelSelector": {
     "label": "Model",
@@ -259,12 +383,16 @@
     "options": {
       "auto": "Auto",
       "claudeOpus": "Opus",
+      "opus55": "Opus 5.5",
       "opus5": "Opus 5",
       "opus46": "Opus 4.6",
       "sonnet": "Sonnet",
       "haiku": "Haiku",
       "fable": "Fable",
       "gpt6Astra": "GPT-6 Astra",
+      "gpt61Sol": "GPT-6.1 Sol",
+      "gpt6Sol": "GPT-6 Sol",
+      "gpt6Luna": "GPT-6 Luna",
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"
@@ -338,6 +466,37 @@
       "loadFailed": "Failed to load projects.",
       "updateFailed": "Failed to update project.",
       "createFailed": "Failed to create project."
+    },
+    "devices": {
+      "listLabel": "Folders",
+      "searchPlaceholder": "Search this folder…",
+      "loading": "Loading folder…",
+      "empty": "No folders here.",
+      "noMatchesQuery": "No folders match “{{query}}”.",
+      "truncated": "Showing the first 1,000 items.",
+      "up": "Up one level",
+      "useFolder": "Use this folder",
+      "thisDevice": "This device",
+      "reasons": {
+        "offline": "Offline",
+        "upgrade_required": "Update rome-node"
+      },
+      "errors": {
+        "offline": "The device is offline.",
+        "upgrade_required": "Update rome-node on this device to browse its folders.",
+        "not_found": "This folder no longer exists.",
+        "not_a_directory": "This path is not a folder.",
+        "permission_denied": "The device's user cannot read this folder.",
+        "unavailable": "Could not read this folder."
+      }
+    },
+    "locations": {
+      "rome": "Rome Cloud",
+      "listLabel": "Locations",
+      "searchPlaceholder": "Search Rome Cloud and devices…",
+      "noMatchesQuery": "Nothing matches “{{query}}”.",
+      "back": "Back",
+      "loading": "Loading devices…"
     }
   },
   "stream": {
@@ -349,7 +508,6 @@
       "sendStatus": "Failed to send message ({{status}}).",
       "sendInvalidResponse": "Failed to send message: invalid response.",
       "sendFallback": "Failed to send message.",
-      "attachStreamStatus": "Failed to attach stream for turn {{turnId}} ({{status}}).",
       "stopFallback": "Failed to stop generation.",
       "stopStatus": "Stop failed ({{status}})."
     }
@@ -359,8 +517,6 @@
     "greetingFallback": "Welcome,",
     "headline": "What should we create?",
     "pinnedChats": "Pinned chats",
-    "unpin": "Unpin",
-    "unpinChat": "Unpin {{name}}",
     "romeNews": "Rome News",
     "startWithPrompt": "Start with a prompt"
   },

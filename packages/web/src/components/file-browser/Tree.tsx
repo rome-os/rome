@@ -11,6 +11,7 @@ import {
   File,
   FileAudio,
   FileImage,
+  FileSpreadsheet,
   FileText,
   FileVideo,
   Folder,
@@ -18,13 +19,7 @@ import {
   Ellipsis,
   type LucideIcon,
 } from "lucide-react";
-import {
-  TreeProvider,
-  TreeView,
-  TreeNode as KiboTreeNode,
-  TreeNodeContent,
-  useTreeNode,
-} from "@/components/kibo-ui/tree";
+import { motion } from "motion/react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import {
   DropdownMenu,
@@ -36,6 +31,7 @@ import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import type { TreeNode } from "./store/types";
 import { TREE_NODE_DRAG_MIME } from "./store/utils";
 import { getUploadEntriesFromDataTransfer } from "@/lib/file-browser-upload";
+import { isSpreadsheetPath } from "@/lib/file-preview";
 import {
   FileActionDropdownMenuItems,
   TreeRowContextMenuItems,
@@ -50,6 +46,7 @@ function getFileIcon(name: string): LucideIcon {
   if (["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba"].includes(extension))
     return FileAudio;
   if (extension === "pdf" || extension === "docx") return FileText;
+  if (isSpreadsheetPath(name)) return FileSpreadsheet;
   return File;
 }
 
@@ -92,9 +89,16 @@ export function shouldAllowNativeTreeDrag(pointerType: string | null): boolean {
   return pointerType === null || pointerType === "mouse";
 }
 
-function TreeRow({ node, handlers }: { node: TreeNode; handlers: TreeRowHandlers }) {
+function TreeRow({
+  node,
+  level,
+  handlers,
+}: {
+  node: TreeNode;
+  level: number;
+  handlers: TreeRowHandlers;
+}) {
   const store = useFileBrowserStoreApi();
-  const { level } = useTreeNode();
   const expanded = useFileBrowserStore((s) => s.tree.expandedPaths.has(node.path));
   const selected = useFileBrowserStore((s) => s.selection.selectedTreePaths.includes(node.path));
   const [isDragOver, setIsDragOver] = useState(false);
@@ -313,25 +317,24 @@ function TreeItem({
   handlers: TreeRowHandlers;
 }) {
   const hasChildren = node.type === "directory" && Boolean(node.children?.length);
+  const expanded = useFileBrowserStore((s) => s.tree.expandedPaths.has(node.path));
   return (
-    <KiboTreeNode nodeId={node.path} level={depth}>
-      <TreeRow node={node} handlers={handlers} />
-      {node.type === "directory" && (
-        <TreeNodeContent hasChildren={hasChildren}>
+    <div className="select-none">
+      <TreeRow node={node} level={depth} handlers={handlers} />
+      {hasChildren && expanded && (
+        <div>
           {node.children?.map((child) => (
             <TreeItem key={child.path} depth={depth + 1} node={child} handlers={handlers} />
           ))}
-        </TreeNodeContent>
+        </div>
       )}
-    </KiboTreeNode>
+    </div>
   );
 }
 
 export function Tree({ contextMenuActions }: { contextMenuActions: ContextMenuActions }) {
   const store = useFileBrowserStoreApi();
   const nodes = useFileBrowserStore((s) => s.tree.nodes);
-  const expandedPaths = useFileBrowserStore((s) => s.tree.expandedPaths);
-  const selectedTreePaths = useFileBrowserStore((s) => s.selection.selectedTreePaths);
 
   const handleSelectFile = async (path: string, event: MouseEvent<HTMLButtonElement>) => {
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
@@ -374,24 +377,17 @@ export function Tree({ contextMenuActions }: { contextMenuActions: ContextMenuAc
   };
 
   return (
-    <TreeProvider
-      expandedIds={Array.from(expandedPaths)}
-      onExpandedChange={(ids) => store.getState().tree.setExpanded(new Set(ids))}
-      selectedIds={selectedTreePaths}
-      onSelectionChange={() => {
-        /* selection is driven by row click handlers via getNextBrowserSelection */
-      }}
-      showLines={false}
-      showIcons={false}
-      multiSelect
-      indent={16}
-      animateExpand={false}
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="w-full"
+      initial={{ opacity: 0, y: 10 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
     >
-      <TreeView className="p-0">
+      <div className="p-0">
         {nodes.map((node) => (
           <TreeItem key={node.path} depth={0} node={node} handlers={handlers} />
         ))}
-      </TreeView>
-    </TreeProvider>
+      </div>
+    </motion.div>
   );
 }

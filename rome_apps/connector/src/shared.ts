@@ -1,6 +1,10 @@
 import { SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
 
-import { ComposioClient, isComposioNotFoundError } from "./api/composio-client.js";
+import {
+  ComposioClient,
+  isComposioAuthenticationError,
+  isComposioNotFoundError,
+} from "./api/composio-client.js";
 import { readSessionApiKey } from "./api/composio-login.js";
 import { buildTopic } from "./api/topic.js";
 
@@ -22,7 +26,7 @@ export const ROME_USER_ID = "rome-guardian";
  * `gh`/`git` in the shell, and its events arrive via Rome's own GitHub webhook,
  * never a Composio trigger.
  */
-export const ROME_MANAGED_TOOLKITS = new Set(["github", "slack"]);
+export const ROME_MANAGED_TOOLKITS = new Set(["github", "slack", "shopify"]);
 
 export function isRomeManagedToolkit(toolkit: string): boolean {
   return ROME_MANAGED_TOOLKITS.has(toolkit.toLowerCase());
@@ -98,6 +102,8 @@ export const TOOLKIT_API_HOSTS: Record<string, string[]> = {
   neon: ["neon.tech"],
   hubspot: ["hubapi.com"],
   stripe: ["stripe.com"],
+  shopify: ["myshopify.com"],
+  otter_ai_mcp: ["otter.ai"],
 };
 
 export type ProxyEndpointRejection =
@@ -207,9 +213,18 @@ export function unsupportedToolkitHint(toolkit: string): string {
   return `Rome can't connect "${toolkit}" — it isn't one of Rome's supported integrations. Pick a supported toolkit (e.g. gmail, slack, notion, linear, github) or ask the guardian to add it.`;
 }
 
+const INLINE_CONNECT_ROME_MANAGED = new Set(["github", "shopify"]);
+
+export function isInlineConnectRomeManagedToolkit(toolkit: string): boolean {
+  return INLINE_CONNECT_ROME_MANAGED.has(toolkit.toLowerCase());
+}
+
 /** Guidance shown when the agent tries to connect a Rome-managed toolkit, or
- *  acts on one that isn't connected yet — points to the one place that owns it. */
+ *  acts on one that isn't connected yet. Native-card toolkits can connect in chat. */
 export function romeManagedConnectHint(toolkit: string): string {
+  if (isInlineConnectRomeManagedToolkit(toolkit)) {
+    return `${toolkit} is managed by Rome. Call connector_connect(${JSON.stringify({ toolkit: toolkit.toLowerCase() })}) to show the connect card, then retry once connected. On surfaces without cards, ask the guardian to use Settings → Connections.`;
+  }
   return `${toolkit} is managed by Rome — it can't be connected from here. Ask the guardian to connect ${toolkit} in Settings → Connections.`;
 }
 
@@ -217,13 +232,13 @@ export function romeManagedConnectHint(toolkit: string): string {
  *  for a Rome-managed toolkit. These have no Composio tools — they're driven by
  *  `connector_proxy` against the provider's native API with Rome's OAuth token. */
 export function romeManagedToolExecuteHint(toolkit: string): string {
-  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector_proxy (toolkit "${toolkit}") instead. If it isn't connected yet, ask the guardian to connect ${toolkit} in Settings → Connections.`;
+  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector_proxy (toolkit "${toolkit}") instead. If it is not connected: ${romeManagedConnectHint(toolkit)}`;
 }
 
 /** Guidance for an agent that reached a Composio surface for GitHub. GitHub has
  *  no Composio connection at all — it runs through Rome's own integration. */
 export function githubViaRomeHint(): string {
-  return 'GitHub does not run through Composio. Use the `gh` CLI or `git` in the shell, or `connector_proxy` with toolkit "github" for direct GitHub REST/GraphQL calls. If `gh`/`git` reports it is not authenticated, ask the guardian to connect GitHub at Settings → Connections.';
+  return `GitHub does not run through Composio. Use the \`gh\` CLI or \`git\` in the shell, or \`connector_proxy\` with toolkit "github" for direct GitHub REST/GraphQL calls. If \`gh\`/\`git\` reports it is not authenticated, ${romeManagedConnectHint("github")}`;
 }
 
 /**
@@ -237,6 +252,31 @@ export async function loadConnectorClient(): Promise<ComposioClient | null> {
   const apiKey = await readSessionApiKey();
   if (!apiKey) return null;
   return new ComposioClient({ apiKey });
+}
+
+/**
+ * The agent-facing error for a Composio call that threw. Points the agent at
+ * `connector_login` only when a fresh `ping()` gets a 401, which is the same
+ * check `connector_login` uses to decide the saved sign-in is rejected. A 401
+ * that the ping does not confirm is about something other than the saved key,
+ * so it keeps the `<fallbackPrefix>: <message>` form and the agent is never
+ * sent to a login that would answer `signed_in`. Pings only on a 401, and keeps
+ * the upstream message in every case.
+ */
+export async function composioActionError(
+  client: Pick<ComposioClient, "ping">,
+  err: unknown,
+  fallbackPrefix: string,
+  rerun: string,
+): Promise<string> {
+  const message = err instanceof Error ? err.message : String(err);
+  if (isComposioAuthenticationError(err)) {
+    const ping = await client.ping();
+    if (!ping.ok && ping.status === 401) {
+      return `Composio rejected Rome's saved sign-in (HTTP 401). Call connector_login to sign in again, then re-run ${rerun}. Upstream: ${message}`;
+    }
+  }
+  return `${fallbackPrefix}: ${message}`;
 }
 
 export type SubscribeFeedErrorCode =

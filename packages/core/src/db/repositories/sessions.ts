@@ -1,5 +1,5 @@
-import { eq, and, desc } from "drizzle-orm";
-import { v4 as uuid } from "uuid";
+import { eq, and, desc, isNull } from "drizzle-orm";
+import { v7 as uuid } from "uuid";
 import { sessions, sessionTurnCheckpoints } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 
@@ -52,7 +52,9 @@ export class SessionsRepository {
     id?: string;
     agentName: string;
     channelThreadKey?: string;
+    chatId?: string;
     status?: "active" | "completed" | "error";
+    workingDir?: string;
   }) {
     const id = data.id ?? uuid();
     const now = new Date();
@@ -60,6 +62,8 @@ export class SessionsRepository {
       id,
       agentName: data.agentName,
       channelThreadKey: data.channelThreadKey ?? null,
+      chatId: data.chatId ?? null,
+      workingDir: data.workingDir ?? null,
       createdAt: now,
       lastActiveAt: now,
       status: data.status ?? "active",
@@ -68,11 +72,14 @@ export class SessionsRepository {
   }
 
   /** Complete every active row for an exact key and create its replacement in
-   * one transaction. The caller serializes this key before entering. */
+   * one transaction. The caller serializes this key before entering. The
+   * replacement serves the caller's conversation, or the retired row's when
+   * the caller names none. */
   async rotateProviderGeneration(input: {
     agentName: string;
     channelThreadKey: string;
     newSessionId: string;
+    chatId?: string;
   }): Promise<typeof sessions.$inferSelect> {
     return this.db.transaction((tx) => {
       const exactKey = and(
@@ -81,12 +88,19 @@ export class SessionsRepository {
         eq(sessions.status, "active"),
       );
       const now = new Date();
+      const retired = tx
+        .select({ chatId: sessions.chatId })
+        .from(sessions)
+        .where(exactKey)
+        .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt))
+        .get();
       tx.update(sessions).set({ status: "completed", lastActiveAt: now }).where(exactKey).run();
       tx.insert(sessions)
         .values({
           id: input.newSessionId,
           agentName: input.agentName,
           channelThreadKey: input.channelThreadKey,
+          chatId: input.chatId ?? retired?.chatId ?? null,
           provider: null,
           providerThreadId: null,
           model: null,
@@ -105,6 +119,19 @@ export class SessionsRepository {
     });
   }
 
+  /** Record the conversation on a row that has none. Never overwrites. */
+  async fillChatId(id: string, chatId: string): Promise<boolean> {
+    const result = await this.db
+      .update(sessions)
+      .set({ chatId })
+      .where(and(eq(sessions.id, id), isNull(sessions.chatId)));
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  async setWorkingDir(id: string, workingDir: string): Promise<void> {
+    await this.db.update(sessions).set({ workingDir }).where(eq(sessions.id, id));
+  }
+
   async touch(id: string) {
     await this.db.update(sessions).set({ lastActiveAt: new Date() }).where(eq(sessions.id, id));
   }
@@ -114,10 +141,6 @@ export class SessionsRepository {
       .update(sessions)
       .set({ status: "completed", lastActiveAt: new Date() })
       .where(eq(sessions.id, id));
-  }
-
-  async setProviderThreadId(id: string, providerThreadId: string): Promise<void> {
-    await this.db.update(sessions).set({ providerThreadId }).where(eq(sessions.id, id));
   }
 
   /** Persist which provider owns this conversation (+ its thread id and the
@@ -138,6 +161,10 @@ export class SessionsRepository {
       .update(sessions)
       .set({ provider, providerThreadId: providerThreadId ?? null, model: model ?? null })
       .where(eq(sessions.id, id));
+  }
+
+  async setReasoningEffort(id: string, reasoningEffort: string): Promise<void> {
+    await this.db.update(sessions).set({ reasoningEffort }).where(eq(sessions.id, id));
   }
 
   async setTurnCheckpoint(input: StoredSessionTurnCheckpoint): Promise<void> {

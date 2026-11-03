@@ -1,0 +1,67 @@
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +2
+++
+
+   ╭───────────────────────────────────────────────╮
+   │                                               │
+   │      Update available! 11.6.0 → 12.11.2.      │
+   │     Changelog: https://pnpm.io/v/12.11.2      │
+   │   To update, run: corepack use pnpm@12.11.2   │
+   │                                               │
+   ╰───────────────────────────────────────────────╯
+
+Progress: resolved 2, reused 0, downloaded 2, added 2, done
+.../node_modules/bufferutil install$ node-gyp-build
+.../node_modules/bufferutil install: gyp info it worked if it ends with ok
+.../node_modules/bufferutil install: gyp info using node-gyp@12.3.0
+.../node_modules/bufferutil install: gyp info using node@24.21.0 | linux | arm64
+.../node_modules/bufferutil install: gyp info find Python using Python version 3.11.2 found at "/usr/bin/python3"
+.../node_modules/bufferutil install: gyp http GET https://nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz
+.../node_modules/bufferutil install: gyp http 200 https://nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz
+.../node_modules/bufferutil install: gyp http GET https://nodejs.org/download/release/v24.21.0/SHASUMS256.txt
+.../node_modules/bufferutil install: gyp http 200 https://nodejs.org/download/release/v24.21.0/SHASUMS256.txt
+.../node_modules/bufferutil install: gyp info spawn /usr/bin/python3
+.../node_modules/bufferutil install: gyp info spawn args [
+.../node_modules/bufferutil install: gyp info spawn args '/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/gyp/gyp_main.py',
+.../node_modules/bufferutil install: gyp info spawn args 'binding.gyp',
+.../node_modules/bufferutil install: gyp info spawn args '-f',
+.../node_modules/bufferutil install: gyp info spawn args 'make',
+.../node_modules/bufferutil install: gyp info spawn args '-I',
+.../node_modules/bufferutil install: gyp info spawn args '/tmp/bufferutil/node_modules/.pnpm/bufferutil@4.0.9/node_modules/bufferutil/build/config.gypi',
+.../node_modules/bufferutil install: gyp info spawn args '-I',
+.../node_modules/bufferutil install: gyp info spawn args '/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/addon.gypi',
+.../node_modules/bufferutil install: gyp info spawn args '-I',
+.../node_modules/bufferutil install: gyp info spawn args '/root/.cache/node-gyp/24.21.0/include/node/common.gypi',
+.../node_modules/bufferutil install: gyp info spawn args '-Dlibrary=shared_library',
+.../node_modules/bufferutil install: gyp info spawn args '-Dvisibility=default',
+.../node_modules/bufferutil install: gyp info spawn args '-Dnode_root_dir=/root/.cache/node-gyp/24.21.0',
+.../node_modules/bufferutil install: gyp info spawn args '-Dnode_gyp_dir=/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp',
+.../node_modules/bufferutil install: gyp info spawn args '-Dnode_lib_file=/root/.cache/node-gyp/24.21.0/<(target_arch)/node.lib',
+.../node_modules/bufferutil install: gyp info spawn args '-Dmodule_root_dir=/tmp/bufferutil/node_modules/.pnpm/bufferutil@4.0.9/node_modules/bufferutil',
+.../node_modules/bufferutil install: gyp info spawn args '-Dnode_engine=v8',
+.../node_modules/bufferutil install: gyp info spawn args '--depth=.',
+.../node_modules/bufferutil install: gyp info spawn args '--no-parallel',
+.../node_modules/bufferutil install: gyp info spawn args '--generator-output',
+.../node_modules/bufferutil install: gyp info spawn args 'build',
+.../node_modules/bufferutil install: gyp info spawn args '-Goutput_dir=.'
+.../node_modules/bufferutil install: gyp info spawn args ]
+.../node_modules/bufferutil install: gyp info spawn make
+.../node_modules/bufferutil install: gyp info spawn args [ 'BUILDTYPE=Release', '-C', 'build' ]
+.../node_modules/bufferutil install: make: Entering directory '/tmp/bufferutil/node_modules/.pnpm/bufferutil@4.0.9/node_modules/bufferutil/build'
+.../node_modules/bufferutil install:   CC(target) Release/obj.target/bufferutil/src/bufferutil.o
+.../node_modules/bufferutil install: make: cc: No such file or directory
+.../node_modules/bufferutil install: make: *** [bufferutil.target.mk:108: Release/obj.target/bufferutil/src/bufferutil.o] Error 127
+.../node_modules/bufferutil install: make: Leaving directory '/tmp/bufferutil/node_modules/.pnpm/bufferutil@4.0.9/node_modules/bufferutil/build'
+.../node_modules/bufferutil install: gyp ERR! build error 
+.../node_modules/bufferutil install: gyp ERR! stack Error: `make` failed with exit code: 2
+.../node_modules/bufferutil install: gyp ERR! stack at ChildProcess.<anonymous> (/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/lib/build.js:219:23)
+.../node_modules/bufferutil install: gyp ERR! System Linux 6.12.76-linuxkit
+.../node_modules/bufferutil install: gyp ERR! command "/usr/local/bin/node" "/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/bin/node-gyp.js" "rebuild"
+.../node_modules/bufferutil install: gyp ERR! cwd /tmp/bufferutil/node_modules/.pnpm/bufferutil@4.0.9/node_modules/bufferutil
+.../node_modules/bufferutil install: gyp ERR! node -v v24.21.0
+.../node_modules/bufferutil install: gyp ERR! node-gyp -v v12.3.0
+.../node_modules/bufferutil install: gyp ERR! $npm_package_name bufferutil
+.../node_modules/bufferutil install: gyp ERR! $npm_package_version 4.0.9
+.../node_modules/bufferutil install: gyp ERR! not ok 
+.../node_modules/bufferutil install: Failed
+[ELIFECYCLE] Command failed with exit code 1.

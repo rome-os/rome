@@ -1,6 +1,6 @@
 import { Download, Ellipsis, Pin, Plus, Search, Store, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import type { AppViewState, InstalledAppCard } from "@rome/api-types/apps";
@@ -25,8 +25,10 @@ import { AppRemixDialog } from "@/components/app-remix-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
+import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { ListToolbar } from "@rome-os/ui/layout-list";
@@ -42,9 +44,9 @@ import {
 import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
-import { useNewApps } from "@/hooks/use-new-apps";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
-import { APP_NAV } from "@/shell/AppGrid";
+import { APP_NAV } from "@/shell/builtin-nav";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 
 function isInFlight(phase: AppViewState): boolean {
   return phase === "installing" || phase === "uninstalling";
@@ -70,6 +72,7 @@ interface AppTileProps {
   ariaLabel: string;
   clickTarget: ClickTarget;
   menuLabel: string;
+  /** Null for a tile with no actions, which then shows no kebab at all. */
   menu: ReactNode;
   menuDisabled?: boolean;
   icon: ReactNode;
@@ -77,6 +80,11 @@ interface AppTileProps {
   /** In-flight verb ("Uninstalling…") shown under the name while acting. */
   caption?: string | null;
 }
+
+// On a phone the grid reads like a home screen: four tiles a row, each name one
+// small line cut with an ellipsis. Wider screens wrap the name to two lines.
+const TILE_NAME_CLASS =
+  "mt-2 w-full truncate text-center text-[length:var(--rome-font-size-13)] text-foreground sm:line-clamp-2 sm:whitespace-normal sm:break-words sm:text-ui";
 
 function AppTile({
   ariaLabel,
@@ -89,7 +97,7 @@ function AppTile({
   caption,
 }: AppTileProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  // Whether the one-line name label is actually clipped ("Competitor …").
+  // Whether the two-line name label is actually clipped ("Competitor Analysis …").
   // Measured lazily right before the tooltip could open (cover pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
   // moment, and hover-time measurement stays correct across grid reflows for
@@ -98,7 +106,7 @@ function AppTile({
   const nameRef = useRef<HTMLSpanElement>(null);
 
   const longPress = useLongPressMenu({
-    canOpen: !menuDisabled && !menuOpen,
+    canOpen: menu !== null && !menuDisabled && !menuOpen,
     onOpen: () => setMenuOpen(true),
   });
 
@@ -107,12 +115,14 @@ function AppTile({
 
   const syncNameClipped = () => {
     const el = nameRef.current;
-    setNameClipped(el !== null && el.scrollWidth > el.clientWidth);
+    setNameClipped(
+      el !== null && (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth),
+    );
   };
 
   return (
     <div
-      className="group relative flex select-none flex-col items-center rounded-12 p-3 transition-colors [-webkit-touch-callout:none] hover:bg-surface-muted has-[a:focus-visible]:bg-surface-muted has-[button:focus-visible]:bg-surface-muted"
+      className="group relative flex select-none flex-col items-center rounded-12 px-0 py-3 transition-colors [-webkit-touch-callout:none] sm:p-3 hover:bg-surface-muted has-[a:focus-visible]:bg-surface-muted has-[button:focus-visible]:bg-surface-muted"
       {...longPress.triggerProps}
     >
       {/* A clipped name reveals its full text in a tooltip on hover/focus.
@@ -152,7 +162,7 @@ function AppTile({
       </Tooltip>
 
       <div className="relative">{icon}</div>
-      <span ref={nameRef} className="mt-2 w-full truncate text-center text-ui text-foreground">
+      <span ref={nameRef} className={TILE_NAME_CLASS}>
         {name}
       </span>
       {caption ? (
@@ -169,43 +179,45 @@ function AppTile({
           link (a sibling, so a swallowed tap never reaches it). pointer-events
           rather than visibility so the trigger inside can still re-enable
           itself on focus/open. */}
-      <div className="absolute -right-1 -top-1 z-20 pointer-coarse:pointer-events-none">
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              size="sm"
-              label={menuLabel}
-              icon={<Ellipsis aria-hidden />}
-              disabled={menuDisabled}
+      {menu === null ? null : (
+        <div className="absolute -right-1 -top-1 z-20 pointer-coarse:pointer-events-none">
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                size="sm"
+                label={menuLabel}
+                icon={<Ellipsis aria-hidden />}
+                disabled={menuDisabled}
+                onClick={stopTileClick}
+                className={cn(
+                  "h-7 w-7 rounded-8 bg-surface text-subtle-foreground shadow-1 ring-1 ring-border hover:text-foreground",
+                  // Hidden at rest, revealed on tile hover / keyboard focus /
+                  // while open.
+                  "opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+                  // Coarse pointers: transparent and tap-inert, NOT visibility/
+                  // display-hidden — the button must stay focusable and in the
+                  // a11y tree (long-press is pointer-only and some menu items
+                  // have no other path from the tile), stray taps near the icon
+                  // must fall through to the tile, and the long-press menu
+                  // anchors to this button's rect, which display:none would
+                  // collapse. Tile keyboard focus restores tappability along
+                  // with visibility for touch devices with keyboards.
+                  "pointer-coarse:pointer-events-none pointer-coarse:group-focus-within:pointer-events-auto pointer-coarse:data-[state=open]:pointer-events-auto",
+                )}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="bottom"
+              align="end"
+              className="w-56"
               onClick={stopTileClick}
-              className={cn(
-                "h-7 w-7 rounded-8 bg-surface text-subtle-foreground shadow-1 ring-1 ring-border hover:text-foreground",
-                // Hidden at rest, revealed on tile hover / keyboard focus /
-                // while open.
-                "opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
-                // Coarse pointers: transparent and tap-inert, NOT visibility/
-                // display-hidden — the button must stay focusable and in the
-                // a11y tree (long-press is pointer-only and some menu items
-                // have no other path from the tile), stray taps near the icon
-                // must fall through to the tile, and the long-press menu
-                // anchors to this button's rect, which display:none would
-                // collapse. Tile keyboard focus restores tappability along
-                // with visibility for touch devices with keyboards.
-                "pointer-coarse:pointer-events-none pointer-coarse:group-focus-within:pointer-events-auto pointer-coarse:data-[state=open]:pointer-events-auto",
-              )}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side="bottom"
-            align="end"
-            className="w-56"
-            onClick={stopTileClick}
-            {...longPress.menuContentProps}
-          >
-            {menu}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+              {...longPress.menuContentProps}
+            >
+              {menu}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </div>
   );
 }
@@ -240,7 +252,7 @@ function GhostTile({ icon, label, onClick }: GhostTileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="flex select-none flex-col items-center rounded-12 p-3 transition-colors hover:bg-surface-muted outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+      className="flex select-none flex-col items-center rounded-12 px-0 py-3 transition-colors sm:p-3 hover:bg-surface-muted outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
     >
       <span
         aria-hidden
@@ -248,9 +260,7 @@ function GhostTile({ icon, label, onClick }: GhostTileProps) {
       >
         {icon}
       </span>
-      <span className="mt-2 w-full truncate text-center text-ui font-medium text-primary">
-        {label}
-      </span>
+      <span className={cn(TILE_NAME_CLASS, "font-medium text-primary")}>{label}</span>
     </button>
   );
 }
@@ -294,13 +304,6 @@ export default function AppsIndexPage() {
   const [remixTarget, setRemixTarget] = useState<InstalledAppCard | null>(null);
   const { isPinned, togglePin } = useSidebarPins();
 
-  // Landing on the full apps list is the acknowledgement: clear the sidebar's
-  // "new app" hint by marking every installed frontend app as seen.
-  const { markAppsSeen } = useNewApps();
-  useEffect(() => {
-    markAppsSeen();
-  }, [markAppsSeen]);
-
   const menusDisabled = lifecycle.lifecycleBusy || lifecycle.accessBusy;
 
   const openRemixDialog = (app: InstalledAppCard) => {
@@ -310,7 +313,11 @@ export default function AppsIndexPage() {
   const closeRemixDialog = () => {
     setRemixTarget(null);
   };
-  const builtinPages = APP_NAV.filter((b) => b.id !== "apps" && b.id !== "chat");
+  // Apps, Chat and Projects are fixed on the sidebar and Settings is in the
+  // profile menu, so none of them needs a tile here.
+  const builtinPages = APP_NAV.filter(
+    (b) => !["apps", "chat", "projects", "settings"].includes(b.id),
+  );
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
@@ -320,6 +327,7 @@ export default function AppsIndexPage() {
       tCommon(entry.labelKey),
       t(`builtinDescriptions.${entry.id}`, { defaultValue: "" }),
       entry.id,
+      ...(entry.aliases ?? []),
     ]
       .join(" ")
       .toLowerCase();
@@ -333,7 +341,9 @@ export default function AppsIndexPage() {
   // `null` while the installed list is still loading — kept distinct from the
   // empty array so the skeleton (loading) and the empty state (no matches) don't
   // collide. Filtering applies live once the list lands.
-  const visibleApps = apps === null ? null : apps.filter(matchesApp);
+  // Carriers (e.g. user-skills) and apps that opt out are not destinations.
+  const launcherApps = apps === null ? null : apps.filter((app) => !isHiddenInLauncher(app));
+  const visibleApps = launcherApps === null ? null : launcherApps.filter(matchesApp);
   // The grid is sectioned by the server-derived provenance (`AppOrigin`):
   // apps built on this instance, App Store installs, and the built-in group,
   // which pairs first-party apps with Rome's own surfaces (APP_NAV).
@@ -352,11 +362,7 @@ export default function AppsIndexPage() {
       <AppTile
         key={`builtin:${entry.id}`}
         ariaLabel={label}
-        clickTarget={
-          entry.id === "store"
-            ? { type: "action", onClick: () => setStoreOpen(true) }
-            : { type: "link", href: entry.href }
-        }
+        clickTarget={{ type: "link", href: entry.href }}
         menuLabel={t("installed.moreActionsAria", { name: label })}
         menu={
           <DropdownMenuItem
@@ -461,13 +467,13 @@ export default function AppsIndexPage() {
     navigate("/chat", { state: { draft: t("sections.my.newAppDraft") } });
 
   const tileGridClass =
-    "grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-x-2 gap-y-4 sm:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]";
+    "grid grid-cols-4 gap-x-2 gap-y-4 sm:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]";
 
   const renderSkeletonTiles = (prefix: string, count: number) =>
     Array.from({ length: count }).map((_, index) => (
       <div
         key={`skeleton:${prefix}:${index}`}
-        className="flex flex-col items-center gap-2 p-3"
+        className="flex flex-col items-center gap-2 px-0 py-3 sm:p-3"
         aria-hidden
       >
         <Skeleton className="h-14 w-14 rounded-16 sm:h-16 sm:w-16" />
@@ -480,21 +486,41 @@ export default function AppsIndexPage() {
       ? null
       : isSearching
         ? visibleMyApps.length
-        : apps.filter((app) => app.origin === "local").length;
+        : (launcherApps ?? []).filter((app) => app.origin === "local").length;
   const storeAppsCount =
     apps === null
       ? null
       : isSearching
         ? visibleStoreApps.length
-        : apps.filter((app) => app.origin === "appstore").length;
+        : (launcherApps ?? []).filter((app) => app.origin === "appstore").length;
   // Built-in = Rome's own surfaces plus the first-party apps shipped with it.
   const builtinCount =
     apps === null
       ? null
       : isSearching
         ? visibleBuiltins.length + visibleBuiltinApps.length
-        : builtinPages.length + apps.filter((app) => app.origin === "builtin").length;
+        : builtinPages.length +
+          (launcherApps ?? []).filter((app) => app.origin === "builtin").length;
   const updatesCount = lifecycle.upgradeTargets.length;
+  // In the Mac app the header moves into the title bar, so the window has one
+  // row on top and the launcher starts right under it.
+  const inTitlebar = useSlotOutlet(TITLEBAR_SLOT);
+  const headerActions = (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        onClick={lifecycle.upgradeAll}
+        disabled={updatesCount === 0 || menusDisabled}
+      >
+        <Download data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
+        {lifecycle.bulkUpgradePending ? t("installed.updateAllUpdating") : t("installed.updateAll")}
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setStoreOpen(true)}>
+        {t("header.appStore")}
+      </Button>
+    </>
+  );
 
   return (
     // One tooltip provider for the whole grid: the delay keeps a sweep across
@@ -508,27 +534,19 @@ export default function AppsIndexPage() {
           the header keeps the default `start` alignment rather than the `end`
           a lone view switch takes. */}
       <Page>
-        <PageHeader>
-          <PageHeading>
-            <PageTitle>{t("header.title")}</PageTitle>
-          </PageHeading>
-          <PageActions>
-            <Button
-              type="button"
-              size="sm"
-              onClick={lifecycle.upgradeAll}
-              disabled={updatesCount === 0 || menusDisabled}
-            >
-              <Download className="h-3.5 w-3.5" aria-hidden />
-              {lifecycle.bulkUpgradePending
-                ? t("installed.updateAllUpdating")
-                : t("installed.updateAll")}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setStoreOpen(true)}>
-              {t("header.appStore")}
-            </Button>
-          </PageActions>
-        </PageHeader>
+        {inTitlebar ? (
+          <SlotContent name={TITLEBAR_SLOT}>
+            <h1 className="min-w-0 flex-1 truncate text-ui text-foreground">{t("header.title")}</h1>
+            <div className="flex shrink-0 items-center gap-2">{headerActions}</div>
+          </SlotContent>
+        ) : (
+          <PageHeader>
+            <PageHeading>
+              <PageTitle>{t("header.title")}</PageTitle>
+            </PageHeading>
+            <PageActions>{headerActions}</PageActions>
+          </PageHeader>
+        )}
 
         {/* Search is the only control that narrows the launcher, so it leads the
             row alone — one filter does not earn the Filter control the toolbar
@@ -563,12 +581,9 @@ export default function AppsIndexPage() {
                 onClick={() => setQuery("")}
                 aria-label={t("search.clear")}
                 title={t("search.clear")}
-                // Centered with `inset-y-0 my-auto`, not `-translate-y-1/2`:
-                // Button's base carries an active-press `translate-y-px` on a
-                // different variant prefix, so a centering transform survives
-                // the merge and the glyph drops half its height while pressed.
-                // Auto margins split the 36px field's spare 12px evenly around
-                // the 24px button without naming an off-scale 6px offset.
+                // Centered with `inset-y-0 my-auto`: auto margins split the
+                // 36px field's spare 12px evenly around the 24px button
+                // without naming an off-scale 6px offset.
                 className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
               >
                 <X className="size-3.5" aria-hidden />

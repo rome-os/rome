@@ -12,6 +12,14 @@ import { RUNTIME_CONFIG_FILENAME } from "./runtime-config.js";
 
 const DEFAULT_WEB_ROOT = "/app/packages/web/dist";
 
+// Every path family Caddy hands to Hono, in either access mode.
+const PROXIED_SURFACE_PATHS =
+  "/api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* " +
+  "/app-manifest/* /app-icon/* /ws/* /desktop-proxy /desktop-proxy/* " +
+  "/apps /apps/* /full/apps /full/apps/*";
+const PROXIED_SURFACE_PREFIXES =
+  "api|webhooks|app-assets|app-og|app-manifest|app-icon|ws|desktop-proxy|apps|full/apps";
+
 // The one place the served-SPA disk root is resolved. The boot script writes
 // `runtime-config.js` into this same root — resolving it anywhere
 // else risks Caddy serving a shell whose runtime config was written elsewhere.
@@ -61,6 +69,26 @@ handle /${RUNTIME_CONFIG_FILENAME} {
 }
 `.trim();
 
+  // Rejects a proxied request whose raw path is not already in canonical
+  // form. Caddy matches on the cleaned path and Hono routes on a parsed and
+  // decoded one, while `forward_auth` sends the raw URI to the verify probe,
+  // so the three must agree on the path for an access decision to hold.
+  // `/api/auth/verify` enforces the same rule; this blocks such requests
+  // before any handler sees them. `%2F` stays allowed because a scoped app id
+  // travels as one encoded segment.
+  const nonCanonicalExpression =
+    `!{http.request.uri}.matches("^/(${PROXIED_SURFACE_PREFIXES})([/?]|$)")` +
+    String.raw` || {http.request.uri}.matches("^[^?]*(/\\.|%2[eE]|%5[cC]|\\\\)")`;
+  const canonicalPathGuard = `
+@nonCanonicalPath {
+\tpath ${PROXIED_SURFACE_PATHS}
+\texpression \`${nonCanonicalExpression}\`
+}
+handle @nonCanonicalPath {
+\trespond "Bad Request" 400
+}
+`.trim();
+
   let body: string;
 
   if (!normalized.enableAccessControl) {
@@ -68,12 +96,13 @@ handle /${RUNTIME_CONFIG_FILENAME} {
     // from disk via `file_server`, so Hono is reserved for the agent/API.
     // Only the dynamic surfaces below are proxied:
     //
-    //   - `@dynamic` (`/api/*`, `/webhooks/*`, `/app-assets/*`, `/app-og/*`)
-    //     goes through `forward_auth` — the verify endpoint
-    //     (`/api/auth/verify`) reads `X-Forwarded-Uri` and gates `/api/*` on
-    //     a cookie. Non-`/api/*` paths (webhooks have their own X-API-Key,
-    //     app bundles and social card images are public) get a 204, so this
-    //     is a pass-through for them.
+    //   - `@dynamic` (`/api/*`, `/webhooks/*`, `/app-assets/*`, `/app-og/*`,
+    //     `/app-manifest/*`, `/app-icon/*`) goes through `forward_auth` — the
+    //     verify endpoint (`/api/auth/verify`) reads `X-Forwarded-Uri` and
+    //     gates `/api/*` on a cookie. Non-`/api/*` paths (webhooks have their
+    //     own X-API-Key; app bundles, social card images and home-screen
+    //     manifests/icons are public) get a 204, so this is a pass-through
+    //     for them.
     //   - SPA routes / static assets are public anyway (verify 204s every
     //     non-`/api/*` path), so serving them from Caddy drops a pointless
     //     double round-trip to Hono with zero change to the auth posture.
@@ -95,11 +124,12 @@ handle /${RUNTIME_CONFIG_FILENAME} {
     // which strips the upgrade headers on the probe copy only.
     body = `
 root * ${webRoot}
+${canonicalPathGuard}
 @wsUpgrade path /ws/* /desktop-proxy /desktop-proxy/*
 handle @wsUpgrade {
 \t${proxy}
 }
-@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/*
+@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/*
 handle @dynamic {
 ${indent(forwardAuth, 1)}
 \t${proxy}
@@ -158,6 +188,12 @@ handle /app-assets/${appIdSegment}/* {
 handle /app-og/${appIdSegment}.png {
 \t${proxy}
 }
+handle /app-manifest/${appIdSegment}.webmanifest {
+\t${proxy}
+}
+handle /app-icon/${appIdSegment}.png {
+\t${proxy}
+}
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
 \t${proxy}
@@ -209,6 +245,12 @@ ${indent(forwardAuth, 1)}
 handle /app-og/${appIdSegment}.png {
 \t${proxy}
 }
+handle /app-manifest/${appIdSegment}.webmanifest {
+\t${proxy}
+}
+handle /app-icon/${appIdSegment}.png {
+\t${proxy}
+}
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
 \t${proxy}
@@ -230,6 +272,7 @@ handle ${getFullAppHref(appId)}/* {
       .join("\n");
     body = `
 root * ${webRoot}
+${canonicalPathGuard}
 @publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*
 handle @publicApi {
 \t${proxy}

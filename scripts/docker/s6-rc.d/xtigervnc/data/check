@@ -1,0 +1,4 @@
+#!/bin/bash
+# Ready once the display socket exists and the RFB port accepts connections.
+[ -S "/tmp/.X11-unix/X${DISPLAY#:}" ] &&
+  (exec 3<>"/dev/tcp/127.0.0.1/${ROME_VNC_PORT:-5900}") 2>/dev/null

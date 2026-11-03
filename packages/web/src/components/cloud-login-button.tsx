@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { beginCloudLogin } from "@/lib/cloud-login";
@@ -7,12 +7,21 @@ import { beginCloudLogin } from "@/lib/cloud-login";
 // rendered only when the backend reports `cloudAuthEnabled`. On success the
 // browser navigates to Rome Cloud, so this only re-enables itself on a start
 // failure. Callback failures come back as ?cloud=error&reason=… and are surfaced
-// by the host page, not here.
-export function CloudLoginButton({ onStartError }: { onStartError: (message: string) => void }) {
+// by the host page, not here. `autoStart` runs the same start once on mount, in
+// place of the click.
+export function CloudLoginButton({
+  onStartError,
+  autoStart = false,
+}: {
+  onStartError: (message: string) => void;
+  autoStart?: boolean;
+}) {
   const { t } = useTranslation("auth");
   const [starting, setStarting] = useState(false);
+  // Survives StrictMode's double effect run, so one mount starts one attempt.
+  const autoStarted = useRef(false);
 
-  async function start() {
+  const start = useCallback(async () => {
     setStarting(true);
     onStartError("");
     const result = await beginCloudLogin();
@@ -20,7 +29,13 @@ export function CloudLoginButton({ onStartError }: { onStartError: (message: str
       onStartError(result.reason === "network" ? t("networkError") : t("cloud.errorStart"));
       setStarting(false);
     }
-  }
+  }, [onStartError, t]);
+
+  useEffect(() => {
+    if (!autoStart || autoStarted.current) return;
+    autoStarted.current = true;
+    void start();
+  }, [autoStart, start]);
 
   return (
     <Button

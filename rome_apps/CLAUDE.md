@@ -7,6 +7,7 @@ Each `rome_apps/<appId>/` is a runtime-loaded app (plugin), shipped first-party 
 - Before creating or scaffolding an app, read [`app_creation/SKILL.md`](coding/src/skills/app_creation/SKILL.md) — pick `$REPO`, `op: "create"`, `git init`, commit, then one-step `op: "install"` with `source: { mode: "source", path: $REPO }`.
 - Before deciding *what* to build or *when* to ship, read [`app_creation/AUTHORING.md`](coding/src/skills/app_creation/AUTHORING.md) — the iteration loop, product-design rules, frontend and icon guidelines, the recurring-run pattern, boundaries, validation, and the delivery checklist.
 - When you need a file-level API — `app.yaml`, `action.yaml`, agent yaml fields, the `@rome-os/app-runtime` and `@rome-os/app-web-sdk` surfaces, the on-disk layout, the `rome` CLI, storage and UI rules — read [`app_creation/REFERENCE.md`](coding/src/skills/app_creation/REFERENCE.md).
+- Before adding an app dependency with a build script, or any software the image does not ship, read [`system:custom-dependencies`](system/src/skills/custom-dependencies/SKILL.md).
 - After editing an installed app's skills or actions, repack and reinstall it. Hot-reload covers `packages/core` only.
 
 ## Traps

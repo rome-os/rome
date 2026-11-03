@@ -1,5 +1,3 @@
-import { PairingApprovals } from "@/components/PairingApproval";
-import { pairingFixtures, PAIRING_FIXTURE_CODE } from "./pairing-fixtures";
 /**
  * Dev-only gallery of every service's Connection detail dialog, for reviewing
  * the credential-slot card layout/copy across ALL services and auth states at
@@ -74,26 +72,8 @@ function pathnameOf(input: RequestInfo | URL): string {
 function useGalleryFetchGuard() {
   useEffect(() => {
     const realFetch = window.fetch;
-    const approvals = pairingFixtures();
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       const path = pathnameOf(input);
-      if (path === "/api/approvals") return Promise.resolve(Response.json(approvals));
-      const fixture = approvals.find((approval) =>
-        path.startsWith(`/api/approvals/${approval.id}/`),
-      );
-      if (fixture && path.endsWith("/code"))
-        return Promise.resolve(
-          Response.json({ code: fixture.status === "pending" ? PAIRING_FIXTURE_CODE : null }),
-        );
-      if (fixture && path.endsWith("/resolve")) {
-        const action = JSON.parse(String(init?.body)).action;
-        if (fixture.status !== "pending")
-          return Promise.resolve(Response.json({ error: "Already resolved" }, { status: 409 }));
-        fixture.status = action === "approve" ? "approved" : "rejected";
-        fixture.resolvedBy = "gallery-guardian";
-        fixture.resolvedAt = new Date().toISOString();
-        return Promise.resolve(Response.json({ ok: true }));
-      }
       if (BLOCKED_API_PREFIXES.some((prefix) => path.startsWith(prefix))) {
         return Promise.reject(
           new Error(`Blocked by the /dev/connections gallery fetch guard: ${path}`),
@@ -110,6 +90,12 @@ function useGalleryFetchGuard() {
 // ── /api/connections fixtures ─────────────────────────────────────────────────
 
 let fixtureId = 0;
+
+/** The connection's state as core derives it from its grants. */
+function connectionState(states: GrantState[]): ApiConnection["state"] {
+  if (states.includes("degraded")) return "broken";
+  return states.every((state) => state === "authorized") ? "working" : null;
+}
 
 /** One mock ConnectionView row. Grants map name → state (+ optional display). */
 function apiConnection(
@@ -132,18 +118,23 @@ function apiConnection(
   }
   return {
     id: options.placeholder ? null : `fixture-${service}-${fixtureId++}`,
-    service,
+    connectionKind: service,
     label: service,
+    state: connectionState(Object.values(grantStates)),
     grants: grantStates,
     display,
     // Capability statuses don't drive the card presentation (copy is
     // hand-written per service), so a neutral projection suffices.
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
     connect: options.connect ?? null,
+    setups: {},
+    channel: null,
+    agent: null,
+    severalAccounts: false,
   };
 }
 
@@ -166,7 +157,7 @@ function composioStatus(overrides: Partial<ComposioCliStatus> = {}): ComposioCli
   };
 }
 
-/** Every service offerable, nothing conferred — the fresh-install placeholders. */
+/** Every service offerable, nothing granted — the fresh-install placeholders. */
 const emptyConnections: ApiConnection[] = [
   apiConnection("telegram", { bot: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("telegram_user", { session: { state: "unauthorized" } }, { placeholder: true }),
@@ -175,7 +166,6 @@ const emptyConnections: ApiConnection[] = [
   apiConnection("discord", { bot: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("email", { inbox: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("feishu", { app: { state: "unauthorized" } }, { placeholder: true }),
-  apiConnection("webchat", {}, { placeholder: true }),
   apiConnection(
     "github",
     { user: { state: "unauthorized" } },
@@ -194,7 +184,7 @@ const emptyConnections: ApiConnection[] = [
   ),
 ];
 
-/** Every service conferred and healthy, with hydrated grant profiles. */
+/** Every service granted and healthy, with hydrated grant profiles. */
 const connectedConnections: ApiConnection[] = [
   apiConnection("telegram", {
     bot: { state: "authorized", display: { handle: "rome_dev_bot" } },
@@ -221,7 +211,6 @@ const connectedConnections: ApiConnection[] = [
   apiConnection("feishu", {
     app: { state: "authorized", display: { handle: "cli_a1b2c3" } },
   }),
-  apiConnection("webchat", {}),
   apiConnection(
     "github",
     {
@@ -270,8 +259,8 @@ const SCENARIOS: GalleryScenario[] = [
     composio: composioStatus({ loggedIn: true }),
   },
   {
-    title: "Degraded (needs attention)",
-    note: "The ledger knows these grants are broken (degraded): the Telegram personal-account session was revoked upstream, GitHub renders as needs-reconnect (still connected). Google: provider unavailable on this host. Composio: login in flight. (Guardian-verification ceremony states — codes, polling — live in the pure-view section above; they are ceremony state, not grant state.)",
+    title: "Broken (needs attention)",
+    note: "The platform stopped accepting these grants, so their connections are broken: the Telegram personal-account session was revoked upstream, and GitHub needs its access given again. Google: provider unavailable on this host. Composio: login in flight. (Guardian-verification ceremony states — codes, polling — live in the pure-view section above; they are ceremony state, not grant state.)",
     connections: [
       apiConnection("telegram", {
         bot: { state: "authorized", display: { handle: "rome_dev_bot" } },
@@ -328,8 +317,6 @@ export default function ConnectionGalleryPrototypePage() {
           </p>
         </header>
 
-        <PairingApprovals />
-
         {SCENARIOS.map((scenario) => (
           <GallerySection key={scenario.title} scenario={scenario} />
         ))}
@@ -358,7 +345,7 @@ function GallerySection({ scenario }: { scenario: GalleryScenario }) {
           mount-time effects). */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" inert>
         {cards.map((card) => (
-          <DialogFrame key={card.service} card={card} scenario={scenario} />
+          <DialogFrame key={card.route} card={card} scenario={scenario} />
         ))}
       </div>
     </section>

@@ -6,6 +6,7 @@ import enActivity from "./locales/en/activity.json";
 import enApps from "./locales/en/apps.json";
 import enAuth from "./locales/en/auth.json";
 import enChat from "./locales/en/chat.json";
+import enEnvoys from "./locales/en/envoys.json";
 import enCommon from "./locales/en/common.json";
 import enRoutines from "./locales/en/routines.json";
 import enFiles from "./locales/en/files.json";
@@ -17,6 +18,7 @@ import zhActivity from "./locales/zh-CN/activity.json";
 import zhApps from "./locales/zh-CN/apps.json";
 import zhAuth from "./locales/zh-CN/auth.json";
 import zhChat from "./locales/zh-CN/chat.json";
+import zhEnvoys from "./locales/zh-CN/envoys.json";
 import zhCommon from "./locales/zh-CN/common.json";
 import zhRoutines from "./locales/zh-CN/routines.json";
 import zhFiles from "./locales/zh-CN/files.json";
@@ -37,8 +39,7 @@ export function getActiveLocale(): string {
   return i18n.resolvedLanguage || i18n.language || "en";
 }
 
-// Native-script labels for the picker. Keep one entry per SUPPORTED_LANGUAGES
-// member; the i18n test asserts this stays exhaustive.
+// Native-script labels for the picker.
 export const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   en: "English",
   "zh-CN": "中文",
@@ -63,6 +64,7 @@ export const resources = {
     activity: enActivity,
     routines: enRoutines,
     chat: enChat,
+    envoys: enEnvoys,
     people: enPeople,
     apps: enApps,
     files: enFiles,
@@ -76,6 +78,7 @@ export const resources = {
     activity: zhActivity,
     routines: zhRoutines,
     chat: zhChat,
+    envoys: zhEnvoys,
     people: zhPeople,
     apps: zhApps,
     files: zhFiles,
@@ -92,19 +95,7 @@ i18n
     fallbackLng: "en",
     supportedLngs: SUPPORTED_LANGUAGES,
     defaultNS: "common",
-    ns: [
-      "common",
-      "settings",
-      "auth",
-      "activity",
-      "routines",
-      "chat",
-      "people",
-      "apps",
-      "files",
-      "inbox",
-      "onboard",
-    ],
+    ns: Object.keys(resources.en),
     interpolation: { escapeValue: false },
     detection: {
       // Explicit user choice (cached under rome.lang) always wins; without one,

@@ -29,37 +29,6 @@ export function RomeCodexLockup({ className }: { className?: string }) {
   );
 }
 
-/** The monochrome marks (ChatGPT, Grok) share one plate: the owner's black on white. */
-const MONO_BADGE_CLASSES = "border-border-strong bg-white text-[#111111]";
-
-const BADGE_CLASSES: Record<AiToolBrandIconName, string> = {
-  chatgpt: MONO_BADGE_CLASSES,
-  claude: "border-[#ead8c7] bg-[#fbf4eb] text-[#d97757]",
-  gemini: "border-border-strong bg-white text-[#4285f4]",
-  grok: MONO_BADGE_CLASSES,
-};
-
-export function AiToolIconBadge({
-  icon,
-  className,
-}: {
-  icon: AiToolBrandIconName;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex h-10 w-10 shrink-0 items-center justify-center rounded-8 border",
-        BADGE_CLASSES[icon],
-        className,
-      )}
-      aria-hidden
-    >
-      <AiToolBrandIcon icon={icon} className="h-6 w-6" />
-    </div>
-  );
-}
-
 export function AiToolBrandIcon({
   icon,
   ...props
@@ -281,6 +250,9 @@ export type ModelProviderBrand =
   | { kind: "image"; src: string }
   | { kind: "generic" };
 
+/** Meta's logo, also drawn for Muse, a Meta product with no mark of its own. */
+export const META_LOGO_SRC = "/provider-logos/meta.svg";
+
 const PROVIDER_LOGOS: Record<string, string> = {
   minimax: "/provider-logos/minimax.svg",
   "minimax-intl": "/provider-logos/minimax.svg",
@@ -289,7 +261,7 @@ const PROVIDER_LOGOS: Record<string, string> = {
   kimi: "/provider-logos/moonshotai.svg",
   moonshot: "/provider-logos/moonshotai.svg",
   deepseek: "/provider-logos/deepseek.svg",
-  meta: "/provider-logos/meta.svg",
+  meta: META_LOGO_SRC,
 };
 
 export function resolveModelProviderBrand({

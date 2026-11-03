@@ -18,6 +18,7 @@
 // The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
 // regression gate for this module.
 
+import { isValidTimeZone } from "../lib/timezone.js";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
 import type {
@@ -129,6 +130,39 @@ export interface FacadeParams {
    * thread to wake (e.g. keyless validation runs).
    */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /**
+   * Tools this session alone carries, registered on every surface beside
+   * `defer`. Their handlers own their own context.
+   */
+  sessionTools?: FacadeToolDef[];
+  /**
+   * Lets `propose_routine` with `activate: true` create the routine itself.
+   * Absent → auto-enable is unavailable and the draft card is shown instead.
+   */
+  routineActivation?: RoutineActivationGate;
+  /**
+   * The agent's text never reaches the guardian, so `defer` does not ask it
+   * to confirm in text: it could only confirm with another message.
+   */
+  textPrivate?: boolean;
+}
+
+/** What `propose_routine` checks before it creates a routine without the
+ * guardian's click. */
+export interface RoutineActivationGate {
+  /** Whether this session's agent may call `name` itself — the same allow-list
+   * check `executeAction` enforces. Auto-enable needs both `create_routine` and
+   * the target action, so it never schedules anything the agent couldn't
+   * already schedule by calling `create_routine` directly. */
+  canCallAction(name: string): "permitted" | "denied" | "unknown";
+  /** The target action's input-schema check on the routine's args — the same
+   * one `POST /api/routines` runs for the card's "Turn it on". Null when the
+   * args fit. */
+  validateArgs(actionName: string, args: Record<string, unknown>): string | null;
+  /** The key to create this tool call's routine with — derived from the
+   * current Rome turn, the same way the webchat drain derives the card's key.
+   * Undefined when no turn is running. */
+  routineKeyFor(toolUseId: string): string | undefined;
 }
 
 interface ActionArgumentSummary {
@@ -661,7 +695,8 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
     },
     {
       name: "read_skill",
-      description: "Read the full markdown for one available skill.",
+      description:
+        "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its `directory` and `files`; open one with your file tools only when the skill body points you to it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -673,9 +708,13 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
       handler: (input) =>
         runFacadeTool("read_skill", input, async (args) => {
           const skillName = resolveSkillLookupName(args);
+          const skill = requireSkill(getSkillCatalog(), skillName);
           return {
             name: skillName,
-            content: requireSkill(getSkillCatalog(), skillName).content,
+            content: skill.content,
+            ...(skill.directory && skill.files?.length
+              ? { directory: skill.directory, files: skill.files }
+              : {}),
           };
         }),
     },
@@ -693,6 +732,11 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
       params.interactiveSurfaceDetached ?? false,
       !!params.handback,
       params.executeDefer,
+      params.routineActivation
+        ? { ...params.routineActivation, executeAction: params.executeAction }
+        : undefined,
+      params.sessionTools,
+      params.textPrivate ?? false,
     ),
   };
 }
@@ -704,6 +748,103 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
 
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
+
+type ActivationDeps = RoutineActivationGate & {
+  executeAction: (name: string, input: unknown) => Promise<unknown>;
+};
+
+const CREATE_ROUTINE_ACTION = "create_routine";
+
+/** Create the drafted routine enabled, on the guardian's explicit instruction.
+ * The routine goes through the agent's own `create_routine` call (same
+ * allow-list, validation and attribution as a direct call); the target must be
+ * an action the agent may call too. Without that permission, it falls back to
+ * the draft card, so the guardian's click stays the gate.
+ *
+ * The routine's key comes from the turn and the tool call (`routineKeyFor`), so
+ * the webchat drain derives the card's key on its own and never takes a
+ * routine identity from the tool's output. A non-error result means "show a
+ * card"; whether that card is On or a draft is settled by the card's lookup. */
+async function activateRoutineDraft(
+  draft: import("@rome-os/app-runtime").RoutineDraftSpec,
+  toolUseId: string | undefined,
+  deps: ActivationDeps | undefined,
+): Promise<FacadeToolResult> {
+  const text = (t: string, isError?: true): FacadeToolResult => ({
+    content: [{ type: "text", text: t }],
+    ...(isError ? { isError } : {}),
+  });
+  const uncertain = (detail: string) =>
+    text(
+      `create_routine did not confirm the routine (${detail}), so it may or may not exist. Its card was shown and reflects what was saved — do NOT call propose_routine or any create action again. Tell the guardian to check the card, then end your turn.`,
+    );
+  const fallback = (reason: string) =>
+    text(
+      `Not turned on automatically: ${reason}. A draft card was shown instead — the guardian turns it on themselves, so do NOT call any create action. Reply with one short line saying the routine is drafted and needs their click, then end your turn.`,
+    );
+
+  if (!deps) return fallback("auto-enable is not available in this session");
+  const routineKey = toolUseId ? deps.routineKeyFor(toolUseId) : undefined;
+  if (!routineKey) return fallback("this tool call has no id to key the routine by");
+  const target = deps.canCallAction(draft.actionName);
+  if (target === "unknown") {
+    return text(
+      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
+      true,
+    );
+  }
+  if (target === "denied") {
+    return fallback(`"${draft.actionName}" is not an action you are permitted to call`);
+  }
+  if (deps.canCallAction(CREATE_ROUTINE_ACTION) !== "permitted") {
+    return fallback("you are not permitted to create routines directly");
+  }
+
+  // create_routine runs the same args check. This copy runs in-process against
+  // the session's registry, so a draft with bad args is rejected without
+  // starting a create_routine execution that would only record a failure.
+  const argsError = deps.validateArgs(draft.actionName, draft.args);
+  if (argsError) {
+    return text(
+      `The routine was NOT created and no card was shown: ${argsError}. Fix the args and call propose_routine again.`,
+      true,
+    );
+  }
+
+  let result: unknown;
+  try {
+    result = await deps.executeAction(CREATE_ROUTINE_ACTION, {
+      key: routineKey,
+      name: draft.name,
+      trigger: draft.trigger,
+      actionName: draft.actionName,
+      args: draft.args,
+    });
+  } catch (err) {
+    // A throw (an RPC failure, an aborted turn) doesn't say whether the row
+    // was saved. Don't report "not created": the agent would retry under a new
+    // key and could leave a second live routine. Show the card instead; its
+    // lookup by key shows whether the routine exists.
+    return uncertain(err instanceof Error ? err.message : String(err));
+  }
+  const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
+  // The key is this call's own, so "already exists" means its routine was saved
+  // (e.g. the card's Turn it on won a race after a stopped turn). The wording is
+  // pinned by create_routine's duplicate-key test.
+  if (r.status === "error" && typeof r.error === "string" && /already exists/.test(r.error)) {
+    return uncertain(r.error);
+  }
+  if (r.status === "error" || typeof r.routineId !== "string") {
+    const error = typeof r.error === "string" ? r.error : "create_routine returned no routineId";
+    return text(
+      `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
+      true,
+    );
+  }
+  return text(
+    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+  );
+}
 
 const CONFIRM_OUTPUT_DIRECTIVE =
   "The guardian's approval has been recorded — the result you last submitted is being handed back now, exactly as if they had clicked Approve. Reply with one short line confirming it's shipping, then end your turn. Do not call submit_output or confirm_output again.";
@@ -875,12 +1016,8 @@ function buildScheduleTriggerFromInput(
       error: `propose_routine.localTime "${localTime}" is invalid — expected HH:mm (24-hour), e.g. 09:30`,
     };
   }
-  if (tzid !== "UTC") {
-    const supported =
-      typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
-    if (supported.length > 0 && !supported.includes(tzid)) {
-      return { ok: false, error: `propose_routine.tzid "${tzid}" is not a valid IANA timezone` };
-    }
+  if (!isValidTimeZone(tzid)) {
+    return { ok: false, error: `propose_routine.tzid "${tzid}" is not a valid IANA timezone` };
   }
 
   const rrule = typeof o.rrule === "string" && o.rrule.trim() ? o.rrule.trim() : undefined;
@@ -933,6 +1070,16 @@ const ASK_QUESTION_COMPONENT_ID = "question-card";
 
 const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
+
+/** Whether a valid `ask_question` call parks the turn on a question card.
+ * Otherwise it relays the questions as prose. Providers that tell their
+ * runtime a park ends the response read this, so they cannot drift from the
+ * handler. */
+export function askQuestionParksOnCard(
+  params: Pick<FacadeParams, "supportsInteractiveSurface" | "interactiveSurfaceDetached">,
+): boolean {
+  return params.supportsInteractiveSurface === true && params.interactiveSurfaceDetached !== true;
+}
 
 /** Shape the `ask_question` tool input into a `pendingInteraction` payload that
  * the webchat drain renders as the host built-in question-card component
@@ -1015,17 +1162,29 @@ function askQuestionsToPromptText(questions: Record<string, unknown>[]): string 
 const DEFER_DESCRIPTION =
   "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
-  "Give a short `name` for what you're watching (it becomes the routine's name) and one of `afterMinutes` or `at`. " +
-  "When the time comes you're pinged back in this thread with the whole conversation still in context, so just " +
-  "re-evaluate and either finish or `defer` again to check later (minimum one minute, no limit on re-defers). " +
+  "Give a short `name` for what you're watching (it becomes the routine's name) and exactly one of " +
+  "`afterMinutes`, `at`, or `event`. Prefer `event` when something announces completion (CI finished, a PR " +
+  "merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, " +
+  "with no timeout. Look up the event name and payload fields with the search_event_catalog action first. " +
+  "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
+  "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
+  "only sees future events: after an event defer, check the current state once more, and if what you're " +
+  "waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so " +
+  "just re-evaluate and either finish or `defer` again (minimum one minute, no limit on re-defers). ";
+
+const DEFER_END_OF_TURN =
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";
+const DEFER_END_OF_TURN_TEXT_PRIVATE =
+  "After calling defer, end your turn. It needs no confirmation.";
 
 function buildDeferFacadeTool(
   executeDefer: (input: DeferInput) => Promise<unknown>,
+  textPrivate: boolean,
 ): FacadeToolDef {
   return {
     name: "defer",
-    description: DEFER_DESCRIPTION,
+    description:
+      DEFER_DESCRIPTION + (textPrivate ? DEFER_END_OF_TURN_TEXT_PRIVATE : DEFER_END_OF_TURN),
     inputSchema: {
       type: "object",
       required: ["name"],
@@ -1040,12 +1199,46 @@ function buildDeferFacadeTool(
           type: "integer",
           minimum: 1,
           description:
-            "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes or at.",
+            "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes, at, or event.",
         },
         at: {
           type: "string",
           description:
-            "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes or at.",
+            "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
+        },
+        event: {
+          type: "object",
+          description:
+            "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+          required: ["eventName"],
+          properties: {
+            eventName: {
+              type: "string",
+              description:
+                "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+            },
+            sourcePattern: {
+              type: "string",
+              description:
+                "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+            },
+            filter: {
+              type: "array",
+              description:
+                "Optional payload conditions, AND-ed together. Each compares the payload value at a dot-path, as a string, for equality.",
+              items: {
+                type: "object",
+                required: ["field", "equals"],
+                properties: {
+                  field: {
+                    type: "string",
+                    description: "Dot-path into the payload, e.g. pull_request.number",
+                  },
+                  equals: { type: "string", description: "Value the field must equal" },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -1061,6 +1254,9 @@ function buildInteractiveTools(
   interactiveSurfaceDetached: boolean,
   hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
+  activation?: ActivationDeps,
+  sessionTools: FacadeToolDef[] = [],
+  textPrivate = false,
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
@@ -1071,7 +1267,7 @@ function buildInteractiveTools(
     {
       name: "ask_question",
       description:
-        "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text) instead of writing the questions in your text reply — rendered as an interactive card in web chat, or relayed as a plain message on other surfaces. Reach for this whenever a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know — ask first, do not guess a generic result. Each call collects one set of questions and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once. Ask only the few questions that actually change what you do next.",
+        "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
       inputSchema: {
         type: "object",
         required: ["questions"],
@@ -1128,7 +1324,7 @@ function buildInteractiveTools(
         // reply in the next turn, so a clarifying question never dead-ends.
         // Detached sessions (exact forks) advertise the card but have no
         // drain to mount it, so they take the same prose path.
-        if (!supportsInteractiveSurface || interactiveSurfaceDetached) {
+        if (!askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached })) {
           return {
             content: [
               {
@@ -1163,8 +1359,9 @@ function buildInteractiveTools(
   // — it injects an inbound message rather than rendering UI, so it needs no
   // interactive surface. Only absent when the session has no defer impl wired.
   if (executeDefer) {
-    tools.push(buildDeferFacadeTool(executeDefer));
+    tools.push(buildDeferFacadeTool(executeDefer, textPrivate));
   }
+  tools.push(...sessionTools);
   // propose_routine and confirm_output render/resolve UI and have no prose
   // fallback, so keep them on interactive surfaces only. Detached sessions
   // (exact forks) keep advertising them — the catalog must stay byte-identical
@@ -1178,7 +1375,7 @@ function buildInteractiveTools(
   tools.push({
     name: "propose_routine",
     description:
-      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). The card shows a plain-language summary and a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
     inputSchema: {
       type: "object",
       required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -1267,10 +1464,16 @@ function buildInteractiveTools(
         args: {
           type: "object",
           description: "A single argument object for the action. Not an array.",
+          additionalProperties: true,
+        },
+        activate: {
+          type: "boolean",
+          description:
+            "Create the routine enabled right away instead of waiting for the guardian's click. Use only when the guardian explicitly stated the trigger or cadence, what to run and its arguments — nothing you inferred — and it acts on their behalf (sending, posting, spending) only as they asked. Otherwise omit it. Falls back to a draft card if you may not call the action yourself.",
         },
       },
     },
-    handler: async (input) => {
+    handler: async (input, context) => {
       const result = normalizeRoutineDraftForCard(input);
       if (!result.ok) {
         return { content: [{ type: "text", text: result.error }], isError: true };
@@ -1287,6 +1490,9 @@ function buildInteractiveTools(
           ],
           isError: true,
         };
+      }
+      if (input.activate === true) {
+        return activateRoutineDraft(result.draft, context?.toolUseId, activation);
       }
       return { content: [{ type: "text", text: PROPOSE_ROUTINE_DIRECTIVE }] };
     },
@@ -1310,7 +1516,3 @@ function buildSubmitOutputFacadeTool(
     },
   ];
 }
-
-// Maximum search-result limit is shared between facade tools and any caller
-// (e.g. anthropic adapter's zod `.max()`) that needs to advertise the cap.
-export const MCP_FACADE_MAX_SEARCH_LIMIT = MAX_SEARCH_LIMIT;

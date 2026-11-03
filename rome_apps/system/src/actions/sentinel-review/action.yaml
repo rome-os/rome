@@ -1,7 +1,0 @@
-name: sentinel_review
-type: system
-description: Main agent reviews sentinel decisions periodically
-complexity: moderate
-speed: slow
-reliability: high
-sideEffects: write

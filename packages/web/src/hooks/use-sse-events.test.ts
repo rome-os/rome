@@ -2,7 +2,16 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
-import { raw, useSseEvent, useSseEvents } from "./use-sse-events";
+import { type SseEventHandler, type UseSseEventsOptions, useSseEvents } from "./use-sse-events";
+
+// Subscribes one handler to the default `message` event.
+function useMessageEvent<Schema extends z.ZodType>(
+  url: string,
+  handler: SseEventHandler<Schema>,
+  options?: UseSseEventsOptions,
+): void {
+  useSseEvents<{ message: Schema }>(url, { message: handler }, options);
+}
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -64,7 +73,7 @@ describe("useSseEvents", () => {
     const handler = rs.fn();
 
     renderHook(() =>
-      useSseEvent("/events", {
+      useMessageEvent("/events", {
         schema: z.object({ count: z.number() }),
         fn: (value) => {
           handler(value);
@@ -142,7 +151,7 @@ describe("useSseEvents", () => {
     const secret = "private-validation-value";
     const error = rs.spyOn(console, "error").mockImplementation(() => {});
     renderHook(() =>
-      useSseEvent("/events", {
+      useMessageEvent("/events", {
         schema: z.string().refine(() => false, { message: `Rejected ${secret}` }),
         fn: rs.fn(),
       }),
@@ -169,9 +178,9 @@ describe("useSseEvents", () => {
     ["number", 42],
     ["boolean", false],
     ["null", null],
-  ])("raw accepts valid JSON %s values", (_category, value) => {
+  ])("z.json() accepts valid JSON %s values", (_category, value) => {
     const handler = rs.fn();
-    renderHook(() => useSseEvent("/events", { schema: raw, fn: handler }));
+    renderHook(() => useMessageEvent("/events", { schema: z.json(), fn: handler }));
 
     act(() => MockEventSource.instances[0].emit("message", JSON.stringify(value)));
 
@@ -183,7 +192,7 @@ describe("useSseEvents", () => {
     const secondHandler = rs.fn();
     const { rerender } = renderHook(
       ({ useSecond }: { useSecond: boolean }) =>
-        useSseEvent("/events", {
+        useMessageEvent("/events", {
           schema: useSecond ? z.object({ value: z.number() }) : z.object({ value: z.string() }),
           fn: useSecond ? secondHandler : firstHandler,
         }),
@@ -223,7 +232,7 @@ describe("useSseEvents", () => {
     const handler = rs.fn();
     const { rerender } = renderHook(
       ({ enabled, url }: { enabled: boolean; url: string }) =>
-        useSseEvent(url, { schema: z.string(), fn: handler }, { enabled }),
+        useMessageEvent(url, { schema: z.string(), fn: handler }, { enabled }),
       { initialProps: { enabled: false, url: "/first" } },
     );
 
@@ -248,7 +257,7 @@ describe("useSseEvents", () => {
     const secondReconnect = rs.fn();
     const { rerender } = renderHook(
       ({ latest }: { latest: boolean }) =>
-        useSseEvent(
+        useMessageEvent(
           "/events",
           { schema: z.string(), fn: rs.fn() },
           { onReconnect: latest ? secondReconnect : firstReconnect },
@@ -272,7 +281,7 @@ describe("useSseEvents", () => {
     const secondError = rs.fn();
     const { rerender } = renderHook(
       ({ latest }: { latest: boolean }) =>
-        useSseEvent(
+        useMessageEvent(
           "/events",
           { schema: z.string(), fn: rs.fn() },
           { onError: latest ? secondError : firstError },
@@ -302,7 +311,7 @@ describe("useSseEvents", () => {
       .mockReturnValueOnce(first)
       .mockRejectedValueOnce(new Error("handler failed"));
     const error = rs.spyOn(console, "error").mockImplementation(() => {});
-    renderHook(() => useSseEvent("/events", { schema: z.number(), fn: handler }));
+    renderHook(() => useMessageEvent("/events", { schema: z.number(), fn: handler }));
     const source = MockEventSource.instances[0];
 
     await act(async () => {

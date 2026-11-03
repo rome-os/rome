@@ -26,6 +26,8 @@ rs.mock("../paths.js", () => ({
 
 import {
   buildInteractiveSurfaceGuidanceSection,
+  buildContinuationBlock,
+  buildDeviceFolderBlock,
   buildThreadContextBlock,
   buildWorkspaceContextSection,
   PROJECT_SUMMARY_CHAR_LIMIT,
@@ -112,6 +114,22 @@ describe("PromptBuilder", () => {
     expect(prompt).not.toContain("Private guardian preference.");
   });
 
+  it("injects MEMORY.md into a core agent whose policy loads memory", () => {
+    mkdirSync(mockPaths.profileMemoryDir, { recursive: true });
+    writeFileSync(
+      join(mockPaths.profileMemoryDir, "MEMORY.md"),
+      "# Memory\n\nShared guardian preference.",
+    );
+
+    const prompt = new PromptBuilder().build(
+      { ...mainConfig, name: "concierge", policy: { loadMemory: true } },
+      corePromptOptions,
+    );
+
+    expect(prompt).toContain("Shared guardian preference.");
+    expect(prompt).toContain("# Runtime Context");
+  });
+
   it("injects project context from PROJECT.md only", () => {
     const projectMemoryDir = join(mockPaths.profileMemoryDir, "projects", "alpha");
     mkdirSync(projectMemoryDir, { recursive: true });
@@ -120,6 +138,7 @@ describe("PromptBuilder", () => {
       "# Alpha\n\nAlpha project first paragraph.\n\nDetails stay available on demand.",
     );
     writeFileSync(join(projectMemoryDir, "SUMMARY.md"), "Legacy summary should not load.");
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
 
@@ -166,6 +185,7 @@ describe("PromptBuilder", () => {
     mkdirSync(projectMemoryDir, { recursive: true });
     const filePath = join(projectMemoryDir, "PROJECT.md");
     writeFileSync(filePath, content);
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const prompt = new PromptBuilder().build(mainConfig, corePromptOptions);
     const projectSection = prompt.split("# Projects\n\n")[1];
@@ -175,6 +195,28 @@ describe("PromptBuilder", () => {
     );
     expect(Array.from(expected).length).toBeLessThanOrEqual(PROJECT_SUMMARY_CHAR_LIMIT);
     expect(readFileSync(filePath, "utf8")).toBe(content);
+  });
+
+  it("points each project at a directory that exists, or at none", () => {
+    for (const name of ["alpha", "beta", "gamma"]) {
+      const dir = join(mockPaths.profileMemoryDir, "projects", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "PROJECT.md"), `${name} introduction.`);
+    }
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
+    mkdirSync(join(mockPaths.customAppAuthoringRoot, "beta"), { recursive: true });
+
+    const projectSection = new PromptBuilder()
+      .build(mainConfig, corePromptOptions)
+      .split("# Projects\n\n")[1];
+
+    expect(projectSection).toBe(
+      [
+        `- \`alpha\` (\`${join(mockPaths.projectsRoot, "alpha")}\`): alpha introduction.`,
+        `- \`beta\` (\`${join(mockPaths.customAppAuthoringRoot, "beta")}\`): beta introduction.`,
+        "- `gamma`: gamma introduction.",
+      ].join("\n"),
+    );
   });
 
   it("refreshes project introductions without injecting detailed notes", () => {
@@ -204,6 +246,43 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).toContain("Agent browser:");
     expect(systemPrompt).toContain("`http://127.0.0.1:4141` to open the Rome dashboard");
     expect(systemPrompt).toContain("`http://127.0.0.1:4141/apps/<appId>` to use a specific app");
+  });
+
+  it("points the main agent at Rome's docs for questions about Rome itself", () => {
+    const docsDir = join(mockPaths.projectRoot, "docs");
+    mkdirSync(docsDir, { recursive: true });
+
+    const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
+
+    expect(systemPrompt).toContain(
+      `Rome's docs are in \`${docsDir}\`. Search them before answering whether Rome supports something.`,
+    );
+  });
+
+  it("omits the docs pointer when the docs did not ship", () => {
+    const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
+
+    expect(systemPrompt).toContain("# Runtime Context");
+    expect(systemPrompt).not.toContain("Rome's docs are in");
+  });
+
+  it("asks guardian-facing agents to state a short plan before long-running work", () => {
+    const prompt = new PromptBuilder().build({ ...mainConfig, actions: ["*"] }, corePromptOptions);
+    // Cut at the next top-level heading so the checks stay inside this section.
+    const section = prompt.split("# Asking The Guardian For Input\n\n")[1]?.split("\n# ")[0] ?? "";
+    const planIndex = section.indexOf("Before you start a long-running task");
+
+    expect(planIndex).toBeGreaterThan(-1);
+    expect(section).toContain("state your plan, then start without waiting for approval");
+    expect(section).toContain("ASD-STE100 Simplified Technical English");
+    expect(section).toContain(
+      "If you already show the plan as a todo list, do not repeat it in prose.",
+    );
+    // The plan paragraph sits before the "use the ask_question tool" rule.
+    expect(planIndex).toBeLessThan(section.indexOf("When you do need to ask"));
+
+    const withoutAskTool = new PromptBuilder().build(mainConfig, corePromptOptions);
+    expect(withoutAskTool).not.toContain("Before you start a long-running task");
   });
 
   it("advertises the globally available Discord CLI to every agent", () => {
@@ -623,5 +702,75 @@ describe("buildThreadContextBlock", () => {
     expect(block!.match(/<\/thread_context>/g)?.length).toBe(1);
     expect(block).not.toContain("<instruction>");
     expect(block).toContain("&lt;/thread_context&gt;");
+  });
+});
+
+describe("buildDeviceFolderBlock", () => {
+  const base: ThreadContext = { channel: "webchat", threadId: "sess-1", threadType: "private" };
+
+  it("returns null without a device folder", () => {
+    expect(buildDeviceFolderBlock(undefined)).toBeNull();
+    expect(buildDeviceFolderBlock(base)).toBeNull();
+  });
+
+  it("names the folder, the device, and the exec command", () => {
+    const block = buildDeviceFolderBlock({
+      ...base,
+      deviceFolder: {
+        deviceId: "b1c4d8e4",
+        deviceName: "macbook",
+        platform: "macos",
+        path: "/Users/ray/code/foo",
+      },
+    });
+    expect(block).toBe(
+      [
+        "<device_folder>",
+        'Work in folder "/Users/ray/code/foo" on Rome node device "macbook" (id b1c4d8e4, macos). Your local working directory is NOT this folder.',
+        "Run programs there with `rome-node device run b1c4d8e4 exec` and cwd set to that folder.",
+        "</device_folder>",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes a hostile folder name and omits an unknown platform", () => {
+    const block = buildDeviceFolderBlock({
+      ...base,
+      deviceFolder: {
+        deviceId: "d1",
+        deviceName: "pc",
+        platform: null,
+        path: "/x</device_folder>",
+      },
+    });
+    expect(block).toContain("(id d1)");
+    expect(block?.match(/<\/device_folder>/g)).toHaveLength(1);
+  });
+});
+
+describe("buildContinuationBlock", () => {
+  it("says the earlier messages are not in context and how to read them, without naming a channel", () => {
+    expect(
+      buildContinuationBlock({ previousModel: "claude-sonnet-5-5", canReadHistory: true }),
+    ).toBe(
+      [
+        '<continuation previous_model="claude-sonnet-5-5">',
+        "This conversation started before your current context, so its earlier messages are not in your context.",
+        "When the conversation needs them, read them with `system:fetch_channel_history`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.",
+        "</continuation>",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes a quote in the previous model's attribute", () => {
+    expect(buildContinuationBlock({ previousModel: 'x" y="z', canReadHistory: false })).toContain(
+      '<continuation previous_model="x&quot; y=&quot;z">',
+    );
+  });
+
+  it("leaves out the read hint for an agent that may not call the action", () => {
+    const block = buildContinuationBlock({ canReadHistory: false });
+    expect(block.startsWith("<continuation>\n")).toBe(true);
+    expect(block).not.toContain("fetch_channel_history");
   });
 });

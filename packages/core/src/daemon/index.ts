@@ -6,7 +6,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { createLogger } from "../logger.js";
-import { initTelemetry, shutdown as shutdownTelemetry } from "../telemetry.js";
+import {
+  initTelemetry,
+  shutdown as shutdownTelemetry,
+  withTracingSuppressed,
+} from "../telemetry.js";
 import {
   parseDaemonActionRequest,
   type DaemonActionRequest,
@@ -335,7 +339,10 @@ class ManagedServiceRunner {
       if (!this.child) {
         throw new Error(`${this.name} exited before becoming healthy`);
       }
-      if (await this.probeHealth()) {
+      // Refused probes are expected until the child listens, and the timeout
+      // below reports a real failure, so they stay out of the Error spans.
+      // runHealthChecks calls probeHealth traced: a refusal there is an outage.
+      if (await withTracingSuppressed(() => this.probeHealth())) {
         return;
       }
       await delay(2_000);
@@ -819,7 +826,7 @@ function createDaemonConfig(): DaemonConfig {
       10,
     ),
     healthRetryDelayMs: Number.parseInt(process.env.HEALTH_CHECK_RETRY_DELAY_MS ?? "15000", 10),
-    healthTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "10000", 10),
+    healthTimeoutMs: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS ?? "60000", 10),
     actionHost: process.env.HEALTH_DAEMON_HOST ?? "0.0.0.0",
     actionPort: Number.parseInt(process.env.HEALTH_DAEMON_PORT ?? "9368", 10),
     romePort: Number.parseInt(process.env.INTERNAL_API_PORT ?? "4141", 10),

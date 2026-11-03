@@ -28,8 +28,8 @@ describe("chat typography policy", () => {
       "ChatEmptyState.tsx:font-normal",
       "ChatEmptyState.tsx:leading-[1.05]",
       "ChatEmptyState.tsx:tracking-[-0.025em]",
-      "blocks/SubagentStepBlock.tsx:tracking-wide",
-      "blocks/ToolStepBlock.tsx:tracking-wide",
+      "entries/SubagentCallView.tsx:tracking-wide",
+      "entries/ToolCallView.tsx:tracking-wide",
     ]);
   });
 });

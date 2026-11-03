@@ -1,11 +1,16 @@
 import { memo, useMemo } from "react";
-import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
-import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
+import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
+import type { ChatMessage } from "@/lib/chat-types";
+import { userMessageText } from "@/components/chat/chat-view";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
+import { MessageRow } from "@/components/chat/MessageRow";
+import { ReplyButton } from "@/components/chat/reply/ReplyButton";
+import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
+import { SenderAvatar, sentByViewer } from "@/components/chat/SenderAvatar";
+import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 
 // Isolated so that streaming-driven re-renders of ChatPage do not re-parse
 // every historical user message through ReactMarkdown on every snapshot tick.
@@ -14,79 +19,77 @@ import { cn } from "@/lib/utils";
 export const UserMessage = memo(
   function UserMessage({ msg }: { msg: ChatMessage }) {
     const { t } = useTranslation("chat");
-    const text = useMemo(() => {
-      let blocks: StreamBlock[];
-      try {
-        const parsed = JSON.parse(msg.content);
-        blocks = Array.isArray(parsed) ? parsed : [{ type: "text", content: msg.content }];
-      } catch {
-        blocks = [{ type: "text", content: msg.content }];
-      }
-      return blocks
-        .filter((b) => b.type === "text")
-        .map((b) => b.content)
-        .join("\n");
-    }, [msg.content]);
+    const { data: viewer } = useDashboardIdentity();
+    const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
-    const pending =
-      msg.inputState === "queued" ||
-      msg.inputState === "submitted" ||
-      msg.inputState === "accepted";
-    const statusLabel =
-      msg.inputState && msg.inputState !== "consumed"
-        ? t(`inputState.${msg.inputState}`)
-        : undefined;
     // Some user turns carry only a structured part with no text (e.g. an
     // interaction_result, whose inline component re-renders its own read-only
     // state), so suppress the empty bubble.
     if (!text) return null;
-    // The guardian's own messages stay as a right-aligned bubble — no avatar or
-    // name, since there's only ever one human in the conversation.
-    return (
-      <div className="group mb-4 flex flex-col items-end">
-        {/* One inset on every side, equal to `--markdown-block-space-between`
-            at this density. A rim narrower than the space the renderer puts
-            between two paragraphs reads as content spilling out of the box. */}
-        <div
-          className={cn(
-            "flex max-w-[70%] items-start gap-2 break-words rounded-12 border border-transparent bg-surface-muted p-4 transition-colors motion-reduce:transition-none",
-            pending && "border-dashed border-border-strong bg-transparent",
-            msg.inputState === "cancelled" && "border-dashed border-border bg-transparent",
-            msg.inputState === "failed" && "border-destructive/50",
-            msg.inputState === "unknown" && "border-warning/50",
-          )}
-          title={statusLabel}
-          aria-busy={pending || undefined}
+    const own = sentByViewer(msg.sender, viewer);
+    const bubble = (
+      <UserMessageBubble
+        msg={msg}
+        text={text}
+        own={own}
+        className={cn("max-w-[70%]", !own && "self-start")}
+      />
+    );
+    // Timestamp + copy under the bubble. Hover-revealed on pointer devices,
+    // always visible on touch. Precision tracks recency: time of day today,
+    // month + day this year, full date for older years.
+    const actions = (
+      <div
+        className={cn(
+          "mt-1 flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100",
+          own
+            ? "-mr-[var(--control-action-offset-sm)]"
+            : "-ml-[var(--control-action-offset-sm)] flex-row-reverse justify-end",
+        )}
+      >
+        {timestamp ? <span className="text-aux text-muted-foreground">{timestamp}</span> : null}
+        <CopyMessageButton text={text} />
+        {isSettledUserMessage(msg) ? (
+          <ReplyButton
+            source={{
+              messageId: msg.id,
+              sessionId: msg.sessionId,
+              author: "guardian",
+              name: msg.sender?.name ?? undefined,
+              text,
+            }}
+          />
+        ) : null}
+      </div>
+    );
+    // Someone else's message reads like the agent's: on the left, under their
+    // name. Only the signed-in person's own messages sit on the right.
+    if (!own && msg.sender) {
+      return (
+        <MessageRow
+          name={msg.sender.name ?? t("senderGuardian")}
+          avatar={<SenderAvatar sender={msg.sender} />}
+          className="group"
+          footer={actions}
         >
-          {msg.inputState === "failed" ? (
-            <CircleAlert className="mt-1 size-4 shrink-0 text-destructive" aria-hidden="true" />
-          ) : msg.inputState === "unknown" ? (
-            <CircleHelp className="mt-1 size-4 shrink-0 text-warning" aria-hidden="true" />
-          ) : msg.inputState === "cancelled" ? (
-            <CircleSlash
-              className="mt-1 size-4 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          ) : null}
-          <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
-            {text}
-          </Markdown>
+          {bubble}
+        </MessageRow>
+      );
+    }
+    return (
+      <div className="group mb-4 flex items-start justify-end gap-2">
+        <div className="flex min-w-0 flex-1 flex-col items-end">
+          {bubble}
+          {actions}
         </div>
-        <span className="sr-only" role="status">
-          {statusLabel}
-        </span>
-        {/* Timestamp + copy under the bubble. Hover-revealed on pointer
-            devices, always visible on touch. Precision tracks recency: time
-            of day today, month + day this year, full date for older years. */}
-        <div className="mt-1 -mr-1 flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100">
-          {timestamp ? <span className="text-aux text-muted-foreground">{timestamp}</span> : null}
-          <CopyMessageButton text={text} />
-        </div>
+        {msg.sender ? <SenderAvatar sender={msg.sender} /> : null}
       </div>
     );
   },
   (prev, next) =>
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
-    prev.msg.inputState === next.msg.inputState,
+    prev.msg.inputState === next.msg.inputState &&
+    prev.msg.sender?.name === next.msg.sender?.name &&
+    prev.msg.sender?.avatarUrl === next.msg.sender?.avatarUrl,
 );

@@ -23,7 +23,6 @@ import {
   appMigrationsTableName,
   ArtifactEntrySchema,
   formatZodIssues,
-  hashWorkspace,
   parseAppManifest,
   resolvePathWithinBase,
   safeIsFile,
@@ -77,6 +76,7 @@ export type ResolveDisplayMetadataResult =
       displayName: string;
       iconAbsolutePath: string | undefined;
       includeSource: boolean;
+      hideInLauncher: boolean;
     }
   | { ok: false; reason: string };
 
@@ -117,7 +117,6 @@ const BuildManifestSchema = z.object({
   assetVersion: z.string().regex(/^[0-9a-f]{12}$/),
   displayName: z.string().min(1),
   navLabel: z.string().min(1).optional(),
-  routing: z.literal("client"),
 });
 
 function normalizeArtifactEntry(entry: z.infer<typeof ArtifactEntrySchema>): RomeAppArtifactEntry {
@@ -338,11 +337,6 @@ export class AppInstaller {
     return { ok: true, root };
   }
 
-  /** Convenience for testing and migration scripts. */
-  computeWorkspaceHash(workspaceRoot: string): Promise<string> {
-    return hashWorkspace(workspaceRoot);
-  }
-
   /**
    * Read the manifest at `installed/<appId>/active/app.yaml` and assemble the
    * resolved artifact list + web/api/db metadata. Manifest lookup and parsing
@@ -422,6 +416,7 @@ export class AppInstaller {
         iconAbsolutePath:
           iconCandidate !== undefined && safeIsFile(iconCandidate) ? iconCandidate : undefined,
         includeSource: manifest.includeSource === true,
+        hideInLauncher: manifest.hideInLauncher === true,
       };
     } catch (err) {
       return {
@@ -491,6 +486,7 @@ export class AppInstaller {
       icon: data.icon,
       appRoot: data.appRoot,
       includeSource: data.includeSource,
+      hideInLauncher: data.hideInLauncher,
       remix: data.remix,
       agents: (data.agents ?? []).map(normalizeArtifactEntry),
       actions: (data.actions ?? []).map(normalizeArtifactEntry),
@@ -511,6 +507,12 @@ export class AppInstaller {
               }),
             }))
           : data.suggestedChannelBindings,
+      eventSources: data.eventSources?.map((source) => ({
+        events: source.events,
+        keys: source.keys ?? [],
+        types: source.types ?? [],
+        ensureAction: source.ensureAction,
+      })),
     };
   }
 

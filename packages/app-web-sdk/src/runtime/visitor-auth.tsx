@@ -151,7 +151,11 @@ export interface SignInWithRomeCloudProps {
   size?: "default" | "sm";
   /** App-page location to return to after authorizing (default: here). */
   next?: string;
-  /** Custom button label; default "Sign in". */
+  /**
+   * Button label; default "Sign in". The Rome Cloud mark already names the
+   * provider, so do not repeat it ("Sign in with Rome Cloud"). Override only
+   * to name what signing in unlocks, e.g. "Sign in to save picks".
+   */
   label?: string;
   className?: string;
   /** Called when the flow fails to start — convenience for toasts/telemetry.
@@ -164,9 +168,8 @@ export interface SignInWithRomeCloudProps {
  * The standard Rome Cloud sign-in button — an OAuth-provider-style control
  * with the Rome Cloud mark, a built-in "Redirecting…" pending state, and
  * automatic degradation on preview mounts (disabled with an explanatory
- * tooltip, since a preview host has no backend to sign into). The default
- * label is a compact "Sign in" so it fits a header corner; pass `label` for
- * a more explicit CTA.
+ * tooltip, since a preview host has no backend to sign into). The label
+ * defaults to "Sign in", which is all a visitor needs to read.
  *
  * Renders nothing when the caller is already signed in (visitor) or is the
  * instance owner (guardian), so it can be dropped in unconditionally. For the

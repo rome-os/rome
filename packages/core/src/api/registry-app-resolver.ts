@@ -1,8 +1,12 @@
-import type { AppRefDto, SubagentStartBlock, ToolUseBlock } from "@rome/api-types/trace-segments";
+import type {
+  AppRefDto,
+  TraceSubagentStartEvent,
+  ToolUseBlock,
+} from "@rome/api-types/trace-segments";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { ResolvedApp } from "../apps/state.js";
+import { isResolvedApp, type ResolvedApp } from "../apps/state.js";
 import {
   BUILTIN_TOOL_APPS,
   DISCOVERY_SHIM_TOOLS,
@@ -35,16 +39,12 @@ function readActionName(input: unknown): string | undefined {
   return undefined;
 }
 
-function isResolvedApp(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
-}
-
 export function createRegistryAppResolver(deps: RegistryAppResolverDeps): AppResolver {
   const cache = new Map<string, CachedAppRef>();
 
   const refForApp = (appId: string): AppRefDto => {
     const view = deps.appCatalog.get(appId);
-    if (!view || !isResolvedApp(view)) return SYSTEM_PSEUDO_APP;
+    if (!isResolvedApp(view)) return SYSTEM_PSEUDO_APP;
 
     const cached = cache.get(appId);
     if (cached && cached.version === view.manifest.version) return cached.ref;
@@ -69,7 +69,7 @@ export function createRegistryAppResolver(deps: RegistryAppResolverDeps): AppRes
   };
 
   return {
-    resolveTool(block: ToolUseBlock | SubagentStartBlock): AppRefDto {
+    resolveTool(block: ToolUseBlock | TraceSubagentStartEvent): AppRefDto {
       const tool = block.type === "subagent_start" ? block.agentName : block.tool;
 
       if (isExecuteShim(tool)) {

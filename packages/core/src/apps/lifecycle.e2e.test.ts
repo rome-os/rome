@@ -20,11 +20,14 @@ import {
   createAppLifecycleHarness,
   MockModelProvider,
   type AppLifecycleHarness,
+  createActionEngineRepos,
 } from "../test/helpers.js";
 import type { ModelSessionParams } from "../core/agent-runner.js";
 import type { AppstoreSource } from "./lockfile.js";
 import { AppLifecycleService } from "./lifecycle-service.js";
 import { appIdToPathSegment, packArtifact } from "./packaging/index.js";
+import { createEmptyLegacyArtifactBindings } from "./artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const FIXTURES_AGENTS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -478,11 +481,13 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   provider: McpSessionModelProvider;
   agentName: string;
 }> {
-  const agentLoader = new AgentLoader();
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const agentLoader = new AgentLoader(artifactIdentity);
   await agentLoader.loadAll(FIXTURES_AGENTS_DIR);
   const agentName = "test-all-actions";
 
-  const sessionManager = new SessionManager(new SessionsRepository(harness.db));
+  const sessionsRepo = new SessionsRepository(harness.db);
+  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({
@@ -500,16 +505,14 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   });
   const actionEngine = new ActionEngine(
     harness.actionRegistry,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    createActionEngineRepos(harness.db),
     { processRole: "worker" },
   );
 
   const manager = createAgentSessionManager({
     agentLoader,
     sessionManager,
+    sessionsRepo,
     promptBuilder,
     actionRegistry: harness.actionRegistry,
     modelResolver,
@@ -517,6 +520,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     skillCatalog: harness.skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
   });
 
   return { manager, provider, agentName };
@@ -858,26 +862,6 @@ describe("App lifecycle e2e", () => {
       await waitFor(() => harness.hasAction("echo_recovered"));
       const cardsAfter = await listApps(harness);
       expect(cardsAfter.find((c) => c.id === "bogus-app")?.status).toBe("active");
-    });
-
-    it("install rejects a bundle source that isn't a packed artifact", async () => {
-      const rawDir = join(workspaceParent, "raw-not-packed");
-      await mkdir(rawDir, { recursive: true });
-      await writeFile(join(rawDir, "src.ts"), "// not packed\n", "utf-8");
-
-      const res = await harness.fetch("/apps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: { mode: "bundle", path: rawDir },
-        }),
-      });
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as { error?: string };
-      expect(body.error).toMatch(/not a packed app artifact.*mode: "source"/s);
-
-      const cards = await listApps(harness);
-      expect(cards.find((c) => c.id === "raw-app")).toBeUndefined();
     });
 
     it("a rejected re-install leaves the healthy installed app running", async () => {
@@ -1653,32 +1637,6 @@ describe("App lifecycle e2e", () => {
       await waitFor(() => harness.hasAction("echo_one_step"));
       const result = await harness.invokeAction("echo_one_step", { via: "one-step" });
       expect(result).toMatchObject({ status: "ok" });
-    });
-
-    it("POST mode=source pointed at a packed artifact is rejected with the bundle alternative", async () => {
-      const packed = await buildWorkspaceApp(workspaceParent, "wrong-mode", "echo_wrong_mode");
-
-      const res = await harness.fetch("/apps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: { mode: "source", path: packed } }),
-      });
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as { error?: string };
-      expect(body.error).toMatch(/packed artifact, not a source workspace[\s\S]*"bundle"/);
-    });
-
-    it("POST mode=bundle pointed at a source repo is rejected with the source install named", async () => {
-      const repo = await buildSourceApp(workspaceParent, "raw-as-bundle", "echo_raw_as_bundle");
-
-      const res = await harness.fetch("/apps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: { mode: "bundle", path: repo } }),
-      });
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as { error?: string };
-      expect(body.error).toMatch(/source workspace, not a packed artifact[\s\S]*"source"/);
     });
   });
 

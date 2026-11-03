@@ -22,10 +22,10 @@ component body aligned with upstream.
 | `MessageRow.tsx`                  | `web/src/components/chat/MessageRow.tsx`                        |
 | `trace-format.ts`                 | `web/src/lib/trace-format.ts`                                  |
 | `markdown.tsx`                    | `web/src/components/markdown.tsx`                              |
-| `MermaidBlock.tsx`                | `web/src/components/chat/blocks/MermaidBlock.tsx`             |
-| `ThinkingBlock.tsx`               | `web/src/components/chat/blocks/ThinkingBlock.tsx`           |
-| `TraceJsonView.tsx`               | `web/src/components/chat/blocks/TraceJsonView.tsx`            |
-| `TracePayload.tsx` (image helpers)| `web/src/components/chat/blocks/TracePayload.tsx` (subset; `TraceImageView` drops the zoom wrapper) |
+| `MermaidBlock.tsx`                | `web/src/components/chat/entries/MermaidBlock.tsx`             |
+| `ThinkingBlock.tsx`               | `web/src/components/chat/entries/ThinkingBlock.tsx`           |
+| `TraceJsonView.tsx`               | `web/src/components/chat/entries/TraceJsonView.tsx`            |
+| `TracePayload.tsx` (image helpers)| `web/src/components/chat/entries/TracePayload.tsx` (subset; `TraceImageView` drops the zoom wrapper) |
 | `../../trace/types.ts` (DTOs)     | `api-types/src/trace-segments.ts` (the trace DTO subset)        |
 | `../../trace/build-snapshot.ts`   | rome-core segment builder (server-side grouping logic)          |
 
@@ -45,7 +45,7 @@ typography and file-specific seams documented below as well.
 | `from "@/components/ui/tooltip"`             | `from "../shims/tooltip"`            |
 | `from "@/hooks/use-theme"`                   | `from "../shims/use-theme"`          |
 | `from "@/components/markdown"`               | `from "./markdown"`                  |
-| `from "@/components/chat/blocks/MermaidBlock"` | `from "./MermaidBlock"`            |
+| `from "@/components/chat/entries/MermaidBlock"` | `from "./MermaidBlock"`            |
 | `from "@rome/api-types/trace-segments"`      | `from "../../../trace/types.js"`     |
 | `from "@/lib/utils"` (the `cn` helper)       | `from "../../lib/utils.js"`          |
 
@@ -111,7 +111,7 @@ in `web/styles.css`). The app's own `web/components/Markdown.tsx` is a thin
   **reuses the vendored `TraceBody`** and feeds it the static, already-imported
   snapshot. When syncing, port any layout/markup changes from upstream
   `TraceDrawer.tsx` into `ShowcaseTraceDrawer.tsx` by hand.
-- **Most of `chat/blocks/*`** are NOT vendored: they pull in interactive cards
+- **Most of `chat/entries/*`** are NOT vendored: they pull in interactive cards
   (approval, ask-user-question, routine-draft), polling, and `@/lib/chat-types`.
   A static showcase has no live interaction, so the app supplies its own
   lightweight `renderInlineBlock` / `renderRunBlocks` (`web/trace/render.tsx`)

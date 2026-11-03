@@ -14,8 +14,6 @@ export interface ListingDetail {
   longDescription: string | null;
   /** Absolute icon URL persisted by the store (S3 object or the store's default icon). */
   iconUrl: string | null;
-  /** @deprecated The store API never emitted this; kept so older callers still typecheck. */
-  iconPath?: string | null;
   categories: string[];
   state: "published" | "taken_down" | "deleted";
   highestVersion: string;
@@ -46,15 +44,17 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+// The listing comes from Rome Cloud, not core, so a relative icon URL is still
+// resolved against the store's origin.
 function resolveIconUrl(
   browseOrigin: string | null | undefined,
-  iconPath: string | null,
+  iconUrl: string | null,
 ): string | null {
-  if (!iconPath) return null;
-  if (/^https?:\/\//i.test(iconPath)) return iconPath;
+  if (!iconUrl) return null;
+  if (/^https?:\/\//i.test(iconUrl)) return iconUrl;
   if (!browseOrigin) return null;
   try {
-    const resolved = new URL(iconPath, browseOrigin);
+    const resolved = new URL(iconUrl, browseOrigin);
     return resolved.protocol === "http:" || resolved.protocol === "https:"
       ? resolved.toString()
       : null;
@@ -170,11 +170,8 @@ export function AppInstallConfirm({
     }
   }, [target, installing, listingId, data, onInstalled, t]);
 
-  const browseOrigin = data?.browseOrigin ?? null;
   const listing = data?.listing ?? null;
-  const iconUrl = listing
-    ? resolveIconUrl(browseOrigin, listing.iconUrl ?? listing.iconPath ?? null)
-    : null;
+  const iconUrl = listing ? resolveIconUrl(data?.browseOrigin, listing.iconUrl) : null;
   const displayName = listing?.name ?? listing?.id ?? listingId;
 
   if (loading) {
@@ -285,7 +282,7 @@ export function AppInstallConfirm({
         >
           {installing ? (
             <>
-              <Spinner label={t("install.installing")} />
+              <Spinner data-icon="inline-start" label={t("install.installing")} />
               <span aria-hidden>{t("install.installing")}</span>
             </>
           ) : (

@@ -8,12 +8,17 @@
 // `.../defer`. There is no push channel — a restart severs any stream mid-
 // cutover anyway, so polling is the whole read contract.
 //
-// `updating` is terminal by design: it is entered only after Rome Cloud has
-// accepted the cutover, meaning this process is scheduled for replacement.
-// Nothing un-sets it — the replacement process boots a fresh hub in `idle`,
-// which is what a polling dashboard eventually observes. Until the process
-// dies, `updating` tells late pollers "don't trust my idle-looking silence,
-// a restart is in flight".
+// `updating` is entered only after Rome Cloud has accepted the cutover, meaning
+// this process is scheduled for replacement. The replacement process boots a
+// fresh hub in `idle`, which is what a polling dashboard eventually observes.
+// Until the process dies, `updating` tells late pollers "don't trust my
+// idle-looking silence, a restart is in flight".
+//
+// Acceptance is not completion: Rome Cloud can accept and then fail before it
+// stops this process, for example when the image pull fails. Every path that
+// gets as far as stopping Rome replaces this process, so a process still alive
+// after the restart window was never replaced. It returns to `idle`, so the
+// banner clears and the next nightly probe can offer the release again.
 
 import { createLogger } from "../logger.js";
 
@@ -37,6 +42,10 @@ export interface UpgradeStatusHubOptions {
    * The callee performs the cutover (relay to Rome Cloud) and reports the outcome
    * back via `markRestarting()` on acceptance or `standDown()` on failure. */
   onDeadline: (targetVersion: string) => void;
+  /** How long `updating` waits for this process to be replaced before it gives
+   * the accepted cutover up and returns to `idle`. Must outlast Rome Cloud's
+   * own upgrade timeout, or a slow but live upgrade reads as failed. */
+  restartWindowMs: number;
   /** Time source — injectable for tests. */
   now?: () => number;
   setTimeout?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -50,12 +59,14 @@ export class UpgradeStatusHub {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly onDeadline: (targetVersion: string) => void;
+  private readonly restartWindowMs: number;
   private readonly now: () => number;
   private readonly setTimer: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   private readonly clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
 
   constructor(options: UpgradeStatusHubOptions) {
     this.onDeadline = options.onDeadline;
+    this.restartWindowMs = options.restartWindowMs;
     this.now = options.now ?? (() => Date.now());
     this.setTimer = options.setTimeout ?? ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = options.clearTimeout ?? ((handle) => clearTimeout(handle));
@@ -103,13 +114,23 @@ export class UpgradeStatusHub {
   }
 
   /** Rome Cloud accepted the cutover: this process is now scheduled for
-   * replacement. Terminal — see the header. No-op unless a countdown is live. */
+   * replacement. Leaves `updating` only if the restart window passes with this
+   * process still alive — see the header. No-op unless a countdown is live. */
   markRestarting(): void {
     if (this.phase !== "countdown") return;
     log.info("upgrade cutover accepted; awaiting restart", { targetVersion: this.targetVersion });
     this.clear();
     this.phase = "updating";
     this.deadline = null;
+    this.timer = this.setTimer(() => {
+      this.timer = null;
+      if (this.phase !== "updating") return;
+      log.warn("accepted upgrade never replaced this process; returning to idle", {
+        targetVersion: this.targetVersion,
+        restartWindowMs: this.restartWindowMs,
+      });
+      this.reset();
+    }, this.restartWindowMs);
   }
 
   /** The deadline-path cutover could not be handed to Rome Cloud (rejected or

@@ -12,16 +12,9 @@
 // The connection is READ-ONLY. `send` throws, `directMessaging` answers null,
 // and nothing is delivered into the agent pipeline: a personal account's whole
 // history arriving as inbound turns would put an agent in the middle of every
-// conversation the guardian has ever had. The read surfaces are `directory`
-// (which chats exist) and `history` (what was said), both live queries against
-// the client's own store.
-//
-// Conferral is observational and physical. The guardian opens Rome's desktop,
-// scans the QR with their phone, and confirms the login there — the same
-// desktop surface LinkedIn's setup uses. Recovering the store key needs ptrace
-// on the live client, which this container cannot do, so that one step runs as
-// a root script on the hosting VM (channels/wechat-user-keys.ts) and hands back
-// only the passphrase; Rome derives the per-database keys back here.
+// conversation the guardian has ever had. The Talk's read surface is `directory`
+// (which chats exist), a live query against the client's own store. What was
+// said is the channel's `messages` (wechat-user-messages.ts), read the same way.
 //
 // Fault mapping: a reader that reports the account signed out, or a key that no
 // longer fits, is terminal (CredentialRejected → the grant degrades → the
@@ -29,27 +22,16 @@
 // degradation, not a revoked login.
 
 import { z } from "zod";
-import { rm } from "node:fs/promises";
-import type {
-  ConversationDescriptor,
-  ConversationId,
-  InboundMessage,
-  TalkDirectory,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkHistory,
-} from "@rome-os/app-runtime";
+import type { ChatDescriptor, ChatId } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,
   WechatUserRuntime,
-  WechatUserStorePending,
-  type WechatUserConversation,
-  type WechatUserMessage,
+  type WechatUserChat,
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
-import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
-import type { RootScriptRunner } from "../../host-execution/root-script-runner.js";
+import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
@@ -63,11 +45,13 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import { directoryPage, historyQueryLimit } from "./talk-features.js";
+import { directoryPage } from "./talk-features.js";
 
 const log = createLogger("wechat-user");
 
-export const WECHAT_USER_SERVICE = "wechat_user";
+// The channel's name is the connection kind's: one constant, so the channel its reads
+// back and the channel its Connection backs cannot drift into two.
+export const WECHAT_USER_KIND = WECHAT_USER_CHANNEL;
 
 /** How long a setup step waits for the guardian's phone actions. Scanning and
  *  confirming on a phone that may be in another room: generous on purpose. */
@@ -79,6 +63,9 @@ const QR_POLL_INTERVAL_MS = 3_000;
 /** Liveness cadence for a live epoch. A personal account is read on demand, so
  *  this only needs to notice a dead session before the guardian does. */
 const SESSION_PROBE_INTERVAL_MS = 5 * 60_000;
+/** How long a probe waits for WeChat to sign in after Rome pressed its button. A
+ *  phone confirmation after this is noticed by the next probe. */
+const SIGN_IN_WAIT_MS = 60_000;
 
 // ── Grant profile ─────────────────────────────────────────────────────────
 
@@ -129,7 +116,7 @@ function containerCredential(wxid: string | undefined): Credential {
 }
 
 /**
- * The `session` scheme. Conferral is the setup below. renew() re-reads the
+ * The `session` scheme. The setup below gives the grant. renew() re-reads the
  * account: still signed in with a working key keeps the credential; a definite
  * signed-out or bad-key answer is the only thing that demands reconnecting. A
  * reader that merely fails to run keeps the credential — the client may be
@@ -137,21 +124,21 @@ function containerCredential(wxid: string | undefined): Credential {
  */
 export function wechatUserSessionScheme(reader: WechatUserReader): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       try {
         await reader.conversations({ limit: 1 });
         return cred;
       } catch (error) {
-        return isWechatUserSessionRejected(error) ? "re-confer" : cred;
+        return isWechatUserSessionRejected(error) ? "needs-fix" : cred;
       }
     },
   };
 }
 
-// ── conferral setup ─────────────────────────────────────────────────────────
+// ── setup ─────────────────────────────────────────────────────────
 
 function installingView(): SetupView {
   return {
@@ -163,7 +150,7 @@ function installingView(): SetupView {
   };
 }
 
-function scanView(qr?: string): SetupView {
+function scanView(desktop: string, qr?: string): SetupView {
   if (qr) {
     return {
       title: "Scan with WeChat",
@@ -183,7 +170,7 @@ function scanView(qr?: string): SetupView {
     body: [
       "Rome is bringing up the WeChat login on your instance. The QR code will appear here in a moment — if it does not, open Rome's desktop and sign in there.",
     ],
-    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    links: [{ label: "Open Rome's desktop", url: desktop }],
     steps: [
       { text: "Wait for the WeChat login QR to appear" },
       { text: "Scan the QR code with WeChat on your phone" },
@@ -195,13 +182,13 @@ function scanView(qr?: string): SetupView {
 
 /** A cached account opens a sign-in button, not a QR. A screenshot of that
  *  button cannot be clicked from here, so the guardian signs in on the desktop. */
-function rememberedView(): SetupView {
+function rememberedView(desktop: string): SetupView {
   return {
     title: "Sign in to WeChat",
     body: [
       "WeChat remembers this account on your instance, so it asks you to sign in instead of showing a QR code. Open Rome's desktop, select the sign-in button in the WeChat window, then confirm on your phone.",
     ],
-    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    links: [{ label: "Open Rome's desktop", url: desktop }],
     steps: [
       { text: "Open Rome's desktop" },
       { text: "Select the sign-in button in the WeChat window" },
@@ -211,14 +198,14 @@ function rememberedView(): SetupView {
   };
 }
 
-function keysView(remembered: boolean): SetupView {
+function keysView(remembered: boolean, desktop: string): SetupView {
   return {
     title: "Unlocking your message history",
     body: [
       "WeChat keeps your history encrypted and only unlocks it while it signs in. Rome is recovering that key now — this can take a minute.",
       "If the desktop shows a sign-in confirmation, approve it on your phone.",
     ],
-    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    links: [{ label: "Open Rome's desktop", url: desktop }],
     steps: [
       {
         text: remembered ? "Sign in on Rome's desktop" : "Scan the QR code with WeChat",
@@ -233,14 +220,6 @@ function keysView(remembered: boolean): SetupView {
 
 export interface WechatUserSetupDeps {
   runtime: WechatUserRuntime;
-  /** Recover the store passphrase (the root script). Injectable for tests;
-   *  production wires the action-driven runner. It launches the client under gdb
-   *  and blocks until a login derives the key, so the caller shows the scan
-   *  walkthrough alongside it rather than waiting for a login first. */
-  recoverPassphrase: (signal: AbortSignal) => Promise<string>;
-  /** Stage the capture driver inside this container before recovery runs. */
-  stageDriver: () => Promise<void>;
-  ensureRecoveryAvailable?: () => void;
   pollIntervalMs?: number;
   loginTimeoutMs?: number;
   /** How often to re-screenshot the login window into the scan view. */
@@ -248,17 +227,15 @@ export interface WechatUserSetupDeps {
 }
 
 /**
- * Build the WeChat user-account conferral setup. A linear coroutine:
- *   1. `ensure-runtime` — install the client and reader if absent, bring up the
- *      session the client draws into, and stage the capture driver (an
- *      already-ready account confers immediately). The client is not started
- *      here; recovery launches it under gdb to catch the first login's key.
- *   2. `capture-login` — recover the store passphrase via the hosting VM root
- *      script, which launches the client so the QR appears; stream that QR into
- *      the view while the guardian signs in, then derive and verify the
- *      per-database keys in the container and wait until the store reads
- *      unlocked,
- *   3. return the terminal conferral: custody marker + account identity.
+ * Build the WeChat user-account setup. A linear coroutine:
+ *   1. `ensure-runtime` — install the client if absent and bring up the
+ *      session the client draws into (an already-ready account grants
+ *      immediately). The client is not started here; the capture launches it
+ *      under gdb to catch the first login's key.
+ *   2. `capture-login` — capture the store keys with the bridge, which launches
+ *      the client so the QR appears; stream that QR into the view while the
+ *      guardian signs in, then wait until the store reads unlocked,
+ *   3. return the terminal grant: custody marker + account identity.
  * Nothing durable exists before the terminal return. Cancelling writes nothing;
  * the only state left behind is the client's own session, which the guardian
  * can sign out of from their phone.
@@ -286,98 +263,105 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
   };
 
   return async (interact, ctx) => {
-    const ready = await ctx.step("ensure-runtime", async (signal) => {
-      const initial = await runtime.status();
-      if (initial.state === "ready" && initial.running) return initial;
-      if (initial.keysReady) {
-        interact.show({
-          title: "Resuming WeChat",
-          body: [
-            "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
-          ],
-          links: [{ label: "Open Rome's desktop", url: "/desktop" }],
-          progress: true,
-        });
-        await runtime.start(signal);
-        return waitFor(signal, (status) => status.running && status.state === "ready");
-      }
-      deps.ensureRecoveryAvailable?.();
-      if (!initial.installed) {
-        interact.show(installingView());
-        await runtime.install(signal);
-      }
-      await runtime.installReader(signal);
-      // The client is deliberately not started here — recovery launches it under
-      // gdb to own it from birth and catch the first login. Only the session it
-      // draws into and the capture driver are readied.
-      await runtime.prepareSession();
-      await deps.stageDriver();
-      return null;
-    });
-
-    let status = ready;
-    if (!status) {
-      status = await ctx.step("capture-login", async (signal) => {
-        // Recovery launches the client, so the login window appears once this
-        // begins. While recovery waits for the guardian to sign in, poll that
-        // window and stream it into the view as the scannable QR, so the
-        // guardian scans inside Rome rather than opening the desktop. The
-        // passphrase comes back the moment that first login derives the key.
-        // A cached account store makes the client show a sign-in button, which
-        // needs the desktop, so that case skips the QR stream.
-        const remembered = (await runtime.status()).loggedIn;
-        interact.show(remembered ? rememberedView() : scanView());
-        const recovery = deps.recoverPassphrase(signal);
-        const qr = { stop: remembered };
-        const qrLoop = (async () => {
-          let last: string | undefined;
-          while (!qr.stop && !signal.aborted) {
-            const shot = await runtime.captureLoginQr().catch(() => null);
-            if (shot && shot !== last) {
-              last = shot;
-              interact.show(scanView(shot));
-            }
-            await abortableDelay(qrPollIntervalMs, signal).catch(() => {});
-          }
-        })();
-        try {
-          const passphrase = await recovery;
-          qr.stop = true;
-          await qrLoop;
-          interact.show(keysView(remembered));
-          await waitFor(signal, (s) => s.loggedIn);
-          // Derive and verify the per-database keys from the captured passphrase.
-          const deadline = Date.now() + loginTimeoutMs;
-          for (;;) {
-            try {
-              await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
-              break;
-            } catch (error) {
-              if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline) throw error;
-              await abortableDelay(pollIntervalMs, signal);
-            }
-          }
-          return waitFor(signal, (s) => s.running && s.state === "ready");
-        } catch (error) {
-          qr.stop = true;
-          await qrLoop.catch(() => {});
-          throw error;
+    // The capture lease, once the setup takes the capture path. Released when
+    // the setup ends, whether it grants, fails or is cancelled.
+    const lease: { release?: () => void } = {};
+    const grant = async () => {
+      const ready = await ctx.step("ensure-runtime", async (signal) => {
+        const initial = await runtime.status();
+        if (initial.state === "ready" && initial.running) return initial;
+        if (initial.keysReady) {
+          interact.show({
+            title: "Resuming WeChat",
+            body: [
+              "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
+            ],
+            links: [{ label: "Open Rome's desktop", url: initial.desktopPath }],
+            progress: true,
+          });
+          await runtime.start(signal);
+          return waitFor(signal, (status) => status.running && status.state === "ready");
         }
+        // From here the setup owns the client until its key capture ends: the
+        // capture kills any client and relaunches it under a debugger, so nothing,
+        // such as an open /desktop/wechat, may launch an ordinary one meanwhile.
+        lease.release ??= runtime.holdCapture();
+        if (!initial.installed) {
+          interact.show(installingView());
+          await runtime.install(signal);
+        }
+        // The client is deliberately not started here — the capture launches it
+        // under gdb to own it from birth and catch the first login. Only the
+        // session it draws into is readied.
+        await runtime.prepareSession();
+        return null;
       });
-    }
 
-    const profile = wechatUserProfileFromStatus(status, new Date()) ?? undefined;
-    return {
-      credential: containerCredential(status.wxid),
-      ...(profile ? { profile } : {}),
-      summary: {
-        title: "WeChat connected",
-        body: [
-          `${status.wxid ?? "Your WeChat account"} is signed in on your instance. Rome can now read your chats and message history.`,
-          "This connection is read-only — Rome never sends WeChat messages.",
-        ],
-      },
+      let status = ready;
+      if (!status) {
+        status = await ctx.step("capture-login", async (signal) => {
+          // Held already when the first step took the capture path; taken
+          // here when this step runs on its own.
+          lease.release ??= runtime.holdCapture();
+          // The capture launches the client, so the login window appears once
+          // this begins. While the capture waits for the guardian to sign in,
+          // poll that window and stream it into the view as the scannable QR, so
+          // the guardian scans inside Rome rather than opening the desktop. The
+          // capture ends once that first login unlocks the store.
+          // A cached account store makes the client show a sign-in button, which
+          // needs the desktop, so that case skips the QR stream.
+          const remembered = (await runtime.status()).loggedIn;
+          // The capture replaces any running client, so it starts on WeChat's
+          // own desktop. The capture, the QR stream and the links all use the
+          // display this returns, never a legacy client's that a status() reports.
+          const display = await runtime.ensureDesktop(signal);
+          const desktopPath = runtime.desktopPathFor(display);
+          interact.show(remembered ? rememberedView(desktopPath) : scanView(desktopPath));
+          const capture = runtime.captureKeys(display, signal);
+          const qr = { stop: remembered };
+          const qrLoop = (async () => {
+            let last: string | undefined;
+            while (!qr.stop && !signal.aborted) {
+              const shot = await runtime.captureLoginQr(display).catch(() => null);
+              if (shot && shot !== last) {
+                last = shot;
+                interact.show(scanView(desktopPath, shot));
+              }
+              await abortableDelay(qrPollIntervalMs, signal).catch(() => {});
+            }
+          })();
+          try {
+            await capture;
+            qr.stop = true;
+            await qrLoop;
+            interact.show(keysView(remembered, desktopPath));
+            return waitFor(signal, (s) => s.running && s.state === "ready");
+          } catch (error) {
+            qr.stop = true;
+            await qrLoop.catch(() => {});
+            throw error;
+          }
+        });
+      }
+
+      const profile = wechatUserProfileFromStatus(status, new Date()) ?? undefined;
+      return {
+        credential: containerCredential(status.wxid),
+        ...(profile ? { profile } : {}),
+        summary: {
+          title: "WeChat connected",
+          body: [
+            `${status.wxid ?? "Your WeChat account"} is signed in on your instance. Rome can now read your chats and message history.`,
+            "This connection is read-only — Rome never sends WeChat messages.",
+          ],
+        },
+      };
     };
+    try {
+      return await grant();
+    } finally {
+      lease.release?.();
+    }
   };
 }
 
@@ -385,47 +369,23 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
 
 function toConversationDescriptor(
   connectionId: string,
-  conversation: WechatUserConversation,
-): ConversationDescriptor {
+  conversation: WechatUserChat,
+): ChatDescriptor {
   return {
-    ref: { connectionId, conversationId: conversation.id as ConversationId },
-    service: WECHAT_USER_SERVICE,
+    ref: { connectionId, chatId: conversation.id as ChatId },
+    connectionKind: WECHAT_USER_KIND,
+    service: WECHAT_USER_KIND,
     kind: conversation.isGroup ? "group" : "dm",
     displayName: conversation.name || conversation.id,
-  };
-}
-
-/**
- * Project a reader message onto Talk's provider-neutral shape. `senderId`
- * falls back to the conversation for an authorless system notice, because an
- * empty sender reads downstream as an unknown person rather than as the chat.
- */
-export function toWechatUserInboundMessage(message: WechatUserMessage): InboundMessage {
-  return {
-    messageId: message.id,
-    conversationId: message.conversationId as ConversationId,
-    senderId: message.senderId || message.conversationId,
-    ...(message.senderName ? { senderDisplayName: message.senderName } : {}),
-    text: message.text,
-    attachments: [],
-    timestamp: new Date(message.timestamp * 1000),
-    thread: {
-      kind: message.isGroup ? "group" : "dm",
-      ...(message.conversationName ? { name: message.conversationName } : {}),
-    },
-    raw: message,
   };
 }
 
 // ── descriptor ────────────────────────────────────────────────────────────
 
 export interface WechatUserDescriptorDeps {
-  /** How host-root scripts run — the action-driven runner in production. The
-   *  key recovery is the only thing that needs it, and it may be absent when
-   *  host execution is disabled, in which case connecting fails before installation
-   *  rather than at registration. */
-  rootScriptRunner?: RootScriptRunner;
-  /** Injectable client runtime (tests). */
+  /** The client runtime. Boot passes the one the channel list reads through,
+   *  so the channel and this Connection coordinate one client; built here when
+   *  absent (tests). The reader is a stateless wrapper over it. */
   runtime?: WechatUserRuntime;
   pollIntervalMs?: number;
   probeIntervalMs?: number;
@@ -441,50 +401,33 @@ export function createWechatUserDescriptor(
   const runtime = deps.runtime ?? new WechatUserRuntime();
   const reader = new WechatUserReader(runtime);
 
-  const ensureRecoveryAvailable = () => {
-    if (!deps.rootScriptRunner) {
-      throw new Error(
-        "Host execution is not enabled on this instance, so Rome cannot recover the WeChat message-store key.",
-      );
-    }
-  };
-  const recoverPassphrase = async (signal: AbortSignal): Promise<string> => {
-    ensureRecoveryAvailable();
-    const driverDir = await stageCaptureDriver();
-    try {
-      return await recoverWechatPassphrase(
-        deps.rootScriptRunner!,
-        { anchorPid: process.pid, driverDir, home: runtime.home },
-        signal,
-      );
-    } finally {
-      await rm(driverDir, { recursive: true, force: true });
-    }
-  };
-
   const sessionScheme = wechatUserSessionScheme(reader);
   sessionScheme.setup = makeWechatUserSetup({
     runtime,
-    recoverPassphrase,
-    ensureRecoveryAvailable,
-    stageDriver: async () => {},
     ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
   });
 
   return {
-    service: WECHAT_USER_SERVICE,
-    reviveProfile: (_grant, record) => reviveWechatUserProfile(record),
-    auth: {
-      session: sessionScheme,
-    },
+    connectionKind: WECHAT_USER_KIND,
+    reviveProfile: (record) => reviveWechatUserProfile(record),
+    accountIdOf: (record) => (typeof record.wxid === "string" && record.wxid) || null,
+    grant: "session",
+    auth: sessionScheme,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
+        // Read-only: the personal account is consulted, never written to or
+        // answered (docs/architecture/channels.md#wechat-personal-account).
+        sends: false,
+        receives: false,
         build(_creds, kit): Talker {
           let degradation: CapabilityDegradation | null = null;
           let probe: ReturnType<typeof setTimeout> | null = null;
           let controller: AbortController | null = null;
           let pending: Promise<void> | null = null;
+          // The client process whose sign-in button Rome pressed: once each, so a
+          // phone prompt the guardian missed or declined is not sent every probe.
+          // A probe that found no button tries again on the next one.
+          let signInPressedFor: number | undefined;
 
           const directory: TalkDirectory = {
             async listConversations(input) {
@@ -505,17 +448,9 @@ export function createWechatUserDescriptor(
             },
           };
 
-          const history: TalkHistory = {
-            async query(input) {
-              const messages = await reader.messages({
-                ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-                ...(input.since ? { since: input.since } : {}),
-                limit: historyQueryLimit(input.limit),
-              });
-              return messages.map(toWechatUserInboundMessage);
-            },
-          };
-
+          // `directMessaging` is absent on purpose: leaving it off is the
+          // whole declaration that this channel cannot be written to.
+          const features: TalkFeatures = { directory };
           const talker: WechatUserTalker = {
             // Read-only: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused. History is answered on demand, never pushed.
@@ -530,6 +465,7 @@ export function createWechatUserDescriptor(
                 try {
                   let status = await runtime.status();
                   if (epoch.signal.aborted) return;
+                  const wasRunning = status.running;
                   if (status.installed && !status.running) {
                     degradation = {
                       reason:
@@ -540,6 +476,39 @@ export function createWechatUserDescriptor(
                     status = await runtime.status();
                   }
                   if (epoch.signal.aborted) return;
+                  if (wasRunning) {
+                    // A client that was already running joins accessibility
+                    // live; a restarted one got it from start(). Never throws,
+                    // so it cannot degrade a client that reads fine.
+                    await runtime.ensureAccessibility();
+                    if (epoch.signal.aborted) return;
+                    // The desktop outlives any one process on it; restart a part
+                    // that died, so the guardian can still reach the client.
+                    await runtime.repairDesktop(epoch.signal);
+                    if (epoch.signal.aborted) return;
+                  }
+                  // After a restart a remembered account waits at its sign-in
+                  // button. Press it; a sign-in that completes clears the
+                  // degradation below, so the guardian hears nothing.
+                  if (
+                    status.state === "awaiting-scan" &&
+                    status.loggedIn &&
+                    status.pid !== undefined &&
+                    status.pid !== signInPressedFor
+                  ) {
+                    if (await runtime.pressSignIn(status.display, epoch.signal)) {
+                      signInPressedFor = status.pid;
+                      const until = Date.now() + SIGN_IN_WAIT_MS;
+                      do {
+                        await abortableDelay(
+                          deps.pollIntervalMs ?? STATUS_POLL_INTERVAL_MS,
+                          epoch.signal,
+                        );
+                        status = await runtime.status();
+                      } while (status.state === "awaiting-scan" && Date.now() < until);
+                    }
+                    if (epoch.signal.aborted) return;
+                  }
                   if (!status.running) {
                     degradation = {
                       reason:
@@ -557,6 +526,13 @@ export function createWechatUserDescriptor(
                     degradation = {
                       reason:
                         "WeChat needs sign-in confirmation. Open Rome's desktop and confirm on your phone if asked. Saved history remains available.",
+                    };
+                  } else if (status.state === "ready" && status.movePending) {
+                    // It works, but still beside Chrome. Rome never restarts a
+                    // live client itself, since that can ask the phone to confirm.
+                    degradation = {
+                      reason:
+                        "WeChat still runs on the shared desktop beside Rome's Chrome. To move it to its own desktop, quit WeChat at /desktop. Rome starts it again within a few minutes at /desktop/wechat, and your phone may ask you to confirm the sign-in.",
                     };
                   } else if (status.state === "ready") {
                     degradation = null;
@@ -595,12 +571,7 @@ export function createWechatUserDescriptor(
             async send(): Promise<never> {
               throw new Error("The WeChat personal connection is read-only");
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              // `directMessaging` is absent on purpose: answering null is the
-              // whole declaration that this channel cannot be written to.
-              const features: Partial<TalkFeatureMap> = { directory, history };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {
               return degradation;
             },

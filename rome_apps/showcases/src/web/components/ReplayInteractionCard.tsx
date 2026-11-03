@@ -5,7 +5,7 @@ import type { ReplyInteractionBlock } from "../../trace/types.js";
 //
 // The live chat renders an agent's `pending_interaction` as either the host
 // built-in `question-card` (QuestionCard.tsx) or an app-provided component
-// mounted from the app's bundle (AppComponentBlock.tsx). A showcase replay is
+// mounted from the app's bundle (AppComponentView.tsx). A showcase replay is
 // static and must stay distributable (no host/app bundles to mount), so we
 // reproduce the *resolved* state read-only: the built-in question-card is
 // rebuilt faithfully from its props + the guardian's answer; an app component

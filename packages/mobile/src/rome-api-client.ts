@@ -1,8 +1,11 @@
-import type { CredentialVault } from "./credential-vault";
-import { fetchWithoutRedirect } from "./http";
-import type { InstanceSessionCoordinator } from "./instance-session-coordinator";
-import type { CloudInstance, InstanceSession } from "./native-auth-types";
-import { NativeAuthError } from "./native-auth-types";
+import {
+  type CloudInstance,
+  type CredentialVault,
+  fetchWithoutRedirect,
+  type InstanceSession,
+  type InstanceSessionCoordinator,
+  NativeAuthError,
+} from "@rome-os/libs/native-auth";
 
 function apiUrl(instance: CloudInstance, path: string): URL {
   if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\")) {

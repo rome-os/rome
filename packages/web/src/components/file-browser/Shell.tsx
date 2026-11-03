@@ -13,6 +13,7 @@ import { Sidebar } from "./Sidebar";
 import { Content, HistoryMobileSheet } from "./Content";
 import { Dialogs } from "./Dialogs";
 import { DropOverlay } from "./DropOverlay";
+import { UploadProgressFromStore } from "./UploadProgress";
 import { FilesPane } from "@/components/files-pane";
 import { FolderPanelTabBar } from "./FolderPanelTabBar";
 import { useUrlSelectionSync } from "./hooks/useUrlSelectionSync";
@@ -47,6 +48,7 @@ interface ShellProps {
   onStartChatFromFolder?: (path: string) => void;
   onSelectionChange?: (selection: {
     selectedPath: string | null;
+    currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
   folderPanel?: (props: { path: string }) => ReactNode;
@@ -72,6 +74,7 @@ export function Shell({
   const showHistory = useFileBrowserStore((s) => s.ui.showHistory);
   const showSearch = useFileBrowserStore((s) => s.ui.showSearch);
   const filesPaneDrillPath = useFileBrowserStore((s) => s.ui.filesPaneDrillPath);
+  const uploadActive = useFileBrowserStore((s) => s.ui.uploadProgress !== null);
   const contextMenuActions = useContextMenuActions({ rootLabel, onStartChatFromFolder });
   // Compact ("below md") is keyed off this browser's *own* width, not the
   // viewport — so an embedded panel (e.g. the workspace Projects widget)
@@ -129,7 +132,7 @@ export function Shell({
   usePageHideKeepalive();
   useAutoSaveOrchestration();
   useExternalSelection(externalSelection);
-  useSelectionChangeBroadcast(onSelectionChange);
+  useSelectionChangeBroadcast(isBelowMd, onSelectionChange);
 
   const handleUploadSelection = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -192,7 +195,9 @@ export function Shell({
       // variants — the CSS counterpart to the JS `isBelowMd` above, both keyed
       // to this same element at the same breakpoint.
       className={`@container/fb relative flex flex-col bg-surface-muted ${
-        embedded ? "h-full" : "h-[var(--rome-mobile-content-height)] md:h-dvh"
+        embedded
+          ? "h-full"
+          : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]"
       }`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -219,6 +224,13 @@ export function Shell({
           <FolderPanelTabBar />
         </div>
       )}
+      {/* Sidebar shows the card on md+; compact layouts show it above both
+          the navigator and the Content overlay so it never gets hidden. */}
+      {isBelowMd && uploadActive && (
+        <div className="shrink-0 border-b border-border-subtle bg-surface p-3">
+          <UploadProgressFromStore />
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         {isBelowMd ? (
           <FilesPane
@@ -228,7 +240,6 @@ export function Shell({
           />
         ) : (
           <Sidebar
-            embedded={embedded}
             rootLabel={rootLabel}
             rootPanelTrigger={rootPanelTrigger}
             sidebarHeading={sidebarHeading}

@@ -29,8 +29,11 @@ fi
 
 # Read the file list into an array so paths with spaces survive. Include
 # untracked-but-not-ignored files so a brand-new script is linted before it is
-# ever committed (and so does not slip past CI on the PR that adds it).
-mapfile -t files < <(git ls-files --cached --others --exclude-standard '*.sh')
+# ever committed (and so does not slip past CI on the PR that adds it). s6
+# names a service's scripts run, finish and data/check, with no extension.
+mapfile -t files < <(git ls-files --cached --others --exclude-standard '*.sh' \
+  'scripts/docker/s6-rc.d/*/run' 'scripts/docker/s6-rc.d/*/finish' \
+  'scripts/docker/s6-rc.d/*/data/check')
 if [ "${#files[@]}" -eq 0 ]; then
   echo "lint-shell: no *.sh files tracked" >&2
   exit 0

@@ -41,8 +41,6 @@ async function stageSymlinkBlob(at: string, target: string, stage = 0): Promise<
 beforeEach(async () => {
   repo = await mkdtemp(path.join(tmpdir(), "agents-symlink-lint-"));
   await git("init", "-q");
-  await git("config", "user.email", "test@example.com");
-  await git("config", "user.name", "Test");
 });
 
 afterEach(async () => {
@@ -116,7 +114,7 @@ describe("lintAgentsSymlinks", () => {
     ]);
   });
 
-  it("does not accept a child of an AGENTS.md directory as the link", async () => {
+  it("reports an AGENTS.md directory, and converges once the remediation is followed", async () => {
     await writeClaudeMd(".");
     await mkdir(path.join(repo, "AGENTS.md"));
     // A pathspec naming a directory matches everything under it, so this child
@@ -124,18 +122,11 @@ describe("lintAgentsSymlinks", () => {
     await symlink("CLAUDE.md", path.join(repo, "AGENTS.md/only-child"));
     await git("add", "-A");
 
-    expect(lint()[0]).toContain("AGENTS.md is a directory — remove or rename it");
-  });
-
-  it("converges after the directory remediation is followed", async () => {
-    await writeClaudeMd(".");
-    await mkdir(path.join(repo, "AGENTS.md"));
-    await symlink("CLAUDE.md", path.join(repo, "AGENTS.md/only-child"));
-    await git("add", "-A");
-
+    const [finding] = lint();
+    expect(finding).toContain("AGENTS.md is a directory — remove or rename it");
     // `ln -sf` would land inside the directory, so the advice says to remove it
     // first; following both steps must leave a clean tree.
-    const fix = lint()[0].split("remove or rename it, then: ")[1];
+    const fix = finding.split("remove or rename it, then: ")[1];
     await rm(path.join(repo, "AGENTS.md"), { recursive: true });
     await execFileAsync("sh", ["-c", fix], { cwd: repo });
 
@@ -198,24 +189,17 @@ describe("lintAgentsSymlinks", () => {
     expect(lint()[0]).toContain("AGENTS.md is a symlink to");
   });
 
-  it("does not let a glob metacharacter in a path match another directory", async () => {
+  it("keeps a glob metacharacter in a path from matching a sibling directory", async () => {
     await writeClaudeMd("docs/starXdir");
     await symlink("CLAUDE.md", path.join(repo, "docs/starXdir/AGENTS.md"));
     await writeClaudeMd("docs/star*dir");
     await git("add", "-A");
 
+    const [finding] = lint();
     // As a pathspec, `docs/star*dir/AGENTS.md` would match the sibling's link.
-    expect(lint()[0]).toContain("docs/star*dir/AGENTS.md is missing");
-  });
-
-  it("keeps the suggested git command from globbing onto a sibling", async () => {
-    await writeClaudeMd("docs/starXdir");
-    await symlink("CLAUDE.md", path.join(repo, "docs/starXdir/AGENTS.md"));
-    await writeClaudeMd("docs/star*dir");
-    await git("add", "-A");
-
+    expect(finding).toContain("docs/star*dir/AGENTS.md is missing");
     // Plain `git add -- 'docs/star*dir/AGENTS.md'` would stage the sibling too.
-    expect(lint()[0]).toContain("git --literal-pathspecs add -- 'docs/star*dir/AGENTS.md'");
+    expect(finding).toContain("git --literal-pathspecs add -- 'docs/star*dir/AGENTS.md'");
   });
 
   it("names the real path, and quotes it in the fix, for an awkward directory name", async () => {

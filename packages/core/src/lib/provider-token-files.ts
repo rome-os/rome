@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import { dirname } from "node:path";
 import type {
   OAuthProviderGrantProfile,
+  ShopifyGrantProfile,
   SlackGrantProfile,
 } from "../connections/integrations/oauth-providers.js";
 import type { SecretRecord } from "../connections/types.js";
@@ -55,6 +56,10 @@ export function getProviderTokenFilePath(provider: OAuthProvider): string {
  * - `slack`: a JSON object `{ botToken, userToken, teamId }` — the bot/user
  *   tokens are secret (`material.botToken` / `material.userToken`); `teamId` is
  *   workspace identity and rides in `profile.teamId`.
+ * - `shopify`: a JSON object `{ accessToken, shop }` — the hourly access token
+ *   (`material.accessToken`, rewritten on each refresh) and the store's
+ *   `.myshopify.com` domain, the Admin API host (`profile.login`). No file
+ *   without both: a token alone can't say which store it opens.
  * - any other provider (e.g. `google`): no file consumer today → `null`.
  */
 function serializeProviderTokenFile(
@@ -73,6 +78,12 @@ function serializeProviderTokenFile(
       const userToken = material.userToken ?? null;
       const teamId = (profile as SlackGrantProfile).teamId ?? null;
       return `${JSON.stringify({ botToken, userToken, teamId })}\n`;
+    }
+    case "shopify": {
+      const accessToken = material.accessToken?.trim();
+      const shop = (profile as ShopifyGrantProfile).login;
+      if (!accessToken || !shop) return null;
+      return `${JSON.stringify({ accessToken, shop })}\n`;
     }
     default:
       return null;

@@ -8,6 +8,7 @@ import {
 } from "@rome-os/app-runtime";
 
 import {
+  composioActionError,
   githubViaRomeHint,
   isRomeManagedToolkit,
   loadConnectorClient,
@@ -77,7 +78,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
         if (account.kind === "ambiguous") {
           return {
             status: "error",
-            error: `Toolkit "${toolkit}" has ${account.ids.length} active managed connections — resolve the duplicate in the Connector dashboard before executing tools.`,
+            error: `Toolkit "${toolkit}" has ${account.ids.length} active managed connections — resolve the duplicate in Settings › Connections before executing tools.`,
           };
         }
         const result = await client.executeTool({
@@ -104,7 +105,15 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("tool execution failed", { slug, toolkit, error: message });
-        return { status: "error", error: `Composio tool execution failed: ${message}` };
+        return {
+          status: "error",
+          error: await composioActionError(
+            client,
+            err,
+            "Composio tool execution failed",
+            `connector_tool_execute for "${slug}"`,
+          ),
+        };
       }
     },
   });

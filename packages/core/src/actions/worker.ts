@@ -1,5 +1,4 @@
 import { context, propagation } from "@opentelemetry/api";
-import { isWorkerRpcResponse } from "./worker-rpc-client.js";
 import { isIpcMessage, getWorkerIpc } from "./ipc.js";
 import {
   initTelemetry,
@@ -83,7 +82,7 @@ let enginePromise: Promise<ActionEngine> | null = null;
 let running = false;
 
 // Eagerly initialize the worker-side IpcRpc so it attaches its process.on
-// listener before the first agent.session.runTurn call lands.
+// listener before the first call into main lands.
 getWorkerIpc();
 
 function getEngine(): Promise<ActionEngine> {
@@ -116,13 +115,6 @@ process.once("disconnect", () => {
 });
 
 process.on("message", (message: unknown) => {
-  // rpc_response messages are handled by the WorkerRpcClient instance that
-  // issued the call — it installs its own process.on("message") listener via
-  // getWorkerRpc(). Skip them here so they don't trip the startup path or
-  // the "unexpected message after startup" warning.
-  if (isWorkerRpcResponse(message)) {
-    return;
-  }
   // IpcRpc messages are handled by the singleton IpcRpc instance via
   // its own process.on("message") listener; ignore them here.
   if (isIpcMessage(message)) {

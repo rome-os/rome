@@ -301,11 +301,16 @@ export function parseThreadSnapshot(result: OpencliResult): LinkedInSnapshotMess
   }));
 }
 
+export interface LinkedInReplyReceipt extends LinkedInSnapshotMessage {
+  /**
+   * Whether LinkedIn stored the text that was sent, line breaks included. Null
+   * when the receipt carried no body, or the installed plugin predates the check.
+   */
+  textMatches: boolean | null;
+}
+
 /** A reply receipt must carry the same provider id as the history mirror. */
-export function parseLinkedInReply(
-  result: OpencliResult,
-  threadId: string,
-): LinkedInSnapshotMessage {
+export function parseLinkedInReply(result: OpencliResult, threadId: string): LinkedInReplyReceipt {
   if (result.code === null) {
     throw new OpencliCommandError(
       "linkedin reply",
@@ -327,6 +332,7 @@ export function parseLinkedInReply(
       snapshotRowSchema.extend({
         status: z.literal("sent"),
         sender_is_self: z.literal(true),
+        text_matches: z.boolean().nullish(),
       }),
     )
     .length(1)
@@ -344,7 +350,7 @@ export function parseLinkedInReply(
       "Send outcome is unknown. Check LinkedIn before retrying.",
     );
   }
-  return message;
+  return { ...message, textMatches: parsed.data[0]?.text_matches ?? null };
 }
 
 // ── thread-participants ───────────────────────────────────────────────────
@@ -386,7 +392,7 @@ function emptyToNull(value: string | null | undefined): string | null {
 /**
  * Parse `linkedin thread-participants`. Rows without a member id are dropped
  * rather than stored as a blank account — `participant_id` is the primary key
- * of `linkedin_participants` and has to match `channel_mappings.channel_user_id`.
+ * of `linkedin_participants` and has to match `links.account_id`.
  *
  * An empty result is a failure, not an empty thread: the store reads an empty
  * participant set as "everyone left" and would wipe the thread's membership,
@@ -413,17 +419,4 @@ export function parseThreadParticipants(result: OpencliResult): LinkedInThreadPa
     throw new OpencliCommandError("linkedin thread-participants", "reported no participants");
   }
   return participants;
-}
-
-/** Read one thread's full participant list through opencli. */
-export async function readLinkedInThreadParticipants(
-  input: { threadUrl: string },
-  run: RunOpencli = runOpencli,
-  opts: RunOpencliOptions = {},
-): Promise<LinkedInThreadParticipant[]> {
-  const result = await run(
-    ["linkedin", "thread-participants", "--thread-url", input.threadUrl],
-    opts,
-  );
-  return parseThreadParticipants(result);
 }

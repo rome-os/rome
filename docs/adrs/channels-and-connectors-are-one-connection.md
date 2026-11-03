@@ -53,3 +53,106 @@ Future diffs must respect:
 - Availability answers with a reason: the exact missing grants, a missing subscription, or an unsupported capability. A boolean is not an answer.
 - Origin-verification material is not a grant product and stays out of the credential, so deliveries remain verifiable while a grant is degraded.
 - Connecting and using stay joined only at the grant ledger and the two crossing signals. A conferral flow does not reach into capability wiring, and a capability does not drive guardian interaction.
+
+## Amendment (2026-09-28): a channel is not a Connection
+
+The decision above unified credentials, capabilities and webhook ingestion under Connections, and it stands for those. It also read a conversational surface as a Connection's Talk, and that half is withdrawn. A channel is a separate concept: a name plus the ports `send`, `inbound`, `accounts` and `messages`, each of which may be null ([Channel ports](../architecture/channels.md#channel-ports)).
+
+A Connection's Talk may back a channel's `send` and `inbound`. The correspondence is incidental. WhatsApp's `accounts` and `messages` are answered by Rome's synced tables, the WeChat personal account's by its Connection's client reader, and webchat's turns start from its own route rather than from its Connection. The `messages` of a Telegram user account, Discord, email and webchat are answered by their Connection's history read, since no store of Rome's holds them for the channel. A channel whose ports have several backers is still one channel.
+
+App actions reach channels by name through one service, not through Connections. It picks the Connection a send or a history read goes to, and it answers the same way in the main process and in a worker ([Channels for app actions](../architecture/channels.md#channels-for-app-actions)). A Connection's Talk is internal to core, and the app SDK does not export it.
+
+This amends one "future diffs must respect" rule: a new conversational surface does not have to be a Connection. A new credentialed API or webhook stream still does.
+
+## Amendment (2026-10-08): a channel is one presence on a platform
+
+A channel is one of Rome's presences on a platform: one bot, one signed-in user, one mailbox. Its name is its service's. Telegram carries two channels, the `telegram` bot and the `telegram_user` signed-in account, and WeChat carries `wechat` and `wechat_user` the same way. Nothing above the channels of one platform merges them, and the platform is not a name Rome stores.
+
+Links and stored rows name the channel. A person Rome reaches through both Telegram channels is two accounts, and their links join them into one person.
+
+A service holds at most one Connection, so a channel's live ports have one Connection behind them. Widening that is still its own decision. When it is taken, a second presence of one service is a second channel with its own name, never a second Connection merged into the first.
+
+This narrows the amendment above without withdrawing it. A channel's ports may still have several backers, such as synced tables and a Connection's Talk. "One presence" says whose channel it is, not how many things answer for it.
+
+## Amendment (2026-10-15): several Connections per service
+
+A service may hold several Connections, and the store does not limit it: the unique index on the service column, `connections_service_unique`, is dropped. The registry still guards every existing path. `ConnectionRegistry.connect` refuses a service that already holds a Connection, so the code that reads a service's one Connection keeps working. Only a caller that asks for another account of a service mints a second. `POST /connections` does so through `connectUnusedOrAnother`, which first hands back a Connection of the service that no conferral has ever filled, so an abandoned add-account attempt is reused rather than piling up, and mints through `connectAnother` only when there is none. The service's descriptor opts in with `severalAccounts`. A second Connection is a second presence, so it backs a second channel with its own name, as the amendment above requires.
+
+The first channel of a service carries the service's name, because data stored before channels were recorded spells it. Every later channel gets an opaque id, and a screen that shows a channel labels it from the account behind it, never from the name. When a Connection is removed, its channel keeps its name and its conversations, and the service's next Connection takes that channel back, the service-named one first, before a new one is made. People, pairing and channel policies key an account by its service, so an address reached through a later Telegram channel is the same account as on `telegram`.
+
+This narrows two earlier sentences. The decision above says "A service carries at most one Connection", and the 2026-10-08 amendment says "A service holds at most one Connection". Both now hold per channel: a channel's live ports have one Connection behind them, and a service may hold several.
+
+### Alternatives
+
+- **Hold several bots' grants on one Connection.** Rejected because several channels would then share one talker and one health state, so one revoked bot would take down every channel of that service.
+- **Merge a second backer into the service's existing channel.** Rejected because each bot is a separate member wherever it is added. A merged channel cannot tell the bots' conversations apart or link each bot to its own agent.
+
+### Consequences
+
+Uniqueness rests on the registry, not the database. Within the one Rome process, the per-service mint lock holds it, and `connect` refuses a second Connection under that lock. The "future diffs must respect" rule on Connection uniqueness becomes: a Connection backs exactly one channel, and a channel's live ports are backed by one Connection.
+
+## Amendment (2026-10-16): an agent linked to a channel
+
+A channel can be linked to an agent, which answers in that channel's conversations ([An account's agent](../architecture/channels.md#an-accounts-agent)). A channel with no linked agent is silent and does not fall back to main. Main is linked like any other agent. On one platform an agent other than main is linked to at most one channel. Main is exempt because it answers a platform's bot and its signed-in user at once, as it does on Telegram. Every backed channel of a linkable service is linked to main on upgrade, and a linkable service's first channel is linked to main when it is made, so existing and first bots keep answering.
+
+Rome stores each channel's platform as a fixed value mapped from its service ([`platform.ts`](../../packages/api-types/src/platform.ts)). Feishu and Lark are one platform, `telegram` and `telegram_user` are one, and `wechat` and `wechat_user` are one. Every other service is its own platform. The one-agent-per-platform rule counts by it. The 2026-10-08 amendment's "the platform is not a name Rome stores" is withdrawn. Its rule that nothing above the channels of one platform merges them stands.
+
+### Alternatives
+
+- **Let main answer wherever no agent is linked.** Rejected because a guardian who moves an agent to another account would leave the old one answering as main, which is not what moving it means. Linking main makes who answers explicit on every account.
+- **Parse the platform out of a channel id.** Rejected because a later channel's id is opaque, and `telegram_user` would need a parsing rule of its own. A fixed mapping from the service answers the question once.
+
+## Amendment (2026-10-20): an account exists only while it is connected
+
+Adding another account of a service mints its Connection at the end of the setup, not ahead of it. The setup starts addressed to a new account of the service, and its terminal conferral mints the Connection and its channel, as it already does for a service's first Connection. `POST /connections` and `connectUnusedOrAnother` from the 2026-10-15 amendment are withdrawn.
+
+An account here is a Connection of a service with a Talk that names its accounts by its own id for them: a Telegram or Discord bot, a Feishu app, the signed-in Telegram user. Revoking the last grant an account holds removes it, and boot removes any account it finds with no grant held. Every other Connection, email's included, stays after its last grant goes.
+
+A linkable service's next Connection never takes back a released channel, the same account's included, so every account that connects starts fresh and none inherits another's conversations, settings or agent sessions (#1073). Its channel gets the service's name if no channel holds it and an opaque id otherwise, and it is linked to main when it is the service's only connected account. A released channel and its history stay stored, reached by nothing. Services that take no agent keep taking their released channel back, since apps address their one channel by the service's name.
+
+### Alternatives
+
+- **Keep minting ahead of setup, and hide accounts that hold no grant.** Rejected because the hidden rows still back channels, take names and count against the one-agent-per-platform rule.
+- **Give a released channel back to the same account when it connects again.** Rejected to keep one rule for every account that connects: it starts empty.
+
+## Amendment (2026-10-20): an agent linked to any number of channels
+
+An agent can be linked to any number of channels, several on one platform included. The one-agent-per-platform rule from the 2026-10-16 amendment is withdrawn, and so is its partial unique index `channels_platform_agent_unique`. A link changes only the channel it names: linking agent X to channel B leaves X linked to channel A. Main's exemption goes with the rule, so main is linked like any other agent in every respect.
+
+Each channel keeps its stored platform, mapped from its service as the 2026-10-16 amendment sets out, and `GET /api/channels/accounts` reports it. No rule counts links by it.
+
+### Alternatives
+
+- **Keep the rule and let a guardian lift it per agent.** Rejected because the rule protects nothing: each channel answers only its own conversations, so an agent on two channels of one platform answers two separate sets of conversations, as main already does.
+
+## Amendment (2026-10-21): Feishu and Lark are two platforms
+
+Feishu and Lark are two platforms, because one account cannot sign in to both. A channel of the `feishu` service is on `lark` when its app's domain is `lark`, and on `feishu` otherwise ([`platform.ts`](../../packages/api-types/src/platform.ts)). The domain comes from the app grant's profile when the channel is made. `telegram` and `telegram_user` stay one platform, and so do `wechat` and `wechat_user`. The 2026-10-16 amendment's "Feishu and Lark are one platform" is withdrawn. A channel's id and its conversations do not depend on its platform, so only the stored platform and the name the dashboard shows for it change. `GET /api/connections` reports each account's platform beside its channel, which is how the dashboard tells a Lark account from a Feishu one. On upgrade, each channel whose Connection holds a Lark app moves to `lark`.
+
+### Alternatives
+
+- **Add a `lark` service.** Rejected because Feishu and Lark share one SDK, one setup and one adapter, and differ only in the host the app talks to. The domain already tells them apart.
+
+## Amendment (2026-10-21): Rome never picks an account's agent
+
+A newly connected account of a linkable service has no agent, so it is silent until the guardian links one. Connecting an account and linking its agent are two operations, and no step can make them one, so an account always passes through a state with no agent. The 2026-10-16 amendment's "a linkable service's first channel is linked to main when it is made" is withdrawn, and so is the same rule in the 2026-10-20 amendment. An account already connected keeps the agent it has. The boot pass that records a channel for a Connection from before channels were recorded links main, since that account answered as main before accounts took agents, as migration `0081` kept main for the channels recorded then. Where the dashboard asks for an agent is the dashboard's choice.
+
+### Alternatives
+
+- **Link main to a service's first account.** Rejected by the guardian: Rome choosing an agent nobody asked for is confusing.
+
+## Amendment (2026-10-21): a newly connected account gets an opaque id
+
+A linkable service's account that connects through setup gets an opaque id, even when no channel holds the service's name. So an account's id is one no earlier account had, whatever happens to the earlier account's row. Only the boot pass that records a channel for a Connection from before channels were recorded gives a linkable service's channel the service's name, since that data spells it. A service that takes no agent keeps naming its first channel after itself, since apps address that channel by the service's name.
+
+### Alternatives
+
+- **Name a service's first channel after the service, as before.** Rejected because the name then depends on whether an earlier account's row is still stored, which ties every later account to that row.
+
+## Amendment (2026-10-25): the dashboard chat is not a connection
+
+A connection is Rome's access to one external account ([connections.md](../domains/connections.md#connection)). The dashboard chat reaches no external account and holds no grant, so it is not one. Rome serves the webchat channel itself: it sends by storing the reply in its chat and reads what was said from the same records. Migration `0090` removes its Connection and that Connection's channel record. The Connections page does not list it. A visitor who signs in to the dashboard chat proves who they are, which gives Rome no access to act as anyone, so visitor chat would not make it a connection either.
+
+### Alternatives
+
+- **Keep webchat as the one connection with no grant.** Rejected because the rule that a connection holds exactly one grant would need an exception, and the guardian could neither fix nor disconnect it.

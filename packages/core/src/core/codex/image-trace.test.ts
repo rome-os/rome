@@ -9,7 +9,7 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./image-trace.js";
-import type { AgentMessage } from "../../types.js";
+import type { AgentEvent } from "../../types.js";
 
 // Minimal valid PNG: the 8-byte signature is all `sniffImageMimeType` needs.
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
@@ -19,10 +19,10 @@ function newCtx(): ToolTraceState & ImageTraceSessionState {
 }
 
 function toolResult(
-  msgs: AgentMessage[],
-): (AgentMessage & { output?: Record<string, unknown> }) | undefined {
+  msgs: AgentEvent[],
+): (AgentEvent & { output?: Record<string, unknown> }) | undefined {
   return msgs.find((m) => m.type === "tool_result") as
-    | (AgentMessage & { output?: Record<string, unknown> })
+    | (AgentEvent & { output?: Record<string, unknown> })
     | undefined;
 }
 

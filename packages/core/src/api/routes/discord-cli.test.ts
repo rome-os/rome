@@ -1,36 +1,42 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelApiResult } from "../../channels/api-request.js";
-import type { GrantState } from "../../connections/types.js";
+import type { ConnectionState } from "../../connections/types.js";
 import { CredentialRejected } from "../../connections/errors.js";
+import { anotherAccountKey } from "../../connections/setup/manager.js";
 import type { ApiDeps } from "../deps.js";
 import { discordCliRoutes } from "./discord-cli.js";
 
+const SETUP_KEYS = {
+  placeholder: "discord",
+  another: anotherAccountKey("discord"),
+  existing: "discord-1",
+} as const;
+
 function appWith(
   execute?: (request: unknown) => Promise<ChannelApiResult>,
-  opts: { activeSetup?: "placeholder" | "existing"; botGrantState?: GrantState } = {},
+  opts: {
+    activeSetup?: "placeholder" | "another" | "existing";
+    botState?: ConnectionState;
+  } = {},
 ) {
   return discordCliRoutes(
     {
       setupManager: opts.activeSetup
         ? ({
-            activeFor: (idOrService: string, grant: string) =>
-              idOrService === (opts.activeSetup === "existing" ? "discord-1" : "discord") &&
-              grant === "bot"
-                ? "setup-1"
-                : null,
+            activeFor: (idOrKind: string, grant: string) =>
+              idOrKind === SETUP_KEYS[opts.activeSetup!] && grant === "bot" ? "setup-1" : null,
           } as NonNullable<ApiDeps["setupManager"]>)
         : undefined,
       connectionRegistry:
-        execute || opts.activeSetup === "existing" || opts.botGrantState
+        execute || opts.activeSetup === "existing" || opts.botState
           ? ({
               find: (service: string) =>
                 service === "discord"
                   ? [
                       {
                         id: "discord-1",
-                        auth: {
-                          grants: () => ({ bot: opts.botGrantState ?? "unauthorized" }),
-                        },
+                        isUnlocked: (capability: string) => capability === "act" && !!execute,
+                        state: () => opts.botState ?? null,
                         act: execute
                           ? {
                               operations: () => [
@@ -72,6 +78,7 @@ describe("Discord CLI loopback broker routes", () => {
 
   it.each([
     "placeholder",
+    "another",
     "existing",
   ] as const)("reports an in-progress %s Discord setup as not paired", async (activeSetup) => {
     const response = await appWith(undefined, { activeSetup }).request("/_internal/discord/auth");
@@ -86,8 +93,8 @@ describe("Discord CLI loopback broker routes", () => {
     });
   });
 
-  it("keeps a degraded Discord bot grant distinguishable from missing auth", async () => {
-    const response = await appWith(undefined, { botGrantState: "degraded" }).request(
+  it("keeps a broken Discord bot distinguishable from missing auth", async () => {
+    const response = await appWith(undefined, { botState: "broken" }).request(
       "/_internal/discord/auth",
     );
 
@@ -233,6 +240,84 @@ describe("Discord CLI loopback broker routes", () => {
     expect(await response.json()).toMatchObject({
       version: 1,
       error: { type: "response_too_large" },
+    });
+  });
+
+  describe("with two Discord bots", () => {
+    const bot = (id: string, invoked: string[]) => ({
+      id,
+      isUnlocked: () => true,
+      act: {
+        operations: () => [{ name: "discord.api.request" }],
+        invoke: async () => {
+          invoked.push(id);
+          return { response: { status: 200, headers: {}, body: { id } } };
+        },
+      },
+    });
+    const twoBots = (invoked: string[]) =>
+      discordCliRoutes(
+        {
+          connectionRegistry: {
+            find: () => [bot("conn-1", invoked), bot("conn-2", invoked)],
+          } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
+          channelRecords: {
+            byId: (id: string) =>
+              ({
+                "discord-2": { connectionKind: "discord", connectionId: "conn-2" },
+                "telegram-1": { connectionKind: "telegram", connectionId: "conn-2" },
+                "discord-3": { connectionKind: "discord", connectionId: "conn-gone" },
+              })[id] as never,
+          },
+        },
+        "127.0.0.1",
+      );
+
+    it.each([
+      ["acts as the bot backing the named channel", "discord-2", "conn-2"],
+      ["falls back to the first bot for a non-Discord channel", "telegram-1", "conn-1"],
+      ["falls back to the first bot for an unknown channel", "discord-9", "conn-1"],
+      ["falls back to the first bot without a channel", undefined, "conn-1"],
+    ])("%s", async (_name, channel, expected) => {
+      const invoked: string[] = [];
+      const response = await twoBots(invoked).request("/_internal/discord/auth", {
+        headers: channel ? { "x-rome-channel": channel } : {},
+      });
+      expect(response.status).toBe(200);
+      expect(invoked).toEqual([expected]);
+    });
+
+    it("never acts as another bot for a Discord channel whose bot is gone", async () => {
+      const invoked: string[] = [];
+      const response = await twoBots(invoked).request("/_internal/discord/auth", {
+        headers: { "x-rome-channel": "discord-3" },
+      });
+      // The other bots are never asked about, so the error names this one.
+      expect(response.status).not.toBe(200);
+      expect(await response.json()).toMatchObject({ error: { type: "not_authenticated" } });
+      expect(invoked).toEqual([]);
+    });
+
+    it("reports a released Discord channel as not connected, even while another account is being added", async () => {
+      const invoked: string[] = [];
+      const response = await discordCliRoutes(
+        {
+          setupManager: {
+            activeFor: (idOrKind: string, grant: string) =>
+              idOrKind === "discord" && grant === "bot" ? "setup-1" : null,
+          } as NonNullable<ApiDeps["setupManager"]>,
+          connectionRegistry: {
+            find: () => [bot("conn-1", invoked)],
+          } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
+          channelRecords: {
+            byId: () => ({ connectionKind: "discord", connectionId: null }) as never,
+          },
+        },
+        "127.0.0.1",
+      ).request("/_internal/discord/auth", { headers: { "x-rome-channel": "discord-4" } });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: { type: "not_authenticated" } });
+      expect(invoked).toEqual([]);
     });
   });
 });

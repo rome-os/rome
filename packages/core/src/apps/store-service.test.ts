@@ -110,6 +110,54 @@ describe("createAppStoreService", () => {
     expect(result.body.error).toContain("Invalid App Store listing id");
   });
 
+  it("passes Rome Cloud's JSON listing-not-found through as 404", async () => {
+    const service = createAppStoreService({
+      fetch: rs.fn(async () =>
+        Response.json({ error: "Listing not found" }, { status: 404 }),
+      ) as unknown as typeof fetch,
+      browseOriginResolver: () => "https://store.example",
+      fetchOriginResolver: () => "https://internal-store.example",
+    });
+
+    const result = await service.getListing({ listingId: "calendar" });
+
+    expect(result.status).toBe(404);
+    expect(result.body.error).toBe(JSON.stringify({ error: "Listing not found" }));
+  });
+
+  it("reports a non-JSON 404 as an upstream failure, not a missing listing", async () => {
+    const service = createAppStoreService({
+      fetch: rs.fn(
+        async () =>
+          new Response("<html><body>404: This page could not be found</body></html>", {
+            status: 404,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          }),
+      ) as unknown as typeof fetch,
+      browseOriginResolver: () => "https://store.example",
+      fetchOriginResolver: () => "https://internal-store.example",
+    });
+
+    const result = await service.getListing({ listingId: "calendar" });
+
+    expect(result.status).toBe(502);
+    expect(result.body.error).toBe("Rome Cloud returned HTTP 404");
+  });
+
+  it("passes a withdrawn listing's 410 through", async () => {
+    const service = createAppStoreService({
+      fetch: rs.fn(async () =>
+        Response.json({ error: "Listing is not available" }, { status: 410 }),
+      ) as unknown as typeof fetch,
+      browseOriginResolver: () => "https://store.example",
+      fetchOriginResolver: () => "https://internal-store.example",
+    });
+
+    const result = await service.getListing({ listingId: "calendar" });
+
+    expect(result.status).toBe(410);
+  });
+
   it("normalizes sourceAvailable for current and legacy version responses", async () => {
     const fetchMock = rs.fn(
       async () =>

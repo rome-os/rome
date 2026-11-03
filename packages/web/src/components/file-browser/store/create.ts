@@ -736,7 +736,7 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         deleting: false,
         moving: false,
         renaming: false,
-        uploading: false,
+        uploadProgress: null,
         filesPaneDrillPath: null,
 
         setSearchQuery(value) {
@@ -821,6 +821,12 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         async uploadFiles(files, targetPathOverride) {
           if (files.length === 0) return;
           const state = get();
+          // One shared progress card and unload guard track a single batch, so
+          // a second batch must wait instead of overwriting and clearing them.
+          if (state.ui.uploadProgress) {
+            toast.error(config.t("status.uploadInProgress"));
+            return;
+          }
           const fallbackTarget =
             state.selection.selectedFolderPath ??
             state.ui.filesPaneDrillPath ??
@@ -832,8 +838,24 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
           ) {
             return;
           }
+          // Re-check: another batch may have started while unsaved edits were resolved.
+          if (get().ui.uploadProgress) {
+            toast.error(config.t("status.uploadInProgress"));
+            return;
+          }
 
-          set((s) => ({ ui: { ...s.ui, uploading: true } }));
+          set((s) => ({
+            ui: {
+              ...s.ui,
+              uploadProgress: {
+                fileCount: files.length,
+                firstFileName: files[0].file.name,
+                loaded: 0,
+                total: 0,
+                phase: "uploading",
+              },
+            },
+          }));
           try {
             const formData = new FormData();
             formData.append("path", target);
@@ -841,9 +863,54 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
               formData.append("files", file);
               formData.append("paths", relativePath);
             }
-            const response = await fetch(`${apiBasePath}/file`, { body: formData, method: "POST" });
-            const data = (await response.json()) as UploadResponse;
-            if (!response.ok) {
+            const { ok, data } = await new Promise<{ ok: boolean; data: UploadResponse }>(
+              (resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", `${apiBasePath}/file`);
+                xhr.upload.onprogress = (event) => {
+                  set((s) => ({
+                    ui: {
+                      ...s.ui,
+                      uploadProgress: s.ui.uploadProgress && {
+                        ...s.ui.uploadProgress,
+                        loaded: event.loaded,
+                        total: event.lengthComputable ? event.total : 0,
+                        phase:
+                          event.lengthComputable && event.total > 0 && event.loaded >= event.total
+                            ? "finishing"
+                            : "uploading",
+                      },
+                    },
+                  }));
+                };
+                xhr.upload.onload = () => {
+                  set((s) => ({
+                    ui: {
+                      ...s.ui,
+                      uploadProgress: s.ui.uploadProgress && {
+                        ...s.ui.uploadProgress,
+                        phase: "finishing",
+                      },
+                    },
+                  }));
+                };
+                xhr.onload = () => {
+                  try {
+                    resolve({
+                      ok: xhr.status >= 200 && xhr.status < 300,
+                      data: JSON.parse(xhr.responseText) as UploadResponse,
+                    });
+                  } catch (error) {
+                    reject(error);
+                  }
+                };
+                xhr.onerror = () => reject(new Error("Upload network error"));
+                xhr.onabort = () => reject(new Error("Upload aborted"));
+                xhr.ontimeout = () => reject(new Error("Upload timed out"));
+                xhr.send(formData);
+              },
+            );
+            if (!ok) {
               toast.error(data.error || config.t("status.uploadFailed"));
               return;
             }
@@ -860,7 +927,7 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
           } catch {
             toast.error(config.t("status.networkError"));
           } finally {
-            set((s) => ({ ui: { ...s.ui, uploading: false } }));
+            set((s) => ({ ui: { ...s.ui, uploadProgress: null } }));
           }
         },
 

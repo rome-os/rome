@@ -24,7 +24,7 @@ test("the empty composer is one composer line box, inset only by the box's paddi
   page,
 }) => {
   await page.goto("/chat");
-  // A cold rsbuild dev server compiles the route's chunk on demand.
+  // A shared runner can render the route far slower than a warm local machine.
   await expect(page.locator(`${BOX} textarea`)).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => document.fonts.ready);
 

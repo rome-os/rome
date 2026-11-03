@@ -134,3 +134,58 @@ describe("generateCaddyfile social card images", () => {
     );
   });
 });
+
+describe("generateCaddyfile home-screen manifests and icons", () => {
+  it("proxies them through the dynamic matcher in open mode", () => {
+    const caddyfile = generateCaddyfile(openConfig);
+    const dynamic =
+      caddyfile.split("\n").find((line) => line.trim().startsWith("@dynamic path")) ?? "";
+    expect(dynamic).toContain(" /app-manifest/* /app-icon/*");
+  });
+
+  it("exposes them only for allowlisted and cloud-email apps in public-access mode", () => {
+    const caddyfile = generateCaddyfile({
+      enableAccessControl: true,
+      allowedApps: ["morning-brief", "@foo/bar"],
+      cloudEmailAccess: { "night-brief": ["a@b.co"] },
+    });
+    expect(caddyfile).not.toContain("handle /app-manifest/* {");
+    expect(caddyfile).not.toContain("handle /app-icon/* {");
+    for (const seg of ["morning-brief", "%40foo%2Fbar", "night-brief"]) {
+      for (const path of [`/app-manifest/${seg}.webmanifest`, `/app-icon/${seg}.png`]) {
+        const block = caddyfile.split(`handle ${path} {`)[1]?.split("}")[0] ?? "";
+        expect(block).toContain("reverse_proxy 127.0.0.1:");
+        expect(block).not.toContain("forward_auth");
+      }
+    }
+  });
+});
+
+describe("canonical path guard", () => {
+  const modes = {
+    open: { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} },
+    "public-access": {
+      enableAccessControl: true,
+      allowedApps: ["morning-brief"],
+      cloudEmailAccess: {},
+    },
+  };
+
+  for (const [mode, config] of Object.entries(modes)) {
+    it(`runs before every proxied handler in ${mode} mode`, () => {
+      const caddyfile = generateCaddyfile(config);
+      const guardAt = caddyfile.indexOf("handle @nonCanonicalPath {");
+      const firstProxyAt = caddyfile.indexOf("reverse_proxy");
+      expect(guardAt).toBeGreaterThan(-1);
+      expect(guardAt).toBeLessThan(firstProxyAt);
+    });
+  }
+
+  it("leaves an encoded slash allowed for scoped app ids", () => {
+    const caddyfile = generateCaddyfile(modes.open);
+    const expression =
+      caddyfile.split("\n").find((line) => line.trim().startsWith("expression")) ?? "";
+    expect(expression).toContain("%2[eE]");
+    expect(expression).not.toMatch(/%2\[[^\]]*[fF]/);
+  });
+});

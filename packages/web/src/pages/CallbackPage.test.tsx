@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
+import { rememberLoginReturn } from "@/lib/login-return";
 import CallbackPage from "./CallbackPage";
 
 // The /callback screen tries setup resume first (`POST /api/setups/return`,
@@ -156,7 +157,7 @@ describe("CallbackPage return-leg routing", () => {
           JSON.stringify({
             matched: true,
             cid: "setup-gh",
-            service: "github",
+            connectionKind: "github",
             accepted: true,
             state: { status: "presenting", view: { progress: true } },
           }),
@@ -171,7 +172,7 @@ describe("CallbackPage return-leg routing", () => {
     expect(landed.textContent).toBe("/settings/connections/github");
   });
 
-  it("lands on the connections list when the matched setup names no service", async () => {
+  it("lands on the connections list when the matched setup names no connection kind", async () => {
     stubFetch({
       setupReturn: () =>
         new Response(
@@ -204,6 +205,30 @@ describe("CallbackPage return-leg routing", () => {
     );
   });
 
+  it("lands a sign-in on the page the guardian was sent to /login from", async () => {
+    rememberLoginReturn("/full/apps/ttt");
+    stubFetch({
+      redeem: () => new Response(JSON.stringify({ nextPath: "/" }), { status: 200 }),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-return&state=s-return");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/full/apps/ttt");
+    expect(window.localStorage.getItem("rome-login-return")).toBeNull();
+  });
+
+  it("keeps the server's own destination when it names one other than home", async () => {
+    rememberLoginReturn("/full/apps/ttt");
+    stubFetch({
+      redeem: () => new Response(JSON.stringify({ nextPath: "/onboard" }), { status: 200 }),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-onboard&state=s-onboard");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/onboard");
+    window.localStorage.clear();
+  });
+
   it("does not redeem a late return owned by a cancelled setup", async () => {
     const fetchMock = stubFetch({
       setupReturn: () =>
@@ -211,7 +236,7 @@ describe("CallbackPage return-leg routing", () => {
           JSON.stringify({
             matched: true,
             cid: "setup-cancelled",
-            service: "github",
+            connectionKind: "github",
             accepted: false,
             state: { status: "cancelled" },
           }),
@@ -280,7 +305,7 @@ describe("CallbackPage identity routing", () => {
       JSON.stringify({
         matched: true,
         cid: "setup-gh",
-        service: "github",
+        connectionKind: "github",
         accepted: true,
         state: { status: "presenting", view: { progress: true } },
       }),
@@ -294,7 +319,7 @@ describe("CallbackPage identity routing", () => {
     renderCallbackAndTrackLanding("?handoff=h-ext&state=s-ext");
 
     // A matched setup is typically still `presenting` while it redeems, and the
-    // redeem or the conferral can still fail — so this page must not claim the
+    // redeem or the grant can still fail — so this page must not claim the
     // connection exists. It cannot wait for `done` either: `/api/setups/:cid`
     // stays private, so an anonymous browser has nothing to poll.
     expect(await screen.findByText("Authorization received")).toBeTruthy();
@@ -327,7 +352,7 @@ describe("CallbackPage identity routing", () => {
       JSON.stringify({
         matched: true,
         cid: "setup-gh",
-        service: "github",
+        connectionKind: "github",
         accepted: true,
         state: { status: "failed", reason: "Authorization was declined." },
       }),

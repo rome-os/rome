@@ -7,7 +7,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 
-import { loadConnectorClient } from "../../shared.js";
+import { composioActionError, loadConnectorClient } from "../../shared.js";
 
 const log = createAppLogger("connector_tool_schema");
 
@@ -60,7 +60,15 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("tool schema fetch failed", { slug, toolkit, error: message });
-        return { status: "error", error: `Composio tool schema fetch failed: ${message}` };
+        return {
+          status: "error",
+          error: await composioActionError(
+            client,
+            err,
+            "Composio tool schema fetch failed",
+            `connector_tool_schema for "${slug}"`,
+          ),
+        };
       }
     },
   });

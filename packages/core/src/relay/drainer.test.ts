@@ -382,6 +382,65 @@ describe("RelayDrainer", () => {
     }
   });
 
+  it("keeps a socket whose relay answers every heartbeat", async () => {
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      relay = startFakeRelay([]);
+      drainer = new RelayDrainer([relay.drain()], async () => ({ status: 200 }));
+      drainer.start();
+
+      await waitFor(() => drainer!.getStatus()[0]?.connected === true);
+      for (let i = 1; i <= 3; i++) {
+        await rs.advanceTimersByTimeAsync(30_000);
+        await waitFor(() => relay!.protocolPings() === i);
+      }
+      expect(relay.connections()).toBe(1);
+      expect(drainer.getStatus()[0]?.connected).toBe(true);
+    } finally {
+      await drainer?.stop();
+      drainer = null;
+      rs.useRealTimers();
+    }
+  });
+
+  it("drops and reconnects a socket whose relay stops answering heartbeats", async () => {
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    // A path that stalls after the handshake: the relay never pongs.
+    let connections = 0;
+    const wss = new WebSocketServer({ port: 0, autoPong: false });
+    wss.on("connection", (ws: ServerSocket) => {
+      connections++;
+      ws.send(JSON.stringify({ type: "ready", backlog: 0 }));
+    });
+    const port = (wss.address() as AddressInfo).port;
+    try {
+      drainer = new RelayDrainer(
+        [
+          {
+            connectUrl: `ws://127.0.0.1:${port}/c/mailbox`,
+            drainKey: "test-drain-key",
+            targetAppId: "connector",
+            targetPath: ["webhook"],
+          },
+        ],
+        async () => ({ status: 200 }),
+        DEFAULT_TEST_TIMING,
+      );
+      drainer.start();
+
+      await waitFor(() => drainer!.getStatus()[0]?.connected === true);
+      await rs.advanceTimersByTimeAsync(30_000);
+      expect(connections).toBe(1);
+      await rs.advanceTimersByTimeAsync(30_000);
+      await waitFor(() => connections === 2);
+    } finally {
+      await drainer?.stop();
+      drainer = null;
+      wss.close();
+      rs.useRealTimers();
+    }
+  });
+
   it("reports connection uptime and delivery counters once events flow", async () => {
     relay = startFakeRelay([
       { seq: 1, body: "{}" },

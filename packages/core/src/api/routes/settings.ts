@@ -1,3 +1,4 @@
+import { AGENT_REPORTS_ENABLED_KEY } from "../../lib/feedback-client.js";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -11,6 +12,16 @@ import {
 } from "../../routines/guardian-timezone.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
+import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+
+// Keys enforced from an in-memory snapshot that only their dedicated route
+// refreshes. Persisting one here would leave the stored and enforced policies
+// disagreeing until restart.
+const DEDICATED_ROUTE_KEYS: Record<string, string> = {
+  [PUBLIC_ACCESS_SETTING_KEY]: "/api/public-access",
+  [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
+};
 
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
@@ -38,6 +49,16 @@ export function settingsRoutes(deps: ApiDeps): Hono {
     const body = await c.req
       .json<Record<string, unknown>>()
       .catch(() => ({}) as Record<string, unknown>);
+
+    if (AGENT_REPORTS_ENABLED_KEY in body && typeof body[AGENT_REPORTS_ENABLED_KEY] !== "boolean") {
+      return c.json({ error: "feedback.agentReportsEnabled must be a boolean" }, 400);
+    }
+
+    for (const [key, route] of Object.entries(DEDICATED_ROUTE_KEYS)) {
+      if (key in body) {
+        return c.json({ error: `${key} is managed by PUT ${route}, not /api/settings.` }, 400);
+      }
+    }
 
     // guardianTimezone is scheduler input: route it through the shared
     // write helper (validate + persist/clear + reschedule floating routines) so

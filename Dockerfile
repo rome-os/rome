@@ -100,6 +100,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm fetch \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
     --filter @rome-os/app-runtime... \
@@ -126,6 +127,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --prefer-offline --frozen-lockfile \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
     --filter @rome-os/app-runtime... \
@@ -177,6 +179,9 @@ ARG NPM_REGISTRY=""
 # google-chrome from dl.google.com. Lets amd64 builds on networks that cannot
 # reach Google use the same browser path as arm64 (which already ships chromium).
 ARG ROME_FORCE_CHROMIUM=""
+# s6-overlay is PID 1 and supervises the long-running services. See
+# scripts/docker/s6-rc.d.
+ARG S6_OVERLAY_VERSION=3.2.1.0
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -201,7 +206,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       BROWSER_PACKAGE="chromium"; \
       BROWSER_BINARY="/usr/bin/chromium"; \
     fi && \
-    apt-get install -y --no-install-recommends tini git git-lfs gh jq ripgrep openssh-server gosu rsync iptables iproute2 sudo caddy sshfs fuse3 tigervnc-standalone-server novnc websockify openbox xterm socat python3 python3-websocket xclip unzip fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation "$BROWSER_PACKAGE" && \
+    apt-get install -y --no-install-recommends xz-utils git git-lfs gh jq ripgrep openssh-server gosu rsync iptables iproute2 sudo caddy sshfs fuse3 tigervnc-standalone-server novnc websockify openbox xterm socat python3 python3-websocket xclip unzip fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation "$BROWSER_PACKAGE" && \
     git lfs version && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
@@ -214,12 +219,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # client dies before it draws. The browser package already supplies most of the
 # X and GL stack; this is only the remainder.
 #
-# gdb is here because key recovery launches the client under it to catch the
-# passphrase the client derives at its first login. This does not grant the
-# container ptrace: a normal container process still lacks CAP_SYS_PTRACE. The
-# recovery runs gdb only through host root, which enters this container's
-# namespaces from the VM (channels/wechat-user-keys.ts) and keeps its capability
-# across the entry — the gdb binary simply has to exist in this mount namespace.
+# Key recovery launches the client under gdb as the Rome service user.
+# Sending drives the client through its AT-SPI accessibility tree: at-spi2-core
+# runs the accessibility bus beside the client's private session bus, jeepney
+# reads the tree, and xdotool clicks and presses Return where the tree has no
+# action.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -227,7 +231,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
       libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
       libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      python3-venv gdb x11-utils imagemagick
+      gdb x11-utils imagemagick \
+      at-spi2-core xdotool python3-jeepney
 
 # Install AI tool CLIs globally (early for better layer caching).
 # @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the
@@ -235,7 +240,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # does NOT work: npm's replace-registry-host rewrites the npmjs tarball host to the
 # top-level --registry (the mirror), producing a 404.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.251 @openai/codex@0.153.4 && \
+    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.293 @openai/codex@0.160.0 && \
     npm install -g @yunfanye/opencli@1.8.8
 
 RUN curl -fsSL --retry 5 --retry-delay 2 https://composio.dev/install | COMPOSIO_INSTALL_DIR=/usr/local/lib/composio bash -s -- "$COMPOSIO_CLI_VERSION" && \
@@ -281,9 +286,29 @@ RUN set -eux; \
 ENV COREPACK_ENABLE_STRICT=0
 RUN corepack enable && corepack prepare pnpm@11.6.0 --activate
 
+# The image ships no uv, but rome can install it under ~/.local. uv's default
+# directories for its commands, tools and Pythons are already under ~/.local,
+# which an upgrade keeps. This system-wide default stops uv from building an
+# environment on /usr/bin/python3, which an upgrade replaces. An account's own
+# uv.toml takes precedence.
+RUN mkdir -p /etc/uv && printf 'python-preference = "only-managed"\n' > /etc/uv/uv.toml
+
 # Create rome user early so COPY --chown can avoid expensive recursive chown
 RUN groupadd --system rome && \
     useradd --system --no-log-init --gid rome --create-home --shell /bin/bash rome
+
+# The daemon runs as rome with HOME on the persistent volume. Corepack's
+# default cache lives under HOME, and an empty cache pins whatever pnpm is
+# latest on first use, so each instance would install apps with a different
+# pnpm. App installs run pnpm against this cache instead (runPnpm in
+# packages/core/src/apps/packaging/pack.ts). rome owns it so an app that
+# declares another packageManager version can still download that version.
+# Such downloads live in the image layer, not the volume, so they repeat after
+# each container recreate (first-party apps all declare this version).
+ENV ROME_PNPM_COREPACK_HOME=/opt/rome-corepack
+RUN mkdir -p /opt/rome-corepack && \
+    COREPACK_HOME=/opt/rome-corepack corepack prepare pnpm@11.6.0 --activate && \
+    chown -R rome:rome /opt/rome-corepack
 
 # Tailscale binaries + state dirs
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
@@ -293,8 +318,26 @@ RUN mkdir -p /var/lib/tailscale /var/run/tailscale && \
     echo "rome ALL=(root) NOPASSWD: /bin/sh /app/scripts/docker/rome-hostfs-remote-access-provision.sh *" > /etc/sudoers.d/rome-hostfs && \
     chmod 0440 /etc/sudoers.d/rome-tailscale /etc/sudoers.d/rome-hostfs
 
+# s6-overlay, with its published sha256 verified like the Notion CLI above.
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) s6_arch="x86_64" ;; \
+      arm64) s6_arch="aarch64" ;; \
+      *) echo "unsupported arch for s6-overlay" >&2; exit 1 ;; \
+    esac; \
+    tmp="$(mktemp -d)"; \
+    for archive in s6-overlay-noarch.tar.xz "s6-overlay-${s6_arch}.tar.xz"; do \
+      curl -fsSL --retry 5 --retry-delay 2 -o "$tmp/$archive" \
+        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/$archive"; \
+      curl -fsSL --retry 5 --retry-delay 2 -o "$tmp/$archive.sha256" \
+        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/$archive.sha256"; \
+      ( cd "$tmp" && sha256sum -c "$archive.sha256" ); \
+      tar -C / -Jxpf "$tmp/$archive"; \
+    done; \
+    rm -rf "$tmp"
+
 # Build into /opt/rome — the bind-mounted /app volume hides image contents at
-# runtime, so the entrypoint copies from /opt/rome to /app on first run.
+# runtime, so rome-init.sh copies from /opt/rome to /app on first run.
 WORKDIR /opt/rome
 
 # Copy entire built application with correct ownership (avoids expensive chown -R layer)
@@ -338,13 +381,20 @@ COPY Caddyfile /etc/caddy/Caddyfile
 COPY infra/chrome/opencli-policy.json /etc/opt/chrome/policies/managed/rome-opencli.json
 COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencli.json
 
-# Copy entrypoint
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Service definitions and the root-run scripts they call. They live outside
+# /opt/rome, which the rome user owns, so rome cannot change what root runs.
+COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
+COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
+COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
+# rome-init.sh has the rome and user shells source this. It sits outside /app
+# because user cannot read /app.
+COPY scripts/docker/rome-shell-path.sh /usr/local/share/rome/rome-shell-path.sh
 
-# Agent-facing Discord REST CLI. /app is populated from /opt/rome by the
-# entrypoint; the package launcher always loads its compiled dist entrypoint.
+# Agent-facing Discord REST CLI. /app is populated from /opt/rome by
+# rome-init.sh; the package launcher always loads its compiled dist entrypoint.
 RUN ln -sf /app/packages/discord-cli/bin/discord.js /usr/local/bin/discord
+RUN ln -sf /app/packages/rome-node-cli/bin/rome-node.js /usr/local/bin/rome-node
 
 # Chrome/CDP launcher assets
 RUN chmod +x /opt/rome/scripts/docker/rome-start-chrome-cdp.sh /opt/rome/scripts/docker/rome-apply-cdp-stealth.sh
@@ -394,6 +444,7 @@ COPY sshd_config /etc/ssh/sshd_config
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV PANTHEON_BASE_ORIGIN=https://romeos.cc
 ENV INTERNAL_API_WEB_ROOT=/app/packages/web/dist
 ENV ROME_VERSION=${ROME_VERSION}
 ENV ROME_BUILD_SHA=${ROME_BUILD_SHA}
@@ -422,4 +473,9 @@ ENV ROME_CHROME_CLIPBOARD_DEFAULT_SETTING=
 
 EXPOSE 8080 4141 9368 22 5900 6080 9222
 
-ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
+# Wait for the one-time setup however long it takes, and stop the container if
+# it or a service with a readiness check fails to come up.
+ENV S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
+ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
+
+ENTRYPOINT ["/init"]

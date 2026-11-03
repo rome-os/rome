@@ -19,7 +19,7 @@
 // which is a genuine logout rather than a revoked stored credential.
 
 /**
- * Machine-readable classification stamped onto the terminal `ErrorMessage.code`
+ * Machine-readable classification stamped onto the terminal `TurnErrorEvent.code`
  * when a Claude turn fails because its credentials were rejected. It shares the
  * `"auth_revoked"` value with the Codex detector.
  */

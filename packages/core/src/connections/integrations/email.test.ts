@@ -8,10 +8,14 @@
 //      { grant: "inbox" }; adapter.start() rejecting (Rome Cloud outage) →
 //      Disconnected.
 //   4. end-to-end over the real ConnectionRegistry: a bad-signature deposit
-//      degrades the inbox grant (renew-once via setup-driven "re-confer").
+//      degrades the inbox grant (renew-once via setup-driven "needs-fix").
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { createHmac } from "node:crypto";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -19,14 +23,14 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../../lib/rome-cloud-mail.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../../channels/email-control.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { ConversationId, InboundMessage, StreamFault, Talker } from "../types.js";
+import type { ChatId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
@@ -38,10 +42,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -126,11 +130,12 @@ function makeSettingsRepo(
 
 /** A person-mapping fake: no guardian person exists, so mapGuardianToChannel is a
  *  no-op — keeps start() off any write path in the descriptor tests. */
-function makePersonMappingRepo(): PersonMappingRepository {
+function makePersonMappingRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as PersonMappingRepository;
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [],
+  } as unknown as PeopleRepository;
 }
 
 function makeDeps(
@@ -140,7 +145,7 @@ function makeDeps(
   return {
     provider,
     settingsRepo: makeSettingsRepo(),
-    personMappingRepo: makePersonMappingRepo(),
+    peopleRepo: makePersonMappingRepo(),
     // Never hit the real whoami during tests; guardian stays unresolved
     // unless a test's settings row carries it.
     ownerEmailResolver: async () => undefined,
@@ -160,25 +165,24 @@ const validCred = (material: Partial<EmailInboxMaterial> = {}) => ({
 describe("email descriptor shape", () => {
   it("declares one `inbox` grant and a talker needing it", () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    expect(desc.service).toBe("email");
-    expect(Object.keys(desc.auth)).toEqual(["inbox"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["inbox"]);
+    expect(desc.connectionKind).toBe("email");
+    expect(desc.grant).toBe("inbox");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("confer() is setup-driven — throws, never prompts headlessly", async () => {
+  it("obtain() is setup-driven — throws, never prompts headlessly", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     await expect(
-      desc.auth.inbox.confer({
+      desc.auth.obtain({
         prompt: () => Promise.reject(new Error("should not be called")),
       }),
-    ).rejects.toThrow("conferral driven by the connect setup");
+    ).rejects.toThrow("grant driven by the connect setup");
   });
 
-  it("renew() always answers re-confer", async () => {
+  it("renew() always answers fix", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    await expect(desc.auth.inbox.renew(validCred())).resolves.toBe("re-confer");
+    await expect(desc.auth.renew(validCred())).resolves.toBe("needs-fix");
   });
 });
 
@@ -196,19 +200,16 @@ function buildTalker(
 } {
   const desc = makeEmailDescriptor(makeDeps(provider, depsOverride));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
-    { inbox: validCred(material) },
-    {
-      connectionId: "email-test",
-      persist: async () => {},
-      registerIngress: (handler) => {
-        ingress = handler;
-        return () => {
-          ingress = undefined;
-        };
-      },
+  const talker = desc.capabilities.talker!.build(validCred(material), {
+    connectionId: "email-test",
+    persist: async () => {},
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {
+        ingress = undefined;
+      };
     },
-  );
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -258,7 +259,7 @@ describe("email Talker fault mapping", () => {
     await flush();
 
     // start() builds the transport from the grant material it was handed; it must
-    // never reach for MailProvider.provision() (conferral is
+    // never reach for MailProvider.provision() (grant is
     // setup-driven), and a valid grant produces no fault.
     expect(provider.provision).not.toHaveBeenCalled();
     expect(h.faults).toHaveLength(0);
@@ -290,18 +291,15 @@ describe("email Talker fault mapping", () => {
     const provider = makeProvider();
     const desc = makeEmailDescriptor(makeDeps(provider));
     let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-    const talker = desc.capabilities.talker!.build(
-      { inbox: validCred() },
-      {
-        connectionId: "email-test",
-        persist: async () => {},
-        registerIngress: (handler) => {
-          ingress = handler;
-          return () => {};
-        },
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "email-test",
+      persist: async () => {},
+      registerIngress: (handler) => {
+        ingress = handler;
+        return () => {};
       },
-    );
-    const received: InboundMessage[] = [];
+    });
+    const received: ChannelMessage[] = [];
     talker.start(
       (msg) => received.push(msg),
       () => {},
@@ -314,53 +312,166 @@ describe("email Talker fault mapping", () => {
     expect(received[0].text).toBe("hello from the full body");
   });
 
-  it("forwards send() to the provider", async () => {
+  it("forwards a new email to the provider", async () => {
     const provider = makeProvider();
     const h = buildTalker(provider);
     h.start();
 
-    await h.talker.send("t1" as ConversationId, {
+    const receipt = await h.talker.send("" as ChatId, {
       kind: "email",
       to: "someone@example.com",
       text: "hi there",
     });
 
     expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0]).toMatchObject({ to: "someone@example.com", text: "hi there" });
+    expect(receipt).toStrictEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
-  it("forwards fetchHistory and saveIncomingAttachments", async () => {
-    const provider = makeProvider();
-    const h = buildTalker(provider);
+  it("forwards saveIncomingAttachments", () => {
+    const h = buildTalker(makeProvider());
     h.start();
 
-    expect(h.talker.feature("history")).not.toBeNull();
-    expect(h.talker.feature("inboundMedia")).not.toBeNull();
-    const history = await h.talker.feature("history")?.query({ limit: 20 });
-    expect(Array.isArray(history)).toBe(true);
+    expect(h.talker.inboundMedia).toBeDefined();
+  });
+});
+
+/** A talker whose ingress and deliveries the test drives directly. */
+function buildDeliveringTalker(provider: MailProvider): {
+  talker: Talker;
+  delivered: ChannelMessage[];
+  ingest: (event: RomeMailEvent) => Promise<unknown>;
+} {
+  const desc = makeEmailDescriptor(makeDeps(provider));
+  let ingress: ((input: unknown) => Promise<unknown>) | undefined;
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "email-test",
+    persist: async () => {},
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {};
+    },
+  });
+  const delivered: ChannelMessage[] = [];
+  talker.start(
+    (msg) => delivered.push(msg),
+    () => {},
+  );
+  return {
+    talker,
+    delivered,
+    ingest: async (event) => {
+      const rawBody = JSON.stringify(event);
+      return ingress?.({ rawBody, signature: sign(rawBody) });
+    },
+  };
+}
+
+describe("email inbound delivery", () => {
+  let sandboxHome: string;
+
+  beforeEach(async () => {
+    sandboxHome = await mkdtemp(join(tmpdir(), "rome-email-integration-"));
+    rs.stubEnv("HOME", sandboxHome);
+    rs.stubEnv("ROME_PROFILE", "email-test");
+  });
+
+  afterEach(async () => {
+    rs.unstubAllEnvs();
+    rs.unstubAllGlobals();
+    await rm(sandboxHome, { recursive: true, force: true });
+  });
+
+  // An authenticated email with a subject and one attachment, so every field
+  // email sets is present.
+  const event = buildEvent({
+    hasAttachment: true,
+    attachments: [{ blobId: "att_1", name: "doc.pdf", size: 3, type: "application/pdf" }],
+  });
+
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const h = buildDeliveringTalker(makeProvider());
+
+    await h.ingest(event);
+
+    expect(h.delivered).toStrictEqual([
+      {
+        channel: "email",
+        direction: "inbound",
+        messageId: "msg_1",
+        chatId: "t1",
+        senderId: GUARDIAN,
+        senderDisplayName: "Guardian",
+        text: "hello from the full body",
+        attachments: [{ type: "document", mimeType: "application/pdf", fileName: "doc.pdf" }],
+        timestamp: new Date(0),
+        thread: { kind: "dm", name: "Hi" },
+        raw: event,
+      },
+    ]);
+  });
+
+  it("materializes the attachments of a message it delivered", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(Buffer.from("pdf"), { status: 200 })),
+    );
+    const getAttachment = rs.fn(async (_messageId: string, _attachmentId: string) => ({
+      downloadUrl: "https://files.example/presigned",
+      expiresAt: new Date(0).toISOString(),
+      size: 3,
+    }));
+    const h = buildDeliveringTalker(makeProvider({ getAttachment }));
+    await h.ingest(event);
+
+    const saved = await h.talker.inboundMedia!.materialize(h.delivered[0]);
+
+    expect(getAttachment).toHaveBeenCalledWith("msg_1", "att_1");
+    expect(saved[0].localPath).toContain(join("channel-attachments", "email", "t1", "msg_1"));
+  });
+
+  it("returns the attachments unchanged for a message it never ingested", async () => {
+    const getAttachment = rs.fn(async () => {
+      throw new Error("should not be called");
+    });
+    const h = buildDeliveringTalker(makeProvider({ getAttachment }));
+    const attachments = [{ type: "document" as const, fileName: "doc.pdf" }];
+
+    const saved = await h.talker.inboundMedia!.materialize({
+      channel: "email",
+      direction: "inbound",
+      messageId: "msg_unknown",
+      chatId: "t1" as ChatId,
+      senderId: GUARDIAN,
+      text: "",
+      attachments,
+      timestamp: new Date(0),
+    });
+
+    expect(saved).toBe(attachments);
+    expect(getAttachment).not.toHaveBeenCalled();
   });
 });
 
 describe("email descriptor over a real ConnectionRegistry", () => {
   it("reports needs-auth for talk before the inbox grant is imported", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(makeProvider())));
     const conn = await registry.connect("email");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk once the inbox grant is imported and delivers inbound", async () => {
     const provider = makeProvider();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.importCredential(conn.id, "inbox", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "inbox", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk!;
-
-    const received: InboundMessage[] = [];
-    talk.subscribe(async (msg) => {
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
+    const received: ChannelMessage[] = [];
+    conn.hearTalker(async (msg) => {
       received.push(msg);
       return;
     });
@@ -375,12 +486,12 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(received).toHaveLength(1);
   });
 
-  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ re-confer)", async () => {
+  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ fix)", async () => {
     const provider = makeProvider();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.importCredential(conn.id, "inbox", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "inbox", validCred());
     const raw = JSON.stringify(buildEvent());
     const result = await registry.ingest(conn.id, {
       rawBody: raw,
@@ -389,8 +500,8 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(result).toEqual({ status: "rejected", reason: "bad_signature" });
     await flush();
 
-    expect(conn.talk).toBeNull();
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
     expect(conn.auth.grants().inbox).toBe("degraded");
   });
 });

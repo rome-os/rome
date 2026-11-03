@@ -112,7 +112,7 @@ v1 span names:
 | `agent:{name}`           | `AgentRunner` — one per agent turn        |
 | `summon:{child}`         | Subagent-spawn action                     |
 | `action:{name}`          | Action registry (already present)         |
-| `channel:{name}.handle`  | Channel adapters, per inbound message     |
+| `channel:{name}.handle`  | Channel inbound ports, per message heard  |
 | `hook:{name}`            | Hook registry, per hook fire              |
 | `sdk:{method}`           | `@rome-os/app-runtime` SDK entrypoints       |
 

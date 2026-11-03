@@ -61,7 +61,7 @@ so disconnection detection includes its heartbeat timeout and the next Rome chec
 An unreachable daemon makes browser status unknown and preserves the last seen time.
 Remote browsers can reach the daemon through a private SSH tunnel.
 
-- **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
+- **Production image**: `scripts/docker/rome-init.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the
   plugin source in place.
 - **Dev stack**: `scripts/dev-up.sh` (step 4c) installs every `/workspace/opencli-plugins/*/`
@@ -70,6 +70,17 @@ Remote browsers can reach the daemon through a private SSH tunnel.
 
 Agents pick up new/changed commands automatically: the `browser-automation` skill has them run
 `opencli <site> --help` before use, and plugin commands appear there like any built-in.
+
+## User plugins
+
+Per-user scripts live in `~/.rome/<profile>/projects/browser-automation/<site>/`, visible and editable in the Projects UI.
+Use the same flat layout as the Rome plugins above, but name the plugin `user-<site>` and list its commands and overrides in a README.
+Run `opencli plugin install <dir>` once for a new site folder. Source edits are live on the next invocation.
+Both startup install loops also register these folders across all profiles.
+
+Plugins load after built-ins and user adapters. With the OpenCLI sequential-discovery fix released and pinned in Rome's Dockerfiles,
+`user-*` plugins load after `rome-*` and win on command conflicts. Only the matching `site/name` command is replaced.
+The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Dockerfile bump must wait for the fork release containing the fix.
 
 ## Rome-owned commands
 
@@ -100,17 +111,24 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   optional follow-back guard.
 - `opencli twitter follow-network <username> <followers|following> [--limit N]` — follows accounts
   directly from a user's followers or following page and returns only the accounts newly followed.
-- `opencli linkedin contact-info <profile>` — opens a LinkedIn profile's Contact info section and
+- `opencli linkedin contact-info <profile>` — reads a LinkedIn profile's Contact info section and
   returns every field visible to the signed-in account, including websites, email addresses,
   phone numbers, addresses, birthdays, connected dates, and other displayed contact fields.
 - `opencli linkedin thread-snapshot --thread-url URL [--limit N]` — returns the latest messages
   from one exact LinkedIn thread with sender, timestamp, profile, participant id, and reaction
-  metadata.
+  metadata. Message text keeps its line breaks.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
 - `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
   With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
+  Line breaks are sent as line feeds. The receipt's `text` is the body LinkedIn stored, and
+  `text_matches` says whether it kept the sent text's line breaks and words, or is null when no
+  body came back. A `false` there is still a sent message, so check LinkedIn rather than sending
+  again.
   Without `--send`, it only verifies the destination.
+- `opencli linkedin connections [--limit N] [--offset N]` lists first-degree connections in
+  LinkedIn's API order. Every row carries `total`, `coverage`, and `next_offset`, so a partial list
+  is distinguishable from the whole list.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across
@@ -138,6 +156,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 - `opencli zillow download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
   photo of a public Zillow listing into one folder per listing, in gallery order, at the widest
   original-ratio size Zillow serves. `photos URL` lists the same gallery without writing anything.
+- `opencli gemini video PROMPT [--image A.jpg,B.jpg] [--ratio 16:9|9:16] [--output DIR] [--name FILE]`
+  — generates a clip in the signed-in Gemini web session's video composer, optionally animating
+  uploaded photos, waits for the render, and saves the MP4 with the browser's session cookies.
 
 ## Overriding a built-in command: caveats
 
@@ -187,19 +208,62 @@ opencli twitter follow-network @realYunfanYe following --limit 10
 
 The LinkedIn plugin adds a browser-backed, read-only contact reader for the signed-in LinkedIn
 account. It accepts a full `/in/` profile URL, `/in/` path, `@public-id`, bare public identifier, or
-`me`, then opens that profile's Contact info overlay. Each visible contact value is returned as a
+`me`, then reads that profile's contact details. Each visible contact value is returned as a
 typed row with its display label and safe link where one exists.
 
+The reader tries three sources in order and stops at the first that answers: a Contact info section
+already on the profile page, the profile's Contact info link, and the Contact info overlay URL. Each wait is bounded, and the reader stops trying once
+too little of OpenCLI's command timeout (`OPENCLI_BROWSER_COMMAND_TIMEOUT`, 60 seconds by default)
+remains, so a section that never opens returns a status row instead of `TIMEOUT`.
+
 LinkedIn controls which fields the signed-in account may see. A profile with no shared contact
-details, a private contact section, or a missing/restricted profile returns a status row instead of
-failing or pretending that hidden data is available. Authentication walls still produce the
-standard OpenCLI authentication error.
+details returns `no_visible_contact_info`. A private contact section returns
+`contact_info_restricted`. A section that never opens returns `contact_info_unavailable`, and its
+message says when the time limit cut the attempts short. A missing or restricted profile returns
+`profile_unavailable`. Authentication walls and browser connection failures still produce the
+standard OpenCLI errors.
 
 ```bash
 opencli linkedin contact-info satyanadella -f json
 opencli linkedin contact-info @satyanadella
 opencli linkedin contact-info "https://www.linkedin.com/in/satyanadella/" -f yaml
 opencli linkedin contact-info me -f json
+```
+
+### LinkedIn Connections
+
+The LinkedIn plugin replaces the built-in `connections` command. The built-in stopped at the first
+page shorter than it requested and returned bare rows, so a partial list looked like the whole list.
+
+The command reads LinkedIn's connections API in pages of up to 40. A short page does not end the
+read. The read ends at `--limit` (1 to 500, default 20), at an empty page, or when `--offset` plus
+the connections returned reaches the total LinkedIn reports. Entries repeated across pages appear
+once.
+
+Rows follow LinkedIn's API order, and `rank` is the position in this result. That order is not
+guaranteed to match the connections page's "Recently added" sort. Sort by `connected_at`, the
+connection time in epoch milliseconds, when recency matters.
+
+Every row carries the same coverage fields:
+
+- `total`: the connection count LinkedIn reports, or `null` when the response carries none. A
+  total smaller than the connections LinkedIn has already returned is stale, so the command reports
+  `null` and stops trusting LinkedIn's totals for the rest of the read.
+- `coverage`: `complete` when `--offset` plus the connections returned equals LinkedIn's reported
+  total. `exhausted_unverified` when LinkedIn returned an empty page without a total to confirm the
+  end, so the list may be whole or LinkedIn may have stopped early. `limit` when the read stopped
+  at `--limit` and more connections remain or may remain. `partial` when LinkedIn stopped returning
+  connections before its reported total, or the read hit its request budget.
+- `next_offset`: the `--offset` that continues the read, or `null` when `coverage` is `complete`.
+
+Any coverage other than `complete` also prints a one-line notice on stderr, leaving stdout as the
+rows. Authentication walls and failed or malformed responses fail the command instead of returning
+the rows read so far. A read whose `--offset` is past the last connection LinkedIn returns fails
+with an empty result that names the offset.
+
+```bash
+opencli linkedin connections --limit 500 -f json
+opencli linkedin connections --limit 500 --offset "$NEXT_OFFSET" -f json
 ```
 
 ### LinkedIn Thread Snapshot
@@ -495,4 +559,38 @@ error, as does a missing listing.
 opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/
 opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ --output ~/Pictures --size large --limit 10 -f json
 opencli zillow photos https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ -f json
+```
+
+### Gemini video
+
+The Gemini plugin adds `video` next to the built-in `ask` and `image` commands. It opens
+`gemini.google.com/videos`, where Gemini pre-selects its Videos tool, picks the aspect ratio,
+attaches any `--image` files, submits the prompt, polls the newest model turn until a player
+renders or Gemini reports a failure, then downloads the MP4. The clip host refuses anonymous
+requests, so the download forwards the browser's Google session cookies for that host only.
+
+- `--image` takes a comma-separated list of local paths (up to 10). Gemini builds its file input
+  on demand and only a trusted pointer click opens it, so the command intercepts the file chooser
+  over CDP and hands Chrome the paths. That needs the direct CDP backend
+  (`opencli --cdp-endpoint http://127.0.0.1:9222 …`); the Browser Bridge extension does not
+  relay CDP events. Chrome reads the paths from its own filesystem, so it must see the same files
+  as the CLI. That holds in the production container; the dev Chrome sidecar
+  (`compose.dev.yml`) does not mount `/workspace` or `/rome-home`. The command waits for every
+  attachment tile to finish uploading before it sends, because a message sent mid-upload is
+  dropped without an error.
+- `--timeout` (default 600 seconds) bounds the whole run, as OpenCLI enforces it for the entire
+  command: the generation wait gets what is left after upload and submission, minus a share
+  kept for the download. The minimum is 240. If setup leaves too little for a generation, the
+  command stops before sending, so the daily allowance is not spent.
+- One prompt yields one clip of roughly 8 to 10 seconds at 1280×720 with generated ambient
+  audio. Longer films are several runs stitched together.
+- Gemini enforces a daily video allowance per account (Google AI Pro: 3 videos a day). Once it is
+  spent, Gemini locks the video composer without a message; the command reports that state as a
+  typed error instead of waiting for a clip.
+- A refusal ("I can't generate that video") is returned as a typed error with Gemini's wording.
+  Refusals are often transient; a retry with a simpler prompt usually works.
+
+```bash
+opencli --cdp-endpoint http://127.0.0.1:9222 gemini video "Slow cinematic dolly toward the house at dusk, subtle motion" --image ./front.jpg --output ./clips --name front-dusk
+opencli --cdp-endpoint http://127.0.0.1:9222 gemini video "A paper boat drifting on a pond at sunrise" --ratio 9:16 -f json
 ```

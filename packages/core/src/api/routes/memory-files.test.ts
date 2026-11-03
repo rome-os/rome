@@ -10,6 +10,7 @@ import * as pathsModule from "../../paths.js" with { rstest: "importActual" };
 
 const childProcessState = rs.hoisted(() => ({
   execFileSync: rs.fn(),
+  spawn: rs.fn(),
 }));
 
 const chokidarState = rs.hoisted(() => ({
@@ -23,6 +24,7 @@ rs.mock("node:child_process", () => ({
   ...childProcessModule,
   default: childProcessModule,
   execFileSync: childProcessState.execFileSync,
+  spawn: childProcessState.spawn,
 }));
 
 rs.mock("chokidar", () => {
@@ -82,6 +84,7 @@ async function readTarGzEntries(res: Response): Promise<Record<string, string>> 
 
 describe("Memory files API", () => {
   beforeEach(() => {
+    childProcessState.spawn.mockImplementation(childProcessModule.spawn);
     state.profileDir = mkdtempSync(join(tmpdir(), "rome-memory-file-route-"));
     state.memoryDir = join(state.profileDir, "memory");
     mkdirSync(state.memoryDir, { recursive: true });
@@ -139,7 +142,6 @@ describe("Memory files API", () => {
   describe("GET /memory/search", () => {
     it("matches literal search terms that contain regex characters", async () => {
       writeFileSync(join(state.memoryDir, "MEMORY.md"), "We work on C++ tooling.\n");
-      childProcessState.execFileSync.mockReturnValue("./MEMORY.md:1:We work on C++ tooling.\n");
 
       const res = await buildApp().request("/memory/search?q=C%2B%2B");
 
@@ -151,8 +153,8 @@ describe("Memory files API", () => {
           line: 1,
         },
       ]);
-      expect(childProcessState.execFileSync).toHaveBeenCalledTimes(1);
-      expect(childProcessState.execFileSync).toHaveBeenCalledWith(
+      expect(childProcessState.spawn).toHaveBeenCalledTimes(1);
+      expect(childProcessState.spawn).toHaveBeenCalledWith(
         "rg",
         expect.arrayContaining(["--fixed-strings", "C++", "."]),
         expect.any(Object),

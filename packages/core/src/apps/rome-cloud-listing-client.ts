@@ -17,6 +17,7 @@
 import { createLogger } from "../logger.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { resolveListingDetailUrl } from "./rome-cloud-urls.js";
+import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 
 const log = createLogger("apps-rome-cloud-listings");
 
@@ -70,7 +71,7 @@ export function createRomeCloudListingClient(
     let response: Response;
     try {
       response = await fetchImpl(detailUrl, {
-        headers: { accept: "application/json" },
+        headers: withRomeCloudReadAuth(detailUrl, { accept: "application/json" }),
         signal: controller.signal,
       });
     } catch (err) {

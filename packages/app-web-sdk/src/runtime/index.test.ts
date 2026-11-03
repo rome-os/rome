@@ -7,6 +7,7 @@ import {
   getPortalContainer,
   isPreview,
   navigateRome,
+  navigateToApp,
   setMountContainer,
   startChat,
   type RomeAppBootstrap,
@@ -125,14 +126,34 @@ describe("isPreview", () => {
   });
 });
 
-describe("navigateRome", () => {
-  function stubNavHost() {
+describe("navigateToApp", () => {
+  it("emits the same path the URL decodes back to", () => {
+    const pushState = rs.fn();
     const dispatchEvent = rs.fn();
     rs.stubGlobal("window", {
       __ROME_APP_BOOTSTRAP__: bootstrap,
+      history: { pushState },
+      dispatchEvent,
+    } as unknown as Window & typeof globalThis);
+
+    navigateToApp("notes/a%2520b");
+
+    expect(pushState).toHaveBeenCalledWith(null, "", "/apps/founder-scout/notes/a%2520b");
+    const navigation = dispatchEvent.mock.calls[0]?.[0] as CustomEvent<string>;
+    expect(navigation.detail).toBe("notes/a%20b");
+  });
+});
+
+describe("navigateRome", () => {
+  function stubNavHost() {
+    const dispatchEvent = rs.fn();
+    const topWindow: Record<string, unknown> = {
+      __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
       location: { origin: "http://localhost" },
-    } as unknown as Window & typeof globalThis);
+    };
+    topWindow.parent = topWindow;
+    rs.stubGlobal("window", topWindow as unknown as Window & typeof globalThis);
     return { dispatchEvent };
   }
 
@@ -337,10 +358,12 @@ describe("navigateRome", () => {
 describe("startChat", () => {
   function stubChatHost() {
     const dispatchEvent = rs.fn();
-    rs.stubGlobal("window", {
+    const topWindow: Record<string, unknown> = {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
-    } as unknown as Window & typeof globalThis);
+    };
+    topWindow.parent = topWindow;
+    rs.stubGlobal("window", topWindow as unknown as Window & typeof globalThis);
     return { dispatchEvent };
   }
 

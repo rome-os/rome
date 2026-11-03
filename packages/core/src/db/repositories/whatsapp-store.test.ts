@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import type { DrizzleDb } from "../index.js";
 import { WhatsAppStoreRepository } from "./whatsapp-store.js";
-import { PersonMappingRepository } from "./person-mapping.js";
+import { PeopleRepository } from "./people.js";
 
 describe("WhatsAppStoreRepository", () => {
   let db: DrizzleDb;
@@ -30,19 +30,6 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.name).toBe("Alice");
     expect(alice?.linkedPersonId).toBeNull();
     expect(alice?.messageCount).toBe(0);
-  });
-
-  it("bounds the address-book read by default and reads it whole on limit: null", async () => {
-    await repo.upsertContacts([
-      { jid: "15550000001@s.whatsapp.net", phoneNumber: "15550000001", name: "Ada" },
-      { jid: "15550000002@s.whatsapp.net", phoneNumber: "15550000002", name: "Bea" },
-      { jid: "15550000003@s.whatsapp.net", phoneNumber: "15550000003", name: "Cy" },
-    ]);
-
-    expect(await repo.listContacts({ limit: 2 })).toHaveLength(2);
-    expect(await repo.listContacts({ limit: null })).toHaveLength(3);
-    // The no-argument call is what `/api/whatsapp/contacts` makes.
-    expect(await repo.listContacts()).toHaveLength(3);
   });
 
   it("hides nameless LID-only contacts but keeps LIDs with a phone number", async () => {
@@ -90,11 +77,11 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("carries a person link across the merged account", async () => {
-    const persons = new PersonMappingRepository(db);
+    const persons = new PeopleRepository(db);
     await persons.create({
       displayName: "May",
       bondLevel: "acquaintance",
-      channelMappings: [{ channel: "whatsapp", channelUserId: "15555550148@s.whatsapp.net" }],
+      links: [{ platform: "whatsapp", id: "15555550148@s.whatsapp.net" }],
     });
     await repo.upsertContacts([
       { jid: "lid-may@lid", phoneNumber: "15555550148" },
@@ -175,11 +162,11 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("annotates contacts linked to a person", async () => {
-    const persons = new PersonMappingRepository(db);
+    const persons = new PeopleRepository(db);
     await persons.create({
       displayName: "Alice Smith",
       bondLevel: "inner-circle",
-      channelMappings: [{ channel: "whatsapp", channelUserId: "111@s.whatsapp.net" }],
+      links: [{ platform: "whatsapp", id: "111@s.whatsapp.net" }],
     });
     await repo.upsertContacts([{ jid: "111@s.whatsapp.net", name: "Alice" }]);
 
@@ -252,7 +239,7 @@ describe("WhatsAppStoreRepository", () => {
       },
     ]);
 
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     expect(msgs.map((m) => m.text)).toEqual(["first", "second"]);
     expect(msgs[0].fromMe).toBe(false);
     expect(msgs[0].senderName).toBe("Bob");
@@ -396,7 +383,7 @@ describe("WhatsAppStoreRepository", () => {
       },
     ]);
 
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     const reaction = msgs.find((m) => m.id === "r1");
     const text = msgs.find((m) => m.id === "m1");
     expect(reaction).toMatchObject({ type: "reaction", text: "❤️", reactsToId: "m1" });
@@ -434,7 +421,7 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.lastMessageAt).toBe(Math.floor(1_700_000_000_000 / 1000));
 
     // ...but the chat view still gets it, carrying its emoji + target id.
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     const reaction = msgs.find((m) => m.id === "r1");
     expect(reaction).toMatchObject({ type: "reaction", text: "❤️", reactsToId: "m1" });
   });

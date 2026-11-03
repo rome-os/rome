@@ -655,7 +655,7 @@ describe("LinkedInInboxPoller and the person graph", () => {
         expect.objectContaining({ participantId: "ACoAAAda0001", linkedPersonId: null }),
       ]);
       expect(testDb.db.all(sql`SELECT id FROM persons`)).toEqual([]);
-      expect(testDb.db.all(sql`SELECT id FROM channel_mappings`)).toEqual([]);
+      expect(testDb.db.all(sql`SELECT person_id FROM links`)).toEqual([]);
     } finally {
       testDb.close();
     }

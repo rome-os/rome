@@ -13,8 +13,12 @@ import {
 } from "./src/launcher-screens";
 import { cloudApi, nativeFetch, sessionCoordinator } from "./src/mobile-runtime";
 import { logoutNativeSession, retryPendingCloudRevocation } from "./src/native-logout";
-import type { CloudCredential, CloudInstance, InstanceSession } from "./src/native-auth-types";
-import { NativeAuthError } from "./src/native-auth-types";
+import {
+  type CloudCredential,
+  type CloudInstance,
+  type InstanceSession,
+  NativeAuthError,
+} from "@rome-os/libs/native-auth";
 import { RomeApiClient } from "./src/rome-api-client";
 import {
   clearSelectedInstance,

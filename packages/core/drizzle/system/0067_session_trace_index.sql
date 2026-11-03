@@ -1,0 +1,1 @@
+CREATE INDEX `idx_rome_agent_messages_session_trace` ON `rome_agent_messages` (`session_id`,`created_at`) WHERE "rome_agent_messages"."role" = 'trace';

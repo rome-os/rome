@@ -1,6 +1,7 @@
 import type { AppCatalog } from "./catalog.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { parseListingId } from "./packaging/index.js";
+import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 
 export interface AppStoreInstalledState {
   appId: string;
@@ -184,7 +185,9 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
 
       let upstream: Response;
       try {
-        upstream = await fetchImpl(url, { headers: { accept: "application/json" } });
+        upstream = await fetchImpl(url, {
+          headers: withRomeCloudReadAuth(url, { accept: "application/json" }),
+        });
       } catch (err) {
         return {
           status: 502,
@@ -252,7 +255,9 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
       const url = new URL(upstreamPath, fetchOrigin);
       let upstream: Response;
       try {
-        upstream = await fetchImpl(url, { headers: { accept: "application/json" } });
+        upstream = await fetchImpl(url, {
+          headers: withRomeCloudReadAuth(url, { accept: "application/json" }),
+        });
       } catch (err) {
         return {
           status: 502,
@@ -266,9 +271,19 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
 
       const body = await upstream.text();
       if (!upstream.ok) {
+        // Callers read 404 as "no such listing". Rome Cloud answers that in
+        // JSON, so a non-JSON 404 comes from a wrong origin, an edge, or a
+        // missing route, and says nothing about the listing. A non-JSON body
+        // is an error page, and the install dialog shows `error` as copy.
+        const isJson = (upstream.headers.get("content-type") ?? "").includes("application/json");
+        const listingNotFound = upstream.status === 404 && isJson;
         return {
-          status: upstream.status === 404 || upstream.status === 410 ? upstream.status : 502,
-          body: { available: true, browseOrigin, error: body || upstream.statusText },
+          status: listingNotFound || upstream.status === 410 ? upstream.status : 502,
+          body: {
+            available: true,
+            browseOrigin,
+            error: isJson && body ? body : `Rome Cloud returned HTTP ${upstream.status}`,
+          },
         };
       }
 

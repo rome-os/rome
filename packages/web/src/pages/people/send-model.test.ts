@@ -3,12 +3,11 @@ import { defaultSendAccount, type LinkedAccount } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
 import {
   ALL_ACCOUNTS,
-  isDismissable,
   accountHandle,
   accountSegments,
   segmentAccount,
   segmentEntries,
-  segmentOutbox,
+  segmentSends,
 } from "./send-model";
 
 // The shape of the person page's two views. What is under test is the one rule
@@ -64,13 +63,29 @@ describe("accountSegments", () => {
 
 describe("accountHandle", () => {
   it("renders a WhatsApp jid as the number a guardian would recognize", () => {
-    expect(accountHandle({ channel: "whatsapp", channelUserId: "6591881123@s.whatsapp.net" })).toBe(
-      "+6591881123",
-    );
+    expect(
+      accountHandle({
+        channel: "whatsapp",
+        channelUserId: "6591881123@s.whatsapp.net",
+        displayName: "Sandy",
+      }),
+    ).toBe("+6591881123");
   });
 
   it("leaves a channel with no phone shape its own identifier", () => {
-    expect(accountHandle({ channel: "telegram", channelUserId: "418820113" })).toBe("418820113");
+    expect(
+      accountHandle({ channel: "telegram", channelUserId: "418820113", displayName: "Sandy" }),
+    ).toBe("418820113");
+  });
+
+  it("names an agent by its label rather than its Cloud id", () => {
+    expect(
+      accountHandle({
+        channel: "agents",
+        channelUserId: "agt_01JZ8Q3V4K",
+        displayName: "atlas (dot)",
+      }),
+    ).toBe("atlas (dot)");
   });
 });
 
@@ -107,36 +122,18 @@ describe("segmentEntries", () => {
   });
 });
 
-describe("segmentOutbox", () => {
-  const messages = [
-    {
-      id: "1",
-      channel: "whatsapp",
-      channelUserId: "a",
-      text: "one",
-      timestamp: 1,
-      state: "sending" as const,
-      ref: null,
-      error: null,
-    },
-    {
-      id: "2",
-      channel: "whatsapp",
-      channelUserId: "b",
-      text: "two",
-      timestamp: 2,
-      state: "sending" as const,
-      ref: null,
-      error: null,
-    },
+describe("segmentSends", () => {
+  const sends = [
+    { id: "1", channel: "whatsapp", channelUserId: "a", text: "one" },
+    { id: "2", channel: "whatsapp", channelUserId: "b", text: "two" },
   ];
 
-  it("narrows by the account itself, which an outbox row does name", () => {
+  it("narrows by the account itself, which a send does name", () => {
     // Unlike a timeline entry. Two accounts on one channel therefore share a
-    // history under either segment and keep their outboxes apart, which is the
-    // half of the pair that can be told apart.
-    const scoped = segmentOutbox(messages, account({ channel: "whatsapp", channelUserId: "b" }));
-    expect(scoped.map((message) => message.text)).toEqual(["two"]);
+    // history under either segment and keep their pending sends apart, which
+    // is the half of the pair that can be told apart.
+    const scoped = segmentSends(sends, account({ channel: "whatsapp", channelUserId: "b" }));
+    expect(scoped.map((send) => send.text)).toEqual(["two"]);
   });
 });
 
@@ -155,35 +152,5 @@ describe("the account a composer opens on", () => {
 
   it("is null when nothing is sendable, which is a reason to render and not an empty box", () => {
     expect(defaultSendAccount([account({ channel: "linkedin", send: "unsupported" })])).toBeNull();
-  });
-});
-
-describe("isDismissable", () => {
-  const NOW = 1_800_000;
-  const WINDOW = 5 * 60;
-  const row = (state: "sending" | "unconfirmed" | "failed", age: number) => ({
-    state,
-    timestamp: NOW - age,
-  });
-
-  it("offers the gesture on a failed row, which is finished", () => {
-    expect(isDismissable(row("failed", 0), NOW)).toBe(true);
-  });
-
-  it("withholds it from a sending row, which has not been answered", () => {
-    expect(isDismissable(row("sending", WINDOW * 10), NOW)).toBe(false);
-  });
-
-  it("withholds it from a fresh unconfirmed row, which is about to clear itself", () => {
-    // Offering to drop one inside the window would race the clearing, and the
-    // route refuses it for the same reason.
-    expect(isDismissable(row("unconfirmed", WINDOW - 1), NOW)).toBe(false);
-  });
-
-  it("offers it once an unconfirmed row has outlived the landing window", () => {
-    // The phantom this exists for: delivered, never seen, and on a channel with
-    // no mirror of its own this is the only way the row ever leaves.
-    expect(isDismissable(row("unconfirmed", WINDOW), NOW)).toBe(true);
-    expect(isDismissable(row("unconfirmed", WINDOW * 3), NOW)).toBe(true);
   });
 });

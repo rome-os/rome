@@ -1,13 +1,23 @@
 // @rstest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { TraceAccounting, TraceSnapshot } from "@rome/api-types/trace-segments";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { UsageSummaryBlock } from "@/components/chat/blocks/UsageSummaryBlock";
-import {
-  TraceDrawer,
-  traceDrawerContentInsetClass,
-  traceDrawerOpenPlacementClass,
-} from "./TraceDrawer";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { TraceAccounting, TraceEventDto, TraceSnapshot } from "@rome/api-types/trace-segments";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { FakeTurnStream, runSegment, stepsSummary } from "@/test/fake-turn-stream";
+import { UsageSummaryView } from "@/components/chat/entries/UsageSummaryView";
+import { TraceDrawer, type TraceDrawerTarget } from "./TraceDrawer";
+
+let streams = new Map<string, FakeTurnStream | "gone">();
+rs.mock("@/lib/chat-api", () => ({
+  openTurnStream: async (turnId: string) => {
+    if (streams.get(turnId) === "gone") return new Response("{}", { status: 404 });
+    const stream = new FakeTurnStream();
+    streams.set(turnId, stream);
+    return stream.response;
+  },
+}));
+beforeEach(() => {
+  streams = new Map();
+});
 
 const translate = (key: string) => key;
 rs.mock("react-i18next", () => ({
@@ -64,48 +74,6 @@ function usageSnapshot(includeSubagents: boolean): TraceSnapshot {
   };
 }
 
-describe("traceDrawerOpenPlacementClass", () => {
-  it("always covers the desktop chat column when an app is open", () => {
-    const classes = traceDrawerOpenPlacementClass(true);
-
-    expect(classes).toContain("top-[var(--rome-mobile-header-height)]");
-    expect(classes).not.toContain("pb-safe");
-    expect(classes).toContain("md:left-[var(--rome-chat-left,0px)]");
-    expect(classes).toContain("md:right-auto");
-    expect(classes).toContain("md:w-[var(--rome-chat-col)]");
-    expect(classes).not.toContain("@5xl/chat:w-[480px]");
-  });
-
-  it("covers the full narrow chat when no app is open", () => {
-    const classes = traceDrawerOpenPlacementClass(false);
-
-    expect(classes).toContain("top-[var(--rome-mobile-header-height)]");
-    expect(classes).not.toContain("top-12");
-    expect(classes).not.toContain("pb-safe");
-    expect(classes).toContain("@max-5xl/chat:md:left-[var(--rome-chat-left,0px)]");
-    expect(classes).toContain("@max-5xl/chat:md:right-0");
-    expect(classes).toContain("@max-5xl/chat:md:w-auto");
-    expect(classes).not.toContain(["@max-5xl/chat:md:w-", "[var(--rome-chat-col)]"].join(""));
-  });
-
-  it("docks a 480px inspector to the right of a wide chat with no apps", () => {
-    const classes = traceDrawerOpenPlacementClass(false);
-
-    expect(classes).toContain("@5xl/chat:left-auto");
-    expect(classes).toContain("@5xl/chat:right-0");
-    expect(classes).toContain("@5xl/chat:w-[480px]");
-  });
-
-  it("reserves side-panel space only for an open trace with no apps", () => {
-    expect(traceDrawerContentInsetClass(true, false)).toBe(
-      "@5xl/chat:flex-none @5xl/chat:w-[calc(100%-480px)]",
-    );
-    expect(traceDrawerContentInsetClass(true, true)).toBe("");
-    expect(traceDrawerContentInsetClass(false, false)).toBe("@5xl/chat:flex-none @5xl/chat:w-full");
-    expect(traceDrawerContentInsetClass(false, true)).toBe("");
-  });
-});
-
 describe("TraceDrawer subagent usage", () => {
   it("loads included usage by default and refetches when the switch is disabled", async () => {
     const loadStoredTrace = rs.fn(async (_messageId: string, include: boolean) =>
@@ -124,7 +92,7 @@ describe("TraceDrawer subagent usage", () => {
         loadStoredTrace={loadStoredTrace}
         renderInlineBlock={(block) =>
           block.type === "result" && block.accounting ? (
-            <UsageSummaryBlock accounting={block.accounting} />
+            <UsageSummaryView accounting={block.accounting} />
           ) : null
         }
         renderRunBlocks={() => null}
@@ -143,5 +111,359 @@ describe("TraceDrawer subagent usage", () => {
       expect(loadStoredTrace).toHaveBeenCalledWith("parent-trace", false);
     });
     expect(await screen.findByText("3")).toBeTruthy();
+  });
+});
+
+describe("TraceDrawer archived steps", () => {
+  it("handles a stale trace link without showing steps, retry, or download", async () => {
+    const fetch = rs.fn(
+      async () => new Response(JSON.stringify({ trace: null, traceArchived: true })),
+    );
+    rs.stubGlobal("fetch", fetch);
+    try {
+      render(
+        <TraceDrawer
+          target={{
+            kind: "stored",
+            messageId: "old",
+            sessionId: "s",
+            turnId: "t",
+            summary: targetSummary,
+          }}
+          onClose={() => {}}
+          renderInlineBlock={() => null}
+          renderRunBlocks={() => null}
+        />,
+      );
+      expect(await screen.findByText("trace.archived")).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "trace.drawer.dumpAriaLabel" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+    } finally {
+      rs.unstubAllGlobals();
+    }
+  });
+});
+
+describe("TraceDrawer hosted in the tool pane", () => {
+  const storedTarget = {
+    kind: "stored" as const,
+    messageId: "m",
+    sessionId: "s",
+    turnId: "t",
+    summary: targetSummary,
+  };
+  const loadStoredTrace = async () => usageSnapshot(false);
+
+  function hosted(outlet: HTMLElement | null, target: TraceDrawerTarget | null = storedTarget) {
+    return (
+      <TraceDrawer
+        target={target}
+        onClose={() => {}}
+        outlet={outlet}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />
+    );
+  }
+
+  it("renders into the outlet with only the summary and the dump link as its header", async () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    render(hosted(outlet));
+
+    await waitFor(() => expect(outlet.textContent).toContain("trace.summary.stepsSingle"));
+    expect(outlet.querySelector("a[download]")?.getAttribute("href")).toBe(
+      "/api/chat/sessions/s/turns/t/trace.json",
+    );
+    // The tab owns the title, the Live indicator and the close button.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "trace.drawer.title" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "trace.drawer.closeAriaLabel" })).toBeNull();
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
+    outlet.remove();
+  });
+
+  it("renders nothing until the tab's outlet exists, then fills it", async () => {
+    const { container, rerender } = render(hosted(null));
+    expect(container.textContent).toBe("");
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    rerender(hosted(outlet));
+    await waitFor(() => expect(outlet.textContent).toContain("trace.summary.stepsSingle"));
+    outlet.remove();
+  });
+
+  it("renders nothing without a target", () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    render(hosted(outlet, null));
+    expect(outlet.textContent).toBe("");
+    outlet.remove();
+  });
+
+  it("stays a dialog overlay when no outlet is given", () => {
+    render(
+      <TraceDrawer
+        target={null}
+        onClose={() => {}}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    expect(document.querySelector('aside[role="dialog"]')).not.toBeNull();
+  });
+
+  it("follows a live trace to the bottom once the outlet mounts", () => {
+    const heights = new WeakMap<Element, number>();
+    const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+    const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get(this: Element) {
+        return heights.get(this) ?? 0;
+      },
+      set(this: Element, value: number) {
+        heights.set(this, value);
+      },
+    });
+    try {
+      const live: TraceDrawerTarget = {
+        kind: "live",
+        sessionId: "s",
+        turnId: "t",
+        summary: targetSummary,
+        segments: [],
+        streaming: true,
+      };
+      const { rerender } = render(hosted(null, live));
+      const outlet = document.createElement("div");
+      document.body.append(outlet);
+      rerender(hosted(outlet, live));
+
+      const scroller = outlet.querySelector(".overflow-y-auto");
+      expect(scroller).not.toBeNull();
+      expect(heights.get(scroller as Element)).toBe(500);
+      outlet.remove();
+    } finally {
+      if (scrollHeight) Object.defineProperty(Element.prototype, "scrollHeight", scrollHeight);
+      else delete (Element.prototype as { scrollHeight?: number }).scrollHeight;
+      if (scrollTop) Object.defineProperty(Element.prototype, "scrollTop", scrollTop);
+      else delete (Element.prototype as { scrollTop?: number }).scrollTop;
+    }
+  });
+
+  it("ignores Escape in the tab, where the overlay would close", async () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    const onClose = rs.fn();
+    render(
+      <TraceDrawer
+        target={storedTarget}
+        onClose={onClose}
+        outlet={outlet}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    outlet.remove();
+  });
+
+  it("leaves focus alone when the tab's trace closes", () => {
+    const outlet = document.createElement("div");
+    const trigger = document.createElement("button");
+    const elsewhere = document.createElement("button");
+    document.body.append(outlet, trigger, elsewhere);
+    trigger.focus();
+    const props = {
+      onClose: () => {},
+      outlet,
+      loadStoredTrace,
+      renderInlineBlock: () => null,
+      renderRunBlocks: () => null,
+    };
+    const { rerender } = render(<TraceDrawer target={storedTarget} {...props} />);
+    elsewhere.focus();
+    rerender(<TraceDrawer target={null} {...props} />);
+    expect(document.activeElement).toBe(elsewhere);
+    outlet.remove();
+    trigger.remove();
+    elsewhere.remove();
+  });
+
+  it("still closes the overlay on Escape", () => {
+    const onClose = rs.fn();
+    render(
+      <TraceDrawer
+        target={storedTarget}
+        onClose={onClose}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the archived note without a dump link", async () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    render(
+      <TraceDrawer
+        target={storedTarget}
+        onClose={() => {}}
+        outlet={outlet}
+        loadStoredTrace={async () => "archived"}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    await waitFor(() => expect(outlet.textContent).toContain("trace.archived"));
+    expect(outlet.querySelector("a[download]")).toBeNull();
+    outlet.remove();
+  });
+});
+
+describe("TraceDrawer following a running subagent", () => {
+  let seq = 0;
+  const callNames = (blocks: TraceEventDto[]) => (
+    <div data-testid="calls">
+      {blocks.map((block) => (block.type === "tool_use" ? block.tool : "")).join(",")}
+    </div>
+  );
+
+  function turnTarget(turnId: string, running: boolean): TraceDrawerTarget {
+    return {
+      kind: "turn",
+      sessionId: "child-session",
+      turnId,
+      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+      running,
+    };
+  }
+
+  function drawer(target: TraceDrawerTarget) {
+    return (
+      <TraceDrawer
+        target={target}
+        onClose={() => {}}
+        renderInlineBlock={() => null}
+        renderRunBlocks={callNames}
+      />
+    );
+  }
+
+  const storedTrace = {
+    trace: {
+      summary: { distinctApps: [], totalSteps: 2, invocationCounts: {} },
+      segments: [
+        runSegment("stored-run", [
+          { tool: "Read", input: {} },
+          { tool: "Edit", input: {} },
+        ]),
+      ],
+    },
+  };
+  let traceFetch = rs.fn(async (_url: string) => new Response(JSON.stringify(storedTrace)));
+  beforeEach(() => {
+    traceFetch = rs.fn(async (_url: string) => new Response(JSON.stringify(storedTrace)));
+    rs.stubGlobal("fetch", traceFetch);
+  });
+  afterEach(() => rs.unstubAllGlobals());
+
+  it("shows the live stream with the Live badge and loads nothing until it ends", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    render(drawer(turnTarget(turnId, true)));
+    await waitFor(() => expect(streams.has(turnId)).toBe(true));
+    await act(async () => {
+      const stream = streams.get(turnId) as FakeTurnStream;
+      stream.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+      stream.send("summary_update", stepsSummary(1));
+    });
+
+    expect((await screen.findByTestId("calls")).textContent).toBe("Bash");
+    expect(screen.getByText("trace.drawer.live")).toBeTruthy();
+    expect(traceFetch).not.toHaveBeenCalled();
+  });
+
+  it("swaps to the stored trace once, when the stream ends", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    render(drawer(turnTarget(turnId, true)));
+    await waitFor(() => expect(streams.has(turnId)).toBe(true));
+    await act(async () => {
+      const stream = streams.get(turnId) as FakeTurnStream;
+      stream.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+    });
+    await screen.findByText("Bash");
+
+    await act(async () => {
+      (streams.get(turnId) as FakeTurnStream).send("done", { success: true });
+    });
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+    expect(traceFetch).toHaveBeenCalledTimes(1);
+    expect(String(traceFetch.mock.calls[0][0])).toContain(
+      `/api/sessions/child-session/turns/${turnId}/trace`,
+    );
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
+  });
+
+  it("loads the stored trace when the stream is already gone (404)", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    streams.set(turnId, "gone");
+    render(drawer(turnTarget(turnId, true)));
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+    expect(traceFetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
+  });
+
+  it("drops the stored trace of the previous target when a running subagent is opened", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    const stored: TraceDrawerTarget = {
+      kind: "stored",
+      messageId: "message-a",
+      sessionId: "session-a",
+      turnId: "turn-a",
+      summary: { distinctApps: [], totalSteps: 2, invocationCounts: {} },
+    };
+    const { rerender } = render(drawer(stored));
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+
+    rerender(drawer(turnTarget(turnId, true)));
+    // Nothing of target A is left while B runs, even before B's first step.
+    await waitFor(() => expect(screen.queryByTestId("calls")).toBeNull());
+    await waitFor(() => expect(streams.has(turnId)).toBe(true));
+    await act(async () => {
+      (streams.get(turnId) as FakeTurnStream).send(
+        "segment_upsert",
+        runSegment("run-b", [{ tool: "Bash", input: {} }]),
+      );
+    });
+    expect((await screen.findByTestId("calls")).textContent).toBe("Bash");
+    expect(screen.getByText("trace.drawer.live")).toBeTruthy();
+
+    // When B ends, its own stored trace is fetched, not A's.
+    traceFetch.mockClear();
+    await act(async () => {
+      (streams.get(turnId) as FakeTurnStream).send("done", { success: true });
+    });
+    await waitFor(() => expect(traceFetch).toHaveBeenCalledTimes(1));
+    expect(String(traceFetch.mock.calls[0][0])).toContain(`/turns/${turnId}/trace`);
+  });
+
+  it("fetches a finished subagent once and opens no stream", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    render(drawer(turnTarget(turnId, false)));
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+    expect(traceFetch).toHaveBeenCalledTimes(1);
+    expect(streams.size).toBe(0);
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
   });
 });

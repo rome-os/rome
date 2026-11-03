@@ -1,9 +1,12 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ProjectDashboardResponse } from "@rome/api-types/projects";
+import type {
+  ProjectDashboardProviderUsage,
+  ProjectDashboardResponse,
+} from "@rome/api-types/projects";
 import i18n from "@/i18n";
 import { ProjectDashboard } from "./ProjectDashboard";
 
@@ -43,7 +46,23 @@ function buildDashboard(): ProjectDashboardResponse {
       totalCostUsd: 0,
       totalTokens: 0,
     },
+    providerUsage: { month: [], total: [] },
     usage: [],
+  };
+}
+
+function providerUsage(
+  provider: string,
+  inputTokens: number,
+  costUsd: number,
+): ProjectDashboardProviderUsage {
+  return {
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd,
+    inputTokens,
+    outputTokens: 0,
+    provider,
   };
 }
 
@@ -133,6 +152,7 @@ describe("ProjectDashboard", () => {
         date: "2026-05-30",
         inputTokens: 25,
         outputTokens: 20,
+        providers: [],
       },
       {
         cacheReadTokens: 20,
@@ -141,6 +161,7 @@ describe("ProjectDashboard", () => {
         date: "2026-05-31",
         inputTokens: 35,
         outputTokens: 30,
+        providers: [],
       },
     ];
     mockDashboardFetch(dashboard);
@@ -172,5 +193,109 @@ describe("ProjectDashboard", () => {
     expect(screen.getByRole("img", { name: "cost usage over the last 14 days" })).toBeTruthy();
     expect(screen.getByText("Total spend")).toBeTruthy();
     expect(container.querySelectorAll(".recharts-bar")).toHaveLength(1);
+  });
+
+  it("stacks the usage chart by provider", async () => {
+    const dashboard = buildDashboard();
+    dashboard.usage = [
+      {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.5,
+        date: "2026-05-30",
+        inputTokens: 300,
+        outputTokens: 0,
+        providers: [providerUsage("anthropic", 100, 0.2), providerUsage("openai", 200, 0.3)],
+      },
+      {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.1,
+        date: "2026-05-31",
+        inputTokens: 50,
+        outputTokens: 0,
+        providers: [providerUsage("openai", 50, 0.1)],
+      },
+    ];
+    mockDashboardFetch(dashboard);
+
+    const { container } = renderDashboard("/projects/demo");
+
+    await screen.findByRole("img", { name: "tokens usage over the last 14 days" });
+    fireEvent.click(screen.getByRole("radio", { name: "By provider" }));
+
+    const chart = screen.getByRole("img", {
+      name: "tokens usage by provider over the last 14 days",
+    });
+    const bars = chart.querySelectorAll(".recharts-bar");
+    expect(bars).toHaveLength(2);
+    expect(bars[0].querySelector(".recharts-bar-rectangle path")?.getAttribute("fill")).toBe(
+      "var(--primary)",
+    );
+    expect(bars[1].querySelector(".recharts-bar-rectangle path")?.getAttribute("fill")).toContain(
+      "var(--foreground) 72%",
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Cost" }));
+
+    expect(
+      screen.getByRole("img", { name: "cost usage by provider over the last 14 days" }),
+    ).toBeTruthy();
+    expect(container.querySelectorAll(".recharts-bar")).toHaveLength(2);
+  });
+
+  it("breaks tokens and spend down by provider for the selected period", async () => {
+    const dashboard = buildDashboard();
+    dashboard.usage = [
+      {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 1,
+        date: "2026-05-31",
+        inputTokens: 1_000,
+        outputTokens: 0,
+        providers: [providerUsage("openai", 1_000, 1)],
+      },
+    ];
+    dashboard.providerUsage = {
+      month: [
+        providerUsage("anthropic", 2_000, 1),
+        providerUsage("openai", 6_000, 3),
+        providerUsage("google", 500, 0),
+        providerUsage("unknown", 500, 0),
+      ],
+      total: [],
+    };
+    mockDashboardFetch(dashboard);
+
+    renderDashboard("/projects/demo");
+
+    const table = await screen.findByRole("table", { name: "Usage by provider, this month" });
+    const rows = within(table).getAllByRole("row");
+    // Header, Codex (largest share), Claude, the merged Other row, then the total.
+    expect(rows.map((row) => row.querySelector("th")?.textContent)).toEqual([
+      "Provider",
+      "Codex",
+      "Claude",
+      "Other",
+      "Total",
+    ]);
+    expect(within(rows[1]).getByText("75%")).toBeTruthy();
+    expect(within(rows[1]).getByText("$3.00")).toBeTruthy();
+    expect(within(rows[2]).getByText("25%")).toBeTruthy();
+    expect(within(rows[3]).getByText("$0.00")).toBeTruthy();
+    expect(within(rows[4]).getByText("$4.00")).toBeTruthy();
+    expect(within(table).getAllByRole("columnheader")[1].textContent).toBe("Share of spend");
+
+    fireEvent.click(screen.getByRole("radio", { name: "14 days" }));
+
+    const recent = screen.getByRole("table", { name: "Usage by provider, 14 days" });
+    expect(within(recent).getAllByRole("row")).toHaveLength(2);
+    expect(within(recent).getByText("100%")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: "All time" }));
+
+    expect(screen.queryByRole("table", { name: /Usage by provider/ })).toBeNull();
+    expect(screen.getByText("No usage recorded yet.")).toBeTruthy();
   });
 });

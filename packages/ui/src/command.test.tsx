@@ -143,3 +143,73 @@ describe("Command trailing input content", () => {
     expect(onClear).not.toHaveBeenCalled();
   });
 });
+
+describe("Command leading input content", () => {
+  it("seats leading content in the glyph reserve and starts the text one gap past it", () => {
+    render(
+      <Command>
+        <CommandInput placeholder="Search…" leading={<span>Scope</span>} />
+      </Command>,
+    );
+
+    const input = screen.getByPlaceholderText("Search…");
+    const leading = screen.getByText("Scope").closest('[data-slot="command-input-leading"]');
+
+    expect(leading).not.toBeNull();
+    expect(leading?.classList).toContain(
+      "pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]",
+    );
+    // The leading slot now owns the glyph reserve, so the field drops it.
+    expect(input.classList).toContain("pl-[var(--control-gap)]");
+    expect(input.classList).not.toContain(
+      "pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]",
+    );
+  });
+
+  it("keeps the glyph reserve on the field when there is no leading content", () => {
+    render(
+      <Command>
+        <CommandInput placeholder="Search…" />
+      </Command>,
+    );
+
+    const input = screen.getByPlaceholderText("Search…");
+    expect(
+      input
+        .closest('[data-slot="command-input-wrapper"]')
+        ?.querySelector('[data-slot="command-input-leading"]'),
+    ).toBeNull();
+    expect(input.classList).toContain(
+      "pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]",
+    );
+  });
+
+  it("activates a focused leading button on Enter rather than the highlighted item", async () => {
+    const onSelect = rs.fn();
+    const onRemove = rs.fn();
+    const user = userEvent.setup();
+    render(
+      <Command shouldFilter={false}>
+        <CommandInput
+          placeholder="Search…"
+          leading={
+            <button type="button" onClick={onRemove}>
+              Remove
+            </button>
+          }
+        />
+        <CommandList>
+          <CommandItem value="only-item" onSelect={onSelect}>
+            Only item
+          </CommandItem>
+        </CommandList>
+      </Command>,
+    );
+
+    screen.getByRole("button", { name: "Remove" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});

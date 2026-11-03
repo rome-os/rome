@@ -1,5 +1,9 @@
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
-import { ComposioClient, isComposioNotFoundError } from "./composio-client.js";
+import {
+  ComposioClient,
+  isComposioAuthenticationError,
+  isComposioNotFoundError,
+} from "./composio-client.js";
 import {
   ensureComposioWebhookRegistered,
   RelayWebhookUnavailableError,
@@ -24,7 +28,7 @@ import {
 import {
   processGithubWebhook,
   processVerifiedWebhook,
-  publishEmittedEvent,
+  publishPendingEvents,
 } from "./process-webhook.js";
 import { resolveRelayDepositUrl } from "./relay-webhook.js";
 import { SettingsStore } from "./settings-store.js";
@@ -37,6 +41,7 @@ import {
   ROME_USER_ID,
   subscribeTriggerFeed,
 } from "../shared.js";
+import { CATALOG } from "../catalog.js";
 
 const APP_ID = "connector";
 const EVENTS_DEFAULT_LIMIT = 100;
@@ -76,6 +81,14 @@ function rawHeader(headers: Record<string, string>, key: string): string | undef
 
 function jsonError(status: number, code: string, message: string): Response {
   return Response.json({ error: code, message }, { status });
+}
+
+function authenticationError(): Response {
+  return jsonError(
+    401,
+    "composio_unauthenticated",
+    "Composio authorization is no longer valid. Sign in again.",
+  );
 }
 
 function trimToUndef(value: unknown): string | undefined {
@@ -123,6 +136,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
       if (method === "GET" && (path === "" || path === "status")) {
         return await this.handleStatus();
       }
+      if (method === "GET" && path === "catalog") return this.handleCatalog();
       if (method === "POST" && path === "login/start") return await this.handleLoginStart();
       if (method === "POST" && path === "login/complete") {
         return await this.handleLoginComplete(request);
@@ -161,6 +175,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
 
       return jsonError(404, "not_found", `Unknown route: ${method} /${path}`);
     } catch (err) {
+      // The relay drops terminal 4xx responses. Webhook processing failures must
+      // stay retryable even when an upstream lookup rejects Rome's credential.
+      if (path !== "webhook" && isComposioAuthenticationError(err)) return authenticationError();
       this.ctx.log.error("composio api error", {
         method,
         path,
@@ -174,6 +191,22 @@ class ComposioApiHandler implements RomeAppApiHandler {
     const apiKey = await readSessionApiKey();
     if (!apiKey) return null;
     return new ComposioClient({ apiKey });
+  }
+
+  /** The Composio catalog, for Settings › Connections. `romeManaged` marks
+   *  the toolkits Rome connects itself: Settings lists those as Rome's own
+   *  connections, so it leaves out their catalog entries and the accounts
+   *  core bridges into Composio for them. */
+  private handleCatalog(): Response {
+    const items = CATALOG.map(({ slug, name, scope, glyph }) => ({
+      slug,
+      name,
+      scope,
+      glyph,
+      // The same set the connect and disconnect routes guard on.
+      romeManaged: isRomeManagedToolkit(slug),
+    }));
+    return Response.json({ items });
   }
 
   // Local reads only — the dashboard blocks its first paint on this response,
@@ -286,11 +319,8 @@ class ComposioApiHandler implements RomeAppApiHandler {
     const client = new ComposioClient({ apiKey });
     const ping = await client.ping();
     if (!ping.ok) {
-      return jsonError(
-        ping.status === 401 || ping.status === 403 ? 401 : 502,
-        "composio_unauthenticated",
-        ping.message,
-      );
+      if (ping.status === 401) return authenticationError();
+      return jsonError(502, "composio_unavailable", ping.message);
     }
 
     // A new Composio project cannot use signing material from the previous one.
@@ -314,12 +344,12 @@ class ComposioApiHandler implements RomeAppApiHandler {
     // Re-register on every successful login rather than only when local state
     // is absent. The upsert repairs a new Composio project, an endpoint deleted
     // upstream, a changed relay mailbox address, or a rotated signing secret.
-    // A completed CLI login cannot be rolled back, so surface registration
-    // failure through status + the manual recovery button instead of reporting
-    // the whole sign-in as failed.
+    // Only credential rejection makes login fail. Other webhook failures leave
+    // tool access usable and can be retried through the registration button.
     try {
       await this.ensureWebhookRegistered(client);
     } catch (err) {
+      if (isComposioAuthenticationError(err)) return authenticationError();
       this.ctx.log.warn("login: webhook registration failed", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -389,6 +419,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
   }
 
   private webhookRegistrationError(err: unknown): Response {
+    if (isComposioAuthenticationError(err)) return authenticationError();
     const message = err instanceof Error ? err.message : String(err);
     return jsonError(
       err instanceof RelayWebhookUnavailableError ? 409 : 502,
@@ -434,6 +465,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     try {
       await this.ensureWebhookRegistered(client);
     } catch (err) {
+      if (isComposioAuthenticationError(err)) throw err;
       // A webhook is required to receive trigger events, but not to complete an
       // OAuth connection or use Composio tools. Keep the recovery attempt here
       // while allowing the connection flow to proceed; feed creation remains
@@ -527,6 +559,17 @@ class ComposioApiHandler implements RomeAppApiHandler {
   private async handleDisconnectConnector(toolkit: string): Promise<Response> {
     const provider = toolkit.trim();
     if (!provider) return jsonError(400, "missing_provider", "toolkit is required");
+
+    // A Rome-managed toolkit's Composio account is the one core bridges from
+    // Rome's own connection. Refuse it like the connect route does, so a stale
+    // client or direct request can't delete what that bridge relies on.
+    if (isRomeManagedToolkit(provider)) {
+      return jsonError(
+        409,
+        "rome_managed_toolkit",
+        `${provider} is managed by Rome. Disconnect it in Settings → Connections.`,
+      );
+    }
 
     const client = await this.loadClient();
     if (!client) return jsonError(409, "no_api_key", "Log in to Composio first");
@@ -717,32 +760,13 @@ class ComposioApiHandler implements RomeAppApiHandler {
       webhookId,
       new Date(),
     );
+    this.publishPendingInBackground();
     if (result.kind === "ignored") {
       this.ctx.log.info("webhook ignored", { webhookId, reason: result.reason });
       return Response.json({ ok: true, ignored: result.reason });
     }
     if (result.kind === "deduped") {
       this.ctx.log.info("webhook retry dedup", { eventId: result.event.eventId });
-    }
-    if (result.kind === "emitted") {
-      try {
-        await publishEmittedEvent((name, args) => this.ctx.runAction(name, args), result);
-        this.ctx.log.info("published composio event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-        });
-      } catch (err) {
-        // The event is already persisted in connector__emitted_events (visible
-        // via GET /events), so the trigger fire is recoverable. Ack Composio
-        // anyway: a non-2xx would make it retry, and the retry dedups — it
-        // would never republish, so 500-ing here strands the event instead of
-        // recovering it.
-        this.ctx.log.error("failed to publish composio event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
     }
     return Response.json({ ok: true, deduped: result.kind === "deduped" });
   }
@@ -788,28 +812,29 @@ class ComposioApiHandler implements RomeAppApiHandler {
       deliveryId,
       new Date(),
     );
+    this.publishPendingInBackground();
     if (result.kind === "deduped") {
       this.ctx.log.info("github webhook retry dedup", { eventId: result.event.eventId });
     }
-    if (result.kind === "emitted") {
-      try {
-        await publishEmittedEvent((name, args) => this.ctx.runAction(name, args), result);
-        this.ctx.log.info("published github event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-        });
-      } catch (err) {
-        // Already persisted (visible via GET /events), so the fire is
-        // recoverable. Ack anyway: a non-2xx makes GitHub redeliver, and the
-        // retry dedups — it would never republish, so 500-ing strands the event.
-        this.ctx.log.error("failed to publish github event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
     return Response.json({ ok: true, deduped: result.kind === "deduped" });
+  }
+
+  /**
+   * Starts an outbox drain without awaiting it. A publish can wait minutes for
+   * an action worker, far past a webhook sender's response timeout, so the
+   * delivery is acked once its event is stored. Every verified delivery drains,
+   * which also retries events an earlier drain left behind.
+   */
+  private publishPendingInBackground(): void {
+    publishPendingEvents(
+      this.events,
+      (name, args) => this.ctx.runAction(name, args),
+      this.ctx.log,
+    ).catch((err: unknown) => {
+      this.ctx.log.error("event outbox drain failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   // Transport-only bridge for inbound Rome Mail: hand the raw deposit body and

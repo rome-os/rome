@@ -52,16 +52,26 @@ function mockSyncApi() {
     if (url.startsWith("/api/sync/targets")) {
       return Response.json({ targets });
     }
+    if (url === "/api/sync/link") {
+      return Response.json({ state: "clean" });
+    }
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
 }
 
+function linkRequestBody(fetchSpy: ReturnType<typeof mockSyncApi>): unknown {
+  const linkCall = fetchSpy.mock.calls.find(([input]) => String(input) === "/api/sync/link");
+  return JSON.parse(String(linkCall?.[1]?.body));
+}
+
 describe("SourceConnect repository picker", () => {
   it("filters and selects an existing repository from the keyboard", async () => {
-    mockSyncApi();
-    const onResolved = rs.fn();
+    const fetchSpy = mockSyncApi();
+    const onLinked = rs.fn();
     const user = userEvent.setup();
-    render(<SourceConnect mode="select" open onClose={rs.fn()} onResolved={onResolved} />);
+    render(
+      <SourceConnect projectPath="/projects/demo" open onClose={rs.fn()} onLinked={onLinked} />,
+    );
 
     const input = await screen.findByRole("combobox", { name: "Repository" });
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
@@ -71,14 +81,22 @@ describe("SourceConnect repository picker", () => {
     expect(screen.getByRole("option").textContent).toContain("amantru/other-project");
 
     await user.keyboard("{ArrowDown}{Enter}");
-    expect(onResolved).toHaveBeenCalledWith(targets[1], "auto");
+    await waitFor(() => expect(onLinked).toHaveBeenCalledWith({ state: "clean" }));
+    expect(linkRequestBody(fetchSpy)).toEqual({
+      projectPath: "/projects/demo",
+      source: "git",
+      target: targets[1],
+      strategy: "auto",
+    });
   });
 
   it("creates a free-text repository from the keyboard", async () => {
     const fetchSpy = mockSyncApi();
-    const onResolved = rs.fn();
+    const onLinked = rs.fn();
     const user = userEvent.setup();
-    render(<SourceConnect mode="select" open onClose={rs.fn()} onResolved={onResolved} />);
+    render(
+      <SourceConnect projectPath="/projects/demo" open onClose={rs.fn()} onLinked={onLinked} />,
+    );
 
     const input = await screen.findByRole("combobox", { name: "Repository" });
     await user.type(input, "new-project");
@@ -86,16 +104,17 @@ describe("SourceConnect repository picker", () => {
 
     await user.keyboard("{ArrowDown}{Enter}");
 
-    await waitFor(() =>
-      expect(onResolved).toHaveBeenCalledWith(
-        {
-          sourceId: "git",
-          locator: { fullName: "amantru/new-project" },
-          label: "amantru/new-project",
-        },
-        "auto",
-      ),
-    );
+    await waitFor(() => expect(onLinked).toHaveBeenCalledWith({ state: "clean" }));
+    expect(linkRequestBody(fetchSpy)).toEqual({
+      projectPath: "/projects/demo",
+      source: "git",
+      target: {
+        sourceId: "git",
+        locator: { fullName: "amantru/new-project" },
+        label: "amantru/new-project",
+      },
+      strategy: "auto",
+    });
     const createCall = fetchSpy.mock.calls.find(
       ([input, init]) => String(input) === "/api/sync/targets" && init?.method === "POST",
     );

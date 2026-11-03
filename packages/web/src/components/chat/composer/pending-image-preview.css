@@ -1,0 +1,95 @@
+/* The viewer animates out of the thumbnail, so the card's number and action
+   would otherwise float over an empty slot while it is open. */
+body:has(.pending-image-preview[open]) [data-pending-card-overlay] {
+  visibility: hidden;
+}
+
+/* The library's zoom button is a dark 40px disc that only appears on focus.
+   Here it becomes the card itself: a transparent cover whose focus edge is the
+   shared ring outline, so keyboard focus reads like any other control. */
+.pending-image-card [data-rmiz-btn-zoom]:is(:focus, :active) {
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: var(--rome-radius-8);
+  background-color: transparent;
+  box-shadow: none;
+  outline: 1px solid transparent;
+  outline-offset: 0;
+}
+
+.pending-image-card [data-rmiz-btn-zoom]:focus-visible {
+  outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+}
+
+.pending-image-preview {
+  --preview-return-duration: 280ms;
+  --preview-return-easing: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.pending-image-preview [data-rmiz-modal-img] {
+  transition-property: transform, clip-path;
+}
+
+.pending-image-preview [data-rmiz-modal-img],
+.pending-image-preview [data-rmiz-modal-overlay] {
+  transition-duration: var(--preview-return-duration);
+  transition-timing-function: var(--preview-return-easing);
+}
+
+/* Return the user's pan and scale alongside the viewer's thumbnail transform. */
+.pending-image-preview [data-preview-state="UNLOADING"] [data-preview-transform] {
+  transition: transform var(--preview-return-duration) var(--preview-return-easing);
+}
+
+.pending-image-preview [data-preview-controls] {
+  transition: opacity 120ms ease-out;
+}
+
+.pending-image-preview [data-preview-state="UNLOADING"] [data-preview-controls] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pending-image-preview [data-rmiz-modal-overlay="visible"] {
+  background-color: var(--overlay);
+}
+
+.pending-image-preview [data-rmiz-modal-overlay="hidden"] {
+  background-color: transparent;
+}
+
+.pending-image-preview [data-rmiz-modal-img] {
+  cursor: default;
+}
+
+.pending-image-preview [data-preview-pannable="true"] [data-rmiz-modal-img] {
+  cursor: grab;
+}
+
+.pending-image-preview [data-preview-pannable="true"] [data-rmiz-modal-img]:active {
+  cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-image-preview {
+    --preview-return-duration: 0.01ms;
+  }
+
+  .pending-image-preview [data-preview-controls] {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* A document thumbnail is a scaled render of the file's first lines, the way
+   an image thumbnail is a scaled render of its pixels. The text keeps its type
+   role and the whole page shrinks, so the miniature never needs a font size
+   off the scale. 250% at 0.4 maps the page back onto its box exactly. */
+.pending-doc-page {
+  width: 250%;
+  height: 250%;
+  transform: scale(0.4);
+  transform-origin: top left;
+}

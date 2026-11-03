@@ -70,7 +70,6 @@ function buildResolvedApp(
           styles: [],
           assetVersion: "abcdef123456",
           displayName: appId,
-          routing: "client",
           manifestPath: "/tmp/unused-web-manifest.json",
           distPath: "/tmp/unused-dist",
         }
@@ -497,5 +496,69 @@ describe("/api/auth/verify", () => {
     // A slash is accepted only as part of a complete valid scoped app id.
     const res = await verifyRequest(host, "/api/app-api/authed%2Fbar/x");
     expect(res.status).toBe(401);
+  });
+});
+
+describe("/api/auth/verify on a non-canonical forwarded path", () => {
+  // Each of these is served by the router as a private route, so a decision
+  // read from the raw string would wave it through without a cookie.
+  const rewrittenPaths = [
+    "/webhooks/../api/people",
+    "/api/health/../people",
+    "/api/share/x/%2e%2e/%2e%2e/people",
+    "/app-assets/x/../../api/people",
+    "/apps/x/../../api/people",
+    "//api/people",
+    "/api/health#/../people",
+  ];
+
+  it("rejects each one without a cookie", async () => {
+    const host = buildHost(await stubDeps([]));
+    for (const uri of rewrittenPaths) {
+      const res = await verifyRequest(host, uri);
+      expect(res.status, uri).toBe(400);
+    }
+  });
+
+  it("rejects each one even with a guardian cookie", async () => {
+    const host = buildHost(await stubDeps([]));
+    for (const uri of rewrittenPaths) {
+      const res = await verifyRequest(host, uri, validCookieHeader());
+      expect(res.status, uri).toBe(400);
+    }
+  });
+
+  it("rejects a path that leaves an allowlisted app's dashboard surface", async () => {
+    const host = buildHost(
+      await stubDeps([buildResolvedApp("pub-app", false)], { allowedApps: ["pub-app"] }),
+    );
+    const res = await verifyRequest(host, "/api/apps/pub-app/%2e%2e/%2e%2e/people");
+    expect(res.status).toBe(400);
+  });
+
+  it("decides a percent-encoded private path as the route it decodes to", async () => {
+    const host = buildHost(await stubDeps([]));
+    for (const uri of ["/%61pi/people", "/api/%70eople"]) {
+      const res = await verifyRequest(host, uri);
+      expect(res.status, uri).toBe(401);
+    }
+  });
+
+  it("keeps public paths with encoded segments and query strings public", async () => {
+    const host = buildHost(await stubDeps([]));
+    for (const uri of [
+      "/api/health?probe=1",
+      "/api/share/abc/projects/asset/my%20file.png",
+      "/api/share/abc/projects/file?path=a/../b",
+    ]) {
+      const res = await verifyRequest(host, uri);
+      expect(res.status, uri).toBe(204);
+    }
+  });
+
+  it("keeps a guardian cookie working on canonical private paths", async () => {
+    const host = buildHost(await stubDeps([]));
+    const res = await verifyRequest(host, "/api/people", validCookieHeader());
+    expect(res.status).toBe(204);
   });
 });

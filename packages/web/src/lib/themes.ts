@@ -252,6 +252,8 @@ const ember: ThemeDefinition = {
   palette: emberPalette,
   light: {
     background: "var(--neutral-50)",
+    "chat-canvas": "var(--neutral-50)",
+    "app-canvas": "var(--neutral-25)",
     foreground: "var(--neutral-900)",
 
     surface: "var(--neutral-25)",
@@ -316,10 +318,17 @@ const ember: ThemeDefinition = {
     "info-fg": "var(--orange-700)",
     "info-border": "var(--orange-100)",
 
+    // The sidebar's running spinner. Blue in every theme, to match the tab
+    // badge; `info` is orange under Ember and Ash. Apps receive the variable
+    // with the theme, but it is not in the app token contract.
+    running: "var(--blue-300)",
+
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,
   },
   dark: {
     background: "var(--neutral-950)",
+    "chat-canvas": "var(--neutral-950)",
+    "app-canvas": "var(--neutral-950)",
     foreground: "var(--neutral-50)",
 
     surface: "var(--neutral-925)",
@@ -382,6 +391,8 @@ const ember: ThemeDefinition = {
     "info-fg": "var(--orange-200)",
     "info-border": "var(--orange-600)",
 
+    running: "var(--blue-200)",
+
     ...LEGACY_STATUS_LABELS_WARM_DARK,
   },
 };
@@ -438,6 +449,8 @@ const ash: ThemeDefinition = {
   palette: ashPalette,
   light: {
     background: "var(--neutral-50)",
+    "chat-canvas": "var(--neutral-50)",
+    "app-canvas": "var(--neutral-25)",
     foreground: "var(--neutral-900)",
 
     surface: "var(--neutral-25)",
@@ -500,6 +513,8 @@ const ash: ThemeDefinition = {
     "info-fg": "var(--orange-700)",
     "info-border": "var(--orange-100)",
 
+    running: "var(--blue-300)",
+
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,
   },
   // Spread rather than copied: the two dark mappings are meant to stay
@@ -560,6 +575,8 @@ const slate: ThemeDefinition = {
   palette: slatePalette,
   light: {
     background: "var(--neutral-50)",
+    "chat-canvas": "var(--neutral-50)",
+    "app-canvas": "var(--neutral-0)",
     foreground: "var(--neutral-950)",
 
     surface: "var(--neutral-0)",
@@ -619,10 +636,14 @@ const slate: ThemeDefinition = {
     "info-fg": "var(--blue-500)",
     "info-border": "var(--blue-100)",
 
+    running: "var(--blue-300)",
+
     ...LEGACY_STATUS_LABELS_SLATE_LIGHT,
   },
   dark: {
     background: "var(--neutral-950)",
+    "chat-canvas": "var(--neutral-950)",
+    "app-canvas": "var(--neutral-950)",
     foreground: "var(--neutral-50)",
 
     surface: "var(--neutral-900)",
@@ -681,6 +702,8 @@ const slate: ThemeDefinition = {
     "info-bg": "var(--blue-700)",
     "info-fg": "var(--blue-150)",
     "info-border": "var(--blue-600)",
+
+    running: "var(--blue-200)",
 
     ...LEGACY_STATUS_LABELS_SLATE_DARK,
   },

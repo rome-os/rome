@@ -7,6 +7,8 @@ on:
   schedule:
     - cron: "30 8 * * 1-5"
       timezone: America/Los_Angeles
+  # Run from main: allocates the next patch version like the schedule.
+  workflow_dispatch:
 
 # Version allocation and latest updates share one lock across all release runs.
 concurrency:

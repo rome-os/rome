@@ -48,6 +48,14 @@ export const AppEntrySchema = z.object({
   state: z.enum(PERSISTED_APP_STATES),
   installedHash: z.string().min(1).nullable(),
   installedVersion: z.string().min(1).nullable(),
+  /**
+   * When this app first installed successfully. Written once: upgrades,
+   * re-installs and the boot first-party pass keep the recorded value.
+   * Optional so lockfiles written before the field existed still parse
+   * without a schemaVersion bump. Absent means "unknown" and is never
+   * backfilled, so upgrading an old app does not make it look new.
+   */
+  installedAt: z.string().datetime().optional(),
   lastError: AppErrorSchema.nullable(),
   updatedAt: z.string().datetime({ message: "updatedAt must be ISO-8601" }),
 });

@@ -46,14 +46,6 @@ export async function saveConfig(config: CliConfig): Promise<string> {
   return file;
 }
 
-export async function requireConfig(): Promise<CliConfig> {
-  const config = await loadConfig();
-  if (!config) {
-    throw new CliError(`Not logged in. Run "rome login --host <URL>" first.`);
-  }
-  return config;
-}
-
 // Resolved bearer for outbound API calls. Tracks whether we got the token
 // from ROME_TOKEN (env) or from the on-disk login config, so commands can
 // pick the right host/email and surface the auth source in `whoami`.

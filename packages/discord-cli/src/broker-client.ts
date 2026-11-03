@@ -1,4 +1,5 @@
 import {
+  DISCORD_BROKER_CHANNEL_HEADER,
   DISCORD_BROKER_VERSION,
   type DiscordBrokerEnvelope,
   type DiscordBrokerError,
@@ -24,6 +25,8 @@ export class CoreProtocolError extends Error {
 export interface DiscordBrokerClientDeps {
   fetch: typeof fetch;
   internalApiPort?: string;
+  /** The session's channel, from `ROME_CHANNEL`. */
+  channel?: string;
 }
 
 export async function requestDiscordAuth(
@@ -46,7 +49,7 @@ export async function requestDiscordApi(
 async function requestBroker(
   deps: DiscordBrokerClientDeps,
   path: string,
-  init: RequestInit,
+  init: Omit<RequestInit, "headers"> & { headers?: Record<string, string> },
 ): Promise<DiscordBrokerEnvelope> {
   const port = deps.internalApiPort?.trim() || "4141";
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65_535) {
@@ -55,7 +58,13 @@ async function requestBroker(
 
   let response: Response;
   try {
-    response = await deps.fetch(`http://127.0.0.1:${port}${path}`, init);
+    const channel = deps.channel?.trim();
+    response = await deps.fetch(
+      `http://127.0.0.1:${port}${path}`,
+      channel
+        ? { ...init, headers: { ...init.headers, [DISCORD_BROKER_CHANNEL_HEADER]: channel } }
+        : init,
+    );
   } catch {
     throw new CoreUnavailableError();
   }

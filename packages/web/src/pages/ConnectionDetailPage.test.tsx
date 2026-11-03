@@ -7,6 +7,10 @@ import i18n from "@/i18n";
 import ConnectionDetailPage from "@/pages/ConnectionDetailPage";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { stateOfGrants } from "@/test/connection-state";
+
+/** A later account's channel id, opaque as core mints it. */
+const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -18,19 +22,24 @@ afterEach(() => {
 });
 
 function connection(
-  overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">,
+  overrides: Partial<ApiConnection> & Pick<ApiConnection, "connectionKind">,
 ): ApiConnection {
   return {
-    id: `conn-${overrides.service}`,
-    label: overrides.service,
+    id: `conn-${overrides.connectionKind}`,
+    label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
     connect: null,
+    setups: {},
+    channel: null,
+    agent: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -41,7 +50,7 @@ function oauth(
   display: GrantDisplay | null = null,
 ): ApiConnection {
   return connection({
-    service,
+    connectionKind: service,
     grants: { user: state },
     display: { user: display },
     connect: { url: `https://oauth/${service}`, available: true, unavailableReason: null },
@@ -49,12 +58,11 @@ function oauth(
 }
 
 /** Mirrors the old minimal channel-status fold: telegram + whatsapp offered but
- *  unconnected, webchat always on. */
+ *  unconnected. */
 function minimalConnections(): ApiConnection[] {
   return [
-    connection({ service: "telegram", grants: { bot: "unauthorized" } }),
-    connection({ service: "whatsapp", grants: { session: "unauthorized" } }),
-    connection({ service: "webchat" }),
+    connection({ connectionKind: "telegram", grants: { bot: "unauthorized" } }),
+    connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } }),
   ];
 }
 
@@ -143,6 +151,35 @@ describe("ConnectionDetailPage — unknown serviceId redirects", () => {
   });
 });
 
+it("redirects the retired telegram-user route to a Telegram card on an opaque channel", async () => {
+  mockApi([
+    connection({ connectionKind: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
+    connection({ connectionKind: "telegram_user", grants: { session: "authorized" } }),
+  ]);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  const locations: string[] = [];
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/settings/connections/telegram-user"]}>
+        <Routes>
+          <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+          <Route
+            path="/settings/connections/chan-7"
+            element={<LocationCapture onLocation={(p) => locations.push(p)} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => {
+    expect(locations).toContain("/settings/connections/chan-7");
+  });
+});
+
 describe("ConnectionDetailPage — load failure", () => {
   it("stays on the detail route and retries the connections request", async () => {
     let connectionRequests = 0;
@@ -176,36 +213,6 @@ describe("ConnectionDetailPage — load failure", () => {
   });
 });
 
-describe("ConnectionDetailPage — webchat (alwaysOn)", () => {
-  it("shows the Always on note in the Connection section", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    expect(await screen.findByText("Always on — nothing to configure.")).toBeTruthy();
-  });
-
-  it("renders the plain enablement bullet for webchat", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    expect(
-      await screen.findByText("Chat with your agent right here in the dashboard"),
-    ).toBeTruthy();
-  });
-
-  it("shows plain enablement copy without the Talk/Act/Watch taxonomy", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    await screen.findByText("Always on — nothing to configure.");
-    // The plain outcome bullet renders...
-    expect(screen.getByText("Chat with your agent right here in the dashboard")).toBeTruthy();
-    // ...but the internal taxonomy is never surfaced to the guardian.
-    expect(screen.queryByText("Capabilities")).toBeNull();
-    expect(screen.queryByText("Talk")).toBeNull();
-  });
-});
-
 describe("ConnectionDetailPage — OAuth service (github)", () => {
   it("renders the Connect button when github is not connected", async () => {
     mockApi([...minimalConnections(), oauth("github", "unauthorized")]);
@@ -227,7 +234,7 @@ describe("ConnectionDetailPage — OAuth service (github)", () => {
     expect(screen.getByText("React when something happens in your repositories")).toBeTruthy();
   });
 
-  it("renders Reconnect + Disconnect when the grant is conferred", async () => {
+  it("renders Reconnect + Disconnect when the grant is granted", async () => {
     mockApi([...minimalConnections(), oauth("github", "authorized")]);
     renderDetail("github");
 
@@ -237,18 +244,186 @@ describe("ConnectionDetailPage — OAuth service (github)", () => {
 });
 
 describe("ConnectionDetailPage — enablement bullets", () => {
-  it("webchat: the dashboard-chat bullet", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    const text = await screen.findByText("Chat with your agent right here in the dashboard");
-    expect(text).toBeTruthy();
-  });
-
   it("google: the outcome bullet phrased for the service", async () => {
     mockApi([...minimalConnections(), oauth("google", "authorized")]);
     renderDetail("google");
 
     expect(await screen.findByText("Work across your Google services as you")).toBeTruthy();
+  });
+});
+
+describe("ConnectionDetailPage — several accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      connectionKind: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      capabilities: {
+        chat: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  const secondFeishu = () =>
+    feishu({
+      id: "conn-feishu-2",
+      channel: SECOND_FEISHU,
+      display: {
+        app: { displayName: "Sales Bot", handle: null, email: null, avatarUrl: null },
+      },
+    });
+
+  function renderWithLocation(initial: string) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const locations: string[] = [];
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[initial]}>
+          <Routes>
+            <Route
+              path="/settings/connections/:serviceId"
+              element={
+                <>
+                  <ConnectionDetailPage />
+                  <LocationCapture onLocation={(p) => locations.push(p)} />
+                </>
+              }
+            />
+            <Route
+              path="/settings/connections"
+              element={<LocationCapture onLocation={(p) => locations.push(p)} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { locations };
+  }
+
+  it("opens the second account at its channel id", async () => {
+    mockApi([feishu(), secondFeishu()]);
+    renderDetail(SECOND_FEISHU);
+
+    expect(await screen.findByText("Feishu · Sales Bot")).toBeTruthy();
+  });
+
+  it("keeps the service route on the first account", async () => {
+    mockApi([feishu(), secondFeishu()]);
+    renderDetail("feishu");
+
+    const title = await screen.findByRole("heading", { level: 1 });
+    expect(title.textContent).toBe("Feishu");
+  });
+
+  /** The setup start for a new account, answered as connected at once. */
+  const connectedSetup = (connectionId: string) => ({
+    cid: "cid-new",
+    state: { status: "done", grant: { connectionId } },
+    reattached: false,
+  });
+
+  it("connects another account, then navigates to its route", async () => {
+    const accounts = [feishu()];
+    const starts: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/setup") && init?.method === "POST") {
+        starts.push({ url, body: JSON.parse(String(init.body)) });
+        accounts.push(secondFeishu());
+        return new Response(JSON.stringify(connectedSetup("conn-feishu-2")), { status: 200 });
+      }
+      if (url === "/api/connections") {
+        return new Response(JSON.stringify({ connections: accounts }), { status: 200 });
+      }
+      if (url === "/api/integrations/composio/status") {
+        return new Response(JSON.stringify({ composio: null }), { status: 200 });
+      }
+      if (url === "/api/agents") {
+        return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const { locations } = renderWithLocation("/settings/connections/feishu");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(locations).toContain(`/settings/connections/${SECOND_FEISHU}`);
+    });
+    expect(starts).toEqual([
+      {
+        url: "/api/connections/feishu/grants/app/setup",
+        body: { force: false, another: true },
+      },
+    ]);
+    expect(await screen.findByText("Feishu · Sales Bot")).toBeTruthy();
+  });
+
+  it("stays on the account when the refetched list lacks the new one", async () => {
+    let started = false;
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/setup") && init?.method === "POST") {
+        started = true;
+        return new Response(JSON.stringify(connectedSetup("conn-feishu-2")), { status: 200 });
+      }
+      if (url === "/api/connections") {
+        return new Response(JSON.stringify({ connections: [feishu()] }), { status: 200 });
+      }
+      if (url === "/api/integrations/composio/status") {
+        return new Response(JSON.stringify({ composio: null }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const { locations } = renderWithLocation("/settings/connections/feishu");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(started).toBe(true);
+      expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
+    });
+    expect(locations).not.toContain(`/settings/connections/${SECOND_FEISHU}`);
+    expect(locations).not.toContain("/settings/connections");
+  });
+});
+
+describe("ConnectionDetailPage — Shopify install return", () => {
+  function shopify(): ApiConnection {
+    return connection({
+      connectionKind: "shopify",
+      grants: { store: "unauthorized" },
+      display: { store: null },
+      connect: {
+        url: "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed",
+        available: true,
+        unavailableReason: null,
+      },
+    });
+  }
+
+  it("offers to connect the store Shopify installed the app on", async () => {
+    mockApi([shopify()]);
+    renderDetail("shopify?shop=acme.myshopify.com");
+
+    const link = await screen.findByRole("link", { name: "Connect acme.myshopify.com" });
+    expect(link.getAttribute("href")).toBe("/api/oauth/shopify/start?shop=acme.myshopify.com");
+  });
+
+  it("ignores a value that is not a myshopify.com store", async () => {
+    mockApi([shopify()]);
+    renderDetail(`shopify?shop=${encodeURIComponent("evil.example.com")}`);
+
+    await screen.findByRole("heading", { name: "Shopify" });
+    expect(screen.queryByText(/Finish connecting/)).toBeNull();
+    expect(screen.queryByRole("link", { name: /evil\.example\.com/ })).toBeNull();
   });
 });

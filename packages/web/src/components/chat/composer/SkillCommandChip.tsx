@@ -15,7 +15,7 @@ export interface SkillSelection {
 
 export interface SkillCommandChipProps {
   skill: SkillSelection;
-  onRemove: () => void;
+  onRemove?: () => void;
 }
 
 /**

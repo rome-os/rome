@@ -8,19 +8,19 @@ import {
   useRef,
   useState,
 } from "react";
-import { useSearchParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Link, useSearchParams } from "react-router-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { TFunction } from "i18next";
 import { Search } from "lucide-react";
 import type {
-  ConversationSettingField,
-  ConversationSettings,
-  ConversationSettingsListItem,
-  ConversationSettingsSnapshot,
-  PartialConversationSettings,
+  ChatSettingField,
+  ChatSettings,
+  ChatSettingsListItem,
+  ChatSettingsSnapshot,
+  PartialChatSettings,
   ProviderSessionResetPolicy,
-} from "@rome/api-types/conversation-settings";
+} from "@rome/api-types/chat-settings";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -44,11 +44,12 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
-import { serviceLabel } from "@/lib/connection-cards";
+import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
 interface PageResponse {
-  items: ConversationSettingsListItem[];
+  items: ChatSettingsListItem[];
   nextCursor?: string;
 }
 
@@ -85,7 +86,7 @@ export function ChannelsSettingsPage() {
   const [availability, setAvailability] = useState("");
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [agentNames, setAgentNames] = useState<string[]>([]);
-  const [items, setItems] = useState<ConversationSettingsListItem[]>([]);
+  const [items, setItems] = useState<ChatSettingsListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -101,7 +102,7 @@ export function ChannelsSettingsPage() {
         if (availability) search.set("availability", availability);
         if (cursor) search.set("cursor", cursor);
         const [page, connectionList, agentPage] = await Promise.all([
-          api<PageResponse>(`/api/conversation-settings?${search}`),
+          api<PageResponse>(`/api/chat-settings?${search}`),
           fetchConnections(),
           api<AgentPage>("/api/agents"),
         ]);
@@ -128,22 +129,55 @@ export function ChannelsSettingsPage() {
   const talkConnections = useMemo(
     () =>
       connections.flatMap((connection) =>
-        connection.id !== null && connection.capabilities.talk?.state !== "unsupported"
+        connection.id !== null && connection.capabilities.chat?.state !== "unsupported"
           ? [{ id: connection.id, label: connection.label }]
           : [],
       ),
     [connections],
   );
 
+  // Rome does not listen to a linkable account with no agent, whatever
+  // agent a conversation on it picks. A core that predates links omits `agent`.
+  // Each maps to the page that links its agent.
+  const silentAccounts = useMemo(
+    () =>
+      new Map(
+        connections.flatMap((connection) =>
+          connection.id !== null && Boolean(connection.link) && connection.agent === null
+            ? [
+                [
+                  connection.id,
+                  `/settings/connections/${encodeURIComponent(connectionRoute(connection))}`,
+                ],
+              ]
+            : [],
+        ),
+      ),
+    [connections],
+  );
+
+  // A linkable account's agent answers each conversation on it that has
+  // no agent of its own.
+  const accountAgents = useMemo(
+    () =>
+      new Map(
+        connections.flatMap((connection) =>
+          connection.id !== null && Boolean(connection.link) && typeof connection.agent === "string"
+            ? [[connection.id, connection.agent]]
+            : [],
+        ),
+      ),
+    [connections],
+  );
+
   // Stable identity: every card takes this as a dependency, so an inline
   // function here would change on each render and churn their save closures.
-  const handleSaved = useCallback((snapshot: ConversationSettingsSnapshot) => {
+  const handleSaved = useCallback((snapshot: ChatSettingsSnapshot) => {
     setItems((current) =>
       current.map((candidate) =>
         candidate.snapshot.conversation.ref.connectionId ===
           snapshot.conversation.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId ===
-          snapshot.conversation.ref.conversationId
+        candidate.snapshot.conversation.ref.chatId === snapshot.conversation.ref.chatId
           ? { ...candidate, snapshot, source: hasOverrides(snapshot) ? "configured" : "known" }
           : candidate,
       ),
@@ -243,9 +277,11 @@ export function ChannelsSettingsPage() {
           <div className="space-y-4">
             {items.map((item) => (
               <ConversationRow
-                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.conversationId}`}
+                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.chatId}`}
                 item={item}
                 agentNames={agentNames}
+                silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
+                accountAgent={accountAgents.get(item.snapshot.conversation.ref.connectionId)}
                 onSaved={handleSaved}
               />
             ))}
@@ -270,11 +306,19 @@ export function ChannelsSettingsPage() {
 function ConversationRow({
   item,
   agentNames,
+  silentAccount,
+  accountAgent,
   onSaved,
 }: {
-  item: ConversationSettingsListItem;
+  item: ChatSettingsListItem;
   agentNames: string[];
-  onSaved: (snapshot: ConversationSettingsSnapshot) => void;
+  /** Set when Rome does not listen to the conversation's account: the page that links
+   *  its agent. */
+  silentAccount: string | undefined;
+  /** The agent linked to the conversation's account, which answers while the
+   *  conversation has no agent of its own. */
+  accountAgent: string | undefined;
+  onSaved: (snapshot: ChatSettingsSnapshot) => void;
 }) {
   const { t } = useTranslation("settings");
   const agentFieldId = useId();
@@ -283,17 +327,29 @@ function ConversationRow({
   const { snapshot } = item;
   const conversation = snapshot.conversation;
   const supported = new Set(snapshot.supportedFields);
+  const silent = silentAccount !== undefined;
+  const agentOverridden = settingSource(snapshot, "routing.agentName") === "overridden";
   const overrideCount = snapshot.supportedFields.filter(
-    (field) => settingSource(snapshot, field) === "overridden",
+    (field) =>
+      settingSource(snapshot, field) === "overridden" && !(field === "routing.agentName" && silent),
   ).length;
-  const [draft, setDraft] = useState<ConversationSettings>(() =>
-    structuredClone(snapshot.effective),
-  );
+  const [draft, setDraft] = useState<ChatSettings>(() => structuredClone(snapshot.effective));
   const [saving, setSaving] = useState(false);
+  // Whether the conversation follows its account's agent, kept beside
+  // the draft: effective settings read the same for no choice and a pin to
+  // main, so only the override tells them apart. `projectedFollow` is to
+  // `followsLink` what `projected` is to the draft.
+  const [followsLink, setFollowsLinkState] = useState(!agentOverridden);
+  const followRef = useRef(!agentOverridden);
+  const projectedFollow = useRef(!agentOverridden);
+  const setFollowsLink = useCallback((follow: boolean) => {
+    followRef.current = follow;
+    setFollowsLinkState(follow);
+  }, []);
   const routingOptions = Array.from(
     new Set(
       ["main", ...agentNames, ...(draft.routing.agentName ? [draft.routing.agentName] : [])].map(
-        (name) => (name === "core:main" ? "main" : name),
+        (name) => (name === MAIN_AGENT_ID ? "main" : name),
       ),
     ),
   );
@@ -304,7 +360,7 @@ function ConversationRow({
    * value would still be the previous one.
    */
   const draftRef = useRef(draft);
-  const applyDraft = useCallback((next: ConversationSettings) => {
+  const applyDraft = useCallback((next: ChatSettings) => {
     draftRef.current = next;
     setDraft(next);
   }, []);
@@ -314,7 +370,7 @@ function ConversationRow({
    * the values are read off the draft at flush time, so a field edited several
    * times in one burst contributes exactly one value: its last.
    */
-  const dirty = useRef(new Set<ConversationSettingField>());
+  const dirty = useRef(new Set<ChatSettingField>());
   const flushTimer = useRef<number>(undefined);
   // Serializes PATCHes: two edits in quick succession must not race, or the
   // later response can be overtaken by the earlier one and show a stale value.
@@ -330,7 +386,7 @@ function ConversationRow({
    * pre-edit value, and pruning against it would drop a genuine change back to
    * that value as if it were a no-op.
    */
-  const projected = useRef<ConversationSettings>(structuredClone(snapshot.effective));
+  const projected = useRef<ChatSettings>(structuredClone(snapshot.effective));
   /** Batches enqueued but not yet settled; only the last one may resync `projected`. */
   const queued = useRef(0);
 
@@ -340,28 +396,36 @@ function ConversationRow({
     // A field edited and put back before the debounce elapsed is not an edit.
     // Sending it would make the round-trip a durable override, which the UI has
     // no way to undo — so diff against projected state and drop no-ops.
-    const sent: Array<[ConversationSettingField, unknown, unknown]> = [];
-    const set: PartialConversationSettings = {};
+    const sent: Array<[ChatSettingField, unknown, unknown]> = [];
+    const set: PartialChatSettings = {};
+    const clear: ChatSettingField[] = [];
     const ahead = structuredClone(projected.current);
+    // Only a linked account has a link to follow.
+    const follow = accountAgent !== undefined && followRef.current;
+    const previousFollow = accountAgent !== undefined && projectedFollow.current;
     for (const field of fields) {
       const value = settingValue(draftRef.current, field);
       const previous = settingValue(projected.current, field);
-      if (settingValuesEqual(value, previous)) continue;
-      setPartialSettingValue(set, field, value);
+      const linkChanged = field === "routing.agentName" && follow !== previousFollow;
+      if (settingValuesEqual(value, previous) && !linkChanged) continue;
+      if (field === "routing.agentName" && follow) clear.push(field);
+      else setPartialSettingValue(set, field, value);
       setSettingValue(ahead, field, value);
       sent.push([field, value, previous]);
     }
     if (sent.length === 0) return inFlight.current;
     projected.current = ahead;
+    const sentLink = sent.some(([field]) => field === "routing.agentName");
+    if (sentLink) projectedFollow.current = follow;
     queued.current += 1;
 
     setSaving(true);
     inFlight.current = inFlight.current
       .then(() =>
-        api<ConversationSettingsSnapshot>("/api/conversation-settings", {
+        api<ChatSettingsSnapshot>("/api/chat-settings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ref: conversation.ref, set, clear: [] }),
+          body: JSON.stringify({ ref: conversation.ref, set, clear }),
         }),
       )
       .then((next) => {
@@ -369,7 +433,10 @@ function ConversationRow({
         // Only the last outstanding batch may adopt the response as the whole
         // projected state — an earlier one's response predates batches already
         // enqueued behind it.
-        if (queued.current === 0) projected.current = structuredClone(next.effective);
+        if (queued.current === 0) {
+          projected.current = structuredClone(next.effective);
+          projectedFollow.current = !overridesAgent(next);
+        }
         if (!mounted.current) return;
         onSaved(next);
         // An edit queued while this was in flight leaves the draft ahead of the
@@ -389,6 +456,10 @@ function ConversationRow({
           if (dirty.current.has(field)) continue;
           setSettingValue(rolledBack, field, previous);
           setSettingValue(restored, field, previous);
+          if (field === "routing.agentName") {
+            projectedFollow.current = previousFollow;
+            if (mounted.current) setFollowsLink(previousFollow);
+          }
         }
         projected.current = rolledBack;
         if (mounted.current) applyDraft(restored);
@@ -402,6 +473,7 @@ function ConversationRow({
                 setSettingValue(next, field, value);
                 dirty.current.add(field);
               }
+              if (sentLink) setFollowsLink(follow);
               applyDraft(next);
               flushRef.current();
             },
@@ -412,7 +484,7 @@ function ConversationRow({
         if (mounted.current) setSaving(false);
       });
     return inFlight.current;
-  }, [applyDraft, conversation.ref, onSaved, t]);
+  }, [applyDraft, conversation.ref, accountAgent, onSaved, setFollowsLink, t]);
 
   // Lets the retry action and the unmount cleanup reach the current flush
   // without taking it as a dependency — see the unmount effect below.
@@ -427,7 +499,9 @@ function ConversationRow({
     if (dirty.current.size > 0 || queued.current > 0) return;
     projected.current = structuredClone(snapshot.effective);
     applyDraft(structuredClone(snapshot.effective));
-  }, [snapshot, applyDraft]);
+    projectedFollow.current = !overridesAgent(snapshot);
+    setFollowsLink(projectedFollow.current);
+  }, [snapshot, applyDraft, setFollowsLink]);
 
   // Leaving the page mid-debounce must not silently discard the edit. Empty
   // deps on purpose: keyed on `flush` this would re-run on every parent render
@@ -444,7 +518,7 @@ function ConversationRow({
    * Every control writes through here: the draft updates immediately so the UI
    * stays responsive, and the change is coalesced into one PATCH per burst.
    */
-  function change(field: ConversationSettingField, value: unknown) {
+  function change(field: ChatSettingField, value: unknown) {
     const next = structuredClone(draftRef.current);
     setSettingValue(next, field, value);
     applyDraft(next);
@@ -459,7 +533,7 @@ function ConversationRow({
       className="overflow-hidden rounded-12 border border-border bg-surface px-4"
     >
       <header className="-mx-4 flex items-start gap-3 border-b border-border px-4 py-4">
-        <ConnectionBrandBadge connection={conversation.service} />
+        <ConnectionBrandBadge connection={conversation.connectionKind} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* The container reads as the place the conversation lives, so it
@@ -490,7 +564,7 @@ function ConversationRow({
               list the service would otherwise be absent from the a11y tree. */}
           <p className="mt-1 truncate text-aux text-muted-foreground">
             {t(`channels.conversationSettings.kinds.${conversation.kind}`)}
-            <span className="sr-only">{` · ${serviceLabel(conversation.service)}`}</span>
+            <span className="sr-only">{` · ${serviceLabel(conversation.connectionKind)}`}</span>
           </p>
         </div>
         {saving && (
@@ -571,27 +645,60 @@ function ConversationRow({
       </SettingSection>
 
       <SettingSection title={t("channels.conversationSettings.sections.routing")}>
-        {supported.has("routing.agentName") && (
+        {supported.has("routing.agentName") && silent && (
+          <SettingRow field="agent" overridden={false}>
+            <div className="sm:max-w-xs">
+              <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
+              <p className="mt-1 text-aux text-muted-foreground">
+                {t("channels.conversationSettings.silentAccount")}{" "}
+                <Trans
+                  t={t}
+                  i18nKey="channels.conversationSettings.silentAccountLink"
+                  components={{
+                    account: <Link to={silentAccount} className="underline underline-offset-2" />,
+                  }}
+                />
+                {agentOverridden &&
+                  ` ${t("channels.conversationSettings.silentAccountOverride", {
+                    agent: overriddenAgentLabel(snapshot.overrides.routing?.agentName),
+                  })}`}
+              </p>
+            </div>
+          </SettingRow>
+        )}
+        {supported.has("routing.agentName") && !silent && (
           <SettingRow
             field="agent"
             overridden={settingSource(snapshot, "routing.agentName") === "overridden"}
             controlId={agentFieldId}
           >
             <Select
-              value={draft.routing.agentName ?? "main"}
-              onValueChange={(name) => change("routing.agentName", name)}
+              value={
+                accountAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")
+              }
+              onValueChange={(name) => {
+                if (accountAgent) setFollowsLink(name === FOLLOW_LINK);
+                change("routing.agentName", name === FOLLOW_LINK ? null : name);
+              }}
             >
               <SelectTrigger id={agentFieldId} className={CONTROL_WIDTH}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {accountAgent && (
+                  <SelectItem value={FOLLOW_LINK}>
+                    {t("channels.conversationSettings.accountAgent", {
+                      agent: overriddenAgentLabel(accountAgent),
+                    })}
+                  </SelectItem>
+                )}
                 {routingOptions.map((name) => (
                   <SelectItem key={name} value={name}>
-                    {name === "main"
-                      ? t("channels.conversationSettings.mainAgent")
-                      : [artifactLocalName(name), artifactOwnerId(name)]
-                          .filter((part): part is string => Boolean(part && part !== "core"))
-                          .join(" · ")}
+                    {name !== "main"
+                      ? agentLabel(name)
+                      : accountAgent
+                        ? "main"
+                        : t("channels.conversationSettings.mainAgent")}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -602,6 +709,26 @@ function ConversationRow({
     </article>
   );
 }
+
+/** A stored agent choice, where null and either spelling of main pin main. */
+function overriddenAgentLabel(name: string | null | undefined): string {
+  return !name || name === "main" || name === MAIN_AGENT_ID ? "main" : agentLabel(name);
+}
+
+/** An agent's name and, unless it is core, its owner. */
+function agentLabel(name: string): string {
+  return [artifactLocalName(name), artifactOwnerId(name)]
+    .filter((part): part is string => Boolean(part && part !== "core"))
+    .join(" · ");
+}
+
+/** Whether the conversation has an agent choice of its own, a main pin included. */
+function overridesAgent(snapshot: ChatSettingsSnapshot): boolean {
+  return settingSource(snapshot, "routing.agentName") === "overridden";
+}
+
+/** The agent picker's value for "no agent of its own", which follows the link. */
+const FOLLOW_LINK = "@linked";
 
 /** Every control in the right-hand column lands on the same width. */
 const CONTROL_WIDTH = "w-full sm:w-52";
@@ -888,7 +1015,7 @@ function settingOptions(t: TFunction<"settings">, values: string[]) {
   }));
 }
 
-function settingValue(settings: ConversationSettings, field: ConversationSettingField): unknown {
+function settingValue(settings: ChatSettings, field: ChatSettingField): unknown {
   switch (field) {
     case "enabled":
       return settings.enabled;
@@ -911,27 +1038,23 @@ function settingValuesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function setSettingValue(
-  settings: ConversationSettings,
-  field: ConversationSettingField,
-  value: unknown,
-): void {
+function setSettingValue(settings: ChatSettings, field: ChatSettingField, value: unknown): void {
   switch (field) {
     case "enabled":
       settings.enabled = value as boolean;
       return;
     case "activation.mode":
-      settings.activation.mode = value as ConversationSettings["activation"]["mode"];
+      settings.activation.mode = value as ChatSettings["activation"]["mode"];
       return;
     case "activation.botMessages":
-      settings.activation.botMessages = value as ConversationSettings["activation"]["botMessages"];
+      settings.activation.botMessages = value as ChatSettings["activation"]["botMessages"];
       return;
     case "activation.whenOthersMentioned":
       settings.activation.whenOthersMentioned =
-        value as ConversationSettings["activation"]["whenOthersMentioned"];
+        value as ChatSettings["activation"]["whenOthersMentioned"];
       return;
     case "replies.placement":
-      settings.replies.placement = value as ConversationSettings["replies"]["placement"];
+      settings.replies.placement = value as ChatSettings["replies"]["placement"];
       return;
     case "routing.agentName":
       settings.routing.agentName = value === "main" ? null : (value as string | null);
@@ -942,8 +1065,8 @@ function setSettingValue(
 }
 
 function setPartialSettingValue(
-  settings: PartialConversationSettings,
-  field: ConversationSettingField,
+  settings: PartialChatSettings,
+  field: ChatSettingField,
   value: unknown,
 ): void {
   switch (field) {
@@ -951,18 +1074,17 @@ function setPartialSettingValue(
       settings.enabled = value as boolean;
       return;
     case "activation.mode":
-      (settings.activation ??= {}).mode = value as ConversationSettings["activation"]["mode"];
+      (settings.activation ??= {}).mode = value as ChatSettings["activation"]["mode"];
       return;
     case "activation.botMessages":
-      (settings.activation ??= {}).botMessages =
-        value as ConversationSettings["activation"]["botMessages"];
+      (settings.activation ??= {}).botMessages = value as ChatSettings["activation"]["botMessages"];
       return;
     case "activation.whenOthersMentioned":
       (settings.activation ??= {}).whenOthersMentioned =
-        value as ConversationSettings["activation"]["whenOthersMentioned"];
+        value as ChatSettings["activation"]["whenOthersMentioned"];
       return;
     case "replies.placement":
-      (settings.replies ??= {}).placement = value as ConversationSettings["replies"]["placement"];
+      (settings.replies ??= {}).placement = value as ChatSettings["replies"]["placement"];
       return;
     case "routing.agentName":
       (settings.routing ??= {}).agentName = value === null ? "main" : (value as string);
@@ -973,8 +1095,8 @@ function setPartialSettingValue(
 }
 
 function settingSource(
-  snapshot: ConversationSettingsSnapshot,
-  field: ConversationSettingField,
+  snapshot: ChatSettingsSnapshot,
+  field: ChatSettingField,
 ): "overridden" | "default" {
   const overrides = snapshot.overrides;
   const overridden =
@@ -995,6 +1117,6 @@ function settingSource(
   return "default";
 }
 
-function hasOverrides(snapshot: ConversationSettingsSnapshot): boolean {
+function hasOverrides(snapshot: ChatSettingsSnapshot): boolean {
   return snapshot.supportedFields.some((field) => settingSource(snapshot, field) === "overridden");
 }

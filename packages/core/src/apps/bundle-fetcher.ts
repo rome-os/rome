@@ -18,6 +18,7 @@ import { createLogger } from "../logger.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import type { BundleFetcher } from "./store-bundle.js";
 import { resolveBundleUrl } from "./rome-cloud-urls.js";
+import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 
 const log = createLogger("apps-bundle-fetcher");
 
@@ -48,7 +49,9 @@ export function createBundleFetcher(opts: CreateBundleFetcherOptions = {}): Bund
     let response: Response;
     try {
       response = await fetchImpl(url, {
-        headers: { accept: "application/gzip, application/octet-stream" },
+        headers: withRomeCloudReadAuth(url, {
+          accept: "application/gzip, application/octet-stream",
+        }),
         signal: controller.signal,
       });
     } catch (err) {

@@ -1,3 +1,4 @@
+import { DevicesSection } from "@/components/devices-section";
 import {
   Measure,
   Section,
@@ -8,6 +9,7 @@ import {
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
+import { SpokenRecapsSection } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -82,6 +84,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -104,6 +107,7 @@ import { SystemUpgradeSection } from "@/components/system-upgrade-section";
 import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
 import { useTailscaleConnect } from "@/hooks/use-tailscale-connect";
 import { useInvalidateSettings } from "@/hooks/use-settings";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { parseEmailTextarea } from "@/lib/email-list";
 import { StatusIndicator } from "@/lib/connection-status";
@@ -127,12 +131,25 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
+/** How a reply streams to Feishu: edited messages, or streaming cards. */
+type FeishuStreamingStyle = "message" | "card";
+
 interface SettingsData {
+  "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
-  enableFable?: boolean;
   enableImpersonation?: boolean;
+  enableReplyStreaming?: boolean;
+  feishuReplyStreamingStyle?: FeishuStreamingStyle;
+  experimentalConcierge?: boolean;
   showAiToolUsage?: boolean;
+  tierModelMappings?: TierModelMappings;
 }
+
+type ModelTier = "large" | "medium" | "small";
+type ConfigurableProviderId = "openai" | "anthropic";
+type TierModelMappings = Partial<
+  Record<ConfigurableProviderId, Partial<Record<ModelTier, string>>>
+>;
 
 interface TailscaleDevice {
   id: string;
@@ -173,6 +190,7 @@ interface TailscaleState {
 export const TABS = [
   "Appearance",
   "Connections",
+  "Devices",
   "Channels",
   "AI Tools",
   "Favors",
@@ -181,12 +199,10 @@ export const TABS = [
 
 type Tab = (typeof TABS)[number];
 
-export const VISIBLE_TABS = TABS;
-
 // Only these tabs read what `loadAll` fetches (/api/settings plus the tailscale
-// device list). Connections, Channels and Favors own their requests, and
+// device list). Connections, Devices, Channels and Favors own their requests, and
 // Appearance reads the theme/i18n context, so neither the initial settings load
-// nor a settings failure has anything to say about them — gating all six on one
+// nor a settings failure has anything to say about them — gating every tab on one
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
 
@@ -196,33 +212,7 @@ function tabToSlug(tab: Tab): string {
 
 export function normalizeTab(value: string | null): Tab | null {
   if (!value) return null;
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-");
-  if (normalized === "session" || normalized === "tailscale") {
-    return "Advanced";
-  }
-  if (normalized === "integrations") {
-    return "Connections";
-  }
-  const match = TABS.find((tab) => tab.toLowerCase().replace(/\s+/g, "-") === normalized);
-  return match ?? null;
-}
-
-// Tabs whose controls were relocated to the Inbox page (/apps/inbox). Old
-// bookmarks/links to these slugs redirect there instead of silently rendering
-// an unrelated settings tab.
-const TABS_MOVED_TO_INBOX = new Set(["trust", "sentinel", "sentinel-log"]);
-
-function isMovedToInbox(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return TABS_MOVED_TO_INBOX.has(
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[_\s]+/g, "-"),
-  );
+  return TABS.find((tab) => tabToSlug(tab) === value) ?? null;
 }
 
 // ── Component ──────────────────────────────────────────
@@ -230,9 +220,9 @@ function isMovedToInbox(value: string | null | undefined): boolean {
 export default function SettingsPage() {
   const { t } = useTranslation("settings");
   const params = useParams<{ tab?: string }>();
-  const redirectToInbox = isMovedToInbox(params.tab);
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
+  useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -272,11 +262,13 @@ export default function SettingsPage() {
           setComposio(payload.composio ?? null);
         }
         setConnectionsError(null);
+        return connectionList;
       } catch (err) {
         console.error("Failed to load connections data", err);
         setConnectionsError(
           err instanceof Error ? err.message : t("connections.loadFailedFallback"),
         );
+        return null;
       } finally {
         if (!backgroundRefresh) setConnectionsLoading(false);
       }
@@ -349,12 +341,6 @@ export default function SettingsPage() {
 
   // ── Render ──
 
-  // Controls relocated to the Inbox page — send legacy /settings/{trust,sentinel,
-  // sentinel-log} links there rather than rendering an unrelated tab.
-  if (redirectToInbox) {
-    return <Navigate to="/apps/inbox" replace />;
-  }
-
   // Unknown settings slugs are not pages. Redirect them to the canonical
   // default instead of rendering Appearance under a stale URL.
   if (params.tab && !normalizedTab) {
@@ -375,7 +361,7 @@ export default function SettingsPage() {
       </PageHeader>
 
       <PageNav aria-label={t("page.title")}>
-        {VISIBLE_TABS.map((tab) => (
+        {TABS.map((tab) => (
           <PageNavLink asChild key={tab} active={tab === activeTab}>
             <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
           </PageNavLink>
@@ -390,7 +376,7 @@ export default function SettingsPage() {
             <CardContent className="flex flex-col items-start gap-3">
               <p className="text-ui text-destructive">{loadError}</p>
               <Button type="button" size="sm" onClick={() => void loadAll()}>
-                <RefreshCw />
+                <RefreshCw data-icon="inline-start" />
                 {t("page.retry")}
               </Button>
             </CardContent>
@@ -405,11 +391,11 @@ export default function SettingsPage() {
               composio={composio}
               loading={connectionsLoading}
               error={connectionsError}
-              onRetry={loadConnections}
               onRefresh={loadConnections}
               onFlash={(message) => toast.error(message)}
             />
           )}
+          {activeTab === "Devices" && <DevicesSection />}
           {activeTab === "Channels" && (
             <div className="max-w-3xl">
               <ChannelsSettingsPage />
@@ -421,7 +407,7 @@ export default function SettingsPage() {
             </Measure>
           )}
           {activeTab === "AI Tools" && (
-            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+            <AiToolsPanel showRomeCredits showUsage={settings.showAiToolUsage ?? true} />
           )}
           {activeTab === "Advanced" && (
             <AdvancedSection
@@ -442,7 +428,7 @@ export default function SettingsPage() {
  * The Appearance tab, on the kit's Form layout. The tab's body fills Form's
  * rows slot — `FormRows` caps the reading measure and each `FormRow` carries
  * one setting, label left and control right — while the Settings title and tab
- * strip above stay the shared frame all six tabs render into.
+ * strip above stay the shared frame all tabs render into.
  *
  * Rows rather than stacked fields, because a guardian returns here to change
  * one setting at a time, and every row saves itself the moment it changes.
@@ -662,9 +648,13 @@ function FavorRequestRow({
                 aria-label={payBusy ? t("favors.payingApprovalRequest") : undefined}
               >
                 {payBusy ? (
-                  <Spinner size="sm" label={t("favors.payingApprovalRequest")} />
+                  <Spinner
+                    data-icon="inline-start"
+                    size="sm"
+                    label={t("favors.payingApprovalRequest")}
+                  />
                 ) : (
-                  <Check />
+                  <Check data-icon="inline-start" />
                 )}
                 Pay
               </Button>
@@ -677,9 +667,13 @@ function FavorRequestRow({
                 aria-label={declineBusy ? t("favors.decliningApprovalRequest") : undefined}
               >
                 {declineBusy ? (
-                  <Spinner size="sm" label={t("favors.decliningApprovalRequest")} />
+                  <Spinner
+                    data-icon="inline-start"
+                    size="sm"
+                    label={t("favors.decliningApprovalRequest")}
+                  />
                 ) : (
-                  <X />
+                  <X data-icon="inline-start" />
                 )}
                 Decline
               </Button>
@@ -777,7 +771,7 @@ function FavorsSection() {
             className="mt-3"
             onClick={() => void query.refetch()}
           >
-            <RefreshCw />
+            <RefreshCw data-icon="inline-start" />
             Retry
           </Button>
         </CardContent>
@@ -853,7 +847,7 @@ function FavorsSection() {
                 key={pack.id}
                 type="button"
                 variant="outline"
-                className="justify-between"
+                align="between"
                 onClick={() => void startRecharge(pack)}
                 disabled={busyPack !== null}
                 aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
@@ -1017,8 +1011,25 @@ function AdvancedSection({
         {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
         <SystemDiagnosisSection />
+        <Section>
+          <SectionHeader>
+            <SectionTitle>{t("advanced.feedback.title")}</SectionTitle>
+          </SectionHeader>
+          <FormRows>
+            <SettingsToggleRow
+              title={t("advanced.feedback.agentReports.title")}
+              description={t("advanced.feedback.agentReports.description")}
+              label={t("advanced.feedback.agentReports.toggleLabel")}
+              checked={settings["feedback.agentReportsEnabled"] ?? true}
+              onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
+              disabled={saving}
+            />
+          </FormRows>
+        </Section>
+        <SpokenRecapsSection />
         <ComputerUseSection />
         <PresentationModeSection />
+        <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -1108,7 +1119,7 @@ function DeveloperSettingsSection({
       </summary>
       <Section className="mt-3">
         <FormRows>
-          <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
@@ -1119,7 +1130,43 @@ function DeveloperSettingsSection({
   );
 }
 
-function FableAdvancedSection({
+const TIER_MODEL_MAPPING_FIELDS: Array<{
+  provider: ConfigurableProviderId;
+  tier: ModelTier;
+  placeholder: string;
+}> = [
+  { provider: "openai", tier: "large", placeholder: "gpt-6.1-sol" },
+  { provider: "openai", tier: "medium", placeholder: "gpt-6.1-sol" },
+  { provider: "openai", tier: "small", placeholder: "gpt-6-luna" },
+  { provider: "anthropic", tier: "large", placeholder: "claude-opus-5-5[1m]" },
+  { provider: "anthropic", tier: "medium", placeholder: "claude-sonnet-5-5" },
+  { provider: "anthropic", tier: "small", placeholder: "claude-haiku-5-5" },
+];
+
+function normalizeTierModelMappings(value: unknown): TierModelMappings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const mappings: TierModelMappings = {};
+  for (const provider of ["openai", "anthropic"] as const) {
+    const providerMappings = (value as Record<string, unknown>)[provider];
+    if (
+      !providerMappings ||
+      typeof providerMappings !== "object" ||
+      Array.isArray(providerMappings)
+    ) {
+      continue;
+    }
+    for (const tier of ["large", "medium", "small"] as const) {
+      const model = (providerMappings as Record<string, unknown>)[tier];
+      if (typeof model === "string" && model.trim()) {
+        mappings[provider] = { ...mappings[provider], [tier]: model.trim() };
+      }
+    }
+  }
+  return mappings;
+}
+
+function TierModelMappingsAdvancedSection({
   settings,
   onSave,
   saving,
@@ -1129,22 +1176,57 @@ function FableAdvancedSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.enableFable ?? false);
+  const [mappings, setMappings] = useState(() =>
+    normalizeTierModelMappings(settings.tierModelMappings),
+  );
 
-  function toggle(next: boolean) {
-    setEnabled(next);
-    void onSave({ enableFable: next });
+  function update(provider: ConfigurableProviderId, tier: ModelTier, model: string) {
+    setMappings((current) => ({
+      ...current,
+      [provider]: { ...current[provider], [tier]: model },
+    }));
+  }
+
+  function save() {
+    const normalized = normalizeTierModelMappings(mappings);
+    setMappings(normalized);
+    void onSave({ tierModelMappings: normalized });
   }
 
   return (
-    <SettingsToggleRow
-      title={t("advanced.fable.title")}
-      description={t("advanced.fable.description")}
-      label={t("advanced.fable.toggleLabel")}
-      checked={enabled}
-      onChange={toggle}
-      disabled={saving}
-    />
+    <FormRow className="block">
+      <FormRowHeading>
+        <FormRowLabel>{t("advanced.tierModelMappings.title")}</FormRowLabel>
+        <FormRowDescription>{t("advanced.tierModelMappings.description")}</FormRowDescription>
+      </FormRowHeading>
+      <FormRows className="mt-3 max-w-none">
+        {TIER_MODEL_MAPPING_FIELDS.map(({ provider, tier, placeholder }) => {
+          const id = `tier-model-${provider}-${tier}`;
+          return (
+            <FormRow key={id}>
+              <FormRowHeading>
+                <FormRowLabel htmlFor={id}>
+                  {t(`advanced.tierModelMappings.${provider}.${tier}`)}
+                </FormRowLabel>
+              </FormRowHeading>
+              <FormRowControl>
+                <Input
+                  id={id}
+                  className="w-64"
+                  value={mappings[provider]?.[tier] ?? ""}
+                  placeholder={placeholder}
+                  onChange={(event) => update(provider, tier, event.target.value)}
+                  disabled={saving}
+                />
+              </FormRowControl>
+            </FormRow>
+          );
+        })}
+      </FormRows>
+      <Button type="button" size="sm" className="mt-3" onClick={save} disabled={saving}>
+        {t("advanced.tierModelMappings.save")}
+      </Button>
+    </FormRow>
   );
 }
 
@@ -1435,6 +1517,97 @@ function ImpersonationAdvancedSection({
   );
 }
 
+/** Features still being tried out, each off until a guardian switches it on.
+ *  Reply streaming is the first: with it off, Rome sends each reply whole. The
+ *  setting is `enableReplyStreaming`, read by the host on every reply.
+ *  `feishuReplyStreamingStyle` chooses how a reply streams to Feishu, cards
+ *  unless it says messages, read for each message a reply creates.
+ *  `experimentalConcierge` shows the Concierge chat under Chats. */
+function ExperimentalFeaturesSection({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
+  const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
+    settings.feishuReplyStreamingStyle === "message" ? "message" : "card",
+  );
+  const [concierge, setConcierge] = useState(settings.experimentalConcierge ?? false);
+
+  function toggleReplyStreaming(next: boolean) {
+    setReplyStreaming(next);
+    void onSave({ enableReplyStreaming: next });
+  }
+
+  function chooseFeishuStyle(next: FeishuStreamingStyle) {
+    setFeishuStyle(next);
+    void onSave({ feishuReplyStreamingStyle: next });
+  }
+
+  function toggleConcierge(next: boolean) {
+    setConcierge(next);
+    void onSave({ experimentalConcierge: next });
+  }
+
+  return (
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("advanced.experimental.title")}</SectionTitle>
+          <SectionDescription>{t("advanced.experimental.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <FormRows>
+        <SettingsToggleRow
+          title={t("advanced.experimental.replyStreaming.title")}
+          description={t("advanced.experimental.replyStreaming.description")}
+          label={t("advanced.experimental.replyStreaming.toggleLabel")}
+          checked={replyStreaming}
+          onChange={toggleReplyStreaming}
+          disabled={saving}
+        />
+        <FormRow>
+          <FormRowHeading>
+            <FormRowLabel>{t("advanced.experimental.feishuStreamingStyle.title")}</FormRowLabel>
+            <FormRowDescription>
+              {t("advanced.experimental.feishuStreamingStyle.description")}
+            </FormRowDescription>
+          </FormRowHeading>
+          <FormRowControl>
+            <SegmentedControl
+              aria-label={t("advanced.experimental.feishuStreamingStyle.title")}
+              size="sm"
+              value={feishuStyle}
+              onValueChange={chooseFeishuStyle}
+              disabled={saving || !replyStreaming}
+              options={[
+                {
+                  value: "message",
+                  label: t("advanced.experimental.feishuStreamingStyle.message"),
+                },
+                { value: "card", label: t("advanced.experimental.feishuStreamingStyle.card") },
+              ]}
+            />
+          </FormRowControl>
+        </FormRow>
+        <SettingsToggleRow
+          title={t("advanced.experimental.concierge.title")}
+          description={t("advanced.experimental.concierge.description")}
+          label={t("advanced.experimental.concierge.toggleLabel")}
+          checked={concierge}
+          onChange={toggleConcierge}
+          disabled={saving}
+        />
+      </FormRows>
+    </Section>
+  );
+}
+
 function AiToolUsageAdvancedSection({
   settings,
   onSave,
@@ -1445,7 +1618,7 @@ function AiToolUsageAdvancedSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.showAiToolUsage ?? false);
+  const [enabled, setEnabled] = useState(settings.showAiToolUsage ?? true);
 
   function toggle(next: boolean) {
     setEnabled(next);
@@ -2104,25 +2277,6 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-function normalizePublicAccessConfigPayload(raw: unknown): PublicAccessConfig {
-  const body = (raw ?? {}) as Partial<PublicAccessConfig>;
-  return {
-    enableAccessControl: body.enableAccessControl === true,
-    allowedApps: Array.isArray(body.allowedApps) ? body.allowedApps : [],
-    cloudEmailAccess:
-      body.cloudEmailAccess && typeof body.cloudEmailAccess === "object"
-        ? body.cloudEmailAccess
-        : {},
-  };
-}
-
-function normalizeDashboardAccessConfigPayload(raw: unknown): DashboardAccessConfig {
-  const body = (raw ?? {}) as Partial<DashboardAccessConfig>;
-  return {
-    cloudEmailAccess: Array.isArray(body.cloudEmailAccess) ? body.cloudEmailAccess : [],
-  };
-}
-
 function AllowedCloudEmailsSection() {
   const { t } = useTranslation("settings");
   const [emails, setEmails] = useState<string[]>([]);
@@ -2132,13 +2286,11 @@ function AllowedCloudEmailsSection() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard-access")
-      .then((response) => response.json())
-      .catch(() => ({ cloudEmailAccess: [] }))
-      .then((dashboardAccess) => {
-        const normalized = normalizeDashboardAccessConfigPayload(dashboardAccess);
-        setEmails(normalized.cloudEmailAccess);
-      })
+    fetchJson<DashboardAccessConfig>("/api/dashboard-access", {
+      fallback: "Failed to load dashboard access.",
+    })
+      .catch((): DashboardAccessConfig => ({ cloudEmailAccess: [] }))
+      .then((dashboardAccess) => setEmails(dashboardAccess.cloudEmailAccess))
       .finally(() => setLoaded(true));
   }, []);
 
@@ -2368,18 +2520,19 @@ function TailnetRestrictionSection() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/public-access")
-        .then((response) => response.json())
-        .catch(() => ({
+      fetchJson<PublicAccessConfig>("/api/public-access", {
+        fallback: "Failed to load public access.",
+      }).catch(
+        (): PublicAccessConfig => ({
           enableAccessControl: false,
           allowedApps: [],
           cloudEmailAccess: {},
-        })),
+        }),
+      ),
       fetchTailnetStatus(),
     ])
       .then(([publicAccess, tailnetStatus]) => {
-        const normalized = normalizePublicAccessConfigPayload(publicAccess);
-        setConfig(normalized);
+        setConfig(publicAccess);
         setTailnetDns(tailnetStatus.tailnetDns);
         setHttpsEnabled(tailnetStatus.httpsEnabled);
         setCertReady(tailnetStatus.certReady);
@@ -2442,7 +2595,7 @@ function TailnetRestrictionSection() {
 
       let handoff: SessionHandoffPayload | null = null;
       if (needsCrossHostHandoff) {
-        handoff = await requestSessionHandoff(targetHost, "/settings/tailscale");
+        handoff = await requestSessionHandoff(targetHost, "/settings/advanced");
         if (!handoff) {
           throw new Error(t("publicAccess.handoffFailed"));
         }

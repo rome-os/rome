@@ -5,7 +5,8 @@ Durable design documentation for Rome. For the rules used when writing docs, see
 ## What lives where
 
 - [`VISION.md`](../VISION.md) (repo root) — why Rome exists, posture constraints, scope.
-- [`concepts/`](concepts/index.md) — domain entity definitions. The single source of truth for what each term means.
+- [`domains/`](domains/README.md) — the shared language for chats, accounts, agents and connections, one file per context, with the context map. [authoring/domains.md](authoring/domains.md) defines the family.
+- [`concepts/`](concepts/index.md) — entity definitions outside those contexts. The single source of truth for what each remaining term means.
 - [`architecture/`](architecture/index.md) — the components on each surface and the invariants binding them.
 - `adrs/` — records of standing decisions, one file per decision keyed by filename. [authoring/adrs.md](authoring/adrs.md) defines the family.
 - [`authoring/`](authoring/authoring.md) — the rulebook for each content type (docs, PRs, issues, ADRs, design tokens, code comments, CLAUDE.md files) plus the cross-cutting prose rules.

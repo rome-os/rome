@@ -6,6 +6,8 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
+import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
+import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_webchat_conversations");
 
@@ -15,35 +17,6 @@ interface MessageRow {
   role: string;
   content: string;
   created_at: number;
-}
-
-function extractText(rawContent: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawContent);
-  } catch {
-    return rawContent.trim();
-  }
-
-  if (typeof parsed === "string") return parsed.trim();
-
-  if (Array.isArray(parsed)) {
-    return parsed
-      .map((block: unknown) => {
-        if (typeof block === "string") return block;
-        if (typeof block === "object" && block !== null) {
-          const b = block as Record<string, unknown>;
-          if (b.type === "tool_result" || b.type === "tool_use") return "";
-          if (typeof b.text === "string") return b.text;
-        }
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-  }
-
-  return String(parsed).trim();
 }
 
 function formatConversations(rows: MessageRow[]): string {
@@ -110,16 +83,21 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       log.info("fetching webchat conversations", { windowHours, cutoffSeconds, sessionId });
 
+      // A guardian chat is stored either as a webchat row or as a webchat
+      // channel row addressed by its own id; both filters below match either.
+      // Same rule as `isWebchatChat` in packages/core/src/db/session-kind.ts.
       let rows: MessageRow[] = [];
       try {
         if (sessionId) {
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM webchat_messages wm
-              JOIN webchat_sessions ws ON ws.id = wm.session_id
+              FROM rome_agent_messages wm
+              JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
+                AND ${inDashboardChat("ws")}
+                AND ${guardianOnlyChat("ws")}
               ORDER BY wm.created_at ASC
             `,
           ) as MessageRow[];
@@ -127,9 +105,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM webchat_messages wm
-              JOIN webchat_sessions ws ON ws.id = wm.session_id
+              FROM rome_agent_messages wm
+              JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
+                AND ${inDashboardChat("ws")}
+                AND ${guardianOnlyChat("ws")}
               ORDER BY wm.session_id, wm.created_at ASC
             `,
           ) as MessageRow[];

@@ -24,6 +24,7 @@ The main process creates every worker that runs a cancellable [action](../concep
 
 - Only main creates workers, and no worker relays a call for another ([decision](../adrs/workers-never-fork-workers.md)).
 - A pending RPC never outlives its peer: timeout, disconnect, or worker exit rejects it.
+- A handler runs under the caller's trace context, carried on the request, or under no span when the request carries none. It never inherits the context that was active when main forked the worker, because a pooled worker serves unrelated roots.
 - Delegated action execution has no duration deadline. It ends on result, root cancellation, owner-worker disconnect, child exit, or main shutdown — never on elapsed time.
 - Cancelling a root follows the logical action tree, not the process tree: every worker running under that root terminates, including workers main spawned on another worker's behalf.
 - The transport is core-internal. The app-facing runtime names no IPC primitive, and an app-level invocation behaves identically in main and in a worker — every invocation carries [fork IPC semantics](../adrs/ipc-semantics-on-every-action-invocation.md) in both processes.

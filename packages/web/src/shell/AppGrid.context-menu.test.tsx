@@ -15,6 +15,7 @@ const apps = [
     hasFrontend: true,
     href: "/apps/recipe-box",
     iconUrl: null,
+    projectPath: "recipe-box" as string | null,
   },
 ];
 
@@ -60,12 +61,12 @@ function LocationProbe() {
   );
 }
 
-function renderSidebar(collapsed: boolean, initialPath = "/apps") {
+function renderSidebar(initialPath = "/apps") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialPath]}>
-        <AppGrid collapsed={collapsed} />
+        <AppGrid />
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -83,10 +84,6 @@ async function findPinnedAppLink(): Promise<HTMLAnchorElement> {
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 beforeEach(() => {
@@ -100,14 +97,13 @@ afterEach(() => {
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
+  delete window.rome;
+  apps[0].projectPath = "recipe-box";
 });
 
-describe.each([
-  ["expanded sidebar", false],
-  ["collapsed rail", true],
-] as const)("pinned app context menu in the %s", (_name, collapsed) => {
-  it("offers normal, split-view, and unpin actions", async () => {
-    renderSidebar(collapsed);
+describe("pinned app context menu in the rail", () => {
+  it("offers new-tab, chat-with-app, details, and unpin actions", async () => {
+    renderSidebar();
 
     fireEvent.contextMenu(await findPinnedAppLink());
 
@@ -116,16 +112,91 @@ describe.each([
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open", "Open in split view", "Unpin from sidebar"]);
+    ).toEqual(["Open in new tab", "Chat with app", "View details", "Unpin from sidebar"]);
   });
 });
 
-it("opens a pinned app beside a new chat from another page", async () => {
-  const user = userEvent.setup();
-  renderSidebar(false, "/projects");
+it("opens a pinned app in a new tab, since a plain click already opens it here", async () => {
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
-  await user.click(await screen.findByRole("menuitem", { name: "Open in split view" }));
+
+  const item = await screen.findByRole("menuitem", { name: "Open in new tab" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBe("_blank");
+});
+
+it("keeps a plain Open on a touch device, where the mobile app's WebView has no tabs to open", async () => {
+  // Same query `useCoarsePointer` asks; every other query keeps jsdom's answer
+  // of "no match", so nothing else about the layout changes.
+  rs.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(hover: none) and (pointer: coarse)",
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  renderSidebar();
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+
+  const item = await screen.findByRole("menuitem", { name: "Open" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
+});
+
+it("keeps a plain Open in the Mac app, where a new tab lands in a browser with no Rome session", async () => {
+  window.rome = {};
+  renderSidebar();
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+
+  const item = await screen.findByRole("menuitem", { name: "Open" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
+});
+
+it("opens a pinned app beside a new chat in its source folder from another page", async () => {
+  const user = userEvent.setup();
+  renderSidebar("/projects");
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+  expect(screen.getByTestId("location").textContent).toBe(
+    JSON.stringify({
+      pathname: "/chat",
+      search: "",
+      state: { widgets: [{ type: "app", appId: "recipe-box" }], projectPath: "recipe-box" },
+    }),
+  );
+});
+
+it("starts an unsent new chat in the app's source folder", async () => {
+  const user = userEvent.setup();
+  renderSidebar("/chat");
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+  expect(screen.getByTestId("location").textContent).toBe(
+    JSON.stringify({
+      pathname: "/chat",
+      search: "",
+      state: { widgets: [{ type: "app", appId: "recipe-box" }], projectPath: "recipe-box" },
+    }),
+  );
+});
+
+it("leaves the folder to the chat for an app without a source folder", async () => {
+  apps[0].projectPath = null;
+  localStorage.setItem("rome-sidebar-apps", JSON.stringify(apps));
+  const user = userEvent.setup();
+  renderSidebar("/projects");
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
   expect(screen.getByTestId("location").textContent).toBe(
     JSON.stringify({
@@ -136,12 +207,12 @@ it("opens a pinned app beside a new chat from another page", async () => {
   );
 });
 
-it("keeps the active chat when opening a pinned app in split view", async () => {
+it("keeps the active chat and its folder when chatting with a pinned app", async () => {
   const user = userEvent.setup();
-  renderSidebar(false, "/chat/session-1?hideSidebar=1");
+  renderSidebar("/chat/session-1?hideSidebar=1");
 
   fireEvent.contextMenu(await findPinnedAppLink());
-  await user.click(await screen.findByRole("menuitem", { name: "Open in split view" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
   expect(screen.getByTestId("location").textContent).toBe(
     JSON.stringify({
@@ -152,9 +223,21 @@ it("keeps the active chat when opening a pinned app in split view", async () => 
   );
 });
 
+it("opens a pinned app's details page from its context menu", async () => {
+  const user = userEvent.setup();
+  renderSidebar();
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "View details" }));
+
+  expect(JSON.parse(screen.getByTestId("location").textContent ?? "{}").pathname).toBe(
+    "/app-details/recipe-box",
+  );
+});
+
 it("unpins the app from its context menu", async () => {
   const user = userEvent.setup();
-  renderSidebar(false);
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
@@ -172,5 +255,106 @@ it("unpins the app from its context menu", async () => {
         body: expect.stringContaining('"sidebarPins"'),
       }),
     );
+  });
+});
+
+describe("pinned built-in page context menu", () => {
+  beforeEach(() => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { type: "builtin", id: "people" },
+        { type: "app", id: "recipe-box" },
+      ]),
+    );
+  });
+
+  async function findBuiltinLink(href: string): Promise<HTMLAnchorElement> {
+    let link: HTMLAnchorElement | null = null;
+    await waitFor(() => {
+      link = document.querySelector(`nav a[href="${href}"]`);
+      expect(link).toBeTruthy();
+    });
+    return link as HTMLAnchorElement;
+  }
+
+  it("offers new-tab and unpin, like an app tile", async () => {
+    renderSidebar();
+
+    fireEvent.contextMenu(await findBuiltinLink("/people"));
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open in new tab", "Unpin from sidebar"]);
+    expect(
+      within(menu).getByRole("menuitem", { name: "Open in new tab" }).getAttribute("href"),
+    ).toBe("/people");
+  });
+
+  it("unpins the page from its context menu and keeps the app pin", async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    fireEvent.contextMenu(await findBuiltinLink("/people"));
+    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
+
+    expect(document.querySelector('nav a[href="/people"]')).toBeNull();
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    expect(stored).not.toContainEqual({ type: "builtin", id: "people" });
+    expect(stored).toContainEqual({ type: "app", id: "recipe-box" });
+  });
+
+  it.each([
+    ["Chat", "/chat"],
+    ["Projects", "/projects"],
+  ])("offers no unpin on the required %s pin", async (_name, href) => {
+    renderSidebar("/memory");
+
+    fireEvent.contextMenu(await findBuiltinLink(href));
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open in new tab"]);
+  });
+
+  it("opens no menu on a required pin where there are no tabs, since Open would only repeat a click", async () => {
+    window.rome = {};
+    renderSidebar("/projects");
+
+    fireEvent.contextMenu(await findBuiltinLink("/chat"));
+
+    // A menu that would open does so synchronously on the contextmenu event.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("rail search", () => {
+  it("leads the rail, ahead of Apps, and opens search", async () => {
+    const onSearch = rs.fn();
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/apps"]}>
+          <AppGrid onSearch={onSearch} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const search = screen.getByRole("button", { name: "Search pages, apps, and chats" });
+    const apps = document.querySelector('nav a[href="/apps"]') as Element;
+    expect(Boolean(search.compareDocumentPosition(apps) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true,
+    );
+
+    await user.click(search);
+    expect(onSearch).toHaveBeenCalledOnce();
   });
 });

@@ -5,20 +5,46 @@
 //   - openStream() / onStream() for named one-shot or long-running streams
 //
 // Wire format (5 message types):
-//   - rpc_request  { reqId, method, params }
+//   - rpc_request  { reqId, method, params, traceCarrier? }
 //   - rpc_response { reqId, result?, error? }
 //   - stream_open  { channelId, name }
 //   - sent_event   { channelId, value }
 //   - stream_close { channelId, reason?, error? }
 
 import { randomUUID } from "node:crypto";
+import { context, propagation, ROOT_CONTEXT } from "@opentelemetry/api";
+import { createLogger } from "../logger.js";
+import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
+
+const log = createLogger("ipc");
 
 export interface IpcRequestMessage {
   type: "rpc_request";
   reqId: string;
   method: string;
   params: unknown;
+  /**
+   * The caller's W3C trace context from `propagation.inject`. Absent when the
+   * caller had no span or runs without telemetry, and from older peers. The
+   * handler runs under exactly this context, or under none when it is absent.
+   */
+  traceCarrier?: Record<string, string>;
+  /** Host-consumed caller binding captured by the Core IPC client. */
+  callerActionName?: string;
+  /** Host-captured origin metadata used to route approval and continuation. */
+  callerActionContext?: IpcCallerActionContext;
 }
+
+export type IpcCallerActionContext = Pick<
+  ActionExecutionStore,
+  | "actor"
+  | "channelContext"
+  | "sharedContext"
+  | "sessionId"
+  | "turnId"
+  | "agentName"
+  | "channelThreadKey"
+>;
 
 export interface IpcResponseMessage {
   type: "rpc_response";
@@ -56,9 +82,6 @@ export type IpcMessage =
 export function isIpcMessage(message: unknown): message is IpcMessage {
   if (typeof message !== "object" || message === null) return false;
   const m = message as { type?: unknown; reqId?: unknown; channelId?: unknown };
-  // Distinguish from legacy worker-rpc messages (which use `clientId`/`id`,
-  // not `reqId`/`channelId`). A message qualifies as IPC only if it uses
-  // the new field names.
   switch (m.type) {
     case "rpc_request":
     case "rpc_response":
@@ -125,6 +148,10 @@ export interface IpcInboundStream<T> {
 export interface IpcCallContext {
   /** Open an outbound stream owned by this side, addressed back to the caller. */
   openStream<T>(name: string): IpcOutboundStream<T>;
+  /** The action executing at the Core-owned worker IPC boundary. */
+  callerActionName?: string;
+  /** Origin metadata captured beside `callerActionName`. */
+  callerActionContext?: IpcCallerActionContext;
 }
 
 export interface IpcTransport {
@@ -135,7 +162,7 @@ export interface IpcTransport {
   readonly connected: boolean;
 }
 
-const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 
 /**
  * Bidirectional RPC + streams over a Node IPC channel. Both sides construct
@@ -205,10 +232,6 @@ export class IpcRpc {
     this.handlers.set(method, handler as (p: unknown, c: IpcCallContext) => Promise<unknown>);
   }
 
-  unhandle(method: string): void {
-    this.handlers.delete(method);
-  }
-
   async call<Req = unknown, Res = unknown>(
     method: string,
     params: Req,
@@ -218,6 +241,25 @@ export class IpcRpc {
       throw new IpcRpcDisconnectError();
     }
     const reqId = randomUUID();
+    const carrier: Record<string, string> = {};
+    propagation.inject(context.active(), carrier);
+    const request: IpcRequestMessage = { type: "rpc_request", reqId, method, params };
+    if (Object.keys(carrier).length > 0) request.traceCarrier = carrier;
+    const actionContext = actionExecutionContext.getStore();
+    if (actionContext?.actionName) {
+      request.callerActionName = actionContext.actionName;
+      if (method.startsWith("connections.app.")) {
+        request.callerActionContext = {
+          actor: actionContext.actor,
+          channelContext: actionContext.channelContext,
+          sharedContext: actionContext.sharedContext,
+          sessionId: actionContext.sessionId,
+          turnId: actionContext.turnId,
+          agentName: actionContext.agentName,
+          channelThreadKey: actionContext.channelThreadKey,
+        };
+      }
+    }
     const timeoutMs =
       options?.timeoutMs === null
         ? null
@@ -237,7 +279,7 @@ export class IpcRpc {
         method,
       });
       try {
-        this.transport.send({ type: "rpc_request", reqId, method, params });
+        this.transport.send(request);
       } catch (err) {
         if (timeout) clearTimeout(timeout);
         this.pending.delete(reqId);
@@ -326,12 +368,19 @@ export class IpcRpc {
     }
     const ctx: IpcCallContext = {
       openStream: <T>(name: string): IpcOutboundStream<T> => this.openStream<T>(name),
+      callerActionName: message.callerActionName,
+      callerActionContext: message.callerActionContext,
     };
+    // Transport callbacks fire in the async context captured when the channel
+    // was created: for a pooled worker, the request that forked it. Extracting
+    // against ROOT_CONTEXT drops that context, so a request without a carrier
+    // runs under no span rather than under a finished span of another trace.
+    const callerContext = propagation.extract(ROOT_CONTEXT, message.traceCarrier ?? {});
     try {
       const invoke = () => handler(message.params, ctx);
-      const result = this.options.runInbound
-        ? await this.options.runInbound(invoke)
-        : await invoke();
+      const result = await context.with(callerContext, () =>
+        this.options.runInbound ? this.options.runInbound(invoke) : invoke(),
+      );
       this.transport.send({ type: "rpc_response", reqId: message.reqId, result });
     } catch (err) {
       this.transport.send({
@@ -471,6 +520,14 @@ export class IpcRpc {
 
 // Convenience transports
 
+// A failed write is followed by `disconnect`, which rejects pending calls. The
+// callback keeps the failure from surfacing as an unhandled `error` event.
+function logSendFailure(message: IpcMessage): (err: Error | null) => void {
+  return (err) => {
+    if (err) log.warn("IPC send failed", { type: message.type, error: err.message });
+  };
+}
+
 /** Build an IpcTransport over `process.send` / `process.on("message")` (worker side). */
 export function createWorkerProcessTransport(): IpcTransport {
   return {
@@ -481,7 +538,7 @@ export function createWorkerProcessTransport(): IpcTransport {
       if (!process.send) {
         throw new Error("createWorkerProcessTransport: not running in a Node child process");
       }
-      process.send(message);
+      process.send(message, logSendFailure(message));
     },
     onMessage(listener) {
       const handler = (message: unknown) => {
@@ -508,7 +565,7 @@ export function createChildProcessTransport(
     },
     send(message: IpcMessage): void {
       if (!child.connected) return;
-      child.send(message);
+      child.send(message, logSendFailure(message));
     },
     onMessage(listener) {
       const handler = (message: unknown) => {

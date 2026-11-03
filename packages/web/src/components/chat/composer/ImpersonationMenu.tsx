@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { PersonResource } from "@rome/api-types/people";
 
 export interface ImpersonationMenuProps {
+  disabled?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedPersonId: string;
@@ -23,6 +24,7 @@ export interface ImpersonationMenuProps {
 }
 
 export function ImpersonationMenu({
+  disabled = false,
   open,
   onOpenChange,
   selectedPersonId,
@@ -35,7 +37,12 @@ export function ImpersonationMenu({
   const { t } = useTranslation("chat");
 
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu
+      open={open && !disabled}
+      onOpenChange={(next) => {
+        if (!disabled) onOpenChange(next);
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
@@ -46,6 +53,7 @@ export function ImpersonationMenu({
           // appearing is the whole signal. A project and a model always have a
           // value, which is why those two always show one.
           size={selectedPerson ? "sm" : "icon-sm"}
+          disabled={disabled}
           aria-label={t("impersonation.buttonLabel")}
           title={selectedPersonLabel}
           className="touch-target"
@@ -69,7 +77,9 @@ export function ImpersonationMenu({
         </div>
         <div className="p-2">
           <DropdownMenuItem
-            onSelect={() => onSelectPersonId("")}
+            onSelect={() => {
+              if (!disabled) onSelectPersonId("");
+            }}
             className={cn(
               "justify-between rounded-8 px-3 py-2 text-ui",
               !selectedPersonId
@@ -86,7 +96,9 @@ export function ImpersonationMenu({
           {options.map((person) => (
             <DropdownMenuItem
               key={person.id}
-              onSelect={() => onSelectPersonId(person.id)}
+              onSelect={() => {
+                if (!disabled) onSelectPersonId(person.id);
+              }}
               className={cn(
                 "mt-1 justify-between rounded-8 px-3 py-2 text-ui",
                 selectedPersonId === person.id

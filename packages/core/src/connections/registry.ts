@@ -1,15 +1,35 @@
-// Connection lifecycle registry. Messaging model: docs/concepts/messaging.md.
+// Connection lifecycle registry. Vocabulary: docs/domains/connections.md.
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
-import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
-import { isTransactionalLedger, type TransactionalGrantLedger } from "./ledger-db.js";
+import { isUnconnectedAccount } from "./unconnected-accounts.js";
 import {
+  type GrantAccount,
+  type GrantRecord,
+  type GrantValue,
+  NO_GRANT,
+  type PersistedCredential,
+} from "./grant.js";
+import {
+  accountOf,
+  brokenGrant,
+  givenGrant,
+  reachedAccount,
+  refuseDifferentAccount,
+  renewedGrant,
+  sameAccount,
+  toPersisted,
+} from "./connection.js";
+import type { ConnectionEventHandler } from "./events.js";
+import type { ConnectionRecord, ConnectionsRepository } from "./repository.js";
+import {
+  AccountAlreadyConnectedError,
   CredentialRejected,
   Disconnected,
-  DuplicateServiceConnectionsError,
-  ServiceConnectionWriteConflict,
+  DuplicateKindConnectionsError,
+  RenewalUnavailable,
 } from "./errors.js";
 import type {
   Act,
@@ -19,21 +39,18 @@ import type {
   Capability,
   CapabilityStatus,
   Connection,
+  ConnectionState,
   ConnectionDescriptor,
   ConnectionId,
   Credential,
   GrantName,
   GrantState,
-  InboundMessage,
   OperationCall,
   OperationResult,
   ProfileRecord,
   RuntimeKit,
   SecretRecord,
   StreamFault,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
   Talker,
   Watch,
   WatchEvent,
@@ -43,13 +60,22 @@ import type {
 type CapabilityKind = "talker" | "actor" | "watcher";
 
 const KIND_OF: Record<Capability, CapabilityKind> = {
-  talk: "talker",
+  chat: "talker",
   act: "actor",
   watch: "watcher",
 };
 
+/** How {@link ConnectionRegistry.giveGrant} writes. */
+export interface GiveGrantOptions {
+  /** A participant run in the grant's transaction (the guardian mapping). */
+  inTx?: (tx: DrizzleTx) => void;
+  /** Mint another account of the connection kind rather than fill its first one. Only
+   *  read when no connection id is addressed. */
+  another?: boolean;
+}
+
 export interface ConnectionRegistryDeps {
-  ledger: GrantLedger;
+  repository: ConnectionsRepository;
   logger?: Logger;
   /** Injectable clock; defaults to `() => new Date()`. */
   clock?: () => Date;
@@ -57,6 +83,8 @@ export interface ConnectionRegistryDeps {
   backoff?: { baseMs: number; maxMs: number };
   /** Injectable sleep for Disconnected backoff waits; defaults to real timers. */
   sleep?: (ms: number) => Promise<void>;
+  /** Hears every connection event, inside the transaction that raised it. */
+  onEvent?: ConnectionEventHandler;
 }
 
 const DEFAULT_BACKOFF = { baseMs: 1_000, maxMs: 60_000 };
@@ -65,40 +93,9 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Persist a live Credential's envelope. External-custody credentials (function
- *  material) persist as `{ kind: "external" }` — the ledger stores no secret.
- *  Exported so the pre-load providerAccounts reconciler, which writes the ledger
- *  directly (before the registry loads), shares this one envelope transform. */
-export function toPersisted(cred: Credential): PersistedCredential {
-  if (typeof cred.material === "function") {
-    return { material: { kind: "external" }, expiresAt: cred.expiresAt };
-  }
-  return { material: { kind: "inline", record: cred.material }, expiresAt: cred.expiresAt };
-}
-
-/** The ledger patch that authorizes a grant with a freshly conferred credential
- *  (+ optional profile). Shared by the in-place `applyNewCredential` path and the
- *  transactional `confer` path so both write an identical row. */
-function conferralPatch(
-  now: Date,
-  cred: Credential,
-  profile?: ProfileRecord,
-): Partial<Pick<GrantRecord, "state" | "credential" | "profile" | "conferredAt" | "degraded">> {
-  return {
-    state: "authorized",
-    credential: toPersisted(cred),
-    // Written in the SAME update as the credential. Only patched
-    // when the conferral supplied one, so an import with no identity to record
-    // leaves any existing profile untouched rather than wiping it.
-    ...(profile !== undefined ? { profile } : {}),
-    conferredAt: now,
-    degraded: undefined,
-  };
-}
-
 /** Rehydrate a live Credential from a persisted envelope. Inline custody hands
  *  back the stored record; external custody re-wraps `resolveExternal` — never
- *  confers. A `{ kind: "external" }` row without a resolver is a descriptor bug. */
+ *  grants. A `{ kind: "external" }` row without a resolver is a descriptor bug. */
 function fromPersisted(persisted: PersistedCredential, scheme: AuthScheme): Credential {
   if (persisted.material.kind === "external") {
     const resolve = scheme.resolveExternal;
@@ -108,13 +105,6 @@ function fromPersisted(persisted: PersistedCredential, scheme: AuthScheme): Cred
     return { material: resolve, expiresAt: persisted.expiresAt };
   }
   return { material: persisted.material.record, expiresAt: persisted.expiresAt };
-}
-
-/** Stable JSON of a credential's inline material, for idempotent-import diffing.
- *  Function (external) material is never compared — always treated as changed. */
-function materialFingerprint(material: SecretRecord): string {
-  const keys = Object.keys(material).sort();
-  return JSON.stringify(keys.map((k) => [k, material[k]]));
 }
 
 /** A capability's live epoch: the built instance plus the runtime-facing
@@ -146,7 +136,7 @@ interface CapabilitySlot {
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
-  messageHandlers: Array<(msg: InboundMessage) => Promise<void>>;
+  messageHandlers: Array<(msg: ChannelMessage) => Promise<void>>;
   eventHandlers: Array<(event: WatchEvent) => void>;
 }
 
@@ -156,106 +146,100 @@ interface RegisteredDescriptor {
 }
 
 export class ConnectionRegistry {
-  private readonly ledger: GrantLedger;
+  private readonly store: ConnectionsRepository;
   private readonly log: Logger;
   private readonly clock: () => Date;
   private readonly backoff: { baseMs: number; maxMs: number };
   private readonly sleep: (ms: number) => Promise<void>;
+  /** Raise a connection event to the subscriber. Called by the Connection,
+   *  inside the transaction that saved it. */
+  readonly raise: ConnectionEventHandler;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
   private readonly unlockHandlers: Record<Capability, Array<(conn: Connection) => void>> = {
-    talk: [],
+    chat: [],
     act: [],
     watch: [],
   };
-  /** Per-(service, grant) critical-section chains for composite ROUTE ceremonies
-   *  — a mutex keyed by `${service}\u0000${grant}`.
+  /** Per-(connection kind, grant) critical-section chains for composite ROUTE ceremonies
+   *  — a mutex keyed by `${connectionKind}\u0000${grant}`.
    *  See {@link withGrantSection}. This is the registry-owned home of the
    *  serialization the two hand-rolled route mutexes (email, telegram-user) used
-   *  to own; keys are bounded by the registered services × their grants and
+   *  to own; keys are bounded by the registered connection kinds × their grants and
    *  evicted when idle. */
   private readonly sectionMutex = new KeyedMutex();
-  /** Serializes every possible Service-connection mint path. Database
-   *  uniqueness remains the cross-process backstop. */
+  /** Serializes every connection mint path, so `connect`'s refusal of
+   *  a second Connection never races another mint. It holds within one
+   *  process, and one Rome process owns a system database. */
   private readonly connectionMutex = new KeyedMutex();
   private readonly ingressHandlers = new Map<ConnectionId, (input: unknown) => Promise<unknown>>();
   private capabilityActivationPaused = false;
 
   constructor(deps: ConnectionRegistryDeps) {
-    this.ledger = deps.ledger;
+    this.store = deps.repository;
     this.log = deps.logger ?? createLogger("connections");
     this.clock = deps.clock ?? (() => new Date());
     this.backoff = deps.backoff ?? DEFAULT_BACKOFF;
     this.sleep = deps.sleep ?? defaultSleep;
+    this.raise = deps.onEvent ?? (() => {});
   }
 
-  /** Declare a service integration. Boot-time only. Validates that every
-   *  capability's `needs` is a subset of the declared grants and that the
-   *  service name is unique. */
+  /** Declare a connection kind. Boot-time only. Validates that the connection
+   *  kind is unique. */
   register(desc: ConnectionDescriptor): void {
-    if (this.descriptors.has(desc.service)) {
-      throw new Error(`duplicate connection descriptor for service "${desc.service}"`);
+    if (this.descriptors.has(desc.connectionKind)) {
+      throw new Error(
+        `duplicate connection descriptor for connection kind "${desc.connectionKind}"`,
+      );
     }
-    const declared = new Set(Object.keys(desc.auth));
-    for (const kind of ["talker", "actor", "watcher"] as const) {
-      const cap = desc.capabilities[kind];
-      if (!cap) continue;
-      for (const grant of cap.needs) {
-        if (!declared.has(grant)) {
-          throw new Error(
-            `capability "${kind}" of service "${desc.service}" needs undeclared grant "${grant}"`,
-          );
-        }
-      }
-    }
-    this.descriptors.set(desc.service, { descriptor: desc });
+    this.descriptors.set(desc.connectionKind, { descriptor: desc });
   }
 
-  /** True iff a descriptor has been registered for `service`. Lets callers
-   *  (settings-import's zero-grant path) skip services this registry does not
-   *  know about — e.g. a test that registers only a subset. */
-  isRegistered(service: string): boolean {
-    return this.descriptors.has(service);
+  /** True iff a descriptor has been registered for `connectionKind`. Lets callers
+   *  skip connection kinds this registry does not know about — e.g. a test that
+   *  registers only a subset. */
+  isRegistered(connectionKind: string): boolean {
+    return this.descriptors.has(connectionKind);
   }
 
   /** Read the registered integration declaration. Generic identity surfaces use
    *  its reviveProfile hook instead of inspecting integration-owned profile keys. */
-  getDescriptor(service: string): ConnectionDescriptor | null {
-    return this.descriptors.get(service)?.descriptor ?? null;
+  getDescriptor(connectionKind: string): ConnectionDescriptor | null {
+    return this.descriptors.get(connectionKind)?.descriptor ?? null;
   }
 
-  /** Every registered service name — the offerable catalog. Lets the connections
-   *  API list services a guardian could connect that have no connection row yet. */
-  registeredServices(): string[] {
+  /** Every registered connection kind — the offerable catalog. Lets the connections
+   *  API list connection kinds a guardian could connect that have no connection row yet. */
+  registeredKinds(): string[] {
     return Array.from(this.descriptors.keys());
   }
 
-  /** Reconstruct every persisted connection at boot. Reads the ledger, rebuilds
-   *  Connection objects for known services (unknown services are logged and
+  /** Reconstruct every persisted connection at boot. Reads the repository, rebuilds
+   *  Connection objects for known connection kinds (unknown connection kinds are logged and
    *  skipped), builds capabilities for grants that are live, and fires
    *  onUnlocked for each. Expired credentials are renewed once or degraded. */
   async load(options: { deferCapabilities?: boolean } = {}): Promise<void> {
     this.capabilityActivationPaused = options.deferCapabilities ?? false;
-    const records = await this.ledger.listConnections();
-    for (const rec of records) {
-      const registered = this.descriptors.get(rec.service);
+    const stored = await this.store.all();
+    for (const rec of stored) {
+      const registered = this.descriptors.get(rec.connectionKind);
       if (!registered) {
-        this.log.warn("Skipping connection for unregistered service", {
+        this.log.warn("Skipping connection for unregistered connectionKind", {
           connectionId: rec.id,
-          service: rec.service,
+          connectionKind: rec.connectionKind,
         });
         continue;
       }
-      const conn = new ConnectionImpl(rec.id, rec.service, rec.label, registered.descriptor, this);
+      const conn = new ConnectionImpl(rec, registered.descriptor, this);
       this.connections.set(rec.id, conn);
-      await conn.hydrate();
+      await conn.hydrate(rec.grant);
     }
   }
 
-  /** Start every capability hydrated while boot activation was deferred. The
-   * startup cutover uses this barrier so no provider transport can observe
-   * pre-cutover settings state. */
+  /** Start every capability hydrated while boot activation was deferred. Boot
+   * uses this barrier so no provider transport starts before its boot passes
+   * finish. */
   startCapabilities(): void {
     this.capabilityActivationPaused = false;
     for (const connection of this.connections.values()) {
@@ -267,81 +251,53 @@ export class ConnectionRegistry {
     return !this.capabilityActivationPaused;
   }
 
-  /** Mint a new Connection from a registered descriptor. Persists the record,
-   *  makes sure every declared grant row exists ("unauthorized"), and builds any
-   *  zero-grant capabilities immediately (epoch from birth). */
-  async connect(service: string, label?: string): Promise<Connection> {
-    return this.connectionMutex.runExclusive(service, async () => {
-      const registered = this.descriptors.get(service);
-      if (!registered) throw new Error(`no registered descriptor for service "${service}"`);
-      const existing = this.find(service);
+  /** Mint a new Connection from a registered descriptor. Persists the record
+   *  and makes sure its grant row exists ("unauthorized"). Refuses a connection kind
+   *  that already holds a Connection; a grant asked for another account
+   *  (`grant` with `another`) adds a second. */
+  async connect(connectionKind: string, label?: string): Promise<Connection> {
+    return this.connectionMutex.runExclusive(connectionKind, async () => {
+      const existing = this.find(connectionKind);
       if (existing.length > 0) {
-        throw new DuplicateServiceConnectionsError([
-          { service, connectionIds: existing.map((connection) => connection.id) },
+        throw new DuplicateKindConnectionsError([
+          { connectionKind, connectionIds: existing.map((connection) => connection.id) },
         ]);
       }
-
-      const id = crypto.randomUUID();
-      const createdAt = this.clock();
-      const record = { id, service, label: label ?? service, createdAt };
-      try {
-        await this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
-      } catch (error) {
-        if (error instanceof ServiceConnectionWriteConflict) {
-          throw await this.duplicateServiceError(service);
-        }
-        throw error;
-      }
-      const conn = new ConnectionImpl(id, service, label ?? service, registered.descriptor, this);
-      this.connections.set(id, conn);
-      await conn.hydrate();
-      return conn;
+      return this.mint(connectionKind, label);
     });
   }
 
-  /** Persist a connection and all of its initial grant placeholders as one
-   *  durable unit. Production ledgers use the same transaction seam as
-   *  confer(); the compensating fallback keeps lightweight test ledgers from
-   *  stranding a connection row if their grant initialization fails. */
-  private async createConnectionWithGrants(
-    record: ConnectionRecord,
-    grants: GrantName[],
-  ): Promise<void> {
-    const ledger = this.ledger;
-    if (isTransactionalLedger(ledger)) {
-      ledger.runInTransaction((tx) => {
-        ledger.writeConnection(tx, record);
-        for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
-      });
-      return;
-    }
-
-    await ledger.createConnection(record);
-    try {
-      for (const grant of grants) await ledger.ensureGrant(record.id, grant);
-    } catch (error) {
-      try {
-        await ledger.deleteConnection(record.id);
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          `Failed to initialize connection "${record.id}" and remove its partial record`,
-        );
-      }
-      throw error;
-    }
+  /** Mint another Connection for a connection kind, whether or not it already holds
+   *  one, with no grant held yet. Tests use it to stand up several accounts
+   *  without driving a setup.
+   *  @internal */
+  async connectAnother(connectionKind: string, label?: string): Promise<Connection> {
+    return this.connectionMutex.runExclusive(connectionKind, () =>
+      this.mint(connectionKind, label),
+    );
   }
 
-  private async duplicateServiceError(service: string): Promise<DuplicateServiceConnectionsError> {
-    const records = await this.ledger.listConnections();
-    return new DuplicateServiceConnectionsError([
-      {
-        service,
-        connectionIds: records
-          .filter((record) => record.service === service)
-          .map((record) => record.id),
-      },
-    ]);
+  private async mint(connectionKind: string, label: string | undefined): Promise<Connection> {
+    const registered = this.descriptors.get(connectionKind);
+    if (!registered)
+      throw new Error(`no registered descriptor for connection kind "${connectionKind}"`);
+    const id = crypto.randomUUID();
+    const createdAt = this.clock();
+    const record = { id, connectionKind, label: label ?? connectionKind, createdAt };
+    this.createConnectionWithGrant(record);
+    const conn = new ConnectionImpl(record, registered.descriptor, this);
+    this.connections.set(id, conn);
+    await conn.hydrate(NO_GRANT);
+    return conn;
+  }
+
+  /** Save a connection that holds no grant yet, in the same transaction seam
+   *  as giveGrant(). */
+  private createConnectionWithGrant(record: ConnectionRecord): void {
+    this.store.transaction((tx) => {
+      this.store.save(tx, { ...record, grant: NO_GRANT });
+      this.raise(tx, { kind: "connected", connection: record });
+    });
   }
 
   get(id: ConnectionId): Connection {
@@ -354,15 +310,15 @@ export class ConnectionRegistry {
     return Array.from(this.connections.values());
   }
 
-  /** Convenience: every loaded connection of a service. */
-  find(service: string): Connection[] {
-    return this.all().filter((c) => c.service === service);
+  /** Convenience: every loaded connection of a connection kind. */
+  find(connectionKind: string): Connection[] {
+    return this.all().filter((c) => c.connectionKind === connectionKind);
   }
 
   /** Stop every live capability instance across every connection WITHOUT
    *  deleting connections or touching grant state — the graceful-shutdown
    *  counterpart to the adapter `stop()` loop. Epochs are torn down (each
-   *  Talker/Watcher `stop()` is called and AWAITED); the ledger is untouched, so
+   *  Talker/Watcher `stop()` is called and AWAITED); the store is untouched, so
    *  the next boot's `load()` rehydrates and rebuilds them.
    *
    *  Unlike relock teardown, this AWAITS each instance's `stop()` so a transport
@@ -375,27 +331,48 @@ export class ConnectionRegistry {
 
   /** Stop every capability instance and delete the connection plus its grants.
    *
-   *  `opts.inTx` is an optional caller participant (the `confer` seam,
+   *  `opts.inTx` is an optional caller participant (the `grant` seam,
    *  mirrored for teardown) enlisted in the SAME transaction as the connection/
-   *  grant deletes — e.g. the guardian channel-mapping cleanup, so it can never
-   *  be left stranded by a failure after the connection is already committed as
-   *  deleted. A participant requires a transactional ledger. The in-memory
-   *  teardown (`teardownAll`) and map eviction run only AFTER that transaction
-   *  commits. */
+   *  grant deletes, so a caller's cleanup can never be left stranded by a
+   *  failure after the connection is already committed as deleted. The in-memory teardown (`teardownAll`) and map eviction run only
+   *  AFTER that transaction commits. */
   async remove(id: ConnectionId, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     const conn = this.connections.get(id);
     if (!conn) throw new Error(`unknown connection "${id}"`);
-    await this.connectionMutex.runExclusive(conn.service, async () => {
+    await this.connectionMutex.runExclusive(conn.connectionKind, async () => {
       const current = this.connections.get(id);
       if (!current) throw new Error(`unknown connection "${id}"`);
-      if (opts.inTx) {
-        await this.txLedger.deleteConnection(id, opts.inTx);
-      } else {
-        await this.ledger.deleteConnection(id);
-      }
+      this.store.transaction((tx) => {
+        this.store.remove(tx, id);
+        this.raise(tx, {
+          kind: "disconnected",
+          connection: { id, connectionKind: current.connectionKind },
+        });
+        opts.inTx?.(tx);
+      });
       current.teardownAll();
       this.connections.delete(id);
     });
+  }
+
+  /** End a connection, whatever its kind: remove it and its grant in one
+   *  transaction that raises disconnected, then stop its capabilities and
+   *  clear the grant's custody artifacts. Runs in the grant's section, so it
+   *  never interleaves with a setup's terminal write. A failed write throws
+   *  and leaves the connection as it was. */
+  async disconnect(id: ConnectionId): Promise<void> {
+    const conn = this.connections.get(id);
+    if (!conn) throw new Error(`unknown connection "${id}"`);
+    const { connectionKind } = conn;
+    const grant = conn.descriptor.grant;
+    await this.withGrantSection(connectionKind, grant, () =>
+      this.connectionMutex.runExclusive(connectionKind, async () => {
+        // A disconnect that ran while this one waited may have removed it.
+        if (this.connections.get(id) !== conn) return;
+        await conn.disconnect(grant);
+        this.connections.delete(id);
+      }),
+    );
   }
 
   /** Commit grant revocation and the caller's cleanup together before stopping capabilities. */
@@ -409,12 +386,12 @@ export class ConnectionRegistry {
     return conn.revoke(grant, opts);
   }
 
-  /** The terminal conferral write: authorize `grant` with a proven
+  /** The terminal grant write: authorize `grant` with a proven
    *  credential + profile, minting the addressed placeholder connection when it
    *  has no row yet, and running the caller's participant (`opts.inTx` — the
    *  guardian channel mapping) — ALL inside ONE transaction. A participant
    *  failure rolls back the credential AND the mint together, so a failed
-   *  conferral leaves zero residual state (the partial-write fix).
+   *  grant leaves zero residual state (the partial-write fix).
    *
    *  The adapter is started AFTER the commit, deliberately outside the
    *  transaction (a live socket cannot be rolled back): a start failure is
@@ -424,133 +401,151 @@ export class ConnectionRegistry {
    *
    *  `connectionId` addresses an existing connection (fails if it vanished
    *  mid-setup rather than resurrecting into `find()[0]`); omit it for an
-   *  offerable placeholder (reuse the first existing connection of the service,
-   *  else mint one). This owns the resolve/mint the manager's terminal write did
-   *  inline before. */
-  async confer(
-    service: string,
+   *  offerable placeholder (reuse the first existing connection of the connection kind,
+   *  else mint one), or omit it with `opts.another` to mint another account of
+   *  the connection kind whether or not it holds one. This owns the resolve/mint the
+   *  manager's terminal write did inline before. */
+  async giveGrant(
+    connectionKind: string,
     connectionId: ConnectionId | undefined,
     grant: GrantName,
     credential: Credential,
-    profile: ProfileRecord | undefined,
-    opts: { inTx?: (tx: DrizzleTx) => void } = {},
+    profile?: ProfileRecord,
+    opts: GiveGrantOptions = {},
   ): Promise<Connection> {
-    try {
-      return await this.connectionMutex.runExclusive(service, () =>
-        this.conferExclusive(service, connectionId, grant, credential, profile, opts),
-      );
-    } catch (error) {
-      if (error instanceof ServiceConnectionWriteConflict) {
-        throw await this.duplicateServiceError(service);
-      }
-      throw error;
-    }
+    return this.connectionMutex.runExclusive(connectionKind, () =>
+      this.giveGrantExclusive(connectionKind, connectionId, grant, credential, profile, opts),
+    );
   }
 
-  private async conferExclusive(
-    service: string,
+  /** The Connection a placeholder grant fills: the connection kind's own, unless
+   *  that is an account a failed removal left behind, which a connecting
+   *  account must not inherit, so a fresh one is minted beside it. */
+  private async placeholderTarget(connectionKind: string): Promise<ConnectionImpl | undefined> {
+    const conn = this.find(connectionKind)[0] as ConnectionImpl | undefined;
+    return conn && !(await isUnconnectedAccount(this, conn)) ? conn : undefined;
+  }
+
+  private async giveGrantExclusive(
+    connectionKind: string,
     connectionId: ConnectionId | undefined,
     grant: GrantName,
     credential: Credential,
     profile: ProfileRecord | undefined,
-    opts: { inTx?: (tx: DrizzleTx) => void },
+    opts: GiveGrantOptions,
   ): Promise<Connection> {
-    const registered = this.descriptors.get(service);
+    const registered = this.descriptors.get(connectionKind);
     let conn: ConnectionImpl | undefined = connectionId
       ? this.connections.get(connectionId)
-      : (this.find(service)[0] as ConnectionImpl | undefined);
+      : opts.another
+        ? undefined
+        : await this.placeholderTarget(connectionKind);
     if (connectionId && !conn) {
-      throw new Error(`Connection "${connectionId}" no longer exists; setup cannot confer.`);
+      throw new Error(`Connection "${connectionId}" no longer exists; setup cannot grant.`);
     }
     const minting = !conn;
     if (minting && !registered) {
-      throw new Error(`no registered descriptor for service "${service}"`);
+      throw new Error(`no registered descriptor for connection kind "${connectionKind}"`);
     }
 
     const id = conn?.id ?? crypto.randomUUID();
+    const account =
+      registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
+    if (registered && account) {
+      if (conn) {
+        const held = (await this.store.grantOf(id)) ?? NO_GRANT;
+        refuseDifferentAccount(registered.descriptor, id, held, account);
+      }
+      await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
+    }
     const createdAt = this.clock();
-    const patch = conferralPatch(this.now(), credential, profile);
-    const ledger = this.txLedger;
+    const grantValue = givenGrant(this.now(), credential, crypto.randomUUID(), profile, account);
+    const record: ConnectionRecord = conn?.record ?? {
+      id,
+      connectionKind,
+      label: connectionKind,
+      createdAt,
+    };
 
-    // One transaction spanning every durable write of the conferral: mint (if a
+    // One transaction spanning every durable write of the grant: mint (if a
     // placeholder), the credential/profile, and the caller's participant.
-    ledger.runInTransaction((tx) => {
-      if (minting) {
-        ledger.writeConnection(tx, { id, service, label: service, createdAt });
-        for (const name of Object.keys(registered!.descriptor.auth)) {
-          ledger.writeEnsureGrant(tx, id, name);
-        }
-      }
-      ledger.writeGrant(tx, id, grant, patch);
-      opts.inTx?.(tx);
-    });
-
-    // Committed — ledger + mapping are consistent. Bring the adapter live;
-    // best-effort per the doc comment. A minted connection hydrates exactly as
-    // it would at boot (rebuilds the epoch from the just-persisted grant); an
-    // existing one activates just this grant in memory.
-    try {
-      if (minting) {
-        conn = new ConnectionImpl(id, service, service, registered!.descriptor, this);
-        this.connections.set(id, conn);
-        await conn.hydrate();
-      } else {
-        await conn!.activatePersistedGrant(grant, credential);
-      }
-    } catch (err) {
-      this.log.error("conferral committed but adapter activation failed", {
-        service,
+    const commit = () =>
+      this.store.transaction((tx) => {
+        this.store.save(tx, { ...record, grant: grantValue });
+        this.raise(
+          tx,
+          minting
+            ? { kind: "connected", connection: record, profile, account }
+            : { kind: "fixed", connection: { id, connectionKind }, account },
+        );
+        opts.inTx?.(tx);
+      });
+    const logActivationFailure = (err: unknown) => {
+      this.log.error("grant committed but adapter activation failed", {
+        connectionKind,
         connectionId: id,
         grant,
         error: err instanceof Error ? err.message : String(err),
       });
+    };
+
+    // Committed — store + mapping are consistent. Bring the adapter live;
+    // best-effort per the doc comment. A minted connection hydrates exactly as
+    // it would at boot (rebuilds the epoch from the just-persisted grant); an
+    // existing one commits and activates just this grant under the grant's
+    // lock, so a renewal in flight on the same grant finishes before this
+    // grant writes and can never land over it.
+    if (minting) {
+      commit();
+      try {
+        conn = new ConnectionImpl(record, registered!.descriptor, this);
+        this.connections.set(id, conn);
+        await conn.hydrate(grantValue);
+      } catch (err) {
+        logActivationFailure(err);
+      }
+    } else {
+      await conn!.commitAndActivateGrant(grant, credential, commit, logActivationFailure);
     }
     return conn as Connection;
   }
 
-  /** The ledger viewed as transaction-capable — required by `confer`. Throws for
-   *  the in-memory test fakes, which never reach `confer`. */
-  private get txLedger(): TransactionalGrantLedger {
-    if (!isTransactionalLedger(this.ledger)) {
-      throw new Error("confer() requires a transactional ledger");
+  /** Throws AccountAlreadyConnectedError when another Connection, of any kind,
+   *  holds a grant in any state but "unauthorized" that reaches `account`. Under
+   *  the connection kind's `connectionMutex` no grant of this kind can fill
+   *  another Connection between this read and the caller's write. A grant of
+   *  another kind on the same platform can, and the store's unique index on
+   *  the account refuses the later write. */
+  private async refuseAccountHeldElsewhere(
+    descriptor: ConnectionDescriptor,
+    connectionId: ConnectionId,
+    account: GrantAccount,
+  ): Promise<void> {
+    const other =
+      (await this.store.reaching(account, connectionId)) ??
+      (await this.unrecordedReaching(account, connectionId));
+    if (other) {
+      throw new AccountAlreadyConnectedError(descriptor.connectionKind, account.accountId, other);
     }
-    return this.ledger;
   }
 
-  /** Headless conferral: skip confer(), inject a caller-supplied credential.
-   *  The settings-import / API-shim path (phase 3). Idempotent: re-importing
-   *  identical inline material over an authorized grant is a no-op.
-   *
-   *  `profile` is the non-secret conferral outcome: when supplied it
-   *  is written to the grant row in the SAME update as the credential — there is
-   *  no separate profile setter, so an authorized grant can never be observed
-   *  with a missing-but-expected or previous-conferral profile. Callers with no
-   *  identity to record (channel imports) omit it, leaving any existing profile
-   *  untouched. */
-  async importCredential(
-    connectionId: ConnectionId,
-    grant: GrantName,
-    credential: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    const conn = this.connections.get(connectionId);
-    if (!conn) throw new Error(`unknown connection "${connectionId}"`);
-    await conn.importCredential(grant, credential, profile);
-  }
-
-  /** Fill a MISSING profile on an already-authorized/degraded grant WITHOUT
-   *  touching the credential or rebuilding the grant epoch — the boot bridge's
-   *  profile-only backfill. The credential column is
-   *  never in the patch, so a bridge-era install that connected before profiles
-   *  existed gains its identity with no credential write and no onUnlocked. */
-  async backfillProfile(
-    connectionId: ConnectionId,
-    grant: GrantName,
-    profile: ProfileRecord,
-  ): Promise<void> {
-    const conn = this.connections.get(connectionId);
-    if (!conn) throw new Error(`unknown connection "${connectionId}"`);
-    await conn.backfillProfile(grant, profile);
+  /** The Connection, other than `exceptId`, whose held grant has no stored
+   *  account but whose profile names `account`. The boot pass leaves such a
+   *  grant when an older connection reached the same account, and it still
+   *  reaches that account once the older one is disconnected. */
+  private async unrecordedReaching(
+    account: GrantAccount,
+    exceptId: ConnectionId,
+  ): Promise<ConnectionId | null> {
+    for (const record of await this.store.heldWithoutAccount(exceptId)) {
+      const kind = this.connections.get(record.custody)?.connectionKind;
+      const descriptor = kind ? this.descriptors.get(kind)?.descriptor : undefined;
+      const held = descriptor ? reachedAccount(descriptor, record) : undefined;
+      if (held && sameAccount(held, account)) {
+        return record.custody;
+      }
+    }
+    return null;
   }
 
   /** In-memory subscription gate for subscription-gated Watchers (phase 6
@@ -562,25 +557,42 @@ export class ConnectionRegistry {
     await conn.setWatchSubscribed(subscribed);
   }
 
+  /** Renew every authorized credential that expires within `withinMs`, before it
+   *  lapses. A credential nothing reports as rejected (an OAuth token a separate
+   *  process reads from its custody file) never reaches the fault-driven renew, so
+   *  without this it would expire in place. Connections renew independently: one
+   *  failure never stops the others. */
+  async renewExpiring(withinMs: number): Promise<void> {
+    await Promise.all(
+      [...this.connections.values()].map((conn) =>
+        conn.renewExpiring(withinMs).catch((err) => {
+          this.log.error("expiring-credential renewal failed", {
+            connectionId: conn.id,
+            error: errMsg(err),
+          });
+        }),
+      ),
+    );
+  }
+
   /** Run a composite lifecycle ceremony inside the registry-owned critical
-   *  section for `(service, grant)`: it starts only once every previously
-   *  enqueued section on the SAME (service, grant) has settled, so overlapping
+   *  section for `(connection kind, grant)`: it starts only once every previously
+   *  enqueued section on the SAME (connection kind, grant) has settled, so overlapping
    *  route ceremonies queue (FIFO) instead of interleaving. This is the scoped
    *  primitive channel routes wrap a multi-step sequence in — consume a pending
-   *  login attempt then confer; cancel then revoke; write a settings row, confer,
+   *  login attempt then grant; cancel then revoke; write a settings row, giveGrant,
    *  and compensate on failure.
    *
-   *  It is keyed by (service, grant), not by connection id, on purpose: a connect
-   *  ceremony mints its connection *inside* the section (`find(service)[0] ??
+   *  It is keyed by (connection kind, grant), not by connection id, on purpose: a connect
+   *  ceremony mints its connection *inside* the section (`find(connectionKind)[0] ??
    *  connect()`), so there is no id to key on until the section has already run,
    *  and two overlapping connects must serialize through the SAME chain to
-   *  converge on exactly one connection. Different grants of one service — and
-   *  different services — hold independent chains and never serialize against
+   *  converge on exactly one connection. Different grants of one connection kind — and
+   *  different connection kinds — hold independent chains and never serialize against
    *  each other.
    *
    *  Composition is deadlock-free by construction: a registry grant mutation
-   *  invoked from inside the section (`importCredential`, `revoke`,
-   *  `backfillProfile`) acquires only the per-connection grant lock — a
+   *  invoked from inside the section (`grant`, `revoke`) acquires only the per-connection grant lock — a
    *  DISTINCT lock this section never holds and which is uncontended while the
    *  section runs — so it runs without re-queueing behind other section work and
    *  cannot deadlock against the section (reentrancy by scope falls out of the
@@ -590,24 +602,24 @@ export class ConnectionRegistry {
    *  nor surfaces as an unhandled rejection (the keyed mutex releases either
    *  way); the original result/rejection is returned to THIS caller unchanged.
    *  Mirrors {@link ConnectionImpl.withGrantLock}. */
-  withGrantSection<T>(service: string, grant: GrantName, fn: () => Promise<T>): Promise<T> {
-    const key = `${service}\u0000${grant}`;
+  withGrantSection<T>(connectionKind: string, grant: GrantName, fn: () => Promise<T>): Promise<T> {
+    const key = `${connectionKind}\u0000${grant}`;
     return this.sectionMutex.runExclusive(key, fn);
   }
 
   /** Register an unlock handler. Fires immediately for every already-unlocked
    *  connection, then for every future unlock epoch (connect, load,
-   *  importCredential, re-import after degrade, subscription arrival).
+   *  grant, fix after degrade, subscription arrival).
    *
    *  Delivery guarantee: only handlers a caller registers SYNCHRONOUSLY inside
-   *  the onUnlocked callback (via `conn.talk.onMessage` / `conn.watch.onEvent`)
+   *  the onUnlocked callback (via `conn.hearTalker` / `conn.watch.onEvent`)
    *  are guaranteed to see the epoch's FIRST deliveries. For a fresh unlock epoch
    *  the registry fires onUnlocked before the capability's stream starts, so a
    *  synchronous registration is wired before start() runs; a handler attached
    *  later (after an await, or on an already-unlocked connection whose stream is
    *  already running) may miss deliveries the stream emitted synchronously from
-   *  start(). Send-before-start is permitted: the wrapper and instance exist when
-   *  the callback runs, so `conn.talk.send(...)` inside it works. */
+   *  start(). Send-before-start is permitted: the instance exists when the
+   *  callback runs, so a send through `conn.withTalker` inside it works. */
   onUnlocked(cap: Capability, handler: (conn: Connection) => void): void {
     this.unlockHandlers[cap].push(handler);
     for (const conn of this.connections.values()) {
@@ -649,8 +661,16 @@ export class ConnectionRegistry {
     }
   }
 
-  getLedger(): GrantLedger {
-    return this.ledger;
+  /** The grant connection `id` holds, or null when Rome holds no
+   *  connection `id`. */
+  grantOf(id: ConnectionId): Promise<GrantValue | null> {
+    return this.store.grantOf(id);
+  }
+
+  /** The store a Connection saves itself to.
+   *  @internal */
+  getRepository(): ConnectionsRepository {
+    return this.store;
   }
   getLogger(): Logger {
     return this.log;
@@ -668,27 +688,27 @@ export class ConnectionRegistry {
 
 /**
  * One connection instance. Owns the per-grant cached state, the capability
- * slots (grant epochs), and the AuthState surface. Reads/writes grant state
- * through the ledger; builds/tears down capability instances as grants and
+ * slots (grant epochs), and the AuthState surface. Reads and saves its grant
+ * through the repository; builds/tears down capability instances as grants and
  * subscriptions change.
  */
 class ConnectionImpl implements Connection {
   readonly auth: AuthState;
 
   /** Cached grant state, keyed by grant name; the source of truth is the
-   *  ledger, this mirror avoids an async read on every status()/getter call. */
+   *  repository, this mirror avoids an async read on every status()/getter call. */
   private readonly grantState = new Map<GrantName, GrantState>();
   /** Live credential per grant name (present ⇔ state !== "unauthorized"). */
   private readonly liveCreds = new Map<GrantName, Credential>();
-  /** Grants renewed since their last confer — a second rejection degrades. */
-  private readonly renewedSinceLastConfer = new Set<GrantName>();
+  /** Grants renewed since their last grant — a second rejection degrades. */
+  private readonly renewedSinceGranted = new Set<GrantName>();
   /** In-flight renewal promise per grant (single-flight coalescing). */
   private readonly renewalsInFlight = new Map<GrantName, Promise<void>>();
   /** Per-grant serialization: the tail of a promise-chain mutex, keyed by grant
-   *  name. Every guardian-facing lifecycle mutation (conferral, revoke, profile
+   *  name. Every guardian-facing lifecycle mutation (grant, revoke, profile
    *  backfill) runs inside its grant's chain, so two overlapping mutations on the
    *  same grant apply in issue order rather than interleaving across their awaited
-   *  ledger writes. The mutex lives on the ConnectionImpl and is keyed by grant
+   *  store writes. The mutex lives on the ConnectionImpl and is keyed by grant
    *  name, so different grants — and different connections, which are distinct
    *  ConnectionImpls — serialize independently and never against each other. Keys
    *  are bounded by the descriptor's declared grants and evicted when idle. */
@@ -698,14 +718,20 @@ class ConnectionImpl implements Connection {
   private watchSubscribed = false;
   private epochCounter = 0;
 
+  readonly id: ConnectionId;
+  readonly connectionKind: string;
+  readonly label: string;
+
   constructor(
-    readonly id: ConnectionId,
-    readonly service: string,
-    readonly label: string,
-    private readonly descriptor: ConnectionDescriptor,
+    /** What this connection is apart from its grant, as it is kept. */
+    readonly record: ConnectionRecord,
+    readonly descriptor: ConnectionDescriptor,
     private readonly registry: ConnectionRegistry,
   ) {
-    for (const cap of ["talk", "act", "watch"] as const) {
+    this.id = record.id;
+    this.connectionKind = record.connectionKind;
+    this.label = record.label;
+    for (const cap of ["chat", "act", "watch"] as const) {
       const kind = KIND_OF[cap];
       const capDef = descriptor.capabilities[kind];
       if (!capDef) continue;
@@ -714,7 +740,7 @@ class ConnectionImpl implements Connection {
       this.slots.set(cap, {
         cap,
         kind,
-        needs: capDef.needs,
+        needs: [descriptor.grant],
         subscriptionGated: gated,
         degradation: kind === "talker" ? descriptor.capabilities.talker?.degradation : undefined,
         epoch: null,
@@ -725,21 +751,26 @@ class ConnectionImpl implements Connection {
     this.auth = new AuthStateImpl(this);
   }
 
-  private get ledger(): GrantLedger {
-    return this.registry.getLedger();
+  private get store(): ConnectionsRepository {
+    return this.registry.getRepository();
+  }
+
+  /** Replace the kept grant with `next` of it, read and saved in one
+   *  transaction. */
+  private replaceGrant(next: (current: GrantValue) => GrantValue): Promise<void> {
+    return this.store.update(this.id, (current) => ({ ...current, grant: next(current.grant) }));
   }
   private get log(): Logger {
     return this.registry.getLogger();
   }
 
-  /** Load grant state from the ledger, rehydrate live credentials (renewing or
-   *  degrading expired ones), then build every currently-unlocked capability
-   *  and fire onUnlocked. Runs at connect() (all grants "unauthorized") and at
-   *  load() (persisted grants). */
-  async hydrate(): Promise<void> {
-    for (const [name, scheme] of Object.entries(this.descriptor.auth)) {
-      const rec = await this.readGrant(name);
-      if (!rec || rec.state === "unauthorized") {
+  /** Take `rec`, the grant as it is kept, rehydrate its live credential
+   *  (renewing or degrading an expired one), then build every currently-unlocked
+   *  capability and fire onUnlocked. Runs at connect() (no grant held), at
+   *  load() and at a grant that mints the connection. */
+  async hydrate(rec: GrantValue): Promise<void> {
+    for (const [name, scheme] of [[this.descriptor.grant, this.descriptor.auth] as const]) {
+      if (rec.state === "unauthorized") {
         this.grantState.set(name, "unauthorized");
         continue;
       }
@@ -776,38 +807,98 @@ class ConnectionImpl implements Connection {
     }
   }
 
+  /** Renew each authorized grant whose credential expires within `withinMs`.
+   *  Runs under the grant's lock, so it serializes with grant and revoke.
+   *  Unlike the fault-driven renew, a failure here does not degrade a credential
+   *  that still works: it keeps the current one and the next pass retries. A
+   *  renewer that can't answer (`RenewalUnavailable`) never degrades the grant,
+   *  even once the credential has expired. Only a refusal (`fix`, or any
+   *  other throw) degrades, and only an already-expired credential. */
+  async renewExpiring(withinMs: number): Promise<void> {
+    const deadline = this.registry.now().getTime() + withinMs;
+    for (const [grant, scheme] of [[this.descriptor.grant, this.descriptor.auth] as const]) {
+      const cred = this.liveCreds.get(grant);
+      if (!cred || cred.expiresAt === "never" || cred.expiresAt.getTime() > deadline) continue;
+      await this.withGrantLock(grant, () => this.renewExpiringLocked(grant, scheme, withinMs));
+    }
+  }
+
+  private async renewExpiringLocked(
+    grant: GrantName,
+    scheme: AuthScheme,
+    withinMs: number,
+  ): Promise<void> {
+    // Re-read under the lock: a grant or revoke that ran while this pass
+    // queued has already replaced or dropped the credential.
+    const cred = this.liveCreds.get(grant);
+    if (this.grantState.get(grant) !== "authorized" || !cred || cred.expiresAt === "never") return;
+    if (cred.expiresAt.getTime() > this.registry.now().getTime() + withinMs) return;
+    const stillCurrent = () => this.liveCreds.get(grant) === cred;
+
+    let renewed: Credential | "needs-fix";
+    try {
+      renewed = await scheme.renew(cred);
+    } catch (err) {
+      this.log.warn("expiring-credential renew threw", {
+        connectionId: this.id,
+        grant,
+        error: errMsg(err),
+      });
+      if (err instanceof RenewalUnavailable) return;
+      renewed = "needs-fix";
+    }
+    if (!stillCurrent()) return;
+    if (renewed === "needs-fix") {
+      if (this.isExpired(cred)) {
+        await this.degradeLocked(grant, "credential expired and renew failed", stillCurrent);
+      }
+      return;
+    }
+    const now = this.registry.now();
+    await this.replaceGrant((current) => renewedGrant(current, renewed, now));
+    this.liveCreds.set(grant, renewed);
+    this.reconcile(grant);
+    await this.syncCustody(grant, renewed);
+  }
+
   /** At-load expired-credential handling: renew once, else degrade. */
   private async renewOrDegradeAtLoad(
     name: GrantName,
     scheme: AuthScheme,
     cred: Credential,
   ): Promise<void> {
-    let renewed: Credential | "re-confer";
+    let renewed: Credential | "needs-fix";
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
+      if (err instanceof RenewalUnavailable) {
+        // The renewer couldn't answer (offline at boot, a Rome Cloud deploy).
+        // Keep the grant on its expired credential; the renewal pass retries.
+        this.log.warn("expired credential could not renew at load; will retry", {
+          connectionId: this.id,
+          grant: name,
+          error: errMsg(err),
+        });
+        this.grantState.set(name, "authorized");
+        this.liveCreds.set(name, cred);
+        await this.syncCustody(name, cred);
+        return;
+      }
       // Load runs before any epoch exists — nothing can supersede this flow.
       await this.degradeGrant(name, `renew threw at load: ${errMsg(err)}`, () => true);
       return;
     }
-    if (renewed === "re-confer") {
-      await this.degradeGrant(name, "renew returned re-confer at load", () => true);
+    if (renewed === "needs-fix") {
+      await this.degradeGrant(name, "renew returned fix at load", () => true);
       return;
     }
-    // Ledger first (the ledger is authoritative) — consistent with the
+    // Store first (the store is authoritative) — consistent with the
     // fault-driven renew path.
-    await this.ledger.updateGrant(this.id, name, {
-      state: "authorized",
-      credential: toPersisted(renewed),
-      lastRenewedAt: this.registry.now(),
-    });
+    const now = this.registry.now();
+    await this.replaceGrant((current) => renewedGrant(current, renewed, now));
     this.grantState.set(name, "authorized");
     this.liveCreds.set(name, renewed);
     await this.syncCustody(name, renewed);
-  }
-
-  private async readGrant(name: GrantName): Promise<GrantRecord | null> {
-    return this.ledger.getGrant(this.id, name);
   }
 
   private isExpired(cred: Credential): boolean {
@@ -829,9 +920,15 @@ class ConnectionImpl implements Connection {
     return slot ? slot.epoch !== null : false;
   }
 
+  state(): ConnectionState | null {
+    const states = Object.values(this.grants());
+    if (states.includes("degraded")) return "broken";
+    return states.every((state) => state === "authorized") ? "working" : null;
+  }
+
   status(): Record<Capability, CapabilityStatus> {
     return {
-      talk: this.capStatus("talk"),
+      chat: this.capStatus("chat"),
       act: this.capStatus("act"),
       watch: this.capStatus("watch"),
     };
@@ -845,18 +942,40 @@ class ConnectionImpl implements Connection {
     if (cap === "watch" && slot.subscriptionGated && !this.watchSubscribed) {
       return { state: "needs-subscription" };
     }
-    if (cap === "talk" && slot.epoch) {
+    if (cap === "chat" && slot.epoch) {
       const degradation = slot.degradation?.(slot.epoch.instance as Talker);
       if (degradation) return { state: "unlocked", degradation };
     }
     return { state: "unlocked" };
   }
 
-  get talk(): Talk | null {
-    const slot = this.slots.get("talk");
-    if (!slot || !slot.epoch) return null;
-    return this.talkWrapper(slot, slot.epoch);
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined {
+    const slot = this.slots.get("chat");
+    const epoch = slot?.epoch;
+    if (!slot || !epoch) return undefined;
+    let answer: T;
+    try {
+      answer = call(epoch.instance as Talker);
+    } catch (err) {
+      this.handleThrownFault(slot, err, epoch);
+      throw err;
+    }
+    if (answer instanceof Promise) {
+      answer.catch((err: unknown) => this.handleThrownFault(slot, err, epoch));
+    }
+    return answer;
   }
+
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
+    const slot = this.slots.get("chat");
+    if (!slot || !slot.epoch) return null;
+    slot.messageHandlers.push(handler);
+    return () => {
+      const index = slot.messageHandlers.indexOf(handler);
+      if (index >= 0) slot.messageHandlers.splice(index, 1);
+    };
+  }
+
   get act(): Act | null {
     const slot = this.slots.get("act");
     if (!slot || !slot.epoch) return null;
@@ -866,62 +985,6 @@ class ConnectionImpl implements Connection {
     const slot = this.slots.get("watch");
     if (!slot || !slot.epoch) return null;
     return this.watchWrapper(slot, slot.epoch);
-  }
-
-  private talkWrapper(slot: CapabilitySlot, epoch: Epoch): Talk {
-    return {
-      subscribe: (handler) => {
-        this.assertLive(epoch);
-        slot.messageHandlers.push(handler);
-        return () => {
-          const index = slot.messageHandlers.indexOf(handler);
-          if (index >= 0) slot.messageHandlers.splice(index, 1);
-        };
-      },
-      send: async (conversationId, msg) => {
-        this.assertLive(epoch);
-        try {
-          return await (epoch.instance as Talker).send(conversationId, msg);
-        } catch (err) {
-          this.handleThrownFault(slot, err, epoch);
-          throw err;
-        }
-      },
-      feature: <K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null => {
-        this.assertLive(epoch);
-        const current = (epoch.instance as Talker).feature(name);
-        if (!current) return null;
-        return this.epochFeatureProxy(slot, epoch, name);
-      },
-    };
-  }
-
-  private epochFeatureProxy<K extends TalkFeatureName>(
-    slot: CapabilitySlot,
-    epoch: Epoch,
-    name: K,
-  ): TalkFeatureMap[K] {
-    return new Proxy({} as TalkFeatureMap[K] & object, {
-      get: (_target, property) => {
-        return (...args: unknown[]) => {
-          this.assertLive(epoch);
-          const feature = (epoch.instance as Talker).feature(name) as
-            | (TalkFeatureMap[K] & Record<PropertyKey, unknown>)
-            | null;
-          if (!feature) throw new Error(`talk feature "${name}" is unavailable`);
-          const method = feature[property];
-          if (typeof method !== "function") {
-            throw new Error(`talk feature "${name}" has no operation "${String(property)}"`);
-          }
-          try {
-            return method.apply(feature, args);
-          } catch (err) {
-            this.handleThrownFault(slot, err, epoch);
-            throw err;
-          }
-        };
-      },
-    });
   }
 
   private actWrapper(slot: CapabilitySlot, epoch: Epoch): Act {
@@ -965,27 +1028,24 @@ class ConnectionImpl implements Connection {
    *  caller registers SYNCHRONOUSLY inside its onUnlocked callback are wired
    *  into the slot before the stream starts. A Talker/Watcher whose start()
    *  delivers synchronously (e.g. flushing buffered inbound) would otherwise send
-   *  into empty handler arrays and drop its first delivery. The wrapper and
-   *  instance already exist when onUnlocked fires, so an onUnlocked handler may
-   *  call talk.send() before start() has run — send-before-start is permitted. */
+   *  into empty handler arrays and drop its first delivery. The instance already
+   *  exists when onUnlocked fires, so an onUnlocked handler may send through
+   *  `withTalker` before start() has run — send-before-start is permitted. */
   private buildEpoch(slot: CapabilitySlot, fire: boolean): void {
-    const creds: Record<GrantName, Credential> = {};
-    for (const grant of slot.needs) {
-      const cred = this.liveCreds.get(grant);
-      if (!cred) {
-        this.log.error("buildEpoch missing live credential", {
-          connectionId: this.id,
-          capability: slot.cap,
-          grant,
-        });
-        return;
-      }
-      creds[grant] = cred;
+    const grant = this.descriptor.grant;
+    const cred = this.liveCreds.get(grant);
+    if (!cred) {
+      this.log.error("buildEpoch missing live credential", {
+        connectionId: this.id,
+        capability: slot.cap,
+        grant,
+      });
+      return;
     }
-    const kit = this.makeKit(slot.needs);
+    const kit = this.makeKit();
     const capDef = this.descriptor.capabilities[slot.kind];
     if (!capDef) return;
-    const instance = capDef.build(creds, kit);
+    const instance = capDef.build(cred, kit);
     const epoch: Epoch = {
       token: ++this.epochCounter,
       instance,
@@ -998,8 +1058,8 @@ class ConnectionImpl implements Connection {
     slot.eventHandlers = [];
     // Fire onUnlocked BEFORE starting the instance so handlers registered
     // synchronously in the callback are wired when the stream starts (see the
-    // method doc). A handler may also call talk.send() here — the wrapper and
-    // instance exist, so send-before-start works.
+    // method doc). A handler may also send through withTalker here — the
+    // instance exists, so send-before-start works.
     if (fire) this.registry.fireUnlock(slot.cap, this);
     this.startInstance(slot, epoch);
   }
@@ -1134,27 +1194,19 @@ class ConnectionImpl implements Connection {
     }
   }
 
-  /** A kit bound to exactly one capability build()'s needed grants. persist to
-   *  any other grant throws — prevents cross-grant writes. */
-  private makeKit(needs: readonly GrantName[]): RuntimeKit {
-    const allowed = new Set(needs);
+  /** The kit a capability's build() gets. persist writes the connection's one
+   *  grant. */
+  private makeKit(): RuntimeKit {
     return {
       connectionId: this.id,
       registerIngress: (handler) => this.registry.registerIngress(this.id, handler),
-      persist: async (grant: GrantName, material: SecretRecord): Promise<void> => {
-        if (!allowed.has(grant)) {
-          throw new Error(
-            `kit.persist("${grant}") rejected: not in this capability's needs [${[...allowed].join(", ")}]`,
-          );
-        }
-        await this.persistMaterial(grant, material);
-      },
+      persist: (material: SecretRecord) => this.persistMaterial(this.descriptor.grant, material),
     };
   }
 
   /** Write-through custody: update the grant's stored credential material in
    *  place, and the in-memory Credential so the NEXT build sees it. No epoch
-   *  rebuild, no state change, no onUnlocked. Ledger first (the ledger
+   *  rebuild, no state change, no onUnlocked. Store first (the store
    *  is authoritative): a failed durable write throws before the in-memory
    *  liveCreds swap, so the mirror keeps the prior material — the next build
    *  cannot see a rotation that never persisted. */
@@ -1162,27 +1214,28 @@ class ConnectionImpl implements Connection {
     const current = this.liveCreds.get(grant);
     const expiresAt = current?.expiresAt ?? "never";
     const next: Credential = { material, expiresAt };
-    await this.ledger.updateGrant(this.id, grant, {
+    await this.replaceGrant((current) => ({
+      ...current,
       credential: toPersisted(next),
-    });
+    }));
     this.liveCreds.set(grant, next);
   }
 
   /** Materialize a grant's custody artifacts (token files, shell auth) from its
    *  live credential material + persisted profile. Fire-and-forget: a failure is
    *  logged and swallowed so it can never fail the transition that triggered it —
-   *  the ledger is authoritative and the next transition or boot re-syncs. No-op
+   *  the store is authoritative and the next transition or boot re-syncs. No-op
    *  for a descriptor with no custody, or an external-custody credential (a
    *  function material has no on-disk secret to mirror). Reads the profile from
-   *  the ledger, which was just written in the same transition, so custody always
-   *  reflects the current conferral outcome. */
+   *  the store, which was just written in the same transition, so custody always
+   *  reflects the current grant outcome. */
   private async syncCustody(grant: GrantName, cred: Credential): Promise<void> {
     const custody = this.descriptor.custody;
     if (!custody || typeof cred.material === "function") return;
     const material = cred.material;
     try {
-      const rec = await this.readGrant(grant);
-      await custody.sync(grant, material, rec?.profile ?? {});
+      const grant = await this.store.grantOf(this.id);
+      await custody.sync(material, grant?.profile ?? {});
     } catch (err) {
       this.log.warn("custody sync failed", {
         connectionId: this.id,
@@ -1198,7 +1251,7 @@ class ConnectionImpl implements Connection {
     const custody = this.descriptor.custody;
     if (!custody) return;
     try {
-      await custody.clear(grant);
+      await custody.clear();
     } catch (err) {
       this.log.warn("custody clear failed", {
         connectionId: this.id,
@@ -1213,114 +1266,54 @@ class ConnectionImpl implements Connection {
    *  mutations on one grant apply in issue order (FIFO) — a later-issued
    *  operation queues behind an in-flight earlier one and wins by running last.
    *
-   *  A mutation that legitimately rejects (e.g. a ledger write failure) neither
+   *  A mutation that legitimately rejects (e.g. a store write failure) neither
    *  poisons the next mutation on the grant nor surfaces as an unhandled rejection
    *  (the keyed mutex releases either way); the original result/rejection is still
    *  returned to THIS caller unchanged. */
+  /** The scheme of `grant`, or undefined when it is not the connection's grant. */
+  private schemeOf(grant: GrantName): AuthScheme | undefined {
+    return grant === this.descriptor.grant ? this.descriptor.auth : undefined;
+  }
+
   private withGrantLock<T>(grant: GrantName, fn: () => Promise<T>): Promise<T> {
     return this.grantMutex.runExclusive(grant, fn);
   }
 
   grants(): Record<GrantName, GrantState> {
     const out: Record<GrantName, GrantState> = {};
-    for (const name of Object.keys(this.descriptor.auth)) {
+    for (const name of [this.descriptor.grant]) {
       out[name] = this.grantState.get(name) ?? "unauthorized";
     }
     return out;
   }
 
-  importCredential(
-    grant: GrantName,
-    credential: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    return this.withGrantLock(grant, () => this.importCredentialLocked(grant, credential, profile));
-  }
-
-  private async importCredentialLocked(
-    grant: GrantName,
-    credential: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    const scheme = this.descriptor.auth[grant];
-    if (!scheme) throw new Error(`connection "${this.id}" has no grant "${grant}"`);
-    // Idempotent: identical inline material over an authorized grant skips the
-    // epoch rebuild. A re-conferral can still refresh the profile (renamed login,
-    // changed scopes) while reusing the same token, so persist a supplied profile
-    // even on the no-op material path — an authorized grant must never keep a
-    // previous conferral's profile. No epoch rebuild, no onUnlocked: profile is
-    // not credential material.
-    if (this.grantState.get(grant) === "authorized") {
-      const current = this.liveCreds.get(grant);
-      if (
-        current &&
-        typeof current.material !== "function" &&
-        typeof credential.material !== "function" &&
-        materialFingerprint(current.material) === materialFingerprint(credential.material)
-      ) {
-        if (profile !== undefined) {
-          await this.ledger.updateGrant(this.id, grant, { profile });
-          // The credential is byte-identical, but a re-conferral can still change
-          // the profile (renamed login, moved workspace) — re-sync custody so a
-          // profile-derived artifact (the Slack file's teamId) stays current.
-          await this.syncCustody(grant, current);
-        }
-        return;
-      }
-    }
-    await this.applyNewCredential(grant, credential, profile);
-  }
-
-  /** Fill a MISSING profile on an already-authorized/degraded grant without
-   *  touching the credential, grant state, or the capability epoch.
-   *  Ledger-only write; then re-sync custody so a profile-derived
-   *  artifact reflects the new identity (no-op for a channel — no custody — and
-   *  for a degraded grant whose live credential was cleared at load). */
-  backfillProfile(grant: GrantName, profile: ProfileRecord): Promise<void> {
-    return this.withGrantLock(grant, () => this.backfillProfileLocked(grant, profile));
-  }
-
-  private async backfillProfileLocked(grant: GrantName, profile: ProfileRecord): Promise<void> {
-    if (!this.descriptor.auth[grant]) {
-      throw new Error(`connection "${this.id}" has no grant "${grant}"`);
-    }
-    await this.ledger.updateGrant(this.id, grant, { profile });
-    const cred = this.liveCreds.get(grant);
-    if (cred) await this.syncCustody(grant, cred);
-  }
-
-  /** Persist a freshly minted/imported credential, mark the grant authorized,
-   *  clear the renewed flag, and rebuild every dependent capability. Ledger
-   *  first (the ledger is authoritative): if the durable write throws,
-   *  the error propagates to the caller with the in-memory mirror untouched —
-   *  the grant stays in its prior state, no rebuild. */
-  private async applyNewCredential(
+  /** The registry's transactional `grant` for an existing connection: run its
+   *  durable write (`commit`), then bring the grant live in memory, as ONE step
+   *  under the per-grant lock. Holding the lock across the write is what keeps a
+   *  renewal on the same grant from writing its older credential over this
+   *  grant: the renewal either finishes first or starts after. A failed
+   *  write throws to the caller; a failed activation goes to `onActivationError`
+   *  (the grant is durable either way). */
+  commitAndActivateGrant(
     grant: GrantName,
     cred: Credential,
-    profile?: ProfileRecord,
+    commit: () => void,
+    onActivationError: (err: unknown) => void,
   ): Promise<void> {
-    await this.ledger.updateGrant(
-      this.id,
-      grant,
-      conferralPatch(this.registry.now(), cred, profile),
-    );
-    await this.activateGrantInMemory(grant, cred);
-  }
-
-  /** Bring a grant live in memory after its authorized credential has been
-   *  DURABLY persisted (by `applyNewCredential` above, or by the registry's
-   *  transactional `confer` which persists the row inside its own transaction and
-   *  then calls this on the already-committed grant). Mirror → reconcile (build
-   *  the epoch / start the adapter) → custody. Under the per-grant lock so it
-   *  serializes against a concurrent renew/fault on the same grant. */
-  activatePersistedGrant(grant: GrantName, cred: Credential): Promise<void> {
-    return this.withGrantLock(grant, () => this.activateGrantInMemory(grant, cred));
+    return this.withGrantLock(grant, async () => {
+      commit();
+      try {
+        await this.activateGrantInMemory(grant, cred);
+      } catch (err) {
+        onActivationError(err);
+      }
+    });
   }
 
   private async activateGrantInMemory(grant: GrantName, cred: Credential): Promise<void> {
     this.grantState.set(grant, "authorized");
     this.liveCreds.set(grant, cred);
-    this.renewedSinceLastConfer.delete(grant);
+    this.renewedSinceGranted.delete(grant);
     this.reconcile(grant);
     await this.syncCustody(grant, cred);
   }
@@ -1329,41 +1322,47 @@ class ConnectionImpl implements Connection {
     return this.withGrantLock(grant, () => this.revokeLocked(grant, opts));
   }
 
+  /** Remove this connection and its grant in one transaction that raises
+   *  disconnected, then drop the grant in memory, stop every capability and
+   *  clear the custody artifacts. The store comes first, so a failed write
+   *  throws with nothing changed in memory. */
+  disconnect(grant: GrantName): Promise<void> {
+    return this.withGrantLock(grant, async () => {
+      const connection = { id: this.id, connectionKind: this.connectionKind };
+      this.store.transaction((tx) => {
+        this.store.remove(tx, this.id);
+        this.registry.raise(tx, { kind: "disconnected", connection });
+      });
+      this.grantState.set(grant, "unauthorized");
+      this.liveCreds.delete(grant);
+      this.renewedSinceGranted.delete(grant);
+      this.teardownAll();
+      await this.clearCustody(grant);
+    });
+  }
+
   private async revokeLocked(
     grant: GrantName,
     opts: { inTx?: (tx: DrizzleTx) => void },
   ): Promise<void> {
-    const scheme = this.descriptor.auth[grant];
+    const scheme = this.schemeOf(grant);
     if (!scheme) throw new Error(`connection "${this.id}" has no grant "${grant}"`);
-    // Ledger first (the ledger is authoritative): a failed durable
+    // Store first (the store is authoritative): a failed durable
     // write propagates to the caller with nothing revoked in memory — the grant
     // stays authorized and its epoch alive.
-    const patch = {
-      state: "unauthorized" as const,
-      credential: undefined,
-      // An unauthorized grant records no conferral outcome — clear the profile
-      // with the credential so a revoked grant carries no stale identity.
-      // `conferredAt` is deliberately NOT cleared: an unauthorized grant with a
-      // conferral on record is the explicit-revoke marker (isExplicitlyRevoked)
-      // the boot settings bridge reads to refuse resurrecting a disconnected
-      // credential from a retained legacy settings row.
-      profile: undefined,
-      degraded: undefined,
-    };
-    if (opts.inTx) {
-      const ledger = this.ledger;
-      if (!isTransactionalLedger(ledger))
-        throw new Error("Grant cleanup requires a transactional ledger");
-      ledger.runInTransaction((tx) => {
-        ledger.writeGrant(tx, this.id, grant, patch);
-        opts.inTx!(tx);
-      });
-    } else {
-      await this.ledger.updateGrant(this.id, grant, patch);
-    }
+    // A revoked grant holds nothing, so it carries no stale identity.
+    const connection = { id: this.id, connectionKind: this.connectionKind };
+    await this.store.update(
+      this.id,
+      (current) => ({ ...current, grant: NO_GRANT }),
+      (tx) => {
+        this.registry.raise(tx, { kind: "revoked", connection });
+        opts.inTx?.(tx);
+      },
+    );
     this.grantState.set(grant, "unauthorized");
     this.liveCreds.delete(grant);
-    this.renewedSinceLastConfer.delete(grant);
+    this.renewedSinceGranted.delete(grant);
     this.reconcile(grant);
     await this.clearCustody(grant);
   }
@@ -1396,8 +1395,8 @@ class ConnectionImpl implements Connection {
     this.runFaultFlow(slot, "CredentialRejected", this.handleCredentialRejected(slot, err, source));
   }
 
-  /** Faults thrown synchronously from act.invoke / talk.send. The wrapper
-   *  rethrows the original error to the caller; the grant flow runs async. */
+  /** Faults thrown from act.invoke or inside withTalker. The caller still gets
+   *  the original error; the grant flow runs async. */
   private handleThrownFault(slot: CapabilitySlot, err: unknown, source: Epoch): void {
     if (source.dead || slot.epoch !== source) return; // see handleFault
     if (err instanceof CredentialRejected) {
@@ -1411,9 +1410,9 @@ class ConnectionImpl implements Connection {
   }
 
   /** Fire-and-forget a fault-driven grant flow, catching any rejection (e.g. a
-   *  transient ledger write failure inside renew/degrade). Without this a
-   *  rejected ledger write would surface as an unhandled promise rejection and,
-   *  under Node's default --unhandled-rejections=throw, crash the host. A ledger
+   *  transient store write failure inside renew/degrade). Without this a
+   *  rejected store write would surface as an unhandled promise rejection and,
+   *  under Node's default --unhandled-rejections=throw, crash the host. A store
    *  blip must degrade gracefully, not take the process down. */
   private runFaultFlow(slot: CapabilitySlot, kind: string, flow: Promise<void>): void {
     void flow.catch((err) => {
@@ -1433,19 +1432,14 @@ class ConnectionImpl implements Connection {
     source: Epoch,
   ): Promise<void> {
     // The invocation-time guard in handleFault/handleThrownFault only covers the
-    // pre-callback window. This flow then awaits (renewalsInFlight join, ledger
-    // writes, scheme.renew), and a conferral can complete in ANY of those gaps —
+    // pre-callback window. This flow then awaits (renewalsInFlight join, store
+    // writes, scheme.renew), and a grant can complete in ANY of those gaps —
     // tearing down `source` and building a fresh epoch on a fresh credential.
     // Acting after that would clobber the fresh grant (persist `degraded` over a
-    // just-authorized conferral), so every state application downstream re-checks
+    // just-authorized grant), so every state application downstream re-checks
     // this predicate immediately before writing.
     const stillCurrent = () => !source.dead && slot.epoch === source;
-    const targets =
-      err.grant !== undefined
-        ? [err.grant]
-        : slot.needs.length === 1
-          ? [slot.needs[0]]
-          : [...slot.needs];
+    const targets = err.grant !== undefined ? [err.grant] : [this.descriptor.grant];
     for (const grant of targets) {
       await this.renewOnceOrDegrade(grant, err, stillCurrent);
     }
@@ -1454,7 +1448,7 @@ class ConnectionImpl implements Connection {
   /** Single-flight renew-once-then-degrade for one grant. `stillCurrent` reports
    *  whether the faulting epoch is still the slot's live epoch; the flow aborts
    *  (no-op) the moment it turns false — a superseded fault must never mutate
-   *  the fresh conferral's grant state. */
+   *  the fresh grant's grant state. */
   private renewOnceOrDegrade(
     grant: GrantName,
     cause: CredentialRejected,
@@ -1462,12 +1456,12 @@ class ConnectionImpl implements Connection {
   ): Promise<void> {
     const existing = this.renewalsInFlight.get(grant);
     if (existing) return existing;
-    const scheme = this.descriptor.auth[grant];
+    const scheme = this.schemeOf(grant);
     if (!scheme) return Promise.resolve();
     const promise = (async () => {
       if (!stillCurrent()) return;
-      // Already renewed since last confer → degrade instead of renewing again.
-      if (this.renewedSinceLastConfer.has(grant)) {
+      // Already renewed since last grant → degrade instead of renewing again.
+      if (this.renewedSinceGranted.has(grant)) {
         await this.degradeGrant(grant, `credential rejected again: ${cause.message}`, stillCurrent);
         return;
       }
@@ -1476,7 +1470,7 @@ class ConnectionImpl implements Connection {
         await this.degradeGrant(grant, "credential rejected with no live credential", stillCurrent);
         return;
       }
-      this.renewedSinceLastConfer.add(grant);
+      this.renewedSinceGranted.add(grant);
       await this.renewGrant(
         grant,
         scheme,
@@ -1491,18 +1485,18 @@ class ConnectionImpl implements Connection {
     return promise;
   }
 
-  /** Attempt a renewal; on success persist + rebuild, on "re-confer"/throw degrade.
+  /** Attempt a renewal; on success persist + rebuild, on "needs-fix"/throw degrade.
    *
-   *  Ledger first on the success branch (the ledger is authoritative).
+   *  Store first on the success branch (the store is authoritative).
    *  If the durable write throws, the renewal is NOT applied: the mirror is
    *  untouched, so the grant stays authorized with its PRIOR (still-live)
    *  credential and its epoch alive — a failed renew write cannot half-apply a
    *  new credential. The throw propagates up through renewOnceOrDegrade into the
-   *  fault flow, where runFaultFlow's .catch swallows it (a ledger blip must not
-   *  crash the process). Note `renewOnceOrDegrade` sets `renewedSinceLastConfer`
+   *  fault flow, where runFaultFlow's .catch swallows it (a store blip must not
+   *  crash the process). Note `renewOnceOrDegrade` sets `renewedSinceGranted`
    *  BEFORE calling us, and we deliberately leave it set on a failed write: the
    *  renew was genuinely attempted, so the next CredentialRejected degrades
-   *  rather than looping renew attempts against a flaky ledger. */
+   *  rather than looping renew attempts against a flaky store. */
   private async renewGrant(
     grant: GrantName,
     scheme: AuthScheme,
@@ -1510,74 +1504,60 @@ class ConnectionImpl implements Connection {
     reason: string,
     stillCurrent: () => boolean,
   ): Promise<void> {
-    let renewed: Credential | "re-confer";
+    let renewed: Credential | "needs-fix";
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
       await this.degradeGrant(grant, `renew threw (${reason}): ${errMsg(err)}`, stillCurrent);
       return;
     }
-    // scheme.renew is the flow's longest await — a conferral completing during
-    // it superseded this fault, so neither degrade NOR the renewed credential
-    // may be applied over the fresh grant (see handleCredentialRejected).
-    if (!stillCurrent()) return;
-    if (renewed === "re-confer") {
-      await this.degradeGrant(grant, `renew returned re-confer (${reason})`, stillCurrent);
+    // scheme.renew is the flow's longest await, and runs outside the grant's
+    // lock so a slow renewer never holds up a grant or a disconnect. A
+    // grant completing during it superseded this fault, so the result is
+    // applied under the lock, and only while the faulting epoch is current.
+    if (renewed === "needs-fix") {
+      await this.degradeGrant(grant, `renew returned fix (${reason})`, stillCurrent);
       return;
     }
-    await this.ledger.updateGrant(this.id, grant, {
-      state: "authorized",
-      credential: toPersisted(renewed),
-      lastRenewedAt: this.registry.now(),
+    await this.withGrantLock(grant, async () => {
+      if (!stillCurrent()) return;
+      const now = this.registry.now();
+      await this.replaceGrant((current) => renewedGrant(current, renewed, now));
+      this.grantState.set(grant, "authorized");
+      this.liveCreds.set(grant, renewed);
+      this.reconcile(grant);
+      await this.syncCustody(grant, renewed);
     });
-    // The write itself awaited — same supersession window as degradeGrant's:
-    // applying the stale renewal in memory would replace the winner's fresh
-    // credential and rebuild over its epoch. Repair the row instead.
-    if (!stillCurrent()) {
-      await this.repairLedgerFromMirror(grant);
-      return;
-    }
-    this.grantState.set(grant, "authorized");
-    this.liveCreds.set(grant, renewed);
-    this.reconcile(grant);
-    await this.syncCustody(grant, renewed);
   }
 
-  /** Degrade a grant: persist state + reason, relock dependent capabilities.
-   *  Sibling grants of those capabilities stay live; onUnlocked fires only on a
-   *  future re-import. The ledger credential row is RETAINED (only the
-   *  in-memory live credential is dropped, so nothing can use it): the ledger
-   *  invariant is `credential present ⇔ state !== "unauthorized"`, and
-   *  "degraded" is not "unauthorized". The stale material is inert until a
-   *  re-confer replaces it.
+  /** Break the connection: save its grant degraded with `reason`, raising
+   *  broken, then relock every capability that needs it. The stored credential
+   *  is kept, inert, until a fix replaces it. Only the in-memory live
+   *  credential is dropped, so nothing can use it.
    *
-   *  Ledger first (the ledger is authoritative). A failed degrade write
-   *  throws BEFORE any in-memory change: the grant stays "authorized" in memory
-   *  with its live credential and epoch intact — a DB blip must not half-degrade.
-   *  The throw propagates up the fault flow, where runFaultFlow's .catch swallows
-   *  it (never crashes the process); the next CredentialRejected retriggers the
-   *  renew-once-then-degrade flow and, with the ledger healthy, degrades cleanly.
-   *
-   *  `stillCurrent` is the fault flow's superseded-epoch predicate, re-checked on
-   *  BOTH sides of the awaited ledger write: a conferral/revoke completing during
-   *  the write owns the grant, so this flow must neither apply the degraded state
-   *  in memory (which would tear down the winner's fresh epoch) nor leave its
-   *  stale row behind (repaired from the mirror). Load-time callers, which run
-   *  before any epoch exists, pass `() => true`. */
-  private async degradeGrant(
+   *  Runs under the grant's lock, so no grant or revoke can land between
+   *  the `stillCurrent` check and the write: a fault flow that a grant
+   *  superseded drops its break instead of writing it. The store comes first,
+   *  so a failed write throws before any in-memory change, and the next
+   *  rejection retries. Load-time callers, which run before any epoch exists,
+   *  pass `() => true`. */
+  private degradeGrant(grant: GrantName, reason: string, stillCurrent: () => boolean) {
+    return this.withGrantLock(grant, () => this.degradeLocked(grant, reason, stillCurrent));
+  }
+
+  private async degradeLocked(
     grant: GrantName,
     reason: string,
     stillCurrent: () => boolean,
   ): Promise<void> {
     if (!stillCurrent()) return;
-    await this.ledger.updateGrant(this.id, grant, {
-      state: "degraded",
-      degraded: { at: this.registry.now(), reason },
-    });
-    if (!stillCurrent()) {
-      await this.repairLedgerFromMirror(grant);
-      return;
-    }
+    const now = this.registry.now();
+    const connection = { id: this.id, connectionKind: this.connectionKind };
+    await this.store.update(
+      this.id,
+      (current) => ({ ...current, grant: brokenGrant(current.grant, reason, now) }),
+      (tx) => this.registry.raise(tx, { kind: "broken", connection, reason }),
+    );
     this.grantState.set(grant, "degraded");
     this.liveCreds.delete(grant);
     for (const slot of this.slots.values()) {
@@ -1587,38 +1567,6 @@ class ConnectionImpl implements Connection {
     // Clear the grant's custody artifacts: an out-of-process consumer must lose
     // the dead token rather than keep retrying it until the guardian reconnects.
     await this.clearCustody(grant);
-  }
-
-  /** Re-assert the in-memory mirror onto the ledger after a superseded fault
-   *  flow's write may have landed ON TOP of the superseding conferral/revoke
-   *  write (the two writes race only across the awaited ledger call; whichever
-   *  lands last wins the row). The mirror is authoritative here: the winner
-   *  finished its own ledger-first sequence before the supersession became
-   *  observable, so rewriting the row from the mirror restores exactly the
-   *  winner's outcome. A "degraded" mirror means another fault flow legitimately
-   *  owns the row — leave it. */
-  private async repairLedgerFromMirror(grant: GrantName): Promise<void> {
-    const state = this.grantState.get(grant) ?? "unauthorized";
-    const cred = this.liveCreds.get(grant);
-    if (state === "authorized" && cred) {
-      await this.ledger.updateGrant(this.id, grant, {
-        state: "authorized",
-        credential: toPersisted(cred),
-        degraded: undefined,
-      });
-    } else if (state === "unauthorized") {
-      await this.ledger.updateGrant(this.id, grant, {
-        state: "unauthorized",
-        credential: undefined,
-        profile: undefined,
-        degraded: undefined,
-      });
-    }
-    this.log.warn("superseded fault flow repaired ledger from mirror", {
-      connectionId: this.id,
-      grant,
-      state,
-    });
   }
 
   /** Disconnected: never touches grant state. Backoff, then rebuild the SAME
@@ -1646,27 +1594,24 @@ class ConnectionImpl implements Connection {
     try {
       const capDef = this.descriptor.capabilities[slot.kind];
       if (!capDef) return;
-      const kit = this.makeKit(slot.needs);
-      // Read the CURRENT live credentials, not the frozen epoch.creds: kit.persist
+      const kit = this.makeKit();
+      // Read the CURRENT live credential, not the frozen epoch.creds: kit.persist
       // replaces the liveCreds entry in place (no epoch rebuild), so a backoff
       // rebuild must pick up the post-persist material — otherwise write-through
       // custody (Baileys key rotation) is defeated on the next reconnect.
-      const creds: Record<GrantName, Credential> = {};
-      for (const grant of slot.needs) {
-        const cred = this.liveCreds.get(grant);
-        if (!cred) {
-          // A needed grant went away under us (relock raced the wait) — abandon
-          // this rebuild; the relock already tore the epoch down.
-          this.log.warn("Disconnected rebuild missing live credential; abandoning", {
-            connectionId: this.id,
-            capability: slot.cap,
-            grant,
-          });
-          return;
-        }
-        creds[grant] = cred;
+      const grant = this.descriptor.grant;
+      const cred = this.liveCreds.get(grant);
+      if (!cred) {
+        // The grant went away under us (relock raced the wait) — abandon this
+        // rebuild; the relock already tore the epoch down.
+        this.log.warn("Disconnected rebuild missing live credential; abandoning", {
+          connectionId: this.id,
+          capability: slot.cap,
+          grant,
+        });
+        return;
       }
-      const instance = capDef.build(creds, kit);
+      const instance = capDef.build(cred, kit);
       epoch.instance = instance;
       this.startInstance(slot, epoch);
     } catch (err) {

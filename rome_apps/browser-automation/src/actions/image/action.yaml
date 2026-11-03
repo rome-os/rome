@@ -1,6 +1,6 @@
 name: chatgpt_image
 type: custom
-description: Generate an image in ChatGPT Images via browser automation and save it to disk
+description: Generate an image in ChatGPT Images in the signed-in browser and save it to disk. Uses OpenCLI's default browser unless `profile` names another
 entry: ./index.ts
 complexity: moderate
 speed: slow

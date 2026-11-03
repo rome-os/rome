@@ -1,14 +1,14 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { AppManagerError } from "./manager.js";
 import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "./packaging/index.js";
 import { remixApp } from "./remix.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema, APPS_LOCKFILE_SCHEMA_VERSION, type SpecSource } from "./lockfile.js";
-import type { ResolvedApp } from "./state.js";
+import { isResolvedApp, type ResolvedApp } from "./state.js";
 
 const SAMPLE_MANIFEST = `formatVersion: 1
 id: testapp
@@ -431,7 +431,7 @@ tagline: One line for the card.
   // An interrupted teardown leaves `installed/<appId>/` on disk with no
   // matching lockfile entry. Boot must NOT sweep it: a blanket "anything
   // not in the lockfile is garbage" rule wipes every cached bundle when
-  // the lockfile is freshly empty (e.g. after `discardNonCurrentLockfile`).
+  // the lockfile is freshly empty.
   // The dangling dir is harmless — boot only probes lockfile entries, and
   // a re-install of the same appId is a content-addressed cache hit on
   // the existing dir.
@@ -588,6 +588,27 @@ sideEffects: read-only
     expect(finalA.current?.state).toBe("installed");
   });
 
+  it("runs settled listeners after every subscriber, even ones registered later", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    const order: string[] = [];
+    harness.catalog.onSettled(function settled(event) {
+      order.push(`settled:${event.current?.state}`);
+    });
+    harness.catalog.subscribe(async function slowSubscriber(event) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      order.push(`subscriber:${event.current?.state}`);
+    });
+
+    await harness.appManager.install({ source });
+
+    expect(order).toEqual([
+      "subscriber:installing",
+      "settled:installing",
+      "subscriber:installed",
+      "settled:installed",
+    ]);
+  });
+
   it("does not resolve install until the active bundle reaches catalog subscribers", async () => {
     const source: SpecSource = { mode: "bundle", path: packedRoot };
     let releaseInstalledSubscriber!: () => void;
@@ -628,6 +649,94 @@ sideEffects: read-only
     const result = await install;
     expect(result.installedHash).toBe(activeHash);
     expect(installSettled).toBe(true);
+  });
+
+  describe("reinstall", () => {
+    const AGENT_MANIFEST = SAMPLE_MANIFEST.replace("agents: []", "agents:\n  - agents/helper.yaml");
+
+    async function agentBundle(label: string): Promise<SpecSource> {
+      const root = await makeWorkspace(join(harness.profileRoot, `agent-${label}`), AGENT_MANIFEST);
+      await mkdir(join(root, "agents"));
+      await writeFile(
+        join(root, "agents", "helper.yaml"),
+        `name: helper\ndescription: Helper ${label}.\ntier: small\npermissionMode: default\ntools: []\nsystemPromptPrefix: Help.\n`,
+        "utf-8",
+      );
+      return { mode: "bundle", path: await packWorkspace(root) };
+    }
+
+    function recordCatalogView() {
+      const seen: Array<{ state: string | undefined; bundle: string | null; agents: string[] }> =
+        [];
+      harness.catalog.subscribe(function recordView(event) {
+        const view = event.current;
+        seen.push({
+          state: view?.state,
+          bundle: isResolvedApp(view) ? basename(view.rootPath) : null,
+          agents: harness.catalog
+            .listArtifacts("agent")
+            .filter((ref) => ref.ownerId === "testapp")
+            .map((ref) => basename(dirname(dirname(ref.absolutePath)))),
+        });
+      });
+      return seen;
+    }
+
+    it("keeps the previous bundle and its agents loaded until the new bundle replaces it", async () => {
+      const firstSource = await agentBundle("one");
+      const first = await harness.appManager.install({ source: firstSource });
+      const seen = recordCatalogView();
+      const sources: unknown[] = [];
+      harness.catalog.subscribe(function recordSource(event) {
+        sources.push(event.current?.source);
+      });
+
+      const secondSource = await agentBundle("two");
+      const second = await harness.appManager.install({ source: secondSource });
+
+      expect(second.installedHash).not.toBe(first.installedHash);
+      expect(sources).toEqual([firstSource, secondSource]);
+      expect(seen).toEqual([
+        { state: "installing", bundle: first.installedHash, agents: [first.installedHash] },
+        { state: "installed", bundle: second.installedHash, agents: [second.installedHash] },
+      ]);
+    });
+
+    it("loads nothing for a first install until the bundle is in place", async () => {
+      const seen = recordCatalogView();
+
+      const result = await harness.appManager.install({ source: await agentBundle("one") });
+
+      expect(seen).toEqual([
+        { state: "installing", bundle: null, agents: [] },
+        { state: "installed", bundle: result.installedHash, agents: [result.installedHash] },
+      ]);
+    });
+
+    it("settles to the failed state when the reinstall fails", async () => {
+      await harness.appManager.install({ source: await agentBundle("one") });
+      const seen = recordCatalogView();
+      rs.spyOn(harness.installer, "materialize").mockRejectedValueOnce(new Error("disk full"));
+
+      const result = await harness.appManager.install({ source: await agentBundle("two") });
+
+      expect(result.state).toBe("failed");
+      expect(seen.at(-1)).toEqual({ state: "failed", bundle: null, agents: [] });
+    });
+
+    it("collects old bundles only after the catalog stops serving them", async () => {
+      await harness.appManager.install({ source: await agentBundle("one") });
+      const collect = harness.installer.gcInstalledCache.bind(harness.installer);
+      const servedAtCollection: Array<string | null | undefined> = [];
+      rs.spyOn(harness.installer, "gcInstalledCache").mockImplementation(async (appId, opts) => {
+        servedAtCollection.push(harness.catalog.get(appId)?.installedHash);
+        await collect(appId, opts);
+      });
+
+      const second = await harness.appManager.install({ source: await agentBundle("two") });
+
+      expect(servedAtCollection).toEqual([second.installedHash]);
+    });
   });
 
   it("boot probes active symlink and marks broken when hash drifts", async () => {
@@ -684,53 +793,16 @@ sideEffects: read-only
     expect(existsSync(harness.lockfilePath)).toBe(false);
   });
 
-  // Pre-#314 dev profiles have an `apps.lock.json` written under the prior
-  // `schemaVersion: 2` shape (string `source: "seed:first_party"`, raw `hash`,
-  // etc.). Boot must rename it aside and start clean so install/seed paths
-  // don't trip on `LockfileTopLevelError`.
-  it("boot discards a non-current schemaVersion lockfile and starts clean", async () => {
-    const legacyLockfile = JSON.stringify({
-      schemaVersion: 2,
-      apps: {
-        legacy: {
-          source: "seed:first_party",
-          enabled: true,
-          version: "0.0.1",
-          hash: "0".repeat(64),
-        },
-      },
-    });
-    await writeFile(harness.lockfilePath, legacyLockfile, "utf-8");
+  it("creates an empty lockfile on a fresh profile", async () => {
+    const result = await harness.appManager.boot();
+    expect(result.appCount).toBe(0);
 
-    const fresh = await createTestApps({ profileRoot: harness.profileRoot });
-    try {
-      const boot = await fresh.appManager.boot();
-      expect(boot.appCount).toBe(0);
-
-      const lockfile = await readLockfile(fresh);
-      expect(lockfile.schemaVersion).toBe(APPS_LOCKFILE_SCHEMA_VERSION);
-      expect(Object.keys(lockfile.apps)).toEqual([]);
-
-      // Backup file is named with a `.bak-<timestamp>-<pid>` suffix.
-      const profileEntries = await readdir(harness.profileRoot);
-      const backups = profileEntries.filter((name) => name.startsWith("apps.lock.json.bak-"));
-      expect(backups).toHaveLength(1);
-      const backupRaw = await readFile(join(harness.profileRoot, backups[0]), "utf-8");
-      expect(JSON.parse(backupRaw)).toMatchObject({ schemaVersion: 2 });
-
-      // Subsequent installs through the same manager must work — the legacy
-      // file no longer blocks `readLockfileWithEntryIsolation`.
-      const result = await fresh.appManager.install({
-        source: { mode: "bundle", path: packedRoot },
-      });
-      expect(result.state).toBe("installed");
-    } finally {
-      await fresh.cleanup();
-    }
+    const lockfile = await readLockfile(harness);
+    expect(lockfile.schemaVersion).toBe(APPS_LOCKFILE_SCHEMA_VERSION);
+    expect(lockfile.apps).toEqual({});
   });
 
-  // Genuine corruption (missing schemaVersion, malformed shape) must still
-  // surface loudly — only stale-but-shaped lockfiles get auto-discarded.
+  // Corruption (missing schemaVersion, malformed shape) must surface loudly.
   it("boot throws on a malformed lockfile rather than silently discarding", async () => {
     await writeFile(
       harness.lockfilePath,
@@ -944,6 +1016,49 @@ sideEffects: read-only
       expect(entry?.source).toEqual({ mode: "bundle", path: packedRoot });
     } finally {
       await fresh.cleanup();
+    }
+  });
+
+  it("stamps installedAt on the first successful install and keeps it across re-installs", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const first = (await readLockfile(harness)).apps.testapp.installedAt;
+    expect(typeof first).toBe("string");
+    expect(Number.isNaN(Date.parse(first as string))).toBe(false);
+
+    const view = harness.catalog.list().find((candidate) => candidate.appId === "testapp");
+    expect(view?.installedAt).toBe(first);
+
+    await harness.appManager.install({ source });
+    expect((await readLockfile(harness)).apps.testapp.installedAt).toBe(first);
+  });
+
+  it("never backfills installedAt onto an entry that predates the field", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const lockfile = await readLockfile(harness);
+    delete lockfile.apps.testapp.installedAt;
+    await writeFile(harness.lockfilePath, JSON.stringify(lockfile, null, 2));
+
+    await harness.appManager.install({ source });
+    expect((await readLockfile(harness)).apps.testapp.installedAt).toBeUndefined();
+  });
+
+  it("keeps installedAt when a later install fails", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const first = (await readLockfile(harness)).apps.testapp.installedAt;
+
+    const realMaterialize = harness.installer.materialize.bind(harness.installer);
+    harness.installer.materialize = async () => {
+      throw new Error("simulated disk failure during materialize");
+    };
+    try {
+      const failed = await harness.appManager.install({ source });
+      expect(failed.state).toBe("failed");
+      expect((await readLockfile(harness)).apps.testapp.installedAt).toBe(first);
+    } finally {
+      harness.installer.materialize = realMaterialize;
     }
   });
 });

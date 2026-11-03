@@ -1,19 +1,21 @@
-import type { ChildProcess } from "node:child_process";
-import { actionExecutionContext } from "./context.js";
-import { replayContext } from "./replay.js";
+import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import { z } from "zod";
+import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
+import { emailConnection } from "../channels/channels-service.js";
+import type { ChannelOf } from "../channels/connection-ports.js";
 import type {
   BackendTurnRunner,
-  ConversationId,
-  ConversationRef,
-  ConversationSettingsControl,
-  InboundMessage,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
+  ChannelMessage,
   OutgoingMessage,
-  TalkRouter,
-  UpdateConversationSettingsInput,
-  ResetConversationSettingsInput,
-  ListConversationSettingsInput,
+  ChannelsService,
+  MessageReceipt,
+  UpdateChatSettingsInput,
+  ResetChatSettingsInput,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
@@ -23,35 +25,52 @@ import { toRoutine } from "../db/repositories/routines.js";
 import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
+import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
+import type { AgentNamesService } from "../channels/agent-names.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
-import { createLogger } from "../logger.js";
-
-const log = createLogger("worker-rpc");
+import type {
+  AppConnectionBrokerPort,
+  AppConnectionBrokerResult,
+} from "../connections/app-connections.js";
 
 const AppIdSchema = z.string().min(1);
 
-const TalkSendParams = z.object({
-  connectionId: z.string().min(1),
-  conversationId: z.string(),
+// An app names one of Rome's accounts, or a channel by its name.
+const AccountOrChannel = z.union([
+  z.string().min(1),
+  z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
+]);
+
+const ChannelsSendParams = z.object({
+  channel: AccountOrChannel,
+  chatId: z.string(),
   message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
     message: "message must be an object",
   }),
 });
 
-const TalkHistoryParams = z.object({
-  connectionId: z.string().min(1),
-  conversationId: z.string().optional(),
-  since: z.string().datetime().optional(),
-  limit: z.number().int().positive().optional(),
-});
+// `query` reads the channel's own `messages`, which names no Connection, so a
+// request naming one is refused rather than answered from another account.
+const ChannelsQueryParams = z
+  .object({
+    channel: AccountOrChannel,
+    chatId: z.string().optional(),
+    since: z.string().datetime().optional(),
+    after: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
 
-const ConversationRefParams = z.object({
-  ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
+const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
+
+const ChatRefParams = z.object({
+  ref: z.object({ connectionId: z.string().min(1), chatId: z.string() }),
 });
-const ConversationSettingsInput = z.custom<
-  UpdateConversationSettingsInput | ResetConversationSettingsInput | ListConversationSettingsInput
+const ChatSettingsInput = z.custom<
+  UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
 >((value) => typeof value === "object" && value !== null);
 
 const EmailIngestInboundParams = z.object({
@@ -67,6 +86,10 @@ const RoutineIdParams = z.object({ routineId: z.string().min(1) });
 const NotifySendParams = z.object({ body: z.string().optional() }).strict();
 
 const ActionHasParams = z.object({ actionName: z.string().min(1) });
+const ActionValidateArgsParams = z.object({
+  actionName: z.string().min(1),
+  args: z.record(z.string(), z.unknown()),
+});
 const AgentHasAgentParams = z.object({ name: z.string().min(1) });
 const AgentHasActionParams = z.object({
   agentName: z.string().min(1),
@@ -90,19 +113,37 @@ const AppsCreateParams = z.union([
     .strict(),
 ]);
 
+// The hook chain of the worker-side caller. An install or an enable starts
+// the app, and the app-started dispatch reads the chain from the async context
+// of the catalog refresh, so the handler restores it around the call.
+const HookInvocationContextParam = z.object({
+  rootInvocationId: z.string().min(1),
+  depth: z.number().int().nonnegative(),
+  chain: z.array(
+    z.object({
+      hookType: z.string().min(1),
+      appId: z.string().min(1),
+      hookName: z.string().min(1),
+    }),
+  ),
+});
+
 const AppsInstallParams = z.object({
   source: SpecSourceSchema,
   enabled: z.boolean().optional(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppsUninstallParams = z.object({
   appId: AppIdSchema,
   purge: z.boolean().optional(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppsSetEnabledParams = z.object({
   appId: AppIdSchema,
   enabled: z.boolean(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppStoreListListingsParams = z.object({
@@ -127,17 +168,36 @@ const EventsPublishParams = z.object({
 const EventsSearchCatalogParams = z.object({
   query: z.string().default(""),
   limit: z.number().int().positive().max(50).default(10),
+  match: z.record(z.string(), z.string()).optional(),
 });
 
 const SessionContinueParams = z.object({
   agentName: z.string().min(1),
   sessionId: z.string().min(1),
-  connectionId: z.string().min(1).optional(),
   channel: z.string().min(1),
   threadId: z.string().min(1),
   channelUserId: z.string().optional(),
   prompt: z.string(),
 });
+
+const AppConnectionsListParams = z
+  .object({
+    cursor: z.string().optional(),
+    limit: z.number().int().positive().max(50).optional(),
+  })
+  .strict();
+const AppConnectionsIdentityParams = z
+  .object({ connectionId: z.string().min(1), identity: z.string().min(1) })
+  .strict();
+const AppConnectionsOperationsParams = AppConnectionsIdentityParams.extend({
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(50).optional(),
+}).strict();
+const AppConnectionsInvokeParams = AppConnectionsIdentityParams.extend({
+  operation: z.string().min(1),
+  input: z.unknown().optional(),
+  requestId: z.string().optional(),
+}).strict();
 
 function parseParams<T extends z.ZodType>(method: string, schema: T, params: unknown): z.infer<T> {
   const result = schema.safeParse(params);
@@ -148,26 +208,31 @@ function parseParams<T extends z.ZodType>(method: string, schema: T, params: unk
   throw new Error(`${method}: invalid params — ${issues}`);
 }
 
-interface RpcRequestMessage {
-  type: "rpc_request";
-  clientId: string;
-  id: number;
-  method: string;
-  params: unknown;
-}
-
-interface RpcResponseMessage {
-  type: "rpc_response";
-  clientId: string;
-  id: number;
-  result?: unknown;
-  error?: string;
+function parseAppConnectionParams<T extends z.ZodType>(
+  method: string,
+  schema: T,
+  params: unknown,
+): AppConnectionBrokerResult<z.infer<T>> {
+  try {
+    return { ok: true, value: parseParams(method, schema, params) };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    };
+  }
 }
 
 export interface WorkerRpcServices {
-  talkRouter: TalkRouter;
+  /** How a worker's actions send and read on channels (`channels.*`). */
+  channelsService: ChannelsService;
   connectionRegistry: ConnectionRegistry;
-  conversationSettings: ConversationSettingsControl;
+  channelOf: ChannelOf;
+  chatSettings: ChatSettingsControl;
   /** Live routine engine + repo — the action worker has no in-process engine,
    * so it persists a routine then calls `routines.schedule` to activate it here. */
   routinesRepo: RoutinesRepository;
@@ -195,6 +260,11 @@ export interface WorkerRpcServices {
    * presence-only, so validation paths such as `create_routine` ask the eager
    * main registry whether an action is actually registered there. */
   hasRegisteredAction: (name: string) => boolean;
+  isExplicitAction: (name: string) => boolean;
+  /** Checks args against the main registry's input schema for the action, the
+   * one worker-local lazy stubs lack. Returns an error message, or null when
+   * the args fit, the action declares no schema, or the action is unknown. */
+  validateActionArgs: (name: string, args: Record<string, unknown>) => string | null;
   /** Capability check bridged to the worker-side `RpcAgentRunner.hasAction`:
    * does the named agent's allow-list resolve the named action? Mirrors the
    * agent session's own gate so the inbox channel-control cue can match what
@@ -210,129 +280,171 @@ export interface WorkerRpcServices {
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
+  feedback: FeedbackService;
+  /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
+  cloudProfile: CloudProfileService;
+  /** System-only: how `system:send_message` turns an agent's name into its id. */
+  agentNames: AgentNamesService;
+  appConnections: AppConnectionBrokerPort;
+  /** Resolve the owner from the action that the Core IPC boundary captured. */
+  appIdForAction: (actionName: string) => string | null;
 }
 
 export class WorkerRpcServer {
-  constructor(private services: WorkerRpcServices) {}
+  private readonly handlers: ReadonlyMap<
+    string,
+    (params: unknown, context?: IpcCallContext) => unknown
+  >;
+
+  constructor(private services: WorkerRpcServices) {
+    this.handlers = new Map<string, (params: unknown, context?: IpcCallContext) => unknown>(
+      Object.entries({
+        "channels.list": () => this.services.channelsService.list(),
+        "channels.send": (params) => this.handleChannelsSend(params),
+        "channels.query": (params) => this.handleChannelsQuery(params),
+        "agentNames.resolve": (params) => {
+          const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
+          return this.services.agentNames.resolve(name);
+        },
+        "chatSettings.list": (params) =>
+          this.services.chatSettings.list(
+            parseParams("chatSettings.list", ChatSettingsInput, params) as ListChatSettingsInput,
+          ),
+        "chatSettings.get": (params) => {
+          const { ref } = parseParams("chatSettings.get", ChatRefParams, params);
+          return this.services.chatSettings.get(ref as ChatRef);
+        },
+        "chatSettings.update": (params) =>
+          this.services.chatSettings.update(
+            parseParams(
+              "chatSettings.update",
+              ChatSettingsInput,
+              params,
+            ) as UpdateChatSettingsInput,
+          ),
+        "chatSettings.reset": (params) =>
+          this.services.chatSettings.reset(
+            parseParams("chatSettings.reset", ChatSettingsInput, params) as ResetChatSettingsInput,
+          ),
+        "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
+        "actions.has": (params) => this.handleActionsHas(params),
+        "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
+        "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
+        "agent.hasAgent": (params) => this.handleAgentHasAgent(params),
+        "agent.hasAction": (params) => this.handleAgentHasAction(params),
+        "routines.schedule": (params) => this.handleRoutinesSchedule(params),
+        "routines.cancel": (params) => this.handleRoutinesCancel(params),
+        "events.publish": (params) => this.handleEventsPublish(params),
+        "events.searchCatalog": (params) => this.handleEventsSearchCatalog(params),
+        "apps.create": (params) => this.handleAppsCreate(params),
+        "apps.install": (params) => this.handleAppsInstall(params),
+        "apps.uninstall": (params) => this.handleAppsUninstall(params),
+        "apps.setEnabled": (params) => this.handleAppsSetEnabled(params),
+        "appStore.listListings": (params) => this.handleAppStoreListListings(params),
+        "appStore.getListing": (params) => this.handleAppStoreGetListing(params),
+        // No params: the probe takes none. All policy (Rome Cloud check,
+        // countdown open) runs in the main-process service.
+        "system.upgrade.checkAndOffer": () => this.services.systemUpgrade.checkAndOffer(),
+        "session.continue": (params) => this.handleSessionContinue(params),
+        "feedback.send": (params) =>
+          this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
+        "cloudProfile.get": () => this.services.cloudProfile.get(),
+        "notify.send": (params) => {
+          // The sender reads token/origin from main-process state; the only wire
+          // param is the optional body. Preserve the no-body call shape
+          // so an absent body is `send(undefined)`, not `send({})`.
+          const { body } = parseParams("notify.send", NotifySendParams, params);
+          return this.services.notify.send(body !== undefined ? { body } : undefined);
+        },
+        "connections.app.list": (params, context) =>
+          this.handleAppConnections("list", params, context),
+        "connections.app.describe": (params, context) =>
+          this.handleAppConnections("describe", params, context),
+        "connections.app.operations": (params, context) =>
+          this.handleAppConnections("operations", params, context),
+        "connections.app.invoke": (params, context) =>
+          this.handleAppConnections("invoke", params, context),
+      }),
+    );
+  }
+
+  /** Serve every method on a worker's IPC channel. */
+  register(rpc: IpcRpc): void {
+    for (const [method, handler] of this.handlers) {
+      rpc.handle(method, async (params, context) => await handler(params, context));
+    }
+  }
 
   /**
    * In-process entry point for the main process. When an action body runs in
-   * main (no parent IPC channel) and calls `getWorkerRpc()`, the SDK falls back
-   * to this dispatcher instead of failing — same dispatch path as IPC requests,
-   * minus the wire hop. Wired up via `setWorkerRpcInProcessDispatcher`.
+   * main (no parent IPC channel) and calls `callMain()`, it falls back to this
+   * dispatcher, which runs the same handlers minus the wire hop. Wired up via
+   * `setWorkerRpcInProcessDispatcher`.
    */
-  dispatchInProcess(method: string, params: unknown): Promise<unknown> {
-    return this.dispatch(method, params);
+  async dispatchInProcess(method: string, params: unknown): Promise<unknown> {
+    const handler = this.handlers.get(method);
+    if (!handler) throw new Error(`Unknown WorkerRPC method: ${method}`);
+    return await handler(params);
   }
 
-  attach(worker: ChildProcess): void {
-    worker.on("message", (message: unknown) => {
-      if (!isRpcRequest(message)) return;
-      const request = message;
-      // A pooled ChildProcess keeps the async resource created by fork(). If
-      // that fork happened while an action replay/execution context was active,
-      // every later `message` callback on the reused worker re-enters that old
-      // context. Worker RPC is an independent ingress boundary, so never let a
-      // creator action's ALS state leak into event/routine dispatch or another
-      // main-process service call.
-      replayContext.exit(() =>
-        actionExecutionContext.exit(() => {
-          this.dispatch(request.method, request.params)
-            .then((result) => {
-              this.respond(worker, request.clientId, request.id, { result });
-            })
-            .catch((err: unknown) => {
-              this.respond(worker, request.clientId, request.id, {
-                error: err instanceof Error ? err.message : String(err),
-              });
-            });
-        }),
-      );
-    });
-  }
-
-  private respond(
-    worker: ChildProcess,
-    clientId: string,
-    id: number,
-    body: { result?: unknown; error?: string },
-  ): void {
-    if (!worker.connected) return;
-    const response: RpcResponseMessage = { type: "rpc_response", clientId, id, ...body };
-    worker.send(response, (err) => {
-      if (err) {
-        log.warn("failed to send rpc response", { id, error: err.message });
-      }
-    });
-  }
-
-  private async dispatch(method: string, params: unknown): Promise<unknown> {
+  private async handleAppConnections(
+    method: "list" | "describe" | "operations" | "invoke",
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<unknown> {
+    const actionName = context?.callerActionName;
+    const appId = actionName ? this.services.appIdForAction(actionName) : null;
+    if (!appId) {
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "Connection access requires an App-owned action context.",
+          retryable: false,
+        },
+      };
+    }
     switch (method) {
-      case "talk.list":
-        return await this.services.talkRouter.list();
-      case "talk.send":
-        return await this.handleTalkSend(params);
-      case "talk.history.query":
-        return await this.handleTalkHistory(params);
-      case "conversationSettings.list":
-        return await this.services.conversationSettings.list(
-          parseParams(method, ConversationSettingsInput, params) as ListConversationSettingsInput,
+      case "list": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.list",
+          AppConnectionsListParams,
+          params,
         );
-      case "conversationSettings.get": {
-        const { ref } = parseParams(method, ConversationRefParams, params);
-        return await this.services.conversationSettings.get(ref as ConversationRef);
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.list(appId, parsed.value);
       }
-      case "conversationSettings.update":
-        return await this.services.conversationSettings.update(
-          parseParams(method, ConversationSettingsInput, params) as UpdateConversationSettingsInput,
+      case "describe": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.describe",
+          AppConnectionsIdentityParams,
+          params,
         );
-      case "conversationSettings.reset":
-        return await this.services.conversationSettings.reset(
-          parseParams(method, ConversationSettingsInput, params) as ResetConversationSettingsInput,
-        );
-      case "channels.email.ingestInbound":
-        return await this.handleEmailIngestInbound(params);
-      case "actions.has":
-        return this.handleActionsHas(params);
-      case "agent.hasAgent":
-        return this.handleAgentHasAgent(params);
-      case "agent.hasAction":
-        return this.handleAgentHasAction(params);
-      case "routines.schedule":
-        return await this.handleRoutinesSchedule(params);
-      case "routines.cancel":
-        return await this.handleRoutinesCancel(params);
-      case "events.publish":
-        return this.handleEventsPublish(params);
-      case "events.searchCatalog":
-        return this.handleEventsSearchCatalog(params);
-      case "apps.create":
-        return await this.handleAppsCreate(params);
-      case "apps.install":
-        return await this.handleAppsInstall(params);
-      case "apps.uninstall":
-        return await this.handleAppsUninstall(params);
-      case "apps.setEnabled":
-        return await this.handleAppsSetEnabled(params);
-      case "appStore.listListings":
-        return await this.handleAppStoreListListings(params);
-      case "appStore.getListing":
-        return await this.handleAppStoreGetListing(params);
-      case "system.upgrade.checkAndOffer":
-        // No params: the probe takes none. All policy (Rome Cloud check,
-        // countdown open) runs in the main-process service.
-        return await this.services.systemUpgrade.checkAndOffer();
-      case "session.continue":
-        return await this.handleSessionContinue(params);
-      case "notify.send": {
-        // The sender reads token/origin from main-process state; the only wire
-        // param is the optional body. Preserve the no-body call shape
-        // so an absent body is `send(undefined)`, not `send({})`.
-        const { body } = parseParams("notify.send", NotifySendParams, params);
-        return await this.services.notify.send(body !== undefined ? { body } : undefined);
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.describe(appId, parsed.value);
       }
-      default:
-        throw new Error(`Unknown WorkerRPC method: ${method}`);
+      case "operations": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.operations",
+          AppConnectionsOperationsParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.operations(appId, parsed.value);
+      }
+      case "invoke": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.invoke",
+          AppConnectionsInvokeParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.invoke(
+          appId,
+          parsed.value,
+          context?.callerActionContext,
+        );
+      }
     }
   }
 
@@ -346,19 +458,40 @@ export class WorkerRpcServer {
     return await this.services.appLifecycle.create(createParams);
   }
 
+  // Each lifecycle handler runs under the caller's hook chain, or under none.
+  // Running under none is deliberate: a pooled worker's IPC callback carries
+  // the async context of whatever forked it, which is not this caller's.
   private async handleAppsInstall(params: unknown): Promise<unknown> {
-    const installParams = parseParams("apps.install", AppsInstallParams, params);
-    return await this.services.appLifecycle.install(installParams);
+    const { hookInvocationContext, ...installParams } = parseParams(
+      "apps.install",
+      AppsInstallParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.install(installParams),
+    );
   }
 
   private async handleAppsUninstall(params: unknown): Promise<unknown> {
-    const { appId, purge } = parseParams("apps.uninstall", AppsUninstallParams, params);
-    return await this.services.appLifecycle.uninstall({ appId, purge });
+    const { appId, purge, hookInvocationContext } = parseParams(
+      "apps.uninstall",
+      AppsUninstallParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.uninstall({ appId, purge }),
+    );
   }
 
   private async handleAppsSetEnabled(params: unknown): Promise<unknown> {
-    const { appId, enabled } = parseParams("apps.setEnabled", AppsSetEnabledParams, params);
-    return await this.services.appLifecycle.setEnabled({ appId, enabled });
+    const { appId, enabled, hookInvocationContext } = parseParams(
+      "apps.setEnabled",
+      AppsSetEnabledParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.setEnabled({ appId, enabled }),
+    );
   }
 
   private async handleAppStoreListListings(params: unknown): Promise<unknown> {
@@ -377,30 +510,21 @@ export class WorkerRpcServer {
     return { ok: true };
   }
 
-  private async handleTalkSend(params: unknown) {
-    const { connectionId, conversationId, message } = parseParams(
-      "talk.send",
-      TalkSendParams,
-      params,
-    );
-    return await this.services.talkRouter.send(
-      connectionId,
-      conversationId as ConversationId,
-      message,
-    );
+  private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
+    const { channel, chatId, message } = parseParams("channels.send", ChannelsSendParams, params);
+    return await this.services.channelsService.send(channel, chatId as ChatId, message);
   }
 
-  private async handleTalkHistory(params: unknown): Promise<InboundMessage[]> {
-    const { connectionId, conversationId, since, limit } = parseParams(
-      "talk.history.query",
-      TalkHistoryParams,
+  private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
+    const { channel, chatId, since, after, limit } = parseParams(
+      "channels.query",
+      ChannelsQueryParams,
       params,
     );
-    const history = this.services.talkRouter.feature(connectionId, "history");
-    if (!history) throw new Error(`Talk history is unavailable for connection "${connectionId}"`);
-    return history.query({
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
+    return await this.services.channelsService.query(channel, {
+      ...(chatId ? { chatId: chatId as ChatId } : {}),
       ...(since ? { since: new Date(since) } : {}),
+      ...(after ? { after } : {}),
       ...(limit ? { limit } : {}),
     });
   }
@@ -411,11 +535,9 @@ export class WorkerRpcServer {
       EmailIngestInboundParams,
       params,
     );
-    const connections = (await this.services.talkRouter.list()).filter(
-      (connection) => connection.service === "email",
-    );
-    if (connections.length !== 1) return { status: "skipped", reason: "channel_inactive" };
-    return (await this.services.connectionRegistry.ingest(connections[0]!.connectionId, {
+    const email = emailConnection(this.services.connectionRegistry, this.services.channelOf);
+    if (!email) return { status: "skipped", reason: "channel_inactive" };
+    return (await this.services.connectionRegistry.ingest(email.id, {
       rawBody,
       signature,
     })) as EmailInboundResult;
@@ -429,6 +551,22 @@ export class WorkerRpcServer {
   private handleActionsHas(params: unknown): { hasAction: boolean } {
     const { actionName } = parseParams("actions.has", ActionHasParams, params);
     return { hasAction: this.services.hasRegisteredAction(actionName) };
+  }
+
+  /** Visibility check for the worker-side create_routine explicit-target gate. */
+  private handleActionsIsExplicit(params: unknown): { explicit: boolean } {
+    const { actionName } = parseParams("actions.isExplicit", ActionHasParams, params);
+    return { explicit: this.services.isExplicitAction(actionName) };
+  }
+
+  /** Input-schema check for the worker-side create_routine args gate. */
+  private handleActionsValidateArgs(params: unknown): { error: string | null } {
+    const { actionName, args } = parseParams(
+      "actions.validateArgs",
+      ActionValidateArgsParams,
+      params,
+    );
+    return { error: this.services.validateActionArgs(actionName, args) };
   }
 
   /**
@@ -477,16 +615,11 @@ export class WorkerRpcServer {
   }
 
   private async handleEventsSearchCatalog(params: unknown): Promise<unknown> {
-    const { query, limit } = parseParams("events.searchCatalog", EventsSearchCatalogParams, params);
-    return await this.services.eventService.search(query, limit);
+    const { query, limit, match } = parseParams(
+      "events.searchCatalog",
+      EventsSearchCatalogParams,
+      params,
+    );
+    return await this.services.eventService.search(query, limit, match ? { match } : {});
   }
-}
-
-function isRpcRequest(message: unknown): message is RpcRequestMessage {
-  return (
-    typeof message === "object" &&
-    message !== null &&
-    (message as { type?: string }).type === "rpc_request" &&
-    typeof (message as { clientId?: unknown }).clientId === "string"
-  );
 }

@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { Image, Platform } from "react-native";
 import { IOS_KEYCHAIN_ACCESS_GROUP } from "./config";
-import type { CloudInstance, InstanceSession } from "./native-auth-types";
+import type { CloudInstance, InstanceSession } from "@rome-os/libs/native-auth";
 import { createWidgetInstanceSession, parseWidgetInstanceSession } from "./widget-instance-session";
 import type { TokenUsageWidgetProps } from "./widget-usage";
 

@@ -4,10 +4,11 @@ import {
   computeGestureTransform,
   createDeferredPasteController,
   createMetaToControlController,
-  isApplePlatform,
   isPasteShortcut,
+  reconnectDelayMs,
   sendTextAsKeysyms,
 } from "./desktop-vnc";
+import { isApplePlatform } from "./platform";
 
 describe("sendTextAsKeysyms", () => {
   it("sends ASCII, Chinese, and every emoji code point in order", () => {
@@ -161,6 +162,14 @@ describe("createMetaToControlController", () => {
     expect(isApplePlatform("MacIntel")).toBe(true);
     expect(isApplePlatform("iPhone")).toBe(true);
     expect(isApplePlatform("Linux x86_64")).toBe(false);
+  });
+});
+
+describe("reconnectDelayMs", () => {
+  it("waits 1 s, doubles each attempt, and stops growing at 10 s", () => {
+    expect([0, 1, 2, 3, 4, 10].map(reconnectDelayMs)).toEqual([
+      1000, 2000, 4000, 8000, 10_000, 10_000,
+    ]);
   });
 });
 

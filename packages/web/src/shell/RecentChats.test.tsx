@@ -1,17 +1,33 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { readFileSync } from "node:fs";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
+import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import type { LiveEventsClient } from "@/lib/live-events";
+import {
+  acceptLatestSocket,
+  FakeWebSocket,
+  fakeSocketLiveEventsClient,
+} from "@/test/fake-websocket";
+import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
+import { chatSessionTopicName } from "@rome/api-types/live-events";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { RecentChats } from "./RecentChats";
+
+// Concierge's chat id comes from its own query, which these tests do not
+// serve; each test that needs the entry sets the id here.
+const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
+rs.mock("@/hooks/use-concierge", () => ({
+  ...conciergeModule,
+  useConciergeChatId: () => concierge.chatId,
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -19,6 +35,7 @@ afterEach(() => {
   rs.useRealTimers();
   localStorage.clear();
   rs.restoreAllMocks();
+  concierge.chatId = null;
 });
 
 interface MockSession {
@@ -28,10 +45,13 @@ interface MockSession {
   activityAt: string;
   lastSeenActivityAt: string | null;
   unread: boolean;
+  running?: boolean;
+  lastTurnFailed?: boolean;
   projectName: string;
   projectPath: string;
   archivedAt?: string | null;
   pinnedAt?: string | null;
+  deviceFolder?: { deviceId: string; deviceName: string; platform: string | null; path: string };
 }
 
 function mockSessions(sessions: MockSession[]) {
@@ -90,18 +110,41 @@ function mockSessions(sessions: MockSession[]) {
   return spy;
 }
 
-function renderRecentChats(initialEntry = "/chat", onSearch = () => {}) {
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+// A fresh cache per mount unless a test passes one in to remount against it.
+function renderRecentChats(
+  initialEntry = "/chat",
+  live?: LiveEventsClient,
+  queryClient = testQueryClient(),
+) {
+  const routed = (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <RecentChats />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <RecentChats onSearch={onSearch} />
-      <LocationProbe />
-    </MemoryRouter>,
+    live ? (
+      <LiveEventsClientContext.Provider value={live}>{routed}</LiveEventsClientContext.Provider>
+    ) : (
+      routed
+    ),
   );
 }
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location-path">{location.pathname}</output>;
+  return (
+    <>
+      <output data-testid="location-path">{location.pathname}</output>
+      <output data-testid="location-state">{JSON.stringify(location.state)}</output>
+    </>
+  );
 }
 
 function textIndex(container: HTMLElement, text: string): number {
@@ -109,21 +152,373 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
-  it("keeps search and list settings visible together", async () => {
+  it("lists Concierge as its own entry and marks the task chats it started", async () => {
+    concierge.chatId = "concierge";
+    const row = (id: string, name: string) => ({
+      id,
+      name,
+      createdAt: new Date().toISOString(),
+      activityAt: new Date().toISOString(),
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "default",
+      projectPath: "default",
+    });
+    mockSessions([
+      { ...row("concierge", "Concierge"), agentName: "core:concierge" } as MockSession,
+      { ...row("task-1", "Find flights"), triggerKind: "concierge" } as MockSession,
+    ]);
+    renderRecentChats();
+    const entry = await screen.findByRole("link", { name: "Concierge" });
+    expect(entry.getAttribute("href")).toBe("/chat/concierge");
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(within(task).getByRole("img", { name: "Started by Concierge" })).toBeTruthy();
+    // The Concierge chat itself stays out of the list.
+    expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
+  });
+
+  describe("Concierge unread badge", () => {
+    const server = { unread: 0, tasks: [] as unknown[] };
+    const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
+    const mockConcierge = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const body = url.startsWith("/api/chat/sessions")
+          ? []
+          : url === "/api/concierge/session"
+            ? { id: "concierge", unread: server.unread }
+            : url.startsWith("/api/concierge/tasks")
+              ? { tasks: server.tasks }
+              : null;
+        if (body === null) return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch);
+
+    beforeEach(() => {
+      concierge.chatId = "concierge";
+      server.unread = 0;
+      server.tasks = [];
+      FakeWebSocket.instances = [];
+    });
+
+    const taskRow = (id: string, state: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: `Task ${id}`,
+      state,
+      summary: null,
+      waitingOn: null,
+      dueAt: null,
+      rank: null,
+      chat: null,
+      createdAt: 1,
+      updatedAt: 1,
+      completedAt: null,
+      archivedAt: null,
+      notSynced: false,
+      ...extra,
+    });
+
+    it("counts unread messages", async () => {
+      server.unread = 3;
+      mockConcierge();
+      renderRecentChats();
+      expect(
+        await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
+      ).toBeTruthy();
+    });
+
+    it("shows no badge at 0", async () => {
+      const fetchSpy = mockConcierge();
+      renderRecentChats();
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(await screen.findByRole("link", { name: "Concierge" })).toBeTruthy();
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("caps the count at 99+", async () => {
+      server.unread = 100;
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Concierge, 99+ unread messages" });
+      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
+    });
+
+    it("counts the tasks that need the guardian beside the unread badge, each badge with its own label", async () => {
+      server.unread = 3;
+      server.tasks = [
+        taskRow("a", "needs_user"),
+        taskRow("b", "needs_user"),
+        taskRow("c", "doing"),
+        taskRow("d", "needs_user", { archivedAt: 5 }),
+      ];
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", {
+        name: "Concierge, 3 unread messages, 2 tasks need you",
+      });
+      const needsYou = within(entry).getByRole("img", { name: "2 tasks need you" });
+      const unread = within(entry).getByRole("img", { name: "3 unread messages" });
+      expect(needsYou.hasAttribute("data-concierge-needs-you")).toBe(true);
+      expect(needsYou.textContent).toBe("2");
+      expect(unread.hasAttribute("data-concierge-unread")).toBe(true);
+      // Apart by shape and colour, and the warning count comes first.
+      expect(needsYou.className).toContain("rounded-8");
+      expect(needsYou.className).toContain("bg-warning-bg");
+      expect(unread.className).toContain("rounded-full");
+      expect(unread.className).toContain("bg-destructive-bg");
+      expect(
+        needsYou.compareDocumentPosition(unread) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("counts a single task that needs the guardian, with no unread badge", async () => {
+      server.tasks = [taskRow("a", "needs_user")];
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
+      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("keeps the Needs you count while the Concierge chat is open", async () => {
+      server.unread = 3;
+      server.tasks = [taskRow("a", "needs_user")];
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat/concierge");
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
+      expect(entry.querySelector("[data-concierge-needs-you]")).not.toBeNull();
+      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("shows no Needs you count when no task needs the guardian, and follows the Concierge's writes", async () => {
+      server.tasks = [taskRow("a", "doing")];
+      mockConcierge();
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByRole("link", { name: "Concierge" });
+      expect(document.querySelector("[data-concierge-needs-you]")).toBeNull();
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toContainEqual({ type: "subscribe", topic: "concierge.tasks" });
+
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "concierge.tasks",
+          event: "task_upsert",
+          data: { task: taskRow("a", "needs_user", { updatedAt: 2 }) },
+        }),
+      );
+      expect(await screen.findByRole("link", { name: "Concierge, 1 task needs you" })).toBeTruthy();
+
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "concierge.tasks",
+          event: "task_upsert",
+          data: { task: taskRow("a", "done", { updatedAt: 3 }) },
+        }),
+      );
+      await waitFor(() => expect(document.querySelector("[data-concierge-needs-you]")).toBeNull());
+    });
+
+    it("shows no badge on the Concierge page", async () => {
+      server.unread = 3;
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat/concierge");
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(screen.getByRole("link", { name: "Concierge" })).toBeTruthy();
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("recounts on a new Concierge message and on a read in this tab", async () => {
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBe(1));
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toContainEqual({
+        type: "subscribe",
+        topic: chatSessionTopicName("concierge"),
+      });
+
+      server.unread = 1;
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: chatSessionTopicName("concierge"),
+          event: "message_insert",
+          data: { id: "m1", sessionId: "concierge", role: "assistant" },
+        }),
+      );
+      expect(await screen.findByRole("link", { name: "Concierge, 1 unread message" })).toBeTruthy();
+
+      server.unread = 0;
+      act(() => emitSessionsChanged());
+      await waitFor(() => expect(document.querySelector("[data-concierge-unread]")).toBeNull());
+    });
+  });
+
+  it("defaults to My chats and persists a scope toggle across remounts", async () => {
+    const fetchSpy = mockSessions([]);
+    const user = userEvent.setup();
+    const view = renderRecentChats();
+    const requestedScope = () =>
+      new URL(String(fetchSpy.mock.calls.at(-1)?.[0]), "http://localhost").searchParams.get(
+        "scope",
+      );
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    const mine = screen.getByRole("menuitem", { name: "My chats" });
+    expect(mine.querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "All chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("all");
+    view.unmount();
+    const remounted = renderRecentChats();
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    expect(screen.getByRole("menuitem", { name: "All chats" }).querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "My chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("mine");
+    remounted.unmount();
+  });
+
+  it.each([
+    ["All chats", 200],
+    ["All chats", 500],
+    ["Archived", 200],
+    ["Archived", 500],
+  ])("ignores a stale %s list response with status %s", async (selection, status) => {
+    let respond!: (response: Response) => void;
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            respond = resolve;
+          }),
+      )
+      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+    const user = userEvent.setup();
+    renderRecentChats();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    await user.click(screen.getByRole("menuitem", { name: selection }));
+    await screen.findByText("No chats yet");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      respond(
+        new Response(
+          JSON.stringify([
+            {
+              id: "stale",
+              name: "Stale chat",
+              createdAt: "2026-07-01T00:00:00.000Z",
+              activityAt: "2026-07-01T00:00:00.000Z",
+              lastSeenActivityAt: null,
+              unread: false,
+              projectName: "alpha",
+              projectPath: "alpha",
+            },
+          ]),
+          { status },
+        ),
+      );
+    });
+    expect(screen.queryByText("Stale chat")).toBeNull();
+    expect(screen.queryByText("Chats couldn't be loaded")).toBeNull();
+    expect(screen.getByText("No chats yet")).toBeTruthy();
+  });
+
+  it("starts a new chat from the row at the top of the list", async () => {
     mockSessions([]);
-    const onSearch = rs.fn();
     const user = userEvent.setup();
 
-    renderRecentChats("/chat", onSearch);
+    renderRecentChats("/chat/session-1");
 
     await screen.findByText("No chats yet");
-    const searchButton = screen.getByRole("button", { name: "Search chats" });
-    expect(searchButton).toBeTruthy();
-    expect(searchButton.getAttribute("title")).toMatch(/^Search chats \((⌘K|Ctrl K)\)$/);
-    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "New chat", exact: true }));
+    expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+  });
 
-    await user.click(searchButton);
-    expect(onSearch).toHaveBeenCalledOnce();
+  it("leaves search to the rail and keeps the list settings in its header", async () => {
+    mockSessions([]);
+
+    renderRecentChats("/chat");
+
+    await screen.findByText("No chats yet");
+    expect(screen.queryByRole("button", { name: "Search pages, apps, and chats" })).toBeNull();
+    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+  });
+
+  it("shows the cached list at once on remount and refetches behind it", async () => {
+    const fetchSpy = mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const listCalls = () =>
+      fetchSpy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions"))
+        .length;
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    view.unmount();
+    const before = listCalls();
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    // Synchronously, before any response: the rows, not the skeleton.
+    expect(screen.getByText("Cached chat")).toBeTruthy();
+    await waitFor(() => expect(listCalls()).toBe(before + 1));
+  });
+
+  it("still shows the cached list after a long time away", async () => {
+    mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    rs.useFakeTimers();
+    view.unmount();
+    // Past React Query's default five-minute garbage collection.
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(10 * 60_000);
+    });
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    expect(screen.getByText("Cached chat")).toBeTruthy();
   });
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
@@ -160,40 +555,361 @@ describe("RecentChats", () => {
     expect(screen.queryByText("Chats couldn't be loaded")).toBeNull();
   });
 
-  it("names the unread marker for assistive tech without adding a second text weight", async () => {
+  it("marks running, failed and finished chats, and drops the open chat's check", async () => {
+    const base = {
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T09:00:00.000Z",
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
     mockSessions([
+      { ...base, id: "running-chat", name: "Running chat", unread: true, running: true },
+      { ...base, id: "failed-chat", name: "Failed chat", unread: false, lastTurnFailed: true },
+      { ...base, id: "done-chat", name: "Done chat", unread: true },
       {
-        id: "unread-chat",
-        name: "Unread chat",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-09T10:00:00.000Z",
-        lastSeenActivityAt: "2026-07-09T09:00:00.000Z",
+        ...base,
+        id: "waiting-chat",
+        name: "Waiting chat",
         unread: true,
-        projectName: "alpha",
-        projectPath: "alpha",
+        lastTurnFailed: true,
+        awaitingGuardian: true,
+        projectName: "beta",
+        projectPath: "beta",
       },
+      { ...base, id: "read-chat", name: "Read chat", unread: false },
       {
-        id: "read-chat",
-        name: "Read chat",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-08T10:00:00.000Z",
-        lastSeenActivityAt: "2026-07-08T11:00:00.000Z",
-        unread: false,
-        projectName: "alpha",
-        projectPath: "alpha",
+        ...base,
+        id: "open-chat",
+        name: "Open chat",
+        unread: true,
+        projectName: "beta",
+        projectPath: "beta",
       },
     ]);
 
-    renderRecentChats();
+    renderRecentChats("/chat/open-chat");
 
-    expect(await screen.findByRole("img", { name: "Unread" })).toBeTruthy();
-    expect(screen.getAllByRole("img", { name: "Unread" })).toHaveLength(1);
-    const unreadRow = screen.getByText("Unread chat").closest("[data-chat-row]");
-    const readRow = screen.getByText("Read chat").closest("[data-chat-row]");
-    expect(unreadRow?.className).toContain("text-ui");
-    expect(readRow?.className).toContain("text-ui");
-    expect(unreadRow?.className).toContain("h-8");
-    expect(unreadRow?.className).not.toContain("font-medium");
+    const mark = (name: string) =>
+      within(screen.getByText(name).closest("[data-chat-row]") as HTMLElement).queryByRole("img");
+    await screen.findByText("Running chat");
+    expect(mark("Running chat")?.getAttribute("aria-label")).toBe("Replying now");
+    expect(mark("Failed chat")?.getAttribute("aria-label")).toBe("Stopped with an error");
+    expect(mark("Done chat")?.getAttribute("aria-label")).toBe("Done · new replies");
+    expect(mark("Waiting chat")?.getAttribute("aria-label")).toBe("Waiting for you");
+    // An error is a red cross; only "waiting" keeps the orange "!".
+    expect(mark("Failed chat")?.querySelector("svg")?.getAttribute("class")).toContain(
+      "text-destructive",
+    );
+    expect(mark("Waiting chat")?.querySelector("svg")?.getAttribute("class")).toContain(
+      "text-warning",
+    );
+    // The running ring turns on an HTML box: Chrome animates an SVG's
+    // transform on the main thread, once per display frame.
+    const spinner = mark("Running chat")?.querySelector(".rome-status-spin");
+    expect(spinner?.tagName).toBe("SPAN");
+    expect(mark("Running chat")?.querySelector("svg")?.getAttribute("class")).not.toMatch(/spin/);
+    expect(mark("Read chat")).toBeNull();
+    expect(mark("Open chat")).toBeNull();
+    const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
+    expect(doneRow?.className).toContain("text-ui");
+    expect(doneRow?.className).not.toContain("font-medium");
+  });
+
+  it.each([
+    ["running", { running: true }, "Replying now"],
+    ["failed", { lastTurnFailed: true }, "Stopped with an error"],
+    ["waiting", { awaitingGuardian: true }, "Waiting for you"],
+  ])("keeps the %s mark on the open chat", async (_, state, label) => {
+    mockSessions([
+      {
+        id: "open-chat",
+        name: "Open chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+        ...state,
+      },
+    ]);
+
+    renderRecentChats("/chat/open-chat");
+
+    expect(await screen.findByRole("img", { name: label })).toBeTruthy();
+  });
+
+  describe("status stream", () => {
+    const sources: Array<{ url: string; listeners: Map<string, (event: MessageEvent) => void> }> =
+      [];
+    class FakeEventSource {
+      listeners = new Map<string, (event: MessageEvent) => void>();
+      constructor(public url: string) {
+        sources.push(this);
+      }
+      addEventListener(name: string, listener: (event: MessageEvent) => void) {
+        this.listeners.set(name, listener);
+      }
+      removeEventListener() {}
+      close() {}
+    }
+    const live = {
+      id: "live-chat",
+      name: "Live chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const send = (running: boolean) =>
+      act(() => {
+        sources
+          .find((source) => source.url === "/api/chat/status/events")
+          ?.listeners.get("session_running")?.(
+          new MessageEvent("session_running", {
+            data: JSON.stringify({ sessionId: "live-chat", running }),
+          }),
+        );
+      });
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeAll(() => {
+      rs.stubGlobal("EventSource", FakeEventSource);
+    });
+    afterEach(() => {
+      sources.length = 0;
+    });
+
+    it("spins on start and refetches on stop", async () => {
+      const fetchSpy = mockSessions([live]);
+      renderRecentChats();
+      await screen.findByText("Live chat");
+
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+
+      const before = listCalls(fetchSpy);
+      send(false);
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+    });
+
+    it.each([
+      ["a failed chat", { lastTurnFailed: true }, "Stopped with an error"],
+      ["a chat waiting on the guardian", { awaitingGuardian: true }, "Waiting for you"],
+    ])("spins for a new turn of %s", async (_, state, label) => {
+      mockSessions([{ ...live, ...state }]);
+      renderRecentChats();
+      expect(await screen.findByRole("img", { name: label })).toBeTruthy();
+
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      expect(screen.queryByRole("img", { name: label })).toBeNull();
+    });
+
+    it("drops a cached spinner on remount once the refetch says the turn stopped", async () => {
+      mockSessions([live]);
+      const queryClient = testQueryClient();
+      const view = renderRecentChats("/chat", undefined, queryClient);
+      await screen.findByText("Live chat");
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      // The stop arrives while the list is unmounted, so only the refetch
+      // can tell the remounted list about it.
+      view.unmount();
+
+      renderRecentChats("/chat", undefined, queryClient);
+
+      expect(screen.getByText("Live chat")).toBeTruthy();
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+    });
+
+    it("keeps a start that arrives while the list is loading", async () => {
+      let respond!: () => void;
+      rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+        await new Promise<void>((resolve) => {
+          respond = resolve;
+        });
+        return new Response(JSON.stringify([live]), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch);
+      renderRecentChats();
+      await waitFor(() => expect(respond).toBeTypeOf("function"));
+
+      send(true);
+      await act(async () => respond());
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+    });
+  });
+
+  describe("status over the live-events socket", () => {
+    const live = {
+      id: "live-chat",
+      name: "Live chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const send = (socket: FakeWebSocket, running: boolean) =>
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.status",
+          event: "session_running",
+          data: { sessionId: "live-chat", running },
+        }),
+      );
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeEach(() => {
+      FakeWebSocket.instances = [];
+    });
+
+    it("spins on start, refetches on stop, and starts over from the list after a reconnect", async () => {
+      const fetchSpy = mockSessions([live]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Live chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toEqual([{ type: "subscribe", topic: "chat.status" }]);
+
+      send(socket, true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      const beforeStop = listCalls(fetchSpy);
+      send(socket, false);
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeStop + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+
+      // A start seen before the drop is dropped too, since its stop may have
+      // been missed: the new socket's snapshot names the chats still running.
+      send(socket, true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      act(() => socket.close());
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+      const beforeReconnect = listCalls(fetchSpy);
+      act(() => {
+        acceptLatestSocket();
+      });
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeReconnect + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+    });
+  });
+
+  describe("a chat the list does not have yet", () => {
+    const listed = {
+      id: "listed-chat",
+      name: "Listed chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const started = { ...listed, id: "new-task", name: "New task chat" };
+    const running = (socket: FakeWebSocket, sessionId: string, value = true) =>
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.status",
+          event: "session_running",
+          data: { sessionId, running: value },
+        }),
+      );
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeEach(() => {
+      FakeWebSocket.instances = [];
+    });
+
+    it("asks for the list once when the chat starts running, and shows it running", async () => {
+      const stored = [listed];
+      const fetchSpy = mockSessions(stored);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+
+      stored.push(started);
+      running(socket, "new-task");
+
+      expect(await screen.findByText("New task chat")).toBeTruthy();
+      expect(listCalls(fetchSpy)).toBe(before + 1);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      // Listed now, so its next start asks for nothing.
+      running(socket, "new-task", false);
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 2));
+      running(socket, "new-task");
+      await act(async () => {});
+      expect(listCalls(fetchSpy)).toBe(before + 2);
+    });
+
+    it("remembers a chat that is still not listed after the refetch, and never asks for it again", async () => {
+      const fetchSpy = mockSessions([listed]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+
+      running(socket, "elsewhere");
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 1));
+      await act(async () => {});
+      running(socket, "elsewhere");
+      running(socket, "elsewhere");
+      await act(async () => {});
+      expect(listCalls(fetchSpy)).toBe(before + 1);
+
+      // Another chat that is not listed gets its own single ask.
+      running(socket, "another");
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 2));
+    });
+
+    it("asks once for a chat that starts running twice before the first refetch lands", async () => {
+      const fetchSpy = mockSessions([listed]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+      running(socket, "new-task");
+      running(socket, "new-task");
+      await act(async () => {});
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 1));
+    });
+
+    it("does not ask for a chat the list already has", async () => {
+      const fetchSpy = mockSessions([listed]);
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await screen.findByText("Listed chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      const before = listCalls(fetchSpy);
+      running(socket, "listed-chat");
+      await act(async () => {});
+      expect(listCalls(fetchSpy)).toBe(before);
+    });
   });
 
   it("sorts project groups and sessions by activity time", async () => {
@@ -227,7 +943,7 @@ describe("RecentChats", () => {
     expect(textIndex(container, "Old but active")).toBeLessThan(
       textIndex(container, "New but inactive"),
     );
-    expect(container.querySelectorAll(".bg-info")).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Done · new replies" })).toHaveLength(1);
   });
 
   it("hides the Projects heading when nothing is pinned", async () => {
@@ -362,7 +1078,9 @@ describe("RecentChats", () => {
 
     renderRecentChats();
 
-    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
+    // The pinned project's section shows before the list lands, so wait for a row.
+    await screen.findByRole("link", { name: "Pinned standalone chat" });
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
     const projectsSection = screen.getByRole("region", { name: "Projects" });
 
     expect(
@@ -404,6 +1122,163 @@ describe("RecentChats", () => {
     await user.click(within(pinnedSection).getByRole("button", { name: "Pinned" }));
     expect(within(pinnedSection).queryByText("Pinned standalone chat")).toBeNull();
     expect(within(pinnedSection).queryByText("Pinned project child")).toBeNull();
+  });
+
+  it("pins and unpins a device-folder group without touching the pinned default project", async () => {
+    localStorage.setItem("rome-recent-chats-pinned-projects", JSON.stringify(["default"]));
+    const deviceFolder = {
+      deviceId: "dev-1",
+      deviceName: "devbox-dev",
+      platform: "linux",
+      path: "/home/ubuntu/device-folder",
+    };
+    mockSessions([
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+      {
+        id: "device-chat",
+        name: "Device chat",
+        createdAt: "2026-07-03T00:00:00.000Z",
+        activityAt: "2026-07-09T11:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+        deviceFolder,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+
+    const projectsSection = await screen.findByRole("region", { name: "Projects" });
+    const groupName = "device-folder on devbox-dev";
+    await user.click(within(projectsSection).getByRole("button", { name: "Project actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Pin" }));
+
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
+    const pinnedGroup = within(pinnedSection).getByRole("button", { name: groupName });
+    expect(pinnedGroup.querySelector('[data-location-icon="device"]')).toBeTruthy();
+    expect(within(pinnedSection).getByRole("link", { name: "Device chat" })).toBeTruthy();
+    expect(within(pinnedSection).getByRole("link", { name: "Default chat" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Projects" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem("rome-recent-chats-pinned-projects") ?? "[]")).toEqual([
+      "default",
+      "device:dev-1:/home/ubuntu/device-folder",
+    ]);
+
+    const actions = within(pinnedSection).getAllByRole("button", { name: "Project actions" });
+    await user.click(actions[1]);
+    await user.click(await screen.findByRole("menuitem", { name: "Unpin" }));
+    const regained = await screen.findByRole("region", { name: "Projects" });
+    expect(within(regained).getByRole("button", { name: groupName })).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Pinned" })).queryByRole("link", {
+        name: "Device chat",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps project groups free of location icons while no chat is on a device", async () => {
+    mockSessions([
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+    ]);
+    renderRecentChats();
+    const defaultGroup = await screen.findByRole("button", { name: "default" });
+    expect(defaultGroup.querySelector("[data-location-icon]")).toBeNull();
+  });
+
+  it("groups a device-folder chat under its folder, not under its default project", async () => {
+    // Pinning default must not pull the device chat into the pinned default group either.
+    localStorage.setItem("rome-recent-chats-pinned-projects", JSON.stringify(["default"]));
+    const deviceFolder = {
+      deviceId: "dev-1",
+      deviceName: "devbox-dev",
+      platform: "linux",
+      path: "/home/ubuntu/device-folder",
+    };
+    mockSessions([
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+      {
+        id: "device-chat",
+        name: "Device chat",
+        createdAt: "2026-07-03T00:00:00.000Z",
+        activityAt: "2026-07-09T11:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+        deviceFolder,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+
+    await screen.findByRole("link", { name: "Default chat" });
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
+    expect(within(pinnedSection).getByRole("link", { name: "Default chat" })).toBeTruthy();
+    expect(within(pinnedSection).queryByRole("link", { name: "Device chat" })).toBeNull();
+
+    const projectsSection = screen.getByRole("region", { name: "Projects" });
+    const folderGroup = within(projectsSection).getByRole("button", {
+      name: "device-folder on devbox-dev",
+    });
+    // The folder icon still shows the open state; a laptop marks another computer.
+    expect(folderGroup.querySelector(".lucide-folder-open")).toBeTruthy();
+    expect(folderGroup.querySelector(".lucide-laptop")).toBeTruthy();
+    expect(folderGroup.textContent).toBe("device-folder");
+    const icon = folderGroup.querySelector('[data-location-icon="device"]') as HTMLElement;
+    await user.hover(icon);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.textContent).toContain("devbox-dev");
+    expect(tooltip.textContent).toContain("/home/ubuntu/device-folder");
+    await user.unhover(icon);
+    expect(within(projectsSection).getByRole("link", { name: "Device chat" })).toBeTruthy();
+
+    // With a device chat in the list, Rome's projects mark their location too.
+    const defaultGroup = within(pinnedSection).getByRole("button", { name: "default" });
+    const cloud = defaultGroup.querySelector('[data-location-icon="rome"]') as HTMLElement;
+    expect(cloud.querySelector(".lucide-cloud")).toBeTruthy();
+    await user.hover(cloud);
+    expect((await screen.findByRole("tooltip")).textContent).toContain("Rome Cloud");
+    await user.unhover(cloud);
+
+    await user.click(
+      within(projectsSection).getByRole("button", { name: "New chat in this folder" }),
+    );
+    expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "null")).toEqual({
+      deviceFolder: {
+        deviceId: "dev-1",
+        deviceName: "devbox-dev",
+        path: "/home/ubuntu/device-folder",
+        home: null,
+      },
+    });
   });
 
   it("does not render unread dots for the active session", async () => {
@@ -494,7 +1369,9 @@ describe("RecentChats", () => {
     await waitFor(() => expect(screen.getByText("Archived chat")).toBeTruthy());
     expect(screen.queryByText("Active chat")).toBeNull();
     expect(
-      spy.mock.calls.some(([url]) => String(url) === "/api/chat/sessions?status=archived"),
+      spy.mock.calls.some(
+        ([url]) => String(url) === "/api/chat/sessions?status=archived&scope=mine",
+      ),
     ).toBe(true);
   });
 
@@ -733,8 +1610,7 @@ describe("RecentChats row menu shortcuts", () => {
   async function openRowMenu() {
     const user = userEvent.setup();
     renderRecentChats();
-    await screen.findByRole("link");
-    await user.click(screen.getByRole("button", { name: "Chat actions" }));
+    await user.click(await screen.findByRole("button", { name: "Chat actions" }));
     return user;
   }
 
@@ -875,8 +1751,11 @@ describe("RecentChats chat name tooltip", () => {
     expect(tooltip.textContent).toBe(name);
   });
 
-  it("shows no tooltip when the chat name fits in the row", async () => {
-    mockSessions([longNameSession("Short chat")]);
+  it.each([
+    ["", {}],
+    [" and the chat has a status mark", { lastTurnFailed: true }],
+  ])("shows no tooltip when the chat name fits in the row%s", async (_, state) => {
+    mockSessions([{ ...longNameSession("Short chat"), ...state }]);
     const user = userEvent.setup();
 
     renderRecentChats();
@@ -887,5 +1766,18 @@ describe("RecentChats chat name tooltip", () => {
     // Outwait the tooltip open delay before concluding nothing appeared.
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+});
+
+describe("running mark style", () => {
+  const css = readFileSync(new URL("../globals.css", import.meta.url), "utf8");
+
+  it("turns at an even speed, not in visible ticks", () => {
+    expect(css).toMatch(/\.rome-status-spin \{\s*animation: rome-status-spin 1s linear infinite;/);
+  });
+
+  it("stands still under reduced motion", () => {
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(/\.rome-status-spin \{\s*animation: none;/);
   });
 });

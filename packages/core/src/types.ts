@@ -3,22 +3,25 @@
 // re-exported from here exists in the SDK; types unique to core (sessions,
 // configs, policies, etc.) stay defined locally.
 
-import type { ReasoningEffort } from "@rome-os/app-runtime";
+import type { PolicyRule, ReasoningEffort } from "@rome-os/app-runtime";
 
 export type {
   Attachment,
-  ChannelSendResult,
+  PolicyRule,
   OutgoingAttachment,
   OutgoingMessage,
   ApprovalCardStatus,
   MessagePart,
   MessageReplyReference,
-  NormalizedMessage,
+  AgentEvent,
+  /** @deprecated Use AgentEvent from @rome-os/app-runtime. */
   AgentMessage,
   AgentPlan,
   AgentPlanStep,
   AgentPlanStepStatus,
   AgentAccounting,
+  AgentStop,
+  AgentStopReason,
   AgentContextUsage,
   AgentTokenUsage,
   ReasoningEffort,
@@ -66,37 +69,25 @@ export interface AgentConfig {
    * session (no provider query — nothing to resume or bill).
    */
   codeBacked?: boolean;
+  /** Per-field overrides of the chat's session policy. See `resolveSessionPolicy`. */
+  policy?: {
+    finalText?: "deliver" | "private";
+    autoTitle?: boolean;
+    loadMemory?: boolean;
+  };
 }
 
 export interface AgentSession {
   id: string;
   agentName: string;
   channelThreadKey: string;
+  /** The Rome conversation this session serves, when the caller named one. */
+  chatId?: string;
   providerThreadId?: string;
+  workingDir?: string;
   createdAt: Date;
   lastActiveAt: Date;
   status: "active" | "completed" | "error";
-}
-
-/**
- * A person and the accounts linked to them.
- *
- * `channelMappings` keeps the table's and the wire's name — a channel mapping is
- * a [link](docs/concepts/people.md#link), and `channelUserId` is the account's
- * own [address](docs/concepts/people.md#address) — because
- * `@rome-os/app-runtime` publishes the field to apps.
- */
-export interface PersonMapping {
-  id: string;
-  displayName: string;
-  channelMappings: {
-    channel: string;
-    channelUserId: string;
-  }[];
-  bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
-  profilePath?: string;
-  approved: boolean;
-  createdAt: Date;
 }
 
 export interface Policy {
@@ -113,13 +104,7 @@ export type PolicyScope =
   | { type: "thread"; threadName: string; threadType: string }
   | { type: "global" };
 
-export interface PolicyRule {
-  action: "allow" | "block" | "require_approval" | "sentinel_review";
-  conditions?: Record<string, unknown>;
-}
-
 export interface Settings {
-  sentinelReviewIntervalMinutes: number;
   trustedBondLevels: string[];
   replyToBondLevels: string[];
   database: {

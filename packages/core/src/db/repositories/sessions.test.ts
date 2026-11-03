@@ -212,4 +212,55 @@ describe("SessionsRepository", () => {
       );
     expect(active.map((row) => row.id)).toEqual(["fresh"]);
   });
+
+  it("create() records the conversation the session serves", async () => {
+    const bound = await repo.create({
+      agentName: "main",
+      channelThreadKey: "webchat:conv-1:large-model:sel-a",
+      chatId: "conv-1",
+    });
+    const unbound = await repo.create({ agentName: "main", channelThreadKey: "main:adhoc" });
+
+    expect((await repo.findById(bound))?.chatId).toBe("conv-1");
+    expect((await repo.findById(unbound))?.chatId).toBeNull();
+  });
+
+  it("rotation takes the caller's conversation and keeps the retired row's otherwise", async () => {
+    await repo.create({
+      id: "old",
+      agentName: "main",
+      channelThreadKey: "telegram:thread-1",
+      chatId: "channel:telegram:thread-1",
+    });
+
+    const inherited = await repo.rotateProviderGeneration({
+      agentName: "main",
+      channelThreadKey: "telegram:thread-1",
+      newSessionId: "gen-2",
+    });
+    expect(inherited.chatId).toBe("channel:telegram:thread-1");
+
+    const named = await repo.rotateProviderGeneration({
+      agentName: "main",
+      channelThreadKey: "telegram:thread-1",
+      newSessionId: "gen-3",
+      chatId: "conv-renamed",
+    });
+    expect(named.chatId).toBe("conv-renamed");
+  });
+
+  it("fillChatId() fills a missing conversation and never overwrites one", async () => {
+    const legacy = await repo.create({ agentName: "main", channelThreadKey: "webchat:conv-1" });
+    const bound = await repo.create({
+      agentName: "main",
+      channelThreadKey: "webchat:conv-2",
+      chatId: "conv-2",
+    });
+
+    expect(await repo.fillChatId(legacy, "conv-1")).toBe(true);
+    expect(await repo.fillChatId(bound, "other")).toBe(false);
+
+    expect((await repo.findById(legacy))?.chatId).toBe("conv-1");
+    expect((await repo.findById(bound))?.chatId).toBe("conv-2");
+  });
 });

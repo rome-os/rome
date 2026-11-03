@@ -44,7 +44,7 @@ const OVERRIDDEN_BY_COMPOSITE = '[data-slot="calendar"]';
 
 test("a size name means one height across every Control member", async ({ page }) => {
   await page.goto("/dev/gallery");
-  // A cold rsbuild dev server compiles the route's chunk on demand.
+  // A shared runner can render the route far slower than a warm local machine.
   await expect(page.locator('[data-slot="icon-button"]').first()).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => document.fonts.ready);
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { advanceReveal, splitGraphemes } from "./use-smooth-text";
+import { splitGraphemes } from "@/lib/graphemes";
+import { advanceReveal } from "./use-smooth-text";
 
 describe("advanceReveal pacing", () => {
   it("reveals at the base rate when the backlog is small", () => {

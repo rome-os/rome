@@ -1,15 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
-import {
-  currentSession,
-  currentSessionId,
-  enterSession,
-  runWithSession,
-} from "./telemetry-context.js";
+import { currentSessionId, enterSession, runWithSession } from "./telemetry-context.js";
 
 describe("session context", () => {
   it("returns undefined when no session is entered", () => {
     expect(currentSessionId()).toBeUndefined();
-    expect(currentSession()).toBeUndefined();
   });
 
   it("runWithSession binds the id for the duration of the callback", async () => {

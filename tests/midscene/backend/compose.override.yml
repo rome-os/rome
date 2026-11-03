@@ -1,0 +1,17 @@
+# Throwaway instance for the backend suite, layered on the repository's
+# docker-compose.yml so the suite boots the same service definition that
+# self-hosters use. Only isolation settings change here.
+services:
+  rome:
+    image: ${ROME_E2E_IMAGE:-zoolsher/rome:latest}
+    # Loopback only, on its own port, beside any dev stack on the same host.
+    ports: !override
+      - "127.0.0.1:${ROME_E2E_PORT:-8090}:8080"
+    # A checked-in env file, so a developer's own .env is never read.
+    env_file: !override
+      - tests/midscene/backend/instance.env
+    # Only `rome` starts, so there is no collector to export to.
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+  otel-collector:
+    env_file: !reset []

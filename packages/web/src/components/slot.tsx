@@ -83,6 +83,16 @@ export function SlotOutlet({
   );
 }
 
+/**
+ * Whether an outlet named `name` is on the page, for a filler with a fallback.
+ * Without a provider there is no outlet, so a page rendered on its own draws
+ * the fallback rather than throwing.
+ */
+export function useSlotOutlet(name: string): boolean {
+  const registry = useContext(SlotContext);
+  return (registry?.hosts[name] ?? null) !== null;
+}
+
 /** The page-side filler — portals `children` into the matching outlet. */
 export function SlotContent({ name, children }: { name: string; children: ReactNode }) {
   const { hosts, addFill, removeFill } = useSlotRegistry();

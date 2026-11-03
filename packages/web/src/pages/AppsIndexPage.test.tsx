@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InstalledAppCard, SpecSource } from "@rome/api-types/apps";
 import { toast } from "sonner";
 import i18n from "@/i18n";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import AppsIndexPage from "./AppsIndexPage";
 
 // Lifecycle failures surface as toasts (the launcher tiles have no room for
@@ -32,24 +34,30 @@ rs.mock("@/components/logo", () => ({
 // The built-in nav grid imports .svg icons that resolve to URL strings under
 // Rstest (not React components), which jsdom rejects as element names. The
 // real icons are irrelevant to apps reactivity, so stub them with components.
-rs.mock("@/shell/AppGrid", () => ({
+rs.mock("@/shell/builtin-nav", () => ({
   APP_NAV: [
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
+    { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: () => null },
+    { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: () => null },
   ],
+}));
+rs.mock("@/shell/AppGrid", () => ({
   DEFAULT_SIDEBAR_PINS: [
     { type: "builtin" as const, id: "apps" },
     { type: "builtin" as const, id: "chat" },
     { type: "builtin" as const, id: "projects" },
   ],
   STORAGE_KEY: "rome-sidebar-pins",
+  isRequiredBuiltinPin: (id: string) => ["apps", "chat", "projects"].includes(id),
   normalizeSidebarPins: (
     pins: Array<{ type: "builtin" | "app"; id: string }>,
   ): Array<{ type: "builtin" | "app"; id: string }> => {
     const required = [
       { type: "builtin" as const, id: "apps" },
       { type: "builtin" as const, id: "chat" },
+      { type: "builtin" as const, id: "projects" },
     ];
     const requiredIds = new Set(required.map((pin) => pin.id));
     return [
@@ -67,11 +75,6 @@ rs.mock("@/shell/AppGrid", () => ({
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix menu + dialog poke pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
   // Radix tooltip arrows measure themselves with ResizeObserver, also absent.
   class TestResizeObserver implements ResizeObserver {
     observe(): void {}
@@ -236,13 +239,15 @@ function LocationProbe() {
 }
 
 describe("AppsIndexPage reactivity", () => {
-  it("starts an update chat in the app's remembered source project", async () => {
+  it("chats with an app in its source project, beside the app", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [
         installedCard({
           id: "weather",
           displayName: "Weather",
+          hasFrontend: true,
+          href: "/apps/weather",
           source: { mode: "source", path: "/projects/apps/weather" },
           projectPath: "apps/weather",
         }),
@@ -252,14 +257,43 @@ describe("AppsIndexPage reactivity", () => {
     renderPage();
 
     await user.click(await screen.findByLabelText("More actions for Weather"));
-    await user.click(await screen.findByRole("menuitem", { name: "Start chat here" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
     expect(screen.getByTestId("location").textContent).toBe(
-      JSON.stringify({ pathname: "/chat", state: { projectPath: "apps/weather" } }),
+      JSON.stringify({
+        pathname: "/chat",
+        state: { widgets: [{ type: "app", appId: "weather" }], projectPath: "apps/weather" },
+      }),
     );
   });
 
-  it("does not offer an update chat without a remembered source project", async () => {
+  it("chats beside an app that has no source project", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({
+          id: "weather",
+          displayName: "Weather",
+          hasFrontend: true,
+          href: "/apps/weather",
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByLabelText("More actions for Weather"));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+    expect(screen.getByTestId("location").textContent).toBe(
+      JSON.stringify({
+        pathname: "/chat",
+        state: { widgets: [{ type: "app", appId: "weather" }] },
+      }),
+    );
+  });
+
+  it("offers no chat for an app with neither a page nor a source project", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [installedCard({ id: "weather", displayName: "Weather" })],
@@ -268,7 +302,7 @@ describe("AppsIndexPage reactivity", () => {
     renderPage();
 
     await user.click(await screen.findByLabelText("More actions for Weather"));
-    expect(screen.queryByRole("menuitem", { name: "Start chat here" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Chat with app" })).toBeNull();
   });
 
   it("offers Remix only for an installed Store app whose local manifest includes source", async () => {
@@ -371,7 +405,7 @@ describe("AppsIndexPage reactivity", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Projects")).toBeTruthy();
+    expect(await screen.findByText("Memory")).toBeTruthy();
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
@@ -413,7 +447,7 @@ describe("AppsIndexPage reactivity", () => {
     expect(within(storeSection).getByText("Store App")).toBeTruthy();
     expect(within(builtinSection).getByText("Shipped App")).toBeTruthy();
     // …and built-in surfaces share the built-in section with first-party apps.
-    expect(within(builtinSection).getByText("Projects")).toBeTruthy();
+    expect(within(builtinSection).getByText("Memory")).toBeTruthy();
 
     // Section order matches the page contract: my → store → built-in.
     const builtHere = within(mySection).getByText("Built Here");
@@ -425,6 +459,51 @@ describe("AppsIndexPage reactivity", () => {
     expect(
       Boolean(storeApp.compareDocumentPosition(shipped) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);
+  });
+
+  it("hides the user-skills carrier: no tile, not counted, not searchable", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({ id: "weather", displayName: "Weather", origin: "local" }),
+        installedCard({ id: "user-skills", displayName: "User Skills", origin: "local" }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(within(mySection).getByText("1")).toBeTruthy();
+    expect(screen.queryByText("User Skills")).toBeNull();
+
+    await user.type(screen.getByLabelText("Search apps"), "skills");
+    expect(screen.queryByText("User Skills")).toBeNull();
+  });
+
+  it("hides an app that sets hideInLauncher: no tile, not counted, not searchable", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({ id: "weather", displayName: "Weather", origin: "local" }),
+        installedCard({
+          id: "quiet",
+          displayName: "Quiet App",
+          origin: "local",
+          hideInLauncher: true,
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(within(mySection).getByText("1")).toBeTruthy();
+    expect(screen.queryByText("Quiet App")).toBeNull();
+
+    await user.type(screen.getByLabelText("Search apps"), "quiet");
+    expect(screen.queryByText("Quiet App")).toBeNull();
   });
 
   it("hides a section that has no matches while searching", async () => {
@@ -758,29 +837,39 @@ describe("AppsIndexPage tile interactions", () => {
   });
 
   it("toggles a built-in surface's sidebar pin from its tile menu", async () => {
-    // Projects starts pinned (it's in DEFAULT_SIDEBAR_PINS), so the menu
-    // offers Unpin; activating it drops the entry from the stored pins.
+    // Memory starts unpinned, so the menu offers Pin; activating it adds the
+    // entry to the stored pins after the fixed three.
     const user = userEvent.setup();
     mockBackend({ installed: [] });
 
     renderPage();
 
-    await user.click(await screen.findByLabelText("More actions for Projects"));
-    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
+    await user.click(await screen.findByLabelText("More actions for Memory"));
+    await user.click(await screen.findByRole("menuitem", { name: "Pin to sidebar" }));
 
     const stored = JSON.parse(localStorage.getItem("rome-sidebar-pins") ?? "[]");
-    expect(stored).not.toContainEqual({ type: "builtin", id: "projects" });
-    expect(stored).toContainEqual({ type: "builtin", id: "apps" });
+    expect(stored.at(-1)).toEqual({ type: "builtin", id: "memory" });
+    expect(stored).toContainEqual({ type: "builtin", id: "projects" });
+  });
+
+  it("omits Projects and Settings, which the sidebar and profile menu already reach", async () => {
+    mockBackend({ installed: [] });
+
+    renderPage();
+
+    expect(await screen.findByLabelText("Memory")).toBeTruthy();
+    expect(screen.queryByLabelText("Projects")).toBeNull();
+    expect(screen.queryByLabelText("Settings")).toBeNull();
   });
 });
 
 describe("AppsIndexPage tile name tooltip", () => {
-  // jsdom performs no layout, so scrollWidth/clientWidth are both 0 and the
+  // jsdom performs no layout, so scrollHeight/clientHeight are both 0 and the
   // page's "is the label clipped?" probe reads false. Fake the geometry of a
   // clipped label on the name span to exercise the tooltip path.
   function fakeClippedLabel(el: HTMLElement) {
-    Object.defineProperty(el, "scrollWidth", { configurable: true, value: 180 });
-    Object.defineProperty(el, "clientWidth", { configurable: true, value: 84 });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 60 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 40 });
   }
 
   it("reveals the full name in a tooltip when hovering a tile whose name is clipped", async () => {
@@ -872,14 +961,14 @@ describe("AppsIndexPage search", () => {
 
     expect(await screen.findByText("Weather")).toBeTruthy();
     expect(screen.getByText("Calendar")).toBeTruthy();
-    expect(screen.getByText("Projects")).toBeTruthy();
+    expect(screen.getByText("Memory")).toBeTruthy();
 
     await user.type(screen.getByLabelText("Search apps"), "weath");
 
     expect(screen.getByText("Weather")).toBeTruthy();
     // Non-matching installed app and built-in surface both drop out.
     expect(screen.queryByText("Calendar")).toBeNull();
-    expect(screen.queryByText("Projects")).toBeNull();
+    expect(screen.queryByText("Memory")).toBeNull();
   });
 
   it("derives the displayed section count from visible search results", async () => {
@@ -1016,5 +1105,31 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(screen.getByText("Weather")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "New app" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Browse store" })).toBeNull();
+  });
+});
+
+describe("AppsIndexPage in the Mac app's title bar", () => {
+  it("moves its title and actions into the title bar instead of a header row", async () => {
+    mockBackend({ installed: [installedCard({ id: "weather", displayName: "Weather" })] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SlotProvider>
+          <div data-testid="titlebar">
+            <SlotOutlet name={TITLEBAR_SLOT} />
+          </div>
+          <MemoryRouter>
+            <AppsIndexPage />
+          </MemoryRouter>
+        </SlotProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Weather");
+    const bar = within(screen.getByTestId("titlebar"));
+    expect(bar.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(bar.getByRole("button", { name: "App store" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(document.querySelector('[data-slot="page-header"]')).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { invalidateNewChatDrafts } from "@/lib/new-chat-draft-storage";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -63,6 +64,7 @@ export function ProfileMenu() {
     }
     // Full navigation, not a client-side route: it drops every cached query
     // holding this user's data along with the rest of the JS state.
+    invalidateNewChatDrafts();
     window.location.assign("/login");
   }
 
@@ -74,7 +76,7 @@ export function ProfileMenu() {
             type="button"
             aria-label={t("profile.menuLabel")}
             title={title ?? t("profile.menuLabel")}
-            className="rounded-full outline-none transition hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="rounded-full outline-none transition hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
           >
             <Avatar>
               {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}

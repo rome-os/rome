@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import {
   buildAnthropicCompatibleProviderEnv,
-  listAnthropicCompatibleProviderSummaries,
   parseStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentialsForEditing,
-  validateCustomAnthropicEnv,
 } from "./anthropic-compatible-providers.js";
+import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
+import { listAnthropicCompatibleProviderSummaries } from "@rome/api-types/anthropic-compatible-providers";
 
 describe("anthropic-compatible-providers", () => {
   it("lists the supported Anthropic-compatible providers", () => {

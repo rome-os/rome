@@ -6,12 +6,18 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 
 - Actions are owned by [apps](apps.md#rome-apps) and exist only via manifest declaration — no implicit discovery. Disabling an app removes its actions. Enabling it puts them back. Install re-reads the manifest, so a newly added action becomes callable without a process restart.
 - An action definition declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`. References and runtime calls use the canonical `<app-id>:<local-name>` id.
-- The input schema is the agent-visibility switch. An action with an input schema is exposed to agents as a callable tool. An action without one is invisible to agents and runs only when a [routine](data.md#routines) fires, a [hook](apps.md#hooks) routes to it, or another action calls it.
+- An input schema makes an action agent-callable. A public action enters an agent catalog through `actions: ["*"]` or an exact reference. An explicit action enters only through an exact reference.
+- An action without an input schema stays outside every agent catalog. It runs only when a [routine](data.md#routines) fires, a [hook](apps.md#hooks) routes to it, or another action calls it.
+- Visibility gates both agent discovery and agent execution. It does not restrict routines, hooks, app APIs, or calls from another action.
 - An approval-gated action never executes before the guardian's decision ([approvals](messaging.md#approvals)).
 - A nested action call shares its caller's root and cancellation lifetime, and the caller must wait for its result. Fire-and-forget of a nested call is invalid: the caller may finish and release its resources while the callee is still running.
 - Intentionally independent work starts **detached**: it becomes a new root execution with no parent. Cancelling the caller does not cancel it, and it can be cancelled separately by its own execution id.
 - A detached start returns only an acceptance receipt, never the eventual result. Acceptance is not durable across a restart.
 - Cancelling a root execution cancels everything under it.
+- Four first-party coordination actions run in the main process when called as a root, instead of in an action worker: `send_message`, `send_user_message`, `create_routine`, `send_feedback`. They start no agent and may not call or dispatch other actions, so they never draw on the worker budget and never fail for want of a worker. They cannot be cancelled. Trust comes from the app's first-party install record, never from its manifest.
+- An execution does not outlive the Rome process that runs it. Every execution still running when Rome stops is recorded as an error at the next start. An execution awaiting approval keeps waiting.
+- An agent turn whose events an action reads runs only as long as the action's worker. When the worker goes away, whether it crashes, exits, or is cancelled, every such turn that has not ended stops with status `interrupted`. A turn whose reply main delivers to a channel keeps running.
+- An action reaches Rome's accounts through `deps.channelsService`, naming each by its platform and the platform's own id, or a channel by its name. It sends and reads what was said the same way in the main process and in a worker, and never names a Connection ([channels for app actions](../architecture/channels.md#channels-for-app-actions)). An action never reaches a Connection's Talk, which is internal to core. Through the 0.7 release, reading `deps.talkRouter` throws an error that points to `deps.channelsService`.
 
 **Not to be confused with:**
 
@@ -36,15 +42,15 @@ Every action reports its outcome through one result envelope carrying exactly on
 
 ## Suspensions
 
-A suspension is an action result that parks the calling agent until the guardian resolves it in webchat. Two kinds exist: an **inline interaction** mounts a component owned by the app inside the caller's own conversation, and a **handoff** transfers the floor to a child session where the guardian collaborates with a summoned agent.
+A suspension is an action result that parks the calling agent until the guardian resolves it in webchat. Two kinds exist: an **inline interaction** mounts a component owned by the app inside the caller's own chat, and a **handoff** transfers the floor to a child session where the guardian collaborates with a summoned agent.
 
 **Contracts:**
 
 - The parked caller is told to wait and receives no artifact. The resolution arrives as a new turn carrying the outcome, and the action body does not run again.
 - Every resolution is either the produced artifact or a dismissal. A dismissal is a first-class outcome the caller acknowledges and continues from, not an error.
 - The artifact schema belongs to the owning app. Rome carries the artifact to the caller without interpreting it, so a new suspending action ships without a platform change.
-- An inline interaction does not lock the conversation, and several can be open at once. A handoff locks the parent conversation until control returns.
-- A handoff's child session is bound to the summoned agent for its whole life. It never appears in the chat sidebar — the guardian reaches it through the card in the parent conversation.
+- An inline interaction does not lock the chat, and several can be open at once. A handoff locks the parent chat until control returns.
+- A handoff's child session is bound to the summoned agent for its whole life. It never appears in the chat sidebar — the guardian reaches it through the card in the parent chat.
 - A handoff that declares a handback contract hands control back only through it: the candidate artifact must satisfy the contract, and the guardian approves the candidate before it resumes the caller. A validation failure bounces to the summoned agent, never to the caller.
 - Only webchat renders suspensions. On a messaging channel, inside a subagent, or on a forked turn, the calling agent relays the prompt text as prose and the guardian's reply arrives as the next turn.
 

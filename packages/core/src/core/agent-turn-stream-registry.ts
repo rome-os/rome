@@ -1,23 +1,22 @@
-import type { ConversationRef } from "@rome-os/app-runtime";
-import type { StreamAgentMessage } from "./agent-session.js";
+import type { ChatRef, StreamAgentEvent } from "@rome-os/app-runtime";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;
   turnId: string;
   agentName: string;
-  conversation?: ConversationRef;
+  conversation?: ChatRef;
   initiatorId?: string;
   startedAt: string;
   finished: boolean;
-  messages(): readonly StreamAgentMessage[];
-  subscribe(listener: (message: StreamAgentMessage) => void): () => void;
+  messages(): readonly StreamAgentEvent[];
+  subscribe(listener: (message: StreamAgentEvent) => void): () => void;
   waitForFinish(): Promise<void>;
   /** Present only when the owner can safely interrupt this turn in isolation. */
   interrupt?(reason?: string): Promise<void>;
 }
 
 interface MutableAgentTurnStream extends ActiveAgentTurnStream {
-  publish(message: StreamAgentMessage): void;
+  publish(message: StreamAgentEvent): void;
   finish(): void;
 }
 
@@ -26,32 +25,38 @@ export interface AgentTurnStreamRegistry {
     sessionId: string;
     turnId: string;
     agentName: string;
-    conversation?: ConversationRef;
+    conversation?: ChatRef;
     initiatorId?: string;
     interrupt?(reason?: string): Promise<void>;
   }): MutableAgentTurnStream;
   get(turnId: string): ActiveAgentTurnStream | undefined;
-  getActiveByConversation(ref: ConversationRef): ActiveAgentTurnStream | undefined;
+  getActiveByConversation(ref: ChatRef): ActiveAgentTurnStream | undefined;
   listBySession(sessionId: string): ActiveAgentTurnStream[];
+  /** Calls `listener` with the session id whenever one of its turns starts or finishes. */
+  onSessionChange(listener: (sessionId: string) => void): () => void;
 }
 
 const FINISHED_STREAM_TTL_MS = 30_000;
 
-function conversationKey(ref: ConversationRef): string {
-  return `${ref.connectionId}\u0000${ref.conversationId}`;
+function conversationKey(ref: ChatRef): string {
+  return `${ref.connectionId}\u0000${ref.chatId}`;
 }
 
 export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
   const streams = new Map<string, MutableAgentTurnStream>();
   const activeByConversation = new Map<string, MutableAgentTurnStream>();
+  const sessionListeners = new Set<(sessionId: string) => void>();
+  const notifySession = (sessionId: string) => {
+    for (const listener of sessionListeners) listener(sessionId);
+  };
 
   return {
     register(input) {
       if (streams.has(input.turnId)) {
         throw new Error(`Turn stream "${input.turnId}" is already registered`);
       }
-      const values: StreamAgentMessage[] = [];
-      const listeners = new Set<(message: StreamAgentMessage) => void>();
+      const values: StreamAgentEvent[] = [];
+      const listeners = new Set<(message: StreamAgentEvent) => void>();
       let resolveFinished!: () => void;
       const finishedPromise = new Promise<void>((resolve) => {
         resolveFinished = resolve;
@@ -86,6 +91,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
             activeByConversation.delete(conversationKey(input.conversation));
           }
           resolveFinished();
+          notifySession(input.sessionId);
           setTimeout(() => {
             if (streams.get(input.turnId) === stream) streams.delete(input.turnId);
           }, FINISHED_STREAM_TTL_MS).unref?.();
@@ -95,6 +101,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       if (input.conversation) {
         activeByConversation.set(conversationKey(input.conversation), stream);
       }
+      notifySession(input.sessionId);
       return stream;
     },
 
@@ -111,6 +118,13 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       return [...streams.values()].filter(
         (stream) => stream.sessionId === sessionId && !stream.finished,
       );
+    },
+
+    onSessionChange(listener) {
+      sessionListeners.add(listener);
+      return () => {
+        sessionListeners.delete(listener);
+      };
     },
   };
 }

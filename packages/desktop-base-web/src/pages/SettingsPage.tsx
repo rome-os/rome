@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { RuntimeTargetCard } from "@/pages/RuntimeTargetCard";
 import {
   errorMessage,
   romeApi,
@@ -16,20 +17,14 @@ import {
   type UpdateStatus,
 } from "@/lib/rome-api";
 
-const BUSY_PHASES: RuntimePhase[] = [
-  "checking_host",
-  "starting_runtime",
-  "pulling_image",
-  "starting_rome",
-  "waiting_for_health",
-];
+const BUSY_PHASES: RuntimePhase[] = ["starting_rome", "waiting_for_health"];
 
 type Tone = "muted" | "success" | "destructive";
 
 function runtimeLabel(phase: RuntimePhase): { text: string; tone: Tone } {
   if (phase === "ready") return { text: "Running", tone: "success" };
   if (phase === "failed") return { text: "Needs attention", tone: "destructive" };
-  if (phase === "installing_runtime") return { text: "Setup needed", tone: "destructive" };
+  if (phase === "waiting_for_user") return { text: "Waiting for you", tone: "muted" };
   return { text: "Working…", tone: "muted" };
 }
 
@@ -103,9 +98,7 @@ export function SettingsPage() {
     };
   }, [loadAttempt]);
 
-  // The only recovery this window offers. A failed runtime leaves the dashboard
-  // reachable, so the proxy answers 502 rather than refusing the connection and
-  // window.ts's did-fail-load retry never sends the user back to onboarding.
+  // The same retry the welcome page offers, for when the main window is hidden.
   const handleRetry = useCallback(async () => {
     setRuntimeError(null);
     setRetryBusy(true);
@@ -158,9 +151,7 @@ export function SettingsPage() {
     }
   }, []);
 
-  // primaryAction is the manager's own "I am working" signal. A phase alone is
-  // not: starting_runtime is a busy phase that also carries "Runtime did not
-  // start", where nothing is running and the retry below is the way out.
+  // primaryAction is the runtime's own "I am working" signal.
   const runtimeBusy =
     !!runtime && BUSY_PHASES.includes(runtime.phase) && runtime.primaryAction === "none";
   const runtimeStatus = runtime ? runtimeLabel(runtime.phase) : null;
@@ -170,11 +161,9 @@ export function SettingsPage() {
     if (!runtime) return "Checking…";
     if (runtime.lastError) return runtime.lastError;
     if (runtime.primaryAction === "retry") return runtime.detail;
-    if (runtime.phase === "ready") return "Rome is running on your computer.";
-    if (runtime.phase === "installing_runtime")
-      return "Rome needs a small helper to run. Finish setup to continue.";
-    if (runtimeBusy) return "Setting things up. This will only take a moment.";
-    return "Rome is not running.";
+    if (runtime.phase === "ready") return "Rome is running in Rome Cloud.";
+    if (runtimeBusy) return "Connecting to your Rome.";
+    return runtime.detail;
   })();
 
   const updateStatus = updater ? updateLabel(updater.state) : null;
@@ -240,6 +229,8 @@ export function SettingsPage() {
           </Card>
         ) : (
           <>
+            <RuntimeTargetCard />
+
             <Card>
               <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
                 <div className="space-y-1.5">
@@ -261,7 +252,7 @@ export function SettingsPage() {
                     }}
                     disabled={retryBusy || runtimeBusy}
                   >
-                    {retryBusy ? "Starting…" : "Start Rome"}
+                    {retryBusy ? "Connecting…" : "Try again"}
                   </Button>
                 )}
               </CardHeader>
@@ -270,12 +261,12 @@ export function SettingsPage() {
 
                 {runtimeError && <p className="text-sm text-destructive">{runtimeError}</p>}
 
-                {/* Which backend this build runs. Pinned releases fix it, so this
-                    is the only place that says which one. */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Image</span>
-                  <span className="font-mono text-xs">{runtime?.image ?? "—"}</span>
-                </div>
+                {runtime?.phase === "ready" && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Address</span>
+                    <span className="font-mono text-xs">{runtime.dashboardUrl}</span>
+                  </div>
+                )}
 
                 <Separator />
 
@@ -286,7 +277,7 @@ export function SettingsPage() {
                     handleOpenLogs().catch(console.error);
                   }}
                 >
-                  View setup logs
+                  View logs
                 </button>
               </CardContent>
             </Card>

@@ -12,6 +12,7 @@ A host job is a script accepted by a privileged service on the operating system 
 - A repeated request with the same identity and contents returns the existing job. Different contents under that identity are rejected.
 - Lost contact leaves the outcome unknown. Recovery inspects the existing job and never starts a replacement automatically.
 - An interrupted action worker reports the original host job identities. A routine does not automatically retry that uncertain execution.
+- If Rome stops while a submitting action runs, the next start records that action with its host job identity and an unknown outcome.
 - Host recovery never resumes an interrupted script. It records an unknown outcome when completion cannot be established.
 - Root execution grants authority over the selected host, including its credentials. A job is not a sandbox for its script.
 

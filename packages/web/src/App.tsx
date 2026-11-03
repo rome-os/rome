@@ -1,4 +1,6 @@
-import { lazy, Suspense } from "react";
+import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
+import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { SlotProvider } from "./components/slot";
@@ -6,6 +8,7 @@ import { AuthGate } from "./shell/AuthGate";
 import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
+import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import FreePage from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
@@ -17,17 +20,15 @@ const ConnectPage = lazy(() => import("./pages/ConnectPage"));
 const OnboardPage = lazy(() => import("./pages/OnboardPage"));
 const CallbackPage = lazy(() => import("./pages/CallbackPage"));
 const SharePage = lazy(() => import("./pages/share/SharePage"));
-const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const PeoplePage = lazy(() => import("./pages/PeoplePage"));
+const EnvoysPage = lazy(() => import("./pages/envoys/EnvoysPage"));
 // The /people redirect lives with the views it forwards to, so the paths are
 // written once; it rides their chunk, which is the one about to render anyway.
 const PeopleIndexRedirect = lazy(() =>
   import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
 );
 const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
-const PersonLegacyRedirect = lazy(() =>
-  import("./pages/PersonDetailPage").then((m) => ({ default: m.PersonLegacyRedirect })),
-);
+const AssistantsPage = lazy(() => import("./pages/AssistantsPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
@@ -41,9 +42,14 @@ const AppRemixConfirmPage = lazy(() => import("./pages/AppRemixConfirmPage"));
 const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
 const AppFullPage = lazy(() => import("./pages/AppFullPage"));
 const DesktopPage = lazy(() => import("./pages/DesktopPage"));
+const WechatDesktopPage = lazy(() => import("./pages/WechatDesktopPage"));
+const NamedDesktopPage = lazy(() =>
+  import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
+);
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
+const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
 const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 // Dev-only pages (src/pages/dev/). import.meta.env.DEV is statically false in
 // production builds, so the route entries below are dropped AND — because each
@@ -56,12 +62,19 @@ const DevIndexPage = import.meta.env.DEV
   : () => null;
 
 export default function App() {
+  const auth = useAuthStateSnapshot();
+  useEffect(() => {
+    if (auth.ready && auth.backendReachable && auth.bootstrap && !hasSession(auth.bootstrap))
+      invalidateNewChatDrafts();
+  }, [auth]);
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
   const resumeRemix = useAppRemixResume();
+  const cloudLoginReturn = useCloudLoginReturn();
   // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
   if (resumeRemix) return <Navigate to={resumeRemix} replace />;
+  if (cloudLoginReturn) return <Navigate to={cloudLoginReturn} replace />;
 
   return (
     <SlotProvider>
@@ -139,19 +152,21 @@ export default function App() {
           >
             <Route path="/" element={<Navigate to="/chat" replace />} />
             <Route path="/chat/*" element={<FreePage />} />
-            <Route path="/activity" element={<ActivityPage />} />
+            {/* The event log is a tab of the Activity page, which keeps the
+                Sessions address. */}
+            <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
+            <Route path="/assistants" element={<AssistantsPage />} />
             {/* The two People views are routes, so each is linkable and back
                 steps between them. The dossier takes its own segment rather
                 than sharing theirs: a person id is a slug of the display name
                 the guardian gave them, so `latest` and `directory` are ids they
                 can mint, and a static view route would leave such a person
-                unreachable. The bare `/people/:personId` forwards, so an
-                address a person was already reached by keeps working. */}
+                unreachable. */}
             <Route path="/people" element={<PeopleIndexRedirect />} />
             <Route path="/people/latest" element={<PeoplePage view="latest" />} />
             <Route path="/people/directory" element={<PeoplePage view="directory" />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-            <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
+            <Route path="/envoys/*" element={<EnvoysPage />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
@@ -176,6 +191,8 @@ export default function App() {
             <Route path="/app-details/:appId" element={<AppDetailPage />} />
             <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
             <Route path="/desktop" element={<DesktopPage />} />
+            <Route path="/desktop/wechat" element={<WechatDesktopPage />} />
+            <Route path="/desktop/:name" element={<NamedDesktopPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
             <Route path="/settings" element={<SettingsPage />} />
@@ -186,6 +203,7 @@ export default function App() {
                 reaches ConnectionDetailPage's unknown-id redirect. */}
             <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
             <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
             <Route path="/settings/:tab" element={<SettingsTabPage />} />
           </Route>
 

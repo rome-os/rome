@@ -6,7 +6,7 @@
 
 ## Context
 
-A trusted agent running in the Rome shell needs more of a provider's API than the [channel](../concepts/messaging.md#channels) surface exposes. Reading a guild, editing a structured message, or calling an endpoint Rome has not wrapped all sit outside Talk. The shape that fits is a command-line tool the agent invokes from the shell it already has.
+A trusted agent running in the Rome shell needs more of a provider's API than the [channel](../architecture/channels.md) surface exposes. Reading a guild, editing a structured message, or calling an endpoint Rome has not wrapped all sit outside Talk. The shape that fits is a command-line tool the agent invokes from the shell it already has.
 
 Rome holds the provider credential for a connected service in the grant ledger, which is the source of truth for it. The credential's lifecycle is the grant epoch: conferral builds one, boot rehydrates one, credential replacement swaps one, and revoke or degrade kills one. Anything that carries the provider's authority has to follow that lifecycle or it becomes a second, divergent answer to the question of who is connected.
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { shouldShowAiToolUsage } from "@/components/ai-tools-panel";
 
 describe("AI tool usage visibility", () => {
-  it("defaults hidden unless the developer setting is enabled", () => {
+  it("stays hidden when the setting is turned off", () => {
     expect(
       shouldShowAiToolUsage(false, { loggedIn: true, usage: { checkedAt: "", source: "" } }, true),
     ).toBe(false);

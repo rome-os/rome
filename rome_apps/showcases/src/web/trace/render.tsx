@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type {
   TraceAccounting,
-  TraceBlockDto,
+  TraceEventDto,
   ToolResultBlock,
   ToolUseBlock,
 } from "../../trace/types.js";
@@ -81,7 +81,15 @@ function shortValue(value: unknown): string {
   return String(value);
 }
 
-function isErrorOutput(output: unknown): boolean {
+function toolFailed(result: ToolResultBlock): boolean {
+  if (result.isError !== undefined) return result.isError;
+  return isLegacyErrorOutput(result.output);
+}
+
+// A result without `tool_result.isError` (recorded before the flag existed, or
+// from a producer that cannot tell) falls back to each provider's own failure
+// signal in the output.
+function isLegacyErrorOutput(output: unknown): boolean {
   const normalized = normalizeTracePayload(output);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return false;
   const record = normalized as Record<string, unknown>;
@@ -102,7 +110,7 @@ function hasErrorPayload(value: unknown): boolean {
   return true;
 }
 
-function stepDurationMs(use: ToolUseBlock, result: ToolResultBlock | null): number | undefined {
+function toolCallDurationMs(use: ToolUseBlock, result: ToolResultBlock | null): number | undefined {
   if (!result || !use.startedAt || !result.endedAt) return undefined;
   const start = Date.parse(use.startedAt);
   const end = Date.parse(result.endedAt);
@@ -137,10 +145,10 @@ function Payload({
   );
 }
 
-function ToolStep({ use, result }: { use: ToolUseBlock; result: ToolResultBlock | null }) {
+function ToolCallView({ use, result }: { use: ToolUseBlock; result: ToolResultBlock | null }) {
   const [open, setOpen] = useState(false);
-  const status = result ? (isErrorOutput(result.output) ? "error" : "ok") : "running";
-  const duration = formatDuration(stepDurationMs(use, result));
+  const status = result ? (toolFailed(result) ? "error" : "ok") : "running";
+  const duration = formatDuration(toolCallDurationMs(use, result));
   const dotClass =
     status === "ok" ? "bg-success" : status === "error" ? "bg-destructive" : "bg-warning";
   return (
@@ -178,7 +186,7 @@ function ToolStep({ use, result }: { use: ToolUseBlock; result: ToolResultBlock 
   );
 }
 
-// Tool input/output detail, mirroring the chat page's ToolStepBlock: a small
+// Tool input/output detail, mirroring the chat page's ToolCallView: a small
 // label + hint header over the structured JSON view, each in its own framed box.
 function DetailSection({
   label,
@@ -258,7 +266,7 @@ function UsageRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function renderInlineBlock(block: TraceBlockDto, key: string): ReactNode {
+export function renderInlineBlock(block: TraceEventDto, key: string): ReactNode {
   switch (block.type) {
     case "session_init": {
       const userPrompt = block.userPrompt ? stripThreadContext(block.userPrompt) : "";
@@ -300,13 +308,13 @@ export function renderInlineBlock(block: TraceBlockDto, key: string): ReactNode 
     case "tool_result":
       return <Payload key={key} label={`${block.tool} output`} value={block.output} />;
     case "tool_use":
-      return <ToolStep key={key} use={block} result={null} />;
+      return <ToolCallView key={key} use={block} result={null} />;
     default:
       return null;
   }
 }
 
-export function renderRunBlocks(blocks: TraceBlockDto[], _live: boolean): ReactNode {
+export function renderRunBlocks(blocks: TraceEventDto[], _live: boolean): ReactNode {
   const resultsByUseId = new Map<string, ToolResultBlock>();
   const resultsByTool = new Map<string, ToolResultBlock[]>();
   for (const block of blocks) {
@@ -323,7 +331,7 @@ export function renderRunBlocks(blocks: TraceBlockDto[], _live: boolean): ReactN
     if (block.type === "tool_use") {
       const paired = pickResult(block, resultsByUseId, resultsByTool, consumed);
       if (paired) consumed.add(paired);
-      nodes.push(<ToolStep key={index} use={block} result={paired} />);
+      nodes.push(<ToolCallView key={index} use={block} result={paired} />);
       return;
     }
     if (block.type === "tool_result" && consumed.has(block)) return;

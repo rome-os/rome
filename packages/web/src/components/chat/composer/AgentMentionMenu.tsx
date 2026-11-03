@@ -1,6 +1,8 @@
 import { forwardRef, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
 import { listChatAgents } from "@/lib/chat-api";
+import { CONCIERGE_AGENT_ID } from "@/hooks/use-concierge";
 import type { AgentCatalogEntry, AgentCatalogGroup, AgentMention } from "@/lib/chat-types";
 import {
   AppGroupedPickerMenu,
@@ -20,43 +22,17 @@ export interface AgentMentionMenuProps {
   anchor: React.ReactNode;
 }
 
-function tokensMatch(haystack: string, query: string): boolean {
-  if (!query) return true;
-  return haystack.toLowerCase().includes(query.toLowerCase());
-}
-
-// Filter rule: keep an app if its id/label matches the query, OR if any of
-// its agents match. When the app itself matched, we keep all of its agents
-// in the right panel; otherwise we keep only the matching subset. This is
-// what "cross-level filter" means in the UI — typing `@expl` narrows the
-// left panel to apps that own an `explore`-like agent.
-function applyFilter(
+function toPickerGroups(
   groups: AgentCatalogGroup[],
-  query: string,
   fallbackDescription: (count: number) => string,
 ): Array<PickerGroup<AgentCatalogEntry>> {
-  const out: Array<PickerGroup<AgentCatalogEntry>> = [];
-  for (const group of groups) {
-    const appMatches =
-      !query || tokensMatch(group.ownerId, query) || tokensMatch(group.label, query);
-    const agentMatches = appMatches
-      ? group.agents
-      : group.agents.filter(
-          (agent) =>
-            tokensMatch(agent.localName ?? agent.name, query) ||
-            tokensMatch(agent.name, query) ||
-            tokensMatch(`${group.ownerId}/${agent.localName ?? agent.name}`, query),
-        );
-    if (agentMatches.length === 0) continue;
-    out.push({
-      ownerId: group.ownerId,
-      label: group.label,
-      description: group.description || fallbackDescription(agentMatches.length),
-      iconUrl: group.iconUrl,
-      items: agentMatches,
-    });
-  }
-  return out;
+  return groups.map((group) => ({
+    ownerId: group.ownerId,
+    label: group.label,
+    description: group.description || fallbackDescription(group.agents.length),
+    iconUrl: group.iconUrl,
+    items: group.agents,
+  }));
 }
 
 /**
@@ -78,7 +54,13 @@ export const AgentMentionMenu = forwardRef<AgentMentionMenuHandle, AgentMentionM
       listChatAgents()
         .then((data) => {
           if (cancelled) return;
-          setGroups(data);
+          // Concierge has its own chat; it is not an agent to start a chat with.
+          setGroups(
+            data.map((group) => ({
+              ...group,
+              agents: group.agents.filter((agent) => agent.name !== CONCIERGE_AGENT_ID),
+            })),
+          );
           setError(null);
         })
         .catch(() => {
@@ -91,7 +73,10 @@ export const AgentMentionMenu = forwardRef<AgentMentionMenuHandle, AgentMentionM
     }, [open, groups, t]);
 
     const filtered = useMemo(
-      () => applyFilter(groups ?? [], query, (count) => t("agentMention.agentCount", { count })),
+      () =>
+        toPickerGroups(filterAgentCatalog(groups ?? [], query), (count) =>
+          t("agentMention.agentCount", { count }),
+        ),
       [groups, query, t],
     );
 

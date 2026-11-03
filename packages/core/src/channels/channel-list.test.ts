@@ -1,0 +1,598 @@
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type {
+  ChannelMessage,
+  ChatId,
+  InboundEvent,
+  ChannelActivity,
+  ChannelDirectMessaging,
+} from "@rome-os/app-runtime";
+import type { TalkDirectory } from "../connections/types.js";
+import { ConnectionRegistry } from "../connections/registry.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
+import { tokenPaste } from "../connections/schemes.js";
+import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
+import type { Accounts } from "./accounts.js";
+import { ChannelNotConnected } from "./channel.js";
+import { channelList, joinLaterChannel } from "./channel-list.js";
+import type { ConnectionPortsDeps } from "./connection-ports.js";
+import { ConnectionPacing } from "./delivery/connection-pacing.js";
+import { type DeliveryTransport, plainText } from "./delivery/types.js";
+import { systemClock } from "../lib/clock.js";
+
+const noAccounts: Accounts = {
+  listAccounts: async () => ({ accounts: [] }),
+  resolve: async () => null,
+};
+
+function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
+  return {
+    channel: "telegram",
+    direction: "inbound",
+    messageId: "m-1",
+    chatId: "c-1" as ChatId,
+    senderId: "guardian",
+    text: "hello",
+    attachments: [],
+    timestamp: new Date(0),
+    ...overrides,
+  };
+}
+
+/** A pasted-token service whose every talker epoch is recorded. */
+function talkKind(
+  service: string,
+  ports: { sends?: boolean; receives?: boolean } = {},
+  direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
+  activity: ChannelActivity | null = null,
+  directory: TalkDirectory | null = null,
+  replyDelivery: DeliveryTransport | null = null,
+): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
+  const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
+  return {
+    epochs,
+    descriptor: {
+      connectionKind: service,
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
+      capabilities: {
+        talker: {
+          ...ports,
+          build(): Talker {
+            const epoch: (typeof epochs)[number] = {};
+            epochs.push(epoch);
+            return {
+              start(deliver) {
+                epoch.deliver = deliver;
+              },
+              stop() {},
+              async send(chatId) {
+                return { chatId, messageId: `sent-${epochs.length}` };
+              },
+              ...(direct && { directMessaging: direct }),
+              ...(activity && { activity }),
+              ...(directory && { directory }),
+              ...(replyDelivery && { replyDelivery }),
+            };
+          },
+        },
+      },
+    },
+  };
+}
+
+describe("channelList", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => testDb?.close());
+
+  function setup(
+    descriptors: ConnectionDescriptor[],
+    admit = async (_id: string, _service: string, inbound: ChannelMessage) =>
+      inbound.senderId === "guardian",
+    admission?: { admissionTimeoutMs?: number },
+    connectionAccounts?: Record<string, Accounts>,
+  ) {
+    testDb = createTestDb();
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
+    for (const descriptor of descriptors) registry.register(descriptor);
+    // The Connection ids the channel ports hear a talker on.
+    const subscribed: string[] = [];
+    const tracked = (connection: Connection): Connection =>
+      new Proxy(connection, {
+        get(target, property, receiver) {
+          if (property !== "hearTalker") {
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return (handler: (message: ChannelMessage) => Promise<void>) => {
+            const detach = target.hearTalker(handler);
+            if (!detach) return detach;
+            subscribed.push(target.id);
+            return () => {
+              subscribed.splice(subscribed.indexOf(target.id), 1);
+              detach();
+            };
+          };
+        },
+      });
+    const watched: ConnectionPortsDeps["registry"] = {
+      find: (service) => registry.find(service).map(tracked),
+      getDescriptor: (service) => registry.getDescriptor(service),
+      onUnlocked: (capability, handler) =>
+        registry.onUnlocked(capability, (connection) => handler(tracked(connection))),
+      registeredKinds: () => registry.registeredKinds(),
+    };
+    const channels = channelList({
+      db: testDb.db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      connections: {
+        registry: watched,
+        admit,
+        channelOf: kindChannelOf,
+        ...(admission ? { admission } : {}),
+      },
+      ...(connectionAccounts ? { connectionAccounts } : {}),
+    });
+    return { registry, channels, subscribed };
+  }
+
+  it("gives every service with a Talk a channel, beside the read-backed ones", () => {
+    const actOnly: ConnectionDescriptor = {
+      connectionKind: "github",
+      grant: "user",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
+      capabilities: {
+        actor: { build: () => ({ operations: () => [], invoke: async () => null }) },
+      },
+    };
+    const { channels } = setup([
+      talkKind("whatsapp").descriptor,
+      talkKind("linkedin", { receives: false }).descriptor,
+      talkKind("telegram").descriptor,
+      talkKind("silent", { sends: false, receives: false }).descriptor,
+      actOnly,
+    ]);
+
+    expect(channels.map((channel) => channel.name)).toEqual(["whatsapp", "linkedin", "telegram"]);
+    const [whatsapp, linkedin, telegram] = channels;
+    expect(whatsapp).toMatchObject({ accounts: noAccounts });
+    expect(whatsapp?.send).not.toBeNull();
+    expect(whatsapp?.inbound).not.toBeNull();
+    expect(linkedin?.send).not.toBeNull();
+    expect(linkedin?.inbound).toBeNull();
+    expect(telegram).toMatchObject({ accounts: null, messages: null });
+  });
+
+  it("gives a Connection-backed channel the address book named for its service", () => {
+    const book: Accounts = { ...noAccounts };
+    const { channels } = setup(
+      [talkKind("agents").descriptor, talkKind("telegram").descriptor],
+      undefined,
+      undefined,
+      { agents: book },
+    );
+    const named = (name: string) => channels.find((channel) => channel.name === name);
+    expect(named("agents")?.accounts).toBe(book);
+    expect(named("telegram")?.accounts).toBeNull();
+  });
+
+  it("rejects a send nothing backs, and sends through the Connection once one does", async () => {
+    const { registry, channels } = setup([talkKind("telegram").descriptor]);
+    const telegram = channels.find((channel) => channel.name === "telegram")!;
+
+    await expect(telegram.send!.send("c-1" as ChatId, { text: "hi" })).rejects.toThrow(
+      'No connection backs channel "telegram"',
+    );
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    await expect(telegram.send!.send("c-1" as ChatId, { text: "hi" })).resolves.toMatchObject({
+      messageId: "sent-1",
+    });
+  });
+
+  it("reaches an account directly only through a Connection that offers it", async () => {
+    const chatFor = rs.fn(async (id: string) => id as ChatId);
+    const { registry, channels } = setup([
+      talkKind("telegram", {}, { chatFor }).descriptor,
+      talkKind("discord").descriptor,
+    ]);
+    const telegram = channels.find((channel) => channel.name === "telegram")!;
+    const discord = channels.find((channel) => channel.name === "discord")!;
+
+    // Nothing backs either channel yet: the lookup says so, as a send would.
+    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(ChannelNotConnected);
+
+    for (const service of ["telegram", "discord"]) {
+      const connection = await registry.connect(service);
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+        material: { token: "t" },
+        expiresAt: "never",
+      });
+    }
+    await expect(telegram.send!.direct!.chatFor("u-1")).resolves.toBe("u-1");
+    // A Connection whose talker offers no direct messaging.
+    expect(discord.send!.direct).toBeNull();
+  });
+
+  it("lists the conversations its Connections see, leaving out one whose read fails", async () => {
+    const listConversations = rs.fn(async (_input: { limit: number }) => ({
+      conversations: [
+        {
+          ref: { connectionId: "unused", chatId: "general" as ChatId },
+          connectionKind: "discord",
+          service: "discord",
+          kind: "channel" as const,
+          displayName: "general",
+        },
+      ],
+    }));
+    const { registry, channels } = setup([
+      talkKind("discord", {}, null, null, { listConversations }).descriptor,
+      talkKind("feishu", {}, null, null, {
+        listConversations: async () => {
+          throw new Error("provider down");
+        },
+      }).descriptor,
+    ]);
+    const discord = channels.find((channel) => channel.name === "discord")!;
+    const feishu = channels.find((channel) => channel.name === "feishu")!;
+
+    // Nothing backs the channel yet, so it sees no conversations.
+    await expect(discord.directory!.listConversations({ limit: 10 })).resolves.toEqual([]);
+
+    const ids: Record<string, string> = {};
+    for (const service of ["discord", "feishu"]) {
+      const connection = await registry.connect(service);
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+        material: { token: "t" },
+        expiresAt: "never",
+      });
+      ids[service] = connection.id;
+    }
+    const listed = await discord.directory!.listConversations({ limit: 10 });
+    expect(listed.map((conversation) => conversation.displayName)).toEqual(["general"]);
+    // The Connection reads the page it was asked for, without the narrowing.
+    expect(listConversations).toHaveBeenLastCalledWith({ limit: 10 });
+
+    // Narrowed to a Connection that does not back the channel, it reads nothing.
+    listConversations.mockClear();
+    await expect(
+      discord.directory!.listConversations({ limit: 10, connectionId: ids.feishu }),
+    ).resolves.toEqual([]);
+    expect(listConversations).not.toHaveBeenCalled();
+    await expect(
+      discord.directory!.listConversations({ limit: 10, connectionId: ids.discord }),
+    ).resolves.toHaveLength(1);
+
+    await expect(feishu.directory!.listConversations({ limit: 10 })).resolves.toEqual([]);
+  });
+
+  it("shows typing through the send port once a Connection offers it", async () => {
+    const begin = rs.fn(async () => null);
+    const { registry, channels } = setup([talkKind("telegram", {}, null, { begin }).descriptor]);
+    const send = channels.find((channel) => channel.name === "telegram")!.send!;
+
+    expect(send.activity).toBeNull();
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    await send.activity!.begin({ chatId: "c-1" as ChatId });
+    expect(begin).toHaveBeenCalledWith({ chatId: "c-1" });
+  });
+
+  it("delivers admitted, answerable messages to a subscription that outlives reconnects", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const telegram = channels.find((channel) => channel.name === "telegram")!;
+
+    // Subscribed before any Connection exists.
+    const heard: InboundEvent[] = [];
+    const failing = rs.fn(async () => {
+      throw new Error("boom");
+    });
+    telegram.inbound!.subscribe(failing);
+    telegram.inbound!.subscribe(async (event) => {
+      heard.push(event);
+    });
+
+    const connection = await registry.connect("telegram");
+    const grant = { material: { token: "first" }, expiresAt: "never" as const };
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", grant);
+    service.epochs[0]!.deliver?.(message({ messageId: "stranger", senderId: "unknown" }));
+    service.epochs[0]!.deliver?.(message({ messageId: "empty", text: "  " }));
+    service.epochs[0]!.deliver?.(message({ messageId: "first" }));
+    await rs.waitFor(() => expect(heard.map((e) => e.message.messageId)).toEqual(["first"]));
+    expect(heard[0]?.kind).toBe("message");
+    expect(heard[0]?.ref).toEqual({ connectionId: connection.id, chatId: "c-1" });
+    expect(failing).toHaveBeenCalledTimes(1);
+
+    await connection.auth.revoke("bot");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      ...grant,
+      material: { token: "2" },
+    });
+    service.epochs[1]!.deliver?.(message({ messageId: "second" }));
+    await rs.waitFor(() =>
+      expect(heard.map((e) => e.message.messageId)).toEqual(["first", "second"]),
+    );
+  });
+
+  it("keeps two subscriptions of one handler independent", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+    const heard: string[] = [];
+    const handler = async (event: InboundEvent) => {
+      heard.push(event.message.messageId);
+    };
+    const first = inbound.subscribe(handler);
+    inbound.subscribe(handler);
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "both" }));
+    await rs.waitFor(() => expect(heard).toEqual(["both", "both"]));
+
+    first();
+    service.epochs[0]!.deliver?.(message({ messageId: "second only" }));
+    await rs.waitFor(() => expect(heard).toEqual(["both", "both", "second only"]));
+  });
+
+  it("follows a Connection removed and connected again, holding only the live one", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels, subscribed } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+    const heard: string[] = [];
+    inbound.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+    const grant = { material: { token: "t" }, expiresAt: "never" as const };
+
+    const first = await registry.connect("telegram");
+    await registry.giveGrant(first.connectionKind, first.id, "bot", grant);
+    await registry.remove(first.id);
+    const second = await registry.connect("telegram");
+    await registry.giveGrant(second.connectionKind, second.id, "bot", grant);
+    service.epochs[1]!.deliver?.(message({ messageId: "after reconnect" }));
+
+    await rs.waitFor(() => expect(heard).toEqual(["after reconnect"]));
+    expect(subscribed).toEqual([second.id]);
+  });
+
+  it("hears one conversation's events in order, without waiting on another conversation", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+    const started: string[] = [];
+    let releaseFirst!: () => void;
+    inbound.subscribe(async (event) => {
+      const id = event.message.messageId;
+      started.push(id);
+      if (id === "c1-first") {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        throw new Error("first fails after it is released");
+      }
+    });
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    const deliver = service.epochs[0]!.deliver!;
+    deliver(message({ messageId: "c1-first", chatId: "c-1" as ChatId }));
+    deliver(message({ messageId: "c1-second", chatId: "c-1" as ChatId }));
+    deliver(message({ messageId: "c2-first", chatId: "c-2" as ChatId }));
+
+    // c-2 is heard while c-1's first event is still in its handler.
+    await rs.waitFor(() => expect(started).toEqual(["c1-first", "c2-first"]));
+    releaseFirst();
+    // c-1's second event starts only once its first has settled, even though
+    // that one failed.
+    await rs.waitFor(() => expect(started).toEqual(["c1-first", "c2-first", "c1-second"]));
+  });
+
+  it("keeps a conversation's order when admission finishes out of order", async () => {
+    const service = talkKind("telegram");
+    // Admission for the first message finishes after admission for the second,
+    // as two pooled database queries can.
+    const { registry, channels } = setup([service.descriptor], async (_id, _service, inbound) => {
+      if (inbound.messageId === "one") await new Promise((resolve) => setTimeout(resolve, 30));
+      return true;
+    });
+    const heard: string[] = [];
+    channels
+      .find((channel) => channel.name === "telegram")!
+      .inbound!.subscribe(async (event) => {
+        heard.push(event.message.messageId);
+      });
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "one" }));
+    service.epochs[0]!.deliver?.(message({ messageId: "two" }));
+    await rs.waitFor(() => expect(heard).toEqual(["one", "two"]));
+  });
+
+  it("fails a stuck admission closed and admits the conversation's next message", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels } = setup(
+      [service.descriptor],
+      (_id, _service, inbound) =>
+        inbound.messageId === "stuck" ? new Promise<boolean>(() => {}) : Promise.resolve(true),
+      { admissionTimeoutMs: 30 },
+    );
+    const heard: string[] = [];
+    channels
+      .find((channel) => channel.name === "telegram")!
+      .inbound!.subscribe(async (event) => {
+        heard.push(event.message.messageId);
+      });
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "stuck" }));
+    service.epochs[0]!.deliver?.(message({ messageId: "next" }));
+    await rs.waitFor(() => expect(heard).toEqual(["next"]));
+  });
+
+  it("drops events still queued for a handler once it unsubscribes", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+    const started: string[] = [];
+    let releaseFirst!: () => void;
+    const unsubscribe = inbound.subscribe(async (event) => {
+      started.push(event.message.messageId);
+      if (event.message.messageId === "held") {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+    });
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "held" }));
+    service.epochs[0]!.deliver?.(message({ messageId: "queued" }));
+    await rs.waitFor(() => expect(started).toEqual(["held"]));
+
+    unsubscribe();
+    releaseFirst();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(started).toEqual(["held"]);
+  });
+
+  it("lets no slow or synchronously throwing handler hold up another subscriber", async () => {
+    const service = talkKind("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+
+    // Never settles: a subscriber stuck on the first event.
+    inbound.subscribe(() => new Promise<void>(() => {}));
+    // Throws before it returns a promise.
+    inbound.subscribe((() => {
+      throw new Error("sync boom");
+    }) as unknown as (event: InboundEvent) => Promise<void>);
+    const heard: string[] = [];
+    inbound.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "first" }));
+    service.epochs[0]!.deliver?.(message({ messageId: "second" }));
+    await rs.waitFor(() => expect(heard).toEqual(["first", "second"]));
+  });
+});
+
+describe("joinLaterChannel", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => testDb?.close());
+
+  it("joins a second Connection's channel once, and its first message reaches a subscriber once", async () => {
+    testDb = createTestDb();
+    const service = talkKind("telegram");
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
+    registry.register(service.descriptor);
+    const first = await registry.connect("telegram");
+    const channelOf = (connection: Pick<Connection, "id" | "connectionKind">) =>
+      connection.id === first.id ? "telegram" : `later-${connection.id}`;
+    const admit = async () => true;
+    const channels = channelList({
+      db: testDb.db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      connections: { registry, admit, channelOf },
+    });
+    // What index.ts does: every channel a chat unlock adds, the hook hears.
+    const joined: string[] = [];
+    const heard: InboundEvent[] = [];
+    registry.onUnlocked("chat", (connection) => {
+      const channel = joinLaterChannel({ registry, admit, channelOf, channels }, connection);
+      if (!channel) return;
+      joined.push(channel.name);
+      channel.inbound!.subscribe(async (event) => {
+        heard.push(event);
+      });
+    });
+    const grant = { material: { token: "t" }, expiresAt: "never" as const };
+
+    await registry.giveGrant(first.connectionKind, first.id, "bot", grant);
+    expect(joined).toEqual([]);
+
+    const second = await registry.connectAnother("telegram");
+    await registry.giveGrant(second.connectionKind, second.id, "bot", grant);
+    expect(joined).toEqual([`later-${second.id}`]);
+    service.epochs[1]!.deliver?.(message({ messageId: "to the second bot" }));
+
+    await rs.waitFor(() => expect(heard).toHaveLength(1));
+    expect(heard[0]?.message.channel).toBe(`later-${second.id}`);
+    expect(heard[0]?.ref.connectionId).toBe(second.id);
+    // A second attachment would deliver each message twice.
+    service.epochs[1]!.deliver?.(message({ messageId: "next" }));
+    await rs.waitFor(() =>
+      expect(heard.map((event) => event.message.messageId)).toEqual(["to the second bot", "next"]),
+    );
+    expect(channels.filter((channel) => channel.name === `later-${second.id}`)).toHaveLength(1);
+  });
+
+  it("paces a later channel's writes with its Connection's pacer, so its replies can stream", async () => {
+    testDb = createTestDb();
+    const service = talkKind("telegram", {}, null, null, null, {
+      capabilities: {
+        maxPartLength: 10,
+        edit: false,
+        budget: { burst: 1, refillMs: 1, conversationSpacingMs: 0 },
+      },
+      codec: plainText,
+      create: async () => ({ messageId: "m", chatId: "c" }),
+    });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
+    registry.register(service.descriptor);
+    const connection = await registry.connect("telegram");
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    const pacing = new ConnectionPacing(systemClock, async () => true);
+
+    const channel = joinLaterChannel(
+      { registry, admit: async () => true, channelOf: () => "later", pacing, channels: [] },
+      connection,
+    );
+
+    expect(channel?.send?.replies?.pacer).toBe(pacing.pacerFor(connection));
+  });
+});

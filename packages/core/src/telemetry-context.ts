@@ -19,10 +19,6 @@ export interface SessionContext {
 
 const store = new AsyncLocalStorage<SessionContext>();
 
-export function currentSession(): SessionContext | undefined {
-  return store.getStore();
-}
-
 export function currentSessionId(): string | undefined {
   return store.getStore()?.sessionId;
 }
@@ -50,6 +46,17 @@ export function enterSession(sessionId: string): void {
  */
 export function runWithSession<T>(sessionId: string, fn: () => T): T {
   return store.run({ sessionId }, fn);
+}
+
+/**
+ * Run `fn` outside any session context. Async resources capture the context
+ * they are created in, so a timer registered during a session's turn would
+ * stamp every later autonomous fire with that session's id. Wrap the start of
+ * work that belongs to no session (routine fires) so its spans and logs carry
+ * none.
+ */
+export function runWithoutSession<T>(fn: () => T): T {
+  return store.exit(fn);
 }
 
 /**

@@ -2,20 +2,84 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { useState } from "react";
+import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { romeNewsConfig } from "@/config/quick-entries";
+import { loadNewChatDraft, saveNewChatDraft } from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
-import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
+import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
+import * as chatModule from "./Chat" with { rstest: "importActual" };
+import type { ChatProps } from "./Chat";
+import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
 
+// Host-wiring tests drive Chat's callbacks through this stub. The draft tests
+// mount the real Chat, because the draft composer lives inside it.
+const chatStub = rs.hoisted(() => ({ enabled: false }));
+
+function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatProps) {
+  return (
+    <>
+      <div data-testid="session-chat">{mainAgentDisplayName}</div>
+      <button type="button" onClick={() => onSessionNotFound?.(sessionId ?? "")}>
+        Missing session
+      </button>
+      <button type="button" onClick={() => onSessionNotFound?.("missing-child")}>
+        Missing child
+      </button>
+    </>
+  );
+}
+
 rs.mock("./Chat", () => ({
-  Chat: ({ mainAgentDisplayName }: { mainAgentDisplayName?: string }) => (
-    <div data-testid="session-chat">{mainAgentDisplayName}</div>
-  ),
+  Chat: (props: ChatProps) =>
+    chatStub.enabled ? <StubChat {...props} /> : <chatModule.Chat {...props} />,
 }));
+
+// jsdom has no element scrolling, which the real hook drives on every send.
+rs.mock("@/hooks/use-stick-to-bottom", () => ({
+  useStickToBottom: () => ({
+    contentRef: rs.fn(),
+    scrollRef: rs.fn(),
+    isAtBottom: true,
+    scrollToBottom: rs.fn(),
+  }),
+}));
+
+rs.mock("@/hooks/use-tab-status", () => ({
+  useChatTabStatus: rs.fn(),
+}));
+
+rs.mock("@/components/agent-trace/TraceDrawer", () => ({
+  TraceDrawer: () => null,
+}));
+
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
+}));
+
+rs.mock("@/components/chat/MessageList", () => ({
+  MessageList: () => <div data-testid="message-list" />,
+  findActiveSubmission: () => null,
+  findLastSubmission: () => null,
+  hasPendingApprovalConfirmation: () => false,
+}));
+
+function LocationProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="chat-location" data-state={JSON.stringify(location.state)}>
+      {location.pathname}
+      {location.search} {navigationType}
+    </output>
+  );
+}
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -29,10 +93,26 @@ beforeAll(async () => {
 
 afterEach(async () => {
   cleanup();
+  chatStub.enabled = false;
+  romeNewsConfig.enabled = false;
   localStorage.clear();
+  sessionStorage.clear();
   rs.restoreAllMocks();
+  rs.unstubAllGlobals();
   await i18n.changeLanguage("en");
 });
+
+function stubCoarsePointer() {
+  rs.stubGlobal(
+    "matchMedia",
+    rs.fn((query: string) => ({
+      matches: query === "(hover: none) and (pointer: coarse)",
+      media: query,
+      addEventListener: rs.fn(),
+      removeEventListener: rs.fn(),
+    })),
+  );
+}
 
 const testNewsFeed = {
   version: 1,
@@ -48,13 +128,54 @@ const testNewsFeed = {
   ],
 };
 
+// Passes a created session back as `sessionId`, as FreeGrid does.
+function ChatHost({
+  sessionId: initialSessionId,
+  onSessionCreated,
+  ...props
+}: Partial<ChatComponentProps>) {
+  const [sessionId, setSessionId] = useState(initialSessionId);
+  const { state } = useLocation();
+  return (
+    <ChatComponent
+      initialDraftText={state?.draft}
+      initialSkillName={state?.skill}
+      initialProjectName={state?.projectPath}
+      initialAgentMention={state?.agentMention}
+      {...props}
+      sessionId={sessionId}
+      onSessionCreated={(id) => {
+        setSessionId(id);
+        onSessionCreated?.(id);
+      }}
+    />
+  );
+}
+
+// The chat always sits in a tool workspace; this one has a collapsed pane.
+const toolPane: ToolTraceHost = {
+  outlet: null,
+  paneOpen: false,
+  setPaneCollapsed: () => {},
+  reveal: () => {},
+  set: () => {},
+};
+
 function renderChatComponent(
   props: Partial<ChatComponentProps> = {},
   homeData?: {
     sessions: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
+    createSession?: () => Response | Promise<Response>;
+    postTurn?: () => Response;
+    // Holds the Rome News feed back until it resolves.
+    newsGate?: Promise<void>;
+    settings?: Record<string, unknown>;
+    // Answers `/api/concierge/session` once it resolves; a chat's messages 404 until then.
+    conciergeCreated?: Promise<void>;
   },
+  initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -62,13 +183,19 @@ function renderChatComponent(
     },
   });
 
+  let conciergeExists = !homeData?.conciergeCreated;
   const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
     if (url === "/api/settings") {
-      return Response.json({ guardianName: "Ada", agentName: "Atlas" });
+      return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
+    }
+    if (url === "/api/concierge/session") {
+      await homeData?.conciergeCreated;
+      conciergeExists = true;
+      return Response.json({ id: "concierge", unread: 0 });
     }
     if (url === "/api/people") {
       return Response.json({
@@ -76,17 +203,37 @@ function renderChatComponent(
         counts: { all: 0, guardian: 0, "inner-circle": 0, acquaintance: 0, other: 0 },
       });
     }
+    if (url === "/api/chat/sessions" && init?.method === "POST") {
+      return homeData?.createSession?.() ?? Response.json({ id: "new-session" });
+    }
     if (url === "/api/chat/sessions") {
       return Response.json(homeData?.sessions ?? []);
     }
-    if (url === "/api/chat/projects") {
+    if (/\/api\/chat\/sessions\/[^/]+\/messages(\?.*)?$/.test(url)) {
+      if (url.includes("/concierge/messages") && !conciergeExists) {
+        return Response.json({ error: "Session not found" }, { status: 404 });
+      }
+      return url.includes("limit=")
+        ? Response.json({ messages: [], nextCursor: null })
+        : Response.json([]);
+    }
+    if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
+      return init?.method === "POST"
+        ? (homeData?.postTurn?.() ?? Response.json({ turnId: "turn-1" }))
+        : Response.json([]);
+    }
+    if (url === "/api/chat/locations") {
       return Response.json({
-        rootPath: "/projects",
-        defaultPath: "/projects/default",
-        projects: homeData?.projects ?? [],
+        projects: {
+          rootPath: "/projects",
+          defaultPath: "/projects/default",
+          projects: homeData?.projects ?? [],
+        },
+        devices: null,
       });
     }
     if (url.endsWith("/api/rome-news")) {
+      await homeData?.newsGate;
       return homeData?.newsFeed === undefined
         ? Response.json({}, { status: 404 })
         : Response.json(homeData.newsFeed);
@@ -101,9 +248,12 @@ function renderChatComponent(
   }) as typeof fetch);
 
   const result = render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
-        <ChatComponent onSessionCreated={() => {}} {...props} />
+        <ToolTraceContext.Provider value={toolPane}>
+          <ChatHost {...props} />
+        </ToolTraceContext.Provider>
+        <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -139,6 +289,10 @@ describe("ChatComponent draft file drops", () => {
 });
 
 describe("ChatComponent agent identity", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
+
   it("passes the onboarding agent name from settings into an existing chat", async () => {
     renderChatComponent({ sessionId: "session-1" });
 
@@ -146,149 +300,161 @@ describe("ChatComponent agent identity", () => {
   });
 });
 
-describe("ChatComponent empty home", () => {
-  it("shows horizontally scrollable pinned chats and Rome News above a bottom composer", async () => {
-    const user = userEvent.setup();
-    const homeData = {
-      sessions: [
-        {
-          id: "session-pinned",
-          name: "Pinned planning chat",
-          personaId: null,
-          projectName: "alpha",
-          projectPath: "alpha",
-          agentName: null,
-          archivedAt: null,
-          pinnedAt: "2026-07-24T12:00:00.000Z",
-          createdAt: "2026-07-24T10:00:00.000Z",
-          activityAt: "2026-07-24T12:00:00.000Z",
-          lastSeenActivityAt: null,
-          unread: false,
-          messageCount: 2,
-        },
-        {
-          id: "session-pinned-2",
-          name: "Pinned launch chat",
-          personaId: null,
-          projectName: "",
-          projectPath: "",
-          agentName: null,
-          archivedAt: null,
-          pinnedAt: "2026-07-24T11:00:00.000Z",
-          createdAt: "2026-07-24T09:00:00.000Z",
-          activityAt: "2026-07-24T11:00:00.000Z",
-          lastSeenActivityAt: null,
-          unread: false,
-          messageCount: 1,
-        },
-      ],
-      projects: [
-        {
-          name: "alpha",
-          displayName: "Alpha project",
-          projectPath: "alpha",
-          path: "/projects/alpha",
-        },
-      ],
-      newsFeed: testNewsFeed,
-    };
+describe("ChatComponent missing sessions", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
 
-    const { fetchSpy } = renderChatComponent({}, homeData);
+  it.each(["", "?hideSidebar=1"])("replaces a missing chat URL with home%s", (search) => {
+    renderChatComponent({ sessionId: "session-1" }, undefined, `/chat/session-1${search}`);
 
-    const greeting = await screen.findByText("Hi Ada,");
-    expect(greeting.previousElementSibling?.getAttribute("data-testid")).toBe("rome-logo");
-    expect(greeting.classList.contains("text-display")).toBe(true);
-    expect(greeting.className).not.toMatch(/(?:^|\s)(?:text-2xl|font-light|leading-tight)(?:\s|$)/);
-    expect(greeting.className).not.toContain("md:text-[1.75rem]");
-    const hero = greeting.nextElementSibling;
-    expect(hero?.className).toBe(
-      "rome-empty-rise mt-1 font-serif text-[2.65rem] font-normal leading-[1.05] tracking-[-0.025em] text-foreground md:text-[3.35rem]",
-    );
-    expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
-    expect(screen.getByText("Pinned launch chat")).toBeTruthy();
-    expect(screen.queryByText("Pinned projects")).toBeNull();
-    expect(screen.queryByText("Alpha project")).toBeNull();
-    expect(screen.getByText("Rome News")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
 
-    const pinnedRail = document.querySelector('[data-horizontal-scroll="pinned-chats"]');
-    const newsRail = document.querySelector('[data-horizontal-scroll="rome-news"]');
-    expect(pinnedRail?.classList.contains("overflow-x-auto")).toBe(true);
-    expect(pinnedRail?.className).toContain("scrollbar-width:none");
-    // The WebKit scrollbar hides via display, not a zero-height box: the box
-    // size scale (docs/ui/primitive-token/box-size-primitives.md) has no zero.
-    expect(pinnedRail?.className).toContain("scrollbar]:hidden");
-    expect(pinnedRail?.className).not.toContain("scrollbar]:h-0");
-    expect(pinnedRail?.className).not.toContain("snap-");
-    expect(pinnedRail?.parentElement?.classList.contains("overflow-visible")).toBe(true);
-    expect(pinnedRail?.children).toHaveLength(2);
-    expect(newsRail?.classList.contains("overflow-x-auto")).toBe(true);
-    expect(newsRail?.className).toContain("scrollbar-width:none");
-    expect(newsRail?.className).toContain("scrollbar]:hidden");
-    expect(newsRail?.className).not.toContain("scrollbar]:h-0");
-    expect(newsRail?.parentElement?.classList.contains("overflow-visible")).toBe(true);
-    expect(newsRail?.firstElementChild?.className).toContain("w-[min(58.5vw,13.5rem)]");
-    expect(newsRail?.firstElementChild?.className).toContain("sm:w-[13.5rem]");
-    const pinnedHeading = screen.getByRole("heading", { name: "Pinned chats" });
-    const newsHeading = screen.getByRole("heading", { name: "Rome News" });
-    expect(pinnedHeading.classList.contains("text-aux")).toBe(true);
-    expect(newsHeading.classList.contains("text-aux")).toBe(true);
-    expect(pinnedHeading.className).not.toMatch(/(?:^|\s)(?:text-sm|font-semibold)(?:\s|$)/);
-    expect(newsHeading.className).not.toMatch(/(?:^|\s)(?:text-sm|font-semibold)(?:\s|$)/);
-    const pinnedTitle = screen.getByText("Pinned planning chat");
-    expect(pinnedTitle.classList.contains("text-ui")).toBe(true);
-    expect(pinnedTitle.className).not.toMatch(/(?:^|\s)(?:text-sm|font-medium)(?:\s|$)/);
-    expect(screen.getByText("alpha").classList.contains("text-aux")).toBe(true);
-    expect(pinnedHeading.nextElementSibling?.classList.contains("text-aux")).toBe(true);
-    expect(screen.getByRole("button", { name: "Cloud announcement" }).className).toContain(
-      "[&_.rome-news-item-subtitle]:!text-ui",
-    );
-    expect(screen.queryByText("Ideas and shortcuts")).toBeNull();
+    expect(screen.getByTestId("chat-location").textContent).toBe(`/chat${search} REPLACE`);
+  });
 
-    if (!(pinnedRail instanceof HTMLElement)) throw new Error("Pinned chat rail was not rendered");
-    Object.defineProperty(pinnedRail, "clientWidth", { configurable: true, value: 300 });
-    Object.defineProperty(pinnedRail, "scrollWidth", { configurable: true, value: 800 });
-
-    fireEvent.scroll(pinnedRail);
-    expect(pinnedRail.dataset.scrollLeft).toBe("false");
-    expect(pinnedRail.dataset.scrollRight).toBe("true");
-    expect(pinnedRail.style.getPropertyValue("--scroll-fade-mask")).toBe(
-      "linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%)",
+  it("keeps the parent chat open when a handoff child is missing", () => {
+    const onSessionNotFound = rs.fn();
+    renderChatComponent(
+      { sessionId: "session-1", onSessionNotFound },
+      undefined,
+      "/chat/session-1",
     );
 
-    pinnedRail.scrollLeft = 200;
-    fireEvent.scroll(pinnedRail);
-    expect(pinnedRail.dataset.scrollLeft).toBe("true");
-    expect(pinnedRail.dataset.scrollRight).toBe("true");
-    expect(pinnedRail.style.getPropertyValue("--scroll-fade-mask")).toBe(
-      "linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%)",
+    fireEvent.click(screen.getByRole("button", { name: "Missing child" }));
+
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/session-1 POP");
+  });
+
+  it("lets a pinned chat remove its card without leaving the current page", () => {
+    const onSessionNotFound = rs.fn();
+    renderChatComponent(
+      { sessionId: "pinned-session", onSessionNotFound },
+      undefined,
+      "/chat/main",
     );
 
-    pinnedRail.scrollLeft = 500;
-    fireEvent.scroll(pinnedRail);
-    expect(pinnedRail.dataset.scrollLeft).toBe("true");
-    expect(pinnedRail.dataset.scrollRight).toBe("false");
-    expect(pinnedRail.style.getPropertyValue("--scroll-fade-mask")).toBe(
-      "linear-gradient(to right, transparent 0, black 24px, black 100%)",
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(onSessionNotFound).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/main POP");
+  });
+});
+
+describe("ChatComponent Concierge", () => {
+  const messageFetches = (spy: ReturnType<typeof renderChatComponent>["fetchSpy"]) =>
+    spy.mock.calls.filter(([input]) =>
+      String(input).includes("/api/chat/sessions/concierge/messages"),
     );
-    expect(pinnedRail.parentElement?.querySelector("[data-scroll-edge]")).toBeNull();
 
-    const sendButton = screen.getByRole("button", { name: "Send" });
-    expect(sendButton.closest(".sticky")).toBeTruthy();
+  it("loads the messages while the chat is still being created", async () => {
+    let created!: () => void;
+    const conciergeCreated = new Promise<void>((resolve) => {
+      created = resolve;
+    });
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true }, conciergeCreated },
+      "/chat/concierge",
+    );
 
-    await user.click(screen.getByRole("button", { name: "Unpin Pinned planning chat" }));
+    await waitFor(() => expect(messageFetches(fetchSpy).length).toBeGreaterThan(0));
+    expect(fetchSpy.mock.calls.some(([input]) => String(input) === "/api/concierge/session")).toBe(
+      true,
+    );
+    created();
+  });
+
+  it("waits for the chat to be created and asks again when the first load finds none", async () => {
+    let created!: () => void;
+    const conciergeCreated = new Promise<void>((resolve) => {
+      created = resolve;
+    });
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true }, conciergeCreated },
+      "/chat/concierge",
+    );
+    await waitFor(() => expect(messageFetches(fetchSpy)).toHaveLength(1));
+
+    await act(async () => created());
+
+    await waitFor(() => expect(messageFetches(fetchSpy)).toHaveLength(2));
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/concierge POP");
+  });
+
+  it("leaves for a new chat when the instance has Concierge off", async () => {
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], conciergeCreated: new Promise<void>(() => {}) },
+      "/chat/concierge",
+    );
+
     await waitFor(() =>
-      expect(
-        fetchSpy.mock.calls.some(
-          ([url, init]) =>
-            String(url) === "/api/chat/sessions/session-pinned/pin" &&
-            init?.method === "PATCH" &&
-            String(init.body).includes('"pinned":false'),
-        ),
-      ).toBe(true),
+      expect(screen.getByTestId("chat-location").textContent).toBe("/chat REPLACE"),
     );
+    expect(fetchSpy.mock.calls.some(([input]) => String(input) === "/api/concierge/session")).toBe(
+      false,
+    );
+  });
+});
+
+describe("ChatComponent empty home", () => {
+  const pinnedSession = {
+    id: "session-pinned",
+    name: "Pinned planning chat",
+    personaId: null,
+    projectName: "",
+    projectPath: "",
+    agentName: null,
+    archivedAt: null,
+    pinnedAt: "2026-07-24T12:00:00.000Z",
+    createdAt: "2026-07-24T10:00:00.000Z",
+    activityAt: "2026-07-24T12:00:00.000Z",
+    lastSeenActivityAt: null,
+    unread: false,
+    messageCount: 2,
+  };
+  it("focuses the draft composer so typing works without a click", async () => {
+    const user = userEvent.setup();
+    renderChatComponent();
+
+    const composer = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(composer);
+
+    await user.keyboard("Hello Rome");
+    expect((composer as HTMLTextAreaElement).value).toBe("Hello Rome");
+  });
+
+  it("does not autofocus the draft composer on touch devices", () => {
+    stubCoarsePointer();
+    renderChatComponent();
+
+    expect(document.activeElement).not.toBe(screen.getByRole("textbox"));
+  });
+
+  it("prefills a draft without focusing the composer on touch devices", () => {
+    stubCoarsePointer();
+    renderChatComponent({ initialDraftText: "Plan a trip" });
+
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(composer.value).toBe("Plan a trip");
+    expect(document.activeElement).not.toBe(composer);
+  });
+
+  it("shows Rome News but not pinned chats, which live in the sidebar", async () => {
+    romeNewsConfig.enabled = true;
+    renderChatComponent({}, { sessions: [pinnedSession], projects: [], newsFeed: testNewsFeed });
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Rome News" })).toBeTruthy();
+    expect(screen.queryByText("Pinned planning chat")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Pinned chats" })).toBeNull();
   });
 
   it("uses the complete Rome Cloud feed and resolves locale in the browser", async () => {
+    romeNewsConfig.enabled = true;
     const { fetchSpy } = renderChatComponent(
       {},
       {
@@ -328,7 +494,65 @@ describe("ChatComponent empty home", () => {
     expect(String(newsRequests[0][0])).not.toContain("locale=");
   });
 
+  it("does not fetch or show Rome News while it is disabled", async () => {
+    const { fetchSpy } = renderChatComponent(
+      {},
+      { sessions: [], projects: [], newsFeed: testNewsFeed },
+    );
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Rome News" })).toBeNull();
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).endsWith("/api/rome-news"))).toBe(
+      false,
+    );
+  });
+
+  const centerSpacer = () => document.querySelector("[data-draft-center-spacer]");
+
+  it("centers the composer with a greeting-only home and remembers it", async () => {
+    renderChatComponent({}, { sessions: [], projects: [] });
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(centerSpacer()).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("true"));
+  });
+
+  it("keeps the composer centered with only pinned chats, and remembers it", async () => {
+    renderChatComponent({}, { sessions: [pinnedSession], projects: [] });
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(centerSpacer()).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("true"));
+  });
+
+  it("docks the composer beside Rome News and remembers it", async () => {
+    romeNewsConfig.enabled = true;
+    renderChatComponent({}, { sessions: [], projects: [], newsFeed: testNewsFeed });
+
+    expect(await screen.findByText("Cloud announcement")).toBeTruthy();
+    expect(centerSpacer()).toBeNull();
+    await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("false"));
+  });
+
+  it("keeps the remembered docked layout while Rome News loads", async () => {
+    romeNewsConfig.enabled = true;
+    localStorage.setItem(GREETING_ONLY_HOME_KEY, "false");
+    let releaseNews = () => {};
+    const newsGate = new Promise<void>((resolve) => {
+      releaseNews = resolve;
+    });
+    renderChatComponent({}, { sessions: [], projects: [], newsFeed: testNewsFeed, newsGate });
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(centerSpacer()).toBeNull();
+
+    releaseNews();
+    expect(await screen.findByText("Cloud announcement")).toBeTruthy();
+    expect(centerSpacer()).toBeNull();
+  });
+
   it("hides Rome News when Rome Cloud publishes an empty feed", async () => {
+    romeNewsConfig.enabled = true;
     renderChatComponent(
       {},
       {
@@ -341,18 +565,8 @@ describe("ChatComponent empty home", () => {
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Rome News" })).toBeNull());
   });
 
-  it("does not carry a bundled Rome News fallback when Rome Cloud is unavailable", async () => {
-    const { fetchSpy } = renderChatComponent({}, { sessions: [], projects: [] });
-
-    await waitFor(() =>
-      expect(fetchSpy.mock.calls.some(([input]) => String(input).endsWith("/api/rome-news"))).toBe(
-        true,
-      ),
-    );
-    expect(screen.queryByRole("heading", { name: "Rome News" })).toBeNull();
-  });
-
   it("executes chat, App Store, and link actions from Cloud definitions", async () => {
+    romeNewsConfig.enabled = true;
     const user = userEvent.setup();
     const openSpy = rs.spyOn(window, "open").mockImplementation(() => null);
     const image = "https://public-assets.romeos.cc/assets/daily-summary-2.png";
@@ -403,5 +617,187 @@ describe("ChatComponent empty home", () => {
 
     await user.click(screen.getByRole("button", { name: "Cloud link" }));
     expect(openSpy).toHaveBeenCalledWith("https://romeos.cc/blog", "_blank", "noopener,noreferrer");
+  });
+});
+
+describe("ChatComponent first send", () => {
+  it("keeps the focused composer through the session the first send creates", async () => {
+    const user = userEvent.setup();
+    const onSessionCreated = rs.fn();
+    const { fetchSpy } = renderChatComponent({ onSessionCreated });
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(composer);
+
+    await user.keyboard("Hello Rome{Enter}");
+
+    expect(await screen.findByTestId("message-list")).toBeTruthy();
+    expect(onSessionCreated).toHaveBeenCalledWith("new-session");
+    const turnPost = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        String(url) === "/api/chat/sessions/new-session/turns" && init?.method === "POST",
+    );
+    expect((turnPost?.[1]?.body as FormData | undefined)?.get("text")).toBe("Hello Rome");
+    expect(screen.getByRole("textbox")).toBe(composer);
+    expect(document.activeElement).toBe(composer);
+    expect(composer.value).toBe("");
+  });
+
+  it("keeps the draft and restores the input when the session cannot be created", async () => {
+    const user = userEvent.setup();
+    const onSessionCreated = rs.fn();
+    const { fetchSpy } = renderChatComponent(
+      { onSessionCreated },
+      {
+        sessions: [],
+        projects: [],
+        createSession: () => Response.json({ error: "Chat limit reached" }, { status: 500 }),
+      },
+    );
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+    await user.keyboard("Hello Rome{Enter}");
+
+    expect(await screen.findByText("Chat limit reached")).toBeTruthy();
+    expect(composer.value).toBe("Hello Rome");
+    expect(loadNewChatDraft()?.text).toBe("Hello Rome");
+    expect(screen.getByRole("textbox")).toBe(composer);
+    expect(screen.queryByTestId("message-list")).toBeNull();
+    expect(onSessionCreated).not.toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).endsWith("/turns"))).toBe(false);
+  });
+});
+
+describe("New chat draft boundaries", () => {
+  it("replaces explicit prefill fields and consumes history state", async () => {
+    saveNewChatDraft({
+      version: 1,
+      text: "saved",
+      projectPath: "old-project",
+      agentMention: null,
+      skill: { name: "old-skill" },
+      personaId: "",
+    });
+    const agentMention = { appId: "app", agentName: "agent", appLabel: "App" };
+    renderChatComponent({}, undefined, {
+      pathname: "/chat",
+      state: { draft: "explicit", skill: "new-skill", projectPath: "new-project", agentMention },
+    });
+    await waitFor(() =>
+      expect(loadNewChatDraft()).toMatchObject({
+        text: "explicit",
+        projectPath: "new-project",
+        skill: { name: "new-skill" },
+        agentMention,
+      }),
+    );
+    expect(screen.getByTestId("chat-location").getAttribute("data-state")).toBe("null");
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "edited" } });
+    expect(loadNewChatDraft()?.text).toBe("edited");
+  });
+
+  it("consumes prefill and widget keys while preserving other history state", async () => {
+    const otherState = { futureKey: { keep: true } };
+    renderChatComponent({}, undefined, {
+      pathname: "/chat",
+      state: {
+        ...otherState,
+        widgets: [{ type: "app", appId: "app" }],
+        draft: "explicit",
+        skill: "skill",
+        projectPath: "project",
+        agentMention: { appId: "app", agentName: "agent", appLabel: "App" },
+        agentName: "agent",
+      },
+    });
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId("chat-location").getAttribute("data-state")!)).toEqual(
+        otherState,
+      ),
+    );
+    expect(loadNewChatDraft()?.text).toBe("explicit");
+  });
+
+  it("text-only prefill removes the saved skill", async () => {
+    saveNewChatDraft({
+      version: 1,
+      text: "saved",
+      projectPath: "default",
+      agentMention: null,
+      skill: { name: "old-skill" },
+      personaId: "",
+    });
+    renderChatComponent({}, undefined, { pathname: "/chat", state: { draft: "explicit" } });
+    await waitFor(() =>
+      expect(loadNewChatDraft()).toMatchObject({ text: "explicit", skill: null }),
+    );
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
+  it("skill-only prefill keeps the saved text", async () => {
+    saveNewChatDraft({
+      version: 1,
+      text: "unsent task",
+      projectPath: "default",
+      agentMention: null,
+      skill: null,
+      personaId: "",
+    });
+    renderChatComponent({}, undefined, { pathname: "/chat", state: { skill: "new-skill" } });
+    await waitFor(() =>
+      expect(loadNewChatDraft()).toMatchObject({
+        text: "unsent task",
+        skill: { name: "new-skill" },
+      }),
+    );
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("unsent task");
+  });
+
+  it("does not resurrect a failed first turn after the session exists and a retry succeeds", async () => {
+    let attempts = 0;
+    renderChatComponent(
+      {},
+      {
+        sessions: [],
+        projects: [],
+        postTurn: () =>
+          ++attempts === 1
+            ? Response.json({ error: "try again" }, { status: 500 })
+            : Response.json({ turnId: "turn-1" }),
+      },
+    );
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "retry me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("retry me"),
+    );
+    expect(loadNewChatDraft()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(loadNewChatDraft()).toBeNull();
+  });
+
+  it("posts the first turn even if navigation unmounts the composer during creation", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const creation = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const { unmount, fetchSpy } = renderChatComponent(
+      {},
+      { sessions: [], projects: [], createSession: () => creation },
+    );
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "complete this send" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    unmount();
+    await act(async () => resolveCreate(Response.json({ id: "created-after-leaving" })));
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/api/chat/sessions/created-after-leaving/turns" &&
+            init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(loadNewChatDraft()).toBeNull();
   });
 });

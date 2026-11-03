@@ -1,4 +1,4 @@
-// Connection setup coroutine pump. Messaging model: docs/concepts/messaging.md.
+// Connection setup coroutine pump. Vocabulary: docs/domains/connections.md.
 //
 // One session drives one builder-written `setup(interact, ctx)` coroutine.
 // The pump suspends the coroutine at each verb; the pending verb IS the
@@ -7,10 +7,10 @@
 // is what a cold re-attach renders while the coroutine is blocked inside a
 // `ctx.step` external-event wait.
 //
-// Terminal conferral: the coroutine's `return` is the ONE durable write. The
-// pump calls `commit` with the returned conferral and only then reports `done` —
+// Terminal grant: the coroutine's `return` is the ONE durable write. The
+// pump calls `commit` with the returned grant and only then reports `done` —
 // so `done` is never observable before the ledger write lands. Abandoning or
-// cancelling runs no commit at all: nothing half-conferred is ever observable.
+// cancelling runs no commit at all: nothing half-granted is ever observable.
 //
 // Cancellation genuinely interrupts: `cancel()` aborts the setup signal
 // (rejecting an in-flight `ctx.step` wait via a race even if its `fn` ignores
@@ -18,7 +18,7 @@
 // coroutine unwinds to `cancelled`.
 
 import type {
-  SetupConferral,
+  SetupGrant,
   SetupContext,
   SetupFn,
   SetupForm,
@@ -51,10 +51,13 @@ export interface SetupSessionDeps {
   /** The builder's coroutine. */
   fn: SetupFn;
   /** The single durable write, run exactly once when the coroutine returns. A
-   *  throw here fails the setup (nothing partial is left observable). */
-  commit: (conferral: SetupConferral, signal: AbortSignal) => Promise<void>;
+   *  throw here fails the setup (nothing partial is left observable). It
+   *  answers the id of the connection it wrote, which `done` reports. */
+  commit: (grant: SetupGrant, signal: AbortSignal) => Promise<string | void>;
   /** Optional override of the default working view (progress snapshot). */
   workingView?: SetupView;
+  /** The setup renews a connection that already names its account. */
+  renewing?: boolean;
 }
 
 type PendingKind = "input" | "redirect";
@@ -155,12 +158,16 @@ export class SetupSession {
     const ctx: SetupContext = {
       signal: this.#abort.signal,
       step: (label, fn) => this.#step(label, fn),
+      renewing: this.#deps.renewing === true,
     };
     try {
-      const conferral = await this.#deps.fn(interact, ctx);
+      const grant = await this.#deps.fn(interact, ctx);
       // The one durable write; `done` is set only after it resolves.
-      await this.#deps.commit(conferral, this.#abort.signal);
-      this.#terminate({ status: "done", conferral: { summary: conferral.summary } });
+      const connectionId = await this.#deps.commit(grant, this.#abort.signal);
+      this.#terminate({
+        status: "done",
+        grant: { summary: grant.summary, ...(connectionId ? { connectionId } : {}) },
+      });
     } catch (err) {
       if (this.#abort.signal.aborted) {
         this.#terminate({ status: "cancelled" });

@@ -1,47 +1,62 @@
-// Connection management HTTP surface. Messaging model: docs/concepts/messaging.md.
+// Connection management HTTP surface. Vocabulary: docs/domains/connections.md.
 //
 // One list for everything the ConnectionRegistry holds — channels and OAuth
 // integrations alike — the sole feed for the dashboard's Connections surface.
-// Registered services with no connection row yet appear as offerable
+// Registered connection kinds with no connection row yet appear as offerable
 // placeholders (`id: null`) so a fresh install still renders the full catalog.
-// The projection speaks registry vocabulary (GrantState / CapabilityStatus)
+// The projection speaks registry vocabulary (ConnectionState / CapabilityStatus)
 // verbatim; identity only ever crosses through the descriptor's `reviveProfile`
-// hook, so no service-owned profile field name is known here. No POST — minting
-// stays in the connect setup.
+// hook, so no kind-specific profile field name is known here. Minting stays in
+// the connect setup, a later account of a connection kind included.
 
+import type { AccountValue, ConnectionAccountFields } from "@rome/api-types/connected-accounts";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
-import { removeProviderAccount } from "../../lib/provider-accounts.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
-import type { GrantRecord } from "../../connections/ledger.js";
-import type { DrizzleTx } from "../../db/index.js";
+import type { GrantValue } from "../../connections/grant.js";
+import { reachedAccount } from "../../connections/connection.js";
 import type {
   Capability,
   CapabilityStatus,
   Connection,
   ConnectionDescriptor,
+  ConnectionState,
   GrantName,
   GrantState,
 } from "../../connections/types.js";
 import type { SetupManager } from "../../connections/setup/manager.js";
+import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
+import { accountLinkOf } from "../../channels/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
 
+/** What a connection lets Rome do, by capability. `talk` repeats `chat` under
+ *  its old name for dashboard tabs opened before the rename. */
+type WireCapabilities = Record<Capability, CapabilityStatus> & {
+  /** @deprecated Read `chat`. */
+  talk: CapabilityStatus;
+};
+
+function wireCapabilities(status: Record<Capability, CapabilityStatus>): WireCapabilities {
+  return { ...status, talk: status.chat };
+}
+
 /** Per-grant active-setup ids for a connection.
- *  `idOrService` is the connection id for a real connection, or the service name
+ *  `idOrKind` is the connection id for a real connection, or the connection kind
  *  for an offerable placeholder (the same key the setup route addresses).
  *  Empty when no manager is wired or no setup is live. */
 function activeSetups(
   manager: SetupManager | null,
-  idOrService: string,
+  idOrKind: string,
   grantNames: string[],
 ): Record<GrantName, string> {
   const out: Record<GrantName, string> = {};
   if (!manager) return out;
   for (const name of grantNames) {
-    const cid = manager.activeFor(idOrService, name);
+    const cid = manager.activeFor(idOrKind, name);
     if (cid) out[name] = cid;
   }
   return out;
@@ -56,8 +71,8 @@ interface GrantDisplayView {
   avatarUrl: string | null;
 }
 
-/** Where the guardian goes to (re-)confer this connection's grants. Resolved
- *  server-side for Rome Cloud-brokered OAuth services; null for services whose
+/** Where the guardian goes to (re-)grant this connection's grants. Resolved
+ *  server-side for Rome Cloud-brokered OAuth connection kinds; null for connection kinds whose
  *  connect setup is dashboard-local (channels). */
 interface ConnectHint {
   url: string | null;
@@ -65,37 +80,49 @@ interface ConnectHint {
   unavailableReason: string | null;
 }
 
-interface ConnectionView {
+interface ConnectionView
+  extends Required<
+      Pick<ConnectionAccountFields, "channel" | "platform" | "account" | "link" | "severalAccounts">
+    >,
+    Pick<ConnectionAccountFields, "agent"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
-   *  service the guardian has never connected (nothing to address or tear down
+   *  connection kind the guardian has never connected (nothing to address or tear down
    *  yet; the connect setup mints the row). */
   id: string | null;
+  /** The kind of connection, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated The kind of connection under its old name, which apps built
+   *  before the rename read. */
   service: string;
   label: string;
+  /** Working or broken. Null for a placeholder, and for a connection a
+   *  disconnect kept with no access. */
+  state: ConnectionState | null;
+  /** @deprecated Per-grant states, which apps built before `state` read. */
   grants: Record<GrantName, GrantState>;
   /** One entry per declared grant: the revived display, or null when the grant
    *  has no stored profile or the descriptor exposes no projection. */
   display: Record<GrantName, GrantDisplayView | null>;
-  capabilities: Record<Capability, CapabilityStatus>;
+  capabilities: WireCapabilities;
   connect: ConnectHint | null;
-  /** Active-setup discovery: per grant, the id of the live conferral
+  /** Active-setup discovery: per grant, the id of the live grant
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
    *  starting a fresh one. Empty when no setup is in progress. */
   setups: Record<GrantName, string>;
 }
 
-/** Per-grant extras for the detail view — ledger envelope fields the list
+/** Per-grant extras for the detail view — grant envelope fields the list
  *  doesn't carry, normalized to ISO strings (no raw DB values). */
 interface GrantDetailView {
-  conferredAt: string | null;
+  grantedAt: string | null;
   lastRenewedAt: string | null;
   degraded: { at: string; reason: string } | null;
   tokenExpiresAt: string | null;
 }
 
-function connectHint(service: string): ConnectHint | null {
-  if (!isOAuthProvider(service)) return null;
-  const link = createRomeCloudOAuthStartUrl(service);
+function connectHint(connectionKind: string): ConnectHint | null {
+  if (!isOAuthProvider(connectionKind)) return null;
+  const link = createRomeCloudOAuthStartUrl(connectionKind);
   return {
     url: link.connectUrl,
     available: link.available,
@@ -103,28 +130,40 @@ function connectHint(service: string): ConnectHint | null {
   };
 }
 
-/** One ledger read per connection; both view builders below project from it. */
-async function loadGrantRecords(
+/** One grant read per connection; both view builders below project from it. */
+async function loadGrant(
   registry: ConnectionRegistry,
   conn: Connection,
-): Promise<Map<GrantName, GrantRecord>> {
-  const records = await registry.getLedger().listGrants(conn.id);
-  return new Map(records.map((rec) => [rec.name, rec]));
+): Promise<GrantValue | null> {
+  return registry.grantOf(conn.id);
+}
+
+/** The account `record`'s grant reaches, as the wire names it. */
+function accountView(
+  descriptor: ConnectionDescriptor | null,
+  record: GrantValue | null,
+): AccountValue | null {
+  const account = descriptor && record ? reachedAccount(descriptor, record) : undefined;
+  return account ? { platform: account.platform, id: account.accountId } : null;
 }
 
 function buildConnectionView(
   registry: ConnectionRegistry,
   conn: Connection,
-  records: Map<GrantName, GrantRecord>,
+  record: GrantValue | null,
   manager: SetupManager | null,
+  channel: string | null,
+  agent: string | null,
 ): ConnectionView {
-  const revive = registry.getDescriptor(conn.service)?.reviveProfile;
+  const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
+  const link = registry.getDescriptor(conn.connectionKind)?.link ?? null;
+  const account = accountView(registry.getDescriptor(conn.connectionKind), record);
   const grants = conn.auth.grants();
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
   for (const name of Object.keys(grants)) {
-    const profile = records.get(name)?.profile;
-    const revived = profile && revive ? revive(name, profile) : undefined;
+    const profile = record?.profile;
+    const revived = profile && revive ? revive(profile) : undefined;
     display[name] = revived
       ? {
           displayName: revived.displayName ?? null,
@@ -137,26 +176,34 @@ function buildConnectionView(
 
   return {
     id: conn.id,
-    service: conn.service,
+    connectionKind: conn.connectionKind,
+    service: conn.connectionKind,
     label: conn.label,
+    state: conn.state(),
     grants,
     display,
-    capabilities: conn.status(),
-    connect: connectHint(conn.service),
+    capabilities: wireCapabilities(conn.status()),
+    connect: connectHint(conn.connectionKind),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
+    channel,
+    platform: account?.platform ?? null,
+    account,
+    // Null means silent, so a connection kind that takes no link reports none.
+    agent: link === null ? undefined : agent,
+    link,
+    severalAccounts: registry.getDescriptor(conn.connectionKind)?.severalAccounts === true,
   };
 }
 
 function buildGrantDetails(
   conn: Connection,
-  records: Map<GrantName, GrantRecord>,
+  rec: GrantValue | null,
 ): Record<GrantName, GrantDetailView> {
   const details: Record<GrantName, GrantDetailView> = {};
   for (const name of Object.keys(conn.auth.grants())) {
-    const rec = records.get(name);
     const expiresAt = rec?.credential?.expiresAt;
     details[name] = {
-      conferredAt: rec?.conferredAt?.toISOString() ?? null,
+      grantedAt: rec?.grantedAt?.toISOString() ?? null,
       lastRenewedAt: rec?.lastRenewedAt?.toISOString() ?? null,
       degraded: rec?.degraded
         ? { at: rec.degraded.at.toISOString(), reason: rec.degraded.reason }
@@ -171,56 +218,62 @@ async function serializeConnection(
   registry: ConnectionRegistry,
   conn: Connection,
   manager: SetupManager | null,
+  channels: ChannelRecordsRepository,
+  accounts: ConnectedAccountsRepository,
 ): Promise<ConnectionView> {
-  return buildConnectionView(registry, conn, await loadGrantRecords(registry, conn), manager);
+  return buildConnectionView(
+    registry,
+    conn,
+    await loadGrant(registry, conn),
+    manager,
+    channels.byConnection(conn.id)?.id ?? null,
+    accounts.agentOf(conn.id),
+  );
 }
 
-/** An offerable placeholder: a registered service with no connection row yet.
- *  Mirrors exactly what a freshly minted connection would project — every grant
- *  unauthorized, every declared capability needs-auth (zero-need capabilities
- *  unlock at birth) — without writing a row: minting stays in the connect
- *  setup. */
+/** An offerable placeholder: a registered connection kind with no connection row yet.
+ *  Mirrors exactly what a freshly minted connection would project — its grant
+ *  unauthorized, every declared capability needs-auth — without writing a row:
+ *  minting stays in the connect setup. */
 function placeholderView(
-  service: string,
+  connectionKind: string,
   descriptor: ConnectionDescriptor,
   manager: SetupManager | null,
 ): ConnectionView {
-  const grantNames = Object.keys(descriptor.auth);
-  const grants: Record<GrantName, GrantState> = {};
-  const display: Record<GrantName, GrantDisplayView | null> = {};
-  for (const name of grantNames) {
-    grants[name] = "unauthorized";
-    display[name] = null;
-  }
+  const grants: Record<GrantName, GrantState> = { [descriptor.grant]: "unauthorized" };
+  const display: Record<GrantName, GrantDisplayView | null> = { [descriptor.grant]: null };
 
   const capStatus = (kind: "talker" | "actor" | "watcher"): CapabilityStatus => {
     const cap = descriptor.capabilities[kind];
     if (!cap) return { state: "unsupported" };
-    if (cap.needs.length > 0) return { state: "needs-auth", missingGrants: [...cap.needs] };
-    if (kind === "watcher" && descriptor.capabilities.watcher?.subscriptionGated) {
-      return { state: "needs-subscription" };
-    }
-    return { state: "unlocked" };
+    return { state: "needs-auth", missingGrants: [descriptor.grant] };
   };
 
   return {
     id: null,
-    service,
-    label: service,
+    connectionKind,
+    service: connectionKind,
+    label: connectionKind,
+    state: null,
     grants,
     display,
-    capabilities: {
-      talk: capStatus("talker"),
+    capabilities: wireCapabilities({
+      chat: capStatus("talker"),
       act: capStatus("actor"),
       watch: capStatus("watcher"),
-    },
-    connect: connectHint(service),
-    setups: activeSetups(manager, service, grantNames),
+    }),
+    connect: connectHint(connectionKind),
+    setups: activeSetups(manager, connectionKind, [descriptor.grant]),
+    channel: null,
+    platform: null,
+    account: null,
+    link: descriptor.link ?? null,
+    severalAccounts: descriptor.severalAccounts === true,
   };
 }
 
-/** The offerable catalog: every registered service with no connection row.
- *  OAuth-brokered services only appear when the host actually offers them
+/** The offerable catalog: every registered connection kind with no connection row.
+ *  OAuth-brokered connection kinds only appear when the host actually offers them
  *  (env-enabled) — their descriptors register unconditionally so an existing
  *  account's state imports regardless, but a placeholder is a connect
  *  invitation. */
@@ -229,12 +282,15 @@ function placeholderViews(
   manager: SetupManager | null,
 ): ConnectionView[] {
   return registry
-    .registeredServices()
-    .filter((service) => registry.find(service).length === 0)
-    .filter((service) => !isOAuthProvider(service) || isEnabledOAuthProvider(service))
-    .map((service) => {
-      const descriptor = registry.getDescriptor(service);
-      return descriptor ? placeholderView(service, descriptor, manager) : null;
+    .registeredKinds()
+    .filter((connectionKind) => registry.find(connectionKind).length === 0)
+    .filter(
+      (connectionKind) =>
+        !isOAuthProvider(connectionKind) || isEnabledOAuthProvider(connectionKind),
+    )
+    .map((connectionKind) => {
+      const descriptor = registry.getDescriptor(connectionKind);
+      return descriptor ? placeholderView(connectionKind, descriptor, manager) : null;
     })
     .filter((view): view is ConnectionView => view !== null);
 }
@@ -244,19 +300,37 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
 
   const findConnection = (registry: ConnectionRegistry, id: string): Connection | undefined =>
     registry.all().find((c) => c.id === id);
+  const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
+  const accounts = new ConnectedAccountsRepository(deps.db);
 
+  // `?platform=&accountId=` finds the connection that reaches an account, so
+  // it lists no placeholders. An account id means nothing without its platform.
   app.get("/connections", async (c) => {
     const registry = requireConnectionRegistry(deps);
     const manager = deps.setupManager ?? null;
-    const connected = await Promise.all(
-      registry.all().map((conn) => serializeConnection(registry, conn, manager)),
+    const platform = c.req.query("platform");
+    const accountId = c.req.query("accountId");
+    if (accountId !== undefined && platform === undefined) {
+      return c.json({ error: "Name the platform an account id is on." }, 400);
+    }
+    const connected = (
+      await Promise.all(
+        registry
+          .all()
+          .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+      )
+    ).filter(
+      (view) =>
+        (platform === undefined || view.account?.platform === platform) &&
+        (accountId === undefined || view.account?.id === accountId),
     );
-    // Stable ordering for the UI: by service, then label, then id — the
+    const placeholders = platform === undefined ? placeholderViews(registry, manager) : [];
+    // Stable ordering for the UI: by connection kind, then label, then id — the
     // registry's own iteration order is insertion-dependent. Placeholders sort
-    // like a connection whose label is its service name and whose id is empty.
-    const connections = [...connected, ...placeholderViews(registry, manager)].sort(
+    // like a connection whose label is its connection kind and whose id is empty.
+    const connections = [...connected, ...placeholders].sort(
       (a, b) =>
-        a.service.localeCompare(b.service) ||
+        a.connectionKind.localeCompare(b.connectionKind) ||
         a.label.localeCompare(b.label) ||
         (a.id ?? "").localeCompare(b.id ?? ""),
     );
@@ -268,39 +342,22 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
-    const records = await loadGrantRecords(registry, conn);
+    const record = await loadGrant(registry, conn);
     c.header("Cache-Control", "no-store");
     return c.json({
       connection: {
-        ...buildConnectionView(registry, conn, records, deps.setupManager ?? null),
-        grantDetails: buildGrantDetails(conn, records),
+        ...buildConnectionView(
+          registry,
+          conn,
+          record,
+          deps.setupManager ?? null,
+          channels.byConnection(conn.id)?.id ?? null,
+          accounts.agentOf(conn.id),
+        ),
+        grantDetails: buildGrantDetails(conn, record),
       },
     });
   });
-
-  /** Transitional: the boot reconciler re-imports a retained legacy
-   *  `provider_accounts` row over an unauthorized grant, so a teardown that
-   *  only touches the ledger would resurrect it on the next boot. Tearing
-   *  down an OAuth provider must also drop its legacy row until that table
-   *  is retired. */
-  const removeLegacyProviderRow = async (service: string): Promise<void> => {
-    if (isOAuthProvider(service)) await removeProviderAccount(deps.db, service);
-  };
-
-  /** Enlist pairing and mapping cleanup in connection deletion or Talk-grant
-   *  revocation. Unrelated grants have no cleanup participant. */
-  const guardianMappingTeardown = (
-    registry: ConnectionRegistry,
-    conn: Connection,
-    grant?: string,
-  ): ((tx: DrizzleTx) => void) | undefined => {
-    const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
-    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
-    return (tx) => {
-      deps.approvalsRepo.supersedePairings(conn.id, tx);
-      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
-    };
-  };
 
   app.delete("/connections/:id/grants/:name", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) {
@@ -312,23 +369,15 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const name = c.req.param("name");
     if (!(name in conn.auth.grants())) return c.json({ error: "Unknown grant." }, 404);
 
-    // Serialize teardown with any in-flight setup on this grant. First
-    // cancel a live setup OUTSIDE the section so it cannot re-import the
-    // credential after we revoke (a setup waiting at its guardian-link unwinds
-    // with no write; one already committing runs to `done` first, then our
-    // revoke below wins as the final state). Then run the revoke INSIDE the same
-    // per-(service, grant) critical section the setup's terminal write uses, so
-    // the two can never interleave.
+    // Cancel a live setup first, OUTSIDE the grant's section, so it cannot
+    // re-import the credential after the revoke (a setup waiting at its
+    // guardian-link unwinds with no write; one already committing runs to
+    // `done` first, then the disconnect wins as the final state). The
+    // disconnect itself runs inside that section.
     await deps.setupManager?.cancelActive(conn.id, name);
-    await registry.withGrantSection(conn.service, name, async () => {
-      await removeLegacyProviderRow(conn.service);
-      await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
-    });
+    await registry.disconnect(conn.id);
     c.header("Cache-Control", "no-store");
-    return c.json({
-      ok: true,
-      connection: await serializeConnection(registry, conn, deps.setupManager ?? null),
-    });
+    return c.json({ ok: true, connection: null });
   });
 
   app.delete("/connections/:id", async (c) => {
@@ -338,8 +387,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
-    await removeLegacyProviderRow(conn.service);
-    await registry.remove(conn.id, { inTx: guardianMappingTeardown(registry, conn) });
+    await registry.remove(conn.id);
     return c.json({ ok: true });
   });
 

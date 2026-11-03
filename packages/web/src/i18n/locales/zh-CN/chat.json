@@ -4,6 +4,85 @@
     "mermaid": "Mermaid 图表"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "正在输入",
+    "taskChat": "任务对话",
+    "taskStatus": {
+      "running": "进行中",
+      "waiting": "等你处理",
+      "failed": "出错停止了",
+      "idle": "已完成"
+    },
+    "openForwardedChat": "打开任务对话：{{title}}",
+    "showFullText": "展开全文",
+    "showLess": "收起",
+    "openTaskChat": "打开",
+    "tasks": {
+      "title": "任务",
+      "close": "关闭任务",
+      "groups": {
+        "needsYou": "等你处理",
+        "doing": "进行中",
+        "next": "接下来",
+        "watching": "盯着",
+        "done": "已完成"
+      },
+      "stop": "停止",
+      "done": "完成",
+      "archive": "归档",
+      "retry": "再试一次",
+      "pending": {
+        "stop": "正在停止…",
+        "archive": "正在归档…",
+        "done": "正在发送…"
+      },
+      "unchanged": "Concierge 没有改动这一项",
+      "timeout": "Concierge 还没有处理",
+      "failed": "没发出去，请再试一次。",
+      "notSynced": "未同步",
+      "sourceMissing": "找不到原消息",
+      "findingMessage": "正在查找消息…",
+      "showMore": "显示更早的 {{count}} 项",
+      "showLess": "收起",
+      "openChat": "打开「{{title}}」的对话",
+      "actionText": {
+        "stop": "停止「{{title}}」",
+        "archive": "归档「{{title}}」",
+        "done": "完成了「{{title}}」",
+        "withId": "（任务 {{id}}）"
+      },
+      "replyText": {
+        "done": "我已经完成了"
+      },
+      "pill": {
+        "needsYou_one": "任务，{{count}} 项等你处理",
+        "needsYou_other": "任务，{{count}} 项等你处理",
+        "doing_one": "任务，{{count}} 项进行中",
+        "doing_other": "任务，{{count}} 项进行中",
+        "idle": "任务"
+      },
+      "emptyTitle": "还没有任务",
+      "emptyDescription": "Concierge 正在做、计划做或盯着的任务会显示在这里。"
+    },
+    "messageDetails": "消息详情",
+    "composerMenu": "添加文件或切换模型",
+    "placeholder": "发消息",
+    "empty": {
+      "title": "直接告诉我你想做什么",
+      "prompts": {
+        "weather": "今天天气怎么样？",
+        "reminder": "一小时后提醒我起来活动一下",
+        "email": "总结一下我的未读邮件",
+        "task": "帮我做一个简单的习惯打卡 app"
+      }
+    }
+  },
+  "reply": {
+    "action": "回复",
+    "dismiss": "取消回复",
+    "jump": "跳到原消息"
+  },
+  "senderGuardian": "守护者",
   "inputState": {
     "queued": "等待加入对话",
     "submitted": "正在发送给 Agent",
@@ -20,6 +99,7 @@
   },
   "navbar": {
     "sessionModel": "会话模型：{{model}}",
+    "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
     "pin": "置顶对话",
     "unpin": "取消置顶",
@@ -59,6 +139,8 @@
   "timeline": {
     "label": "提问时间线"
   },
+  "jumpToWaitingCard": "待你处理：跳转到待处理卡片",
+  "waitingCard": "待你处理",
   "jumpToLatest": "回到最新消息",
   "roles": {
     "agent": "助手"
@@ -78,7 +160,7 @@
     "branch": {
       "open": "从此回复发起侧边对话",
       "title": "创建侧边对话",
-      "description": "继续追问，同时不改变当前对话。",
+      "description": "继续追问，同时不改变当前聊天。",
       "suggestionsLabel": "推荐提示词",
       "suggestions": {
         "mermaid": "用 Mermaid 图表呈现",
@@ -107,7 +189,6 @@
     "emptyList": "(空列表)",
     "emptyObject": "(空对象)",
     "agentRunFailed": "智能体执行失败",
-    "unknownTool": "未知",
     "showMore": "展开",
     "showLess": "收起",
     "input": "输入",
@@ -146,6 +227,11 @@
       "title": "没有可用的 AI Provider",
       "description": "请连接 AI Tool，或检查当前登录和额度状态。"
     },
+    "creditsUsedUp": {
+      "title": "Rome 额度已用完",
+      "description": "连接 ChatGPT 或 Claude，或选择已连接服务的模型。",
+      "action": "连接 AI"
+    },
     "openAiTools": "打开 AI Tools"
   },
   "usage": {
@@ -176,9 +262,11 @@
       "cacheWrite": "缓存写入",
       "input": "输入",
       "output": "输出",
+      "reasoning": "推理",
       "context": "上下文",
       "mainContext": "主智能体上下文"
-    }
+    },
+    "reasoningHint": "已计入输出。部分提供方报告的是估算值；合计只包含报告了该数值的运行。"
   },
   "approvals": {
     "headerPending": "需要守护者批准",
@@ -216,11 +304,30 @@
   },
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
+    "lockedByCard": "请先回答上方的卡片，再继续。",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
+    "hints": {
+      "skill": "输入 / 使用技能",
+      "agent": "输入 @ 选择 agent",
+      "project": "在下方选择项目，让 agent 在里面工作",
+      "attach": "粘贴或拖入文件即可附上",
+      "newline": "Shift+Enter 换行",
+      "search": "{{shortcut}} 搜索对话",
+      "sendWhileWorking": "agent 工作时也可以继续发消息"
+    },
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "重置",
+    "zoomLevel": "缩放",
+    "previewImage": "预览",
+    "playVideo": "播放",
+    "closeImagePreview": "关闭",
     "filePill": "#文件 {{index}}",
+    "uploadProgressFor": "{{name}} 的上传进度",
+    "cancelUpload": "取消",
     "send": "发送",
     "sendTitle": "发送",
     "sendWhileRunningTitle": "在 Agent 运行中发送消息",
@@ -237,6 +344,9 @@
     "dismiss": "跳过",
     "send": "发送"
   },
+  "appComponent": {
+    "dismiss": "跳过"
+  },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",
     "hint": "我会使用你已有的订阅来思考。登录其中一个，我就可以开始工作了。",
@@ -244,10 +354,24 @@
     "connected": "已连接",
     "skipped": "暂时跳过",
     "skip": "暂时跳过",
+    "sendFailed": "没能发送出去。",
+    "retry": "重试",
     "connectedSummary": "已连接 AI",
     "skippedSummary": "暂时跳过连接 AI",
     "connectedTitle": "AI 已连接",
-    "checking": "正在检查你的 AI 连接…"
+    "checking": "正在检查你的 AI 连接…",
+    "credits": {
+      "title": "使用免费 Rome 额度开始",
+      "hint": "你的账户有 {{amount}} 的 Rome 额度，我现在就可以开始。你也可以随时登录 Claude 或 ChatGPT，改用自己的订阅。",
+      "continue": "使用额度继续",
+      "summary": "使用 Rome 额度继续",
+      "usingTitle": "正在使用 Rome 额度",
+      "using": "Rome 额度使用中",
+      "ready": "Rome 额度可用"
+    }
+  },
+  "modelSwitch": {
+    "notice": "已切换到 {{model}}"
   },
   "modelSelector": {
     "label": "模型",
@@ -259,12 +383,16 @@
     "options": {
       "auto": "自动",
       "claudeOpus": "Claude Opus",
+      "opus55": "Opus 5.5",
       "opus5": "Opus 5",
       "opus46": "Opus 4.6",
       "sonnet": "Sonnet",
       "haiku": "Haiku",
       "fable": "Fable",
       "gpt6Astra": "GPT-6 Astra",
+      "gpt61Sol": "GPT-6.1 Sol",
+      "gpt6Sol": "GPT-6 Sol",
+      "gpt6Luna": "GPT-6 Luna",
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"
@@ -338,6 +466,37 @@
       "loadFailed": "加载项目失败。",
       "updateFailed": "更新项目失败。",
       "createFailed": "创建项目失败。"
+    },
+    "devices": {
+      "listLabel": "文件夹",
+      "searchPlaceholder": "搜索当前文件夹…",
+      "loading": "正在读取文件夹…",
+      "empty": "这里没有文件夹。",
+      "noMatchesQuery": "没有文件夹匹配 “{{query}}”。",
+      "truncated": "只显示前 1,000 项。",
+      "up": "返回上一级",
+      "useFolder": "使用此文件夹",
+      "thisDevice": "本机",
+      "reasons": {
+        "offline": "离线",
+        "upgrade_required": "需更新 rome-node"
+      },
+      "errors": {
+        "offline": "设备离线。",
+        "upgrade_required": "请先在这台设备上更新 rome-node，才能浏览文件夹。",
+        "not_found": "这个文件夹已不存在。",
+        "not_a_directory": "这个路径不是文件夹。",
+        "permission_denied": "设备上的用户无权读取这个文件夹。",
+        "unavailable": "无法读取这个文件夹。"
+      }
+    },
+    "locations": {
+      "rome": "Rome Cloud",
+      "listLabel": "位置",
+      "searchPlaceholder": "搜索 Rome Cloud 和设备…",
+      "noMatchesQuery": "没有匹配 “{{query}}” 的结果。",
+      "back": "返回",
+      "loading": "正在加载设备…"
     }
   },
   "stream": {
@@ -349,7 +508,6 @@
       "sendStatus": "发送消息失败({{status}})。",
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
-      "attachStreamStatus": "附加流失败,轮次 {{turnId}}({{status}})。",
       "stopFallback": "停止生成失败。",
       "stopStatus": "停止失败({{status}})。"
     }
@@ -359,8 +517,6 @@
     "greetingFallback": "欢迎,",
     "headline": "我们从哪里开始?",
     "pinnedChats": "置顶对话",
-    "unpin": "取消置顶",
-    "unpinChat": "取消置顶 {{name}}",
     "romeNews": "Rome 动态",
     "startWithPrompt": "试试这些提示"
   },

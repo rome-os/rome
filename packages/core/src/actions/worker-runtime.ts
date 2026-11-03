@@ -8,8 +8,12 @@ import { ActionEngine } from "./engine.js";
 import { emitAgentMessage } from "./runtime-events.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { noAccountLinks } from "../channels/account-links.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
+import { appPersonMapping } from "../people/app-person-mapping.js";
+import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -22,19 +26,26 @@ import {
   ActionRegistryProxy,
   AppManagerProxy,
   AppStoreProxy,
-  ConversationSettingsControlProxy,
+  ChatSettingsControlProxy,
   EmailInboundControlProxy,
   BackendTurnRunnerProxy,
   EventBusProxy,
   EventCatalogProxy,
   NotifyServiceProxy,
+  AgentNamesProxy,
+  FeedbackServiceProxy,
+  CloudProfileProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
-  TalkRouterProxy,
+  ChannelsServiceProxy,
+  AppConnectionsProxy,
 } from "./service-proxies.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import { ChatRepository } from "../chats/chat-repository.js";
+import { ChatEvents } from "../chats/events.js";
+import { StoredMessages } from "../chats/message-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -45,11 +56,16 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
+import { sendApprovalCard } from "./approval-card.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
 } from "../apps/artifact-id.js";
 import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
+import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
+import type { Trigger } from "../routines/types.js";
+import { legacyChatIdChannelsService, legacyChatIdSettings } from "../apps/legacy-chat-id.js";
 
 const log = createLogger("action-worker");
 
@@ -88,9 +104,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const agentLoader = new AgentLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
-  // The worker executes actions dispatched from main; it never resolves
-  // per-agent tool visibility, so it needs no globally-granted action names.
-  const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+  const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   await hydrateCatalogFromLockfile({
     lockfilePath,
     catalog: appCatalog,
@@ -99,58 +113,39 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await actionLoader.loadFromCatalog(appCatalog);
   await skillCatalog.loadFromCatalog(appCatalog);
 
-  const personMappingRepo = new PersonMappingRepository(db);
-  const sentinelLogRepo = new SentinelLogRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
+  const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
+  const peopleRepo = new PeopleRepository(db);
+  const sentinelLogRepo = new SentinelLogRepository(db, (name) =>
+    channelRecords.platformOfChannel(name),
+  );
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  // An action records the messages it sent. Nothing in the worker reads a
+  // place's history or hears what was said, so it keeps no channels to read
+  // under and its events go nowhere.
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    chatRepo: new ChatRepository(db, channelRecords),
+    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+  });
   const policiesRepo = new PoliciesRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
-  const talkRouter = new TalkRouterProxy();
-  const conversationSettings = new ConversationSettingsControlProxy();
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
+  const channelsService = new ChannelsServiceProxy();
+  const chatSettings = new ChatSettingsControlProxy();
+  const appChatSettings = legacyChatIdSettings(chatSettings);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
-      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
-        if (!channelContext) return;
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === channelContext.channel,
-        );
-        const connectionId =
-          channelContext.connectionId ??
-          (matches.length === 1 ? matches[0]!.connectionId : undefined);
-        if (!connectionId) return;
-        const payload = preview ?? {
-          kind: "generic" as const,
-          title: actionName,
-          summary: `The agent wants to run "${actionName}" and needs your approval.`,
-        };
-        await talkRouter.send(
-          connectionId,
-          channelContext.threadId as import("@rome-os/app-runtime").ConversationId,
-          {
-            parts: [
-              {
-                type: "approval_card",
-                approvalId,
-                actionName,
-                preview: payload,
-                status: "pending",
-              },
-            ],
-          },
-        );
-      },
+      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
@@ -168,21 +163,28 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     actionRegistry,
   });
 
-  const appActionReload = registerLazyAppActions(
+  registerLazyAppActions(
     actionLoader,
     actionRegistry,
     appCatalog,
     {
       agentRunner,
       resolveArtifactReference,
-      talkRouter,
-      conversationSettings,
+      channelsService: legacyChatIdChannelsService(channelsService),
+      chatSettings: appChatSettings,
+      // Apps built before the chat rename read `conversationSettings`.
+      conversationSettings: appChatSettings,
       capabilityDiscovery,
-      personMappingRepo,
+      personMappingRepo: appPersonMapping(peopleRepo, (name) =>
+        channelRecords.platformOfChannel(name),
+      ),
+      people: appPeople(peopleRepo),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
       routinesRepo,
+      resolveOneOffDate: (trigger: Trigger) =>
+        resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
       // Worker actions reach the live main-process services over RPC. Injecting
       // the proxies here (the real coordinators are injected in the main
       // process) lets the event/app-lifecycle actions call their dep directly
@@ -214,30 +216,32 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       actionEngine,
       routinesRepo,
       repositories: appRuntimeRepositories,
+      appConnections: new AppConnectionsProxy(),
       hostExecution: new HostExecutionService({
         socketPath: config.hostExecutionSocket,
         enabled: config.hostExecutionEnabled,
       }),
+      feedback: new FeedbackServiceProxy(),
+      cloudProfile: new CloudProfileProxy(),
+      agentNames: new AgentNamesProxy(),
     },
   );
+  // The main process warns about these once per change in the failures. Every
+  // worker process reloads the same apps, so a warn here would repeat it per
+  // worker.
   if (agentLoader.getRegistryLoadFailures().length > 0) {
-    log.warn("some app agents failed to load", {
+    log.debug("some app agents failed to load", {
       failures: agentLoader.getRegistryLoadFailures(),
     });
   }
   if (skillCatalog.getRegistryLoadFailures().length > 0) {
-    log.warn("some app skills failed to load", {
+    log.debug("some app skills failed to load", {
       failures: skillCatalog.getRegistryLoadFailures(),
     });
   }
   if (actionLoader.getRegistryLoadFailures().length > 0) {
-    log.warn("some app action configs failed to load", {
+    log.debug("some app action configs failed to load", {
       failures: actionLoader.getRegistryLoadFailures(),
-    });
-  }
-  if (appActionReload.failed.length > 0) {
-    log.warn("some app actions failed to initialize", {
-      failures: appActionReload.failed,
     });
   }
 

@@ -15,7 +15,7 @@
  *
  * // Via direct function call from the local action module
  * import { executeSendMessage } from "./index.js";
- * await executeSendMessage(talkRouter, {
+ * await executeSendMessage(channels, {
  *   channel: "discord",
  *   threadId: "123456",
  *   text: "Hello!",
@@ -36,7 +36,11 @@ export interface SendMessageAttachment {
   caption?: string;
 }
 
-/** Chat-style channels: addressed by a thread id, no email-specific fields. */
+/**
+ * Chat-style channels: addressed by a thread id, no email-specific fields. The
+ * channel is the id of the account to send as, such as the `channel` a message
+ * arrived on. A platform's name is an account id only for the account it names.
+ */
 export type ChatChannel =
   | "telegram"
   | "telegram_user"
@@ -44,11 +48,11 @@ export type ChatChannel =
   | "wechat"
   | "discord"
   | "webchat"
-  | "feishu";
+  | "feishu"
+  | "agents"
+  | (string & {});
 
 interface SendMessageBase {
-  /** Exact Connection that owns the opaque provider conversation. */
-  connectionId?: string;
   /** The message text to send (supports markdown). Optional when attachments are provided. */
   text?: string;
   /** Optional file attachments to send. */
@@ -62,8 +66,8 @@ interface SendMessageBase {
    */
   turnId?: string;
   /**
-   * Structured message parts (text with optional turnPhase/blockIx, cards, …). When
-   * provided, rich-content channels (webchat) render/persist these instead of
+   * Structured message parts (text with optional turnPhase/blockId/blockIx,
+   * cards, …). When provided, rich-content channels (webchat) render/persist these instead of
    * the plain `text` path; other channels ignore them and fall back to `text`.
    * Supplied by the orchestrating route (e.g. the webchat turn finalizer that
    * persists in-turn commentary + final answer), not by agent tool calls — so
@@ -80,8 +84,11 @@ export interface SendMessageChatInput extends SendMessageBase {
   channel: ChatChannel;
   /** The thread/chat ID to send the message to. Required unless `to: "guardian"` is used. */
   threadId?: string;
-  /** Recipient alias for chat channels. Currently only `"guardian"` is supported. */
-  to?: "guardian";
+  /**
+   * Recipient alias for chat channels: `"guardian"`, or on `agents`, from the main
+   * agent, an agent's name, which core resolves to the agent's id.
+   */
+  to?: string;
   /** The recipient user ID. Defaults to threadId if not provided. */
   channelUserId?: string;
   /** Optional message ID to reply to. */

@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
-import type { ApprovalCardStatus, ApprovalPreviewPayload } from "@/lib/chat-types";
+import type { ApprovalCardStatus, PreviewPayload } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
+import { useTabStatus } from "@/hooks/use-tab-status";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
 import { useApprovalCard } from "./use-approval-card";
@@ -23,7 +24,7 @@ export function ApprovalCard({
 }: {
   approvalId: string;
   actionName?: string;
-  preview: ApprovalPreviewPayload;
+  preview: PreviewPayload;
   status: ApprovalCardStatus;
   onResolved: () => void;
 }) {
@@ -33,6 +34,9 @@ export function ApprovalCard({
     initialStatus,
     onResolved,
   });
+  // The transcript stores every card as pending, so only the server's answer
+  // counts: an approval resolved long ago must not flash Needs you on load.
+  useTabStatus(record && status === "pending" ? "needs-you" : "idle");
   const resolvedActionName = actionName
     ? artifactLocalName(actionName)
     : t("approvals.fallbackActionName");
@@ -41,7 +45,11 @@ export function ApprovalCard({
     status === "pending" ? t("approvals.headerPending") : t("approvals.headerResolved");
 
   return (
-    <div className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60">
+    <div
+      tabIndex={-1}
+      data-chat-pending-card={record && status === "pending" ? "approval" : undefined}
+      className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60"
+    >
       <div className="flex items-center justify-between border-b border-warning-border bg-warning-bg px-4 py-2">
         <div className="flex items-center gap-2 text-ui text-warning-fg">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

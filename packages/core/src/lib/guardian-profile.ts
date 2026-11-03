@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { DrizzleDb } from "../db/index.js";
 import { guardianAuth, persons } from "../db/schema.js";
 import { pickRandomAgentPreset } from "./agent-presets.js";
-import { generatePersonSlug } from "../db/repositories/person-mapping.js";
+import { generatePersonSlug } from "@rome/api-types/persons";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
 import {
@@ -152,9 +152,9 @@ async function readStoredProfile(
   return stored as GuardianProfileInput;
 }
 
-// Only the profile's own keys are written. The input is a JSON body on
-// `/onboard/setup` and an app-supplied object through the SDK repository, so an
-// unfiltered spread would let either write any settings key it likes.
+// Only the profile's own keys are written. The input can be an app-supplied
+// object through the SDK repository, so an unfiltered spread would let an app
+// write any settings key it likes.
 function definedFields(input: GuardianProfileInput): GuardianProfileInput {
   const owned = new Set<string>(PROFILE_SETTING_KEYS);
   return Object.fromEntries(

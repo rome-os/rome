@@ -70,6 +70,8 @@ For a patch release:
    scripts/dev/create-patch-release-tag.sh
    ```
 
+The user can also click **Run workflow** on `main` in the Actions tab instead. That run allocates the same next patch version and checks CI itself.
+
 For a minor, major, or prerelease version, the helper does not apply, because it bumps the patch version only. Confirm the version with the user, then tag `origin/main` directly.
 
 ```bash

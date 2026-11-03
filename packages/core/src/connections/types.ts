@@ -1,25 +1,68 @@
-// Connection caller and builder contracts. Messaging model: docs/concepts/messaging.md.
+// Connection caller and builder contracts. Vocabulary: docs/domains/connections.md.
 //
 // The runtime never inspects the contents of a credential's `material` (only
 // the `expiresAt` envelope).
 
 import type {
-  ConversationId,
-  InboundMessage,
+  ChannelMessage,
+  ChatDescriptor,
+  ChatId,
   MessageReceipt,
   OutgoingMessage,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
+  ChannelActivity,
+  ChannelDirectMessaging,
+  ChannelInboundMedia,
 } from "@rome-os/app-runtime";
+import type { AccountLink } from "@rome/api-types/account-agents";
+import type { DeliveryTransport } from "../channels/delivery/types.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
+
+// ── Talk ─────────────────────────────────────────────────────────────────────
+// A Connection's conversational surface, as its builder implements it
+// (`Talker`). Only the channel ports (channels/connection-ports.ts) reach it,
+// through `Connection.withTalker`: apps reach channels through the channels
+// service (actions) or a hook's `channels`. A talker delivers each message as
+// the channel's own record: a `ChannelMessage` naming the channel it backs,
+// with direction `inbound`.
+
+/** The conversations a Connection can see, for conversation settings. */
+export interface TalkDirectory {
+  listConversations(input: {
+    query?: string;
+    cursor?: string;
+    limit: number;
+    includeTopics?: boolean;
+  }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
+}
+
+export interface TalkFeatureMap {
+  inboundMedia: ChannelInboundMedia;
+  activity: ChannelActivity;
+  directory: TalkDirectory;
+  /** A talker answers only `chatFor`. The channel port adds the deprecated
+   *  `conversationFor` for callers. */
+  directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
+  /** Writing a reply as it is generated: creating and editing messages. */
+  replyDelivery: DeliveryTransport;
+}
+
+export type TalkFeatureName = keyof TalkFeatureMap;
+
+/**
+ * What a talker offers beyond sending and hearing, one optional field per
+ * channel port it backs. An absent field is the declaration that the talker
+ * does not offer it. The registry reads a field each time it is used, so a
+ * getter defined on the talker literal stays live; spreading an object into the
+ * talker reads its getters once.
+ */
+export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
-export type Capability = "talk" | "act" | "watch";
+export type Capability = "chat" | "act" | "watch";
 export type SecretRecord = Record<string, string>;
 /**
- * The non-secret half of a grant's conferral outcome. Like SecretRecord, this
+ * The non-secret half of a grant's grant outcome. Like SecretRecord, this
  * is deliberately opaque to the connection framework: each integration owns
  * the keys and value shapes it stores here.
  */
@@ -27,19 +70,13 @@ export type ProfileRecord = Record<string, unknown>;
 
 // OutgoingMessage is the existing @rome-os/app-runtime shape (phase 2 collapses
 // the message contract; do not invent a new shape now).
-export type {
-  ConversationId,
-  InboundMessage,
-  MessageReceipt,
-  OutgoingMessage,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+export type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 
 export interface OperationCall {
   operation: string;
   input?: unknown;
+  /** Stable caller request id for an app-exposed write operation. */
+  requestId?: string;
 }
 export type OperationResult = unknown;
 
@@ -48,6 +85,23 @@ export interface OperationDescriptor {
   description: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  /**
+   * Opts this operation into the restricted App SDK broker. An absent value
+   * keeps the operation Core-only.
+   */
+  appAccess?: {
+    sideEffects: "read-only" | "write";
+    /** Safe fields Core may show when a guardian approves this operation. A
+     * write operation must declare this contract before an App can use it. */
+    approvalPreview?: {
+      summary: string;
+      fields?: readonly {
+        label: string;
+        /** RFC 6901 JSON Pointer into the operation input. */
+        inputPointer: string;
+      }[];
+    };
+  };
 }
 
 /** Caller-facing Act handle. Outbound-only and synchronous. */
@@ -76,8 +130,8 @@ export interface AuthState {
 }
 
 /**
- * Conferral ceremonies are not implemented for `confer`; this is the minimal
- * placeholder so `AuthScheme` compiles. Headless conferrals (tests, settings
+ * Grant ceremonies are not implemented for `grant`; this is the minimal
+ * placeholder so `AuthScheme` compiles. Headless grants (tests, settings
  * import) never call it.
  */
 export interface GuardianInteraction {
@@ -106,9 +160,9 @@ export interface Credential {
 /**
  * The framework's only universal identity surface. The ledger stores the opaque
  * `ProfileRecord`; the descriptor's `reviveProfile` re-parses a stored record
- * with the service's own schema and maps the parsed plain data through the
- * service's pure display function — the returned display object is what
- * satisfies this readonly interface. Service-specific values that generic
+ * with the connection kind's own schema and maps the parsed plain data through the
+ * connection kind's pure display function — the returned display object is what
+ * satisfies this readonly interface. Kind-specific values that generic
  * readers can't render (scopes, workspace ids) stay on the parsed profile for
  * owner-side readers; they never widen this surface.
  */
@@ -121,25 +175,25 @@ export interface ProfileDisplay {
 
 /** What a builder supplies per grant. */
 export interface AuthScheme {
-  confer(interact: GuardianInteraction): Promise<Credential>;
+  obtain(interact: GuardianInteraction): Promise<Credential>;
   /**
-   * the guardian-facing conferral setup for this grant. When present,
+   * the guardian-facing setup for this grant. When present,
    * the generic setup surface (`POST
    * /api/connections/:id/grants/:name/setup`) drives it: a server-owned
-   * coroutine that prompts/shows/redirects and returns a terminal conferral
+   * coroutine that prompts/shows/redirects and returns a terminal grant
    * (credential + profile + optional guardian mapping). Absent for grants with
    * no dashboard setup (headless imports, OAuth redirect routes). Kept
    * `unknown`-free by importing the setup type lazily to avoid a cycle: see
    * `./setup/types.ts`.
    */
   setup?: import("./setup/types.js").SetupFn;
-  /** Renew WITHOUT the guardian, if the scheme can; "re-confer" is the honest
+  /** Renew WITHOUT the guardian, if the scheme can; "needs-fix" is the honest
    *  answer for pasted tokens and pairing sessions. Required, not optional. */
-  renew(cred: Credential): Promise<Credential | "re-confer">;
+  renew(cred: Credential): Promise<Credential | "needs-fix">;
   /**
    * External-custody resolver. When a rehydrated credential persisted
    * as `{ kind: "external" }`, the registry re-wraps its live `material` with
-   * this resolver — rehydration must never confer.
+   * this resolver — rehydration must never grant.
    */
   resolveExternal?: () => Promise<SecretRecord>;
 }
@@ -160,21 +214,48 @@ export type CapabilityStatus =
   | { state: "needs-subscription" }
   | { state: "unsupported" };
 
-/** One service, named grants, up to three capabilities. */
+/**
+ * Whether the platform accepts the connection's grant. A broken connection
+ * keeps its account and that account's agent until the guardian gives access
+ * again (docs/domains/connections.md).
+ */
+export type ConnectionState = "working" | "broken";
+
+/** One connection kind, one grant, up to three capabilities. */
 export interface Connection {
   readonly id: ConnectionId;
-  readonly service: string;
+  readonly connectionKind: string;
   readonly label: string;
   readonly auth: AuthState;
+  /**
+   * Broken when the grant is degraded, working when it is authorized. Null
+   * while it is unauthorized: a disconnect ends the connection, so only one
+   * whose removal failed, or one not yet granted, is neither.
+   */
+  state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
+  /** Whether `cap` is built and live now. `status()` reads the grants; this
+   *  reads whether the capability's instance exists. */
+  isUnlocked(cap: Capability): boolean;
+  /**
+   * Calls `call` with the talker of the live epoch and answers what it
+   * returns, or undefined while chat is locked. Starting and stopping the
+   * talker are the registry's. A `CredentialRejected` that
+   * `call` throws, or that the promise it returns rejects with, runs the
+   * grant's fault flow before it reaches the caller. Read the talker inside
+   * `call` only: a talker held past it outlives a relock unguarded.
+   */
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
+  /** Hears each message the live talker delivers until chat relocks, or null
+   *  while chat is locked. */
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
-  get talk(): Talk | null;
   get act(): Act | null;
   get watch(): Watch | null;
 }
 
-/** What every push from the service looks like. Raw bytes + headers stay intact
+/** What every push from the remote service looks like. Raw bytes + headers stay intact
  *  so origin verification can HMAC them. */
 export type RawDelivery = { body: Uint8Array; headers: Record<string, string>; json: unknown };
 
@@ -183,20 +264,19 @@ export interface RuntimeKit {
   readonly connectionId: ConnectionId;
   /** Write-through custody (Baileys). Updates the grant's stored credential
    *  material IN PLACE: no epoch rebuild, no state change, no onUnlocked. */
-  persist(grant: GrantName, material: SecretRecord): Promise<void>;
+  persist(material: SecretRecord): Promise<void>;
   registerIngress(handler: (input: unknown) => Promise<unknown>): () => void;
   // kit.webhook() lands in phase 6 — do not add it now.
 }
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
-export interface Talker {
-  start(deliver: (msg: InboundMessage) => void, fault: (err: StreamFault) => void): void;
+export interface Talker extends TalkFeatures {
+  start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
-  send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
+  send(chatId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
 }
 
 /** Builder-side Act implementation. */
@@ -225,7 +305,7 @@ export type StreamFault = CredentialRejected | Disconnected;
  * (the `gh`/git shell wrappers) or a sandboxed app (the `connector` reading a
  * tmpfs token file). The registry drives those artifacts off grant transitions,
  * NOT off any capability build: `sync` runs whenever a grant reaches
- * `authorized` (fresh conferral, renew, or boot rehydration) with that grant's
+ * `authorized` (fresh grant, renew, or boot rehydration) with that grant's
  * live secret `material` plus its integration-owned non-secret `profile`;
  * `clear` runs on revoke AND on
  * degrade. Both are fire-and-forget: a failure is logged and swallowed so it can
@@ -233,37 +313,81 @@ export type StreamFault = CredentialRejected | Disconnected;
  * transition or boot re-syncs.
  */
 export interface GrantCustody {
-  sync(grant: GrantName, material: SecretRecord, profile: ProfileRecord): Promise<void>;
-  clear(grant: GrantName): Promise<void>;
+  sync(material: SecretRecord, profile: ProfileRecord): Promise<void>;
+  clear(): Promise<void>;
 }
 
-/** A service integration declaration. */
+/** A connection kind declaration. */
 export interface ConnectionDescriptor {
-  service: string;
-  auth: Record<GrantName, AuthScheme>;
+  connectionKind: string;
+  /** The name of the connection's one grant: the key the dashboard, the setup
+   *  routes and the ledger know it by. */
+  grant: GrantName;
+  /** How the guardian gives access. A connection holds one grant
+   *  (docs/domains/connections.md#grant). */
+  auth: AuthScheme;
   /** Revive a grant's stored opaque profile record: re-parse it with this
-   *  service's own schema, then map it through the service's pure display
+   *  connection kind's own schema, then map it through the connection kind's pure display
    *  function. Fail-closed — a record that no longer matches the schema throws
    *  rather than displaying sparsely. Generic readers consume only the returned
    *  display object; raw records never cross to generic surfaces. */
-  reviveProfile?(grant: GrantName, record: ProfileRecord): ProfileDisplay;
+  reviveProfile?(record: ProfileRecord): ProfileDisplay;
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
-   *  auth). Omitted by services with no such artifact — most descriptors. */
+   *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
+  /** True when the guardian can add another account of this connection kind, each
+   *  with its own Connection and channel. A connection kind that keeps its stores or
+   *  adapter state under one channel, or is a single presence by nature
+   *  (webchat, email), leaves it unset. Vocabulary:
+   *  docs/domains/chats.md#account. */
+  severalAccounts?: boolean;
+  /** The platform's own id for the account a grant's profile names (a bot id,
+   *  an app id, an inbox address), or null when the profile names none. It reads
+   *  the one field rather than parsing the strict profile schema, so a stored
+   *  profile with an extra key still names its account.
+   *  The ledger stores it on the grant with the account's platform. Grant
+   *  refuses an account another live grant reaches on that platform, whatever
+   *  its connection kind, and a fix that reaches another account
+   *  (docs/domains/connections.md#connection). A connection kind that leaves it
+   *  unset, or a profile it answers null for, is never refused. */
+  accountIdOf?(profile: ProfileRecord): string | null;
+  /** The kind of link an agent has to this kind's accounts: `own_account` for
+   *  an account made for the agent, `delegate` for the guardian's own signed-in
+   *  account. A kind that leaves it unset takes no agent. It is the one place
+   *  that says which kinds take an agent. Vocabulary:
+   *  docs/domains/chats.md#connected-account. */
+  link?: AccountLink;
   capabilities: Partial<{
     talker: {
-      needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
+      build(cred: Credential, kit: RuntimeKit): Talker;
       degradation?(instance: Talker): CapabilityDegradation | null;
+      /** False when the talker can never send, so the channel it backs has no
+       *  `send` port. Absent means it can. */
+      sends?: boolean;
+      /** False when this Talk's deliveries do not back the channel's `inbound`
+       *  port, so that channel has none. It says what the Talk backs, not what
+       *  the talker does: webchat's talker is wired to `deliver`, but its turns
+       *  start from its own route. Absent means the deliveries back it. */
+      receives?: boolean;
+      /** True when the surface that delivers this channel's next human turn
+       *  renders interactive cards, so an agent may pause on one for a reply.
+       *  Absent means it does not, and a card falls back to prose. */
+      interactiveCards?: boolean;
+      /** False when every message in a conversation already reaches the agent
+       *  as a turn, so a prompt needs no preamble of stored messages the agent
+       *  has not seen. Absent means the channel stores messages the agent
+       *  never saw, such as other people's lines in a group. */
+      promptContext?: boolean;
     };
     actor: {
-      needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Actor;
+      /** Static discovery contract for App SDK operations. Required when any
+       * operation opts into `appAccess`. */
+      operations?: readonly OperationDescriptor[];
+      build(cred: Credential, kit: RuntimeKit): Actor;
     };
     watcher: {
-      needs: readonly GrantName[];
       subscriptionGated?: boolean;
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Watcher;
+      build(cred: Credential, kit: RuntimeKit): Watcher;
     };
   }>;
 }

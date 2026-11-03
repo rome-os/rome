@@ -2,7 +2,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { slotCardCopy, slotHeadingKey } from "@/lib/connection-capability-copy";
+import { slotCardCopy } from "@/lib/connection-capability-copy";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 
 /**
@@ -106,7 +106,7 @@ export function ConnectionSlotCard({
   const copyTitle = copy.title ? t(copy.title.key, copy.title.params) : null;
   const title = identityTitle ?? (bare && !connected ? null : copyTitle);
 
-  // The setup subtitle ("Sign in with GitHub", "Add a bot from @BotFather") is
+  // The setup subtitle ("Sign in with GitHub", "Create the account with @BotFather") is
   // the slot's descriptor in a framed multi-slot card. A bare card drops it too:
   // the ceremony instructions right below say the same thing in more detail.
   const subtitle = connected
@@ -141,7 +141,7 @@ export function ConnectionSlotCard({
 
       {copy.bullets.length > 0 && (
         <div className="space-y-2 text-ui text-foreground">
-          <p>{t(slotHeadingKey(headingRole))}</p>
+          <p>{t(`connections.headings.${headingRole}`)}</p>
           <ul className="list-disc space-y-2 pl-5">
             {copy.bullets.map((bullet) => (
               <li key={bullet.key}>{t(bullet.key, bullet.params)}</li>

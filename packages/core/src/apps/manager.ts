@@ -1,7 +1,5 @@
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { Mutex } from "async-mutex";
-import { existsSync } from "node:fs";
-import { readFile, rename } from "node:fs/promises";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger } from "../logger.js";
 import { getProjectRoot } from "../paths.js";
@@ -27,9 +25,11 @@ import {
   type SpecSource,
   writeLockfile,
 } from "./lockfile.js";
+import { resolveArtifactId, type LegacyArtifactBindings } from "./artifact-id.js";
+import type { RoutinesRepository } from "../db/repositories/routines.js";
+import type { RoutineEngine } from "../routines/engine.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
-import { migrateToLockfile } from "./migrate-to-lockfile.js";
 import { normalizeListingId } from "./rome-cloud-urls.js";
 import { validateRemixInstallIsolation } from "./remix-install-validation.js";
 import { ManifestIdMismatchError } from "./prepare.js";
@@ -103,6 +103,11 @@ export interface BootResult {
 export interface AppManagerOptions {
   lockfilePath: string;
   installer: AppInstaller;
+  routines?: {
+    legacyBindings: Readonly<LegacyArtifactBindings>;
+    repository: Pick<RoutinesRepository, "findEnabled" | "update">;
+    engine: Pick<RoutineEngine, "deactivate">;
+  };
 }
 
 /**
@@ -117,7 +122,7 @@ export class AppManager {
   private readonly lockfileMutex = new Mutex();
   private readonly inFlightOps = new Map<AppId, InFlightOp>();
 
-  constructor(opts: AppManagerOptions) {
+  constructor(private readonly opts: AppManagerOptions) {
     this.lockfilePath = opts.lockfilePath;
     this.installer = opts.installer;
   }
@@ -203,6 +208,7 @@ export class AppManager {
       }
       const startedAt = nowIso();
       const op: InFlightOp = { kind: "install", source, startedAt };
+      let installedHash: string | null = null;
       this.inFlightOps.set(appId, op);
       try {
         await this.catalog?.refresh(appId);
@@ -221,6 +227,9 @@ export class AppManager {
         await this.lockfileMutex.runExclusive(async () => {
           const lockfile = await this.readLockfileForMutation();
           const prior = lockfile.apps[appId];
+          if (prior && prior.enabled !== false && opts.enabled === false) {
+            await this.pauseRoutines(appId);
+          }
           lockfile.apps[appId] = {
             source: persistedSource,
             enabled: opts.enabled ?? prior?.enabled ?? true,
@@ -228,6 +237,10 @@ export class AppManager {
             state: "installed",
             installedHash: result.hash,
             installedVersion: result.version,
+            // First successful install stamps the time. A prior entry that
+            // already installed once keeps what it recorded, including
+            // "absent" for entries older than the field.
+            installedAt: prior?.installedHash != null ? prior.installedAt : nowIso(),
             lastError: null,
             updatedAt: nowIso(),
           };
@@ -239,10 +252,7 @@ export class AppManager {
           version: result.version,
           cacheHit: result.cacheHit,
         });
-        await this.installer.gcInstalledCache(appId, {
-          keep: INSTALLED_CACHE_RETAINED_OLD_VERSIONS,
-          protectedHashes: [result.hash],
-        });
+        installedHash = result.hash;
         return {
           appId,
           state: "installed",
@@ -277,6 +287,9 @@ export class AppManager {
           const prior = lockfile.apps[appId];
           priorHash = prior?.installedHash ?? null;
           priorVersion = prior?.installedVersion ?? null;
+          if (prior && prior.enabled !== false && opts.enabled === false) {
+            await this.pauseRoutines(appId);
+          }
           lockfile.apps[appId] = {
             source,
             enabled: opts.enabled ?? prior?.enabled ?? true,
@@ -284,6 +297,7 @@ export class AppManager {
             state: "failed",
             installedHash: priorHash,
             installedVersion: priorVersion,
+            installedAt: prior?.installedAt,
             lastError: error,
             updatedAt: nowIso(),
           };
@@ -304,6 +318,14 @@ export class AppManager {
       } finally {
         this.inFlightOps.delete(appId);
         await this.catalog?.refresh(appId);
+        // The catalog serves the replaced bundle until the refresh above, so
+        // the old bundle directory is collected only after it.
+        if (installedHash != null) {
+          await this.installer.gcInstalledCache(appId, {
+            keep: INSTALLED_CACHE_RETAINED_OLD_VERSIONS,
+            protectedHashes: [installedHash],
+          });
+        }
       }
     });
   }
@@ -505,6 +527,7 @@ export class AppManager {
       const startedAt = nowIso();
       this.inFlightOps.set(appId, { kind: "uninstall", startedAt });
       try {
+        await this.pauseRoutines(appId);
         await this.catalog?.refresh(appId);
         const lockfile = await this.readLockfileForMutation();
         if (lockfile.apps[appId] == null) {
@@ -553,6 +576,7 @@ export class AppManager {
             throw new AppManagerError("NOT_INSTALLED", `app "${appId}" is not installed`);
           }
           if (entry.enabled === enabled) return;
+          if (!enabled) await this.pauseRoutines(appId);
           entry.enabled = enabled;
           entry.updatedAt = nowIso();
           await writeLockfile(this.lockfilePath, lockfile);
@@ -563,9 +587,30 @@ export class AppManager {
     });
   }
 
+  private async pauseRoutines(appId: AppId): Promise<void> {
+    const deps = this.opts.routines;
+    if (!deps) return;
+    const prefix = `${appId}:`;
+    for (const routine of await deps.repository.findEnabled()) {
+      let actionName = routine.actionName;
+      if (!actionName.startsWith(prefix)) {
+        try {
+          actionName = resolveArtifactId({
+            kind: "action",
+            value: actionName,
+            legacyBindings: deps.legacyBindings,
+          });
+        } catch {
+          continue;
+        }
+        if (!actionName.startsWith(prefix)) continue;
+      }
+      await deps.repository.update(routine.id, { enabled: false });
+      await deps.engine.deactivate(routine.id);
+    }
+  }
+
   async boot(): Promise<BootResult> {
-    await this.discardNonCurrentLockfile();
-    await this.runLegacyMigrationIfNeeded();
     const { lockfile, brokenEntries } = await readLockfileWithEntryIsolation(this.lockfilePath);
     if (brokenEntries.length > 0) {
       log.warn("salvaged broken lockfile entries on boot", { count: brokenEntries.length });
@@ -579,9 +624,8 @@ export class AppManager {
     const sweptStaging: string[] = [];
 
     // Deliberately do not sweep `installed/<dirname>/` dirs that have no
-    // lockfile entry. The blast radius is too wide: an empty / freshly
-    // discarded lockfile would wipe every cached bundle on disk, and
-    // `discardNonCurrentLockfile` above leaves the lockfile empty by design.
+    // lockfile entry. The blast radius is too wide: an empty lockfile would
+    // wipe every cached bundle on disk.
     // Crashed-uninstall recovery now relies on a re-install of the same
     // appId producing the same content hash (cache hit on the dangling
     // dir), with the cost being some disk waste until that happens.
@@ -619,73 +663,6 @@ export class AppManager {
       sweptStaging,
       brokenApps,
     };
-  }
-
-  /**
-   * Discard any `apps.lock.json` whose `schemaVersion` isn't current. The
-   * lockfile was deprecated for a stretch (apps lived in per-app
-   * `deployment.yaml` files instead) and is now back at v3 with a fundamentally
-   * different shape; old v1/v2 files left over from before the deprecation
-   * are stale and not worth migrating. Rename aside so subsequent reads see
-   * no lockfile — `runLegacyMigrationIfNeeded` then handles deployment.yaml
-   * profiles, and the daemon's boot step 5c re-installs any core-required
-   * app missing from the lockfile. Stale bundles under
-   * `apps/installed/` are left in place; a re-install of the same appId is
-   * a content-addressed cache hit on the dangling dir.
-   *
-   * Only triggers when `schemaVersion` is present and not current. Malformed
-   * JSON / missing `schemaVersion` / wrong root shape still fall through to
-   * the loud `LockfileTopLevelError` so genuine corruption isn't masked.
-   */
-  private async discardNonCurrentLockfile(): Promise<void> {
-    if (!lockfileExists(this.lockfilePath)) return;
-    let raw: string;
-    try {
-      raw = await readFile(this.lockfilePath, "utf-8");
-    } catch {
-      return;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return;
-    const observedVersion = (parsed as Record<string, unknown>).schemaVersion;
-    if (observedVersion === APPS_LOCKFILE_SCHEMA_VERSION) return;
-    if (typeof observedVersion !== "number") return;
-
-    const backupPath = `${this.lockfilePath}.bak-${Date.now()}-${process.pid}`;
-    await rename(this.lockfilePath, backupPath);
-    log.warn("discarded stale apps.lock.json (non-current schemaVersion)", {
-      observedVersion,
-      expectedVersion: APPS_LOCKFILE_SCHEMA_VERSION,
-      backupPath,
-      note: "core-required apps will be re-seeded; other apps must be re-installed",
-    });
-  }
-
-  /**
-   * Detect a pre-imperative profile (legacy `apps/<appId>/deployment.yaml`
-   * + version-keyed bundle dirs, no `apps.lock.json` yet) and run the one-shot
-   * migration. Idempotent — `migrateToLockfile` bails when lockfile or
-   * `installed/` already exists.
-   */
-  private async runLegacyMigrationIfNeeded(): Promise<void> {
-    if (lockfileExists(this.lockfilePath)) return;
-    const profileRoot = dirname(this.lockfilePath);
-    const legacyAppsDir = join(profileRoot, "apps");
-    if (!existsSync(legacyAppsDir)) return;
-    const result = await migrateToLockfile({ profileRoot });
-    if (result.skipped) {
-      log.info("legacy migration skipped", { reason: result.reason });
-    } else {
-      log.info("legacy migration done", {
-        migrated: result.migrated,
-        failures: result.failures.length,
-      });
-    }
   }
 
   async markBroken(appId: AppId, code: string, message: string): Promise<void> {

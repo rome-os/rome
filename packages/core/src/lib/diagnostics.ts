@@ -11,7 +11,7 @@ const log = createLogger("diagnostics");
 // relay can assemble the bundle without dragging in unrelated wiring.
 export type DiagnosticsDeps = Pick<
   ApiDeps,
-  "settingsRepo" | "talkRouter" | "appCatalog" | "bootVersionReport"
+  "settingsRepo" | "channelsService" | "appCatalog" | "bootVersionReport"
 >;
 
 export interface DiagnosticBundle {
@@ -64,7 +64,7 @@ export async function assembleDiagnosticBundle(deps: DiagnosticsDeps): Promise<D
   const apps = deps.appCatalog.list();
   const failed = apps.filter((a) => a.state === "failed").map((a) => a.appId);
   const broken = apps.filter((a) => a.state === "broken").map((a) => a.appId);
-  const talkConnections = await deps.talkRouter.list();
+  const channels = await deps.channelsService.list();
 
   return {
     build,
@@ -73,7 +73,7 @@ export async function assembleDiagnosticBundle(deps: DiagnosticsDeps): Promise<D
     previousVersion: deps.bootVersionReport.previousVersion,
     database,
     relay,
-    channels: [...new Set(talkConnections.map((connection) => connection.service))],
+    channels: channels.filter((channel) => channel.sendable).map((channel) => channel.name),
     apps: { total: apps.length, failed, broken },
   };
 }

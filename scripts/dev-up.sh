@@ -151,7 +151,11 @@ if [ -n "$existing_project_labels" ]; then
     while IFS= read -r dir; do
       [ -n "$dir" ] && printf '  %s\n' "$dir" >&2
     done <<<"$other_roots"
-    echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    if [ -n "${ROME_DEV_SLUG:-}" ]; then
+      echo "        ROME_DEV_SLUG=${ROME_DEV_SLUG} pins this name. Unset it here, or run dev:all from that checkout." >&2
+    else
+      echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    fi
     exit 1
   fi
 fi
@@ -373,6 +377,7 @@ echo "dev-up: syncing node_modules (pnpm install --frozen-lockfile) ..."
 if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T -e CI=true rome pnpm install --frozen-lockfile \
   --filter @rome/core... \
   --filter @rome/discord-cli... \
+  --filter @rome-os/node... \
   --filter rome-web... \
   --filter @rome-os/app-web-sdk... \
   --filter @rome-os/app-runtime... \
@@ -411,9 +416,10 @@ fi
 #     persistent volume), so host source edits flow through the mutagen sync
 #     with no reinstall — the install only has to happen once per rome-home
 #     volume. Idempotent; non-fatal because the stack is fully functional with
-#     just the built-in opencli commands.
+#     just the built-in opencli commands. Also register user-<site> plugins from
+#     every profile under the container HOME/.rome bind.
 # ---------------------------------------------------------------------------
-echo "dev-up: registering Rome opencli plugins ..."
+echo "dev-up: registering Rome and user opencli plugins ..."
 if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T rome sh -c '
   failed=0
   for plugin_src in /workspace/opencli-plugins/*/; do
@@ -426,6 +432,16 @@ if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T rome sh 
       [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then continue; fi
     rm -rf "$plugin_link"
     opencli plugin install "$plugin_src" || failed=1
+  done
+  for plugin_src in "$HOME"/.rome/*/projects/browser-automation/*/; do
+    plugin_src="${plugin_src%/}"
+    [ -f "$plugin_src/opencli-plugin.json" ] || continue
+    plugin_link="$HOME/.opencli/plugins/user-$(basename "$plugin_src")"
+    if [ "$(readlink "$plugin_link" 2>/dev/null)" = "$plugin_src" ] &&
+      [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then continue; fi
+    if ! { rm -f "$plugin_link" && opencli plugin install "$plugin_src"; }; then
+      echo "dev-up: warning — user opencli plugin install failed: $plugin_src; continuing." >&2
+    fi
   done
   exit "$failed"
 '; then
@@ -513,11 +529,9 @@ echo "dev-up: Rome Cloud is serving (host + in-container)"
 # Defaults — overridable via env:
 #   ROME_DEV_USERID         (default: dev)
 #   ROME_DEV_PASSWORD       (default: rome-dev-default; min 8 chars)
-#   ROME_DEV_GUARDIAN_NAME  (default: Dev)
 # ---------------------------------------------------------------------------
 ROME_DEV_USERID="${ROME_DEV_USERID:-dev}"
 ROME_DEV_PASSWORD="${ROME_DEV_PASSWORD:-rome-dev-default}"
-ROME_DEV_GUARDIAN_NAME="${ROME_DEV_GUARDIAN_NAME:-Dev}"
 
 if [ "${#ROME_DEV_PASSWORD}" -lt 8 ]; then
   echo "dev-up: ROME_DEV_PASSWORD must be at least 8 characters." >&2
@@ -559,17 +573,6 @@ done
 #     exit 1
 #   fi
 
-#   setup_payload="$(printf '{"profile":{"guardianName":"%s"}}' "$ROME_DEV_GUARDIAN_NAME")"
-#   if ! curl -fsS --max-time 10 \
-#       -b "$cookie_jar" -c "$cookie_jar" \
-#       -H "Content-Type: application/json" \
-#       -X POST \
-#       --data "$setup_payload" \
-#       "${ROME_API_BASE}/api/onboard/setup" >/dev/null; then
-#     echo "dev-up: /api/onboard/setup failed." >&2
-#     exit 1
-#   fi
-#
 #   if ! curl -fsS --max-time 10 \
 #       -b "$cookie_jar" -c "$cookie_jar" \
 #       -X POST \

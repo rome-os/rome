@@ -18,12 +18,14 @@ describe("provider token files", () => {
       "ROME_GITHUB_TOKEN_FILE",
       "ROME_SLACK_TOKEN_FILE",
       "ROME_GOOGLE_TOKEN_FILE",
+      "ROME_SHOPIFY_TOKEN_FILE",
     ]) {
       savedEnv[key] = process.env[key];
     }
     process.env.ROME_GITHUB_TOKEN_FILE = join(tempDir, "github-oauth-token");
     process.env.ROME_SLACK_TOKEN_FILE = join(tempDir, "slack-oauth-token");
     process.env.ROME_GOOGLE_TOKEN_FILE = join(tempDir, "google-oauth-token");
+    process.env.ROME_SHOPIFY_TOKEN_FILE = join(tempDir, "shopify-oauth-token");
   });
 
   afterEach(() => {
@@ -71,6 +73,27 @@ describe("provider token files", () => {
       userToken: null,
       teamId: null,
     });
+  });
+
+  it("writes Shopify as JSON carrying the access token and the store's domain", async () => {
+    // The token is secret material; the store's myshopify.com domain is the
+    // profile's `login`, which the connector uses as the Admin API host.
+    await syncProviderTokenFile(
+      "shopify",
+      { accessToken: "shpat_live", refreshToken: "shprt_live" },
+      { login: "acme.myshopify.com" },
+    );
+
+    // The refresh token stays in core: the connector never refreshes.
+    expect(JSON.parse(readFileSync(getProviderTokenFilePath("shopify"), "utf8"))).toEqual({
+      accessToken: "shpat_live",
+      shop: "acme.myshopify.com",
+    });
+  });
+
+  it("writes no Shopify file without the store's domain", async () => {
+    await syncProviderTokenFile("shopify", { accessToken: "shpat_live" }, {});
+    expect(existsSync(getProviderTokenFilePath("shopify"))).toBe(false);
   });
 
   it("clears the file when the material carries no usable access token", async () => {

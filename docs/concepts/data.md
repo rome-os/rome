@@ -25,6 +25,9 @@ Projects are working directories where the agent does its work — writing code,
 - Every project can have a one-line memory summary describing what it is. The main agent receives all project summaries, not just the selected project's summary.
 - The first paragraph supplies the summary, capped at 160 Unicode code points including a trailing ellipsis when truncated. Separate this short introduction from detailed notes with a blank line. Consecutive list items without blank lines count as one paragraph.
 - Detailed notes remain available on demand and stay out of the automatic project context.
+- A blocking `summon` starts its agent in the project of the session that called it. The summon can name another project instead, but only a directory inside the projects root. The host rejects any other path before the agent starts. Agents that other actions run start in the default project unless the action names a directory.
+- A resumed agent session reopens in the directory it last ran in, because the model provider keeps its transcript per directory. A caller that names another directory moves the session there. When the recorded directory is missing, resuming that session by id fails, and a thread that reuses its session implicitly starts a fresh session in the default project.
+- The Projects browser and shared-project views skip dependency folders named `node_modules` and dot entries in listings, live updates, uploads, and folder downloads. Build outputs such as `build`, `coverage`, and `dist` remain browsable, editable, and downloadable, and a top-level folder with one of those names is a project. Search still omits build outputs. These filters are not access controls.
 
 **Not to be confused with:**
 
@@ -32,21 +35,25 @@ Projects are working directories where the agent does its work — writing code,
 
 ## Routines
 
-A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, webhook, event-bus, poll, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
+A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, event-bus, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
 
 *Deprecated alias:* **Events** — surfaces that still say "events" for scheduled automation mean routines.
 
 **Contracts:**
 
 - Every fire is recorded as a routine run linked to its action execution, so a routine's history is inspectable.
+- Creating a routine fails when its stored arguments do not satisfy the bound action's input schema, so no routine is saved with arguments that fail on every fire.
 - A routine with an active run (executing, or parked awaiting [guardian approval](messaging.md#approvals)) cannot be deleted out from under it. The active-run check and the delete are atomic.
+- A run still executing when Rome stops is recorded as an error at the next start, so it does not block a delete. A run awaiting approval stays active.
 - An app-managed routine can only be deleted by the managing app, never by a user.
 - A schedule trigger states its timezone binding explicitly. *Floating* resolves against the guardian's current timezone, so the routine follows them when it changes. *Fixed* pins the stored zone forever.
+- A schedule that repeats every N days fires N calendar days apart, across month and year ends. The count starts on the routine's creation day, read in the zone the schedule fires in. A floating schedule reads that day in the guardian's current zone, so the first gap after the guardian changes zone can be shorter or longer than N days.
 
 **Not to be confused with:**
 
 - **[Hook](apps.md#hooks)** — a hook is app-owned code declared in a manifest. A routine is guardian- or agent-authored data managed at runtime.
 - **Event-bus event** — an event is a thing that happens. A routine is a standing binding that may use one as its trigger.
+- **[Event](sessions.md#event)** — one item of a turn's stream. The deprecated alias "events" above means routines, never turn events.
 
 ## Database
 

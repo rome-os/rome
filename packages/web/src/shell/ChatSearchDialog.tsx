@@ -1,11 +1,26 @@
-import { AlertCircle, Archive, Check, Folder, MessageSquare, SearchX, X } from "lucide-react";
+import {
+  AlertCircle,
+  Archive,
+  Check,
+  Folder,
+  MessageSquare,
+  SearchX,
+  SendHorizontal,
+  X,
+} from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import type { InstalledAppCard } from "@rome/api-types/apps";
+import { TileIcon } from "@/components/app-tile-icon";
+import { AgentMentionChip } from "@/components/chat/composer/AgentMentionChip";
+import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   Command,
+  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
@@ -13,12 +28,42 @@ import {
 } from "@/components/ui/command";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
-import { listSessions, searchChatMessages } from "@/lib/chat-api";
-import type { ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
+import { useAppsList } from "@/hooks/use-apps";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
+import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
+import { prettyAgentName } from "@/lib/agent-name";
+import { getHostAppRoute } from "@/lib/auth-routing";
+import {
+  ChatApiError,
+  createSession,
+  listChatAgents,
+  postSessionTurn,
+  searchChatMessages,
+} from "@/lib/chat-api";
+import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import { isChatSearchShortcut, chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
+import type {
+  AgentCatalogGroup,
+  AgentMention,
+  ChatSearchMessageMatch,
+  ChatSession,
+} from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
+import { randomUUID } from "@/lib/random-uuid";
+import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 
 const RECENT_CHAT_LIMIT = 10;
+/**
+ * The most chat rows a search draws. Every row is formatted and highlighted on
+ * each keystroke, so a query that matches hundreds of chats would redraw all
+ * of them while the guardian is still typing; the ranking puts the best
+ * matches first, and more typing narrows the rest.
+ */
+const MAX_CHAT_RESULTS = 50;
 const CONTENT_SEARCH_DEBOUNCE_MS = 200;
 
 /** One row of the result list: a session, plus the message-content hit that
@@ -28,45 +73,80 @@ interface SearchEntry {
   match?: ChatSearchMessageMatch["message"];
 }
 
-function currentPlatform(): string {
-  return typeof navigator === "undefined" ? "" : navigator.platform;
+interface AppSearchEntry {
+  app: InstalledAppCard;
+  href: string;
 }
 
-function isApplePlatform(platform: string): boolean {
-  return /Mac|iPhone|iPad|iPod/i.test(platform);
+interface PageSearchEntry {
+  page: BuiltinNavEntry;
+  label: string;
 }
 
-export function chatSearchShortcutForPlatform(platform = currentPlatform()): string {
-  return isApplePlatform(platform) ? "⌘K" : "Ctrl K";
-}
-
-export function isChatSearchShortcut(
-  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">,
-  platform = currentPlatform(),
-): boolean {
-  const modifier = isApplePlatform(platform) ? event.metaKey : event.ctrlKey;
-  return modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k";
-}
-
-function activeSessionFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/chat\/([^/?#]+)/);
-  if (!match) return null;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
-}
-
-function activityTime(session: ChatSession): number {
-  const activity = new Date(session.activityAt || session.createdAt).getTime();
-  if (Number.isFinite(activity)) return activity;
-  const created = new Date(session.createdAt).getTime();
-  return Number.isFinite(created) ? created : 0;
+/**
+ * The agent filter while the query is a lone `@` token at its start, else
+ * null. Only a leading token counts, so a search that merely contains `@` (an
+ * email address in a message) stays a search.
+ */
+export function agentMentionQuery(query: string): string | null {
+  const match = /^@(\S*)$/.exec(query.trimStart());
+  return match ? match[1] : null;
 }
 
 function normalizeSearchText(value: string): string {
   return value.normalize("NFKD").replace(/\p{M}/gu, "").trim().toLocaleLowerCase();
+}
+
+function openableAppHref(app: InstalledAppCard): string | null {
+  if (!app.isEnabled || app.status !== "active" || app.phase !== "installed") return null;
+  return (app.hasFrontend && app.href ? app.href : null) ?? getHostAppRoute(app.id);
+}
+
+/** Catalog matching is intentionally narrower than chat matching: the whole
+ * query is a case-insensitive substring of the app's display name or id. */
+function matchingOpenableApps(apps: InstalledAppCard[], normalizedQuery: string): AppSearchEntry[] {
+  if (!normalizedQuery) return [];
+
+  return apps
+    .map((app, originalIndex) => {
+      if (isHiddenInLauncher(app)) return null;
+      const href = openableAppHref(app);
+      if (!href) return null;
+      const name = normalizeSearchText(app.displayName);
+      const id = normalizeSearchText(app.id);
+      if (!name.includes(normalizedQuery) && !id.includes(normalizedQuery)) return null;
+      const rank = name === normalizedQuery ? 3 : name.startsWith(normalizedQuery) ? 2 : 1;
+      return { app, href, originalIndex, rank };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((a, b) => b.rank - a.rank || a.originalIndex - b.originalIndex)
+    .map(({ app, href }) => ({ app, href }));
+}
+
+/** Matches Rome's own pages by translated label, id, or alias, ranked like
+ * apps: an exact name, then a name prefix, then any substring. */
+function matchingPages(
+  pages: readonly BuiltinNavEntry[],
+  labelFor: (page: BuiltinNavEntry) => string,
+  normalizedQuery: string,
+): PageSearchEntry[] {
+  if (!normalizedQuery) return [];
+
+  return pages
+    .map((page, originalIndex) => {
+      const label = labelFor(page);
+      const names = [label, page.id, ...(page.aliases ?? [])].map(normalizeSearchText);
+      if (!names.some((name) => name.includes(normalizedQuery))) return null;
+      const rank = names.includes(normalizedQuery)
+        ? 3
+        : names.some((name) => name.startsWith(normalizedQuery))
+          ? 2
+          : 1;
+      return { page, label, originalIndex, rank };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((a, b) => b.rank - a.rank || a.originalIndex - b.originalIndex)
+    .map(({ page, label }) => ({ page, label }));
 }
 
 interface MatchRange {
@@ -139,7 +219,7 @@ function rankSession(session: ChatSession, normalizedQuery: string): number | nu
   if (!normalizedQuery) return 0;
 
   const name = normalizeSearchText(session.name);
-  const projectName = normalizeSearchText(session.projectName ?? "");
+  const projectName = normalizeSearchText(session.projectName);
   const projectPath = normalizeSearchText(session.projectPath ?? "");
   const haystack = `${name}\n${projectName}\n${projectPath}`;
   const terms = normalizedQuery.split(/\s+/);
@@ -152,6 +232,86 @@ function rankSession(session: ChatSession, normalizedQuery: string): number | nu
   return 0;
 }
 
+/**
+ * One chat in the result list. Memoized with its inputs only, so a keystroke
+ * redraws the rows whose highlighting changes and an unrelated update (a
+ * request settling, the dialog's other sections) redraws none.
+ */
+const ChatResultRow = memo(function ChatResultRow({
+  session,
+  match,
+  terms,
+  current,
+  onOpen,
+}: {
+  session: ChatSession;
+  match: SearchEntry["match"];
+  terms: string[];
+  current: boolean;
+  onOpen: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation("common");
+  const archived = Boolean(session.archivedAt);
+  const project = session.projectPath || session.projectName;
+  const timestamp = useMemo(() => formatMessageTimestamp(session.activityAt), [session.activityAt]);
+  return (
+    <CommandItem
+      value={`chat:${session.id}`}
+      onSelect={() => onOpen(session.id)}
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <span
+        className={cn(
+          "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+          "bg-surface-muted text-muted-foreground",
+          "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+        )}
+      >
+        <MessageSquare className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui text-foreground">
+          <HighlightedText text={session.name} terms={terms} />
+        </span>
+        {match ? (
+          <span className="mt-1 block truncate text-aux text-muted-foreground">
+            <span className="text-foreground/80">
+              {match.role === "user"
+                ? t("recentChats.searchMatchUser")
+                : t("recentChats.searchMatchAssistant")}
+              {": "}
+            </span>
+            <HighlightedText text={match.snippet} terms={terms} />
+          </span>
+        ) : null}
+        <span className="mt-1 flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
+          <Folder className="size-3 shrink-0" aria-hidden />
+          <span className="truncate">
+            <HighlightedText text={project} terms={terms} />
+          </span>
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {archived ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 text-aux text-muted-foreground">
+            <Archive className="size-3" aria-hidden />
+            {t("recentChats.statusArchived")}
+          </span>
+        ) : null}
+        {current ? (
+          <span className="inline-flex items-center gap-1 text-aux text-foreground">
+            <Check className="size-3" aria-hidden />
+            {t("recentChats.searchCurrent")}
+          </span>
+        ) : null}
+        {timestamp ? (
+          <span className="text-aux tabular-nums text-muted-foreground">{timestamp}</span>
+        ) : null}
+      </span>
+    </CommandItem>
+  );
+});
+
 export interface ChatSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -159,15 +319,50 @@ export interface ChatSearchDialogProps {
 
 export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) {
   const { t } = useTranslation("common");
+  const { t: tChat } = useTranslation("chat");
   const navigate = useNavigate();
   const location = useLocation();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
-  const [sessions, setSessions] = useState<ChatSession[] | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [loadAttempt, setLoadAttempt] = useState(0);
+  // The agent a new chat will go to. Once pinned, the field holds the
+  // message rather than a search.
+  const [agentMention, setAgentMention] = useState<AgentMention | null>(null);
+  const [agentCatalog, setAgentCatalog] = useState<AgentCatalogGroup[] | null>(null);
+  const [agentCatalogError, setAgentCatalogError] = useState(false);
+  const [agentCatalogAttempt, setAgentCatalogAttempt] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  // Guards a second Enter before `sending` commits.
+  const sendingRef = useRef(false);
+  // Bumped each time the dialog opens or closes, so a send that finishes after
+  // the guardian dismissed the dialog does not navigate or report into it.
+  const openGenerationRef = useRef(0);
+  // A session created by a send whose turn then failed. A retry to the same
+  // agent reuses it rather than leaving an empty chat behind per attempt.
+  const pendingSessionRef = useRef<{ sessionId: string; agentName: string } | null>(null);
+  // The last failed turn. Resending the same text reuses its `inputId`, so a
+  // turn the server accepted before the failure is not recorded twice.
+  const failedTurnRef = useRef<{ sessionId: string; text: string; inputId: string } | null>(null);
+  // The sidebar's cached list: an opening shows it at once and refetches behind
+  // it, and a refetch that finds nothing new leaves the rows alone.
+  const {
+    sessions: cachedSessions,
+    isError: sessionsFailed,
+    refetch: refetchSessions,
+  } = useChatSessions("all", undefined, { enabled: open });
+  const sessions = cachedSessions ?? null;
+  const loadError = sessionsFailed && !cachedSessions;
   const [contentMatches, setContentMatches] = useState<ChatSearchMessageMatch[]>([]);
+  const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [contentLoading, setContentLoading] = useState(false);
+  const {
+    apps,
+    error: appsError,
+    loading: appsLoading,
+    retry: retryApps,
+  } = useAppsList({
+    enabled: open,
+  });
   const shortcut = chatSearchShortcutForPlatform();
   const currentSessionId = activeSessionFromPath(location.pathname);
 
@@ -182,33 +377,63 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   }, [onOpenChange, open]);
 
   useEffect(() => {
+    openGenerationRef.current += 1;
     if (!open) return;
     setQuery("");
+    setAgentMention(null);
+    setAgentCatalog(null);
+    setSendError(null);
+    // A send from an earlier opening may still be in flight. It reports
+    // through a toast instead, so this opening starts unblocked.
+    sendingRef.current = false;
+    setSending(false);
+    pendingSessionRef.current = null;
+    failedTurnRef.current = null;
   }, [open]);
 
+  const mentionQuery = agentMention ? null : agentMentionQuery(query);
+  const pickingAgent = mentionQuery !== null;
+  const messagingAgent = agentMention !== null;
+  // Picking or messaging an agent takes the field over, so chat and app
+  // search see an empty query and stay idle.
+  const searchQuery = pickingAgent || messagingAgent ? "" : query;
+
+  // A failed load is forgotten once the picker closes, so the next `@` opens
+  // on the loading state rather than an alert left over from the last try.
   useEffect(() => {
-    if (!open) return;
+    if (!pickingAgent) setAgentCatalogError(false);
+  }, [pickingAgent]);
+
+  // The catalog is fetched the first time `@` is typed in each opening, so an
+  // agent installed since the last one shows up. A failed load is not kept.
+  useEffect(() => {
+    if (!open || !pickingAgent || agentCatalog !== null) return;
     let cancelled = false;
-    setSessions(null);
-    setLoadError(false);
-    listSessions("all")
-      .then((result) => {
-        if (!cancelled) setSessions(result);
+    setAgentCatalogError(false);
+    listChatAgents()
+      .then((groups) => {
+        if (!cancelled) setAgentCatalog(groups);
       })
       .catch(() => {
-        if (!cancelled) setLoadError(true);
+        if (!cancelled) setAgentCatalogError(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [loadAttempt, open]);
+  }, [agentCatalog, agentCatalogAttempt, open, pickingAgent]);
+
+  const matchingAgentGroups = useMemo(
+    () => (mentionQuery === null ? [] : filterAgentCatalog(agentCatalog ?? [], mentionQuery)),
+    [agentCatalog, mentionQuery],
+  );
 
   // Debounced transcript search: matches inside user + assistant messages.
   // Failures degrade silently to title/project-only results.
-  const trimmedQuery = query.trim();
+  const trimmedQuery = searchQuery.trim();
   useEffect(() => {
     if (!open || !trimmedQuery) {
       setContentMatches([]);
+      setContentSearchQuery("");
       setContentLoading(false);
       return;
     }
@@ -219,11 +444,13 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         .then((matches) => {
           if (cancelled) return;
           setContentMatches(matches);
+          setContentSearchQuery(trimmedQuery);
           setContentLoading(false);
         })
         .catch(() => {
           if (cancelled) return;
           setContentMatches([]);
+          setContentSearchQuery(trimmedQuery);
           setContentLoading(false);
         });
     }, CONTENT_SEARCH_DEBOUNCE_MS);
@@ -233,7 +460,15 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     };
   }, [open, trimmedQuery]);
 
-  const normalizedQuery = normalizeSearchText(query);
+  const normalizedQuery = normalizeSearchText(searchQuery);
+  const matchingPageEntries = useMemo(
+    () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
+    [normalizedQuery, t],
+  );
+  const matchingApps = useMemo(
+    () => matchingOpenableApps(apps ?? [], normalizedQuery),
+    [apps, normalizedQuery],
+  );
   const matchingSessions = useMemo(() => {
     if (!sessions) return [];
     return sessions
@@ -246,7 +481,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       .sort(
         (a, b) =>
           b.rank - a.rank ||
-          activityTime(b.session) - activityTime(a.session) ||
+          sessionActivityTime(b.session) - sessionActivityTime(a.session) ||
           a.originalIndex - b.originalIndex,
       )
       .map((entry) => entry.session);
@@ -259,58 +494,333 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     if (!normalizedQuery) {
       return matchingSessions.slice(0, RECENT_CHAT_LIMIT).map((session) => ({ session }));
     }
+    const currentContentMatches = contentSearchQuery === trimmedQuery ? contentMatches : [];
     const matchBySession = new Map(
-      contentMatches.map((match) => [match.session.id, match.message] as const),
+      currentContentMatches.map((match) => [match.session.id, match.message] as const),
     );
-    const entries: SearchEntry[] = matchingSessions.map((session) => ({
+    const entries: SearchEntry[] = matchingSessions.slice(0, MAX_CHAT_RESULTS).map((session) => ({
       session,
       match: matchBySession.get(session.id),
     }));
-    // One row per session. The endpoint documents one match per session, but
-    // nothing here enforces it, and a second match for the same session would
-    // otherwise append a duplicate row — same React key, and two cmdk options
-    // sharing a value.
-    const seen = new Set(matchingSessions.map((session) => session.id));
-    for (const match of contentMatches) {
-      if (seen.has(match.session.id)) continue;
-      seen.add(match.session.id);
+    // The endpoint returns one match per session, so only a session that
+    // already matched by title needs skipping here.
+    const titleMatched = new Set(matchingSessions.map((session) => session.id));
+    for (const match of currentContentMatches) {
+      if (entries.length >= MAX_CHAT_RESULTS) break;
+      if (titleMatched.has(match.session.id)) continue;
       entries.push({ session: match.session, match: match.message });
     }
     return entries;
-  }, [contentMatches, matchingSessions, normalizedQuery]);
+  }, [contentMatches, contentSearchQuery, matchingSessions, normalizedQuery, trimmedQuery]);
 
   const queryTerms = useMemo(
     () => (normalizedQuery ? normalizedQuery.split(/\s+/) : []),
     [normalizedQuery],
   );
 
-  const openSession = useCallback(
-    (session: ChatSession) => {
+  const openSessionById = useCallback(
+    (sessionId: string) => {
       onOpenChange(false);
       const preserveHiddenSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
       navigate(
-        `/chat/${encodeURIComponent(session.id)}${preserveHiddenSidebar ? "?hideSidebar=1" : ""}`,
+        `/chat/${encodeURIComponent(sessionId)}${preserveHiddenSidebar ? "?hideSidebar=1" : ""}`,
       );
     },
     [location.search, navigate, onOpenChange],
   );
 
-  // Single source for what the body shows. The result count and the list rows
-  // are rendered in different places, so deciding this twice would let them
-  // disagree.
-  const viewState: "loading" | "error" | "no-sessions" | "searching" | "no-results" | "results" =
-    sessions === null && !loadError
-      ? "loading"
-      : loadError
-        ? "error"
-        : sessions && sessions.length === 0
-          ? "no-sessions"
-          : visibleEntries.length > 0
-            ? "results"
-            : contentLoading
-              ? "searching"
-              : "no-results";
-  const loading = viewState === "loading";
+  const pickAgent = useCallback((group: AgentCatalogGroup, agentName: string) => {
+    setAgentMention({
+      appId: group.ownerId,
+      appLabel: group.label,
+      agentName,
+      iconUrl: group.iconUrl,
+    });
+    setQuery("");
+    setSendError(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const unpinAgent = useCallback(() => {
+    if (sendingRef.current) return;
+    setAgentMention(null);
+    setSendError(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const messageText = messagingAgent ? query.trim() : "";
+
+  // Starts the chat the way the new-chat composer does, with its defaults: the
+  // default project, and the stored model and reasoning preferences, which
+  // the server applies when the request omits them.
+  const sendToAgent = useCallback(async () => {
+    if (!agentMention || !messageText || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    setSendError(null);
+    const generation = openGenerationRef.current;
+    // Retry state and UI belong to the opening that sent. Once the dialog has
+    // closed, this send must not leak its state into a later opening.
+    const isCurrent = () => generation === openGenerationRef.current;
+    const agentName = agentMention.agentName;
+    let sessionId: string | null = null;
+    let inputId: string | null = null;
+    let errorMessage = tChat("stream.errors.createChatFallback");
+    try {
+      const pending = pendingSessionRef.current;
+      sessionId = pending?.agentName === agentName ? pending.sessionId : null;
+      if (!sessionId) {
+        try {
+          const created = await createSession({
+            name: tChat("sidebar.newChat"),
+            projectPath: DEFAULT_PROJECT_NAME,
+            agentName,
+          });
+          sessionId = created.id;
+        } catch (error) {
+          if (error instanceof ChatApiError && error.message) errorMessage = error.message;
+          throw error;
+        }
+        if (isCurrent()) pendingSessionRef.current = { sessionId, agentName };
+        // An unsent chat is still a chat; the lists should show it even if
+        // the turn below fails.
+        emitSessionsChanged();
+      }
+      const failed = failedTurnRef.current;
+      inputId =
+        failed && failed.sessionId === sessionId && failed.text === messageText
+          ? failed.inputId
+          : randomUUID();
+      const body = new FormData();
+      body.set("text", messageText);
+      body.set("inputId", inputId);
+      errorMessage = tChat("stream.errors.sendFallback");
+      const result = await postSessionTurn(sessionId, body);
+      if (!result.ok) {
+        errorMessage =
+          result.message ||
+          (result.status === 0
+            ? tChat("stream.errors.sendInvalidResponse")
+            : tChat("stream.errors.sendStatus", { status: result.status }));
+        throw new Error(errorMessage);
+      }
+      emitSessionsChanged();
+      if (!isCurrent()) {
+        // Escape mid-send reads as cancel, so a send that lands after the
+        // dialog closed says so rather than leaving the guardian to resend.
+        const createdId = sessionId;
+        toast.success(t("recentChats.agentSent", { agent: prettyAgentName(agentName) }), {
+          description: messageText,
+          action: {
+            label: t("recentChats.agentSentOpen"),
+            onClick: () => openSessionById(createdId),
+          },
+        });
+        return;
+      }
+      pendingSessionRef.current = null;
+      failedTurnRef.current = null;
+      openSessionById(sessionId);
+    } catch {
+      if (!isCurrent()) {
+        // The dialog that held the draft is gone, so the toast carries the
+        // text for the guardian to recover.
+        toast.error(
+          t("recentChats.agentSendFailed", {
+            agent: prettyAgentName(agentName),
+            error: errorMessage,
+          }),
+          {
+            description: messageText,
+          },
+        );
+        return;
+      }
+      if (sessionId && inputId) failedTurnRef.current = { sessionId, text: messageText, inputId };
+      setSendError(errorMessage);
+    } finally {
+      if (isCurrent()) {
+        sendingRef.current = false;
+        setSending(false);
+      }
+    }
+  }, [agentMention, messageText, openSessionById, t, tChat]);
+
+  const openHref = useCallback(
+    (href: string) => {
+      onOpenChange(false);
+      const preserveHiddenSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
+      if (!preserveHiddenSidebar) {
+        navigate(href);
+        return;
+      }
+
+      // App hrefs may already carry app-owned query parameters. Parse rather
+      // than concatenate so shell mode is added without replacing them.
+      const target = new URL(href, "http://rome.local");
+      target.searchParams.set("hideSidebar", "1");
+      navigate(`${target.pathname}${target.search}${target.hash}`);
+    },
+    [location.search, navigate, onOpenChange],
+  );
+
+  // The blank state remains chat-only. Once the guardian types, each source
+  // settles independently: one source loading or failing must never hide
+  // selectable matches from the other.
+  const isSearching = normalizedQuery.length > 0;
+  const chatLoading = sessions === null && !loadError;
+  const contentPending = isSearching && contentSearchQuery !== trimmedQuery;
+  const resultCount = matchingPageEntries.length + matchingApps.length + visibleEntries.length;
+  const relevantLoading = isSearching
+    ? chatLoading || appsLoading || contentLoading || contentPending
+    : chatLoading;
+  const hasResults = resultCount > 0;
+  const hasPartialFailure = isSearching && (loadError || Boolean(appsError));
+  const agentCatalogLoading = pickingAgent && agentCatalog === null && !agentCatalogError;
+  const agentCount = matchingAgentGroups.reduce((count, group) => count + group.agents.length, 0);
+  const agentName = agentMention ? prettyAgentName(agentMention.agentName) : "";
+  const inputLabel = agentMention
+    ? t("recentChats.agentMessageLabel", { agent: agentName })
+    : t("recentChats.search");
+  // Whether the listbox has options, which decides its padding.
+  const listHasOptions = pickingAgent
+    ? agentCount > 0
+    : messagingAgent
+      ? messageText.length > 0
+      : hasResults;
+
+  const agentGroups = matchingAgentGroups.map((group) => (
+    <CommandGroup key={`agents:${group.ownerId}`} heading={group.label}>
+      {group.agents.map((agent) => {
+        const label = prettyAgentName(agent.localName ?? agent.name);
+        return (
+          <CommandItem
+            key={`agent:${agent.name}`}
+            value={`agent:${agent.name}`}
+            aria-label={label}
+            onSelect={() => pickAgent(group, agent.name)}
+            className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+          >
+            <span
+              className={cn(
+                "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+                "bg-surface-muted text-muted-foreground",
+                "group-data-[selected=true]:bg-background",
+              )}
+            >
+              {group.iconUrl ? (
+                <img src={group.iconUrl} alt="" className="size-5 rounded-4" />
+              ) : (
+                <RomeLogo aria-hidden="true" className="size-5" />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-ui text-foreground">{label}</span>
+              {agent.description ? (
+                <span className="mt-1 block truncate text-aux text-muted-foreground">
+                  {agent.description}
+                </span>
+              ) : null}
+            </span>
+          </CommandItem>
+        );
+      })}
+    </CommandGroup>
+  ));
+
+  const sendItem =
+    messagingAgent && messageText ? (
+      <CommandItem
+        value="send-to-agent"
+        disabled={sending}
+        onSelect={() => void sendToAgent()}
+        className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+      >
+        <span
+          className={cn(
+            "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+            "bg-surface-muted text-muted-foreground",
+            "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+          )}
+        >
+          {sending ? (
+            <Spinner size="sm" label={t("recentChats.agentSending", { agent: agentName })} />
+          ) : (
+            <SendHorizontal className="size-4" aria-hidden />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-ui text-foreground">
+            {t("recentChats.agentStartChat", { agent: agentName })}
+          </span>
+          <span className="mt-1 block truncate text-aux text-muted-foreground">{messageText}</span>
+        </span>
+      </CommandItem>
+    ) : null;
+
+  const pageItems = matchingPageEntries.map(({ page, label }) => (
+    <CommandItem
+      key={`page:${page.id}`}
+      value={`page:${page.id}`}
+      aria-label={label}
+      onSelect={() => openHref(page.href)}
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <span
+        className={cn(
+          "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+          "bg-surface-muted text-muted-foreground",
+          "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+        )}
+      >
+        <page.Icon className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui text-foreground">
+          <HighlightedText text={label} terms={queryTerms} />
+        </span>
+        <span aria-hidden className="mt-1 block truncate text-aux text-muted-foreground">
+          <HighlightedText text={page.href} terms={queryTerms} />
+        </span>
+      </span>
+    </CommandItem>
+  ));
+
+  const appItems = matchingApps.map((entry) => (
+    <CommandItem
+      key={`app:${entry.app.id}`}
+      value={`app:${entry.app.id}`}
+      aria-label={entry.app.displayName}
+      onSelect={() => openHref(entry.href)}
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <TileIcon
+        kind="image"
+        displayName={entry.app.displayName}
+        iconUrl={entry.app.iconUrl}
+        size="md"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui text-foreground">
+          <HighlightedText text={entry.app.displayName} terms={queryTerms} />
+        </span>
+        <span aria-hidden className="mt-1 block truncate text-aux text-muted-foreground">
+          <HighlightedText text={entry.app.id} terms={queryTerms} />
+        </span>
+      </span>
+    </CommandItem>
+  ));
+
+  const chatItems = visibleEntries.map((entry) => (
+    <ChatResultRow
+      key={`chat:${entry.session.id}`}
+      session={entry.session}
+      match={entry.match}
+      terms={queryTerms}
+      current={entry.session.id === currentSessionId}
+      onOpen={openSessionById}
+    />
+  ));
 
   return (
     <Dialog
@@ -334,17 +844,47 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         shouldFilter={false}
         loop
         vimBindings={false}
-        label={t("recentChats.search")}
+        // cmdk names its input from this label, over the input's own
+        // aria-label, so the field's name follows the mode here.
+        label={inputLabel}
         className="bg-transparent"
       >
         <CommandInput
           ref={inputRef}
-          aria-label={t("recentChats.search")}
-          aria-busy={loading}
+          aria-label={inputLabel}
+          aria-busy={
+            pickingAgent ? agentCatalogLoading : messagingAgent ? sending : relevantLoading
+          }
           value={query}
-          onValueChange={setQuery}
-          placeholder={t("recentChats.searchPlaceholder")}
+          onValueChange={(value) => {
+            setQuery(value);
+            if (sendError) setSendError(null);
+          }}
+          onKeyDown={(event) => {
+            // Backspace at the start of an empty message unpins the agent,
+            // the way a token field gives back its last token.
+            if (event.key === "Backspace" && agentMention && query === "") {
+              event.preventDefault();
+              unpinAgent();
+            }
+          }}
+          placeholder={
+            agentMention
+              ? t("recentChats.agentMessagePlaceholder", { agent: agentName })
+              : t("recentChats.searchPlaceholder")
+          }
           className="h-14"
+          leading={
+            agentMention ? (
+              <AgentMentionChip
+                mention={agentMention}
+                pinned={false}
+                // Unpinning mid-send would orphan the send, so the × waits.
+                onRemove={sending ? undefined : unpinAgent}
+                removeLabel={t("recentChats.agentRemove", { agent: agentName })}
+              />
+            ) : null
+          }
         >
           {query ? (
             <IconButton
@@ -353,6 +893,8 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               icon={<X aria-hidden />}
               onClick={() => {
                 setQuery("");
+                // Typing clears the error in onValueChange; this path skips it.
+                setSendError(null);
                 inputRef.current?.focus();
               }}
               className="text-muted-foreground hover:text-foreground"
@@ -365,148 +907,223 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         </CommandInput>
 
         <div className="min-h-52">
-          {viewState === "loading" ? (
-            <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
-              <Spinner label={t("recentChats.searchLoading")} />
-              <span aria-hidden>{t("recentChats.searchLoading")}</span>
-            </div>
-          ) : viewState === "error" ? (
-            <div
-              className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
-              role="alert"
-            >
-              <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full bg-destructive-bg text-destructive-fg">
-                <AlertCircle className="size-5" aria-hidden />
-              </span>
-              <p className="text-ui text-foreground">{t("recentChats.searchLoadError")}</p>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setLoadAttempt((attempt) => attempt + 1)}
-                // Not a list item, so its own activation has to survive the
-                // command root's Enter handling.
-                onKeyDown={stopEnterPropagation}
-                className="mt-3"
-              >
-                {t("recentChats.searchRetry")}
-              </Button>
-            </div>
-          ) : viewState === "no-sessions" ? (
-            <div
-              className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
-              role="status"
-            >
-              <MessageSquare className="mb-3 size-6 text-muted-foreground" aria-hidden />
-              <p className="text-ui text-muted-foreground">{t("recentChats.empty")}</p>
-            </div>
-          ) : viewState !== "results" ? (
-            viewState === "searching" ? (
+          {pickingAgent ? (
+            agentCatalogLoading ? (
               <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
-                <Spinner label={t("recentChats.searchingMessages")} />
-                <span aria-hidden>{t("recentChats.searchingMessages")}</span>
+                <Spinner label={t("recentChats.agentLoading")} />
+                <span aria-hidden>{t("recentChats.agentLoading")}</span>
               </div>
-            ) : (
+            ) : agentCatalogError ? (
+              <div
+                className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
+                role="alert"
+              >
+                <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full bg-destructive-bg text-destructive-fg">
+                  <AlertCircle className="size-5" aria-hidden />
+                </span>
+                <p className="text-ui text-foreground">{t("recentChats.agentLoadError")}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setAgentCatalogAttempt((attempt) => attempt + 1)}
+                  onKeyDown={stopEnterPropagation}
+                  className="mt-3"
+                >
+                  {t("recentChats.searchRetry")}
+                </Button>
+              </div>
+            ) : agentCount === 0 ? (
               <div
                 className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
                 role="status"
               >
                 <SearchX className="mb-3 size-6 text-muted-foreground" aria-hidden />
-                <p className="text-ui text-foreground">{t("recentChats.searchNoResults")}</p>
-                <p className="mt-1 text-aux text-muted-foreground">
-                  {t("recentChats.searchNoResultsDescription")}
+                <p className="text-ui text-foreground">
+                  {(agentCatalog ?? []).length === 0
+                    ? t("recentChats.agentEmpty")
+                    : t("recentChats.agentNoMatch")}
                 </p>
+              </div>
+            ) : (
+              <div className="px-4 pb-1 pt-3 text-aux text-muted-foreground">
+                {t("recentChats.agentPickHeading")}
+              </div>
+            )
+          ) : messagingAgent ? (
+            <>
+              {sendError ? (
+                <div
+                  className="mx-4 mt-3 flex items-center gap-2 rounded-8 bg-destructive-bg px-3 py-2 text-ui text-destructive-fg"
+                  role="alert"
+                >
+                  <AlertCircle className="size-4 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1">{sendError}</span>
+                </div>
+              ) : null}
+              {messageText ? null : (
+                <div
+                  className="flex min-h-40 flex-col items-center justify-center px-6 text-center"
+                  role="status"
+                >
+                  <MessageSquare className="mb-3 size-6 text-muted-foreground" aria-hidden />
+                  <p className="text-ui text-muted-foreground">
+                    {t("recentChats.agentMessageHint", { agent: agentName })}
+                  </p>
+                </div>
+              )}
+            </>
+          ) : !isSearching ? (
+            chatLoading ? (
+              <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
+                <Spinner label={t("recentChats.searchLoading")} />
+                <span aria-hidden>{t("recentChats.searchLoading")}</span>
+              </div>
+            ) : loadError ? (
+              <div
+                className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
+                role="alert"
+              >
+                <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full bg-destructive-bg text-destructive-fg">
+                  <AlertCircle className="size-5" aria-hidden />
+                </span>
+                <p className="text-ui text-foreground">{t("recentChats.searchChatLoadError")}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void refetchSessions()}
+                  onKeyDown={stopEnterPropagation}
+                  className="mt-3"
+                >
+                  {t("recentChats.searchRetry")}
+                </Button>
+              </div>
+            ) : sessions?.length === 0 ? (
+              <div
+                className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
+                role="status"
+              >
+                <MessageSquare className="mb-3 size-6 text-muted-foreground" aria-hidden />
+                <p className="text-ui text-muted-foreground">{t("recentChats.searchEmpty")}</p>
+              </div>
+            ) : (
+              <div className="px-4 pb-1 pt-3 text-aux text-muted-foreground">
+                {t("recentChats.searchRecent")}
               </div>
             )
           ) : (
-            <div
-              className="flex items-center gap-2 px-4 pb-1 pt-3 text-aux text-muted-foreground"
-              role={contentLoading ? undefined : "status"}
-              aria-live={contentLoading ? undefined : "polite"}
-            >
-              {normalizedQuery
-                ? t("recentChats.searchResultsCount", { count: visibleEntries.length })
-                : t("recentChats.searchRecent")}
-              {normalizedQuery && contentLoading ? (
-                <Spinner size="sm" label={t("recentChats.searchingMessages")} />
+            <>
+              {hasResults ? (
+                <div
+                  className="flex items-center gap-2 px-4 pb-1 pt-3 text-aux text-muted-foreground"
+                  role={relevantLoading ? undefined : "status"}
+                  aria-live={relevantLoading ? undefined : "polite"}
+                >
+                  {t("recentChats.searchResultsCount", { count: resultCount })}
+                  {relevantLoading ? (
+                    <Spinner size="sm" label={t("recentChats.searchingResults")} />
+                  ) : null}
+                </div>
               ) : null}
-            </div>
+
+              {loadError ? (
+                <div
+                  className="mx-4 mt-2 flex items-center gap-2 rounded-8 bg-destructive-bg px-3 py-2 text-ui text-destructive-fg"
+                  role="alert"
+                >
+                  <AlertCircle className="size-4 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1">{t("recentChats.searchChatLoadError")}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("recentChats.searchRetryChats")}
+                    onClick={() => void refetchSessions()}
+                    onKeyDown={stopEnterPropagation}
+                  >
+                    {t("recentChats.searchRetry")}
+                  </Button>
+                </div>
+              ) : null}
+              {appsError ? (
+                <div
+                  className="mx-4 mt-2 flex items-center gap-2 rounded-8 bg-destructive-bg px-3 py-2 text-ui text-destructive-fg"
+                  role="alert"
+                >
+                  <AlertCircle className="size-4 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1">{t("recentChats.searchAppLoadError")}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("recentChats.searchRetryApps")}
+                    onClick={retryApps}
+                    onKeyDown={stopEnterPropagation}
+                  >
+                    {t("recentChats.searchRetry")}
+                  </Button>
+                </div>
+              ) : null}
+
+              {!hasResults ? (
+                relevantLoading ? (
+                  <div className="flex min-h-40 items-center justify-center gap-2 text-ui text-muted-foreground">
+                    <Spinner label={t("recentChats.searchingResults")} />
+                    <span aria-hidden>{t("recentChats.searchingResults")}</span>
+                  </div>
+                ) : (
+                  <div
+                    className="flex min-h-40 flex-col items-center justify-center px-6 text-center"
+                    role="status"
+                  >
+                    <SearchX className="mb-3 size-6 text-muted-foreground" aria-hidden />
+                    <p className="text-ui text-foreground">
+                      {hasPartialFailure
+                        ? t("recentChats.searchNoAvailableResults")
+                        : t("recentChats.searchNoResults")}
+                    </p>
+                    <p className="mt-1 text-aux text-muted-foreground">
+                      {hasPartialFailure
+                        ? t("recentChats.searchNoAvailableResultsDescription")
+                        : t("recentChats.searchNoResultsDescription")}
+                    </p>
+                  </div>
+                )
+              ) : null}
+            </>
           )}
 
-          {/* Mounted in every state, matching the project picker: cmdk's input
-              points aria-controls at this list unconditionally, so unmounting
-              it in the loading, error and empty branches would leave that
-              reference dangling. Empty here is the ordinary no-results shape. */}
+          {/* cmdk's input emits aria-controls unconditionally, so the listbox
+              remains mounted in loading, failure, and empty states. */}
           <CommandList
-            label={t("recentChats.searchResultsLabel")}
-            className={`max-h-[55vh] sm:max-h-96 ${viewState === "results" ? "px-2 pb-2" : ""}`}
+            label={
+              pickingAgent
+                ? t("recentChats.agentResultsLabel")
+                : messagingAgent
+                  ? t("recentChats.agentMessageLabel", { agent: agentName })
+                  : t("recentChats.searchResultsLabel")
+            }
+            className={`max-h-[55vh] sm:max-h-96 ${listHasOptions ? "px-2 pb-2" : ""}`}
           >
-            {viewState === "results" &&
-              visibleEntries.map((entry) => {
-                const session = entry.session;
-                const archived = Boolean(session.archivedAt);
-                const current = session.id === currentSessionId;
-                const project = session.projectPath || session.projectName;
-                const timestamp = formatMessageTimestamp(session.activityAt || session.createdAt);
-                return (
-                  <CommandItem
-                    key={session.id}
-                    value={session.id}
-                    onSelect={() => openSession(session)}
-                    className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
-                  >
-                    <span
-                      className={cn(
-                        "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
-                        "bg-surface-muted text-muted-foreground",
-                        "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
-                      )}
-                    >
-                      <MessageSquare className="size-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-ui text-foreground">
-                        <HighlightedText text={session.name} terms={queryTerms} />
-                      </span>
-                      {entry.match ? (
-                        <span className="mt-1 block truncate text-aux text-muted-foreground">
-                          <span className="text-foreground/80">
-                            {entry.match.role === "user"
-                              ? t("recentChats.searchMatchUser")
-                              : t("recentChats.searchMatchAssistant")}
-                            {": "}
-                          </span>
-                          <HighlightedText text={entry.match.snippet} terms={queryTerms} />
-                        </span>
-                      ) : null}
-                      <span className="mt-1 flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
-                        <Folder className="size-3 shrink-0" aria-hidden />
-                        <span className="truncate">
-                          <HighlightedText text={project} terms={queryTerms} />
-                        </span>
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {archived ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 text-aux text-muted-foreground">
-                          <Archive className="size-3" aria-hidden />
-                          {t("recentChats.statusArchived")}
-                        </span>
-                      ) : null}
-                      {current ? (
-                        <span className="inline-flex items-center gap-1 text-aux text-foreground">
-                          <Check className="size-3" aria-hidden />
-                          {t("recentChats.searchCurrent")}
-                        </span>
-                      ) : null}
-                      {timestamp ? (
-                        <span className="text-aux tabular-nums text-muted-foreground">
-                          {timestamp}
-                        </span>
-                      ) : null}
-                    </span>
-                  </CommandItem>
-                );
-              })}
+            {pickingAgent ? agentGroups : null}
+            {messagingAgent ? sendItem : null}
+            {!pickingAgent && !messagingAgent ? (
+              <>
+                {hasResults && isSearching && matchingPageEntries.length > 0 ? (
+                  <CommandGroup heading={t("recentChats.searchPagesGroup")}>
+                    {pageItems}
+                  </CommandGroup>
+                ) : null}
+                {hasResults && isSearching && matchingApps.length > 0 ? (
+                  <CommandGroup heading={t("recentChats.searchAppsGroup")}>{appItems}</CommandGroup>
+                ) : null}
+                {hasResults && isSearching && visibleEntries.length > 0 ? (
+                  <CommandGroup heading={t("recentChats.searchChatsGroup")}>
+                    {chatItems}
+                  </CommandGroup>
+                ) : null}
+                {hasResults && !isSearching ? chatItems : null}
+              </>
+            ) : null}
           </CommandList>
         </div>
       </Command>
@@ -522,7 +1139,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
           <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
             ↵
           </kbd>
-          {t("recentChats.searchOpenHint")}
+          {pickingAgent
+            ? t("recentChats.agentPickHint")
+            : messagingAgent
+              ? t("recentChats.agentSendHint")
+              : t("recentChats.searchOpenHint")}
         </span>
         <span className="inline-flex items-center gap-2">
           <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">

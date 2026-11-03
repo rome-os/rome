@@ -79,6 +79,14 @@ test("a weekday release increments the stable patch and pins the checked CI comm
   );
 });
 
+test("a manual run on main allocates the next patch like the schedule", (t) => {
+  const f = fixture(t);
+  const result = f.run({ GITHUB_EVENT_NAME: "workflow_dispatch" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.output(), `tag=v1.1.10\nsha=${f.sha}\n`);
+  assert.equal(f.git("--git-dir", f.remote, "rev-parse", "v1.1.10^{commit}"), f.sha);
+});
+
 test("stable versions sort numerically across minor and major versions", (t) => {
   const f = fixture(t);
   for (const tag of ["v2.9.9", "v2.10.12", "v1.99.99", "v3.0.0-rc.1"]) f.git("tag", tag);
@@ -148,8 +156,9 @@ test("missing stable versions fail without inventing an initial version", (t) =>
 test("unexpected events, branches, and checkout commits cannot allocate a version", (t) => {
   const f = fixture(t);
   for (const overrides of [
-    { GITHUB_EVENT_NAME: "workflow_dispatch" },
+    { GITHUB_EVENT_NAME: "pull_request" },
     { GITHUB_EVENT_NAME: "push" },
+    { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/feature" },
     { GITHUB_REF: "refs/heads/feature" },
     { GITHUB_SHA: "0".repeat(40) },
   ]) {

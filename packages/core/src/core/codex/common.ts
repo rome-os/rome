@@ -1,6 +1,7 @@
 // Shared Codex helpers — model catalog, env/auth wiring, and OpenAI-shaped
 // accounting. Consumed by CodexAppServerProvider (the only Codex provider).
 
+import type { AgentStop } from "../../types.js";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "../provider-accounting.js";
 import {
   modelTokenMetricAttributes,
@@ -48,6 +49,7 @@ interface BuildOpenAiAccountingArgs {
   agentName?: string;
   appStoreListingId?: string;
   reportedCostUsd?: number;
+  stop?: AgentStop;
   stopReason?: string;
   durationMs?: number;
 }
@@ -58,7 +60,8 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
   const cacheWriteTokens = usage?.cache_write_input_tokens ?? 0;
   const inputTokens = Math.max(0, sdkInputTokens - cacheReadTokens - cacheWriteTokens);
   const outputTokens = usage?.output_tokens ?? 0;
-  const reasoningTokens = usage?.reasoning_output_tokens ?? 0;
+  const reportedReasoningTokens = usage?.reasoning_output_tokens;
+  const reasoningTokens = reportedReasoningTokens ?? 0;
   return {
     sdkInputTokens,
     outputTokens,
@@ -67,6 +70,9 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
       outputTokens,
       cacheReadTokens,
       cacheWriteTokens,
+      ...(typeof reportedReasoningTokens === "number" && Number.isFinite(reportedReasoningTokens)
+        ? { reasoningTokens: reportedReasoningTokens }
+        : {}),
     },
     rawUsage: usage
       ? {
@@ -101,6 +107,7 @@ export function buildOpenAiAccounting(args: BuildOpenAiAccountingArgs) {
     model: stripLegacyReasoningSuffix(args.model),
     usage: normalized.agentUsage,
     reportedCostUsd: args.reportedCostUsd,
+    stop: args.stop,
     stopReason: args.stopReason,
     durationMs: args.durationMs,
     rawUsage: normalized.rawUsage,

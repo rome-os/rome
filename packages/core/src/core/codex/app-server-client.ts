@@ -23,13 +23,15 @@ const log = createLogger("codex-app-server");
 export interface AppServerClientOptions {
   cwd: string;
   env: Record<string, string>;
+  /** Root `-c key=value` overrides passed to `codex` before `app-server`. */
+  configArgs?: readonly string[];
   /** Fired for every server→client notification. */
   onNotification: (method: string, params: unknown) => void;
   /** Fired for server→client requests; the resolved value becomes the JSON-RPC
    *  result. Throwing yields a JSON-RPC error response. */
   onServerRequest: (method: string, params: unknown) => Promise<unknown> | unknown;
-  /** Fired when the subprocess exits unexpectedly. */
-  onExit?: (code: number | null) => void;
+  /** Fired once, with the cause, when the subprocess exits or its pipe breaks before close(). */
+  onExit?: (error: Error) => void;
 }
 
 interface Pending {
@@ -53,16 +55,20 @@ export class AppServerClient {
   private readonly pending = new Map<JsonRpcId, Pending>();
   private stdoutBuf = "";
   private closed = false;
-  private exited = false;
+  /** Why the transport ended, once it has; later requests reject with it. */
+  private exitError: Error | null = null;
 
   constructor(private readonly opts: AppServerClientOptions) {}
 
   start(): void {
     log.info("spawning codex app-server");
-    const proc = spawnCodexAppServer({
-      cwd: this.opts.cwd,
-      env: this.opts.env,
-    });
+    const proc = spawnCodexAppServer(
+      {
+        cwd: this.opts.cwd,
+        env: this.opts.env,
+      },
+      this.opts.configArgs,
+    );
     this.proc = proc;
 
     proc.stdout.setEncoding("utf8");
@@ -72,13 +78,12 @@ export class AppServerClient {
       const text = chunk.trim();
       if (text) log.debug("app-server stderr", { text: text.slice(0, 500) });
     });
-    proc.stdin.on("error", (err) => this.handleTransportExit(err, null));
-    proc.on("exit", (code) => {
-      this.handleTransportExit(new Error(`codex app-server exited (code ${code ?? "null"})`), code);
+    proc.stdin.on("error", (err) => this.handleTransportError(err));
+    proc.on("exit", (code, signal) => {
+      const status = signal ? `signal ${signal}` : `code ${code ?? "null"}`;
+      this.handleTransportExit(new Error(`codex app-server exited (${status})`), { code, signal });
     });
-    proc.on("error", (err) => {
-      this.handleTransportExit(err, null);
-    });
+    proc.on("error", (err) => this.handleTransportError(err));
   }
 
   /** Issue a request and resolve with its `result` (or reject on error). */
@@ -86,7 +91,7 @@ export class AppServerClient {
     if (this.closed || !this.proc) return Promise.reject(new Error("app-server client is closed"));
     // After exit no response can ever arrive; registering the request in
     // `pending` would leave the caller waiting forever.
-    if (this.exited) return Promise.reject(new Error("codex app-server exited"));
+    if (this.exitError) return Promise.reject(this.exitError);
     const id = this.nextId++;
     const payload: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
     return new Promise<unknown>((resolve, reject) => {
@@ -97,7 +102,7 @@ export class AppServerClient {
 
   /** Fire a notification (no response expected). */
   notify(method: string, params?: unknown): void {
-    if (this.closed || this.exited || !this.proc) return;
+    if (this.closed || this.exitError || !this.proc) return;
     const payload: JsonRpcNotification = { jsonrpc: "2.0", method, params };
     this.write(payload);
   }
@@ -114,28 +119,46 @@ export class AppServerClient {
 
   private write(msg: unknown): void {
     const proc = this.proc;
-    if (!proc || this.closed || this.exited || proc.stdin.destroyed || !proc.stdin.writable) {
-      if (!this.closed && !this.exited) {
-        this.handleTransportExit(new Error("codex app-server stdin is not writable"), null);
+    if (!proc || this.closed || this.exitError || proc.stdin.destroyed || !proc.stdin.writable) {
+      if (!this.closed && !this.exitError) {
+        this.handleTransportError(new Error("stdin is not writable"));
       }
       return;
     }
     try {
       proc.stdin.write(JSON.stringify(msg) + "\n", (err) => {
-        if (err) this.handleTransportExit(err, null);
+        if (err) this.handleTransportError(err);
       });
     } catch (err) {
-      this.handleTransportExit(err instanceof Error ? err : new Error(String(err)), null);
+      this.handleTransportError(err instanceof Error ? err : new Error(String(err)));
     }
   }
 
-  private handleTransportExit(err: Error, code: number | null): void {
-    if (this.closed || this.exited) return;
-    this.exited = true;
-    log.warn("codex app-server transport exited", { code, error: err.message });
+  private handleTransportError(err: Error): void {
+    this.handleTransportExit(new Error(`codex app-server connection failed: ${err.message}`));
+  }
+
+  private handleTransportExit(
+    err: Error,
+    exit?: { code: number | null; signal: NodeJS.Signals | null },
+  ): void {
+    if (this.closed) return;
+    if (this.exitError) {
+      // Callers keep the first cause. A broken pipe usually comes before the
+      // exit that caused it, so log that exit to tell a crash from a restart.
+      if (exit) {
+        log.warn("codex app-server exited after its connection failed", {
+          ...exit,
+          firstCause: this.exitError.message,
+        });
+      }
+      return;
+    }
+    this.exitError = err;
+    log.warn("codex app-server transport exited", { ...exit, error: err.message });
     for (const [, pending] of this.pending) pending.reject(err);
     this.pending.clear();
-    this.opts.onExit?.(code);
+    this.opts.onExit?.(err);
   }
 
   private onStdout(chunk: string): void {

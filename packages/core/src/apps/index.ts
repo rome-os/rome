@@ -8,7 +8,7 @@
  */
 import { AppCatalog } from "./catalog.js";
 import { AppInstaller, type BundleFetcher } from "./installer.js";
-import { AppManager } from "./manager.js";
+import { AppManager, type AppManagerOptions } from "./manager.js";
 import { createBundleFetcher } from "./bundle-fetcher.js";
 import type { RomeCloudListingClient } from "./rome-cloud-listing-client.js";
 
@@ -67,11 +67,6 @@ export {
 
 export { hashWorkspace } from "./packaging/index.js";
 export { hydrateCatalogFromLockfile } from "./catalog-hydration.js";
-export {
-  migrateToLockfile,
-  type MigrateOptions,
-  type MigrateResult,
-} from "./migrate-to-lockfile.js";
 
 export interface AppDomain {
   installer: AppInstaller;
@@ -81,6 +76,7 @@ export interface AppDomain {
 
 export interface CreateAppDomainOptions {
   lockfilePath: string;
+  routines?: AppManagerOptions["routines"];
   installedRoot?: string;
   bundleFetcher?: BundleFetcher;
   /** Used by the installer to resolve omitted `AppstoreSource.contentHash`. */
@@ -98,7 +94,11 @@ export function createAppDomain(opts: CreateAppDomainOptions): AppDomain {
     bundleFetcher: opts.bundleFetcher ?? createBundleFetcher(),
     romeCloudListings: opts.romeCloudListings,
   });
-  const manager = new AppManager({ lockfilePath: opts.lockfilePath, installer });
+  const manager = new AppManager({
+    lockfilePath: opts.lockfilePath,
+    installer,
+    routines: opts.routines,
+  });
   const catalog = new AppCatalog({
     installer,
     readLockfileEntry: (appId) => manager.readLockfileEntry(appId),

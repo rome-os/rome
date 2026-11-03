@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
-import { AsyncResource } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
 import { describe, it, expect, rs } from "@rstest/core";
+import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
 import { replayContext, type ReplayStore } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
@@ -11,50 +13,63 @@ import { EventCatalog } from "../event-catalog.js";
 import { EventService } from "../events/event-service.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { buildAction } from "../test/kit/index.js";
+import {
+  getCurrentHookInvocationContext,
+  runWithHookInvocationContext,
+} from "../core/hook-recursion.js";
 import type { ActionResult } from "./types.js";
+import type { ActionWorkerPayload } from "./worker-protocol.js";
+import { actionExecutionContext } from "./context.js";
+import {
+  ACTION_ROOT_DISPATCH_METHOD,
+  ActionWorkerCoordinator,
+  registerActionSubprocessHost,
+} from "./action-subprocess.js";
+import {
+  createActionEngineRepos,
+  installTestSpanHarness,
+  type SpanHarness,
+} from "../test/helpers.js";
 
 interface SubprocessEngine {
   executeInSubprocess(...args: unknown[]): Promise<ActionResult>;
 }
 
-// A fake IPC peer standing in for the worker ChildProcess: it records every
-// message the server sends back so tests can assert on the rpc_response.
-interface RpcResponse {
-  type: "rpc_response";
-  clientId: string;
-  id: number;
-  result?: unknown;
-  error?: string;
-}
-
-function makeFakeWorker() {
-  const emitter = new EventEmitter();
-  const sent: RpcResponse[] = [];
-  const worker = Object.assign(emitter, {
+// An in-memory IPC channel standing in for a forked worker: the server serves
+// one end, and the test calls from the other like a worker would.
+function connect(server: WorkerRpcServer): IpcRpc {
+  const toMain = new Set<(message: IpcMessage) => void>();
+  const toWorker = new Set<(message: IpcMessage) => void>();
+  const end = (
+    inbox: Set<(message: IpcMessage) => void>,
+    outbox: Set<(message: IpcMessage) => void>,
+  ): IpcTransport => ({
     connected: true,
-    send: (message: RpcResponse, cb?: (err: Error | null) => void) => {
-      sent.push(message);
-      cb?.(null);
-      return true;
+    send(message) {
+      queueMicrotask(() => {
+        for (const listener of outbox) listener(message);
+      });
     },
+    onMessage(listener) {
+      inbox.add(listener);
+      return () => inbox.delete(listener);
+    },
+    onDisconnect: () => () => undefined,
   });
-  return { worker: worker as unknown as ChildProcess, emitter, sent };
+  server.register(new IpcRpc(end(toMain, toWorker), "main"));
+  return new IpcRpc(end(toWorker, toMain), "worker");
 }
-
-let nextId = 1;
 
 async function rpc(
-  fake: ReturnType<typeof makeFakeWorker>,
+  worker: IpcRpc,
   method: string,
   params: unknown,
-): Promise<RpcResponse> {
-  const id = nextId++;
-  fake.emitter.emit("message", { type: "rpc_request", clientId: "client-1", id, method, params });
-  return await rs.waitFor(() => {
-    const response = fake.sent.find((m) => m.id === id);
-    if (!response) throw new Error("no response yet");
-    return response;
-  });
+): Promise<{ result?: unknown; error?: string }> {
+  try {
+    return { result: await worker.call(method, params) };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
 }
 
 // The RPC server now only validates wire params and delegates to the
@@ -67,14 +82,22 @@ function makeServer(
     routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
+    eventService?: EventService;
     appManager?: { setEnabled: ReturnType<typeof rs.fn>; install?: ReturnType<typeof rs.fn> };
     appStore?: {
       listListings: ReturnType<typeof rs.fn>;
       getListing: ReturnType<typeof rs.fn>;
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
+    isExplicitAction?: ReturnType<typeof rs.fn>;
+    validateActionArgs?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
-    talkRouter?: { list: ReturnType<typeof rs.fn> };
+    feedback?: { send: ReturnType<typeof rs.fn> };
+    channelsService?: unknown;
+    connectionRegistry?: unknown;
+    agentNames?: unknown;
+    appConnections?: unknown;
+    appIdForAction?: (actionName: string) => string | null;
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -94,18 +117,26 @@ function makeServer(
   const services = {
     routineEngine,
     routinesRepo: overrides.routinesRepo,
-    eventService: new EventService(eventBus, eventCatalog),
+    eventService: overrides.eventService ?? new EventService(eventBus, eventCatalog),
     // catalog/db are only touched by uninstall --purge, which these tests don't
     // exercise, so stub them.
     appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
     appStore,
     hasAgent: () => false,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
+    isExplicitAction: overrides.isExplicitAction ?? rs.fn(() => false),
+    validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     hasAction: () => false,
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
-    talkRouter: overrides.talkRouter,
+    feedback: overrides.feedback ?? { send: rs.fn() },
+    channelsService: overrides.channelsService,
+    connectionRegistry: overrides.connectionRegistry,
+    channelOf: (connection: { service: string }) => connection.service,
+    agentNames: overrides.agentNames,
+    appConnections: overrides.appConnections,
+    appIdForAction: overrides.appIdForAction ?? (() => null),
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -118,13 +149,127 @@ function makeServer(
   };
 }
 
+describe("WorkerRpcServer App connection identity", () => {
+  it("derives the App from the Core-captured action and rejects a spoofed App id", async () => {
+    const list = rs.fn(async (appId: string) => ({
+      ok: true,
+      value: { connections: [{ connectionId: appId }] },
+    }));
+    const invoke = rs.fn(async () => ({
+      ok: true,
+      value: { status: "ok", executionId: "connection-execution" },
+    }));
+    const appConnections = {
+      list,
+      describe: rs.fn(),
+      operations: rs.fn(),
+      invoke,
+    };
+    const { server } = makeServer({
+      appConnections,
+      appIdForAction: (actionName) => (actionName === "app-b:work" ? "app-b" : null),
+    });
+    const worker = connect(server);
+    const store = {
+      actionName: "app-b:work",
+      executionId: "execution-1",
+      rootExecutionId: "execution-1",
+      initiator: "app:app-a",
+      actor: { kind: "guardian", userId: "guardian", via: "cookie" } as const,
+      channelContext: { channel: "webchat", threadId: "thread-1", channelUserId: "guardian" },
+      sessionId: "session-1",
+      turnId: "turn-1",
+      agentName: "main",
+      channelThreadKey: "webchat:thread-1",
+    };
+
+    const result = await actionExecutionContext.run(store, () =>
+      worker.call("connections.app.list", { limit: 1 }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      value: { connections: [{ connectionId: "app-b" }] },
+    });
+    expect(list).toHaveBeenCalledWith("app-b", { limit: 1 });
+
+    const spoofed = await actionExecutionContext.run(store, () =>
+      rpc(worker, "connections.app.list", { limit: 1, callerAppId: "app-a" }),
+    );
+    expect(spoofed.result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    });
+    expect(list).toHaveBeenCalledTimes(1);
+
+    const contextSpoof = await actionExecutionContext.run(store, () =>
+      runWithCurrentActionContext({ actionName: "app-a:work", callerAppId: "app-a" } as never, () =>
+        worker.call("connections.app.list", { limit: 1 }),
+      ),
+    );
+    expect(contextSpoof).toEqual({
+      ok: true,
+      value: { connections: [{ connectionId: "app-b" }] },
+    });
+    expect(list).toHaveBeenLastCalledWith("app-b", { limit: 1 });
+
+    expect(
+      await actionExecutionContext.run(store, () =>
+        worker.call("connections.app.list", { limit: 0 }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+
+    await actionExecutionContext.run(store, () =>
+      worker.call("connections.app.invoke", {
+        connectionId: "connection-1",
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-1",
+      }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      "app-b",
+      expect.objectContaining({ operation: "documents.create" }),
+      expect.objectContaining({
+        actor: store.actor,
+        channelContext: store.channelContext,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        agentName: "main",
+        channelThreadKey: "webchat:thread-1",
+      }),
+    );
+  });
+
+  it("denies a connection RPC outside an App-owned action", async () => {
+    const list = rs.fn();
+    const { server } = makeServer({
+      appConnections: { list, describe: rs.fn(), operations: rs.fn(), invoke: rs.fn() },
+      appIdForAction: () => null,
+    });
+    const result = await connect(server).call("connections.app.list", {});
+    expect(result).toMatchObject({ ok: false, error: { code: "access_denied" } });
+    expect(list).not.toHaveBeenCalled();
+  });
+});
+
 describe("WorkerRpcServer param validation", () => {
   it("forwards a pinned Store source to create without an install call", async () => {
     const install = rs.fn();
     const { server, services } = makeServer({ appManager: { setEnabled: rs.fn(), install } });
     const create = rs.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
     const params = {
       appId: "ray-calendar",
       name: "@ray/calendar",
@@ -152,8 +297,7 @@ describe("WorkerRpcServer param validation", () => {
   ])("rejects a mixed or unpinned Remix source %#", async (from) => {
     const { server, services } = makeServer();
     const create = rs.spyOn(services.appLifecycle, "create");
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
     expect(
       (await rpc(fake, "apps.create", { appId: "ray-calendar", name: "@ray/calendar", from }))
         .error,
@@ -164,8 +308,7 @@ describe("WorkerRpcServer param validation", () => {
   it.each([false, true])("normalizes the confirmed hash for installed=%s", async (installed) => {
     const { server, services } = makeServer();
     const create = rs.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
     const pin = { listingId: "@alice/calendar", version: "1.0.0", contentHash: "A".repeat(64) };
     const from = installed ? { appId: pin.listingId, expectedSource: pin } : pin;
     const params = { appId: "ray-calendar", name: "@ray/calendar", from };
@@ -181,8 +324,7 @@ describe("WorkerRpcServer param validation", () => {
   it("preserves a canonical Remix source and expected pin across RPC", async () => {
     const { server, services } = makeServer();
     const create = rs.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
     const params = {
       appId: "ray-calendar",
       name: "@ray/calendar",
@@ -200,8 +342,7 @@ describe("WorkerRpcServer param validation", () => {
   });
   it("rejects a mixed template/remix create shape at the RPC boundary", async () => {
     const { server } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "apps.create", {
       appId: "ray-calendar",
@@ -215,27 +356,124 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toMatch(/apps\.create: invalid params/);
   });
 
-  it("serves the current main-process Talk connection list", async () => {
-    const list = rs
-      .fn()
-      .mockResolvedValueOnce([{ connectionId: "discord-1", service: "discord" }])
-      .mockResolvedValueOnce([{ connectionId: "wechat-1", service: "wechat" }]);
-    const { server } = makeServer({ talkRouter: { list } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+  describe("channels.*", () => {
+    it("serves the channel list, sends and reads by channel name", async () => {
+      const service = {
+        list: rs.fn(async () => [{ name: "discord", sendable: true }]),
+        send: rs.fn(async () => ({ messageId: "m1" })),
+        query: rs.fn(async () => []),
+      };
+      const { server } = makeServer({ channelsService: service });
+      const fake = connect(server);
 
-    const first = await rpc(fake, "talk.list", {});
-    const second = await rpc(fake, "talk.list", {});
+      const listed = await rpc(fake, "channels.list", {});
+      const sent = await rpc(fake, "channels.send", {
+        channel: "discord",
+        chatId: "c1",
+        message: { text: "hi" },
+      });
+      await rpc(fake, "channels.query", {
+        channel: "discord",
+        since: "2026-09-29T10:00:00.000Z",
+        limit: 5,
+      });
 
-    expect(first.result).toEqual([{ connectionId: "discord-1", service: "discord" }]);
-    expect(second.result).toEqual([{ connectionId: "wechat-1", service: "wechat" }]);
-    expect(list).toHaveBeenCalledTimes(2);
+      expect(listed.result).toEqual([{ name: "discord", sendable: true }]);
+      expect(sent.result).toEqual({ messageId: "m1" });
+      expect(service.send).toHaveBeenCalledWith("discord", "c1", { text: "hi" });
+      expect(service.query).toHaveBeenCalledWith("discord", {
+        since: new Date("2026-09-29T10:00:00.000Z"),
+        limit: 5,
+      });
+    });
+
+    it("sends and reads by account, and refuses an account missing its id", async () => {
+      const service = {
+        send: rs.fn(async () => ({ messageId: "m1" })),
+        query: rs.fn(async () => []),
+      };
+      const { server } = makeServer({ channelsService: service });
+      const fake = connect(server);
+      const account = { platform: "telegram", id: "8123" };
+
+      await rpc(fake, "channels.send", { channel: account, chatId: "c1", message: { text: "hi" } });
+      await rpc(fake, "channels.query", { channel: account });
+      const refused = await rpc(fake, "channels.query", { channel: { platform: "telegram" } });
+
+      expect(service.send).toHaveBeenCalledWith(account, "c1", { text: "hi" });
+      expect(service.query).toHaveBeenCalledWith(account, {});
+      expect(refused.error).toMatch(/channels\.query: invalid params/);
+      expect(service.query).toHaveBeenCalledTimes(1);
+    });
+
+    it("ingests inbound email through the email Connection, and skips without one", async () => {
+      const ingest = rs.fn(async () => ({ status: "accepted" }));
+      // Its record has an opaque id, as for an account connected after
+      // another was removed, so it is found by its connection kind.
+      const email = {
+        id: "email-1",
+        service: "4f1c",
+        connectionKind: "email",
+        status: () => ({ chat: { state: "unlocked" } }),
+      };
+      const withEmail = makeServer({ connectionRegistry: { all: () => [email], ingest } });
+      const without = makeServer({ connectionRegistry: { all: () => [], ingest } });
+      const fakeWith = connect(withEmail.server);
+      const fakeWithout = connect(without.server);
+      const params = { rawBody: "raw", signature: "sig" };
+
+      const accepted = await rpc(fakeWith, "channels.email.ingestInbound", params);
+      const skipped = await rpc(fakeWithout, "channels.email.ingestInbound", params);
+
+      expect(accepted.result).toEqual({ status: "accepted" });
+      expect(ingest).toHaveBeenCalledWith("email-1", params);
+      expect(skipped.result).toEqual({ status: "skipped", reason: "channel_inactive" });
+      expect(ingest).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a read with no channel", async () => {
+      const { server } = makeServer({ channelsService: { query: rs.fn() } });
+      const fake = connect(server);
+
+      const response = await rpc(fake, "channels.query", {});
+
+      expect(response.error).toMatch(/channels\.query: invalid params/);
+    });
+
+    it("refuses a query naming a Connection, which it cannot honour", async () => {
+      const query = rs.fn(async () => []);
+      const { server } = makeServer({ channelsService: { query } });
+      const fake = connect(server);
+
+      const response = await rpc(fake, "channels.query", {
+        channel: "telegram_user",
+        connectionId: "tg-b",
+      });
+
+      expect(response.error).toMatch(/channels\.query: invalid params/);
+      expect(query).not.toHaveBeenCalled();
+    });
+
+    it("resolves an agent's name, refusing anything but a name", async () => {
+      const resolve = rs.fn(async () => ({ status: "none" }));
+      const { server } = makeServer({ agentNames: { resolve } });
+      const fake = connect(server);
+
+      const found = await rpc(fake, "agentNames.resolve", { name: "atlas" });
+      const empty = await rpc(fake, "agentNames.resolve", { name: "" });
+      const stray = await rpc(fake, "agentNames.resolve", { name: "atlas", channel: "whatsapp" });
+
+      expect(found.result).toEqual({ status: "none" });
+      expect(resolve).toHaveBeenCalledWith("atlas");
+      expect(empty.error).toMatch(/agentNames\.resolve: invalid params/);
+      expect(stray.error).toMatch(/agentNames\.resolve: invalid params/);
+      expect(resolve).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("enables an app and echoes the result when params are valid", async () => {
     const { server, appManager } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "apps.setEnabled", { appId: "demo", enabled: false });
 
@@ -244,10 +482,76 @@ describe("WorkerRpcServer param validation", () => {
     expect(appManager.setEnabled).toHaveBeenCalledWith("demo", false);
   });
 
+  it("runs apps.setEnabled under the caller's hook chain", async () => {
+    let seen: unknown = "unset";
+    const appManager = {
+      setEnabled: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+      }),
+    };
+    const { server } = makeServer({ appManager });
+    const fake = connect(server);
+    const hookInvocationContext = {
+      rootInvocationId: "root-1",
+      depth: 1,
+      chain: [{ hookType: "app", appId: "demo", hookName: "app-started" }],
+    };
+
+    const response = await rpc(fake, "apps.setEnabled", {
+      appId: "demo",
+      enabled: true,
+      hookInvocationContext,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(appManager.setEnabled).toHaveBeenCalledWith("demo", true);
+    expect(seen).toEqual(hookInvocationContext);
+  });
+
+  it("runs apps.install without a hook chain when the caller sent none", async () => {
+    let seen: unknown = "unset";
+    const appManager = {
+      setEnabled: rs.fn(async () => {}),
+      install: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+        return { appId: "demo" };
+      }),
+    };
+    const { server } = makeServer({ appManager });
+    const fake = connect(server);
+    const stale = {
+      rootInvocationId: "stale",
+      depth: 3,
+      chain: [{ hookType: "app", appId: "other", hookName: "app-started" }],
+    };
+    // A pooled worker's IPC callbacks run in the async context of whatever
+    // forked it, here a stale hook chain.
+    const response = await runWithHookInvocationContext(stale, () =>
+      rpc(fake, "apps.install", { source: { mode: "bundle", path: "/tmp/demo" } }),
+    );
+
+    expect(response.error).toBeUndefined();
+    expect(appManager.install).toHaveBeenCalled();
+    expect(seen).toBeUndefined();
+  });
+
+  it("rejects apps.setEnabled with a malformed hook chain without touching the service", async () => {
+    const { server, appManager } = makeServer({});
+    const fake = connect(server);
+
+    const response = await rpc(fake, "apps.setEnabled", {
+      appId: "demo",
+      enabled: true,
+      hookInvocationContext: { rootInvocationId: "root-1", depth: -1, chain: [] },
+    });
+
+    expect(response.error).toContain("apps.setEnabled: invalid params");
+    expect(appManager.setEnabled).not.toHaveBeenCalled();
+  });
+
   it("rejects apps.setEnabled when enabled is missing without touching the service", async () => {
     const { server, appManager } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "apps.setEnabled", { appId: "demo" });
 
@@ -258,8 +562,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("rejects apps.setEnabled when enabled is not a boolean", async () => {
     const { server, appManager } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "apps.setEnabled", { appId: "demo", enabled: "yes" });
 
@@ -269,8 +572,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("forwards the exact AgentSession identity for session.continue", async () => {
     const { server, services } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
     const params = {
       agentName: "main",
       sessionId: "agent-session-1",
@@ -288,8 +590,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("rejects session.continue without the exact AgentSession identity", async () => {
     const { server, services } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "session.continue", {
       agentName: "main",
@@ -305,8 +606,7 @@ describe("WorkerRpcServer param validation", () => {
   it("answers actions.has from the main action registry", async () => {
     const hasRegisteredAction = rs.fn((name: string) => name === "send_message");
     const { server } = makeServer({ hasRegisteredAction });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "actions.has", { actionName: "send_message" });
 
@@ -315,10 +615,54 @@ describe("WorkerRpcServer param validation", () => {
     expect(hasRegisteredAction).toHaveBeenCalledWith("send_message");
   });
 
+  it("answers actions.isExplicit from the main action registry", async () => {
+    const isExplicitAction = rs.fn((name: string) => name === "execute_root_script");
+    const { server } = makeServer({ isExplicitAction });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "actions.isExplicit", { actionName: "execute_root_script" });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({ explicit: true });
+    expect(isExplicitAction).toHaveBeenCalledWith("execute_root_script");
+  });
+
+  it("answers actions.validateArgs from the main action registry", async () => {
+    const validateActionArgs = rs.fn((_name: string, args: Record<string, unknown>) =>
+      typeof args.prompt === "string" ? null : "prompt is required",
+    );
+    const { server } = makeServer({ validateActionArgs });
+    const fake = connect(server);
+
+    const invalid = await rpc(fake, "actions.validateArgs", {
+      actionName: "coding_task",
+      args: {},
+    });
+    const valid = await rpc(fake, "actions.validateArgs", {
+      actionName: "coding_task",
+      args: { prompt: "fix the test" },
+    });
+
+    expect(invalid.error).toBeUndefined();
+    expect(invalid.result).toEqual({ error: "prompt is required" });
+    expect(valid.result).toEqual({ error: null });
+    expect(validateActionArgs).toHaveBeenCalledWith("coding_task", {});
+  });
+
+  it("rejects actions.validateArgs without an args object", async () => {
+    const validateActionArgs = rs.fn(() => null);
+    const { server } = makeServer({ validateActionArgs });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "actions.validateArgs", { actionName: "coding_task" });
+
+    expect(response.error).toContain("actions.validateArgs: invalid params");
+    expect(validateActionArgs).not.toHaveBeenCalled();
+  });
+
   it("forwards appStore.listListings when params are valid", async () => {
     const { server, appStore } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "appStore.listListings", {
       query: "calendar",
@@ -337,8 +681,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("rejects appStore.listListings when limit is invalid", async () => {
     const { server, appStore } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "appStore.listListings", { limit: 0 });
 
@@ -349,8 +692,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("rejects routines.cancel with an empty routineId without deactivating anything", async () => {
     const { server, services } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "routines.cancel", { routineId: "" });
 
@@ -360,8 +702,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("deactivates a routine when routineId is valid", async () => {
     const { server, services } = makeServer({});
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "routines.cancel", { routineId: "r-42" });
 
@@ -388,8 +729,7 @@ describe("WorkerRpcServer routines.schedule", () => {
     const { server, services } = makeServer({
       routinesRepo: { findById: rs.fn(async () => baseRow) },
     });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "routines.schedule", { routineId: "r-7" });
 
@@ -403,8 +743,7 @@ describe("WorkerRpcServer routines.schedule", () => {
     const { server, services } = makeServer({
       routinesRepo: { findById: rs.fn(async () => ({ ...baseRow, enabled: false })) },
     });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "routines.schedule", { routineId: "r-7" });
 
@@ -417,8 +756,7 @@ describe("WorkerRpcServer routines.schedule", () => {
     const { server, services } = makeServer({
       routinesRepo: { findById: rs.fn(async () => undefined) },
     });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "routines.schedule", { routineId: "ghost" });
 
@@ -433,8 +771,7 @@ describe("WorkerRpcServer routines.schedule", () => {
     const { server } = makeServer({
       routinesRepo: { findById },
     });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "routines.schedule", { routineId: "" });
 
@@ -449,8 +786,7 @@ describe("WorkerRpcServer events.publish", () => {
     const received: BusEvent[] = [];
     bus.subscribe((e) => received.push(e));
     const { server } = makeServer({ eventBus: bus });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "events.publish", {
       name: "order.created",
@@ -472,8 +808,7 @@ describe("WorkerRpcServer events.publish", () => {
     const received: BusEvent[] = [];
     bus.subscribe((e) => received.push(e));
     const { server } = makeServer({ eventBus: bus });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     await rpc(fake, "events.publish", { name: "ping", source: "sys" });
 
@@ -485,8 +820,7 @@ describe("WorkerRpcServer events.publish", () => {
     let published = 0;
     bus.subscribe(() => published++);
     const { server } = makeServer({ eventBus: bus });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const missingName = await rpc(fake, "events.publish", { source: "sys" });
     const missingSource = await rpc(fake, "events.publish", { name: "x" });
@@ -501,12 +835,33 @@ describe("WorkerRpcServer events.publish", () => {
   it("starts event-triggered actions outside the pooled worker's stale replay context", async () => {
     const bus = new EventBus();
     const { server } = makeServer({ eventBus: bus });
-    const fake = makeFakeWorker();
-    const registry = new ActionRegistryImpl([]);
+    class PooledWorker extends EventEmitter {
+      pid = 345_678;
+      connected = true;
+      exitCode: number | null = null;
+      signalCode: NodeJS.Signals | null = null;
+      sent: Array<{ type?: string; reqId?: string }> = [];
+
+      send(message: { type?: string }, callback?: (error: Error | null) => void): boolean {
+        this.sent.push(message);
+        callback?.(null);
+        if (message.type === "shutdown") {
+          this.connected = false;
+          this.exitCode = 0;
+          queueMicrotask(() => this.emit("exit", 0, null));
+        }
+        return true;
+      }
+    }
+    const worker = new PooledWorker();
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("routine_action"));
-    const actionEngine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const actionEngine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
+      workerWarmPoolSize: 1,
+      actionWorkerFork: () => worker as unknown as ChildProcess,
     });
+    actionEngine.setWorkerRpcServer(server);
     const executeInSubprocess = rs
       .spyOn(actionEngine as unknown as SubprocessEngine, "executeInSubprocess")
       .mockResolvedValue({ status: "ok" });
@@ -525,31 +880,24 @@ describe("WorkerRpcServer events.publish", () => {
       nextSequence: 0,
       replayIndex: 0,
       mode: "record",
-      divergenceMode: "fallthrough",
     };
-    let pooledWorkerResource!: AsyncResource;
+    actionEngine.startWorkerWarmPool();
+    // ChildProcess IPC callbacks run under the async resource created by
+    // fork(), so a pooled worker's request can arrive inside a stale context.
     replayContext.run(staleStore, () => {
-      // ChildProcess IPC callbacks run under the async resource created by
-      // fork(). Model that resource explicitly so this test is deterministic
-      // without starting a real worker process.
-      pooledWorkerResource = new AsyncResource("pooled-worker-ipc");
-      server.attach(fake.worker);
-    });
-
-    const id = nextId++;
-    pooledWorkerResource.runInAsyncScope(() => {
-      fake.emitter.emit("message", {
+      worker.emit("message", {
         type: "rpc_request",
-        clientId: "client-1",
-        id,
+        reqId: "publish-1",
         method: "events.publish",
         params: { name: "github.pull_request", source: "connector", payload: {} },
       });
     });
-    await rs.waitFor(() => expect(fake.sent.some((message) => message.id === id)).toBe(true));
+    await rs.waitFor(() =>
+      expect(worker.sent.some((message) => message.reqId === "publish-1")).toBe(true),
+    );
     await rs.waitFor(() => expect(routineRun).toBeDefined());
     await routineRun;
-    pooledWorkerResource.emitDestroy();
+    await actionEngine.stopWorkerWarmPool();
 
     expect(observedReplayRoot).toBeUndefined();
     expect(executeInSubprocess).toHaveBeenCalledTimes(1);
@@ -560,13 +908,164 @@ describe("WorkerRpcServer events.publish", () => {
   });
 });
 
+describe("WorkerRpcServer trace context", () => {
+  class PooledWorker extends EventEmitter {
+    pid = 345_679;
+    connected = true;
+    exitCode: number | null = null;
+    signalCode: NodeJS.Signals | null = null;
+    sent: Array<{ type?: string; reqId?: string; result?: unknown }> = [];
+
+    send(message: { type?: string }, callback?: (error: Error | null) => void): boolean {
+      this.sent.push(message);
+      callback?.(null);
+      if (message.type === "shutdown") {
+        this.connected = false;
+        this.exitCode = 0;
+        queueMicrotask(() => this.emit("exit", 0, null));
+      }
+      return true;
+    }
+  }
+
+  // A main ActionEngine with one pooled fake worker. executeInSubprocess only
+  // accepts the root and reports success, so the span under test is main's own
+  // `action:*` span.
+  function mainWithPooledWorker(actionName: string) {
+    const worker = new PooledWorker();
+    const registry = new ActionRegistryImpl();
+    registry.register(buildAction(actionName));
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 1,
+      actionWorkerFork: () => worker as unknown as ChildProcess,
+      tracer: trace.getTracer("rome"),
+    });
+    rs.spyOn(engine as unknown as SubprocessEngine, "executeInSubprocess").mockImplementation(
+      async (...args: unknown[]) => {
+        const onRootAccepted = args[3] as (() => void) | undefined;
+        onRootAccepted?.();
+        return { status: "ok" };
+      },
+    );
+    return { worker, engine };
+  }
+
+  // Two spans from unrelated traces. `forkContext` holds an ended span, like
+  // the context main re-enters on every `message` callback of a pooled worker.
+  // `traceCarrier` names the span the worker is running when it calls main.
+  function forkAndWorkerSpans() {
+    const tracer = trace.getTracer("worker-rpc-test");
+    const forkSpan = tracer.startSpan("fork-time-request", undefined, ROOT_CONTEXT);
+    forkSpan.end();
+    const workerSpan = tracer.startSpan("worker-action", undefined, ROOT_CONTEXT);
+    const traceCarrier: Record<string, string> = {};
+    propagation.inject(trace.setSpan(ROOT_CONTEXT, workerSpan), traceCarrier);
+    workerSpan.end();
+    return {
+      forkContext: trace.setSpan(ROOT_CONTEXT, forkSpan),
+      workerSpan: workerSpan.spanContext(),
+      traceCarrier,
+    };
+  }
+
+  it("parents an event-triggered action span to the publishing worker's span", async () => {
+    const harness = installTestSpanHarness("node");
+    try {
+      const bus = new EventBus();
+      const { server } = makeServer({ eventBus: bus });
+      const { worker, engine } = mainWithPooledWorker("routine_action");
+      engine.setWorkerRpcServer(server);
+      let routineRun: Promise<unknown> | undefined;
+      bus.subscribe(() => {
+        routineRun = engine.run("routine_action", {}, { rootExecutionId: "fresh-root" });
+      });
+      const { forkContext, workerSpan, traceCarrier } = forkAndWorkerSpans();
+
+      engine.startWorkerWarmPool();
+      context.with(forkContext, () => {
+        worker.emit("message", {
+          type: "rpc_request",
+          reqId: "publish-traced",
+          method: "events.publish",
+          params: { name: "github.pull_request", source: "connector", payload: {} },
+          traceCarrier,
+        });
+      });
+      await rs.waitFor(() =>
+        expect(worker.sent.some((message) => message.reqId === "publish-traced")).toBe(true),
+      );
+      await rs.waitFor(() => expect(routineRun).toBeDefined());
+      await routineRun;
+      await engine.stopWorkerWarmPool();
+
+      const actionSpan = (await harness.finishedSpans()).find(
+        (span) => span.name === "action:routine_action",
+      );
+      expect(actionSpan?.spanContext().traceId).toBe(workerSpan.traceId);
+      expect(actionSpan?.parentSpanContext?.spanId).toBe(workerSpan.spanId);
+    } finally {
+      await harness.shutdown();
+    }
+  });
+
+  it("parents a detached root's action span to the dispatching worker's span", async () => {
+    const harness = installTestSpanHarness("node");
+    try {
+      const { worker, engine } = mainWithPooledWorker("detached_action");
+      const coordinator = new ActionWorkerCoordinator(engine);
+      engine.setAgentSessionBridge({
+        attach: (rpc, child) => registerActionSubprocessHost(rpc, coordinator, child),
+      });
+      const { forkContext, workerSpan, traceCarrier } = forkAndWorkerSpans();
+      const payload: ActionWorkerPayload = {
+        actionName: "detached_action",
+        args: {},
+        context: {
+          actionName: "detached_action",
+          executionId: "detached-root",
+          rootExecutionId: "detached-root",
+        },
+      };
+
+      engine.startWorkerWarmPool();
+      context.with(forkContext, () => {
+        worker.emit("message", {
+          type: "rpc_request",
+          reqId: "dispatch-traced",
+          method: ACTION_ROOT_DISPATCH_METHOD,
+          params: { payload },
+          traceCarrier,
+        });
+      });
+      await rs.waitFor(() =>
+        expect(worker.sent.find((message) => message.reqId === "dispatch-traced")).toMatchObject({
+          result: { executionId: "detached-root" },
+        }),
+      );
+      let actionSpan: Awaited<ReturnType<SpanHarness["finishedSpans"]>>[number] | undefined;
+      await rs.waitFor(async () => {
+        actionSpan = (await harness.finishedSpans()).find(
+          (span) => span.name === "action:detached_action",
+        );
+        expect(actionSpan).toBeDefined();
+      });
+      await engine.stopWorkerWarmPool();
+
+      expect(actionSpan?.spanContext().traceId).toBe(workerSpan.traceId);
+      expect(actionSpan?.parentSpanContext?.spanId).toBe(workerSpan.spanId);
+    } finally {
+      await harness.shutdown();
+    }
+  });
+});
+
 describe("WorkerRpcServer event discovery", () => {
   it("registers an event type on publish and surfaces it via events.searchCatalog", async () => {
     const bus = new EventBus();
     const catalog = new EventCatalog();
     const { server } = makeServer({ eventBus: bus, eventCatalog: catalog });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const empty = await rpc(fake, "events.searchCatalog", { query: "gmail" });
     expect(empty.result).toEqual({ entries: [], total: 0 });
@@ -600,11 +1099,29 @@ describe("WorkerRpcServer event discovery", () => {
     });
   });
 
+  it("passes events.searchCatalog's match through to the event service", async () => {
+    const eventService = new EventService(new EventBus(), new EventCatalog());
+    const search = rs
+      .spyOn(eventService, "search")
+      .mockResolvedValue({ entries: [], total: 0, matchError: "not connected" });
+    const { server } = makeServer({ eventService });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "events.searchCatalog", {
+      query: "github",
+      match: { "repository.full_name": "acme/widgets" },
+    });
+
+    expect(search).toHaveBeenCalledWith("github", 10, {
+      match: { "repository.full_name": "acme/widgets" },
+    });
+    expect(response.result).toEqual({ entries: [], total: 0, matchError: "not connected" });
+  });
+
   it("rejects events.searchCatalog with a non-positive limit", async () => {
     const catalog = new EventCatalog();
     const { server } = makeServer({ eventBus: new EventBus(), eventCatalog: catalog });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "events.searchCatalog", { query: "x", limit: 0 });
 
@@ -619,8 +1136,7 @@ describe("WorkerRpcServer event discovery", () => {
     let published = 0;
     bus.subscribe(() => published++);
     const { server } = makeServer({ eventBus: bus, eventCatalog: catalog });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     // A different source claims the same type — registration is skipped, but the
     // event still publishes (publishing must never break on catalog drift).
@@ -640,8 +1156,7 @@ describe("notify.send dispatch", () => {
   it("dispatches notify.send to the notify service and echoes the SendOutcome", async () => {
     const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "notify.send", {});
 
@@ -657,8 +1172,7 @@ describe("notify.send dispatch", () => {
   ])("parses %s and forwards it to notify.send", async (_label, params, expectedArg) => {
     const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "notify.send", params);
 
@@ -669,8 +1183,7 @@ describe("notify.send dispatch", () => {
   it("rejects a non-string body without calling the notify service", async () => {
     const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "notify.send", { body: 123 });
 
@@ -685,8 +1198,7 @@ describe("notify.send dispatch", () => {
     // sending the default alert.
     const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+    const fake = connect(server);
 
     const response = await rpc(fake, "notify.send", { body: "hi", title: "sneaky" });
 
@@ -723,8 +1235,7 @@ describe("notify.send dispatch", () => {
           queueMicrotask(() => {
             this.emit("message", {
               type: "rpc_request",
-              clientId: "client-1",
-              id: 999,
+              reqId: "notify-1",
               method: "notify.send",
               params: {},
             });
@@ -739,9 +1250,9 @@ describe("notify.send dispatch", () => {
     const exited = rs.fn();
     worker.on("disconnect", disconnected);
     worker.on("exit", exited);
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("send_notification"));
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
       workerWarmPoolSize: 0,
       actionWorkerFork: () => worker as unknown as ChildProcess,
@@ -781,5 +1292,35 @@ describe("notify.send dispatch", () => {
       release();
       kill.mockRestore();
     }
+  });
+});
+
+describe("feedback.send dispatch", () => {
+  const input = {
+    category: "bug",
+    summary: "Broken",
+    details: "Repro",
+    reporter: { kind: "agent", agentName: "main", callerAppId: "some-app" },
+  };
+  it("forwards validated fields and runtime provenance", async () => {
+    const send = rs.fn(async () => ({ kind: "ok" }));
+    const { server } = makeServer({ feedback: { send } });
+    expect(await server.dispatchInProcess("feedback.send", input)).toEqual({ kind: "ok" });
+    expect(send).toHaveBeenCalledWith(input);
+  });
+  it.each([
+    { ...input, token: "spoof" },
+    { ...input, reporter: { kind: "guardian" } },
+    { ...input, reporter: { kind: "agent", extra: true } },
+    { ...input, details: "x".repeat(4000) },
+    { ...input, summary: "two\nlines" },
+    { ...input, category: "invalid" },
+  ])("rejects invalid RPC parameters without sending: %j", async (params) => {
+    const send = rs.fn();
+    const { server } = makeServer({ feedback: { send } });
+    await expect(server.dispatchInProcess("feedback.send", params)).rejects.toThrow(
+      "invalid params",
+    );
+    expect(send).not.toHaveBeenCalled();
   });
 });

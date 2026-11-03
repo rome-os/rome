@@ -36,9 +36,8 @@ test("the touch floor raises small controls without overruling the caller", asyn
   // ever stops producing one, they would all pass vacuously.
   expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
 
-  // Mock mode compiles the route's chunk on demand, so the kit stylesheet can
-  // land after first paint. Poll the plainest case until it is live rather
-  // than measuring a page that has no CSS yet.
+  // Poll the plainest case until the kit stylesheet is live rather than
+  // measuring a page that has no CSS yet.
   await expect
     .poll(
       async () =>

@@ -8,7 +8,9 @@ import {
 } from "@rome-os/app-runtime";
 
 import {
+  composioActionError,
   isRomeManagedToolkit,
+  isInlineConnectRomeManagedToolkit,
   isSupportedToolkit,
   loadConnectorClient,
   romeManagedConnectHint,
@@ -41,19 +43,20 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // authoritative status check both reach core's /api/integrations directly —
       // the connector server can't see Rome Cloud's connection state, so they must
       // live in the browser component. A non-webchat surface that can't mount the
-      // card falls back to `promptText` (the Settings → Connections hint). Once
+      // card falls back to the guardian-facing `promptText`. Once
       // connected, GitHub is driven through gh/git or connector_proxy — never
       // connector_tool_execute, which is Composio-only.
       if (isRomeManagedToolkit(toolkit)) {
-        if (toolkit.toLowerCase() === "github") {
+        if (isInlineConnectRomeManagedToolkit(toolkit)) {
           // The unified connect card selects the Rome-managed (Rome Cloud OAuth)
-          // adapter for github from the toolkit prop — same componentId the
-          // Composio branch renders below, so there's one card for both brokers.
+          // adapter from the toolkit prop — same componentId the Composio branch
+          // renders below, so there's one card for both brokers. Shopify's card
+          // opens Shopify's install link, where Shopify asks which store.
           return {
             status: "pending_interaction",
             interaction: {
               appId: "connector",
-              promptText: romeManagedConnectHint(toolkit),
+              promptText: `Connect ${toolkit}: click Connect on the card to start authorization. If no card is shown, connect ${toolkit} in Settings → Connections.`,
               render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
             },
           };
@@ -107,7 +110,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           // rather than guess which connection to act on.
           return {
             status: "error",
-            error: `Toolkit "${toolkit}" has ${existing.ids.length} active managed connections — resolve the duplicate in the Connector dashboard before reconnecting.`,
+            error: `Toolkit "${toolkit}" has ${existing.ids.length} active managed connections — resolve the duplicate in Settings › Connections before reconnecting.`,
           };
         }
         // Not connected: render the inline connect card. It drives the OAuth
@@ -119,7 +122,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           status: "pending_interaction",
           interaction: {
             appId: "connector",
-            promptText: `To connect ${toolkit}, open the Connector dashboard and click Connect for "${toolkit}" to authorize.`,
+            promptText: `To connect ${toolkit}, open Settings › Connections and click Connect for "${toolkit}" to authorize.`,
             render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
           },
         };
@@ -128,7 +131,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         log.error("connector add failed", { toolkit, error: message });
         return {
           status: "error",
-          error: `Could not prepare "${toolkit}" for connection: ${message}`,
+          error: await composioActionError(
+            client,
+            err,
+            `Could not prepare "${toolkit}" for connection`,
+            `connector_connect with toolkit "${toolkit}"`,
+          ),
         };
       }
     },

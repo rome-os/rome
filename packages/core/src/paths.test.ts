@@ -7,7 +7,6 @@ import {
   getDefaultAgentWorkingDir,
   ensureProfileDevAppsDirInitialized,
   getProfileAppDataDir,
-  getProfileAppInstallDir,
   getProfileAppsDir,
   getProfileAppsLockfilePath,
   getProfileAppsRuntimeStatusPath,
@@ -157,11 +156,7 @@ describe("profile app paths", () => {
     expect(getCustomAppAuthoringRoot()).toContain("/.rome/guardian/projects/apps");
     expect(getProfileAppsDir()).toContain("/.rome/guardian/apps");
     expect(getProfileInstalledAppsDir()).toContain("/.rome/guardian/apps/installed");
-    expect(getProfileAppInstallDir("coding")).toContain("/.rome/guardian/apps/installed/coding");
     expect(getProfileAppDataDir("coding")).toContain("/.rome/guardian/apps/data/coding");
-    expect(getProfileAppInstallDir("@foo/bar")).toContain(
-      "/.rome/guardian/apps/installed/%40foo%2Fbar",
-    );
     expect(getProfileAppDataDir("@foo/bar")).toContain("/.rome/guardian/apps/data/%40foo%2Fbar");
     expect(getProfileAppsLockfilePath()).toContain("/.rome/guardian/apps.lock.json");
     expect(getProfileAppsRuntimeStatusPath()).toContain("/.rome/guardian/apps/runtime-status.json");

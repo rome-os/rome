@@ -186,7 +186,7 @@ Build the workflow first; sort out connections after. Connection *status* (wheth
    const issueUrl = issue.html_url;
    ```
 
-3. **Connect after the build, not before.** Once the app is installed, name the toolkits the workflow uses and ask the guardian to connect any that aren't yet connected, e.g. "this workflow uses GitHub and Slack — connect them from the Connector page (or the `connector:connector_connect` action) and it's ready to run." `connector:connector_proxy` fails closed on an unconnected toolkit, so until then the workflow simply can't run — which is fine; the app is built and waiting. Never swap in a fixture or fake data to dodge a missing connection.
+3. **Connect after the build, not before.** Once the app is installed, name the toolkits the workflow uses and ask the guardian to connect any that aren't yet connected, e.g. "this workflow uses GitHub and Slack — connect them in Settings › Connections (or the `connector:connector_connect` action) and it's ready to run." `connector:connector_proxy` fails closed on an unconnected toolkit, so until then the workflow simply can't run — which is fine; the app is built and waiting. Never swap in a fixture or fake data to dodge a missing connection.
 
 ### The web surface — three files, the rest is the template's
 

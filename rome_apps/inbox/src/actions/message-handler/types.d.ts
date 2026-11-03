@@ -1,4 +1,4 @@
-import type { MessageReplyReference } from "@rome-os/app-runtime";
+import type { MessageReplyReference, ReplyDeliveryReport } from "@rome-os/app-runtime";
 
 /**
  * message_handler — Process an inbound message from a channel.
@@ -73,6 +73,17 @@ export interface MessageHandlerInput {
   personOverride?: MessageHandlerPersonOverride;
   /** Optional project working directory for this dedicated chat session. */
   workingDir?: string;
+  /** The conversation's agent choice (`routing.agentName`), which the
+   *  conversation stores. It wins over `accountAgentName`. */
+  routedAgentName?: string;
+  /** Canonical id of the agent of the account the message arrived on. It
+   *  answers a conversation that stores no agent choice of its own, and the
+   *  conversation never stores it. When that agent is not loaded, nothing
+   *  answers. Absent on an account that takes no agent. */
+  accountAgentName?: string;
+  /** @deprecated The name `accountAgentName` had in actions queued before it.
+   *  Read only when `accountAgentName` is absent. */
+  linkedAgentName?: string;
 }
 
 export interface MessageHandlerOutput {
@@ -80,6 +91,7 @@ export interface MessageHandlerOutput {
   action:
     | "blocked"
     | "sent"
+    | "streamed"
     | "no_response"
     | "pending_approval"
     | "rejected_by_envoy"
@@ -89,4 +101,6 @@ export interface MessageHandlerOutput {
   response?: string;
   /** Reason for the action taken (e.g. block or rejection reason). */
   reason?: string;
+  /** What the host's streamed reply delivered, when the action is `streamed`. */
+  streamed?: ReplyDeliveryReport;
 }

@@ -43,7 +43,7 @@ export interface LinkedInMessageInput {
 // `https://www.linkedin.com/in/ACoAA…/`. A vanity handle (`/in/ada-lovelace`)
 // deliberately does not match: it is a public alias, not the member id these
 // tables key on, and storing one would break the correspondence with
-// `channel_mappings.channel_user_id`.
+// `links.account_id`.
 const MEMBER_ID_IN_PROFILE_URL = /\/in\/(ACoAA[A-Za-z0-9_-]+)/;
 
 /** The bare LinkedIn member id inside a stored profile URL, or null. */
@@ -56,7 +56,7 @@ export function linkedInMemberIdFromProfileUrl(url: string | null | undefined): 
 export interface LinkedInParticipantInput {
   /**
    * LinkedIn member id, bare (`ACoAA…`) — not a urn or a profile URL — so it
-   * lines up with `channel_mappings.channel_user_id` for `channel: "linkedin"`.
+   * lines up with `links.account_id` for `platform: "linkedin"`.
    */
   participantId: string;
   name?: string | null;
@@ -114,6 +114,9 @@ export interface LinkedInHistoryMessage {
   messageId: string;
   threadId: string;
   threadName: string | null;
+  /** LinkedIn's own group flag for the thread, null until it has been
+   *  snapshotted. */
+  isGroup?: boolean | null;
   /** sent_at when LinkedIn reported one, else the mirror's first-seen time. */
   sentAt: Date;
   senderName: string | null;
@@ -155,8 +158,6 @@ export interface LinkedInSyncSink {
       isGroup?: boolean | null;
     },
   ): Promise<void>;
-  /** Mirrored history, newest last; `threadId: null` spans every thread. */
-  fetchHistory?(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]>;
   /** Replace authoritative thread membership without refreshing profile metadata. */
   replaceThreadParticipantMembership?(
     threadId: string,

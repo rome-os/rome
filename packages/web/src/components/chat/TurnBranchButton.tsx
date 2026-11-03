@@ -3,6 +3,7 @@ import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import { useTranslation } from "react-i18next";
 import { turnApiPath } from "@/components/agent-trace/turn-api";
 import { BranchingChatBubbleIcon } from "@/components/chat/BranchingChatBubbleIcon";
+import { CHAT_POPOVER_FIT } from "@/components/chat/chat-overlay";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -14,8 +15,11 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { placeChatWidget } from "@/pages/free/use-free-cells";
+import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import { emitSessionsChanged } from "@/lib/session-events";
+import { cn } from "@/lib/utils";
 
 const SUGGESTION_KEYS = [
   "message.branch.suggestions.mermaid",
@@ -30,6 +34,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<false | "generic" | "notBranchable">(false);
+  const coarsePointer = useCoarsePointer();
 
   const submit = useCallback(
     async (rawPrompt: string) => {
@@ -89,7 +94,11 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           />
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-80">
+      <PopoverContent
+        align="start"
+        collisionPadding={CHAT_POPOVER_FIT.collisionPadding}
+        className={cn("w-80", CHAT_POPOVER_FIT.className)}
+      >
         <PopoverHeader>
           <PopoverTitle>{t("message.branch.title")}</PopoverTitle>
           <PopoverDescription>{t("message.branch.description")}</PopoverDescription>
@@ -122,6 +131,13 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           <Textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              // Same Enter rule as the chat composer.
+              if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
+                event.preventDefault();
+                void submit(prompt);
+              }
+            }}
             maxLength={TURN_BRANCH_PROMPT_MAX_LENGTH}
             rows={3}
             disabled={submitting}

@@ -10,7 +10,6 @@ import {
 import { accountsRoutes } from "./accounts.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { STRANGER_PERSON_ID } from "../../constants.js";
 
 // The two account reads over one set of sources — the links, the sentinel log
 // and the channel mirrors. GET /accounts is the contacts list: every account
@@ -71,11 +70,11 @@ describe("Accounts API", () => {
       },
     ]);
 
-    waPersonId = await deps.personMappingRepo.create({
+    waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
+      links: [{ platform: "whatsapp", id: LINKED_JID }],
     });
 
     // A dismissal: the sender is filed under the stranger sentinel.
@@ -87,12 +86,7 @@ describe("Accounts API", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.personMappingRepo.addChannelMapping(
-      STRANGER_PERSON_ID,
-      "telegram",
-      DISMISSED_SENDER,
-      "Spammer",
-    );
+    await deps.peopleRepo.dismiss({ platform: "telegram", id: DISMISSED_SENDER });
   });
 
   afterEach(() => testDb.close());
@@ -163,6 +157,142 @@ describe("Accounts API", () => {
     }
   });
 
+  describe("overlapping stream reads", () => {
+    /** Hold the WhatsApp store's head reads until `open` is called, counting
+     *  each account they are asked about. */
+    function gateWhatsAppHeads() {
+      const store = deps.channels.find((channel) => channel.name === "whatsapp")?.messages
+        ?.byAccount;
+      if (!store) throw new Error("the test deps carry a WhatsApp store");
+      const latest = store.latest.bind(store);
+      const asked: string[] = [];
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const control = { failing: false };
+      store.latest = async (accounts) => {
+        asked.push(...accounts.flatMap((account) => account.addresses));
+        await gate;
+        if (control.failing) throw new Error("store unavailable");
+        return latest(accounts);
+      };
+      return { asked, open, control };
+    }
+
+    /**
+     * Count finished directory reads. Naming is a directory read's last step;
+     * once it has answered, everything up to joining the heads is synchronous,
+     * so by the next timer tick that read has joined.
+     */
+    function countDirectoryReads() {
+      const names = deps.accountNames;
+      const displayNames = names.displayNames.bind(names);
+      const count = { done: 0 };
+      names.displayNames = async (accounts) => {
+        const answer = await displayNames(accounts);
+        count.done += 1;
+        return answer;
+      };
+      return count;
+    }
+
+    /** Wait until `check` holds, failing after a deadline rather than guessing
+     *  how long the reads in between take. */
+    async function until(check: () => boolean) {
+      const deadline = Date.now() + 2_000;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error("timed out waiting");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+
+    it("share the head reads, and read the directory afresh each time", async () => {
+      const { asked, open } = gateWhatsAppHeads();
+      const first = fetchStream();
+      await until(() => asked.includes(TALKING_JID));
+
+      // A write lands while the first read is waiting on its heads.
+      await deps.peopleRepo.dismiss({ platform: "whatsapp", id: TALKING_JID });
+      const directory = countDirectoryReads();
+      const second = fetchStream();
+      await until(() => directory.done === 1);
+      open();
+
+      const [before, after] = await Promise.all([first, second]);
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+      expect(find(before, `whatsapp:${TALKING_JID}`)?.state).toBe("unlinked");
+      expect(find(after, `whatsapp:${TALKING_JID}`)?.state).toBe("dismissed");
+      expect(find(after, `whatsapp:${TALKING_JID}`)?.latest.preview).toBe("hello from tina");
+    });
+
+    it("read heads of their own for an account the running read did not cover", async () => {
+      const { asked, open } = gateWhatsAppHeads();
+      const first = fetchStream();
+      await until(() => asked.includes(TALKING_JID));
+
+      const NEW_JID = "15550004444@s.whatsapp.net";
+      await deps.whatsAppStoreRepo.upsertContacts([
+        { jid: NEW_JID, phoneNumber: "15550004444", name: "Newcomer" },
+      ]);
+      await deps.whatsAppStoreRepo.upsertMessages([
+        {
+          id: "wa-new",
+          chatJid: NEW_JID,
+          senderJid: NEW_JID,
+          fromMe: false,
+          timestamp: new Date("2026-08-17T12:00:00Z"),
+          type: "text",
+          text: "just arrived",
+          hasMedia: false,
+        },
+      ]);
+      const second = fetchStream();
+      await until(() => asked.includes(NEW_JID));
+      // A third read joins both: the first read's heads and the second's.
+      const directory = countDirectoryReads();
+      const third = fetchStream();
+      await until(() => directory.done === 1);
+      open();
+
+      const [before, after, latest] = await Promise.all([first, second, third]);
+      expect(find(before, `whatsapp:${NEW_JID}`)).toBeUndefined();
+      expect(find(after, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
+      expect(find(latest, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+      expect(asked.filter((address) => address === NEW_JID)).toHaveLength(1);
+    });
+
+    it("fail together on a failed shared read, and do not keep it", async () => {
+      const { asked, open, control } = gateWhatsAppHeads();
+      control.failing = true;
+      const first = app.request("/accounts/stream");
+      await until(() => asked.includes(TALKING_JID));
+      const directory = countDirectoryReads();
+      const second = app.request("/accounts/stream");
+      await until(() => directory.done === 1);
+      open();
+
+      expect((await first).status).toBe(500);
+      expect((await second).status).toBe(500);
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+
+      control.failing = false;
+      expect(find(await fetchStream(), `whatsapp:${TALKING_JID}`)?.latest.preview).toBe(
+        "hello from tina",
+      );
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(2);
+    });
+
+    it("read afresh once the running read has settled", async () => {
+      const { asked, open } = gateWhatsAppHeads();
+      open();
+      await fetchStream();
+      await fetchStream();
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(2);
+    });
+  });
+
   it("keeps an account nothing has happened on off the stream", async () => {
     const stream = await fetchStream();
     expect(find(stream, `whatsapp:${SILENT_JID}`)).toBeUndefined();
@@ -189,9 +319,6 @@ describe("Accounts API", () => {
     expect(dismissed.state).toBe("dismissed");
     expect(dismissed.personId).toBeNull();
     expect(dismissed.personName).toBeNull();
-    // Not merely absent from that row: the sentinel is not a person, so its id
-    // may not reach a client on any row of any page.
-    expect(JSON.stringify(page)).not.toContain(STRANGER_PERSON_ID);
   });
 
   it("filters the listing by state, and answers 400 for a state that is not one", async () => {
@@ -238,11 +365,11 @@ describe("Accounts API", () => {
   });
 
   it("lists an account on a channel with no history at all", async () => {
-    const linkedSilent = await deps.personMappingRepo.create({
+    const linkedSilent = await deps.peopleRepo.create({
       displayName: "Quiet Link",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "signal", channelUserId: "sig-quiet" }],
+      links: [{ platform: "signal", id: "sig-quiet" }],
     });
     const account = find(await fetchPage(), "signal:sig-quiet")!;
     expect(account.personId).toBe(linkedSilent);
@@ -258,6 +385,35 @@ describe("Accounts API", () => {
     // The person's name finds the accounts they were placed on.
     const byPerson = await fetchPage("?q=wanda");
     expect(byPerson.accounts.map(accountRef)).toEqual([`whatsapp:${LINKED_JID}`]);
+  });
+
+  it("narrows the listing and its counts to one channel, and 400s a channel that is not one", async () => {
+    const telegram = await fetchPage("?channel=telegram");
+    expect(telegram.accounts.every((account) => account.channel === "telegram")).toBe(true);
+    expect(find(telegram, `telegram:${DISMISSED_SENDER}`)).toBeDefined();
+    expect(find(telegram, `whatsapp:${SILENT_JID}`)).toBeUndefined();
+    // The channel scopes what the listing admits, so its counts are that
+    // channel's, the way a query's are.
+    const tally = { unlinked: 0, linked: 0, dismissed: 0 };
+    for (const account of telegram.accounts) tally[account.state] += 1;
+    expect(telegram.counts).toEqual(tally);
+    expect(telegram.counts).not.toEqual((await fetchPage()).counts);
+
+    const whatsapp = await fetchPage("?channel=whatsapp");
+    expect(whatsapp.accounts.length).toBeGreaterThan(0);
+    expect(whatsapp.accounts.every((account) => account.channel === "whatsapp")).toBe(true);
+
+    expect((await app.request("/accounts?channel=tele:gram")).status).toBe(400);
+  });
+
+  it("matches no row on the channel's own name once the channel is fixed", async () => {
+    // Unfixed, a term finds every account on the channel it names.
+    expect(find(await fetchPage("?q=tele"), `telegram:${DISMISSED_SENDER}`)).toBeDefined();
+    // Fixed, every row shares that name, so matching it would answer every row.
+    expect((await fetchPage("?channel=telegram&q=tele")).accounts).toEqual([]);
+    expect((await fetchPage("?channel=telegram&q=spam")).accounts.map(accountRef)).toEqual([
+      `telegram:${DISMISSED_SENDER}`,
+    ]);
   });
 
   it("excludes group chats — a group is not an account", async () => {

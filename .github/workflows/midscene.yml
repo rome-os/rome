@@ -1,0 +1,416 @@
+name: E2E Testing by Midscene
+
+# Visual E2E in two suites, each one job and one report artifact:
+# - mock: the strict MSW mock build (pnpm --filter rome-web dev:mock:e2e, port
+#   3200) with synthetic in-repo fixtures and no real backend. Project setup in
+#   midscene.config.ts starts the mock server.
+# - backend: a real Rome container from the published image, with a real model
+#   configured from ROME_E2E_ANTHROPIC_ENV_JSON.
+# Each suite writes Midscene's native result to its job Summary, and both
+# native HTML reports are published to Pages together.
+# Model credentials come from repository secrets.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC / 14:00 Beijing daily
+  workflow_dispatch:
+    inputs:
+      publish_pages:
+        description: Publish reports to Pages when this repository is enabled
+        required: false
+        type: boolean
+        default: true
+      suite:
+        description: Which suites to run
+        required: false
+        type: choice
+        options: [all, mock, backend]
+        default: all
+
+# Credential trust model:
+# The four MIDSCENE_MODEL_* secrets are billable, and a pull_request job runs
+# contributor-controlled code with the secrets in its environment. Naming a
+# protected environment in the workflow does not create its reviewer gate — an
+# absent environment is provisioned open — so until a maintainer actually
+# configures a protected environment with required reviewers, the secret-
+# bearing path (the `mock` and `backend` jobs) is restricted to the protected main
+# branch in the upstream repository. Fork owners may explicitly dispatch a
+# fork branch with their fork's own secrets. Pull requests do not trigger
+# this workflow. Pages publication is enabled upstream and opt-in for forks.
+#
+# Job-level `if` cannot read workflow `env`, so the gates spell out the
+# upstream repository that MIDSCENE_UPSTREAM_REPOSITORY also names.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: midscene-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MIDSCENE_UPSTREAM_REPOSITORY: rome-os/rome
+
+jobs:
+  # The two model-backed suites. Both jobs follow the same step order and each
+  # uploads one `midscene-suite-<suite>` artifact for the `publish` job below;
+  # only the target each suite tests differs.
+  mock:
+    name: "Midscene suite: mock"
+    # Fail-closed trust gate: upstream runs only on main; a fork owner may
+    # explicitly dispatch a fork ref with that fork's own secrets.
+    if: >-
+      inputs.suite != 'backend' &&
+      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
+      github.repository != 'rome-os/rome' && github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      HEADLESS: "true"
+      ROME_E2E_BASE_URL: http://localhost:3200
+      # The model endpoint is reachable over IPv4; avoid family-race timeouts.
+      NODE_OPTIONS: "--dns-result-order=ipv4first --no-network-family-autoselection"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # pnpm must exist before setup-node resolves the pnpm store for its
+      # cache; without a version it reads the root `packageManager` field.
+      - name: Enable pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+
+      - name: Activate Node.js 24 and pnpm
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Require Midscene model configuration
+        env: &model-env
+          # Scoped to the steps that actually call the model; installs and the
+          # mock server never see these variables.
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+        run: |
+          test -n "$MIDSCENE_MODEL_API_KEY"
+          test -n "$MIDSCENE_MODEL_NAME"
+          test -n "$MIDSCENE_MODEL_BASE_URL"
+          test -n "$MIDSCENE_MODEL_FAMILY"
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Prepare Midscene dependencies and Chromium
+        working-directory: tests/midscene
+        run: |
+          pnpm rebuild esbuild sharp
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Verify the Midscene model
+        working-directory: tests/midscene
+        env: *model-env
+        run: pnpm run check:model
+
+      - name: Type-check Midscene custom nodes
+        # pnpm test loads midscene.config.ts via tsx/esbuild without semantic
+        # TS checks, so run the test package's tsc before the expensive
+        # browser run.
+        working-directory: tests/midscene
+        run: pnpm run typecheck
+
+      # Project setup starts dev:mock:e2e, waits for it, and checks the browser
+      # network boundary before the first case; its log lands in midscene_run/.
+      - name: Run the suite
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
+          MIDSCENE_RETRY: "2"
+        run: timeout --signal=TERM --kill-after=60s 80m pnpm test
+
+      - name: Upload the suite report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: midscene-suite-mock
+          path: |
+            tests/midscene/midscene_run/
+            tests/midscene/.midscene/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Write the result to the Summary
+        if: always()
+        run: tests/midscene/scripts/write-summary.sh mock
+
+  backend:
+    needs: mock
+    name: "Midscene suite: backend"
+    # The same trust gate as `mock`. It runs after `mock`, never beside it,
+    # because both share the Midscene endpoint's tokens-per-minute ceiling; a
+    # failed or skipped `mock` does not stop it.
+    if: >-
+      always() && !cancelled() && inputs.suite != 'mock' &&
+      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
+      github.repository != 'rome-os/rome' && github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HEADLESS: "true"
+      ROME_E2E_BASE_URL: http://127.0.0.1:8090
+      NODE_OPTIONS: "--dns-result-order=ipv4first --no-network-family-autoselection"
+      # The image published from main twice a day; the Summary records which
+      # commit it was built from.
+      ROME_E2E_IMAGE: zoolsher/rome:latest
+      ROME_E2E_EVENTS_FILE: ${{ github.workspace }}/tests/midscene/midscene_run/backend/events.jsonl
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+
+      - name: Activate Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Require Midscene and Rome model configuration
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: |
+          test -n "$MIDSCENE_MODEL_API_KEY"
+          test -n "$MIDSCENE_MODEL_NAME"
+          test -n "$MIDSCENE_MODEL_BASE_URL"
+          test -n "$MIDSCENE_MODEL_FAMILY"
+          test -n "$ROME_E2E_ANTHROPIC_ENV_JSON"
+          # GitHub masks the secret as a whole, not a token printed on its own.
+          node --input-type=module <<'NODE'
+          const parsed = JSON.parse(process.env.ROME_E2E_ANTHROPIC_ENV_JSON);
+          for (const value of Object.values(parsed.env ?? parsed)) {
+            if (typeof value === "string" && value.length >= 8) console.log(`::add-mask::${value}`);
+          }
+          NODE
+
+      - name: Install Midscene workspace dependencies
+        run: pnpm --filter rome-midscene-e2e install --frozen-lockfile --ignore-scripts
+
+      - name: Prepare Midscene dependencies and Chromium
+        working-directory: tests/midscene
+        run: |
+          pnpm rebuild esbuild sharp
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Verify the Midscene model
+        working-directory: tests/midscene
+        env: *model-env
+        run: pnpm run check:model
+
+      - name: Type-check Midscene custom nodes
+        working-directory: tests/midscene
+        run: pnpm run typecheck
+
+      - name: Pull the published image
+        run: |
+          docker pull "$ROME_E2E_IMAGE"
+          docker image inspect "$ROME_E2E_IMAGE" \
+            --format 'Image built from {{ index .Config.Labels "org.opencontainers.image.revision" }} at {{ .Created }}'
+
+      - name: Start the target (Rome container)
+        run: tests/midscene/backend/instance.sh up
+
+      - name: Run the suite
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: timeout --signal=TERM --kill-after=60s 35m pnpm run test:backend
+
+      - name: Collect the container log and anomalies
+        if: always()
+        run: |
+          tests/midscene/backend/instance.sh collect tests/midscene/midscene_run/backend
+          revision=$(docker image inspect "$ROME_E2E_IMAGE" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' || true)
+          node tests/midscene/scripts/backend-anomalies.mjs \
+            --rome-log tests/midscene/midscene_run/backend/rome.log \
+            --events "$ROME_E2E_EVENTS_FILE" \
+            --image "$ROME_E2E_IMAGE@$revision" \
+            --out tests/midscene/midscene_run/backend
+
+      # The report is published like the mock report, so nothing is uploaded
+      # unless this scan passes: GitHub masks secrets in step logs but not
+      # inside artifacts.
+      - name: Scan the suite report for secrets
+        id: secret-scan
+        if: always()
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: node scripts/backend-secret-scan.mjs midscene_run .midscene
+
+      - name: Upload the suite report
+        if: always() && steps.secret-scan.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: midscene-suite-backend
+          path: |
+            tests/midscene/midscene_run/
+            tests/midscene/.midscene/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Write the result to the Summary
+        if: always() && steps.secret-scan.outcome == 'success'
+        run: |
+          tests/midscene/scripts/write-summary.sh backend
+          summary=tests/midscene/midscene_run/backend/backend-summary.md
+          if [ -f "$summary" ]; then cat "$summary" >> "$GITHUB_STEP_SUMMARY"; fi
+
+  publish:
+    name: Publish Midscene reports to Pages
+    needs: [mock, backend]
+    # Upstream publishes from main; a fork opts in by its exact full name and
+    # publishes only from manual dispatch.
+    if: >-
+      always() && !cancelled() &&
+      (needs.mock.result != 'skipped' || needs.backend.result != 'skipped') &&
+      (github.event_name != 'workflow_dispatch' || inputs.publish_pages) &&
+      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
+      github.repository != 'rome-os/rome' && github.repository == vars.MIDSCENE_PUBLISH_REPO &&
+      github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # The site carries the last few runs forward from the previous deployment,
+    # so reading that history and deploying must not interleave across runs.
+    # The lock covers this job only, not the suite runs.
+    concurrency:
+      group: midscene-pages-report
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
+      - name: Configure GitHub Pages
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        with:
+          enablement: false
+
+      - name: Explain unavailable Pages configuration
+        if: steps.pages.outcome != 'success'
+        run: |
+          echo "::warning::GitHub Pages is unavailable. A maintainer must select Settings > Pages > Build and deployment > Source > GitHub Actions."
+
+      # Separate directories keep reports whose generated filenames match
+      # across suites apart.
+      - name: Download the suite reports
+        if: steps.pages.outcome == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: midscene-suite-*
+          path: ${{ runner.temp }}/midscene-reports
+          merge-multiple: false
+
+      - name: Find the latest published report artifact
+        id: previous-report
+        if: steps.pages.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tests/midscene/scripts/trusted-report-runs.mjs find-previous
+
+      - name: Download the latest published report
+        if: steps.pages.outcome == 'success' && steps.previous-report.outputs.run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.previous-report.outputs.name }}
+          run-id: ${{ steps.previous-report.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous-pages-artifact
+
+      - name: Extract the latest published report
+        if: steps.pages.outcome == 'success' && steps.previous-report.outputs.run_id != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous-pages"
+          tar -xf "$RUNNER_TEMP/previous-pages-artifact/artifact.tar" -C "$RUNNER_TEMP/previous-pages"
+
+      - name: Prepare the Pages site
+        id: site
+        if: steps.pages.outcome == 'success'
+        run: |
+          node tests/midscene/scripts/prepare-pages-site.mjs \
+            --site "$RUNNER_TEMP/midscene-pages" \
+            --reports "$RUNNER_TEMP/midscene-reports" \
+            --run-id "$GITHUB_RUN_ID" \
+            --previous "$RUNNER_TEMP/previous-pages" > "$RUNNER_TEMP/midscene-site.json"
+          cat "$RUNNER_TEMP/midscene-site.json"
+
+      - name: Upload the Pages site
+        id: upload-pages
+        if: steps.site.outcome == 'success'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: midscene-e2e-report-pages-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/midscene-pages
+          retention-days: 90
+
+      - name: Deploy the Pages site
+        id: deployment
+        if: steps.upload-pages.outcome == 'success'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: midscene-e2e-report-pages-${{ github.run_attempt }}
+
+      # Links come from prepare-pages-site, which names only reports that exist.
+      - name: Link the published reports in the Summary
+        if: steps.deployment.outcome == 'success'
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import { readFileSync } from "node:fs";
+          const { reports } = JSON.parse(
+            readFileSync(`${process.env.RUNNER_TEMP}/midscene-site.json`, "utf8"),
+          );
+          const base = `${process.env.PAGE_URL.replace(/\/$/, "")}/runs/${process.env.GITHUB_RUN_ID}`;
+          const suites = Object.keys(reports).sort();
+          console.log("## Midscene reports\n");
+          if (!suites.length) console.log("No suite produced an HTML report.");
+          for (const suite of suites) {
+            console.log(`- [Open the ${suite} report ↗](${base}/${reports[suite]})`);
+          }
+          NODE

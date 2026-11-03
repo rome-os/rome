@@ -1,5 +1,6 @@
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
+import { type CloudProfile, readCloudProfile } from "./cloud-profile.js";
 
 const log = createLogger("instance-identity");
 
@@ -30,6 +31,7 @@ export function isValidInstanceToken(token: string | null | undefined): token is
 // the same way. `getInstanceToken` only ever reads the in-memory cache that
 // `hydrateInstanceToken` fills from the DB — it never touches the env.
 let cachedInstanceToken: string | null = null;
+const instanceTokenListeners = new Set<() => void>();
 
 export function getInstanceToken(): string | null {
   return isValidInstanceToken(cachedInstanceToken) ? cachedInstanceToken : null;
@@ -38,7 +40,25 @@ export function getInstanceToken(): string | null {
 // Update the in-process cache without touching the DB. Call after persisting a
 // freshly-minted token so synchronous `getInstanceToken` callers see it at once.
 export function setInstanceTokenInMemory(token: string | null): void {
-  cachedInstanceToken = isValidInstanceToken(token) ? token : null;
+  const nextToken = isValidInstanceToken(token) ? token : null;
+  if (cachedInstanceToken === nextToken) return;
+  cachedInstanceToken = nextToken;
+  // The token is already persisted; a failing listener must not fail that write.
+  for (const listener of instanceTokenListeners) {
+    try {
+      listener();
+    } catch (err) {
+      log.warn("instance token listener failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/** Subscribe to minted and revoked instance credentials in this process. */
+export function onInstanceTokenChanged(listener: () => void): () => void {
+  instanceTokenListeners.add(listener);
+  return () => instanceTokenListeners.delete(listener);
 }
 
 // Load the persisted token from the DB into the cache. Run once at boot, before
@@ -92,6 +112,8 @@ export interface InstanceIdentity {
   /** Rome Cloud profile picture for the account owner. Null means Cloud knows
    *  the account has no picture; undefined means the response omitted the field. */
   avatarUrl?: string | null;
+  /** The whole whoami account, for `system:get_guardian_cloud_profile`. */
+  profile?: CloudProfile;
 }
 
 // The outcome of presenting the durable token to Rome Cloud. `revoked` and
@@ -168,7 +190,10 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
         : null
       : undefined;
 
-  return { status: "ok", identity: { accountId, instanceId, email, avatarUrl } };
+  return {
+    status: "ok",
+    identity: { accountId, instanceId, email, avatarUrl, profile: readCloudProfile(data?.account) },
+  };
 }
 
 // Best-effort identity announcement at boot. Authenticate is "constant,

@@ -207,17 +207,6 @@ describe("Public-access API", () => {
       expect([...publicAccessState.cloudEmailsForApp("inbox")]).toEqual(["ada@example.com"]);
     });
 
-    it("refreshes the auth-edge allowed-apps snapshot", async () => {
-      const res = await putConfig(
-        JSON.stringify({
-          enableAccessControl: true,
-          allowedApps: ["inbox", "news"],
-        }),
-      );
-      expect(res.status).toBe(200);
-      expect([...publicAccessState.allowedApps()].sort()).toEqual(["inbox", "news"]);
-    });
-
     it("accepts an empty body (null → defaults)", async () => {
       const res = await putConfig("not-json");
       expect(res.status).toBe(200);

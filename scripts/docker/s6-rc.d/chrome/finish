@@ -1,0 +1,5 @@
+#!/bin/bash
+# The wrapper's EXIT trap cannot run after SIGKILL. s6 gives run its own
+# process group, so cleanup can reach its browser, proxy and stealth children.
+group="$(cat process-group 2>/dev/null)" || exit 0
+kill -KILL -- "-$group" 2>/dev/null || true

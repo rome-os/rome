@@ -1,15 +1,11 @@
 import { trace } from "@opentelemetry/api";
+import type { PolicyContext } from "@rome-os/app-runtime";
 import type { Policy, PolicyRule, PolicyScope } from "../types.js";
 import type { PoliciesRepository } from "../db/repositories/policies.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 
-export interface PolicyContext {
-  channel: string;
-  sender: { id: string; bondLevel: string } | null;
-  bondLevel: string;
-  threadName?: string;
-  threadType?: string;
-}
+export type { PolicyContext } from "@rome-os/app-runtime";
 
 type MatchedScope = "sender_specific" | "thread" | "sender_tier" | "channel" | "global" | "default";
 
@@ -37,6 +33,7 @@ export class PolicyEngine {
   constructor(
     private policiesRepo: PoliciesRepository,
     private settingsRepo: SettingsRepository,
+    private connectionKindOf: ConnectionKindOfChannel,
   ) {}
 
   /**
@@ -109,12 +106,21 @@ export class PolicyEngine {
       }
     }
 
-    for (const policy of channel) {
-      const scope = policy.scope as Extract<PolicyScope, { type: "channel" }>;
-      if (scope.channel === context.channel && policy.rules.length > 0) {
-        const rule = policy.rules[0];
-        recordPolicyDecision(context, rule, "channel");
-        return rule;
+    // A policy on a later channel's own name wins; one on its connection kind covers
+    // it otherwise, as People keys an account by connection kind. Most installs have
+    // no channel policy, so the connection kind is only looked up when one exists.
+    const connectionKind =
+      channel.length > 0 ? this.connectionKindOf(context.channel) : context.channel;
+    for (const name of connectionKind !== context.channel
+      ? [context.channel, connectionKind]
+      : [context.channel]) {
+      for (const policy of channel) {
+        const scope = policy.scope as Extract<PolicyScope, { type: "channel" }>;
+        if (scope.channel === name && policy.rules.length > 0) {
+          const rule = policy.rules[0];
+          recordPolicyDecision(context, rule, "channel");
+          return rule;
+        }
       }
     }
 

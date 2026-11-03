@@ -292,7 +292,8 @@ services:
     image: rome-dev-chrome:${ROME_WORKTREE_SLUG:-dev}
     restart: unless-stopped
     # Shares rome's network namespace; if the rome container is recreated this
-    # one must be too (dev-up.sh always `up --force-recreate`s them together).
+    # one must be too (dev-up.sh's `up -d` recreates it whenever rome is). A
+    # restart reuses its writable layer, which infra/chrome/entrypoint.sh handles.
     network_mode: "service:rome"
     depends_on:
       - rome

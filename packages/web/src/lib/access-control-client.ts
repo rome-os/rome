@@ -53,11 +53,7 @@ export async function requestSessionHandoff(
     return null;
   }
 
-  const data = await response.json();
-  if (typeof data.token !== "string" || typeof data.next !== "string") {
-    return null;
-  }
-
+  const data = (await response.json()) as SessionHandoffPayload;
   return { token: data.token, next: data.next };
 }
 

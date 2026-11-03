@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Cross2Icon, DownloadIcon } from "@radix-ui/react-icons";
 import type {
-  TraceBlockDto,
+  TraceEventDto,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
+import { useTurnStream } from "@/hooks/use-turn-stream";
 import { CollapsedTraceSummary } from "./CollapsedTraceSummary";
 import { TraceBody } from "./AgentTrace";
-import { isTraceScrollNearBottom } from "./scroll-follow";
 import { turnApiPath } from "./turn-api";
-import { TraceUsageOptionsContext } from "@/components/chat/blocks/UsageSummaryBlock";
+import { TraceUsageOptionsContext } from "@/components/chat/entries/UsageSummaryView";
 
 export type TraceDrawerTarget =
   | {
@@ -36,20 +37,22 @@ export type TraceDrawerTarget =
       turnId: string;
       summary: TraceSummary;
       dumpHref?: string;
+      /** Still running when opened: followed over its stream, then loaded from storage. */
+      running?: boolean;
     };
 
-export function traceDrawerOpenPlacementClass(hasApps: boolean): string {
+function traceDrawerOpenPlacementClass(hasApps: boolean): string {
   if (hasApps) {
     // A widget already owns the surface beside chat. Keep it visible and cover
     // the actual desktop chat column, regardless of how wide that column may
     // become. Mobile keeps the base full-chat overlay below its header.
-    return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 md:left-[var(--rome-chat-left,0px)] md:right-auto md:top-0 md:w-[var(--rome-chat-col)]";
+    return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 md:left-[var(--rome-chat-left,0px)] md:right-auto md:top-[var(--rome-chat-top,0px)] md:w-[var(--rome-chat-col)]";
   }
 
   // With no widgets, width alone chooses the presentation: a narrow chat is
   // covered from its real left edge through the viewport's right edge, while a
   // wide chat keeps 480px for a docked inspector.
-  return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 @max-5xl/chat:md:left-[var(--rome-chat-left,0px)] @max-5xl/chat:md:right-0 @max-5xl/chat:md:top-0 @max-5xl/chat:md:w-auto @5xl/chat:left-auto @5xl/chat:right-0 @5xl/chat:top-0 @5xl/chat:w-[480px] @5xl/chat:border-l @5xl/chat:border-border";
+  return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 @max-5xl/chat:md:left-[var(--rome-chat-left,0px)] @max-5xl/chat:md:right-0 @max-5xl/chat:md:top-[var(--rome-chat-top,0px)] @max-5xl/chat:md:w-auto @5xl/chat:left-auto @5xl/chat:right-0 @5xl/chat:top-[var(--rome-chat-top,0px)] @5xl/chat:w-[480px] @5xl/chat:border-l @5xl/chat:border-border";
 }
 
 export function traceDrawerContentInsetClass(open: boolean, hasApps: boolean): string {
@@ -64,21 +67,21 @@ export function traceDrawerContentInsetClass(open: boolean, hasApps: boolean): s
 async function fetchStoredTrace(
   messageId: string,
   includeSubagentUsage: boolean,
-): Promise<TraceSnapshot | null> {
+): Promise<TraceSnapshot | "archived" | null> {
   const params = new URLSearchParams({ includeSubagentUsage: String(includeSubagentUsage) });
   const res = await fetch(`/api/chat/messages/${encodeURIComponent(messageId)}/content?${params}`, {
     credentials: "include",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as { trace: TraceSnapshot | null };
-  return data.trace;
+  const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+  return data.traceArchived ? "archived" : data.trace;
 }
 
 async function fetchTurnTrace(
   sessionId: string,
   turnId: string,
   includeSubagentUsage: boolean,
-): Promise<TraceSnapshot | null> {
+): Promise<TraceSnapshot | "archived" | null> {
   const params = new URLSearchParams({ includeSubagentUsage: String(includeSubagentUsage) });
   const res = await fetch(
     `/api/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/trace?${params}`,
@@ -86,9 +89,13 @@ async function fetchTurnTrace(
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as { trace: TraceSnapshot | null };
-  return data.trace;
+  const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+  return data.traceArchived ? "archived" : data.trace;
 }
+
+// How close to the bottom still counts as following the live trace. The slack
+// absorbs inertial scrolling and subpixel rounding.
+const TRACE_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 
 export function TraceDrawer({
   target,
@@ -96,27 +103,22 @@ export function TraceDrawer({
   renderInlineBlock,
   renderRunBlocks,
   loadStoredTrace = fetchStoredTrace,
-  loadTurnTrace = fetchTurnTrace,
   allowSubagentUsage = true,
   readOnly = false,
   hasApps = false,
+  outlet,
 }: {
   target: TraceDrawerTarget | null;
   onClose: () => void;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   // Resolve a stored trace's segments. Defaults to the authed content endpoint;
   // the share page passes a map-backed resolver so traces render from the frozen
   // snapshot. A thrown error surfaces as the drawer's retryable error state.
   loadStoredTrace?: (
     messageId: string,
     includeSubagentUsage: boolean,
-  ) => Promise<TraceSnapshot | null>;
-  loadTurnTrace?: (
-    sessionId: string,
-    turnId: string,
-    includeSubagentUsage: boolean,
-  ) => Promise<TraceSnapshot | null>;
+  ) => Promise<TraceSnapshot | "archived" | null>;
   /** Whether this surface can ask the backend for derived descendant usage. */
   allowSubagentUsage?: boolean;
   // Read-only surface (public share): hides the raw-dump download, which hits
@@ -125,15 +127,23 @@ export function TraceDrawer({
   // App/widget presence is independent from chat width. When true, the trace
   // always covers the chat column so it never competes with the app surface.
   hasApps?: boolean;
+  /**
+   * Where the trace renders. `undefined` is the standalone overlay (public
+   * share, sessions page). An element hosts the trace in the tool pane's Trace
+   * tab, which draws the title, the Live indicator and the close button. `null`
+   * is that mode before the tab has mounted, and renders nothing.
+   */
+  outlet?: HTMLElement | null;
 }) {
   const { t } = useTranslation("activity");
   const [remoteTrace, setRemoteTrace] = useState<TraceSnapshot | null>(null);
+  const [archived, setArchived] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const loadedKeyRef = useRef<string | null>(null);
   const loadedTargetKeyRef = useRef<string | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const shouldFollowLiveTraceRef = useRef(true);
 
   const storedId = target?.kind === "stored" ? target.messageId : null;
@@ -150,13 +160,27 @@ export function TraceDrawer({
   const includeSubagentUsage =
     usageOption.targetKey === remoteTargetKey ? usageOption.include : true;
   const liveTargetKey = target?.kind === "live" ? `${target.sessionId}:${target.turnId}` : null;
+  // A running turn is followed over its stream; its stored trace loads once it ends.
+  const turnStream = useTurnStream(turnTarget?.turnId, { enabled: !!turnTarget?.running });
+  const followingTurn = !!turnTarget?.running && !turnStream.done;
 
   useEffect(() => {
     if (!remoteTargetKey) {
       setRemoteTrace(null);
+      setArchived(false);
       setError(null);
       setLoading(false);
       setUsageOption({ targetKey: null, include: true });
+      loadedKeyRef.current = null;
+      loadedTargetKeyRef.current = null;
+      return;
+    }
+    if (followingTurn) {
+      // Drop what the previous target left behind (stored trace, archived/error state).
+      setRemoteTrace(null);
+      setArchived(false);
+      setError(null);
+      setLoading(false);
       loadedKeyRef.current = null;
       loadedTargetKeyRef.current = null;
       return;
@@ -167,15 +191,21 @@ export function TraceDrawer({
     loadedKeyRef.current = key;
     if (loadedTargetKeyRef.current !== remoteTargetKey) setRemoteTrace(null);
     setError(null);
+    setArchived(false);
     setLoading(true);
     (async () => {
       try {
         const trace = storedId
           ? await loadStoredTrace(storedId, includeSubagentUsage)
           : turnTarget
-            ? await loadTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
+            ? await fetchTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
             : null;
         if (cancelled) return;
+        if (trace === "archived") {
+          setRemoteTrace(null);
+          setArchived(true);
+          return;
+        }
         if (!trace) {
           setError(t("trace.drawer.notAvailable"));
           return;
@@ -200,57 +230,62 @@ export function TraceDrawer({
     remoteTargetKey,
     storedId,
     turnTarget,
+    followingTurn,
     includeSubagentUsage,
     retryNonce,
     t,
     loadStoredTrace,
-    loadTurnTrace,
   ]);
 
   const onRetry = remoteTargetKey ? () => setRetryNonce((n) => n + 1) : undefined;
 
   const open = target !== null;
-  const segments = target?.kind === "live" ? target.segments : (remoteTrace?.segments ?? null);
-  const displaySummary = remoteTrace?.summary ?? target?.summary;
-  const streaming = target?.kind === "live" && target.streaming;
+  // Until the stored trace lands, show what the stream delivered, so the panel never blanks.
+  const streamedSegments = turnTarget?.running && turnStream.segments.length > 0;
+  const segments =
+    target?.kind === "live"
+      ? target.segments
+      : (remoteTrace?.segments ?? (streamedSegments ? turnStream.segments : null));
+  const displaySummary =
+    remoteTrace?.summary ?? (streamedSegments ? turnStream.summary : null) ?? target?.summary;
+  const streaming = (target?.kind === "live" && target.streaming) || followingTurn;
+  const followsLive = target?.kind === "live" || !!turnTarget?.running;
+  const followKey = liveTargetKey ?? (followsLive ? remoteTargetKey : null);
   useLayoutEffect(() => {
     shouldFollowLiveTraceRef.current = true;
-    if (target?.kind !== "live") return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.scrollTop = container.scrollHeight;
-  }, [liveTargetKey, target?.kind]);
+    if (!followKey || !scrollEl) return;
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+  }, [followKey, scrollEl]);
 
   const updateLiveTraceFollowState = useCallback(() => {
-    if (target?.kind !== "live") return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    shouldFollowLiveTraceRef.current = isTraceScrollNearBottom(
-      container.scrollHeight,
-      container.scrollTop,
-      container.clientHeight,
-    );
-  }, [target?.kind]);
+    if (!followsLive || !scrollEl) return;
+    shouldFollowLiveTraceRef.current =
+      scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight <=
+      TRACE_SCROLL_BOTTOM_THRESHOLD_PX;
+  }, [followsLive, scrollEl]);
 
   useLayoutEffect(() => {
-    if (target?.kind !== "live" || !streaming || !shouldFollowLiveTraceRef.current) return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.scrollTop = container.scrollHeight;
-  }, [target, streaming]);
+    if (!followsLive || !streaming || !shouldFollowLiveTraceRef.current || !scrollEl) return;
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+  }, [target, segments, followsLive, streaming, scrollEl]);
 
-  const dumpHref = !readOnly
-    ? target?.kind === "turn" && target.dumpHref
-      ? target.dumpHref
-      : target?.turnId
-        ? turnApiPath(target.sessionId, target.turnId, "trace.json")
-        : null
-    : null;
+  const dumpHref =
+    !readOnly && !archived
+      ? target?.kind === "turn" && target.dumpHref
+        ? target.dumpHref
+        : target?.turnId
+          ? turnApiPath(target.sessionId, target.turnId, "trace.json")
+          : null
+      : null;
 
+  const overlay = outlet === undefined;
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
+  // Focus moves into the overlay and back to its trigger on close. The Trace
+  // tab leaves focus to the pane, which may already show another chat's trace.
   useEffect(() => {
+    if (!overlay) return;
     if (open) {
       triggerRef.current = document.activeElement as HTMLElement | null;
       const id = requestAnimationFrame(() => closeBtnRef.current?.focus());
@@ -261,10 +296,13 @@ export function TraceDrawer({
     if (trigger && document.contains(trigger) && typeof trigger.focus === "function") {
       trigger.focus();
     }
-  }, [open]);
+  }, [open, overlay]);
 
+  // Escape closes the overlay, which covers the chat. In the Trace tab it would
+  // also fire from the composer's menus or a hidden tab, so the tab's own close
+  // button and Delete key are the way out there.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !overlay) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -273,7 +311,7 @@ export function TraceDrawer({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, overlay, onClose]);
 
   const canIncludeSubagentUsage =
     allowSubagentUsage && !!remoteTargetKey && !!target?.summary.subagents?.length;
@@ -284,6 +322,59 @@ export function TraceDrawer({
     onIncludeSubagentUsageChange: (include: boolean) =>
       setUsageOption({ targetKey: remoteTargetKey, include }),
   };
+
+  const body = (
+    <div
+      ref={setScrollEl}
+      onScroll={updateLiveTraceFollowState}
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(0.75rem+var(--rome-safe-area-bottom))] pt-3"
+    >
+      {archived ? (
+        <p className="text-aux text-muted-foreground">{t("trace.archived")}</p>
+      ) : target ? (
+        <TraceBody
+          segments={segments}
+          loading={loading && !streamedSegments}
+          error={error}
+          onRetry={onRetry}
+          renderInlineBlock={renderInlineBlock}
+          renderRunBlocks={renderRunBlocks}
+          live={streaming}
+        />
+      ) : null}
+    </div>
+  );
+  const summary =
+    displaySummary && !archived ? <CollapsedTraceSummary summary={displaySummary} /> : null;
+  const dumpLink = dumpHref ? (
+    <a
+      href={dumpHref}
+      download
+      className="inline-flex items-center justify-center rounded-8 px-2 py-1 text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+      aria-label={t("trace.drawer.dumpAriaLabel")}
+      title={t("trace.drawer.dumpTitle")}
+    >
+      <DownloadIcon className="h-4 w-4" />
+    </a>
+  ) : null;
+
+  if (outlet !== undefined) {
+    // The Trace tab names the trace, shows Live and closes it, so only the
+    // summary and the dump link remain for the content header.
+    if (!outlet || !target) return null;
+    return createPortal(
+      <TraceUsageOptionsContext.Provider value={usageOptions}>
+        {(summary || dumpLink) && (
+          <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+            <div className="min-w-0 flex-1">{summary}</div>
+            {dumpLink}
+          </div>
+        )}
+        {body}
+      </TraceUsageOptionsContext.Provider>,
+      outlet,
+    );
+  }
 
   return (
     <TraceUsageOptionsContext.Provider value={usageOptions}>
@@ -310,7 +401,11 @@ export function TraceDrawer({
             : "fixed inset-y-0 right-0 w-[480px] translate-x-full"
         }`}
       >
-        <div className="flex min-w-0 items-center gap-2 border-b border-border px-4 py-3">
+        {/* `h-12` is the chat title header's height (Chat.tsx). The docked
+            drawer sits beside that header, so the two bottom borders must
+            meet; a padding-driven height around the 28px close button lands
+            lower. */}
+        <div className="flex h-12 min-w-0 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2">
           <h3 className="text-ui text-foreground">{t("trace.drawer.title")}</h3>
           {streaming && (
             <span className="inline-flex items-center gap-1 rounded-full bg-info-bg px-2 py-1 text-badge text-info-fg">
@@ -318,20 +413,8 @@ export function TraceDrawer({
               {t("trace.drawer.live")}
             </span>
           )}
-          <div className="ml-2 min-w-0 flex-1">
-            {displaySummary ? <CollapsedTraceSummary summary={displaySummary} /> : null}
-          </div>
-          {dumpHref && (
-            <a
-              href={dumpHref}
-              download
-              className="inline-flex items-center justify-center rounded-8 px-2 py-1 text-muted-foreground hover:bg-surface-muted hover:text-foreground"
-              aria-label={t("trace.drawer.dumpAriaLabel")}
-              title={t("trace.drawer.dumpTitle")}
-            >
-              <DownloadIcon className="h-4 w-4" />
-            </a>
-          )}
+          <div className="ml-2 min-w-0 flex-1">{summary}</div>
+          {dumpLink}
           <Button
             ref={closeBtnRef}
             type="button"
@@ -344,23 +427,7 @@ export function TraceDrawer({
             <Cross2Icon className="h-4 w-4" />
           </Button>
         </div>
-        <div
-          ref={scrollContainerRef}
-          onScroll={updateLiveTraceFollowState}
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(0.75rem+var(--rome-safe-area-bottom))] pt-3"
-        >
-          {target ? (
-            <TraceBody
-              segments={segments}
-              loading={loading}
-              error={error}
-              onRetry={onRetry}
-              renderInlineBlock={renderInlineBlock}
-              renderRunBlocks={renderRunBlocks}
-              live={streaming}
-            />
-          ) : null}
-        </div>
+        {body}
       </aside>
     </TraceUsageOptionsContext.Provider>
   );

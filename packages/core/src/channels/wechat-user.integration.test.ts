@@ -1,9 +1,9 @@
 // Contract check against a REAL signed-in WeChat client in this container.
 //
 // The unit tests prove Rome reads the shape it expects; only this proves the
-// reader helper answers it. The helper reads a vendor's SQLCipher schema
-// through a pinned CLI, so the parse is the part most likely to rot — a WeChat
-// update can change a chat address or a message kind without touching this repo.
+// bridge answers it. wechat-bridge reads a vendor's SQLCipher schema, pinned to
+// one version, so the parse is the part most likely to rot — a WeChat update
+// can change a chat address or a message kind without touching this repo.
 //
 // Skipped unless `WECHAT_USER_TEST=1` and a client is installed, signed in, and
 // unlocked in this container:
@@ -40,7 +40,8 @@ withClient("the WeChat reader contract", () => {
     "reads a direct contact's body, latest message, and count through the People store",
     async () => {
       const directory = wechatUserAccounts(reader);
-      const store = wechatUserMessages(reader);
+      const store = wechatUserMessages(reader).byAccount;
+      if (!store) throw new Error("the WeChat store answers per-account reads");
       const { accounts } = await directory.listAccounts({ limit: 100 });
       expect(accounts.length).toBeGreaterThan(0);
       let checked = false;
@@ -68,11 +69,11 @@ withClient("the WeChat reader contract", () => {
       expect(conversations.length).toBeGreaterThan(0);
 
       const chat = conversations.find((c) => c.isGroup) ?? conversations[0]!;
-      const messages = await reader.messages({ conversationId: chat.id, limit: 5 });
+      const messages = await reader.messages({ chatId: chat.id, limit: 5 });
       expect(messages.length).toBeGreaterThan(0);
 
       for (const message of messages) {
-        expect(message.conversationId).toBe(chat.id);
+        expect(message.chatId).toBe(chat.id);
         expect(message.timestamp).toBeGreaterThan(0);
         // A rich message keeps its placeholder and drops its XML envelope.
         expect(message.text).not.toContain("<?xml");

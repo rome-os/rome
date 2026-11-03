@@ -5,9 +5,9 @@
 
 import { describe, expect, it, rs } from "@rstest/core";
 import { SetupSession } from "./session.js";
-import type { SetupConferral, SetupFn } from "./types.js";
+import type { SetupGrant, SetupFn } from "./types.js";
 
-const CRED: SetupConferral["credential"] = { material: { token: "t" }, expiresAt: "never" };
+const CRED: SetupGrant["credential"] = { material: { token: "t" }, expiresAt: "never" };
 
 /** A deferred promise handle for driving in-coroutine external waits from tests. */
 function deferred<T>(): {
@@ -103,12 +103,12 @@ describe("SetupSession", () => {
     gate.resolve();
   });
 
-  it("runs commit exactly once with the returned conferral, and only then reports done", async () => {
+  it("runs commit exactly once with the returned grant, and only then reports done", async () => {
     const commitGate = deferred<void>();
-    const commit = rs.fn(async (_conferral: SetupConferral, _signal: AbortSignal) => {
+    const commit = rs.fn(async (_grant: SetupGrant, _signal: AbortSignal) => {
       await commitGate.promise;
     });
-    const conferral: SetupConferral = {
+    const grant: SetupGrant = {
       credential: CRED,
       profile: { botUsername: "rome" },
       guardianChannelUserId: "guardian-123",
@@ -116,7 +116,7 @@ describe("SetupSession", () => {
     };
     const fn: SetupFn = async (interact) => {
       await interact.prompt({ fields: [{ name: "token", label: "Token", secret: true }] });
-      return conferral;
+      return grant;
     };
     const session = new SetupSession({ fn, commit });
 
@@ -129,10 +129,10 @@ describe("SetupSession", () => {
     commitGate.resolve();
     const outcome = await inputDone;
     expect(commit).toHaveBeenCalledTimes(1);
-    expect(commit.mock.calls[0][0]).toBe(conferral);
+    expect(commit.mock.calls[0][0]).toBe(grant);
     expect(outcome.state).toEqual({
       status: "done",
-      conferral: { summary: { title: "Connected" } },
+      grant: { summary: { title: "Connected" } },
     });
   });
 

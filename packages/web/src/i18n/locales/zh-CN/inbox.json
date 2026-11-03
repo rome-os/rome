@@ -16,10 +16,11 @@
   },
   "sources": {
     "title": "消息来源",
-    "description": "为收件箱供给消息的渠道。连接管理请前往<a>渠道设置</a>。",
+    "description": "为收件箱供给消息的账号。连接管理请前往<a>连接设置</a>。",
     "status": {
       "connected": "已连接",
       "configured": "已配置",
+      "broken": "需重新连接",
       "awaiting": "待验证",
       "disconnected": "未连接",
       "alwaysOn": "始终在线"

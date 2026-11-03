@@ -117,7 +117,7 @@ export function EmptyStateTitle({ id, className, ...props }: ComponentProps<"h3"
       data-slot="empty-state-title"
       // Section, not Title: the panel sits inside a page or card beside alerts
       // and rows, and its heading reads at their scale.
-      className={cn("text-section text-foreground", className)}
+      className={cn("text-section [text-wrap-style:balance] text-foreground", className)}
       {...props}
     />
   );
@@ -137,7 +137,7 @@ export function EmptyStateDescription({ id, className, ...props }: ComponentProp
     <p
       id={effectiveId}
       data-slot="empty-state-description"
-      className={cn("mt-1 text-ui text-muted-foreground", className)}
+      className={cn("mt-1 text-ui [text-wrap-style:pretty] text-muted-foreground", className)}
       {...props}
     />
   );

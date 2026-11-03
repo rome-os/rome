@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
-import type { ApprovalPreviewPayload } from "@/lib/chat-types";
+import type { PreviewPayload } from "@/lib/chat-types";
 
-export function ApprovalPreviewBody({ preview }: { preview: ApprovalPreviewPayload }) {
+export function ApprovalPreviewBody({ preview }: { preview: PreviewPayload }) {
   const { t } = useTranslation("chat");
   if (preview.kind === "sensitive_message") {
     return (

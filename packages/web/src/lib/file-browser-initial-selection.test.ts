@@ -7,7 +7,6 @@ describe("resolveInitialSelectedFolderPath", () => {
       resolveInitialSelectedFolderPath({
         initialSelectedFolderPath: undefined,
         isDesktopViewport: true,
-        selectInitialFolderOnMobile: true,
       }),
     ).toBeNull();
   });
@@ -17,27 +16,15 @@ describe("resolveInitialSelectedFolderPath", () => {
       resolveInitialSelectedFolderPath({
         initialSelectedFolderPath: "projects/default",
         isDesktopViewport: true,
-        selectInitialFolderOnMobile: false,
       }),
     ).toBe("projects/default");
   });
 
-  it("keeps the initial folder on mobile when mobile selection is allowed", () => {
+  it("skips the initial folder on mobile", () => {
     expect(
       resolveInitialSelectedFolderPath({
         initialSelectedFolderPath: "projects/default",
         isDesktopViewport: false,
-        selectInitialFolderOnMobile: true,
-      }),
-    ).toBe("projects/default");
-  });
-
-  it("skips the initial folder on mobile when mobile selection is disabled", () => {
-    expect(
-      resolveInitialSelectedFolderPath({
-        initialSelectedFolderPath: "projects/default",
-        isDesktopViewport: false,
-        selectInitialFolderOnMobile: false,
       }),
     ).toBeNull();
   });

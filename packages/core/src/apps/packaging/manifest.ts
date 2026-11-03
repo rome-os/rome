@@ -98,6 +98,23 @@ const RemixDeclarationSchema = z
   })
   .strict();
 
+// An event type family the app can deliver on the bus, and the action core
+// calls to make sure it does. `events` is the event-name glob (one `*`), and
+// `types` fill that `*` so the catalog can list them before the first
+// emission. Read by `defer` and `search_event_catalog`.
+const EventSourceDeclarationSchema = z
+  .object({
+    events: z.string().min(1),
+    keys: z.array(z.array(z.string().min(1)).min(1)).optional(),
+    types: z.array(z.string().min(1)).optional(),
+    ensureAction: z.string().min(1),
+  })
+  .strict()
+  .refine((source) => !source.types || source.events.split("*").length === 2, {
+    message: "events must contain exactly one * when types are listed",
+    path: ["events"],
+  });
+
 export const AppManifestSchema = z
   .object({
     formatVersion: z.union([z.literal(1), z.literal(2)]),
@@ -134,6 +151,9 @@ export const AppManifestSchema = z
     icon: z.string().min(1).optional(),
     appRoot: z.string().min(1).optional(),
     includeSource: z.boolean().optional(),
+    // Keeps the app out of the launcher surfaces (Apps page, sidebar, search,
+    // app picker). The app still installs, loads, and opens by URL.
+    hideInLauncher: z.boolean().optional(),
     remix: RemixDeclarationSchema.optional(),
     // Basic store-listing metadata still lives in app.yaml because it is small
     // and useful for local display too. Rich store-page metadata and media live
@@ -158,6 +178,7 @@ export const AppManifestSchema = z
     api: ApiDeclarationSchema.optional(),
     db: DbDeclarationSchema.optional(),
     suggestedChannelBindings: z.array(SuggestedChannelBindingSchema).optional(),
+    eventSources: z.array(EventSourceDeclarationSchema).optional(),
   })
   .strict()
   .superRefine((manifest, ctx) => {

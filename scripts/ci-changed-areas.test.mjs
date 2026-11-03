@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { AREA_PATHS, AREAS, allAreas, areasForFiles } from "./ci-changed-areas.mjs";
@@ -15,6 +19,64 @@ const TEST_CONFIGS = [
   "vitest.config.ts",
   "vitest.config.mts",
 ];
+
+test("changedFiles preserves paths that Git quotes in line-delimited output", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "rome-ci-paths-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgSign=false",
+        "-c",
+        "user.name=CI paths test",
+        "-c",
+        "user.email=ci-paths@example.invalid",
+        ...args,
+      ],
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  git("init", "--quiet");
+  git("config", "core.quotePath", "true");
+  git("commit", "--quiet", "--allow-empty", "-m", "baseline");
+  const base = git("rev-parse", "HEAD").trim();
+  const paths = [
+    "packages/web/src/中文.ts",
+    "packages/web/src/tab\tname.ts",
+    'packages/web/src/quote"name.ts',
+    "packages/web/src/line\nname.ts",
+    "packages/web/src/space name.ts",
+    "packages/web/src/trailing-space.ts ",
+  ];
+  for (const path of paths) {
+    const file = join(cwd, path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "export {};\n");
+  }
+  git("add", "--", ".");
+  git("commit", "--quiet", "-m", "add paths");
+
+  const moduleUrl = new URL("./ci-changed-areas.mjs", import.meta.url).href;
+  const files = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { changedFiles } from ${JSON.stringify(moduleUrl)};
+         process.stdout.write(JSON.stringify(changedFiles({
+           GITHUB_EVENT_BEFORE: ${JSON.stringify(base)}
+         })));`,
+      ],
+      { cwd, encoding: "utf8" },
+    ),
+  );
+  assert.deepEqual(files.sort(), paths.sort());
+  assert.deepEqual(areasForFiles(files), { core: false, web: true, rest: true });
+});
 
 test("a change confined to core's own package leaves the other shards idle", () => {
   assert.deepEqual(areasForFiles(["packages/core/src/db/schema.ts"]), {
@@ -217,12 +279,13 @@ test("each shard job guards its steps on its own detection output", async () => 
       assert.equal(key, shard, `the ${shard} job guards a step on steps.areas.outputs.${key}`);
     }
 
-    // pnpm/action-setup, setup-node, install, and the suite itself. A guard
-    // dropped from any of them runs that step on a shard meant to stay idle.
+    // A missing guard runs setup or tests on a shard meant to stay idle.
+    // Core also installs rg for tests that invoke the real binary.
+    const expectedGuards = shard === "core" ? 5 : 4;
     assert.equal(
       runGuards.length,
-      4,
-      `the ${shard} job has ${runGuards.length} guarded steps, want 4`,
+      expectedGuards,
+      `the ${shard} job has ${runGuards.length} guarded steps, want ${expectedGuards}`,
     );
 
     assert.ok(

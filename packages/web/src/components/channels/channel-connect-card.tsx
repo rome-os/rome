@@ -1,29 +1,28 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
+import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
 import {
   SetupRenderer,
   StandardSetupRenderer,
-  type SetupComponentRegistry,
   type SetupRenderProps,
 } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 
-// Every Talk channel connects through the conferral setup: the card
+// Every Talk channel connects through the setup: the card
 // is a thin frame around `useSetup` (drives `/api/connections/:id/grants/:name/
 // setup` + `/api/setups/:cid/input`) and the standard `SetupRenderer`. What used
 // to be seven near-identical per-service cards (telegram bot / telegram user /
 // whatsapp / discord / wechat / feishu / email) is a single component driven by
 // the {@link ChannelConnectConfig} table below — the only things a channel
-// varies are its grant name, a couple of copy keys, and (for two services) a
-// genuinely custom piece: Discord's post-connect routing table and Feishu's
-// QR-image setup renderer. Those are the "registered custom components"; the
+// varies are its grant name, a couple of copy keys, and (for Feishu) a
+// genuinely custom QR-image setup renderer. That is the custom component; the
 // generic card is the "standard renderer".
 
 /**
@@ -52,17 +51,13 @@ function FeishuPresenting(props: SetupRenderProps) {
   );
 }
 
-const FEISHU_SETUP_REGISTRY: SetupComponentRegistry = {
-  "feishu:presenting": FeishuPresenting,
-};
-
 // ── Config ──────────────────────────────────────────────────────────────────
 
 export interface ChannelConnectConfig {
   /** Setup service id — addresses the setup (`useSetup`/`SetupRenderer`) and,
    *  by default, the brand badge and copy namespace. */
   service: string;
-  /** Grant to address before a connection row exists; the terminal conferral
+  /** Grant to address before a connection row exists; the terminal grant
    *  mints the row, so this is the fallback when `slot.grant` is null. */
   defaultGrant: string;
   /** ConnectionSlotCard copy namespace (`connections.cards.<copyService>`) when
@@ -72,10 +67,8 @@ export interface ChannelConnectConfig {
   /** i18n key for the success note shown under the connected header (the
    *  "linked as guardian" line). Omitted for services with no such note. */
   guardianLinkedKey?: string;
-  /** Extra content rendered under the connected view — Discord's routing table. */
-  connectedExtra?: ReactNode;
-  /** Custom setup renderers for this service — Feishu's QR image. */
-  registry?: SetupComponentRegistry;
+  /** Custom renderer for the `presenting` setup state — Feishu's QR image. */
+  renderPresenting?: ComponentType<SetupRenderProps>;
   /** Header icon override; defaults to the service brand badge. */
   icon?: ReactNode;
   /** Copy key for the connected title when the slot has no folded identity. */
@@ -83,7 +76,7 @@ export interface ChannelConnectConfig {
   /** Disconnect-failed fallback copy key; defaults to
    *  `channels.disconnectFailedFallback`. */
   disconnectFailedKey?: string;
-  /** Whether this service exposes the shared conversation-settings surface. */
+  /** Whether this service exposes the shared chat settings surface. */
   conversationSettings?: boolean;
 }
 
@@ -143,12 +136,20 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   feishu: {
     service: "feishu",
     defaultGrant: "app",
-    registry: FEISHU_SETUP_REGISTRY,
+    renderPresenting: FeishuPresenting,
     conversationSettings: true,
   },
   email: {
     service: "email",
     defaultGrant: "inbox",
+  },
+  slack_bot: {
+    service: "slack_bot",
+    defaultGrant: "bot",
+  },
+  agents: {
+    service: "agents",
+    defaultGrant: "cloud",
   },
 };
 
@@ -159,33 +160,67 @@ export interface ChannelConnectCardProps {
   slot: ConnectionSlot;
   role: "primary" | "secondary";
   onRefresh: () => void | Promise<void>;
+  /** Connect a new account of the service rather than the slot's own. */
+  another?: boolean;
+  /** Cancel the setup when the card goes away. Defaults to `another`. */
+  cancelOnLeave?: boolean;
+  /** Fired after a setup connects, in place of the refresh, with the
+   *  connection it connected when core reports it. */
+  onConnected?: (connectionId: string | null) => void;
 }
 
 /**
  * The single channel connect card. When connected it shows the folded identity +
- * Disconnect (and, per config, a "linked as guardian" note and/or a custom
- * connected-state panel like Discord's routing table); when not, it runs the
- * setup through the standard renderers (plus any per-service custom
+ * Disconnect (and, per config, a "linked as guardian" note); when not, it runs
+ * the setup through the standard renderers (plus any per-service custom
  * renderer). A channel that reads connected was guardian-linked during the
- * terminal conferral, so there is no separate verify-status polling.
+ * terminal grant, so there is no separate verify-status polling.
  */
-export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelConnectCardProps) {
+export function ChannelConnectCard({
+  config,
+  slot,
+  role,
+  onRefresh,
+  another = false,
+  cancelOnLeave,
+  onConnected,
+}: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
-  const connected = slot.state !== "unauthorized";
+  const connected = slot.state !== null;
+  // A broken connection is fixed in place: disconnecting would remove the
+  // account, and an account that connects again starts with no history.
+  const broken = slot.state === "broken";
 
   const [disconnecting, setDisconnecting] = useState(false);
+  // Disconnecting an account removes it, so the guardian confirms the cost first.
+  const [confirming, setConfirming] = useState(false);
+  const confirmsDisconnect = Boolean(slot.link);
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when
-  // the guardian has never connected (the terminal conferral mints the row).
+  // the guardian has never connected or is adding another account (the
+  // terminal grant mints the row).
   const setup = useSetup({
-    idOrService: slot.connectionId ?? config.service,
+    idOrKind: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
+    another,
+    cancelOnLeave,
     activeCid: slot.activeSetupCid,
-    onDone: () => {
-      void onRefresh();
+    // A caller that opens the account it connected refetches as it does, so
+    // the refresh does not first drop a card whose route the connect moved.
+    onDone: (connectionId) => {
+      if (onConnected) onConnected(connectionId);
+      else void onRefresh();
     },
   });
+
+  // A finished Reconnect is dropped once the account reads healthy, so a later
+  // fault offers Reconnect again instead of the old finished view.
+  const setupStatus = setup.state?.status;
+  const { reset } = setup;
+  useEffect(() => {
+    if (slot.state === "working" && setupStatus === "done") reset();
+  }, [slot.state, setupStatus, reset]);
 
   async function handleDisconnect() {
     if (!slot.connectionId || !slot.grant) return;
@@ -205,11 +240,27 @@ export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelCon
     setDisconnecting(false);
   }
 
-  const disconnectAction = connected ? (
-    <Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={disconnecting}>
+  const disconnectButton = connected ? (
+    <Button
+      variant="destructive"
+      size="sm"
+      onClick={() => (confirmsDisconnect ? setConfirming(true) : void handleDisconnect())}
+      disabled={disconnecting}
+    >
       {disconnecting ? t("common.disconnecting") : t("common.disconnect")}
     </Button>
   ) : undefined;
+  const disconnectAction =
+    broken && !setup.state ? (
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={() => setup.start(true)} disabled={setup.busy}>
+          {setup.busy ? t("common.connecting") : t("channels.reconnect")}
+        </Button>
+        {disconnectButton}
+      </div>
+    ) : (
+      disconnectButton
+    );
 
   const configureAction =
     connected && slot.connectionId && config.conversationSettings ? (
@@ -244,26 +295,42 @@ export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelCon
       }
     >
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
+      <RomeConfirmDialog
+        open={confirming}
+        destructive
+        title={
+          identityTitle
+            ? t("channels.disconnectConfirmTitle", { name: identityTitle })
+            : t("channels.disconnectConfirmTitleUnnamed")
+        }
+        description={t("channels.disconnectConfirmBody")}
+        confirmLabel={t("common.disconnect")}
+        confirmDisabled={disconnecting}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          void handleDisconnect();
+        }}
+      />
 
-      {connected ? (
-        config.guardianLinkedKey || config.connectedExtra ? (
+      {broken && setup.error && !setup.state ? (
+        <p className="text-aux text-destructive-fg">{setup.error}</p>
+      ) : null}
+      {connected && !(broken && setup.state) ? (
+        config.guardianLinkedKey ? (
           <div>
-            {config.guardianLinkedKey && (
-              <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
-            )}
-            {config.connectedExtra}
+            <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
           </div>
         ) : null
       ) : setup.state ? (
         <SetupRenderer
-          service={config.service}
           state={setup.state}
           busy={setup.busy}
           error={setup.error}
           onSubmit={setup.submit}
           onCancel={setup.cancel}
           onRetry={() => setup.start(true)}
-          registry={config.registry}
+          renderPresenting={config.renderPresenting}
         />
       ) : (
         <div className="space-y-3">

@@ -1,0 +1,35 @@
+cases:
+  - name: PROJECT-01 Write a project file and have Rome read it back
+    tags:
+      - files
+      - chat
+    steps:
+      - app.open:
+          path: /projects
+      - aiAct: >-
+          In the project tree, create a new file named "e2e-check.md" inside the "default"
+          project. Type exactly "E2E token: ${fileToken}" as its content and save the file.
+          Finish when the editor shows the file as saved.
+      - aiAssert: >-
+          The file "e2e-check.md" is open, its content reads "E2E token: ${fileToken}", and no
+          "Failed to save" message is visible.
+      - backend.expectProjectFile:
+          path: projects/default/e2e-check.md
+          contains: ${fileToken}
+      - aiAct: >-
+          Reload the page with the browser. Then open "e2e-check.md" in the "default" project
+          again. Finish when its content is visible.
+      - aiAssert: >-
+          The open file "e2e-check.md" still reads "E2E token: ${fileToken}".
+      - aiAct: >-
+          Open Chat from the sidebar and start a new chat. In the message composer, type
+          "Read the file projects/default/e2e-check.md and reply with only the token it
+          contains." and send it.
+      - aiWaitFor:
+          prompt: >-
+            Rome's reply has finished (no stop button or typing indicator) and the reply text
+            contains "${fileToken}". No "Failed to send message" or other error is visible.
+          options:
+            timeoutMs: 300000
+            checkIntervalMs: 10000
+      - aiAssert: Rome's latest reply contains "${fileToken}" and no error message is visible.

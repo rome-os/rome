@@ -92,13 +92,7 @@ export function createWorkspaceContextRegistry(): WorkspaceContextRegistry {
 
   const notify = () => {
     version++;
-    for (const l of listeners) {
-      try {
-        l();
-      } catch {
-        // best-effort
-      }
-    }
+    for (const l of listeners) l();
   };
 
   return {
@@ -233,19 +227,14 @@ export function useWorkspaceContextRegistry(): WorkspaceContextRegistry | null {
 
 /**
  * Invoke `registry.collect()` and return the snapshot — or `null` when the
- * registry is missing, `collect()` throws, or the snapshot is empty. Lets
+ * registry is missing or the snapshot is empty. Lets
  * each send site attach workspace context in one expression.
  */
 export function snapshotWorkspaceForSend(
   registry: WorkspaceContextRegistry | null,
 ): WorkspaceContextSnapshot | null {
   if (!registry) return null;
-  let snap: WorkspaceContextSnapshot;
-  try {
-    snap = registry.collect();
-  } catch {
-    return null;
-  }
+  const snap = registry.collect();
   if (snap.builtins.length === 0 && snap.apps.length === 0) return null;
   return snap;
 }
@@ -258,7 +247,7 @@ export function buildProjectsBuiltin(input: {
   project: string | null;
   files: Array<{ path: string; focused?: boolean }>;
 }): WorkspaceContextBuiltin | null {
-  const raw = input.files ?? [];
+  const raw = input.files;
   if (!input.project && raw.length === 0) return null;
   const kept = raw.slice(0, WORKSPACE_CONTEXT_LIMITS.maxFilesPerProject);
   const dropped = Math.max(0, raw.length - kept.length);

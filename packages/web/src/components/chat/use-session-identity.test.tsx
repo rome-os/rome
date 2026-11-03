@@ -91,6 +91,29 @@ describe("useSessionIdentity model", () => {
     await waitFor(() => expect(result.current.model).toBe("claude-opus-4-6"));
   });
 
+  it("reports the effort the last turn ran with and refreshes it", async () => {
+    rs.mocked(getSession).mockResolvedValue({
+      ...session,
+      model: "gpt-5.5",
+      reasoningEffort: "low",
+    });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result, rerender } = renderHook(({ id }) => useSessionIdentity(id), {
+      initialProps: { id: "s1" },
+    });
+    await waitFor(() => expect(result.current.reasoningEffort).toBe("low"));
+    rs.mocked(getSession).mockResolvedValue({
+      ...session,
+      model: "gpt-5.5",
+      reasoningEffort: "xhigh",
+    });
+    act(() => emitSessionsChanged());
+    await waitFor(() => expect(result.current.reasoningEffort).toBe("xhigh"));
+    rs.mocked(getSession).mockResolvedValue({ ...session, id: "s2" });
+    rerender({ id: "s2" });
+    await waitFor(() => expect(result.current.reasoningEffort).toBeNull());
+  });
+
   it("clears the model when navigating to a session without a pin", async () => {
     rs.mocked(getSession).mockResolvedValue({ ...session, model: "gpt-5.5" });
     rs.mocked(listChatAgents).mockResolvedValue(groups);

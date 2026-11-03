@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.7](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.6...app-web-sdk-v0.3.7) (2026-10-11)
+
+
+### Bug Fixes
+
+* **app-web-sdk:** show non-JSON login errors and drop duplicated CLI and runtime code ([#853](https://github.com/rome-os/rome/issues/853)) ([1c46dcc](https://github.com/rome-os/rome/commit/1c46dcc0017920e8c1da454294ab22d04d299d83))
+
+## [0.3.6](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.5...app-web-sdk-v0.3.6) (2026-10-10)
+
+
+### Bug Fixes
+
+* **app-web-sdk:** stop double-decoding app paths and show non-JSON CLI errors ([#846](https://github.com/rome-os/rome/issues/846)) ([2b36e88](https://github.com/rome-os/rome/commit/2b36e886ff62b54fec19e0b0e3274370eb5a116b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.3.0 to ^0.3.4
+
+## [0.3.5](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.4...app-web-sdk-v0.3.5) (2026-09-25)
+
+
+### Features
+
+* **node:** add remote computer CLI ([#459](https://github.com/rome-os/rome/issues/459)) ([79ae0c2](https://github.com/rome-os/rome/commit/79ae0c27a47da6d009ffcd91f14c996042cb234f))
+* **ui:** split chat and app canvas tokens ([#447](https://github.com/rome-os/rome/issues/447)) ([d9a491f](https://github.com/rome-os/rome/commit/d9a491f4a2bf8be5dabfb50824d976f19d0fc7f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.3.0 to ^0.3.3
+
 ## [0.3.4](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.3...app-web-sdk-v0.3.4) (2026-09-15)
 
 

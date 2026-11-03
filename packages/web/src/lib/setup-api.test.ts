@@ -41,12 +41,12 @@ describe("startSetup", () => {
   it("returns a non-throwing error when the route 404s", async () => {
     stubFetch(
       () =>
-        new Response(JSON.stringify({ error: "No conferral setup for this grant." }), {
+        new Response(JSON.stringify({ error: "No setup for this grant." }), {
           status: 404,
         }),
     );
     const result = await startSetup("discord", "nope");
-    expect(result).toEqual({ ok: false, error: "No conferral setup for this grant." });
+    expect(result).toEqual({ ok: false, error: "No setup for this grant." });
   });
 });
 
@@ -65,7 +65,7 @@ describe("getSetupState", () => {
 
 describe("submitSetupInput", () => {
   it("POSTs answers and returns the outcome", async () => {
-    const outcome = { accepted: true, state: { status: "done", conferral: {} } };
+    const outcome = { accepted: true, state: { status: "done", grant: {} } };
     const fetchMock = stubFetch(() => new Response(JSON.stringify(outcome), { status: 200 }));
     const result = await submitSetupInput("c1", { token: "abc" });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -82,7 +82,7 @@ describe("submitSetupInput", () => {
     const outcome = {
       accepted: false,
       reason: "Not awaiting input.",
-      state: { status: "done", conferral: {} },
+      state: { status: "done", grant: {} },
     };
     stubFetch(() => new Response(JSON.stringify(outcome), { status: 409 }));
     const result = await submitSetupInput("c1", {});
@@ -111,7 +111,7 @@ describe("cancelSetup", () => {
 
 describe("isTerminalSetup", () => {
   it.each([
-    [{ status: "done", conferral: {} }, true],
+    [{ status: "done", grant: {} }, true],
     [{ status: "failed", reason: "x" }, true],
     [{ status: "cancelled" }, true],
     [{ status: "awaiting-input", form: { fields: [] } }, false],

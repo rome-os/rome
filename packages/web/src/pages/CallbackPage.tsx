@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { takeLoginReturn } from "@/lib/login-return";
 import { submitSetupReturn } from "@/lib/setup-api";
 
 interface OAuthRedeemPayload {
   nextPath?: string;
   error?: string;
 }
-
-const redeemRequests = new Map<string, Promise<OAuthRedeemPayload>>();
 
 /** The connections list — where a return leg lands when it cannot name the
  *  service it belongs to (nothing matched, or an ambiguous delivery). */
@@ -18,10 +17,10 @@ const SETTINGS_CONNECTIONS_PATH = "/settings/connections";
  *  delivered: the connection's own detail page, the only surface that renders
  *  `OAuthConnectionSection` and so the only one that re-attaches to the (possibly
  *  still-redeeming) setup and settles it to connected. Falls back to the list
- *  when the service is unknown. */
-function connectionPath(service: string | undefined): string {
-  return service
-    ? `${SETTINGS_CONNECTIONS_PATH}/${encodeURIComponent(service)}`
+ *  when the connection kind is unknown. */
+function connectionPath(connectionKind: string | undefined): string {
+  return connectionKind
+    ? `${SETTINGS_CONNECTIONS_PATH}/${encodeURIComponent(connectionKind)}`
     : SETTINGS_CONNECTIONS_PATH;
 }
 
@@ -32,7 +31,7 @@ function connectionPath(service: string | undefined): string {
  *  send it and the page has to be the ending.
  *
  *  Deliberately NOT `connected`. A resumed setup is typically still `presenting`
- *  while it redeems, and the redeem or the conferral commit can still fail —
+ *  while it redeems, and the redeem or the grant commit can still fail —
  *  delivery is the most this browser can honestly report. It cannot wait for
  *  `done` either: `/api/setups/:cid` stays private, so an anonymous browser has
  *  no way to poll for the real outcome. */
@@ -78,8 +77,8 @@ async function hasDashboardSession(): Promise<boolean> {
 }
 
 // Dedup by `(state, handoff, providerError)` so React's double-invoked effects
-// deliver each single-use return leg ONCE. Like `redeemRequests`, an entry is
-// pruned only on rejection; a resolved entry is retained for the page's lifetime
+// deliver each single-use return leg ONCE. An entry is pruned only on
+// rejection; a resolved entry is retained for the page's lifetime
 // (deliberate — the dedup must hold for repeat effect runs). `state` is
 // single-use and the callback page is short-lived (it navigates away on
 // success), so the map holds at most a handful of entries and never grows
@@ -96,7 +95,7 @@ const returnHandlers = new Map<string, Promise<ReturnOutcome>>();
  *  - CONNECT a provider — a connection setup (the layer that unifies channels +
  *    connectors). A live setup is suspended at the redirect awaiting this
  *    `state`; delivering the leg to it resumes the coroutine, which redeems via
- *    the OAuth primitive and confers. This is the #1611 path.
+ *    the OAuth primitive and grants. This is the #1611 path.
  *  - SIGN IN with the provider — authentication (guardian → Rome Cloud account),
  *    NOT a connection. No setup is waiting, so this falls through to
  *    `/oauth/redeem`, which redeems the SAME OAuth primitive and also
@@ -137,7 +136,7 @@ function handleOAuthReturnOnce(
       if (!(await hasDashboardSession())) return { delivered: true };
       // The setup consumed the leg and is finishing the redeem; the connection's
       // detail page re-attaches and settles it.
-      return { redirect: connectionPath(returned.service) };
+      return { redirect: connectionPath(returned.connectionKind) };
     }
 
     // A broker error (denied consent) means no connection could have succeeded —
@@ -149,12 +148,15 @@ function handleOAuthReturnOnce(
     // the redeem would dead-end on an already-consumed attempt. Send the guardian
     // to the connections list to see the real state instead — an ambiguous
     // delivery carries no service to address.
-    if (returned.ambiguous) return { redirect: connectionPath(returned.service) };
+    if (returned.ambiguous) return { redirect: connectionPath(returned.connectionKind) };
 
     // Definitive no-match — the sign-in / lost-session fallback.
     if (!handoff) return { error: fallbackError };
-    const payload = await redeemOAuthHandoffOnce(handoff, state, fallbackError);
-    return { redirect: payload?.nextPath || "/" };
+    const payload = await redeemOAuthHandoff(handoff, state, fallbackError);
+    // The server names "/" for a plain sign-in; the page the guardian was
+    // sent to /login from wins over it. /onboard and connection pages stand.
+    const nextPath = payload?.nextPath || "/";
+    return { redirect: nextPath === "/" ? takeLoginReturn() : nextPath };
   })().catch((error) => {
     returnHandlers.delete(key);
     throw error;
@@ -164,36 +166,23 @@ function handleOAuthReturnOnce(
   return run;
 }
 
-function redeemOAuthHandoffOnce(
+async function redeemOAuthHandoff(
   handoff: string,
   state: string,
   fallbackError: string,
 ): Promise<OAuthRedeemPayload> {
-  const requestKey = `${state}:${handoff}`;
-  const existing = redeemRequests.get(requestKey);
-  if (existing) return existing;
-
-  const request = fetch("/api/oauth/redeem", {
+  const response = await fetch("/api/oauth/redeem", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
     credentials: "include",
     body: JSON.stringify({ handoff, state }),
-  })
-    .then(async (response) => {
-      const payload = (await response.json().catch(() => null)) as OAuthRedeemPayload | null;
-      if (!response.ok) {
-        throw new Error(payload?.error || fallbackError);
-      }
-      return payload ?? {};
-    })
-    .catch((error) => {
-      redeemRequests.delete(requestKey);
-      throw error;
-    });
-
-  redeemRequests.set(requestKey, request);
-  return request;
+  });
+  const payload = (await response.json().catch(() => null)) as OAuthRedeemPayload | null;
+  if (!response.ok) {
+    throw new Error(payload?.error || fallbackError);
+  }
+  return payload ?? {};
 }
 
 export default function CallbackPage() {

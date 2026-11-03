@@ -1,5 +1,6 @@
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { EventBusTrigger, EventFilterCondition, Routine } from "./types.js";
+import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { BusEvent, EventBus } from "../events/event-bus.js";
 import { createLogger } from "../logger.js";
 
@@ -18,24 +19,33 @@ interface Registration {
  * A matching routine's action is fired without awaiting completion: a slow
  * downstream action must not stall the publisher's `events.publish` RPC. The
  * RoutineEngine persists each run and owns retry, so durability lives there.
+ *
+ * A `once` routine fires on its first match and is then disabled. It drops
+ * its registration synchronously before firing, so a second matching event
+ * can't fire it again.
  */
 export class EventBusTriggerProvider implements TriggerProvider {
   readonly type = "event-bus";
   private registrations = new Map<string, Registration>();
   private unsubscribe: (() => void) | null = null;
 
-  constructor(private bus: EventBus) {}
+  constructor(
+    private bus: EventBus,
+    private routinesRepo: Pick<RoutinesRepository, "update">,
+  ) {}
 
   async activate(
     routine: Routine,
     fire: (payload: Record<string, unknown>) => Promise<void>,
   ): Promise<void> {
     this.ensureSubscribed();
+    const trigger = routine.trigger as EventBusTrigger;
     this.registrations.set(routine.id, { routine, fire });
     log.info("event-bus trigger activated", {
       routineId: routine.id,
       name: routine.name,
-      eventName: (routine.trigger as EventBusTrigger).eventName,
+      eventName: trigger.eventName,
+      ...(trigger.once ? { once: true } : {}),
     });
   }
 
@@ -68,6 +78,10 @@ export class EventBusTriggerProvider implements TriggerProvider {
       if (trigger.filter && !matchesFilter(trigger.filter, event.payload)) {
         continue;
       }
+      if (trigger.once) {
+        this.fireOnce(routine.id, event.payload);
+        continue;
+      }
       // Fire-and-forget: the engine records the run and retries on failure.
       void fire(event.payload).catch((err) => {
         log.error("event-bus routine fire failed", {
@@ -78,6 +92,26 @@ export class EventBusTriggerProvider implements TriggerProvider {
         });
       });
     }
+  }
+
+  /** Settle a `once` routine: drop it synchronously (so a second matching
+   * event can't fire it again), persist it as disabled so a restart doesn't
+   * re-arm it, then fire. A no-op when already settled. */
+  private fireOnce(routineId: string, payload: Record<string, unknown>): void {
+    const registration = this.registrations.get(routineId);
+    if (!registration) return;
+    this.deactivate(routineId);
+    const { routine, fire } = registration;
+    void (async () => {
+      await this.routinesRepo.update(routine.id, { enabled: false });
+      await fire(payload);
+    })().catch((err) => {
+      log.error("one-shot event-bus routine fire failed", {
+        routineId: routine.id,
+        name: routine.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 }
 
