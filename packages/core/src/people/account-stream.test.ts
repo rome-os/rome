@@ -186,10 +186,11 @@ describe("readAccountStream", () => {
     const small = await readAccountStream(streamed);
     const passes = counted.passes() - before;
     // One per store with anything in scope: the WhatsApp mirror, Rome's
-    // transcript, and the triage record. The LinkedIn mirror is asked about no
-    // LinkedIn account here, and a store with an empty scope answers without a
-    // query at all.
-    expect(passes).toBe(3);
+    // transcript, and the triage record, plus one read of the accounts Rome
+    // has spoken as on the one channel the transcript is asked about. The
+    // LinkedIn mirror is asked about no LinkedIn account here, and a store
+    // with an empty scope answers without a query at all.
+    expect(passes).toBe(4);
 
     // Twenty more contacts, every one of them talking, on a channel already in
     // the scope. Served a query per row this would cost twenty passes more.
