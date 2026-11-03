@@ -37,6 +37,9 @@ describe("appChatWrites", () => {
   let mailSent: Array<{ to: ChatId; message: OutgoingMessage }>;
   let failOpen: boolean;
   let failBind: boolean;
+  // Storage that fails once the platform took a message.
+  let failKeys: boolean;
+  let failKeysOnSend: boolean;
   let threads: number;
 
   const telegram = {
@@ -45,7 +48,9 @@ describe("appChatWrites", () => {
       if (refuse) throw new Error("refused");
       sends.push({ chat, threadId, out });
       // Keyed as Rome's account holds the platform's id for it.
-      return { key: lines.keyIn(speakerAt(), `${100 + sends.length}`), threadId };
+      const key = lines.keyIn(speakerAt(), `${100 + sends.length}`);
+      failKeysOnSend && (failKeys = true);
+      return { key, threadId };
     },
   } as unknown as ChannelChatAdapter;
 
@@ -56,6 +61,7 @@ describe("appChatWrites", () => {
         mailSent.push({ to, message });
         // A new email starts a thread of its own; a reply lands in its own.
         const chatId = to.startsWith("thread-") ? to : `thread-${(threads += 1)}`;
+        failKeysOnSend && (failKeys = true);
         return { messageId: `m${mailSent.length}`, chatId };
       },
     },
@@ -100,6 +106,8 @@ describe("appChatWrites", () => {
     mailSent = [];
     failOpen = false;
     failBind = false;
+    failKeys = false;
+    failKeysOnSend = false;
     threads = 0;
     writes = appChatWrites({
       webchatRepo: new WebChatRepository(testDb.db),
@@ -116,7 +124,10 @@ describe("appChatWrites", () => {
       lines,
       adapters: {
         of: adapterOf,
-        keyOf,
+        keyOf: (ref) => {
+          if (failKeys) throw new Error("store unavailable");
+          return keyOf(ref);
+        },
         accountOn: (name) =>
           name === "mail" ? { platform: "email", id: "rome@example.com" } : BOT,
       },
@@ -313,6 +324,19 @@ describe("appChatWrites", () => {
       expect(said().at(-1)!.text).toContain("[image: Chart]");
     });
 
+    it("answers a message the platform took even when storage fails after", async () => {
+      failKeysOnSend = true;
+
+      const result = await writes.send({
+        sessionId: "s1",
+        channel: "telegram",
+        text: "x",
+        knownToProvider: false,
+      });
+
+      expect(result).toEqual({ messageId: "101" });
+    });
+
     it("records nothing when the platform refuses", async () => {
       refuse = true;
 
@@ -464,6 +488,51 @@ describe("appChatWrites", () => {
           knownToProvider: false,
         }),
       ).rejects.toThrow("Email m1 is not in session mail-2's thread");
+      expect(mailSent).toHaveLength(2);
+    });
+
+    it("answers an email the provider took even when storage fails after", async () => {
+      failKeysOnSend = true;
+      const started = await writes.sendEmail({
+        channel: "mail",
+        text: "Plans",
+        email: { to: "wei@example.com", subject: "Plans" },
+        knownToProvider: false,
+      });
+      failKeys = false;
+
+      const replied = await writes.sendEmail({
+        channel: "mail",
+        sessionId: "mail-1",
+        text: "Again",
+        email: {},
+        knownToProvider: false,
+      });
+
+      expect(started).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(replied).toEqual({ messageId: "m2", threadId: "thread-1" });
+    });
+
+    it("refuses a session that is not in the thread named", async () => {
+      for (const to of ["wei@example.com", "ann@example.com"]) {
+        await writes.sendEmail({
+          channel: "mail",
+          text: "Plans",
+          email: { to, subject: "Plans" },
+          knownToProvider: false,
+        });
+      }
+
+      await expect(
+        writes.sendEmail({
+          channel: "mail",
+          threadId: "thread-1",
+          sessionId: "mail-2",
+          text: "Re",
+          email: {},
+          knownToProvider: false,
+        }),
+      ).rejects.toThrow("Session mail-2 is not in thread thread-1");
       expect(mailSent).toHaveLength(2);
     });
 

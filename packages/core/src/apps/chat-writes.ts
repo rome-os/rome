@@ -24,7 +24,7 @@ import type { ChatRepository as Chats } from "../chats/storage/chat-repository.j
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";
-import type { ChatAdapters } from "../connections/chat-adapter.js";
+import { type ChatAdapters, platformIdOfLine } from "../connections/chat-adapter.js";
 import {
   emailOf,
   type EmailOutbound,
@@ -91,6 +91,14 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
     }
   };
 
+  /** The platform's id for a line `speaker` says, as a function of the
+   *  line's key. It reads storage now, before a send, so turning a receipt
+   *  into an id never fails a send the platform took. */
+  const receiptOf = (speaker: SpeakerAt) => {
+    const chat = deps.adapters.keyOf(speaker.place.chat);
+    return (lineKey: string) => platformIdOfLine(chat, speaker.accountId, lineKey);
+  };
+
   /** The provider's address for the email thread `chat`. Asks the email
    *  adapter, which keeps the address of a thread it started even when
    *  storing it failed. */
@@ -137,7 +145,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       },
       async (target) => ({ key: (await adapter.send(target.chat, null, out)).key }),
     );
-    const threadId = threadAddressOf(channel, chat);
+    // The adapter keeps the thread's address in memory, so reading it after
+    // the send cannot fail it.
+    const threadId = adapter.threadAddress(key.externalId);
     try {
       const session = await deps.open({
         channel: channel.name,
@@ -155,7 +165,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       });
     }
     return {
-      messageId: deps.lines.platformIdIn({ place: placeIn(chat), accountId: account.id }, sent.key),
+      messageId: platformIdOfLine(key, account.id, sent.key),
       threadId,
     };
   };
@@ -204,7 +214,8 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       const parts = input.parts?.length ? withoutHostOnlyParts(input.parts) : undefined;
       // An app quotes by the platform's id, which names a line of the
       // session's chat.
-      const speaker = input.replyToPlatformMessageId ? speakerOf(input.sessionId) : null;
+      const speaker = speakerOf(input.sessionId);
+      const receipt = receiptOf(speaker);
       const sent = await deps.replies.send(
         input.sessionId,
         channel,
@@ -225,7 +236,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       );
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
       active(input.sessionId, sent.at);
-      const messageId = deps.lines.platformIdIn(sent.speaker, sent.sent);
+      const messageId = receipt(sent.sent);
       return messageId ? { messageId } : {};
     },
 
@@ -295,7 +306,14 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
             threadType: "group",
           })
         ).id;
-      const speaker = inReplyToMessageId ? speakerOf(sessionId) : null;
+      const speaker = speakerOf(sessionId);
+      const address = speaker.place.threadId ?? threadAddressOf(channel, speaker.place.chat);
+      if (input.threadId !== undefined && address !== input.threadId) {
+        throw new Error(
+          `Session ${sessionId} is not in thread ${input.threadId}. No email was sent.`,
+        );
+      }
+      const receipt = receiptOf(speaker);
       const reply: Omit<EmailOutbound, "replyTo"> = {
         ...out,
         ...(cc?.length ? { cc } : {}),
@@ -309,10 +327,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       );
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
       active(sessionId, sent.at);
-      return {
-        messageId: deps.lines.platformIdIn(sent.speaker, sent.sent),
-        threadId: sent.speaker.place.threadId ?? threadAddressOf(channel, sent.speaker.place.chat),
-      };
+      return { messageId: receipt(sent.sent), threadId: address };
     },
   };
 }
