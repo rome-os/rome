@@ -95,6 +95,7 @@ import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { storedOn } from "./channels/channel.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
 import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
+import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
 import { domainOf, domainOfGrant } from "./channels/platform.js";
 import {
   AccountListening,
@@ -504,12 +505,16 @@ async function main() {
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
           connectedAccounts.add(tx, record.id);
+          // A channel that now knows its account moves its legacy chats
+          // before it hears anything.
+          backfillLegacyChatsIn(tx);
           return;
         }
         case "fixed":
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
           connectedAccounts.add(tx, connection.id);
+          backfillLegacyChatsIn(tx);
           return;
         case "revoked":
           channelRecords.forget();
@@ -1746,6 +1751,9 @@ async function main() {
   // A channel recorded before channels knew their account learns it from its
   // connection's grant.
   await recordChannelAccounts(db, channelRecords, connectionRegistry);
+  // Legacy chats move into Chats once their channel knows its account, before
+  // any channel hears anything (src/db/chats-backfill.ts).
+  backfillLegacyChats(db);
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.

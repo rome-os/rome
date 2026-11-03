@@ -1,47 +1,43 @@
-// The 0108 migration, the Chats switch's backfill, run on legacy rows as they
-// stood before it. Like every migration test, it writes the columns that
-// schema had.
+// The Chats switch's backfill, run on legacy rows in a database at the latest
+// schema, the way startup runs it: in one transaction, foreign keys on.
 
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "@rstest/core";
+import { LEGACY_CHATS_BACKFILL } from "./chats-backfill.js";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
-const TAG = "0108_chats_backfill";
 
-function migrationSql(tag: string): string[] {
-  return readFileSync(join(MIGRATIONS_DIR, `${tag}.sql`), "utf8")
-    .split("--> statement-breakpoint")
-    .map((statement) => statement.trim())
-    .filter(Boolean);
-}
-
-/** A database migrated up to, but not including, `tag`. */
-function databaseBefore(tag: string): Database.Database {
+/** A database every migration has run on. */
+function migratedDatabase(): Database.Database {
   const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as {
     entries: { tag: string }[];
   };
-  const tags = journal.entries.map((entry) => entry.tag);
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  for (const earlier of tags.slice(0, tags.indexOf(tag))) {
-    for (const statement of migrationSql(earlier)) sqlite.exec(statement);
+  for (const { tag } of journal.entries) {
+    for (const statement of readFileSync(join(MIGRATIONS_DIR, `${tag}.sql`), "utf8")
+      .split("--> statement-breakpoint")
+      .map((each) => each.trim())
+      .filter(Boolean)) {
+      sqlite.exec(statement);
+    }
   }
   return sqlite;
 }
 
-/** Runs the migration the way boot does: in one transaction, foreign keys on. */
-function migrate(sqlite: Database.Database) {
+/** Runs the backfill as startup does: in one transaction. */
+function backfill(sqlite: Database.Database) {
   sqlite.transaction(() => {
-    for (const statement of migrationSql(TAG)) sqlite.exec(statement);
+    for (const statement of LEGACY_CHATS_BACKFILL) sqlite.exec(statement);
   })();
 }
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
 
-describe("0108 Chats backfill", () => {
+describe("Chats backfill", () => {
   let sqlite: Database.Database;
   const all = (query: string) => sqlite.prepare(query).all();
   const line = (key: string) =>
@@ -55,7 +51,7 @@ describe("0108 Chats backfill", () => {
       .get(key, session);
 
   beforeEach(() => {
-    sqlite = databaseBefore(TAG);
+    sqlite = migratedDatabase();
     const channel = sqlite.prepare(
       `INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
        VALUES (?, ?, ?, ?, 1)`,
@@ -89,8 +85,8 @@ describe("0108 Chats backfill", () => {
     // group from a direct message.
     session.run("tg-dm", "Ada", "channel", "tg-sales", "55", null, null, null, null);
     session.run("tg-group", "Club", "channel", "tg-sales", "-77", null, "Club", null, null);
-    // A signed-in Telegram user's chat whose channel has no record: it is on
-    // the platform of the connection kind the channel is named after.
+    // A chat heard on a channel that knows no account: it waits until the
+    // channel does.
     session.run("tgu-dm", "Bo", "channel", "telegram_user", "99", null, null, null, null);
     const row = sqlite.prepare(
       `INSERT INTO rome_agent_messages (id, session_id, role, content, created_at, turn_id,
@@ -264,7 +260,7 @@ describe("0108 Chats backfill", () => {
     sqlite.prepare("UPDATE rome_sessions SET created_at = 550 WHERE id = 'thread'").run();
     // Support's first message came in the second its session was made.
     sqlite.prepare("UPDATE rome_sessions SET created_at = 300 WHERE id = 'g-support'").run();
-    migrate(sqlite);
+    backfill(sqlite);
   });
 
   it("starts a chat for each place, as the adapters key it", () => {
@@ -275,7 +271,6 @@ describe("0108 Chats backfill", () => {
       { platform: "feishu", key: "oc_launch", kind: "group" },
       { platform: "telegram", key: "dm:111:55", kind: "dm" },
       { platform: "telegram", key: "-77", kind: "group" },
-      { platform: "telegram", key: "dm:telegram_user:99", kind: "dm" },
     ]);
   });
 
@@ -292,7 +287,7 @@ describe("0108 Chats backfill", () => {
       { id: "group", key: "oc_launch", thread_id: null, account_id: "bot" },
       { id: "tg-dm", key: "dm:111:55", thread_id: null, account_id: "111" },
       { id: "tg-group", key: "-77", thread_id: null, account_id: "111" },
-      { id: "tgu-dm", key: "dm:telegram_user:99", thread_id: null, account_id: "telegram_user" },
+      { id: "tgu-dm", key: null, thread_id: null, account_id: null },
       { id: "thread", key: "oc_launch", thread_id: "omt_1", account_id: "bot" },
     ]);
   });
@@ -437,13 +432,6 @@ describe("0108 Chats backfill", () => {
         address: "oc_p2p",
       },
       {
-        platform: "telegram",
-        account_id: "telegram_user",
-        chat_key: "dm:telegram_user:99",
-        thread_id: "",
-        address: "99",
-      },
-      {
         platform: "feishu",
         account_id: "bot",
         chat_key: "oc_launch",
@@ -457,5 +445,27 @@ describe("0108 Chats backfill", () => {
     expect(line("fork-in")).toBeUndefined();
     expect(all("SELECT count(*) AS n FROM rome_agent_messages")).toEqual([{ n: 17 }]);
     expect(all("SELECT name FROM sqlite_master WHERE name LIKE 'legacy_chat%'")).toEqual([]);
+    expect(all("SELECT name FROM sqlite_temp_master WHERE name LIKE 'legacy_chat%'")).toEqual([]);
+  });
+
+  it("moves a channel's sessions once it knows its account, and nothing twice", () => {
+    const before = all("SELECT id, chat_id, key FROM chat_messages ORDER BY id");
+    sqlite
+      .prepare(
+        `INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
+         VALUES ('telegram_user', 'telegram_user', 'telegram', '333', 1)`,
+      )
+      .run();
+
+    backfill(sqlite);
+
+    // The sessions moved before keep their lines as they were.
+    expect(all("SELECT id, chat_id, key FROM chat_messages ORDER BY id")).toEqual(before);
+    expect(
+      all(`SELECT c.platform, c.key, c.kind, s.account_id FROM rome_sessions s
+           JOIN chats c ON c.id = s.chat_id WHERE s.id = 'tgu-dm'`),
+    ).toEqual([{ platform: "telegram", key: "dm:333:99", kind: "dm", account_id: "333" }]);
+    backfill(sqlite);
+    expect(all("SELECT count(*) AS n FROM chats")).toEqual([{ n: 7 }]);
   });
 });
