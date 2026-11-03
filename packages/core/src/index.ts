@@ -435,6 +435,11 @@ async function main() {
     webchatRepo,
     chatRepo,
     chatMessages,
+    speakers: {
+      chats: chatsWired.chats,
+      adapters: chatsWired.adapters,
+      speakers: chatsWired.speakers,
+    },
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -532,8 +537,12 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    messages: chatMessages,
-    places: chatRepo,
+    // A reply is said through its session's speaker, on the platform's own
+    // send port, so it is recorded once.
+    speakers: {
+      channel: (name) => builtChannels?.find((channel) => channel.name === name),
+      replies: chatsWired.replies,
+    },
   });
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
@@ -1097,6 +1106,7 @@ async function main() {
     agentTurnStreamRegistry,
     undefined,
     replyStreams,
+    { lines: chatsWired.speakerLines, links: chatsWired.links },
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1106,6 +1116,7 @@ async function main() {
     webchatRepo,
     agentTurnStreamRegistry,
     actionRegistry,
+    { lines: chatsWired.speakerLines, links: chatsWired.links },
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
@@ -1151,8 +1162,7 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
-    messages: chatMessages,
-    places: chatRepo,
+    replies: chatsWired.replies,
     isTextPrivate: (agentName) =>
       agentLoader.has(agentName) &&
       resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
