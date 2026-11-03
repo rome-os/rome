@@ -547,6 +547,27 @@ describe("ChatReadModel", () => {
       expect(await awaiting("chat-1")).toBe(false);
     });
 
+    // Concierge answers for the guardian with a line of its own, which
+    // prompts the task's turn as the guardian's answer would.
+    it("stops waiting once an answer Concierge relays prompts a turn", async () => {
+      const chat = dashboardChat("chat-1");
+      fromRome(chat, "card", 1, card);
+      links.prompt(
+        fixture.say({
+          id: "relayed",
+          chat,
+          from: "agent:concierge",
+          agent: "concierge",
+          at: new Date(2_000),
+        }),
+        "chat-1",
+        "t2",
+      );
+      fromRome(chat, "answer", 3);
+
+      expect(await awaiting("chat-1")).toBe(false);
+    });
+
     it("does not wait on a line Rome posted without a card", async () => {
       const chat = dashboardChat("chat-1");
       fromRome(chat, "plain", 1);

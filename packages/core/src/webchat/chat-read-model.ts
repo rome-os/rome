@@ -99,10 +99,10 @@ export interface ChatSearchHit {
 /**
  * Whether the session in the current `rome_sessions` row waits on the
  * guardian, read from Chats: a card (question, connect-AI, app component) in
- * a line from Rome after the guardian's last prompt where the session's
- * speaker stands, or an approval still pending in this chat. Any answer to a
- * card is the guardian's line prompting a turn, so a card after the last one
- * is still open. `seq` is the order Chats recorded lines in. The pending
+ * a line from Rome after the last prompt where the session's speaker stands,
+ * or an approval still pending in this chat. Any answer to a card is a line
+ * prompting a turn, the guardian's own or one Concierge relays for them, so a
+ * card after the last one is still open. `seq` is the order Chats recorded lines in. The pending
  * approvals' chats are collected once per list rather than scanned per chat.
  * json_valid and the object check skip lines whose parts are not a block
  * array, which would otherwise fail the whole list. The Chats version of the
@@ -116,7 +116,6 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
   and m."seq" > coalesce((
     select max(u."seq") from ${CHAT_LINES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
-    and u."sender_agent" is null
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
   ), 0)
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
