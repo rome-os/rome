@@ -6,8 +6,10 @@ import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, shouldNudge } from "./nudge.js";
+import { TaskReviewer } from "./reviewer.js";
 import {
   CONCIERGE_ACCOUNT,
+  CONCIERGE_CHAT_ID,
   type ConciergeService,
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
@@ -141,11 +143,20 @@ export function startConciergeEvents(
   });
   service.attachTaskEvents(coalescer);
 
+  // A fork's turn fires no lifecycle event, so the review never schedules itself.
+  const reviewer = new TaskReviewer({
+    isEnabled: () => service.isEnabled(),
+    turnLive: () => service.dashboard.chats.activeTurns(CONCIERGE_CHAT_ID).length > 0,
+    fork: (prompt, parentTurnId) => service.dashboard.forkConcierge(prompt, parentTurnId),
+  });
+
   const onConciergeTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
     const reminderRunning = remindersRunning.has(chatId);
     if (!(await service.isEnabled())) return;
+    // Every turn end, before the nudge check returns early.
+    reviewer.schedule(event.turn.turnId);
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,
@@ -263,6 +274,7 @@ export function startConciergeEvents(
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe();
     coalescer.stop();
+    reviewer.stop();
     service.attachTaskEvents(null);
   };
 }

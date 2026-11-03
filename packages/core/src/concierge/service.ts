@@ -2,7 +2,7 @@
 // chats. Design: rome-os/rome#1344.
 
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import type { Account, BackendTurnParams } from "@rome-os/app-runtime";
+import type { Account, AgentEvent, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../chats/send.js";
@@ -54,6 +54,9 @@ export interface ConciergeDashboard {
   chats: TaskChats;
   /** Chats' ordinary send (chats/send.ts), with the dashboard able to take it. */
   send(place: Place, body: Body, as: Account): Promise<SendResult>;
+  /** Runs the prompt in an exact fork of the Concierge session, reviving the
+   *  session if it was closed, and shows the guardian nothing. */
+  forkConcierge(prompt: string, parentTurnId: string): AsyncIterable<AgentEvent>;
 }
 
 export interface ConciergeDeps {

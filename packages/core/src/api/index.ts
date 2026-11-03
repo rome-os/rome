@@ -36,6 +36,7 @@ import { webhookRoutes } from "./routes/webhooks.js";
 import { send } from "../chats/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
+import { CONCIERGE_CHAT_ID } from "../concierge/service.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -242,6 +243,8 @@ export function buildApp(
   deps.concierge?.attachDashboard({
     chats: webchatRuntime,
     send: (place, body, as) => send({ ...deps, dashboard: webchatRuntime }, place, body, as),
+    forkConcierge: (prompt, parentTurnId) =>
+      webchatRuntime.runQuietFork(CONCIERGE_CHAT_ID, prompt, "task-review", parentTurnId),
   });
 
   app.route("/api", api);

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { Account, AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
+import type {
+  Account,
+  AgentEvent,
+  AgentTurnFinishedEvent,
+  BackendTurnParams,
+} from "@rome-os/app-runtime";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,12 +12,13 @@ import type { MessagePage } from "../chats/message-repository.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
-import type { SessionToolContext } from "../core/session-tools.js";
+import { detachSessionTools, type SessionToolContext } from "../core/session-tools.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { startConciergeEvents } from "./events.js";
 import { NUDGE_PROMPT } from "./nudge.js";
+import { REVIEW_DEBOUNCE_MS, REVIEW_PROMPT } from "./reviewer.js";
 import {
   CONCIERGE_ACCOUNT,
   CONCIERGE_AGENT_ID,
@@ -103,6 +109,24 @@ function setup(
   const order: string[] = [];
   let startedChats = 0;
   let saidCount = 0;
+  /** The Concierge's running turn; a review fork runs while there is none. */
+  let runningTurn: string | undefined = "concierge-turn-1";
+  /** The review forks started, by the turn they review. */
+  const forks: string[] = [];
+  const forkConcierge = rs.fn(async function* (
+    prompt: string,
+    parentTurnId: string,
+  ): AsyncGenerator<AgentEvent> {
+    expect(prompt).toBe(REVIEW_PROMPT);
+    forks.push(parentTurnId);
+    yield {
+      type: "turn_start",
+      turnId: "fork-turn",
+      sessionId: "fork-session",
+      userPrompt: prompt,
+    };
+    yield { type: "result", content: "Nothing changed." };
+  });
   const chats: TaskChats = {
     startChat: rs.fn(async () => {
       const id = `task-${++startedChats}`;
@@ -207,13 +231,13 @@ function setup(
   } as unknown as ConciergeDeps;
   let onBackendTurn: (params: BackendTurnParams) => Promise<void> | void = () => {};
   const service = new ConciergeService(deps);
-  service.attachDashboard({ chats, send });
+  service.attachDashboard({ chats, send, forkConcierge });
   const context = (agentName = CONCIERGE_AGENT_ID): SessionToolContext => ({
     agentName,
     channelThreadKey: `webchat:${CONCIERGE_CHAT}`,
     sessionId: "runtime-1",
     isSubagent: false,
-    getTurnId: () => "concierge-turn-1",
+    getTurnId: () => runningTurn,
     getThreadContext: () => ({
       channel: "webchat",
       threadId: CONCIERGE_CHAT,
@@ -265,6 +289,13 @@ function setup(
     if (!found) throw new Error(`no tool ${name}`);
     return await found.handler(input);
   };
+  /** A tool as a fork of the Concierge session sees it. */
+  const forkTool = async (name: string, input: Record<string, unknown>) => {
+    const tools = detachSessionTools(await buildConciergeTools(service, context()));
+    const found = tools.find((candidate) => candidate.name === name);
+    if (!found) throw new Error(`no tool ${name}`);
+    return await found.handler(input);
+  };
   /** Moves a posted input to the turn that takes it, as the input queue does. */
   const assignInput = (chatId: string, inputId: string, turnId: string) => {
     const row = messages.get(chatId)?.find((candidate) => candidate.id === inputId);
@@ -295,6 +326,12 @@ function setup(
     context,
     finish,
     tool,
+    forkTool,
+    forks,
+    /** The Concierge's turn ends, so tools run as from a fork while it is idle. */
+    idle: () => {
+      runningTurn = undefined;
+    },
     posted,
     assignInput,
     refuseSends: (result: Exclude<SendResult, { ok: true }>) => {
@@ -1388,5 +1425,160 @@ describe("Concierge chat", () => {
     const { service, createSession } = serviceWith(codexOnly, true);
     expect(await service.ensureChatId()).toBe("concierge");
     expect(createSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Concierge task review", () => {
+  const text = (result: { content: Array<{ text: string }> }) => JSON.parse(result.content[0].text);
+  const conciergeTurn = (s: ReturnType<typeof setup>, turnId: string) =>
+    s.finish({ turnId, agentName: CONCIERGE_AGENT_ID, chatId: CONCIERGE_CHAT, text: "done" });
+
+  it("forks the Concierge once, 30 s after the last turn of a burst; task chat turns start none", async () => {
+    const s = setup();
+    s.fakeTimers();
+    await conciergeTurn(s, "c1");
+    await rs.advanceTimersByTimeAsync(10_000);
+    await conciergeTurn(s, "c2");
+    await s.finish({ turnId: "task-turn", agentName: "core:main", chatId: "task-9" });
+    await rs.advanceTimersByTimeAsync(REVIEW_DEBOUNCE_MS - 100);
+    expect(s.forks).toEqual([]);
+    await rs.advanceTimersByTimeAsync(100);
+    expect(s.forks).toEqual(["c2"]);
+    // The fork announces no turn end of its own, so nothing schedules another.
+    await rs.advanceTimersByTimeAsync(10 * REVIEW_DEBOUNCE_MS);
+    expect(s.forks).toEqual(["c2"]);
+    expect(s.backendTurns).toEqual([]);
+  });
+
+  it("skips while the Concierge chat runs a turn, and reviews after that turn ends", async () => {
+    const s = setup();
+    s.fakeTimers();
+    rs.mocked(s.chats.activeTurns).mockImplementation((chatId: string) =>
+      chatId === CONCIERGE_CHAT ? ["c2"] : [],
+    );
+    await conciergeTurn(s, "c1");
+    await rs.advanceTimersByTimeAsync(REVIEW_DEBOUNCE_MS);
+    expect(s.forks).toEqual([]);
+    rs.mocked(s.chats.activeTurns).mockImplementation(() => []);
+    await conciergeTurn(s, "c2");
+    await rs.advanceTimersByTimeAsync(REVIEW_DEBOUNCE_MS);
+    expect(s.forks).toEqual(["c2"]);
+  });
+
+  it("does not review while the setting is off", async () => {
+    const s = setup({ enabled: false });
+    s.fakeTimers();
+    await conciergeTurn(s, "c1");
+    await rs.advanceTimersByTimeAsync(10 * REVIEW_DEBOUNCE_MS);
+    expect(s.forks).toEqual([]);
+  });
+
+  it("in a fork while the Concierge is idle, only task_list, chat_read and task_upsert act", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.idle();
+    expect((await s.forkTool("task_list", {})).isError).toBeFalsy();
+    expect((await s.forkTool("chat_read", { chatId: "task-1" })).isError).toBeFalsy();
+    const [row] = text(await s.forkTool("task_list", {})).tasks;
+    expect(
+      (await s.forkTool("task_upsert", { tasks: [{ id: row.id, state: "done" }] })).isError,
+    ).toBeFalsy();
+    const refusals = {
+      say: { text: "hi" },
+      chat_start: { title: "x", brief: "y" },
+      chat_send: { chatId: "task-1", text: "more" },
+      chat_stop: { chatId: "task-1" },
+      chat_list: {},
+      chat_forward: { chatId: "task-1" },
+      chat_card: { chatId: "task-1" },
+    };
+    for (const [name, input] of Object.entries(refusals)) {
+      const result = await s.forkTool(name, input);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(`${name} is unavailable in a forked turn.`);
+    }
+    // Only the brief chat_start sent before the fork.
+    expect(s.send).toHaveBeenCalledTimes(1);
+    expect(s.chats.startChat).toHaveBeenCalledTimes(1);
+    expect(s.chats.interruptTurn).not.toHaveBeenCalled();
+  });
+
+  it("in an idle fork a new row must name its message, one of the Concierge chat", async () => {
+    const s = setup();
+    const promise = text(await s.tool("say", { text: "I'll renew your passport next week." }));
+    s.messages.set("task-1", [{ id: "foreign-1", role: "assistant", content: "[]" }]);
+    s.idle();
+    const without = await s.forkTool("task_upsert", { tasks: [{ title: "Renew passport" }] });
+    expect(without.isError).toBe(true);
+    expect(without.content[0].text).toContain("only during a turn");
+    const foreign = await s.forkTool("task_upsert", {
+      tasks: [{ title: "Renew passport", messageId: "foreign-1" }],
+    });
+    expect(foreign.content[0].text).toContain("No message foreign-1 in this chat");
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+    const made = text(
+      await s.forkTool("task_upsert", {
+        tasks: [{ title: "Renew passport", messageId: promise.messageId }],
+      }),
+    );
+    expect(made.tasks[0]).toMatchObject({ state: "next", anchor: promise.messageId });
+  });
+
+  // The fixtures behind each miss the review exists for. The fork's judgement
+  // is the model's (replayed on a real model); this pins that every fix it
+  // needs reads and writes from an idle fork in one task_upsert.
+  it("fixes every kind of miss from an idle fork, in one write", async () => {
+    const s = setup();
+    const start = async (title: string) =>
+      text(await s.tool("chat_start", { title, brief: title })) as {
+        chatId: string;
+        taskId: string;
+      };
+    const reply = (chatId: string, words: string) =>
+      s.messages.get(chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: words }]),
+      });
+    const flights = await start("Flights");
+    reply(flights.chatId, "Booked LH 123 for Friday.");
+    const hotel = await start("Hotel");
+    const question = "Which one do you want, A or B?";
+    reply(hotel.chatId, `${"Two hotels fit. ".repeat(50)}${question}`);
+    const research = await start("Research");
+    const relayed = text(await s.tool("say", { text: "Hotel: A or B?" })).messageId;
+    const promised = text(await s.tool("say", { text: "I'll renew your passport." })).messageId;
+    const [watch] = text(
+      await s.tool("task_upsert", {
+        tasks: [
+          { id: hotel.taskId, state: "done" },
+          { title: "Watch CI", state: "watching", waitingOn: "CI", dueAt: "2026-10-01T00:00:00Z" },
+        ],
+      }),
+    ).tasks.slice(1);
+
+    s.idle();
+    expect(text(await s.forkTool("task_list", { includeDone: true })).tasks).toHaveLength(4);
+    const hotelChat = text(await s.forkTool("chat_read", { chatId: hotel.chatId }));
+    // The whole reply, past the 600 characters a task event carries.
+    expect(hotelChat.messages.at(-1).text.length).toBeGreaterThan(600);
+    expect(hotelChat.messages.at(-1).text.endsWith(question)).toBe(true);
+    const written = await s.forkTool("task_upsert", {
+      tasks: [
+        { id: flights.taskId, state: "done", summary: "Booked LH 123" },
+        { id: hotel.taskId, state: "needs_user", waitingOn: "hotel A or B", messageId: relayed },
+        { id: watch.id, state: "dropped", summary: "No check is scheduled", waitingOn: null },
+        { id: research.taskId, state: "dropped", summary: "Stopped by the guardian" },
+        { title: "Renew passport", messageId: promised },
+      ],
+    });
+    expect(written.isError).toBeFalsy();
+    const rows = Object.fromEntries(
+      (await s.taskRepo.listForAgent(true)).map(({ row }) => [row.title, row]),
+    );
+    expect(rows.Flights).toMatchObject({ state: "done", summary: "Booked LH 123" });
+    expect(rows.Hotel).toMatchObject({ state: "needs_user", sourceMessageId: relayed });
+    expect(rows["Watch CI"]).toMatchObject({ state: "dropped", waitingOn: null });
+    expect(rows.Research).toMatchObject({ state: "dropped" });
+    expect(rows["Renew passport"]).toMatchObject({ state: "next", sourceMessageId: promised });
   });
 });

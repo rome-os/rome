@@ -11,7 +11,11 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
+import {
+  createSessionFromRun,
+  type ModelProvider,
+  type ModelSessionForkOpenParams,
+} from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "./model-resolver.js";
@@ -20,6 +24,7 @@ import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
+import type { FacadeToolDef } from "./mcp-facade.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 
@@ -48,6 +53,10 @@ describe("AgentSession turn usage", () => {
   let resolverUsesRomeCredits: boolean;
   let state: AIToolStateValue;
   let providerCalls: number;
+  let lifecycle: ReturnType<typeof createAgentLifecycleDispatcher>;
+  // Session tools the agent carries, and the params a fork's session opened with.
+  let sessionTools: FacadeToolDef[];
+  let forkOpenParams: ModelSessionForkOpenParams | undefined;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -96,7 +105,10 @@ describe("AgentSession turn usage", () => {
             sourceSessionId: "source-session",
             mode: fork.mode ?? "ephemeral",
             providerThreadId: "fork-thread",
-            open: async () => createSessionFromRun("openai", () => nextRun(), params),
+            open: async (opened) => {
+              forkOpenParams = opened;
+              return createSessionFromRun("openai", () => nextRun(), params);
+            },
           });
         }
         return session;
@@ -106,6 +118,9 @@ describe("AgentSession turn usage", () => {
       codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
       claude: { loggedIn: false, quotaExhausted: false },
     };
+    lifecycle = createAgentLifecycleDispatcher();
+    sessionTools = [];
+    forkOpenParams = undefined;
     const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     const sessionsRepo = new SessionsRepository(testDb.db);
@@ -133,10 +148,11 @@ describe("AgentSession turn usage", () => {
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        lifecycleDispatcher: lifecycle,
         channelSurface: testChannelSurface,
         turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+        sessionTools: async () => sessionTools,
       },
       { keepAliveAcrossTurns: true },
     );
@@ -320,6 +336,43 @@ describe("AgentSession turn usage", () => {
       romeSessionType: "fork",
       status: "completed",
       accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
+    });
+  });
+
+  // Listeners such as the Concierge's task review start work on a turn's end,
+  // so a fork that announced its own would schedule itself again. The review
+  // writes the task list from the fork, so those tools must still act there.
+  it("announces no turn start or end for an exact fork, which acts only with fork-safe session tools", async () => {
+    forkable = true;
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const tool = (name: string): FacadeToolDef => ({
+      name,
+      description: name,
+      inputSchema: { type: "object" },
+      handler: async () => ({ content: [{ type: "text", text: `ran ${name}` }] }),
+    });
+    sessionTools = ["say", "task_upsert", "task_list", "chat_read", "chat_send"].map(tool);
+    const started = rs.spyOn(lifecycle, "dispatchStarted");
+    const finished = rs.spyOn(lifecycle, "dispatchFinished");
+    const session = await manager.acquire(key);
+    await drain(session.runForkedTurn!({ prompt: "review", mode: "exact" }));
+
+    expect(recorded.map((facts) => facts.romeSessionType)).toEqual(["fork"]);
+    expect(started).not.toHaveBeenCalled();
+    expect(finished).not.toHaveBeenCalled();
+    const answers: Record<string, string> = {};
+    for (const forked of forkOpenParams?.sessionTools ?? []) {
+      const result = await forked.handler({});
+      answers[forked.name] = (result.content[0] as { text: string }).text;
+    }
+    expect(answers).toEqual({
+      say: "say is unavailable in a forked turn.",
+      task_upsert: "ran task_upsert",
+      task_list: "ran task_list",
+      chat_read: "ran chat_read",
+      chat_send: "chat_send is unavailable in a forked turn.",
     });
   });
 

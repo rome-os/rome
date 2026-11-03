@@ -24,6 +24,7 @@ import { createLogger } from "../logger.js";
 import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
 import {
   CONCIERGE_ACCOUNT,
+  CONCIERGE_CHAT_ID,
   type ConciergeService,
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
@@ -81,8 +82,9 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
 
 /**
  * The Concierge tools for one session, or none when the session is not
- * Concierge's or the setting is off. Each handler acts on the session's
- * running turn and fails when none runs.
+ * Concierge's or the setting is off. Most handlers act on the session's
+ * running turn and fail when none runs. task_list, chat_read and task_upsert
+ * with a messageId need none, so the task review's fork can use them.
  */
 export async function buildConciergeTools(
   service: ConciergeService,
@@ -134,8 +136,9 @@ export async function buildConciergeTools(
   };
 
   // A row points back to a message of this chat, so the panel can jump to it.
+  // No turn needed: the task review writes from a fork while the chat is idle.
   const requireSourceMessage = async (messageId: string) => {
-    const { chatId } = currentTurn();
+    const chatId = context.getThreadContext()?.threadId ?? CONCIERGE_CHAT_ID;
     if (!(await webchatRepo.getReplyTarget(chatId, messageId))) {
       throw new Error(
         `No message ${messageId} in this chat. Pass the messageId that say, chat_card, or chat_forward returned.`,
@@ -353,7 +356,6 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("task_upsert", input, async (args) => {
-          currentTurn();
           if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
             throw new Error("tasks is required: an array with one entry per row to write");
           }

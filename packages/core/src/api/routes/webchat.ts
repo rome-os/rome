@@ -801,6 +801,22 @@ export interface WebchatRuntime {
   activeTurns(sessionId: string): string[];
   /** Stop a turn. A turn that already ended is not an error. */
   interruptTurn(turnId: string): Promise<void>;
+  /** Runs the prompt in an exact fork of the chat's session that the guardian
+   *  does not see. Throws when the chat cannot be forked. */
+  runQuietFork(
+    chatId: string,
+    prompt: string,
+    label: string,
+    parentTurnId: string,
+  ): AsyncIterable<AgentEvent>;
+}
+
+/** A webchat session's live agent session, as a fork names its source. */
+interface ForkSource {
+  agentName: string;
+  channelThreadKey: string;
+  threadContext: ThreadContext;
+  sourceSessionId: string;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -1447,6 +1463,75 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   /**
+   * The live agent session behind a webchat session, to fork. The in-memory
+   * source is intentionally short-lived (15s in production), while webchat
+   * provider sessions are durable. Acquire transparently resumes an evicted
+   * source from its persisted provider thread, allowing forks from settled
+   * conversations after the first fork or a backend restart.
+   */
+  const acquireForkSource = async (session: StoredWebchatSession): Promise<ForkSource> => {
+    const agentName = session.agentName ?? "main";
+    const modelSelection = resolveStoredModelSelection(session.largeModelSelection);
+    const channelThreadKey = webchatSessionKey(session.id);
+    const projectPath = normalizeSelectedWebchatProjectPath(
+      session.projectPath ?? session.projectName,
+    );
+    const project = await ensureStoredProjectSelection(projectPath);
+    const projectsRoot = getWebchatProjectsRoot();
+    const workingDir = resolveWebchatProjectPath(project.path, projectsRoot);
+    const threadContext: ThreadContext = {
+      channel: "webchat",
+      threadId: session.id,
+      romeSessionId: session.id,
+      threadPath: join(workingDir, ".threads", session.id),
+      channelUserId: "guardian",
+      threadName: session.name,
+      threadType: "private" as const,
+      projectName: project.name,
+      projectPath: project.path,
+      ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
+      senderBondLevel: "guardian",
+    };
+    const source = await deps.agentSessionManager.acquire(
+      { agentName, channelThreadKey },
+      {
+        workingDir,
+        threadContext,
+        romeSessionId: session.id,
+        contextSuffix: buildWebchatContextSuffix(),
+        handback: resolveSessionHandback(session),
+        selectionId: modelSelection?.id,
+        reasoningEffort: await resolveRequestedReasoningEffort(undefined),
+      },
+    );
+    return { agentName, channelThreadKey, threadContext, sourceSessionId: source.sessionId };
+  };
+
+  /**
+   * An exact fork of the chat's session at its latest turn, which the
+   * guardian never sees: no Sessions tile, no branch. Its trace still lands
+   * under /sessions.
+   */
+  async function* runQuietFork(
+    chatId: string,
+    prompt: string,
+    label: string,
+    parentTurnId: string,
+  ): AsyncIterable<AgentEvent> {
+    if (!deps.agentRunner.runForked) throw new Error("The agent runner cannot fork");
+    const session = await deps.webchatRepo.getSession(chatId);
+    if (!session || !isStoredWebchatSession(session)) throw new Error(`No chat ${chatId}`);
+    const source = await acquireForkSource(session);
+    yield* deps.agentRunner.runForked({
+      ...source,
+      prompt,
+      parentTurnId,
+      label,
+      mode: "exact",
+    });
+  }
+
+  /**
    * Start an exact fork from a resumable webchat session. Consuming
    * `turn_start` creates the fork's Rome session and persists its user prompt,
    * so the Sessions surface can open immediately while the remaining output
@@ -1476,11 +1561,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
-    const agentName = input.session.agentName ?? "main";
-    const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
-    const channelThreadKey = webchatSessionKey(input.session.id);
-    let sourceSessionId: string;
-    let threadContext: ThreadContext;
+    let source: ForkSource | undefined;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
@@ -1501,51 +1582,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         });
         return null;
       }
-      const projectPath = normalizeSelectedWebchatProjectPath(
-        input.session.projectPath ?? input.session.projectName,
-      );
-      const project = await ensureStoredProjectSelection(projectPath);
-      const projectsRoot = getWebchatProjectsRoot();
-      const workingDir = resolveWebchatProjectPath(project.path, projectsRoot);
-      threadContext = {
-        channel: "webchat",
-        threadId: input.session.id,
-        romeSessionId: input.session.id,
-        threadPath: join(workingDir, ".threads", input.session.id),
-        channelUserId: "guardian",
-        threadName: input.session.name,
-        threadType: "private" as const,
-        projectName: project.name,
-        projectPath: project.path,
-        ...(input.session.deviceFolder ? { deviceFolder: input.session.deviceFolder } : {}),
-        senderBondLevel: "guardian",
-      };
-      // The in-memory source is intentionally short-lived (15s in production),
-      // while webchat provider sessions are durable. Acquire transparently
-      // resumes an evicted source from its persisted provider thread, allowing
-      // side chats from settled conversations after the first fork or a
-      // backend restart.
-      const source = await deps.agentSessionManager.acquire(
-        { agentName, channelThreadKey },
-        {
-          workingDir,
-          threadContext,
-          romeSessionId: input.session.id,
-          contextSuffix: buildWebchatContextSuffix(),
-          handback: resolveSessionHandback(input.session),
-          selectionId: modelSelection?.id,
-          reasoningEffort: await resolveRequestedReasoningEffort(undefined),
-        },
-      );
-      sourceSessionId = source.sessionId;
+      source = await acquireForkSource(input.session);
       const storedCheckpoint = await deps.sessionsRepo.getTurnCheckpoint(
-        source.sessionId,
+        source.sourceSessionId,
         input.turnId,
       );
       if (!storedCheckpoint) {
         log.warn("turn fork skipped: source turn checkpoint is unavailable", {
           sessionId: input.session.id,
-          sourceSessionId: source.sessionId,
+          sourceSessionId: source.sourceSessionId,
           turnId: input.turnId,
           label: input.label,
         });
@@ -1569,7 +1614,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
-    if (!sourceCheckpoint) return null;
+    if (!source || !sourceCheckpoint) return null;
+    const { agentName, sourceSessionId, channelThreadKey, threadContext } = source;
 
     const iterator = deps.agentRunner
       .runForked({
@@ -4472,6 +4518,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // 404: the turn ended before the stop landed.
       if (stopped.status >= 400 && stopped.status !== 404) throw new Error(routeError(stopped));
     },
+    runQuietFork,
   };
 
   return { routes: app, runtime };

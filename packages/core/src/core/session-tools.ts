@@ -22,16 +22,25 @@ export interface SessionToolContext {
  */
 export type SessionToolsProvider = (context: SessionToolContext) => Promise<FacadeToolDef[]>;
 
+/** Tools that need no running turn, so the Concierge's task review can use
+ *  them from a fork (concierge/reviewer.ts). */
+const FORK_SAFE_TOOLS = new Set(["task_upsert", "task_list", "chat_read"]);
+
 /**
- * The same tools with handlers that refuse. A forked turn advertises its
- * source's catalog unchanged, but its calls must not act on the source's turn.
+ * The same tools with handlers that refuse, except the fork-safe ones. A
+ * forked turn advertises its source's catalog unchanged, but its calls must
+ * not act on the source's turn.
  */
 export function detachSessionTools(tools: FacadeToolDef[]): FacadeToolDef[] {
-  return tools.map((tool) => ({
-    ...tool,
-    handler: async () => ({
-      content: [{ type: "text", text: `${tool.name} is unavailable in a forked turn.` }],
-      isError: true,
-    }),
-  }));
+  return tools.map((tool) =>
+    FORK_SAFE_TOOLS.has(tool.name)
+      ? tool
+      : {
+          ...tool,
+          handler: async () => ({
+            content: [{ type: "text", text: `${tool.name} is unavailable in a forked turn.` }],
+            isError: true,
+          }),
+        },
+  );
 }
