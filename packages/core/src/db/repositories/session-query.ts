@@ -21,6 +21,7 @@ import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 import { romeSessionKind, withSessionKind } from "../session-kind.js";
+import { CHAT_LINES } from "../../chats/storage/lines-sql.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
 const turnEndTraceBlocks = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
@@ -267,8 +268,36 @@ function rawStats(row: RawSessionStats): RawSessionStats {
   };
 }
 
+/**
+ * Where a session's lines are read from: `legacy` counts the session's own
+ * rows in `rome_agent_messages`; `chats` counts what was said where its
+ * speaker stands, from Chats, beside the session's own traces (and the
+ * lines of a session that stands in no chat). Vocabulary:
+ * docs/domains/chats.md.
+ */
+export type SessionLines = "legacy" | "chats";
+
+/**
+ * How many lines the transcript of session `id` holds, read from Chats: the
+ * messages said where its speaker stands since it joined, plus its own rows
+ * in `rome_agent_messages` that Chats does not hold. A session in a chat
+ * keeps only traces there; one in no chat keeps its prompts and answers too.
+ */
+function chatsLineCount(id: SQL | string): SQL {
+  return sql`SELECT (
+    (SELECT count(*) FROM rome_agent_messages t
+      WHERE t.session_id = s.id
+        AND (s.chat_id IS NULL OR t.role NOT IN ('user', 'assistant', 'notification')))
+    + (SELECT count(*) FROM ${CHAT_LINES} m
+      WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id AND m.said_at >= s.created_at)
+  ) AS count FROM rome_sessions s WHERE s.id = ${id}`;
+}
+
 export class SessionQueryRepository {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private db: DrizzleDb,
+    private readonly lines: SessionLines = "legacy",
+  ) {}
 
   private runStats(scope: SessionQueryStorageScope) {
     return this.db
@@ -327,6 +356,12 @@ export class SessionQueryRepository {
       .from(romeAgentMessages)
       .groupBy(romeAgentMessages.sessionId)
       .as("session_query_message_counts");
+    // Read from Chats, each session on the page counts its own lines, so the
+    // count is never taken over the whole table.
+    const messageCount =
+      this.lines === "chats"
+        ? sql<number>`(${chatsLineCount(sql`${romeSessions.id}`)})`.mapWith(Number)
+        : sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number);
     const predicates = [
       ...sessionPredicates(query.scope, query.search, query.searchAgentNames),
       isNotNull(runStats.sessionId),
@@ -342,11 +377,11 @@ export class SessionQueryRepository {
               ? runStats.error
               : romeSessions.activityAt;
     const primaryOrder = query.sort.direction === "asc" ? asc(sortValue) : desc(sortValue);
-    const rows = await this.db
+    const page = this.db
       .select({
         ...getTableColumns(romeSessions),
         type: romeSessionKind,
-        messageCount: sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number),
+        messageCount,
         stats: {
           runCount: runStats.runCount,
           inputTokens: runStats.inputTokens,
@@ -363,7 +398,11 @@ export class SessionQueryRepository {
       })
       .from(romeSessions)
       .innerJoin(runStats, eq(runStats.sessionId, romeSessions.id))
-      .leftJoin(messageCounts, eq(messageCounts.sessionId, romeSessions.id))
+      .$dynamic();
+    const rows = await (this.lines === "chats"
+      ? page
+      : page.leftJoin(messageCounts, eq(messageCounts.sessionId, romeSessions.id))
+    )
       .where(and(...predicates))
       .orderBy(primaryOrder, desc(romeSessions.createdAt), desc(romeSessions.id))
       .limit(query.limit)
@@ -489,10 +528,12 @@ export class SessionQueryRepository {
     if (!rows[0]) return null;
     const session = withSessionKind(rows[0]);
     const [messageCountRows, parentRows, childRows] = await Promise.all([
-      this.db
-        .select({ count: count() })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id)),
+      this.lines === "chats"
+        ? this.db.all<{ count: number }>(chatsLineCount(id))
+        : this.db
+            .select({ count: count() })
+            .from(romeAgentMessages)
+            .where(eq(romeAgentMessages.sessionId, id)),
       session.parentSessionId
         ? this.db.select().from(romeSessions).where(eq(romeSessions.id, session.parentSessionId))
         : Promise.resolve([]),
