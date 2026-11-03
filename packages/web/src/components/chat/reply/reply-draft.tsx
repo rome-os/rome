@@ -12,7 +12,7 @@ import {
 /** The message a draft replies to, as the chip and the optimistic bubble show it. */
 export interface ReplyTarget {
   messageId: string;
-  author: "guardian" | "agent";
+  author: "guardian" | "agent" | "automated";
   name?: string;
   /** The selected snippet, or the text of the one bubble replied to in a message of several. Sent as `replyQuote`. Absent when the whole message is quoted. */
   quote?: string;

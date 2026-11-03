@@ -83,8 +83,13 @@ import {
 } from "../../core/conversation-title.js";
 import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import type { DashboardInbox } from "../../chats/send.js";
-import { resolveChatSenders } from "./chat-senders.js";
+import {
+  resolveChatSenders,
+  resolveAutomatedSender,
+  automatedMessageNotice,
+} from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -1271,7 +1276,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
     const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
-    const senders = await resolveChatSenders(deps, actors);
+    const sources = await deps.webchatRepo.getUserMessageSources(sessionId);
+    const senders = await resolveChatSenders(
+      deps,
+      actors,
+      new Map([...sources].filter(([id]) => shownIds.has(id))),
+    );
     if (senders.size === 0) return withTraces;
     return withTraces.map((message) => {
       const sender = senders.get(message.id);
@@ -3220,6 +3230,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   type SendBody = {
     inputId?: string;
+    automatedSource?: unknown;
     threadId?: string;
     text?: string;
     personaId?: string;
@@ -3293,6 +3304,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return {
         inputId: getString("inputId"),
+        automatedSource: getString("automatedSource"),
         threadId: getString("threadId"),
         text: getString("text"),
         personaId: getString("personaId"),
@@ -3314,6 +3326,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     body: SendBody,
     said: { saidBy?: Account } = {},
   ): Promise<RouteAnswer> => {
+    const actor = await currentSessionActor();
+    const sourceId =
+      actor?.kind === "guardian" &&
+      actor.via === "loopback" &&
+      typeof body.automatedSource === "string"
+        ? automatedSenderId(body.automatedSource)
+        : undefined;
+    const saidBy = sourceId ? { platform: "webchat", id: sourceId } : said.saidBy;
+    const automated = saidBy ? await resolveAutomatedSender(deps, saidBy.id) : null;
     if (
       body.inputId &&
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.inputId)
@@ -3501,7 +3522,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached system prefix in PromptBuilder stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
-    const promptText = workspaceSection ? `${workspaceSection}\n\n${repliedPrompt}` : repliedPrompt;
+    const contextPrompt = workspaceSection
+      ? `${workspaceSection}\n\n${repliedPrompt}`
+      : repliedPrompt;
+    const promptText = automated
+      ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
+      : contextPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3610,15 +3636,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (
-      !(await deps.webchatRepo.recordUserInput(
-        inputId,
-        sessionId,
-        userContent,
-        await currentSessionActor(),
-        said.saidBy,
-      ))
-    ) {
+    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent, actor, saidBy))) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return answer({ error: "inputId is already in use" }, 409);
       return answer({

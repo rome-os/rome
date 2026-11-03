@@ -1,3 +1,4 @@
+import { automatedSource } from "./automated-source.js";
 // The dashboard's repository over Chats' tables. Vocabulary:
 // docs/domains/chats.md and docs/domains/participation.md.
 //
@@ -246,11 +247,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
         direction: "toRome",
         key: id,
         place: standing.place,
-        // An agent saying it into the chat says it as its dashboard account.
+        // A source records who triggered the action, not an agent participating in this chat.
         saidBy: saidBy
           ? {
-              account: { platform: WEBCHAT_PLATFORM, id: dashboardAccountId(saidBy.id) },
-              agent: saidBy.id,
+              account: {
+                platform: WEBCHAT_PLATFORM,
+                id: saidBy.id.startsWith("automated::") ? saidBy.id : dashboardAccountId(saidBy.id),
+              },
+              ...(saidBy.id.startsWith("automated::") ? {} : { agent: saidBy.id }),
             }
           : dashboardSender(actor),
         body: { text: partsText(parts) },
@@ -387,6 +391,17 @@ export class ChatsWebChatRepository extends WebChatRepository {
     );
   }
 
+  override async getUserMessageSources(sessionId: string): Promise<Map<string, string>> {
+    const rows = this.db.all<LineRow>(
+      sql`SELECT * FROM ${sessionLines([sessionId])} WHERE role = 'user'`,
+    );
+    return new Map(
+      rows.flatMap((row) =>
+        row.source_id && automatedSource(row.source_id) ? [[row.id, row.source_id] as const] : [],
+      ),
+    );
+  }
+
   override async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
     const rows = this.db.all<LineRow>(sql`
       SELECT * FROM ${sessionLines([sessionId])} WHERE role = 'user'
@@ -412,6 +427,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     if (!row) return null;
     return {
       ...storedLine(row),
+      senderId: row.source_id,
       role: row.role as "user" | "assistant",
       actor: row.role === "user" ? actorOf(row.sender_id, row.sender_name) : null,
     };
@@ -662,6 +678,8 @@ function agentSender(standing: Standing): SaidBy & { agent: string } {
 
 /** The person a dashboard line's sender account stands for. */
 function actorOf(senderId: string | null, senderName: string | null): SessionActor | null {
+  if (senderId?.startsWith("automated::"))
+    return { kind: "guardian", userId: "guardian", via: "loopback" };
   if (senderId === "guardian") return { kind: "guardian", userId: "guardian", via: "cookie" };
   if (senderId?.startsWith("visitor:")) {
     return {
@@ -698,6 +716,7 @@ interface LineRow {
   /** Who said it, as WebChatRepository names the sender of a turn's line:
    *  the agent for a line an agent said. */
   turn_sender_id: string | null;
+  source_id: string | null;
   line_order: number;
   seq: number;
 }
@@ -741,6 +760,8 @@ export function sessionLines(sessionIds: readonly string[]) {
            ELSE 'notification' END AS role,
       m.parts AS content, m.said_at AS created_at, m.sender_account_id AS sender_id,
       m.sender_name, COALESCE(m.sender_agent, m.sender_account_id) AS turn_sender_id,
+      CASE WHEN m.sender_agent IS NOT NULL THEN m.sender_agent
+           WHEN m.sender_account_id GLOB 'automated::*' THEN m.sender_account_id END AS source_id,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
@@ -765,7 +786,7 @@ export function sessionLines(sessionIds: readonly string[]) {
       r.created_at,
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
-      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id,
+      json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 WHEN r.role = 'trace' THEN 1 ELSE 2 END AS line_order,

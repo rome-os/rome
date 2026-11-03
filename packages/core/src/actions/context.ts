@@ -41,6 +41,7 @@ setCurrentActionContextResolver(() => {
   }
 
   return {
+    initiator: store.initiator,
     actionName: store.actionName,
     executionId: store.executionId,
     rootExecutionId: store.rootExecutionId,

@@ -34,6 +34,49 @@ describe("ChatsWebChatRepository", () => {
   const ownRows = (id: string) =>
     testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all();
 
+  it.each([
+    "automated::agent:coding:coding",
+    "automated::app:daily-report",
+    "automated::routine:Morning briefing",
+    "automated::unknown",
+    "core:concierge",
+    "visitor:assistant",
+    "automated:assistant",
+  ])("keeps source %s separate from ownership and reads it for replies", async (senderId) => {
+    await repo.createSession("source-chat", "Sources");
+    const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+    expect(
+      await repo.recordUserInput("source-input", "source-chat", "[]", actor, {
+        platform: "webchat",
+        id: senderId,
+      }),
+    ).toBe(true);
+    expect(await repo.getUserMessageSources("source-chat")).toEqual(
+      new Map([["source-input", senderId]]),
+    );
+    expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
+    if (senderId.startsWith("automated::")) {
+      expect((await repo.getUserMessageActors("source-chat")).get("source-input")?.kind).toBe(
+        "guardian",
+      );
+    }
+    expect(await repo.getReplyTarget("another-chat", "source-input")).toBeNull();
+    expect(await repo.getSessionOwnerKey("source-chat")).toBeNull();
+    const line = testDb.db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.key, "source-input"))
+      .get();
+    expect(line?.senderAccountId).toBe(
+      senderId.startsWith("automated::") ? senderId : `agent:${senderId}`,
+    );
+    expect(line?.senderAgent).toBe(senderId.startsWith("automated::") ? null : senderId);
+    await repo.recordUserInput("old-loopback", "source-chat", "[]", actor);
+    expect((await repo.getUserMessageSources("source-chat")).has("old-loopback")).toBe(false);
+    expect((await repo.getUserMessageActors("source-chat")).get("old-loopback")?.kind).toBe(
+      "guardian",
+    );
+  });
   it("starts a webchat chat for a new session, keyed by the session", async () => {
     await repo.createSession("chat-1", "Plans", undefined, undefined, null, null, "writer");
 

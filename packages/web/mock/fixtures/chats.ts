@@ -1,5 +1,7 @@
+import type { ChatMessageSender } from "@rome/api-types/chat";
 import type { TranscriptPart } from "@/lib/chat-types";
 import { appBuildingChat } from "./app-building-chat";
+import codingIcon from "../../../../rome_apps/coding/assets/icon.svg";
 
 export interface DemoChat {
   id: string;
@@ -8,6 +10,7 @@ export interface DemoChat {
   turns: {
     at: string;
     prompt: string | TranscriptPart[];
+    sender?: ChatMessageSender;
     reply: string;
     blocks?: TranscriptPart[];
   }[];
@@ -16,6 +19,57 @@ export interface DemoChat {
 // Authored product scenarios and an edited shared conversation. All app links
 // open the recorded samples. Provenance: docs/dashboard-mock-mode.md.
 export const curatedChats: DemoChat[] = [
+  {
+    id: "mock-chat-automated",
+    name: "Messages from people and automation",
+    project: "default",
+    turns: [
+      {
+        at: "2026-09-15T09:00:00.000Z",
+        prompt: "Prepare today's briefing.",
+        reply: "Today has two meetings and one release check.",
+        sender: {
+          kind: "automated",
+          sourceType: "routine",
+          name: "Morning briefing",
+          iconUrl: null,
+        },
+      },
+      {
+        at: "2026-09-15T09:01:00.000Z",
+        prompt: "Move the review to Thursday.",
+        reply: "",
+      },
+      {
+        at: "2026-09-15T09:02:00.000Z",
+        prompt: "Review the new pull request.",
+        reply: "",
+        sender: {
+          kind: "automated",
+          sourceType: "app",
+          name: "Code Review",
+          iconUrl: "/recorded-apps/code-review/icon.svg",
+        },
+      },
+      {
+        at: "2026-09-15T09:03:00.000Z",
+        prompt: "Run the release check again.",
+        reply: "",
+        sender: { kind: "automated", sourceType: "agent", name: "Coding", iconUrl: codingIcon },
+      },
+      {
+        at: "2026-09-15T09:04:00.000Z",
+        prompt: "Can you share the notes with me too?",
+        reply: "",
+        sender: {
+          kind: "visitor",
+          accountId: "demo-alex",
+          name: "alex@example.com",
+          avatarUrl: null,
+        },
+      },
+    ],
+  },
   appBuildingChat,
   {
     id: "mock-chat-learn-video",

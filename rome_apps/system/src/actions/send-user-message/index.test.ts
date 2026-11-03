@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { setCurrentActionContextResolver } from "@rome-os/app-runtime";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createSendUserMessageAction } from "./index.js";
 
@@ -24,6 +25,31 @@ function requestBody(impl: ReturnType<typeof rs.fn>, call: number): Record<strin
 }
 
 describe("send_user_message", () => {
+  it.each([
+    "agent:core:main",
+    "agent:coding:coding",
+    "app:daily-report",
+    "routine:Morning briefing",
+    "unknown",
+    undefined,
+  ])("passes its runtime initiator %s to the turn, not to session creation", async (initiator) => {
+    const fetchImpl = makeFetch(
+      jsonResponse(200, { id: "session" }),
+      jsonResponse(200, { turnId: "turn" }),
+    );
+    setCurrentActionContextResolver(() => ({ initiator }));
+    try {
+      const action = createSendUserMessageAction(config, { fetchImpl, baseUrl: BASE });
+      await action.execute({ text: "/brief today" });
+      expect(requestBody(fetchImpl, 0)).toEqual({});
+      expect(requestBody(fetchImpl, 1)).toEqual({
+        text: "/brief today",
+        automatedSource: initiator ?? "unknown",
+      });
+    } finally {
+      setCurrentActionContextResolver(null);
+    }
+  });
   it("defaults to creating a new chat, then posts the text as a guardian turn", async () => {
     const fetchImpl = makeFetch(
       jsonResponse(200, { id: "sess-1" }),
@@ -38,7 +64,10 @@ describe("send_user_message", () => {
     // No explicit agentName ⇒ the route's own default (main) applies.
     expect(requestBody(fetchImpl, 0)).toEqual({});
     expect(fetchImpl.mock.calls[1][0]).toBe(`${BASE}/api/chat/sessions/sess-1/turns`);
-    expect(requestBody(fetchImpl, 1)).toEqual({ text: "Summarize my inbox" });
+    expect(requestBody(fetchImpl, 1)).toEqual({
+      text: "Summarize my inbox",
+      automatedSource: "unknown",
+    });
     expect(result).toEqual({
       status: "ok",
       data: { sessionId: "sess-1", turnId: "turn-1", createdSession: true },

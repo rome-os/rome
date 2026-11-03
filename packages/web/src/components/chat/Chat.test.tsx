@@ -12,6 +12,8 @@ import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { Chat } from "./Chat";
+import enChat from "@/i18n/locales/en/chat.json";
+import zhChat from "@/i18n/locales/zh-CN/chat.json";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
 import {
@@ -32,7 +34,8 @@ import {
   postSessionTurn,
 } from "@/lib/chat-api";
 
-const t = (key: string) => key;
+let agentRoleLabel = enChat.roles.agent;
+const t = (key: string) => (key === "roles.agent" ? agentRoleLabel : key);
 const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
@@ -663,6 +666,19 @@ describe("Chat agent identity", () => {
   it("does not invent a model for a session without a pin", () => {
     renderChat(<Chat sessionId="session-1" />);
     expect(screen.queryByLabelText("navbar.sessionModel")).toBeNull();
+  });
+
+  it.each([
+    ["en", enChat.roles.agent],
+    ["zh-CN", zhChat.roles.agent],
+  ])("names an unnamed main agent Rome in %s ordinary replies", (_locale, label) => {
+    agentRoleLabel = label;
+    try {
+      renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  " />);
+      expect(screen.getByTestId("message-list").textContent).toBe("Rome");
+    } finally {
+      agentRoleLabel = enChat.roles.agent;
+    }
   });
 
   it("uses the guardian-chosen name for the default main agent", () => {

@@ -4,6 +4,7 @@ import { REPLY_TO_TEXT_MAX_LENGTH, type ReplyToPart } from "@rome/api-types/chat
 import { replyContextLine } from "../../core/reply-context.js";
 import type { ApiDeps } from "../deps.js";
 import { resolveChatSenders } from "./chat-senders.js";
+import { promptSafeSourceName } from "../../webchat/automated-source.js";
 
 export type ReplyResolution =
   | { ok: true; part: ReplyToPart; promptLine: string }
@@ -57,7 +58,7 @@ function truncate(text: string): string {
  * normalization, is rejected.
  */
 export async function resolveReply(
-  deps: Pick<ApiDeps, "db" | "settingsRepo" | "webchatRepo">,
+  deps: Pick<ApiDeps, "db" | "settingsRepo" | "webchatRepo" | "agentLoader" | "appCatalog">,
   input: { sessionId: string; messageId: string; quote?: string; ownRowOnly: boolean },
 ): Promise<ReplyResolution> {
   const { sessionId, messageId } = input;
@@ -86,18 +87,27 @@ export async function resolveReply(
   }
   text = truncate(text);
 
-  const author = target.role === "user" ? "guardian" : "agent";
+  let author: ReplyToPart["author"] = target.role === "user" ? "guardian" : "agent";
   let name: string | undefined;
-  if (target.role === "user" && target.actor) {
-    const senders = await resolveChatSenders(deps, new Map([[target.id, target.actor]]));
-    name = senders.get(target.id)?.name ?? undefined;
+  if (target.role === "user") {
+    const senders = await resolveChatSenders(
+      deps,
+      new Map(target.actor ? [[target.id, target.actor]] : []),
+      new Map(target.senderId ? [[target.id, target.senderId]] : []),
+    );
+    const sender = senders.get(target.id);
+    if (sender?.kind === "automated") author = "automated";
+    name = sender?.name ?? (author === "automated" ? "Automation" : undefined);
   }
   return {
     ok: true,
     part: { type: "reply_to", messageId, author, ...(name ? { name } : {}), text },
     promptLine: replyContextLine({
       createdAt: target.createdAt,
-      sender: name ?? (author === "guardian" ? "Guardian" : "Assistant"),
+      sender:
+        author === "automated" && name
+          ? promptSafeSourceName(name)
+          : (name ?? (author === "guardian" ? "Guardian" : "Rome")),
       text,
     }),
   };

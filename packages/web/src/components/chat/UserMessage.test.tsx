@@ -176,6 +176,51 @@ describe("UserMessage sender", () => {
     expect(side(guardian.container)).toBe("left");
   });
 
+  it.each([
+    "agent",
+    "app",
+    "routine",
+    null,
+  ] as const)("shows automated %s on the left for every viewer", (sourceType) => {
+    for (const identity of [
+      { kind: "guardian", userId: "seat", displayName: "Ray", avatarUrl: null },
+      { kind: "visitor", accountId: "acct-ada", email: "ada@example.com", avatarUrl: null },
+    ] as const) {
+      viewer.current = identity;
+      const { container, unmount } = render(
+        withSender({
+          kind: "automated",
+          sourceType,
+          name: sourceType ? "Morning briefing" : null,
+          iconUrl: null,
+        }),
+      );
+      expect(side(container)).toBe("left");
+      expect(container.querySelector(".bg-primary")).toBeNull();
+      expect(container.querySelector('[data-slot="avatar"]')?.className).toContain("rounded-8");
+      expect(screen.getByText("senderAutomated")).toBeTruthy();
+      expect(screen.getByText(sourceType ? "Morning briefing" : "senderAutomation")).toBeTruthy();
+      if (sourceType === "routine") expect(container.querySelector(".lucide-clock")).not.toBeNull();
+      unmount();
+    }
+  });
+
+  it("refreshes an automation's icon and kind when reloaded", () => {
+    const { container, rerender } = render(
+      withSender({ kind: "guardian", name: "Ray", avatarUrl: null }),
+    );
+    rerender(
+      withSender({
+        kind: "automated",
+        sourceType: "app",
+        name: "Ray",
+        iconUrl: "/api/apps/review/icon",
+      }),
+    );
+    expect(side(container)).toBe("left");
+    expect(screen.getByText("senderAutomated")).toBeTruthy();
+  });
+
   it("keeps a message that recorded no sender on the right, with no avatar", () => {
     const { container } = render(withSender(undefined));
 
@@ -235,6 +280,34 @@ describe("UserMessage reply", () => {
     render(inChat(draft(), state));
 
     expect(screen.queryByRole("button", { name: "reply.action" })).toBeNull();
+  });
+
+  it("replies to automation with its source name, not Guardian", () => {
+    const reply = draft();
+    render(
+      <ReplyDraftProvider value={reply}>
+        <ThemeProvider>
+          <UserMessage
+            msg={{
+              ...message,
+              sender: {
+                kind: "automated",
+                sourceType: "routine",
+                name: "Morning briefing",
+                iconUrl: null,
+              },
+            }}
+          />
+        </ThemeProvider>
+      </ReplyDraftProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "reply.action" }));
+    expect(reply.set).toHaveBeenCalledWith({
+      messageId: "input-1",
+      author: "automated",
+      name: "Morning briefing",
+      preview: message.content,
+    });
   });
 
   it("shows the quote a reply carries, linked to the original", () => {

@@ -2121,6 +2121,8 @@ export interface ActionRunContext {
 }
 
 export interface CurrentActionContext {
+  /** The runtime-recorded source of this action chain, separate from its accountable actor. */
+  initiator?: string;
   actionName?: string;
   executionId?: string;
   rootExecutionId?: string;

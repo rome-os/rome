@@ -54,8 +54,10 @@ export const UserMessage = memo(
             source={{
               messageId: msg.id,
               sessionId: msg.sessionId,
-              author: "guardian",
-              name: msg.sender?.name ?? undefined,
+              author: msg.sender?.kind === "automated" ? "automated" : "guardian",
+              name:
+                msg.sender?.name ??
+                (msg.sender?.kind === "automated" ? t("senderAutomation") : undefined),
               text,
             }}
           />
@@ -67,7 +69,17 @@ export const UserMessage = memo(
     if (!own && msg.sender) {
       return (
         <MessageRow
-          name={msg.sender.name ?? t("senderGuardian")}
+          name={
+            msg.sender.name ??
+            t(msg.sender.kind === "automated" ? "senderAutomation" : "senderGuardian")
+          }
+          subtitle={
+            msg.sender.kind === "automated" ? (
+              <span className="rounded-4 border border-border px-1 text-aux text-muted-foreground">
+                {t("senderAutomated")}
+              </span>
+            ) : undefined
+          }
           avatar={<SenderAvatar sender={msg.sender} />}
           className="group"
           footer={actions}
@@ -90,6 +102,15 @@ export const UserMessage = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
+    prev.msg.sender?.kind === next.msg.sender?.kind &&
     prev.msg.sender?.name === next.msg.sender?.name &&
-    prev.msg.sender?.avatarUrl === next.msg.sender?.avatarUrl,
+    (prev.msg.sender?.kind === "automated"
+      ? next.msg.sender?.kind === "automated" &&
+        prev.msg.sender.iconUrl === next.msg.sender.iconUrl &&
+        prev.msg.sender.sourceType === next.msg.sender.sourceType
+      : next.msg.sender?.kind !== "automated" &&
+        prev.msg.sender?.avatarUrl === next.msg.sender?.avatarUrl &&
+        (prev.msg.sender?.kind !== "visitor" ||
+          (next.msg.sender?.kind === "visitor" &&
+            prev.msg.sender.accountId === next.msg.sender.accountId))),
 );

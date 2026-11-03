@@ -1,15 +1,12 @@
-import { createAppLogger, defineAction, z } from "@rome-os/app-runtime";
+import { createAppLogger, defineAction, getCurrentActionContext, z } from "@rome-os/app-runtime";
 import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 import type { SendUserMessageOutput } from "./types.js";
 export type { SendUserMessageOutput } from "./types.js";
 
 const log = createAppLogger("send-user-message");
 
-// This action drives the same HTTP routes the dashboard composer uses, so the
-// message is a real guardian turn — user-attributed transcript entry, session
-// naming, /skill expansion, SSE stream — not a backend continuation. In-process
-// callers hit the loopback listener, which resolves as the guardian by design
-// (core lib/guardian-session.ts): the container is the security boundary.
+// Only the loopback listener accepts the source attribution. The guardian
+// remains accountable for the turn, independently of who sent the message.
 function getInternalApiBaseUrl(): string {
   const port = process.env.INTERNAL_API_PORT?.trim() || "4141";
   return `http://127.0.0.1:${port}`;
@@ -153,7 +150,10 @@ export function createSendUserMessageAction(
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: input.text }),
+          body: JSON.stringify({
+            text: input.text,
+            automatedSource: getCurrentActionContext()?.initiator ?? "unknown",
+          }),
         },
       );
       if (!res.ok) {

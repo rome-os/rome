@@ -44,7 +44,10 @@ import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
-import { prettyAgentName } from "@/lib/agent-name";
+import {
+  prettyAgentName,
+  mainAgentDisplayName as resolveMainAgentDisplayName,
+} from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
@@ -559,7 +562,7 @@ export function Chat({
     () => ({
       name: pinnedAgentMention
         ? prettyAgentName(pinnedAgentMention.agentName)
-        : mainAgentDisplayName?.trim() || t("roles.agent"),
+        : resolveMainAgentDisplayName(mainAgentDisplayName, t("roles.agent")),
       iconUrl: pinnedAgentMention?.iconUrl ?? null,
     }),
     [mainAgentDisplayName, pinnedAgentMention, t],

@@ -7,7 +7,7 @@ export interface ReplySource {
   /** The message the server looks up. For an agent turn, its last row with text. */
   messageId: string;
   sessionId: string;
-  author: "guardian" | "agent";
+  author: "guardian" | "agent" | "automated";
   name?: string;
   /** The text a whole-message reply quotes. */
   text: string;
