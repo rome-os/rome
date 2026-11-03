@@ -836,3 +836,164 @@ describe("send_message to an agent by name", () => {
     ).rejects.toThrow("Sending to an agent by name is not available");
   });
 });
+
+describe("send_message through Chats", () => {
+  /** A host's chats that send and record through Chats. */
+  function chatsWithWrites(): ChatRepository & {
+    send: ReturnType<typeof rs.fn>;
+    sendEmail: ReturnType<typeof rs.fn>;
+  } {
+    return {
+      ensureChannelChat: rs.fn(async () => ({ id: "channel:discord:thread-1", agentName: null })),
+      ensureChannelConversation: rs.fn(),
+      addMessage: rs.fn(),
+      promoteMessageToUser: rs.fn(),
+      recordOutboundMessage: rs.fn(),
+      send: rs.fn(async () => ({ messageId: "platform-out-1" })),
+      sendEmail: rs.fn(async () => ({ messageId: "msg_2", threadId: "t1" })),
+    };
+  }
+
+  afterEach(() => setCurrentActionContextResolver(null));
+
+  it("says a message through the session's chat adapter, not the channel", async () => {
+    const adapter = makeAdapter();
+    const chats = chatsWithWrites();
+
+    const result = await executeSendMessage(
+      adapter,
+      { channel: "discord", threadId: "thread-1", text: "Background update" },
+      { chats },
+    );
+
+    expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
+    expect(adapter.send).not.toHaveBeenCalled();
+    expect(chats.recordOutboundMessage).not.toHaveBeenCalled();
+    expect(chats.ensureChannelChat).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "discord", threadId: "thread-1", agentName: "main" }),
+    );
+    expect(chats.send).toHaveBeenCalledWith({
+      sessionId: "channel:discord:thread-1",
+      channel: "discord",
+      text: "Background update",
+      content: JSON.stringify([{ type: "text", content: "Background update" }]),
+      knownToProvider: false,
+    });
+  });
+
+  it("says it as the run's session when it answers where the run was asked", async () => {
+    setCurrentActionContextResolver(() => ({
+      executionId: "e",
+      agentName: "main",
+      turnId: "turn-1",
+      channelContext: { channel: "discord", threadId: "thread-1", romeSessionId: "session-1" },
+    }));
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      makeAdapter(),
+      { channel: "discord", threadId: "thread-1", text: "Done", replyToMessageId: "m-9" },
+      { chats },
+    );
+
+    expect(chats.ensureChannelChat).not.toHaveBeenCalled();
+    expect(chats.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        replyToPlatformMessageId: "m-9",
+        turnId: "turn-1",
+        knownToProvider: true,
+      }),
+    );
+  });
+
+  it("surfaces the platform's refusal", async () => {
+    const chats = chatsWithWrites();
+    chats.send.mockRejectedValue(new Error("Discord refused the message"));
+
+    await expect(
+      executeSendMessage(
+        makeAdapter(),
+        { channel: "discord", threadId: "thread-1", text: "hi" },
+        { chats },
+      ),
+    ).rejects.toThrow("Discord refused the message");
+  });
+
+  it("leaves a webchat send to the channel", async () => {
+    const adapter = makeAdapter("webchat");
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      adapter,
+      { channel: "webchat", threadId: "session-1", text: "hi" },
+      { chats },
+    );
+
+    expect(chats.send).not.toHaveBeenCalled();
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends an email reply through Chats on its thread", async () => {
+    const adapter = makeAdapter("email");
+    const chats = chatsWithWrites();
+
+    const result = await executeSendMessage(
+      adapter,
+      {
+        channel: "email",
+        threadId: "t1",
+        replyToMessageId: "msg_1",
+        romeSessionId: "session-1",
+        text: "reply",
+      },
+      { chats },
+    );
+
+    expect(result).toEqual({ status: "ok", data: { messageId: "msg_2", threadId: "t1" } });
+    expect(adapter.send).not.toHaveBeenCalled();
+    expect(chats.sendEmail).toHaveBeenCalledWith({
+      channel: "email",
+      threadId: "t1",
+      sessionId: "session-1",
+      text: "reply",
+      content: JSON.stringify([{ type: "text", content: "reply" }]),
+      email: { inReplyToMessageId: "msg_1" },
+      knownToProvider: false,
+    });
+  });
+
+  it("starts a new email thread through Chats as answering no known turn", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "main", turnId: "t" }));
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      makeAdapter("email"),
+      { channel: "email", to: "guardian", subject: "Hi", text: "body", turnId: "turn-1" },
+      { chats },
+    );
+
+    expect(chats.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: { to: "guardian", subject: "Hi" },
+        turnId: "turn-1",
+        knownToProvider: false,
+      }),
+    );
+    expect(chats.sendEmail.mock.calls[0]![0]).not.toHaveProperty("threadId");
+  });
+
+  it("falls back to the channel and records the line when the host offers no send", async () => {
+    const adapter = makeAdapter();
+    const { send: _send, sendEmail: _sendEmail, ...legacy } = chatsWithWrites();
+
+    await executeSendMessage(
+      adapter,
+      { channel: "discord", threadId: "thread-1", text: "hi" },
+      { chats: legacy },
+    );
+
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+    expect(legacy.recordOutboundMessage).toHaveBeenCalledTimes(1);
+  });
+});

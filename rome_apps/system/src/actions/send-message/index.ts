@@ -137,6 +137,88 @@ function ensureChannelChat(
     : repository.ensureChannelConversation(input);
 }
 
+/**
+ * Say `input` at `threadId` through Chats, as the session it belongs to: the
+ * one the caller names, the run's own when it sends where the run was asked,
+ * else main's at that address, opened when Rome holds none. The account's
+ * chat adapter sends it and Chats records it once.
+ */
+async function sendThroughChats(
+  chats: ChatRepository,
+  send: NonNullable<ChatRepository["send"]>,
+  input: SendMessageInput,
+  threadId: string,
+): Promise<{ messageId?: string }> {
+  const current = getCurrentActionContext();
+  const sameAmbientConversation =
+    current?.channelContext?.channel === input.channel &&
+    current.channelContext.threadId === threadId;
+  const sessionId =
+    input.romeSessionId ??
+    (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined) ??
+    (
+      await ensureChannelChat(chats, {
+        channel: input.channel,
+        threadId,
+        // A send must not bind an unclaimed conversation to whichever
+        // background or sentinel agent happened to send first.
+        agentName: "main",
+        threadType: "private",
+      })
+    ).id;
+  const turnId = input.turnId ?? current?.turnId;
+  return send({
+    sessionId,
+    channel: input.channel,
+    ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.parts?.length ? { parts: [...input.parts] } : {}),
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+    content: outboundContent(input),
+    ...(input.replyToMessageId ? { replyToPlatformMessageId: input.replyToMessageId } : {}),
+    ...(turnId ? { turnId } : {}),
+    knownToProvider:
+      input.knownToProvider ??
+      Boolean(input.turnId || (sameAmbientConversation && current?.turnId)),
+  });
+}
+
+/**
+ * Send email `input` through Chats: on its thread as the session the caller
+ * names, or the run's own when it answers where the run was asked, else as
+ * main's there; on a new thread when it names none.
+ */
+async function emailThroughChats(
+  sendEmail: NonNullable<ChatRepository["sendEmail"]>,
+  input: SendMessageInput,
+  email: Parameters<NonNullable<ChatRepository["sendEmail"]>>[0]["email"],
+): Promise<{ messageId: string | null; threadId: string }> {
+  const current = getCurrentActionContext();
+  const threadId = input.threadId;
+  const sameAmbientConversation =
+    !!threadId &&
+    current?.channelContext?.channel === input.channel &&
+    current.channelContext.threadId === threadId;
+  const sessionId =
+    input.romeSessionId ??
+    (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined);
+  const turnId = input.turnId ?? current?.turnId;
+  return sendEmail({
+    channel: input.channel,
+    ...(threadId ? { threadId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(input.text !== undefined ? { text: input.text } : {}),
+    ...(input.parts?.length ? { parts: [...input.parts] } : {}),
+    content: outboundContent(input),
+    email,
+    ...(turnId ? { turnId } : {}),
+    // A new thread's first email answers no turn the provider knows.
+    knownToProvider:
+      !!threadId &&
+      (input.knownToProvider ??
+        Boolean(input.turnId || (sameAmbientConversation && current?.turnId))),
+  });
+}
+
 async function recordDeliveredConversationMessageBestEffort(
   deps: SendMessageRuntimeDeps,
   input: SendMessageInput,
@@ -414,6 +496,23 @@ export async function executeSendMessage(
       throw new Error("Email needs a `threadId`/`replyToMessageId` to reply, or a `to` recipient");
     }
 
+    const sendEmail = deps.chats?.sendEmail?.bind(deps.chats);
+    if (sendEmail) {
+      log.info("sending email through Chats", {
+        threadId: email.threadId ?? null,
+        reply: !!(email.threadId || replyTarget),
+      });
+      const sent = await emailThroughChats(sendEmail, safeInput, {
+        ...(email.to !== undefined ? { to: email.to } : {}),
+        ...(email.cc !== undefined ? { cc: email.cc } : {}),
+        ...(email.bcc !== undefined ? { bcc: email.bcc } : {}),
+        ...(email.subject !== undefined ? { subject: email.subject } : {}),
+        ...(email.html !== undefined ? { html: email.html } : {}),
+        ...(replyTarget !== undefined ? { inReplyToMessageId: replyTarget } : {}),
+      });
+      return { status: "ok", data: { messageId: sent.messageId, threadId: sent.threadId } };
+    }
+
     const threadId = email.threadId ?? "";
     log.info("sending email", {
       threadId: threadId || null,
@@ -464,6 +563,16 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
+  // The dashboard writes its own lines. On a host that keeps chats in Chats,
+  // every other send goes through the session's chat adapter, which sends
+  // and records it as one step.
+  const send = deps.chats?.send?.bind(deps.chats);
+  if (send && deps.chats && channel !== "webchat") {
+    const said = await sendThroughChats(deps.chats, send, safeInput, threadId);
+    return said.messageId
+      ? { status: "ok", data: { messageId: said.messageId } }
+      : { status: "ok" };
+  }
   const delivery = await channels.send(account, threadId as ChatId, {
     text,
     parts,
