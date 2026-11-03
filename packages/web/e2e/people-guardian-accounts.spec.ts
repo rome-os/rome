@@ -9,7 +9,6 @@ test.use({ viewport: { width: 390, height: 844 } });
 
 test("the guardian's longest account handle fits inside the row on a phone", async ({ page }) => {
   await page.goto("/people");
-  await page.getByRole("radio", { name: "Directory" }).click();
   const handle = page.getByText("guardian.work.account@example-company.com");
   await expect(handle).toBeVisible();
 
