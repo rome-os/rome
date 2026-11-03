@@ -1425,9 +1425,12 @@ describe("Concierge quota failover", () => {
       "gpt-6-luna",
     );
     expect(inserted).toHaveBeenCalledTimes(1);
-    expect(JSON.parse((await s.storedChats.getMessages(CONCIERGE_CHAT))[0].content)).toEqual([
+    const [notice] = await s.storedChats.getMessages(CONCIERGE_CHAT);
+    expect(JSON.parse(notice.content)).toEqual([
       { type: "quota_switch", from: "anthropic", to: "openai", model: "gpt-6-luna" },
     ]);
+    // Transcript order breaks same-second ties by turn id, so it must sort by time.
+    expect(notice.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
     expect(await readWebchatMessages(s.storedChats, CONCIERGE_CHAT, new Date(0))).toEqual([]);
     raw.claude.quotaExhausted = false;
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();

@@ -19,7 +19,7 @@ import {
 } from "../core/model-selector.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import { quotaSwitchTarget, soleExhaustedProvider } from "../core/quota-switch.js";
-import { randomUUID } from "node:crypto";
+import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
@@ -189,7 +189,7 @@ export class ConciergeService {
     if (!target) return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
     this.deps.agentSessionManager.peek(key)?.selectModel(target.selectionId);
-    await this.deps.webchatRepo.addBackendMessage(chatId, randomUUID(), [
+    await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {
         type: "quota_switch",
         from,

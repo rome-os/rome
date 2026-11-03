@@ -3545,8 +3545,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
-    const quotaSwitch =
-      sessionId === CONCIERGE_CHAT_ID ? await deps.concierge?.switchIfExhausted(sessionId) : null;
+    let largeModelSelection = session.largeModelSelection;
+    if (sessionId === CONCIERGE_CHAT_ID) {
+      await deps.concierge?.switchIfExhausted(sessionId);
+      // A background turn may also have moved the chat since this send read it.
+      largeModelSelection = (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection;
+    }
     // A branch has no stored selection: it continues the provider thread
     // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
@@ -3555,7 +3559,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,
-              largeModelSelection: quotaSwitch?.selectionId ?? session.largeModelSelection,
+              largeModelSelection,
             },
             messageCount,
             body.largeModelSelection,

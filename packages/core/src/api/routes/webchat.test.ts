@@ -3486,6 +3486,39 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("sends a Concierge turn on the selection a background switch just stored", async () => {
+      mockScriptedManager();
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      deps.concierge = {
+        switchIfExhausted: async (chatId: string) => {
+          await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna");
+          return null;
+        },
+      } as never;
+      await deps.webchatRepo.createSession(
+        "concierge",
+        "Quota",
+        undefined,
+        undefined,
+        "claude-sonnet",
+        undefined,
+        "core:concierge",
+      );
+      const sent = await createWebchatRuntime(deps).routes.request(
+        "/chat/sessions/concierge/turns",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        },
+      );
+      expect(sent.status).toBe(200);
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+      );
+    });
+
     it("fails over only the Concierge pre-turn and leaves an ordinary quota failure unchanged", async () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
