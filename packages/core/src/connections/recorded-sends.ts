@@ -5,12 +5,13 @@
 //
 // Nothing wraps the channels with this yet: the Chats switch does.
 
-import type {
-  Channel,
-  ChatId,
-  MessageReceipt,
-  OutgoingEmailMessage,
-  OutgoingMessage,
+import {
+  ChannelSendRefused,
+  type Channel,
+  type ChatId,
+  type MessageReceipt,
+  type OutgoingEmailMessage,
+  type OutgoingMessage,
 } from "@rome-os/app-runtime";
 import type { ChannelSend } from "../channels/channel.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -112,7 +113,10 @@ export function recordedSends<C extends Channel>(
         };
         if (!out.text.trim() && !out.html?.trim() && !out.parts && !out.attachments) {
           // Nothing to send, which is refused rather than skipped.
-          throw new Error("A message needs text, parts or attachments. Nothing was sent.");
+          throw new ChannelSendRefused(
+            "empty",
+            "A message needs text, parts or attachments. Nothing was sent.",
+          );
         }
         if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
           // As the port does, rather than read a blank id as no reply.

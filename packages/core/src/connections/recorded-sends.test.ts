@@ -412,7 +412,13 @@ describe("recordedSends", () => {
     await send("telegram").send("-100" as ChatId, {
       attachments: [{ type: "image", source: "/tmp/a.png", caption: "sunset" }],
     });
-    const card = { type: "approval_card", approvalId: "ap-1" } as never;
+    const card = {
+      type: "approval_card",
+      approvalId: "a-1",
+      actionName: "deploy",
+      preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+      status: "pending",
+    } as never;
     await send("telegram").send("-100" as ChatId, { parts: [card] });
 
     expect(sent).toHaveLength(2);
@@ -425,9 +431,12 @@ describe("recordedSends", () => {
   });
 
   it("refuse a message with nothing in it, and record nothing", async () => {
-    await expect(send("telegram").send("-100" as ChatId, { text: "  " })).rejects.toThrow(
-      "Nothing was sent",
-    );
+    for (const name of ["telegram", "email"]) {
+      await expect(send(name).send("thread-1" as ChatId, { text: "  " })).rejects.toMatchObject({
+        name: "ChannelSendRefused",
+        reason: "empty",
+      });
+    }
     expect(sent).toEqual([]);
     expect(lines()).toEqual([]);
   });
@@ -493,30 +502,7 @@ describe("recordedSends", () => {
     ]);
   });
 
-  it("hand a message with nothing to show to the port as it is, and record nothing", async () => {
-    const card = {
-      parts: [
-        {
-          type: "approval_card",
-          approvalId: "a-1",
-          actionName: "deploy",
-          preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
-          status: "pending",
-        },
-      ],
-    } as OutgoingMessage;
-    await send("email").send("thread-1" as ChatId, { text: "  " });
-    await send("telegram").send("4242" as ChatId, card);
-
-    // The port decides: Feishu, Slack and email skip it; nothing is said.
-    expect(sent).toEqual([
-      { channel: "email", address: "thread-1", message: { text: "  " } },
-      { channel: "telegram", address: "4242", message: card },
-    ]);
-    expect(lines()).toEqual([]);
-  });
-
-  it("hand an attachment-only plain message on an email channel to the port, which refuses it", async () => {
+  it("record an attachment-only plain message on an email channel whose port took it", async () => {
     await send("email").send(
       "thread-1" as ChatId,
       {
@@ -524,9 +510,9 @@ describe("recordedSends", () => {
       } as OutgoingMessage,
     );
 
-    // The port, not the wrapper, answers: the real one throws for attachments.
+    // The port, not the wrapper, answers: this one took it, so it is said.
     expect(sent).toHaveLength(1);
-    expect(lines()).toEqual([]);
+    expect(lines().map((line) => line.text)).toEqual(["[document]"]);
   });
 
   it("send no email that names a blank email to reply to", async () => {
