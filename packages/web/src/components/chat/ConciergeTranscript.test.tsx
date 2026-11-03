@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import i18n from "@/i18n";
 import { readFileSync } from "node:fs";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -231,4 +232,47 @@ describe("ConciergeTranscript typing indicator", () => {
     const { container } = render(transcript([...history, agent("a9", "t8")], true, true));
     expect(dots(container)).toBeNull();
   });
+});
+
+it.each([
+  "en",
+  "zh-CN",
+])("renders the automatic quota notice in %s even with no recovery output", async (locale) => {
+  await i18n.changeLanguage(locale);
+  try {
+    const message = {
+      ...agent("switch", "host"),
+      content: JSON.stringify([
+        { type: "quota_switch", from: "anthropic", to: "openai", model: "gpt-6-luna" },
+      ]),
+    };
+    const trace = (id: string, model: string): ChatMessage => ({
+      ...agent(id, id),
+      role: "trace",
+      content: "[]",
+      traceSummary: {
+        model,
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        terminalError: "Recovery failed",
+      },
+    });
+    const { getByRole, container } = render(
+      transcript([
+        trace("old", "claude-sonnet-5-5"),
+        message,
+        trace("failed-recovery", "gpt-6-luna"),
+      ]),
+    );
+    expect(getByRole("note").textContent).toBe(
+      locale === "en"
+        ? "Claude quota ran out, switched to Codex"
+        : "Claude 额度已用完，已切换到 Codex",
+    );
+    expect(container.querySelector("[data-chat-card-message]")).toBeNull();
+    expect(container.querySelector("[data-chat-message]")).toBeNull();
+  } finally {
+    await i18n.changeLanguage("en");
+  }
 });

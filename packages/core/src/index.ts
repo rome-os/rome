@@ -1086,6 +1086,7 @@ async function main() {
     aiToolState,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
+    agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
@@ -1183,6 +1184,7 @@ async function main() {
     resolveWebchatContinuationWorkingDir(channel, threadId, webchatRepo);
 
   const backendTurnRunner = createBackendTurnRunner({
+    beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;
     // no backend turn runs before boot completes.

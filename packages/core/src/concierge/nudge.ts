@@ -13,6 +13,17 @@ export const NUDGE_PROMPT =
   "If that text was meant for the guardian, send it now with say. " +
   `If it was a note to yourself, end this turn by writing only ${END_OF_TURN_MARKER}.</reminder>`;
 
+export function quotaRecoveryPrompt(from: string): string {
+  return (
+    `<quota_recovery>The previous turn stopped because ${from} ran out of quota. ` +
+    "This thread may not have the earlier conversation. First read it with system:fetch_channel_history " +
+    "(limit 20, this thread's channel and id), and check task_list and chat_list. " +
+    "Check the actual state of the work and verify anything uncertain. Do only what remains. " +
+    "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it. " +
+    "Speak only through say, then end with done.</quota_recovery>"
+  );
+}
+
 /**
  * Whether a finished Concierge turn gets one reminder turn: it completed and
  * its final text is not the end-of-turn marker, whether or not it spoke

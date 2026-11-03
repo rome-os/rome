@@ -56,13 +56,22 @@ export interface ReplyToPart {
   text: string;
 }
 
+/** Host-written notice of the Concierge chat's subscription quota failover. */
+export interface QuotaSwitchPart {
+  type: "quota_switch";
+  from: "openai" | "anthropic";
+  to: "openai" | "anthropic";
+  model: string;
+}
+
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart =
   | Exclude<MessagePart, { type: "text" }>
   | WebchatTextPart
   | StoredErrorPart
   | TaskChatPart
-  | ReplyToPart;
+  | ReplyToPart
+  | QuotaSwitchPart;
 
 /** The person who sent a WebChat user message, as the dashboard shows them.
  * Absent when the message recorded no sender: one sent before senders were

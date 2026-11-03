@@ -1,3 +1,4 @@
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -3457,6 +3458,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
+    let largeModelSelection = session.largeModelSelection;
+    if (sessionId === CONCIERGE_CHAT_ID) {
+      await deps.concierge?.switchIfExhausted(sessionId);
+      // A background turn may also have moved the chat since this send read it.
+      largeModelSelection =
+        (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
+    }
     // A branch has no stored selection: it continues the provider thread
     // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
@@ -3465,7 +3473,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,
-              largeModelSelection: session.largeModelSelection,
+              largeModelSelection,
             },
             messageCount,
             body.largeModelSelection,

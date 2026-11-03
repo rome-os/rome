@@ -1,3 +1,5 @@
+import type { QuotaSwitchPart } from "@rome/api-types/chat";
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ChatRow } from "@/components/chat/chat-view";
@@ -22,7 +24,7 @@ export interface ConciergeEntry {
 export type ConciergeItem =
   /** Centered time line before `at`, an ISO timestamp. */
   | { kind: "separator"; key: string; at: string }
-  | { kind: "notice"; key: string; model: string }
+  | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -89,7 +91,14 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
-  if (a.kind === "notice") return b.kind === "notice" && a.key === b.key && a.model === b.model;
+  if (a.kind === "notice")
+    return (
+      b.kind === "notice" &&
+      a.key === b.key &&
+      a.model === b.model &&
+      a.quota?.from === b.quota?.from &&
+      a.quota?.to === b.quota?.to
+    );
   return (
     b.kind === "group" &&
     a.key === b.key &&
@@ -118,7 +127,7 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
 export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
-    | { kind: "notice"; key: string; model: string }
+    | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
@@ -148,12 +157,29 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
     previous = message;
   };
 
+  let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
       if (isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
-      for (const message of row.messages) if (isRenderable(message)) add(message, "agent");
+      for (const message of row.messages) {
+        const quota =
+          message.sessionId === CONCIERGE_CHAT_ID
+            ? parseMessageEntries(message).find(
+                (part): part is QuotaSwitchPart => part.type === "quota_switch",
+              )
+            : undefined;
+        if (quota) {
+          slots.push({ kind: "notice", key: message.id, model: quota.model, quota });
+          automaticModel = quota.model;
+          group = null;
+        } else if (isRenderable(message)) add(message, "agent");
+      }
     } else if (row.kind === "model_switch") {
+      if (row.model === automaticModel) {
+        automaticModel = undefined;
+        continue;
+      }
       slots.push({ kind: "notice", key: row.key, model: row.model });
       group = null;
     }
@@ -175,7 +201,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
     if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
     } else if (slot.kind === "notice") {
-      items.push({ kind: "notice", key: slot.key, model: slot.model });
+      items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>
         entryFor(

@@ -134,6 +134,9 @@ export interface BackendTurnRunnerDeps {
    *  `messages` and `places`, and `channel` must answer the platform's own
    *  send ports, not ones that record their sends. */
   replies?: Pick<SpeakerReplies, "send">;
+  /** Runs when a webchat continuation starts, after it has waited its turn in
+   * the queue, so it resolves its model from the chat's current selection. */
+  beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -296,6 +299,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
           params.channel,
           params.threadId,
           async ({ emit }) => {
+            await deps.beforeTurn?.(params);
             let reply = "";
             let turnId: string | undefined;
             const trace = { persistTrace: true, persistTranscript: false };

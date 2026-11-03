@@ -171,6 +171,45 @@ describe("backend turn delivery", () => {
     expect(await run()).toEqual([undefined]);
   });
 
+  it("runs beforeTurn when a queued webchat continuation starts, not when it is queued", async () => {
+    const order: string[] = [];
+    const webchat = {
+      name: "webchat",
+      send: {
+        send: async () => ({ messageId: "m", chatId: "concierge" }),
+        direct: null,
+        activity: null,
+      },
+    } as unknown as Channel;
+    const turns = createMockAgentRunner([[{ type: "result", content: "" }]]);
+    const run = turns.run.bind(turns);
+    turns.run = (params) => {
+      order.push("turn");
+      return run(params);
+    };
+    const runner = createBackendTurnRunner({
+      agentRunner: turns,
+      channel: (name) => (name === "webchat" ? webchat : null),
+      beforeTurn: async ({ threadId }) => {
+        order.push(`before:${threadId}`);
+      },
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        order.push("queued");
+        await task({ emit: async () => {} });
+      },
+    });
+    await runner.runAndDeliver({
+      agentName: "core:concierge",
+      sessionId: "s",
+      channel: "webchat",
+      threadId: "concierge",
+      prompt: "Wake",
+    });
+    expect(order).toEqual(["queued", "before:concierge", "turn"]);
+  });
+
   it("delivers no reply for an agent whose text is private", async () => {
     const agentRunner = createMockAgentRunner([
       [

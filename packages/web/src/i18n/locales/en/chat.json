@@ -371,6 +371,7 @@
     }
   },
   "modelSwitch": {
+    "quota": "{{from}} quota ran out, switched to {{to}}",
     "notice": "Switched to {{model}}"
   },
   "modelSelector": {
