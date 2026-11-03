@@ -232,9 +232,8 @@ export function storedOn(
 }
 
 /** The channels' own stores that answer per-account reads, in the channels'
- *  order. Rome's stores — the agent transcript, the sentinel log — are not
- *  here: they belong to no channel, and a read that wants them appends them
- *  behind these. */
+ *  order. Rome's own transcript is not here: it belongs to no channel, and a
+ *  read that wants it appends it behind these. */
 export function messageStores(channels: Channels): AccountMessages[] {
   return channels.flatMap((channel) =>
     channel.messages?.byAccount ? [channel.messages.byAccount] : [],
