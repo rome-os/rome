@@ -158,6 +158,22 @@ describe("SessionQueryRepository", () => {
       expect(JSON.parse(String(counted[0]?.[0]))).toHaveLength(1);
     });
 
+    it("counts a message each of Rome's accounts holds a copy of once", async () => {
+      const fixture = speakerFixture(testDb.db);
+      const chat = fixture.chat("telegram", "-42", "group");
+      fixture.speaker({ id: "sales", chat, accountId: "bot-sales", createdAt: at(0) });
+      fixture.speaker({ id: "support", chat, accountId: "bot-support", createdAt: at(0) });
+      // One message, heard by both accounts, and one only the sales bot heard.
+      fixture.say({ id: "bot-sales:4", chat, from: "wei", text: "hi", at: at(10) });
+      fixture.say({ id: "bot-support:8", chat, from: "wei", text: "hi", at: at(10) });
+      fixture.say({ id: "bot-sales:5", chat, from: "wei", text: "later", at: at(20) });
+      own("sales", "trace", "trace", 21);
+      const repository = new SessionQueryRepository(testDb.db, "chats");
+
+      expect(await pageCounts(repository)).toEqual({ sales: 3 });
+      expect((await repository.getSessionDetailRows("sales"))?.messageCount).toBe(3);
+    });
+
     it("counts the session's own rows when it reads the legacy tables", async () => {
       seededChat();
       const repository = new SessionQueryRepository(testDb.db);

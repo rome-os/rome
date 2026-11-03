@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account, AccountId, Accounts } from "../channels/accounts.js";
 import type { Channels } from "../channels/channel.js";
-import { timelineAccounts } from "./timeline-sources.js";
+import { romeSessions } from "../db/schema.js";
+import { createTestDb } from "../test/helpers.js";
+import { romeAccountOn, timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
   id: id as AccountId,
@@ -229,5 +231,52 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
       // Rome holds no Feishu app, so nothing stores a Feishu account's history.
       { channel: "feishu", storedUnder: [], addresses: ["ou_grace"] },
     ]);
+  });
+});
+
+describe("romeAccountOn", () => {
+  const platformOfChannel = () => "telegram";
+
+  function seeded() {
+    const { db } = createTestDb();
+    db.insert(romeSessions)
+      .values({
+        id: "s-dm",
+        name: "DM",
+        type: "channel",
+        sourceChannel: "tg-bot",
+        accountId: "bot-123",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    return db;
+  }
+
+  it("names the account the channel's record holds", () => {
+    const db = seeded();
+    const accountOf = () => ({ platform: "telegram", id: "bot-live" });
+    expect(romeAccountOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual({
+      platform: "telegram",
+      id: "bot-live",
+    });
+  });
+
+  // Disconnecting an account clears its record, and its chats stay keyed by
+  // the account that spoke in them.
+  it("names the account Rome spoke as once the record holds none", () => {
+    const db = seeded();
+    expect(romeAccountOn({ db, platformOfChannel, accountOf: () => null }, "tg-bot")).toEqual({
+      platform: "telegram",
+      id: "bot-123",
+    });
+  });
+
+  it("names the channel itself when Rome never spoke there", () => {
+    const db = seeded();
+    expect(romeAccountOn({ db, platformOfChannel }, "tg-other")).toEqual({
+      platform: "telegram",
+      id: "tg-other",
+    });
   });
 });

@@ -26,6 +26,7 @@ import {
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { agentMessages, chatsAgentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
+import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 
 /**
@@ -57,11 +58,36 @@ export function personMessageStores(deps: {
    *  Chats. */
   transcript?: "legacy" | "chats";
 }): AccountMessages[] {
-  const accountOn = (channel: string): Account =>
-    deps.accountOf?.(channel) ?? { platform: deps.platformOfChannel(channel), id: channel };
   const transcript =
-    deps.transcript === "chats" ? chatsAgentMessages(deps.db, accountOn) : agentMessages(deps.db);
+    deps.transcript === "chats"
+      ? chatsAgentMessages(deps.db, (channel) => romeAccountOn(deps, channel))
+      : agentMessages(deps.db);
   return [...messageStores(deps.channels), transcript, sentinelLogMessages(deps.db)];
+}
+
+/**
+ * Rome's account on channel `channel`, as the chats it spoke in name it: the
+ * channel record's while it holds one, else the account Rome's speakers on
+ * that channel spoke as, so a history told to an account since disconnected
+ * still reads, else the channel's own name on its platform.
+ */
+export function romeAccountOn(
+  deps: {
+    db: DrizzleDb;
+    platformOfChannel: PlatformOfChannel;
+    accountOf?: (channel: string) => Account | null;
+  },
+  channel: string,
+): Account {
+  const recorded = deps.accountOf?.(channel);
+  if (recorded) return recorded;
+  const platform = deps.platformOfChannel(channel);
+  const [spoke] = deps.db.all<{ account_id: string }>(sql`
+    SELECT account_id FROM rome_sessions
+    WHERE source_channel = ${channel} AND account_id IS NOT NULL
+    ORDER BY created_at DESC LIMIT 1
+  `);
+  return { platform, id: spoke?.account_id ?? channel };
 }
 
 /**
