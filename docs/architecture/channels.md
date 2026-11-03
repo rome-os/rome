@@ -18,8 +18,10 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - The `send` port sends all of a message or none of it. A message the channel cannot deliver as given is refused with `ChannelSendRefused`, and nothing goes out. The refusal names one of these reasons:
   - `empty`: the message has no text and no attachment.
   - `part_unsupported`: the message has a part the channel cannot show. A text platform shows `text` parts and nothing else.
-  - `attachment_unsupported`: the message has an attachment the channel cannot carry.
-  - `reply_unaddressable`: the message's `replyToMessageId` names a message the channel cannot find to answer. A platform with no quoting at all, such as WhatsApp or WeChat, answers in place instead.
+  - `attachment_unsupported`: the message has an attachment the channel cannot carry. That includes a type the channel does not send, an attachment that names no file, a file that is not on disk, and a web address on a channel that uploads files only.
+  - `reply_unaddressable`: the message's `replyToMessageId` names a message the channel cannot find to answer, including an id that is not of the channel's shape. A platform with no quoting at all, such as WhatsApp or WeChat, answers in place instead.
+
+  The adapter checks all of this itself, before its first request to the platform, so a caller needs no guard of its own. When `text` says anything it is what goes out, in place of the text parts. One suite ([`send-contract.test.ts`](../../packages/core/src/channels/send-contract.test.ts)) runs every adapter through the same cases. A new adapter joins it.
 
   A refusal is never swallowed. An approval card a channel cannot show rejects, and the action engine logs it as an error without failing the turn. An agent's reply that cannot quote the message it answers fails.
 - An inbound event carries its chat's `ChatRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.

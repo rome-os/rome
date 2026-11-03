@@ -224,3 +224,88 @@ export function chatsOver(port: ChatsPort): Chats {
 function sameChat(a: ChatRef, b: ChatRef): boolean {
   return a.platform === b.platform && a.id === b.id;
 }
+
+/**
+ * A chat where one of Rome's agent sessions stands, with something said there
+ * in a window, as {@link ChatReads.recentChats} lists it.
+ */
+export interface RecentChat {
+  /** The agent session that stands in the chat, which the other reads take. */
+  readonly sessionId: string;
+  readonly chat: ChatRef;
+  /** The session's name, as the dashboard lists it. */
+  readonly name: string;
+  /** The topic's name when the session stands in a topic, else null. */
+  readonly threadName: string | null;
+  /** Who a dashboard chat belongs to: `guardian`, or `visitor:<id>`. */
+  readonly ownerKey: string;
+  readonly archived: boolean;
+  /** The channel that is the session's account, with its connection kind, or
+   *  null on the dashboard and where Rome holds no record of it. */
+  readonly channel: { readonly name: string; readonly kind: string } | null;
+  /** The agent that answers there, or null when the session names none. */
+  readonly agentName: string | null;
+  readonly projectName: string | null;
+  readonly projectPath: string | null;
+  /** When the session came to stand in the chat. */
+  readonly startedAt: Date;
+}
+
+/**
+ * A line said where a session stands, as that session reads it: a prompt
+ * (`user`), an answer (`assistant`), or something else said there
+ * (`notification`). A trace is not a line.
+ */
+export interface ChatLine {
+  /** The line's key, unique in its transcript. Opaque. */
+  readonly key: string;
+  /** The turn the line prompted or answered, or null. */
+  readonly turnId: string | null;
+  readonly role: "user" | "assistant" | "notification";
+  /** The sender's account id: a platform account's, or on the dashboard
+   *  `guardian` or `visitor:<id>`. Null on a line that kept no sender. */
+  readonly senderId: string | null;
+  readonly senderName: string | null;
+  /** The line's parts as JSON. */
+  readonly content: string;
+  readonly createdAt: Date;
+}
+
+/** What a session's agent did in one turn, and what the turn used. */
+export interface SessionTrace {
+  readonly id: string;
+  readonly turnId: string | null;
+  /** The trace's blocks as a JSON array. */
+  readonly content: string;
+  readonly createdAt: Date;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly cacheReadTokens: number | null;
+  readonly cacheWriteTokens: number | null;
+  readonly costUsd: number | null;
+}
+
+/**
+ * What an app reads of the chats Rome's sessions stand in. A host that
+ * predates Chats offers none of it.
+ */
+export interface ChatReads {
+  /**
+   * The chats with a line said at or after `since`, and since the session
+   * came to stand there: the dashboard's chats, or chats on Rome's accounts
+   * of the connection kinds named. Most recently active first.
+   */
+  recentChats(input: {
+    since: Date;
+    where: "dashboard" | { accountKinds: readonly string[] };
+  }): Promise<RecentChat[]>;
+  /**
+   * Session `sessionId`'s lines said at or after `since` (every line
+   * without it), oldest first: for a session in a chat what was said there,
+   * and for one in no chat its turns' prompts and answers. Empty for a
+   * session Rome does not hold.
+   */
+  transcript(sessionId: string, input?: { since?: Date }): Promise<ChatLine[]>;
+  /** Session `sessionId`'s traces, oldest first. */
+  traces(sessionId: string): Promise<SessionTrace[]>;
+}
