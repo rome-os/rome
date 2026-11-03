@@ -44,7 +44,7 @@ export interface RecordedSendsDeps {
    *  sends there. */
   adapters: Pick<
     ChatAdapters,
-    "of" | "chatAt" | "accountOn" | "platformOn" | "addressAt" | "keyOf"
+    "of" | "chatAt" | "accountOn" | "platformOn" | "addressAt" | "keyOf" | "openedDirectMessageAt"
   >;
   chats: Pick<ChatRepository, "byKey" | "start">;
   speakers: Pick<Speakers, "speakerOf" | "speakerIn" | "speakerInThread">;
@@ -179,6 +179,8 @@ function threadsStartedOn(deps: RecordedSendsDeps, channel: Channel): RecordedSe
           ? adapter.threadAddress(adapters.keyOf(place.chat).externalId)
           : adapters.addressAt(name, place),
       keyOf: (ref) => adapters.keyOf(ref),
+      openedDirectMessageAt: (name, address, key) =>
+        adapters.openedDirectMessageAt(name, address, key),
       chatAt: (name, address, kind) =>
         (name === channel.name ? adapter.chatStartedAt(address) : null) ??
         adapters.chatAt(name, address, kind),

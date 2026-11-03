@@ -8,6 +8,7 @@
 // Chats switch adds them to the app repositories and moves the inbox and
 // `send_message` onto them.
 
+import { actionExecutionContext } from "../actions/context.js";
 import type {
   Channel,
   ChatRepository,
@@ -370,8 +371,13 @@ function recordedOf(content: string): MessagePart[] {
   return JSON.parse(stripHostOnlyPartsFromContent(content)) as MessagePart[];
 }
 
-/** The agent the turn sending runs, for a send that may not answer it. */
+/** The agent the turn sending runs, for a send that may not answer it: as
+ *  noted where the turn started, else as the action running in that turn
+ *  names it, which is how a worker, where no turn starts, knows it. */
 function agentOf(deps: AppChatWritesDeps, turnId: string | undefined): { agent?: string } {
-  const agent = deps.replies.agentOf(turnId);
+  const running = actionExecutionContext.getStore();
+  const agent =
+    deps.replies.agentOf(turnId) ??
+    (turnId !== undefined && running?.turnId === turnId ? running.agentName : undefined);
   return agent === undefined ? {} : { agent };
 }

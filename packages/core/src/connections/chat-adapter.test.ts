@@ -13,6 +13,8 @@ import { type DeliveryTransport, plainText } from "../channels/delivery/types.js
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { chats } from "../db/schema.js";
+import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { startChannelChat } from "./channel-chat.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import {
   addressOf,
@@ -668,6 +670,19 @@ describe("ChatAdapters", () => {
       { key: dm.externalId },
     ]);
     expect(adapters.chatAt("telegram", "dm-address-2", "dm")).toEqual(dm);
+  });
+
+  it("keep a direct message Rome opened at its address there, so the other end's first message moves it", () => {
+    const early = startChannelChat(
+      { chats: new ChatRepository(testDb.db), adapters },
+      { channel: "telegram", threadId: "dm-address-3", threadType: "private" },
+    ).key;
+
+    expect(addresses.keyAt(ROME, "dm-address-3")).toBe(early.externalId);
+    const dm = adapters.directMessageReached("telegram", "dave", "dm-address-3");
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([
+      { key: dm.externalId },
+    ]);
   });
 });
 

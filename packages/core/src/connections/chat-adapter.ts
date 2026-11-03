@@ -669,6 +669,19 @@ export class ChatAdapters {
   }
 
   /**
+   * Note that `channel`'s account reaches the direct message keyed `key` at
+   * `address`, as one Rome opened there before it knew the other end. The
+   * first message from the other end then moves the chat to its key
+   * ({@link settledDirectMessage}) rather than starting a second one. An
+   * address already kept for a chat stays as it is.
+   */
+  openedDirectMessageAt(channel: string, address: string, key: ChatKey): void {
+    const account = this.accountOn(channel);
+    if (this.deps.addresses.keyAt(account, address) !== null) return;
+    this.deps.addresses.bind(account, key.externalId, address);
+  }
+
+  /**
    * The direct message channel `channel`'s account has with `other`, which
    * the channel reaches at `address`. The address is kept, so a send there
    * goes where the channel answered, as for a direct message it heard.

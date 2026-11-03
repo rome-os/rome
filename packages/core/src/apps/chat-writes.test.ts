@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Channel, ChatId, ChatRecord, OutgoingMessage } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
+import { actionExecutionContext } from "../actions/context.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef } from "../chats/storage/place.js";
@@ -255,6 +256,32 @@ describe("appChatWrites", () => {
       expect(line).toMatchObject({ key: lines.keyIn(speakerAt(), "101"), text: "Deploy done" });
       expect(linkOf("s1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
       expect(result).toEqual({ messageId: "101" });
+    });
+
+    it("says a send as the agent the running action names for its turn, as in a worker", async () => {
+      // A worker starts no turn, so only the action running in it knows that
+      // the account's own agent runs this one.
+      await actionExecutionContext.run(
+        {
+          executionId: "x1",
+          rootExecutionId: "x1",
+          initiator: "agent",
+          turnId: "turn-9",
+          agentName: "support",
+        },
+        () =>
+          writes.send({
+            sessionId: "s1",
+            channel: "telegram",
+            text: "On it",
+            turnId: "turn-9",
+            knownToProvider: true,
+          }),
+      );
+
+      expect(
+        testDb.db.all<{ agent: string }>(sql`SELECT sender_agent AS agent FROM chat_messages`),
+      ).toEqual([{ agent: "support" }]);
     });
 
     it("quotes a message by the platform's id, records what the app hands over, and keeps host-only parts off record", async () => {

@@ -10,7 +10,7 @@ import type { ChatAdapters } from "./chat-adapter.js";
 export interface StartChannelChatDeps {
   chats: Pick<ChatRepository, "start">;
   /** The adapters, which name the chat at a channel address. */
-  adapters: Pick<ChatAdapters, "chatAt" | "accountOn">;
+  adapters: Pick<ChatAdapters, "chatAt" | "accountOn" | "openedDirectMessageAt">;
 }
 
 /**
@@ -32,5 +32,8 @@ export function startChannelChat(
   const kind = parent || input.threadType !== "private" ? "group" : "dm";
   const key = deps.adapters.chatAt(input.channel, parent ?? input.threadId, kind);
   const chat = deps.chats.start(key, kind, parent ? null : (input.threadName ?? null));
+  // Opened at its address, the direct message is kept there, so the other
+  // end's first message finds it.
+  if (kind === "dm") deps.adapters.openedDirectMessageAt(input.channel, input.threadId, key);
   return { chat: chat.ref, key, romeEnd: deps.adapters.accountOn(input.channel).id };
 }
