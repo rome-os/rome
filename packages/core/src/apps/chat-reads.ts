@@ -66,11 +66,12 @@ interface RecentRow {
 }
 
 // The agent that answers in session `s`, by the rules in
-// docs/architecture/channels.md#an-accounts-agent, over its channel `ch`: an
+// docs/architecture/channels.md#an-accounts-agent, over its connected account
+// `ca`, which holds the account's agent: an
 // account's agent answers its direct messages, and a group unless the chat is
 // pinned to main. An account's main reads as null.
-const ACCOUNT_AGENT = sql`CASE WHEN ch.agent IN ('main', 'core:main') THEN NULL ELSE ch.agent END`;
-const ANSWERING_AGENT = sql`CASE WHEN ch.agent IS NOT NULL THEN CASE
+const ACCOUNT_AGENT = sql`CASE WHEN ca.agent IN ('main', 'core:main') THEN NULL ELSE ca.agent END`;
+const ANSWERING_AGENT = sql`CASE WHEN ca.agent IS NOT NULL THEN CASE
     WHEN c.kind = 'dm' THEN ${ACCOUNT_AGENT}
     WHEN coalesce(json_type(s.channel_settings, '$.overrides.routing.agentName') = 'null', 0) = 1 THEN NULL
     WHEN coalesce(s.agent_name, 'main') IN ('main', 'core:main') THEN ${ACCOUNT_AGENT}
@@ -110,6 +111,7 @@ function recentChats(
     JOIN ${CHATS} c ON c.id = s.chat_id
     LEFT JOIN channels ch ON ch.platform = c.platform
       AND coalesce(ch.platform_account_id, ch.id) = s.account_id
+    LEFT JOIN connected_accounts ca ON ca.connection_id = ch.connection_id
     JOIN ${CHAT_LINES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id

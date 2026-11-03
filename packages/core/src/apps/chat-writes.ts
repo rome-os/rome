@@ -14,6 +14,7 @@ import {
   withoutHostOnlyParts,
 } from "../channels/host-only-parts.js";
 import { messageContentText } from "../channels/messages-agent.js";
+import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
@@ -143,7 +144,13 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           : { replyTo: keyOf(input.replyToPlatformMessageId) }),
         at: input.createdAt ?? new Date(),
       });
-      if (!recorded) return { inserted: false };
+      if (!recorded) {
+        // Heard already, as through the adapter: still the session's prompt
+        // when the app says so.
+        const id = deps.lines.idIn(speaker, input.platformMessageId);
+        if (id !== null && input.role === "user") deps.links.prompt(id, input.sessionId);
+        return { inserted: false };
+      }
       if (input.role === "user") deps.links.prompt(recorded.id, input.sessionId);
       deps.webchatRepo.advanceSessionActivity(input.sessionId, recorded.at);
       return { inserted: true };
@@ -164,7 +171,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         input.sessionId,
         channel,
         {
-          text: input.text ?? "",
+          // A channel that shows text alone shows this, so parts-only sends
+          // say their text parts.
+          text: input.text ?? (parts ? partsText(parts) : ""),
           ...(parts ? { parts } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           ...replyToIn(deps, speaker, input.replyToPlatformMessageId),
@@ -187,8 +196,12 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       if (inReplyToMessageId !== undefined && !inReplyToMessageId.trim()) {
         throw new Error("Email replyToMessageId must not be blank. No email was sent.");
       }
-      // An email's body is its text, else the text of its parts.
+      // An email's body is its text, else the text of its parts. An
+      // HTML-only email goes on record as the text its HTML reads as.
       const text = input.text ?? (parts ? partsText(parts) : "");
+      const shown = text.trim() || (html ? htmlToMarkdown(html, true).trim() : "");
+      const onRecord: readonly MessagePart[] = recorded ??
+        parts ?? [{ type: "text", content: shown }];
       const out: Omit<EmailOutbound, "replyTo"> = {
         text,
         ...(parts ? { parts } : {}),
@@ -201,7 +214,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           { to: to ?? [], ...(cc ? { cc } : {}), ...(bcc ? { bcc } : {}) },
           subject?.trim() ?? "",
           out,
-          recorded ?? parts ?? [{ type: "text", content: text }],
+          onRecord,
           turnId,
         );
       }
@@ -228,7 +241,7 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         sessionId,
         channel,
         { ...reply, ...replyToIn(deps, speaker, inReplyToMessageId) },
-        { ...(turnId ? { turnId } : {}), ...(recorded ? { recorded } : {}) },
+        { ...(turnId ? { turnId } : {}), recorded: onRecord },
       );
       if (!sent) throw new Error(`Session ${sessionId} stands in no chat`);
       return {

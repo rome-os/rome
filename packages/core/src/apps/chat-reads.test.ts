@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 import type { ChatReads } from "@rome-os/app-runtime/chats";
 import type { ChatRef } from "../chats/storage/place.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { channels, romeAgentMessages } from "../db/schema.js";
+import { channels, connectedAccounts, connections, romeAgentMessages } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { speakerFixture } from "../test/speakers.js";
@@ -116,6 +116,44 @@ describe("appChatReads", () => {
       expect(recent.map((chat) => [chat.sessionId, chat.channel])).toEqual([
         ["s-1", { name: "lark", kind: "feishu" }],
       ]);
+    });
+
+    it("names the agent the connected account holds now, not the channel's retired one", async () => {
+      testDb.db
+        .insert(connections)
+        .values({ id: "conn-1", connectionKind: "telegram", label: "Bot", createdAt: at(0) })
+        .run();
+      testDb.db
+        .insert(channels)
+        .values({
+          id: "telegram",
+          connectionKind: "telegram",
+          platform: "telegram",
+          connectionId: "conn-1",
+          platformAccountId: "rome-bot",
+          createdAt: at(0),
+          agent: "old:agent",
+        })
+        .run();
+      const link = (agent: string | null) =>
+        testDb.db
+          .insert(connectedAccounts)
+          .values({ connectionId: "conn-1", agent })
+          .onConflictDoUpdate({ target: connectedAccounts.connectionId, set: { agent } })
+          .run();
+      const dm = fixture.chat("telegram", "dm:rome-bot:42", "dm", "Wei");
+      fixture.speaker({ id: "s-1", chat: dm, accountId: "rome-bot", createdAt: at(0) });
+      fixture.say({ id: "m-1", chat: dm, from: "42", at: at(2_000) });
+      const agentNow = async () =>
+        (await reads.recentChats({ since: at(1_000), where: { accountKinds: ["telegram"] } }))[0]
+          ?.agentName;
+
+      link("sales:agent");
+      expect(await agentNow()).toBe("sales:agent");
+      link("support:agent");
+      expect(await agentNow()).toBe("support:agent");
+      link(null);
+      expect(await agentNow()).toBeNull();
     });
 
     it("leaves out a chat whose only lines were said before the session came to stand there", async () => {

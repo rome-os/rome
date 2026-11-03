@@ -165,6 +165,27 @@ describe("appChatWrites", () => {
       expect(linkOf("s1", line!.id)).toMatchObject({ role: "prompt" });
     });
 
+    it("makes a line its account already heard the session's prompt", async () => {
+      const heard = messages.record({
+        direction: "toRome",
+        key: lines.keyIn(speakerAt(), "43"),
+        place: placeIn(group),
+        saidBy: { account: { platform: "telegram", id: "wei" } },
+        body: { text: "already here" },
+        at: new Date(0),
+      });
+
+      expect(
+        await writes.addMessage({
+          sessionId: "s1",
+          role: "user",
+          content: "[]",
+          platformMessageId: "43",
+        }),
+      ).toEqual({ inserted: false });
+      expect(linkOf("s1", heard!.id)).toMatchObject({ role: "prompt" });
+    });
+
     it("refuses a session that stands in no chat", async () => {
       await expect(
         writes.addMessage({
@@ -225,6 +246,17 @@ describe("appChatWrites", () => {
       ]);
     });
 
+    it("says a parts-only message's text parts as its text", async () => {
+      await writes.send({
+        sessionId: "s1",
+        channel: "telegram",
+        parts: [{ type: "text", content: "From parts" }],
+        knownToProvider: false,
+      });
+
+      expect(sends[0]?.out.text).toBe("From parts");
+    });
+
     it("records nothing when the platform refuses", async () => {
       refuse = true;
 
@@ -271,6 +303,22 @@ describe("appChatWrites", () => {
 
       expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
       expect(said()).toHaveLength(1);
+    });
+
+    it("records an HTML-only email as the text its HTML reads as", async () => {
+      await writes.sendEmail({
+        channel: "mail",
+        email: { to: "wei@example.com", subject: "Plans", html: "<p>Hello <b>Wei</b></p>" },
+        knownToProvider: false,
+      });
+      await writes.sendEmail({
+        channel: "mail",
+        sessionId: "mail-1",
+        email: { html: "<p>Again</p>" },
+        knownToProvider: false,
+      });
+
+      expect(said().map((line) => line.text)).toEqual(["Hello **Wei**", "Again"]);
     });
 
     it("copies a reply on a thread Rome holds to its cc and bcc", async () => {
