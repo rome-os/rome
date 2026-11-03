@@ -43,6 +43,19 @@ import {
 
 export { sendersOf, type SendDeps };
 
+/**
+ * `deps` with its senders cut to the guardian's own accounts. A person's page
+ * shows the guardian's chats with them, so it sends only from the guardian's
+ * own accounts: a message sent from an agent's account would land in a chat
+ * the page does not show.
+ */
+export function asGuardian<Deps extends SendDeps>(
+  deps: Deps,
+  guardians: (channel: string) => boolean,
+): Deps {
+  return { ...deps, sendersOn: (platform: string) => sendersOf(deps, platform).filter(guardians) };
+}
+
 /** A resolved target: the channel it is on, that channel's send port, and the
  *  conversation on it that reaches this account. It names the channel, not
  *  the Connection: the port finds the channel's Connection again when it

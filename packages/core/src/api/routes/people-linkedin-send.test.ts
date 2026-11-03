@@ -9,10 +9,12 @@ import {
   createTestConnections,
   createTestDb,
   FakeTransport,
+  ownedByGuardian,
   testChannels,
   type TestDb,
   type TestDeps,
 } from "../../test/helpers.js";
+import { seedBaseline } from "../../test/seeds.js";
 import { peopleRoutes } from "./people.js";
 
 const MEMBER = "ACoAARecipient";
@@ -39,6 +41,11 @@ describe("LinkedIn replies through People", () => {
   beforeEach(async () => {
     db = createTestDb();
     deps = await buildTestDeps(db.db);
+    // The LinkedIn account Rome is connected as is the guardian's own.
+    await seedBaseline(db.db);
+    ownedByGuardian(db.db, deps.peopleRepo, "guardian", [
+      { channel: "linkedin", platform: "linkedin" },
+    ]);
     run.mockReset();
     run.mockResolvedValue({ code: 0, stdout: JSON.stringify([reply]), stderr: "" });
     await deps.linkedInStoreRepo.upsertThreads([
