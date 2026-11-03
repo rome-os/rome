@@ -12,6 +12,3 @@ export interface WorkflowContext {
    * must short-circuit when this is set. */
   dryRun: boolean;
 }
-
-/** Returns a display envelope with a human-readable `message`; `ok: false` means no result. */
-export type WorkflowFn = (input: Json, ctx: WorkflowContext) => Json | Promise<Json>;

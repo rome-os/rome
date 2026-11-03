@@ -14,8 +14,6 @@ const askAgentInputSchema = z.object({
   sessionId: z.string().optional().describe("Optional session ID to resume the demo agent"),
 });
 
-type AskAgentDeps = AppActionRuntimeDeps;
-
 type SummonData = {
   result?: unknown;
   sessionId?: unknown;
@@ -37,7 +35,7 @@ function readSummonData(data: unknown): { result: string; sessionId?: string } |
   };
 }
 
-export function createAskAgentAction(config: ActionConfig, deps: AskAgentDeps): Action {
+export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
     schema: askAgentInputSchema,
@@ -62,8 +60,4 @@ export function createAskAgentAction(config: ActionConfig, deps: AskAgentDeps): 
       return { status: "ok", data };
     },
   });
-}
-
-export function createAction(config: ActionConfig, deps: AskAgentDeps): Action {
-  return createAskAgentAction(config, deps);
 }

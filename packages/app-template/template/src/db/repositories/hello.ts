@@ -18,25 +18,20 @@ export class HelloRepository {
     this.tables = createAppDbSchema(tablePrefix);
   }
 
-  async recordGreeting(message: string): Promise<Greeting> {
+  recordGreeting(message: string): Greeting {
     const id = crypto.randomUUID();
     const createdAt = new Date();
     this.db.insert(this.tables.greetings).values({ id, message, createdAt }).run();
     return { id, message, createdAt };
   }
 
-  async list(): Promise<Greeting[]> {
-    const rows = this.db
+  list(): Greeting[] {
+    return this.db
       .select()
       .from(this.tables.greetings)
       .orderBy(desc(this.tables.greetings.createdAt))
       .limit(50)
       .all();
-    return rows.map((row) => ({
-      id: row.id,
-      message: row.message,
-      createdAt: row.createdAt,
-    }));
   }
 }
 
