@@ -183,9 +183,10 @@ async function sendThroughChats(
 }
 
 /**
- * Send email `input` through Chats: on its thread as the session the caller
- * names, or the run's own when it answers where the run was asked, else as
- * main's there; on a new thread when it names none.
+ * Send email `input` through Chats. A reply, on its thread or to a message,
+ * goes as the session the caller names, or the run's own when it answers where
+ * the run was asked, else as main's there. An email that names neither starts
+ * a new thread to its recipients, as no session's.
  */
 async function emailThroughChats(
   sendEmail: NonNullable<ChatRepository["sendEmail"]>,
@@ -194,13 +195,16 @@ async function emailThroughChats(
 ): Promise<{ messageId: string | null; threadId: string }> {
   const current = getCurrentActionContext();
   const threadId = input.threadId;
+  const reply = !!threadId || !!email.inReplyToMessageId;
   const sameAmbientConversation =
     !!threadId &&
     current?.channelContext?.channel === input.channel &&
     current.channelContext.threadId === threadId;
-  const sessionId =
-    input.romeSessionId ??
-    (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined);
+  // A session names a thread already, so a new email must not carry one.
+  const sessionId = reply
+    ? (input.romeSessionId ??
+      (sameAmbientConversation ? current?.channelContext?.romeSessionId : undefined))
+    : undefined;
   const turnId = input.turnId ?? current?.turnId;
   return sendEmail({
     channel: input.channel,
@@ -213,7 +217,7 @@ async function emailThroughChats(
     ...(turnId ? { turnId } : {}),
     // A new thread's first email answers no turn the provider knows.
     knownToProvider:
-      !!threadId &&
+      reply &&
       (input.knownToProvider ??
         Boolean(input.turnId || (sameAmbientConversation && current?.turnId))),
   });

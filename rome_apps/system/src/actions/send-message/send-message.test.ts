@@ -983,6 +983,47 @@ describe("send_message through Chats", () => {
     expect(chats.sendEmail.mock.calls[0]![0]).not.toHaveProperty("threadId");
   });
 
+  it("starts a new email thread to its recipient, not the named session's thread", async () => {
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      makeAdapter("email"),
+      { channel: "email", to: "a@x.com", subject: "New", text: "body", romeSessionId: "session-1" },
+      { chats },
+    );
+
+    const sent = chats.sendEmail.mock.calls[0]![0];
+    expect(sent).not.toHaveProperty("sessionId");
+    expect(sent).not.toHaveProperty("threadId");
+    expect(sent.email).toEqual({ to: "a@x.com", subject: "New" });
+  });
+
+  it("keeps the session and turn of a reply named by its message alone", async () => {
+    const chats = chatsWithWrites();
+
+    await executeSendMessage(
+      makeAdapter("email"),
+      {
+        channel: "email",
+        replyToMessageId: "msg_1",
+        romeSessionId: "session-1",
+        turnId: "turn-1",
+        knownToProvider: true,
+        text: "reply",
+      },
+      { chats },
+    );
+
+    expect(chats.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        email: { inReplyToMessageId: "msg_1" },
+        turnId: "turn-1",
+        knownToProvider: true,
+      }),
+    );
+  });
+
   it("falls back to the channel and records the line when the host offers no send", async () => {
     const adapter = makeAdapter();
     const { send: _send, sendEmail: _sendEmail, ...legacy } = chatsWithWrites();
