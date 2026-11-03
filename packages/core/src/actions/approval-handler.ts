@@ -206,6 +206,8 @@ export class ApprovalHandler {
           payload.channelContext?.channel ?? "",
           payload.channelContext?.threadId ?? "",
         );
+        let reply = "";
+        let turnId: string | undefined;
         for await (const message of this.agentRunner.run({
           agentName,
           prompt: resultText,
@@ -217,7 +219,30 @@ export class ApprovalHandler {
           threadContext: payload.channelContext,
           initiatedBy: "system",
         })) {
+          if (message.type === "turn_start") turnId = message.turnId;
+          if (message.type === "result") reply = message.content;
           if (emit) emit({ ...message, agent: agentName });
+        }
+        // Webchat's reply rides the session stream through `emit`. A messaging
+        // channel has no such stream, so its reply goes out on the channel.
+        const channel = payload.channelContext?.channel;
+        const threadId = payload.channelContext?.threadId;
+        if (channel && threadId && channel !== "webchat") {
+          // The action already ran. A reply that cannot be sent must not mark
+          // the approval's execution as failed.
+          try {
+            await this.backendTurnRunner.deliverMessagingReply(
+              { agentName, channel, threadId },
+              reply,
+              turnId,
+            );
+          } catch (err) {
+            log.error("approval continuation reply not delivered", {
+              approvalId,
+              channel,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
 
