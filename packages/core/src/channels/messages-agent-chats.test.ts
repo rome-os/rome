@@ -355,6 +355,18 @@ describe("chatsAgentMessages", () => {
     expect(runs).toBe(1);
   });
 
+  it("names every entry's conversation without a statement per entry", async () => {
+    const runs = await statementsRun(async () => {
+      const page = await chatsAgentMessages(db, accountOn).read({
+        accounts: [account],
+        limit: WHOLE_HISTORY,
+      });
+      expect(page.length).toBeGreaterThan(1);
+      expect(page.every((entry) => entry.conversation?.id !== undefined)).toBe(true);
+    });
+    expect(runs).toBe(1);
+  });
+
   it("answers a batch of more accounts than SQLite binds variables for", async () => {
     const messages = read(db);
     const heads = await Promise.all(

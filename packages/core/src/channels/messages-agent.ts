@@ -9,8 +9,7 @@ import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import { CHAT_LINES, CHATS } from "../chats/storage/lines-sql.js";
-import { chatAt, directMessageAddress } from "../connections/chat-adapter.js";
-import { ChatAddresses } from "../connections/chat-addresses.js";
+import { addressOf, chatAt } from "../connections/chat-adapter.js";
 import { chatKey } from "../connections/chat-ids.js";
 
 /**
@@ -138,7 +137,6 @@ export function chatsAgentMessages(
   db: DrizzleDb,
   accountOn: (channel: string) => Account,
 ): AccountMessages {
-  const addresses = new ChatAddresses(db);
   return sqlMessages({
     db,
     view(scope) {
@@ -199,24 +197,26 @@ export function chatsAgentMessages(
           'chatKey', c.key,
           'platform', c.platform,
           'accountId', json_extract(${key}, '$[1]'),
-          'threadName', c.name
+          'threadName', c.name,
+          -- Where Rome's account reaches the direct message, when it heard it
+          -- at an address other than the chat's key.
+          'address', (SELECT a.address FROM chat_addresses a
+            WHERE a.platform = c.platform AND a.account_id = json_extract(${key}, '$[1]')
+              AND a.chat_key = c.key AND a.thread_id = '')
         )
         FROM ${CHAT_LINES} m
         JOIN ${CHATS} c ON c.id = m.chat_id
         WHERE m.id = json_extract(${key}, '$[0]')
       )`,
-      map: (raw, entry) => chatsTranscriptDetail(raw, entry, addresses),
+      map: chatsTranscriptDetail,
     },
   });
 }
 
 /** Who said a line of a direct message, and the direct message, named by the
- *  address Rome's account reaches it at. Rome's own lines carry no sender. */
-function chatsTranscriptDetail(
-  raw: Record<string, unknown>,
-  entry: Message,
-  addresses: Pick<ChatAddresses, "addressOf">,
-): MessageDetail {
+ *  address Rome's account reaches it at: the one it heard it at, else the
+ *  other party. Rome's own lines carry no sender. */
+function chatsTranscriptDetail(raw: Record<string, unknown>, entry: Message): MessageDetail {
   const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
   const detail: MessageDetail = {};
   const sender = { id: text(raw.senderId), name: text(raw.senderName) };
@@ -225,14 +225,9 @@ function chatsTranscriptDetail(
   }
   const key = text(raw.chatKey);
   const platform = text(raw.platform);
-  const accountId = text(raw.accountId);
-  if (key !== null && platform !== null && accountId !== null) {
+  if (key !== null && platform !== null) {
     detail.conversation = {
-      id: directMessageAddress(
-        { platform, id: accountId },
-        chatKey(platform, key as ChatId),
-        addresses,
-      ),
+      id: text(raw.address) ?? addressOf(chatKey(platform, key as ChatId)),
       name: text(raw.threadName),
       kind: "dm",
     };

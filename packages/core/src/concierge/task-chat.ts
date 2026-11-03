@@ -8,6 +8,7 @@ import type { SaidMessage as StoredLine } from "../chats/storage/message.js";
 import { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import { placeIn as placeInChat } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
+import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { MessagePage, MessageRepository } from "../chats/message-repository.js";
@@ -53,6 +54,7 @@ export async function latestSaid(
  */
 export function chatsTaskChatMessages(db: DrizzleDb): Pick<MessageRepository, "recent" | "before"> {
   const lines = new ChatLines(db);
+  const turns = new TurnLinks(db);
   const page = (
     place: Place,
     limit: number,
@@ -69,8 +71,9 @@ export function chatsTaskChatMessages(db: DrizzleDb): Pick<MessageRepository, "r
         limit,
       },
     );
+    const links = turns.turnsOf(read.messages.map((line) => line.id));
     return {
-      messages: read.messages.map((line) => saidIn(place, line)),
+      messages: read.messages.map((line) => saidIn(place, line, links.get(line.id))),
       older: read.older ? { at: read.older.at, id: String(read.older.id) } : null,
     };
   };
@@ -80,11 +83,13 @@ export function chatsTaskChatMessages(db: DrizzleDb): Pick<MessageRepository, "r
   };
 }
 
-/** Chats' line as Concierge reads a message. */
-function saidIn(place: Place, line: StoredLine): SaidMessage {
+/** Chats' line as Concierge reads a message. A line that prompted a turn is
+ *  input to the task, also Concierge's own follow-up, which one of Rome's
+ *  agents said; any other line from Rome is the task's. */
+function saidIn(place: Place, line: StoredLine, link: TurnLink | undefined): SaidMessage {
   return {
     id: line.key,
-    direction: line.direction,
+    direction: link?.role === "prompt" ? "toRome" : line.direction,
     place,
     ...(line.senderName === undefined ? {} : { senderName: line.senderName }),
     body: { text: messageContentText(line.parts) ?? "" },
