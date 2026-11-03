@@ -9,7 +9,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { ChatBuffers } from "../channels/conversation-buffer.js";
 import { Pacer } from "../channels/delivery/pacer.js";
-import { type DeliveryTransport, plainText } from "../channels/delivery/types.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "../channels/delivery/types.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { chats } from "../db/schema.js";
@@ -656,6 +656,33 @@ describe("channelAdapter", () => {
     reply.accept({ type: "text", content: "All done." });
 
     expect((await reply.settle(false)).shown).toMatchObject([{ key: "s1", threadId: "thread-8" }]);
+  });
+
+  it("settle a part whose create is unknown to the thread the parts before it landed in", async () => {
+    const created: string[] = [];
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 20, edit: false, budget: OPEN_BUDGET },
+      codec: plainText,
+      create: async (conversation) => {
+        created.push(conversation);
+        // The platform opens a thread for the first part; the second's answer is lost.
+        if (created.length === 1) return { messageId: "s1", chatId: "thread-8" };
+        throw new DeliveryFailure("unknown", "the answer was lost");
+      },
+    };
+    const { channel } = fakeChannel(transport);
+    const adapter = channelAdapter(channel, deps());
+    const reply = adapter.stream?.("-1001234567890123", null, {
+      policy: { mode: "final", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      clock: systemClock,
+    });
+    if (!reply) throw new Error("expected a stream");
+
+    reply.accept({ type: "text", content: "one two three four five six seven eight" });
+    const { shown } = await reply.settle(false);
+
+    expect(created).toEqual(["-1001234567890123", "thread-8"]);
+    expect(shown.map((message) => message.threadId)).toEqual(["thread-8", "thread-8"]);
   });
 });
 

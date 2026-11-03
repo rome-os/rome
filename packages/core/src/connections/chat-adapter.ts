@@ -575,12 +575,18 @@ export function channelAdapter(
           // most likely landed, and nothing sends it again. Each part is a
           // message of its own on the platform, so it is one in Chats too,
           // keyed by its own id; one whose create is unknown has no id and
-          // takes one of Rome's.
-          const shown = outcome.parts.map((part) => ({
-            text: part.source,
-            key: sentMessageKey(ref, own.id, part.receipt?.messageId || undefined),
-            threadId: landedIn(ref, address, threadId, part.receipt?.chatId),
-          }));
+          // takes one of Rome's. A part whose receipt names no chat went where
+          // the parts before it went, as the delivery sends each after the last.
+          let lastLanded = threadId;
+          const shown = outcome.parts.map((part) => {
+            if (part.receipt?.chatId)
+              lastLanded = landedIn(ref, address, threadId, part.receipt.chatId);
+            return {
+              text: part.source,
+              key: sentMessageKey(ref, own.id, part.receipt?.messageId || undefined),
+              threadId: lastLanded,
+            };
+          });
           return { outcome, shown };
         },
       };
