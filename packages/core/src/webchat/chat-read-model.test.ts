@@ -576,6 +576,30 @@ describe("ChatReadModel", () => {
       expect(await awaiting("chat-1")).toBe(false);
     });
 
+    // A cutoff found again for each of Rome's lines walks the place once per
+    // line, which took seconds on a few thousand turns.
+    it("finds the last prompt once per session, not once per line from Rome", () => {
+      const query = testDb.db
+        .select({ awaiting: chatsSessionAwaitingGuardian })
+        .from(romeSessions)
+        .toSQL();
+      const client = (
+        testDb.db as unknown as {
+          $client: { prepare(text: string): { all(...values: unknown[]): unknown[] } };
+        }
+      ).$client;
+      const plan = client.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...query.params) as {
+        id: number;
+        parent: number;
+        detail: string;
+      }[];
+      const cutoff = plan.find((row) => row.detail === "CO-ROUTINE last");
+      const promptProbe = plan.find((row) => row.detail.startsWith("SEARCH ul EXISTS"));
+
+      expect(cutoff).toBeDefined();
+      expect(promptProbe?.parent).toBe(cutoff?.id);
+    });
+
     it("waits while an approval in the chat is pending", async () => {
       dashboardChat("chat-1");
       await testDb.db.insert(approvals).values({

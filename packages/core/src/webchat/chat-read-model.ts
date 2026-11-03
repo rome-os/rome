@@ -102,22 +102,27 @@ export interface ChatSearchHit {
  * a line from Rome after the last prompt where the session's speaker stands,
  * or an approval still pending in this chat. Any answer to a card is a line
  * prompting a turn, the guardian's own or one Concierge relays for them, so a
- * card after the last one is still open. `seq` is the order Chats recorded lines in. The pending
- * approvals' chats are collected once per list rather than scanned per chat.
+ * card after the last one is still open. `seq` is the order Chats recorded
+ * lines in. The last prompt is found once per session (`last`) rather than
+ * once per line from Rome, which walked the place again for each line. The
+ * pending approvals' chats are collected once per list rather than scanned
+ * per chat.
  * json_valid and the object check skip lines whose parts are not a block
  * array, which would otherwise fail the whole list. The Chats version of the
  * legacy `sessionAwaitingGuardian` (db/repositories/webchat.ts), for a
  * select over `rome_sessions`.
  */
 export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
-  select 1 from ${CHAT_LINES} m, json_each(m."parts") part
-  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
-  and m."sender_agent" is not null and json_valid(m."parts")
-  and m."seq" > coalesce((
-    select max(u."seq") from ${CHAT_LINES} u
+  select 1 from (
+    select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_LINES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
-  ), 0)
+  ) last
+  cross join ${CHAT_LINES} m
+  cross join json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and m."seq" > last."cut"
+  and m."sender_agent" is not null and json_valid(m."parts")
   and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
 ) or "rome_sessions"."id" in (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
