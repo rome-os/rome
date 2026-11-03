@@ -170,7 +170,7 @@ describe("backend turn delivery", () => {
     expect(await run()).toEqual([undefined]);
   });
 
-  it("runs beforeTurn before a continuation's turn is queued, for a defer wake-up too", async () => {
+  it("runs beforeTurn when a queued webchat continuation starts, not when it is queued", async () => {
     const order: string[] = [];
     const webchat = {
       name: "webchat",
@@ -180,16 +180,23 @@ describe("backend turn delivery", () => {
         activity: null,
       },
     } as unknown as Channel;
+    const turns = createMockAgentRunner([[{ type: "result", content: "" }]]);
+    const run = turns.run.bind(turns);
+    turns.run = (params) => {
+      order.push("turn");
+      return run(params);
+    };
     const runner = createBackendTurnRunner({
-      agentRunner: createMockAgentRunner([[{ type: "result", content: "" }]]),
+      agentRunner: turns,
       channel: (name) => (name === "webchat" ? webchat : null),
       beforeTurn: async ({ threadId }) => {
         order.push(`before:${threadId}`);
       },
     });
     runner.setWebchatRuntime({
-      enqueueSessionTask: async () => {
+      enqueueSessionTask: async (_sessionId, task) => {
         order.push("queued");
+        await task({ emit: async () => {} });
       },
     });
     await runner.runAndDeliver({
@@ -199,7 +206,7 @@ describe("backend turn delivery", () => {
       threadId: "concierge",
       prompt: "Wake",
     });
-    expect(order).toEqual(["before:concierge", "queued"]);
+    expect(order).toEqual(["queued", "before:concierge", "turn"]);
   });
 
   it("delivers no reply for an agent whose text is private", async () => {
