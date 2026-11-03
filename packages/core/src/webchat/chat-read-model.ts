@@ -592,7 +592,8 @@ function chatLine(
     sessionId: link?.sessionId ?? openedSessionId,
     turnId: link?.turnId ?? null,
     inputState: link?.inputState ?? null,
-    role: prompt ? "user" : message.direction === "fromRome" ? "assistant" : "notification",
+    role:
+      message.direction === "fromRome" && !source ? "assistant" : prompt ? "user" : "notification",
     content: message.parts,
     senderAccountId: source ? null : (accountId ?? null),
     senderName: source ? "Automation" : (message.senderName ?? null),
