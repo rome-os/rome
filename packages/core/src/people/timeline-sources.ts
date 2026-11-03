@@ -24,8 +24,9 @@ import {
   type PlatformOfChannel,
 } from "../channels/channel.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
-import { agentMessages } from "../channels/messages-agent.js";
+import { agentMessages, chatsAgentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
+import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 
 /**
@@ -50,8 +51,54 @@ import type { DrizzleDb } from "../db/index.js";
 export function personMessageStores(deps: {
   db: DrizzleDb;
   channels: Channels;
+  platformOfChannel: PlatformOfChannel;
+  /** Rome's own account on a channel, or null while its record knows none. */
+  accountOf?: (channel: string) => Account | null;
+  /** Where Rome's transcript is read from: its legacy table by default, or
+   *  Chats. */
+  transcript?: "legacy" | "chats";
 }): AccountMessages[] {
-  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
+  const transcript =
+    deps.transcript === "chats"
+      ? chatsAgentMessages(deps.db, (channel) => romeAccountsOn(deps, channel))
+      : agentMessages(deps.db);
+  return [...messageStores(deps.channels), transcript, sentinelLogMessages(deps.db)];
+}
+
+/**
+ * Every account Rome has spoken as on channel `channel`, as the chats it spoke
+ * in name them: the channel record's while it holds one, then each account
+ * Rome's speakers on that channel spoke as, newest first. A kept connection
+ * can be signed in as another account, and a history told to an earlier or
+ * disconnected account still reads. Absent any, the channel's own name on its
+ * platform.
+ */
+export function romeAccountsOn(
+  deps: {
+    db: DrizzleDb;
+    platformOfChannel: PlatformOfChannel;
+    accountOf?: (channel: string) => Account | null;
+  },
+  channel: string,
+): Account[] {
+  const platform = deps.platformOfChannel(channel);
+  const recorded = deps.accountOf?.(channel);
+  const spoke = deps.db.all<{ account_id: string }>(sql`
+    SELECT account_id FROM rome_sessions
+    WHERE source_channel = ${channel} AND account_id IS NOT NULL
+    GROUP BY account_id ORDER BY max(created_at) DESC
+  `);
+  const ids = new Set<string>();
+  const accounts: Account[] = [];
+  for (const account of [
+    ...(recorded ? [recorded] : []),
+    ...spoke.map((row) => ({ platform, id: row.account_id })),
+  ]) {
+    if (ids.has(account.id)) continue;
+    ids.add(account.id);
+    accounts.push(account);
+  }
+  return accounts.length > 0 ? accounts : [{ platform, id: channel }];
 }
 
 /**
