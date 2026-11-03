@@ -3549,7 +3549,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sessionId === CONCIERGE_CHAT_ID) {
       await deps.concierge?.switchIfExhausted(sessionId);
       // A background turn may also have moved the chat since this send read it.
-      largeModelSelection = (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection;
+      largeModelSelection =
+        (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
     }
     // A branch has no stored selection: it continues the provider thread
     // `persistForkThread` saved, on whatever model that thread pinned.
