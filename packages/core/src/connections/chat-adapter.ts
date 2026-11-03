@@ -481,9 +481,10 @@ export function channelAdapter(
         // order the port hands it over, and returns: the adapter hands a
         // chat's messages over one at a time, and none waits behind another
         // thread's at the port. The queue is bounded as the port's is.
-        // A channel that does not know its account is not active: what
-        // reaches it keys no chat.
-        const heardBy = event.message.account ?? deps.accountOf(channel.name);
+        // A channel whose record knows no account is not active: what reaches
+        // it keys no chat, whatever account the event names.
+        const recorded = deps.accountOf(channel.name);
+        const heardBy = recorded ? (event.message.account ?? recorded) : null;
         if (!heardBy) {
           log.error("inbound message dropped: channel knows no account", {
             channel: channel.name,

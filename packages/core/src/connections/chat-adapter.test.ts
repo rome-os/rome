@@ -498,6 +498,8 @@ describe("channelAdapter", () => {
     );
 
     await hear({ chatId: "-42", messageId: "7" });
+    // An event that names its account is dropped too: the record decides.
+    await hear({ chatId: "-42", messageId: "8", account: ROME });
     await adapter.settled();
 
     expect(delivered).toEqual([]);
