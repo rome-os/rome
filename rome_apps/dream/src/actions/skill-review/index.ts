@@ -9,6 +9,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { createRunsRepository, type RunsRepository } from "../../db/repositories/runs.js";
+import { chatReadsOf } from "../../lib/chat-lines.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
   ensureUserSkillsCarrier,
@@ -120,8 +121,23 @@ export function createAction(
     async execute(args): Promise<ActionResult> {
       let sessionId = args.sessionId as string | undefined;
       let sessionName: string | null = null;
+      const reads = chatReadsOf(appContext);
 
-      if (sessionId) {
+      if (reads) {
+        // The guardian's dashboard chats, most recently active first: the one
+        // named, or the latest.
+        const chats = await reads.recentChats({ since: new Date(0), where: "dashboard" });
+        if (sessionId) {
+          sessionName = chats.find((chat) => chat.sessionId === sessionId)?.name ?? null;
+        } else {
+          const latest = chats[0];
+          if (!latest) {
+            return { status: "ok", data: { result: "No webchat sessions found." } };
+          }
+          sessionId = latest.sessionId;
+          sessionName = latest.name;
+        }
+      } else if (sessionId) {
         const row = appContext.db.connection.get(
           sql`SELECT name FROM rome_sessions WHERE id = ${sessionId}`,
         ) as { name: string } | undefined;

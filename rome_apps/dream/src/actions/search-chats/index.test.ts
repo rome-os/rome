@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction, queryWords } from "./index.js";
 
 const actionConfig = {
@@ -197,5 +198,52 @@ describe("search_chats", () => {
 describe("queryWords", () => {
   it("lower-cases, strips quotes and punctuation, and drops repeats and one-letter words", () => {
     expect(queryWords('"Invoice", PDF? a invoice (rename)')).toEqual(["invoice", "pdf", "rename"]);
+  });
+});
+
+describe("search_chats through Chats", () => {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+  const reads = fakeChatReads([
+    {
+      chat: { sessionId: "s1", name: "Invoices" },
+      lines: [
+        { role: "user", content: text("set up the books"), createdAt: daysAgo(20) },
+        { role: "user", content: text("rename the invoice pdf"), createdAt: daysAgo(2) },
+      ],
+    },
+    {
+      chat: { sessionId: "s2", name: "Visitor" },
+      lines: [
+        {
+          role: "user",
+          content: text("invoice pdf please"),
+          createdAt: daysAgo(1),
+          senderId: "visitor:v1",
+        },
+      ],
+    },
+  ]);
+  const run = async (args: Record<string, unknown>) => {
+    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
+    const result = await createAction(actionConfig, deps).execute(args);
+    if (result.status !== "ok") throw new Error(`expected ok, got ${JSON.stringify(result)}`);
+    return result.data as { chatCount: number; content: string };
+  };
+
+  it("finds the guardian's matching request and opens the chat from its first line", async () => {
+    const data = await run({ query: "invoice pdf", days: 30 });
+
+    expect(data.chatCount).toBe(1);
+    expect(data.content).toContain("Invoices");
+    expect(data.content).toContain("rename the invoice pdf");
+    expect(data.content).not.toContain("Visitor");
+  });
+
+  it("lists each guardian chat by the request that opened it", async () => {
+    const data = await run({ days: 7 });
+
+    expect(data.chatCount).toBe(1);
+    expect(data.content).toContain("set up the books");
   });
 });

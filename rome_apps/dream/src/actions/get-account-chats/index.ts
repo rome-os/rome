@@ -9,7 +9,8 @@ import {
   type AppActionRuntimeDeps,
   isCoreMainAgentId,
 } from "@rome-os/app-runtime";
-import { onRomeAccount } from "../../lib/chat-activity.js";
+import { ACCOUNT_KINDS, onRomeAccount } from "../../lib/chat-activity.js";
+import { chatReadsOf } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_account_chats");
@@ -203,9 +204,41 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // packages/core/src/channels/messages-agent.ts. Lines stored in the same
       // second keep the order they were stored in.
       let rows: MessageRow[];
+      const reads = chatReadsOf(appContext);
       try {
-        rows = appContext.db.connection.all(
-          sql`
+        if (reads) {
+          // Through Chats, which reads every line Rome sent as `assistant`.
+          const since = new Date(cutoffSeconds * 1000);
+          rows = [];
+          for (const chat of await reads.recentChats({
+            since,
+            where: { accountKinds: ACCOUNT_KINDS },
+          })) {
+            const lines = await reads.transcript(chat.sessionId, { since });
+            for (const line of lines.slice(-MESSAGES_PER_CHAT)) {
+              rows.push({
+                session_id: chat.sessionId,
+                session_name: chat.name,
+                thread_name: chat.threadName,
+                channel: chat.channel?.name ?? chat.chat.platform,
+                connection_kind: chat.channel?.kind ?? chat.chat.platform,
+                platform: chat.chat.platform,
+                role: line.role,
+                agent_name: chat.agentName,
+                outbound: line.role === "assistant" ? 1 : 0,
+                sender_name: line.senderName,
+                sender_id: line.senderId,
+                content: line.content,
+                created_at: Math.floor(line.createdAt.getTime() / 1000),
+                chat_total: lines.length,
+              });
+            }
+          }
+          // Each account's chats together, as the formatting groups them.
+          rows.sort((a, b) => a.channel.localeCompare(b.channel));
+        } else
+          rows = appContext.db.connection.all(
+            sql`
             SELECT * FROM (
               SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
                 s.source_channel AS channel,
@@ -233,7 +266,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             WHERE newest <= ${MESSAGES_PER_CHAT}
             ORDER BY channel, session_id, created_at ASC, stored ASC
           `,
-        ) as MessageRow[];
+          ) as MessageRow[];
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("failed to query account chats", { error: message });

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction } from "./index.js";
 
 const actionConfig = {
@@ -343,5 +344,47 @@ describe("get_account_chats against the system schema", () => {
     const content = (result.data as { content: string }).content;
     expect(content).toContain("### Discord account `discord`");
     expect(content).toContain('**Person "Bob"**:\n> from before channel records');
+  });
+});
+
+describe("get_account_chats through Chats", () => {
+  it("groups chats on Rome's accounts under their account, Rome's lines as its own", async () => {
+    const now = new Date();
+    const reads = fakeChatReads([
+      {
+        chat: {
+          sessionId: "s1",
+          threadName: "Team group",
+          channel: { name: "telegram", kind: "telegram" },
+          chat: { platform: "telegram", id: 1 },
+        },
+        lines: [
+          {
+            role: "user",
+            content: "ship it",
+            createdAt: now,
+            senderName: "Alice",
+            senderId: "100",
+          },
+          { role: "assistant", content: "done", createdAt: now },
+        ],
+      },
+      {
+        chat: { sessionId: "s2", channel: { name: "whatsapp", kind: "whatsapp" } },
+        lines: [{ role: "user", content: "personal", createdAt: now }],
+      },
+    ]);
+    const deps = { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
+
+    const result = await createAction(actionConfig, deps).execute({ windowHours: 1 });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { messageCount: number; content: string };
+    expect(data.messageCount).toBe(2);
+    expect(data.content).toContain("### Telegram account `telegram`");
+    expect(data.content).toContain('#### Chat "Team group"');
+    expect(data.content).toContain('**Person "Alice"**:\n> ship it');
+    expect(data.content).toContain("**Agent (Rome)**:\n> done");
+    expect(data.content).not.toContain("personal");
   });
 });
