@@ -1127,6 +1127,8 @@ async function main() {
     resolveWebchatContinuationWorkingDir(channel, threadId, webchatRepo);
 
   const backendTurnRunner = createBackendTurnRunner({
+    beforeTurn: ({ channel, threadId }) =>
+      channel === "webchat" ? concierge.switchIfExhausted(threadId) : Promise.resolve(),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;
     // no backend turn runs before boot completes.

@@ -1454,18 +1454,6 @@ describe("Concierge quota failover", () => {
     expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
-  it("checks quota before a background system turn", async () => {
-    const s = setup({ startEvents: false });
-    s.deps.aiToolState.get = state;
-    await s.service.runSystemTurn(CONCIERGE_CHAT, "check unfinished work");
-    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenCalledWith(
-      CONCIERGE_CHAT,
-      "gpt-6-luna",
-    );
-    expect(s.backendTurns).toEqual([
-      expect.objectContaining({ sessionId: "runtime-1", prompt: "check unfinished work" }),
-    ]);
-  });
   it("uses the runtime provider before the sole-exhausted fallback", async () => {
     const s = setup({ startEvents: false });
     s.deps.aiToolState.get = state;

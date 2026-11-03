@@ -113,6 +113,9 @@ export interface BackendTurnRunnerDeps {
    *  stands for. Absent, nothing records it. */
   messages?: Pick<MessageRepository, "recordSent">;
   places?: Pick<ChatsByKey, "placeOfRecord">;
+  /** Runs before a continuation resolves its model, so every background turn,
+   * a `defer` wake-up included, sees the chat's current selection. */
+  beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
   /** Whether the agent's session policy keeps its text private, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
   isTextPrivate?: (agentName: string) => boolean;
@@ -178,6 +181,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     runBackendSessionTask,
 
     async runAndDeliver(params: BackendTurnParams, options?: BackendTurnOptions): Promise<void> {
+      await deps.beforeTurn?.(params);
       // Resolve the continued session's project dir up front so the resumed turn
       // runs where its SDK transcript lives (defer/timer fire on a fresh stack
       // that never carried it). Undefined ⇒ keep the default-dir fallback.

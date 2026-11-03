@@ -209,13 +209,12 @@ export class ConciergeService {
     return row?.id ?? null;
   }
 
-  /** Checks quota, then runs `prompt`. Without a runtime session, sends no turn. */
+  /** Runs `prompt` as a system turn in the Concierge chat. A no-op before its first turn. */
   async runSystemTurn(
     chatId: string,
     prompt: string,
     options: { quiet?: boolean } = {},
   ): Promise<void> {
-    await this.switchIfExhausted(chatId);
     const sessionId = await this.runtimeSessionId(chatId);
     if (!sessionId) return;
     await this.deps.runBackendTurn(
