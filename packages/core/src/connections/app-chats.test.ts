@@ -13,6 +13,7 @@ import type {
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
 import { ChannelNotConnected } from "../channels/channel.js";
+import { ChannelSendRefused } from "@rome-os/app-runtime";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -329,22 +330,26 @@ describe("appChats", () => {
       expect(sent).toHaveLength(1);
     });
 
-    it("refuses a message left with nothing to say once host-only parts are gone, and sends nothing", async () => {
+    it("sends a message with no words, such as a card, and records it with its parts", async () => {
       const group = fixture.chat("telegram", "-100", "group");
+      const card = { type: "approval_card", approvalId: "ap-1" } as never;
+
+      await chats.send(group, { parts: [card] });
+
+      expect(sent[0]?.message).toEqual({ text: "", parts: [card] });
+      const recorded = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
+      expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([card]);
+    });
+
+    it("answers what the channel refuses as unsupported, and records nothing", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      duringSend = () => {
+        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+      };
 
       expect(
-        await refusal(
-          chats.send(group, { parts: [{ type: "routine_draft_card", draft: {} } as never] }),
-        ),
+        await refusal(chats.send(group, { parts: [{ type: "approval_card" } as never] })),
       ).toBe("unsupported");
-      expect(await refusal(chats.send(group, { text: "  " }))).toBe("unsupported");
-      expect(await refusal(chats.send(group, { parts: [{ type: "text", content: " " }] }))).toBe(
-        "unsupported",
-      );
-      expect(await refusal(chats.send(group, { parts: [{ type: "turn_recap" } as never] }))).toBe(
-        "unsupported",
-      );
-      expect(sent).toEqual([]);
       expect(lines()).toEqual([]);
     });
 

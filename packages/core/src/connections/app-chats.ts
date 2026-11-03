@@ -12,7 +12,12 @@
 // Nothing wires this to apps yet: the Chats switch does, once chats are
 // named by Chats' ids.
 
-import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
+import {
+  type Account,
+  type Channel,
+  type ChatId,
+  isChannelSendRefused,
+} from "@rome-os/app-runtime";
 import {
   type ChatMessage,
   type ChatRef as SdkChatRef,
@@ -92,13 +97,9 @@ async function send(
   }
   const given = out.parts?.length ? withoutHostOnlyParts(out.parts) : [];
   const parts = recordedParts(out, given);
+  // A message with no words, such as a card, goes to the adapter as it is:
+  // one that cannot show it refuses it, and so does one given nothing.
   const text = out.text ?? partsText(given);
-  // Some platforms answer an empty send with a receipt and post nothing.
-  // A platform shows the text, so parts that render none, such as a recap,
-  // say nothing there.
-  if (!text.trim() && !out.attachments?.length) {
-    throw new SendError("unsupported", "A message with no text or attachment is not sent");
-  }
   const outbound = {
     text,
     ...(given.length ? { parts: given } : {}),
@@ -163,6 +164,7 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
     return await deliver();
   } catch (error) {
     if (error instanceof SendError) throw error;
+    if (isChannelSendRefused(error)) throw new SendError("unsupported", error.message);
     if (
       error instanceof ChannelNotConnected ||
       (error instanceof DeliveryFailure && error.kind === "unauthorized")
