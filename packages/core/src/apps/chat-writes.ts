@@ -342,7 +342,10 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       // Refused before anything goes out on a channel that sends no email.
       emailOf(deps.adapters, channel);
       const parts = input.parts?.length ? input.parts : undefined;
-      const recorded = input.content ? recordedOf(input.content) : undefined;
+      // Composed content with nothing in it, as an HTML-only email's, says
+      // nothing: the email goes on record as its HTML reads.
+      const composed = input.content ? recordedOf(input.content) : undefined;
+      const recorded = composed?.length ? composed : undefined;
       const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
       // An email's body is its text, else the text of its parts. An
       // HTML-only email goes on record as the text its HTML reads as.
@@ -362,16 +365,18 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       const held =
         inReplyToMessageId === undefined ? undefined : threadHolding(channel, inReplyToMessageId);
       if (held === null) {
-        // An email Rome holds no thread for sits in a thread only the
-        // provider knows, so a caller that names one is refused.
-        if (input.threadId !== undefined || input.sessionId) {
+        // A blank id names no email, so nothing answers it.
+        if (!inReplyToMessageId?.trim()) {
           throw new Error(
             `Rome holds no email thread with message ${inReplyToMessageId}. No email was sent.`,
           );
         }
+        // The provider sends a reply into the thread of the email it answers,
+        // whatever thread or session the caller names, as the email port
+        // always has: the reply is recorded where the provider's receipt says.
         return await replyUnheld(
           channel,
-          inReplyToMessageId as string,
+          inReplyToMessageId,
           {
             ...out,
             ...(cc?.length ? { cc } : {}),

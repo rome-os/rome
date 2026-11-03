@@ -659,17 +659,33 @@ describe("appChatWrites", () => {
       expect(linkOf("mail-1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
     });
 
-    it("refuses a reply to an email Rome holds no thread with that names a session", async () => {
-      await expect(
-        writes.sendEmail({
-          channel: "mail",
-          sessionId: "mail-1",
-          text: "Re",
-          email: { inReplyToMessageId: "unknown" },
-          knownToProvider: false,
-        }),
-      ).rejects.toThrow("Rome holds no email thread with message unknown");
-      expect(mailSent).toEqual([]);
+    it("replies to an email Rome holds no thread with where the provider sends it, whatever session is named", async () => {
+      fixture.chat("email", "thread-1", "group", "Invoice");
+
+      const result = await writes.sendEmail({
+        channel: "mail",
+        sessionId: "s1",
+        text: "Re",
+        email: { inReplyToMessageId: "unknown" },
+        knownToProvider: false,
+      });
+
+      expect(mailSent).toHaveLength(1);
+      expect(result).toEqual({ messageId: "m1", threadId: "thread-1" });
+      expect(said().map((line) => line.text)).toEqual(["Re"]);
+    });
+
+    it("records an HTML-only email as its HTML reads, though its composed content is empty", async () => {
+      await writes.sendEmail({
+        channel: "mail",
+        content: "[]",
+        email: { to: "wei@example.com", subject: "Plans", html: "<p>See you <b>Friday</b></p>" },
+        knownToProvider: false,
+      });
+
+      const [line] = said();
+      expect(line?.text).toContain("See you");
+      expect(JSON.parse(line!.parts)).not.toEqual([]);
     });
 
     it("refuses a blank message to reply to, since no thread holds it, before anything goes out", async () => {

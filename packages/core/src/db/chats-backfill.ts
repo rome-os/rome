@@ -148,6 +148,8 @@ CREATE TEMP TABLE legacy_chat_speakers AS SELECT * FROM legacy_chat_speakers_vie
 --> statement-breakpoint
 CREATE UNIQUE INDEX temp.idx_legacy_chat_speakers ON legacy_chat_speakers (session_id);
 --> statement-breakpoint
+CREATE INDEX temp.idx_legacy_chat_speakers_key ON legacy_chat_speakers (platform, key);
+--> statement-breakpoint
 -- A direct message keyed by whoever first wrote there may be a group a send
 -- opened as private, where one person has written so far. Where two addresses
 -- would share that key, or a chat already holds it at another address, each
