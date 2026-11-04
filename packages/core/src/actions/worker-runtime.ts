@@ -49,7 +49,6 @@ import { callMain } from "./worker-rpc-client.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { ChatRepository } from "../chats/chat-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -145,7 +144,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
     speakers: appSpeakers,
     // An app's chats are read and written in Chats here too. The worker holds
     // no channels: a speaker sends through main's, which records nothing, so

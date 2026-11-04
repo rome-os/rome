@@ -254,7 +254,6 @@ import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
 import { createAppRuntimeRepositories } from "./apps/repositories.js";
-import { ChatRepository } from "./chats/chat-repository.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
@@ -433,7 +432,6 @@ async function main() {
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }
-  const chatRepo = new ChatRepository(db, channelRecords);
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
   const appSpeakers = {
@@ -444,7 +442,6 @@ async function main() {
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo,
     speakers: appSpeakers,
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.

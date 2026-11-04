@@ -1,23 +1,17 @@
 // A chat starts when its first message reaches Rome through one of Rome's
 // accounts. Vocabulary: docs/domains/chats.md#chat.
 
-import type { ChatId, ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import type { ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { startChannelChat, type StartChannelChatDeps } from "./channel-chat.js";
 import { addressOf, type ChatAdapters } from "./chat-adapter.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Speakers } from "../sessions/speakers.js";
-import type { ChatRepository } from "../chats/chat-repository.js";
-import { chatKey } from "../chats/place.js";
 
 export interface OpenChannelChatDeps {
-  /** Today's chats, which the chat starts in. Unused when `speakers` is
-   *  given. */
-  chats?: ChatRepository;
   webchatRepo: Pick<WebChatRepository, "ensureChannelChat">;
-  /** Chats and Agents' speakers. Given, the chat starts in Chats and the
-   *  row's session stands in it as the speaker of the channel's account. */
-  speakers?: OpenSpeakerDeps;
+  /** Chats and Agents' speakers: the chat starts in Chats and the row's
+   *  session stands in it as the speaker of the channel's account. */
+  speakers: OpenSpeakerDeps;
 }
 
 export interface OpenSpeakerDeps extends StartChannelChatDeps {
@@ -36,34 +30,8 @@ export function openChannelChat(
   deps: OpenChannelChatDeps,
   input: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
-  if (input.channel !== "webchat" && deps.speakers) {
+  if (input.channel !== "webchat") {
     return openAsSpeaker(deps.webchatRepo, deps.speakers, input);
-  }
-  if (input.channel !== "webchat" && deps.chats) {
-    const parent =
-      input.parentThreadId && input.parentThreadId !== input.threadId
-        ? input.parentThreadId
-        : undefined;
-    const via = deps.chats.accountOn(input.channel);
-    const seed = {
-      agentName: isCoreMainAgentId(input.agentName) ? null : input.agentName,
-      projectName: input.projectName,
-      projectPath: input.projectPath ?? null,
-    };
-    if (parent === undefined) {
-      deps.chats.startIfMissing(
-        chatKey(via.platform, input.threadId as ChatId),
-        input.threadType === "private" ? "dm" : "group",
-        via,
-        input.threadName ?? null,
-        { ...seed, threadType: input.threadType ?? null },
-      );
-    } else {
-      deps.chats.startIfMissing(chatKey(via.platform, parent as ChatId), "group", via, null, {
-        ...seed,
-        threadType: "group",
-      });
-    }
   }
   return deps.webchatRepo.ensureChannelChat(input);
 }
