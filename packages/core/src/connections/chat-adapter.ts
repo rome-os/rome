@@ -232,6 +232,8 @@ export function kindNamedBy(platform: string, address: string): "group" | "dm" |
     return /^[1-9]\d*$/.test(address) ? "dm" : null;
   }
   if (platform === "whatsapp") return address.endsWith("@g.us") ? "group" : "dm";
+  // A Feishu open id names a person, and a chat id a chat of any kind.
+  if (platform === "feishu" || platform === "lark") return address.startsWith("ou_") ? "dm" : null;
   return null;
 }
 
