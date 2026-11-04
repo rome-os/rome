@@ -39,6 +39,30 @@ describe("validateActionArgs", () => {
     );
   });
 
+  it("does not require __triggerPayload, which the engine injects on every fire", () => {
+    // Shape of code-review's pr-webhook schema: a hand-written JSON schema.
+    const schema = {
+      type: "object",
+      properties: {
+        githubEvent: { type: "string" },
+        __triggerPayload: { type: "object" },
+      },
+      required: ["githubEvent", "__triggerPayload"],
+    };
+
+    expect(validateActionArgs("pr-webhook", { githubEvent: "pull_request" }, schema)).toBeNull();
+    expect(schema.required).toEqual(["githubEvent", "__triggerPayload"]);
+    expect(validateActionArgs("pr-webhook", {}, schema)).toMatch(/githubEvent/);
+  });
+
+  it("does not require __triggerPayload declared through zod", () => {
+    const schema = emittedSchema(
+      z.object({ githubEvent: z.string(), __triggerPayload: z.record(z.string(), z.unknown()) }),
+    );
+
+    expect(validateActionArgs("pr-webhook", { githubEvent: "push" }, schema)).toBeNull();
+  });
+
   it("accepts any args when the action declares no schema", () => {
     expect(validateActionArgs("legacy", { anything: true }, undefined)).toBeNull();
   });
