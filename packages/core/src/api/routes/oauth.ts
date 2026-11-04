@@ -193,14 +193,14 @@ export function oauthRoutes(deps: ApiDeps): Hono {
 
       // A connecting guardian lands on that connection's own page, the
       // surface that shows the grant it just granted.
-      const nextPath = existingSession
+      const nextPath = connecting
         ? `/settings/connections/${encodeURIComponent(redeemed.provider)}`
         : guardian.onboardingComplete
           ? "/"
           : "/onboard";
 
       issueGuardianSession(c, guardian.userId);
-      if (!existingSession) deps.loginUsage.recordLogin("oauth");
+      if (!connecting) deps.loginUsage.recordLogin("oauth");
 
       c.header("Cache-Control", "no-store");
       return c.json({
