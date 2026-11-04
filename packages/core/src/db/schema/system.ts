@@ -1168,10 +1168,12 @@ export const channels = sqliteTable(
   ],
 );
 
-// Chats' record of a connected account: one row per account Rome holds a
-// connection to that lets it chat, keyed by the account (the platform and the
+// Chats' record of a connected account: one row per account a connection that
+// lets Rome chat has reached, keyed by the account (the platform and the
 // platform's own id) and holding the agent that speaks through it, null for
-// none. A connection whose grant has not reported its account yet has no row.
+// none. The row outlives the connection, so disconnecting keeps the agent and
+// connecting the same account again finds it. A connection whose grant has
+// not reported its account yet has no row.
 // Vocabulary: docs/domains/chats.md#connected-account.
 export const connectedAccounts = sqliteTable(
   "connected_accounts",
