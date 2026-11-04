@@ -27,7 +27,7 @@ flowchart TD
             Batch["Batch<br/><i>five-minute window</i>"]
             Triage["Triage<br/><i>small model, no tools</i>"]
             Important["Important"]
-            Store["Digest store"]
+            Store["Follow items store<br/><i>owed to the digest</i>"]
             Ignore["Ignore<br/><i>logged with a reason</i>"]
         end
         Turn["Concierge turn<br/><i>quiet, triaged lines only</i>"]
@@ -73,9 +73,8 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 
 ### Triage decides importance, and the Concierge decides what to say
 
-- **Triage reads the normalized event, the follow's preference in the guardian's words, and what was told recently.** It has no tools and answers important, digest or ignore for each event. Its prompt states goals and names no service; labels are descriptions it weighs, not rules. When it is unsure, it answers digest.
+- **Triage reads the normalized event, the follow's options rendered as words from the catalog, its preference in the guardian's words, and what was told recently.** It has no tools and answers important, digest or ignore for each event. Its prompt states goals and names no service; labels are descriptions it weighs, not rules. When it is unsure, it answers digest.
 - **Triage never decides delivery.** An important item reaches the Concierge promptly, and the Concierge decides whether to tell the guardian now or stay silent.
-- **A following turn's input stays in its trace.** The important and digest turns keep what they were handed, labelled, so the Concierge's session shows why it spoke or stayed silent. Other system turns keep no such block, and none of it appears in the chat.
 - **Every message to the guardian is a Concierge turn.** No part of following posts into the chat by itself.
 - **Every important and digest item goes into the next digest, whether or not the Concierge told it.** Important items lead the digest. The Concierge gives an item already told one short line.
 - **A failure loses no event silently.** A triage run that fails sends its events to the digest. A batch that fails is tried again with later batches and is dropped with a warning only after three tries. An important turn that fails leaves its items owed and is tried again.
@@ -88,6 +87,13 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 ### Text from outside Rome is data
 
 - **The Concierge never sees a raw payload.** It reads the lines triage wrote, with their links, inside a fence marked untrusted. Triage reads only the normalized event, as data in its prompt.
+
+### Every decision leaves a record the guardian can read, and no record keeps outside content it does not need
+
+- **Each triage run is recorded in one "Concierge triage" session,** with its input and its decision for every event. A batch runs fresh, so the shared session never feeds one batch's events into the next.
+- **A following turn's input stays in its trace.** The important and digest turns keep what they were handed, labelled, so the Concierge's session shows why it spoke or stayed silent. Other system turns keep no such block, and none of it appears in the chat.
+- **A follow routine keeps no event payload in its run history,** only the payload's size. The action still receives the whole event.
+- **An ignored event leaves one log line** with its source, kind and reason, never its content.
 
 ### Subscriptions at the source are shared
 
