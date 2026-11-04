@@ -84,7 +84,7 @@ import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatsWiring } from "../chats-wiring.js";
-import { openChannelChat } from "../connections/open-chat.js";
+import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
@@ -102,7 +102,6 @@ import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { ChatRepository } from "../chats/chat-repository.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { AppManager } from "../apps/manager.js";
@@ -164,11 +163,6 @@ export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
 /** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
 export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
 
-/** The chats by key over `db`, reading the channel records `db` holds. */
-export function testChatRepository(db: DrizzleDb): ChatRepository {
-  return new ChatRepository(db, new ChannelRecordsRepository(db, testAccountLinkOf));
-}
-
 /** Chats over `db` as Rome wires it, reading the channel records `db`
  *  holds. Every channel is active: one its record names no account for is
  *  the account named like it, so tests need not record one per channel. */
@@ -180,6 +174,13 @@ export function testChatsWiring(db: DrizzleDb) {
     platformOfChannel: (name) => records.platformOfChannel(name),
     channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
   });
+}
+
+/** What opens a speaker over `db`: {@link testChatsWiring}'s chats,
+ *  adapters and speakers. */
+export function testOpenSpeakerDeps(db: DrizzleDb): OpenSpeakerDeps {
+  const wired = testChatsWiring(db);
+  return { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers };
 }
 
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
@@ -645,7 +646,11 @@ export async function buildTestDeps(
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
+    speakers: {
+      chats: chatsWired.chats,
+      adapters: chatsWired.adapters,
+      speakers: chatsWired.speakers,
+    },
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -1226,7 +1231,7 @@ export async function createAppLifecycleHarness(
     const appRuntimeRepositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
-      chatRepo: testChatRepository(db),
+      speakers: testOpenSpeakerDeps(db),
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {

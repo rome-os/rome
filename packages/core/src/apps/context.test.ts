@@ -7,7 +7,7 @@ import {
   type RomeAppContext,
   type RomeAppRuntimeServices,
 } from "./context.js";
-import type { ChatRepository } from "../chats/chat-repository.js";
+import type { OpenSpeakerDeps } from "../connections/open-chat.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { AppApiDispatcher } from "./api.js";
 import type { AppCatalog } from "./catalog.js";
@@ -254,7 +254,7 @@ export function createAction(config, deps) {
     const repositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
-      chatRepo: {} as ChatRepository,
+      speakers: {} as OpenSpeakerDeps,
     });
 
     expect("delete" in repositories.settings).toBe(false);

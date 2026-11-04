@@ -5,7 +5,6 @@ import type {
   GuardianProfileRepository,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
-import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -17,11 +16,9 @@ import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
   webchatRepo: WebChatRepository;
-  /** The chats a channel thread's first message starts. */
-  chatRepo: ChatsByKey;
-  /** Chats and Agents' speakers. Given, a channel thread's chat starts in
-   *  Chats and its session stands in it as the channel account's speaker. */
-  speakers?: OpenSpeakerDeps;
+  /** Chats and Agents' speakers: a channel thread's chat starts in Chats,
+   *  and its session stands in it as the channel account's speaker. */
+  speakers: OpenSpeakerDeps;
   /** Chats, read and written for apps. Given, an app reads its chats
    *  through `recentChats`, `transcript` and `traces`, and its lines go on
    *  record in Chats: `addMessage`, `promoteMessageToUser`, `send` and
@@ -36,7 +33,7 @@ export interface CreateAppRuntimeRepositoriesDeps {
 export function createAppRuntimeRepositories(
   deps: CreateAppRuntimeRepositoriesDeps,
 ): AppRuntimeRepositories {
-  const legacy = createChatRepository(deps.webchatRepo, deps.chatRepo, deps.speakers);
+  const legacy = createChatRepository(deps.webchatRepo, deps.speakers);
   const chats: ChatRepository = deps.inChats
     ? {
         ...legacy,
@@ -80,13 +77,9 @@ function createGuardianProfileRepository(deps: {
   };
 }
 
-function createChatRepository(
-  repo: WebChatRepository,
-  chats: ChatsByKey,
-  speakers?: OpenSpeakerDeps,
-): ChatRepository {
+function createChatRepository(repo: WebChatRepository, speakers: OpenSpeakerDeps): ChatRepository {
   const open: ChatRepository["ensureChannelChat"] = (input) =>
-    openChannelChat({ chats, webchatRepo: repo, ...(speakers ? { speakers } : {}) }, input);
+    openChannelChat({ webchatRepo: repo, speakers }, input);
   return {
     ensureChannelChat: open,
     ensureChannelConversation: open,
