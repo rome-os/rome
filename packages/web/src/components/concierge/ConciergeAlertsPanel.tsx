@@ -216,7 +216,7 @@ function RulesSection({
                     defaultValue={quiet.start}
                     key={`start-${quiet.start}`}
                     onBlur={(event) => setQuietTime("start", event.target.value)}
-                    className="w-28 tabular-nums"
+                    className="w-36 tabular-nums"
                   />
                 </label>
                 <label className="flex items-center gap-2 text-ui text-muted-foreground">
@@ -227,7 +227,7 @@ function RulesSection({
                     defaultValue={quiet.end}
                     key={`end-${quiet.end}`}
                     onBlur={(event) => setQuietTime("end", event.target.value)}
-                    className="w-28 tabular-nums"
+                    className="w-36 tabular-nums"
                   />
                 </label>
               </li>
