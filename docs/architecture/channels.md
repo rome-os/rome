@@ -50,7 +50,7 @@ Chats will record a chat and its messages under integer ids of its own, and keep
 
 A channel's `send` takes the other party's account id as a direct message's address where the platform has one: Discord opens or finds its DM channel with the user, and Feishu sends to the user's open id. Discord also hears a person's first DM before any DM with them was opened, which discord.js alone drops.
 
-The adapter conformance suite ([`connections/adapter-conformance.ts`](../../packages/core/src/connections/adapter-conformance.ts)) is what every adapter owes Chats. It runs each adapter against its platform's peer through Rome's inbound recording and an app's send path, and checks only what a person sees on the peer and what Rome's transcript holds. A case Rome fails today on a platform is listed as a gap beside that platform, with why, and skipped.
+The adapter conformance suite ([`test/kit/im/adapter-conformance.ts`](../../packages/core/src/test/kit/im/adapter-conformance.ts)) is what every adapter owes Chats. It runs each adapter against its platform's peer through Rome's inbound recording and an app's send path, and checks only what a person sees on the peer and what Rome's transcript holds. A case Rome fails today on a platform is listed as a gap beside that platform, with why, and skipped.
 
 ### Chat adapters
 

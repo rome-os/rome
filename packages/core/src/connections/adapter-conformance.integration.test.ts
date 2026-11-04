@@ -1,11 +1,11 @@
 // Every chat adapter against its platform's peer, through the conformance
-// suite (./adapter-conformance.ts).
+// suite (../test/kit/im/adapter-conformance.ts).
 
 import { rs } from "@rstest/core";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { channelOver, describeAdapterConformance } from "./adapter-conformance.js";
+import { channelOver, describeAdapterConformance } from "../test/kit/im/adapter-conformance.js";
 import { exemplar, loadCapture } from "../test/kit/im/capture.js";
 import wechatTextCapture from "../test/kit/im/captures/wechat-text.capture.json" with {
   type: "json",
