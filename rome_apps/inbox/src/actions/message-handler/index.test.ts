@@ -106,7 +106,6 @@ function createMessageHandlerDeps(
     })),
     addMessage: rs.fn(async () => ({ inserted: true })),
     promoteMessageToUser: rs.fn(async () => undefined),
-    recordOutboundMessage: rs.fn(async () => undefined),
     ...overrides.conversations,
   };
 

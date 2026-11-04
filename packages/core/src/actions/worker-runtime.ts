@@ -49,8 +49,6 @@ import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/in
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
 import { ChatRepository } from "../chats/chat-repository.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
@@ -148,7 +146,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     settingsRepo,
     webchatRepo,
     chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     speakers: appSpeakers,
     // An app's chats are read and written in Chats here too. The worker holds
     // no channels: a speaker sends through main's, which records nothing, so

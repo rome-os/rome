@@ -2313,7 +2313,8 @@ export interface ChatRepository extends Partial<ChatReads> {
    * as JSON parts, when it says more than the platform shows. Throws the
    * platform's refusal, and records nothing then. Answers the platform's id
    * for the message, when it gave one. Absent on a host that does not keep
-   * chats in Chats yet; use `recordOutboundMessage` after sending there.
+   * chats in Chats, where an app has no way to put a message it sends on
+   * record, so it does not send one there.
    */
   send?(input: {
     sessionId: string;
@@ -2350,18 +2351,6 @@ export interface ChatRepository extends Partial<ChatReads> {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<{ messageId: string | null; threadId: string }>;
-  /** @deprecated A host that keeps chats in Chats records what `send` and
-   *  `sendEmail` send; this is for one that does not yet. */
-  recordOutboundMessage(input: {
-    sessionId: string;
-    content: string;
-    platformMessageId?: string;
-    senderId?: string;
-    senderName?: string;
-    replyToPlatformMessageId?: string;
-    turnId?: string;
-    knownToProvider: boolean;
-  }): Promise<void>;
 }
 
 export interface WebChatRecapSession {

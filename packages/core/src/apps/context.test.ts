@@ -255,7 +255,6 @@ export function createAction(config, deps) {
       settingsRepo,
       webchatRepo,
       chatRepo: {} as ChatRepository,
-      chatMessages: { recordSent: rs.fn() },
     });
 
     expect("delete" in repositories.settings).toBe(false);
