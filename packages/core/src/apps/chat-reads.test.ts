@@ -12,6 +12,7 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { speakerFixture } from "../test/speakers.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { appChatReads } from "./chat-reads.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const at = (seconds: number) => new Date(seconds * 1000);
 
@@ -24,7 +25,7 @@ describe("appChatReads", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
     links = new TurnLinks(testDb.db);
     fixture = speakerFixture(testDb.db);
     reads = appChatReads({

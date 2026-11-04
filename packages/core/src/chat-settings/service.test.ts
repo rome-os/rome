@@ -8,11 +8,11 @@ import { tokenPaste } from "../connections/schemes.js";
 import type { Channels } from "../chats/connected-accounts/connected-account.js";
 import { connectionPorts } from "../chats/connected-accounts/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ChatRepository } from "../chats/chat-repository.js";
 import { chatKey } from "../chats/place.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function directoryDescriptor(
   service: "discord" | "feishu" | "wechat" | "agents",
@@ -268,7 +268,7 @@ describe("ChatSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "guardian-1" },
     });
-    await new WebChatRepository(testDb!.db).ensureChannelChat({
+    await new ChatsWebChatRepository(testDb!.db).ensureChannelChat({
       channel: "discord",
       threadId: "first-seen-topic",
       parentThreadId: "parent",
@@ -340,7 +340,7 @@ describe("ChatSettingsService", () => {
 
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
-    const webchat = new WebChatRepository(testDb!.db);
+    const webchat = new ChatsWebChatRepository(testDb!.db);
     await webchat.ensureChannelChat({
       channel: "discord",
       threadId: "dm-1",
@@ -425,7 +425,7 @@ describe("ChatSettingsService", () => {
       listAgents: () => [],
       onChanged: () => {},
     });
-    await new WebChatRepository(testDb.db).ensureChannelChat({
+    await new ChatsWebChatRepository(testDb.db).ensureChannelChat({
       channel: "agents",
       threadId: "dm-1",
       threadType: "private",
@@ -998,7 +998,7 @@ describe("ChatSettingsService", () => {
 
   it("keeps guardian chats out of conversation settings", async () => {
     testDb = createTestDb();
-    await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
+    await new ChatsWebChatRepository(testDb.db).createSession("chat-1", "Chat");
     const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
 
     expect(repository.find("webchat", "chat-1" as ChatId)).toBeNull();
@@ -1015,6 +1015,6 @@ describe("ChatSettingsService", () => {
         { settings: null, agentName: undefined },
       ),
     ).toThrow("Webchat chats have no conversation settings");
-    expect(await new WebChatRepository(testDb.db).getSession("chat-2")).toBeNull();
+    expect(await new ChatsWebChatRepository(testDb.db).getSession("chat-2")).toBeNull();
   });
 });

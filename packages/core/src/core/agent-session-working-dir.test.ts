@@ -18,6 +18,7 @@ import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "worker";
 
@@ -49,7 +50,7 @@ describe("AgentSessionManager working dirs", () => {
     await loader.loadAll(directory);
     testDb = createTestDb();
     sessionsRepo = new SessionsRepository(testDb.db);
-    webchatRepo = new WebChatRepository(testDb.db);
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",
       displayName: "anthropic",
