@@ -12,13 +12,13 @@
 
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
-import { WechatUserStorePending } from "../../channels/wechat-user.js";
+import type { WechatUserRuntime, WechatUserStatus } from "../kinds/wechat-user/wechat-user.js";
+import { WechatUserStorePending } from "../kinds/wechat-user/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";
 import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
-import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.js";
+import { toWechatUserChannelMessage } from "../../chats/history/wechat-user-messages.js";
 import {
   createWechatUserDescriptor,
   makeWechatUserSetup,
@@ -153,6 +153,11 @@ describe("makeWechatUserSetup", () => {
     });
     expect(wechatUserGrantProfileSchema.parse(grant.profile).wxid).toBe("wxid_guardian");
     expect(grant.summary?.body?.join(" ")).toContain("read-only");
+    // The signed-in account is the guardian's own, under the id its channel records.
+    expect(grant).toMatchObject({
+      guardianChannelUserId: "wxid_guardian",
+      addsGuardianAccount: true,
+    });
   });
 
   it("resumes readable cached history without recapturing keys", async () => {

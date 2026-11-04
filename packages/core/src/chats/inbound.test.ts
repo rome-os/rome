@@ -8,7 +8,7 @@ import type {
   SaidInboundEvent,
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
-import { type AccountAgents, AccountListening } from "../channels/account-agents.js";
+import { type AccountAgents, AccountListening } from "./connected-accounts/account-agents.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { channelChatId } from "../db/session-kind.js";

@@ -5,8 +5,8 @@ import { createTestDb, kindChannelOf, testChatRepository, type TestDb } from "..
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
-import type { Channels } from "../channels/channel.js";
-import { connectionPorts } from "../channels/connection-ports.js";
+import type { Channels } from "../chats/connected-accounts/connected-account.js";
+import { connectionPorts } from "../chats/connected-accounts/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ChatRepository } from "../chats/chat-repository.js";

@@ -167,6 +167,21 @@ describe("buildConnectionCards — Telegram fold", () => {
     expect(cards[0].slots.map((slot) => slot.key)).toEqual(["bot", "session"]);
   });
 
+  it("marks the Telegram card when the folded personal account's channel knows no account", () => {
+    const user = conn({
+      connectionKind: "telegram_user",
+      id: "conn-tg-user",
+      grants: { session: "authorized" },
+      accountUnknown: true,
+    });
+    const withBot = buildConnectionCards([
+      conn({ connectionKind: "telegram", id: "conn-tg", grants: { bot: "authorized" } }),
+      user,
+    ]);
+    expect(withBot[0].accountUnknown).toBe(true);
+    expect(buildConnectionCards([user])[0].accountUnknown).toBe(true);
+  });
+
   it("a personal account with no telegram connection still yields a Telegram card with just the session slot", () => {
     const cards = buildConnectionCards([
       conn({

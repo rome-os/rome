@@ -8,6 +8,7 @@ import {
   confirmReplyReceipt,
   parseReplyReceipt,
   postLinkedInReply,
+  sameReplyText,
   verifiedReplyTarget,
 } from "./reply-helpers.mjs";
 import "./reply.js";
@@ -220,6 +221,46 @@ test("a complete receipt needs no additional history read", async () => {
   assert.equal(receipt.message_id, "sent-123");
 });
 
+const signed = "See https://example.com/demo\n\nExample signature";
+
+test("a reply receipt keeps line breaks and says whether LinkedIn stored the sent text", () => {
+  const receipt = (body, sent = signed) =>
+    parseReplyReceipt({ value: message({ body }) }, payload(), {
+      ...expected,
+      originToken,
+      text: sent,
+    });
+
+  const exact = receipt({ text: signed });
+  assert.equal(exact.text, signed);
+  assert.equal(exact.text_matches, true);
+  assert.equal(
+    receipt({ text: "See  https://example.com/demo \r\n\r\nExample signature" }).text_matches,
+    true,
+  );
+  assert.equal(
+    receipt({ text: "See https://example.com/demoExample signature" }).text_matches,
+    false,
+  );
+  assert.equal(
+    receipt({ text: "See https://example.com/demo Example signature" }).text_matches,
+    false,
+  );
+  assert.equal(
+    receipt({ text: "See https://example.com/demo\nExample signature" }).text_matches,
+    false,
+  );
+  assert.equal(receipt(undefined).text_matches, null);
+  assert.equal(receipt({ text }, text).text, text);
+});
+
+test("reply text comparison folds spacing within a line but never across lines", () => {
+  assert.ok(sameReplyText("Hi  there,\n\n  Ana", "Hi there,\r\n\r\nAna \n"));
+  assert.ok(!sameReplyText("Hi there,\nAna", "Hi there, Ana"));
+  assert.ok(!sameReplyText("Hi there,\nAna", "Hi there,Ana"));
+  assert.ok(!sameReplyText("Hi there,\n\nAna", "Hi there,\nAna"));
+});
+
 test("the browser write makes exactly one scoped POST and preserves the message", async () => {
   const calls = [];
   const result = await vm.runInNewContext(`(${postLinkedInReply.toString()})(...args)`, {
@@ -295,6 +336,7 @@ function fakePage({ conversation = payload(), outcome = null, history = null } =
       if (fn.name === "postLinkedInReply") {
         writes.push(args);
         if (outcome instanceof Error) throw outcome;
+        if (typeof outcome === "function") return outcome(...args);
         return outcome ?? { json: { value: message({ originToken: args[3] }) } };
       }
       throw new Error(`Unexpected function ${fn.name}`);
@@ -360,3 +402,42 @@ for (const [label, outcome] of [
     assert.equal(page.writes.length, 1);
   });
 }
+
+test("the command sends line feeds and returns the stored multiline text", async () => {
+  const page = fakePage({
+    outcome: (_csrf, _target, sent, token) => ({
+      json: { value: message({ originToken: token, body: { text: sent } }) },
+    }),
+  });
+  const [receipt] = await getRegistry()
+    .get("linkedin/reply")
+    .func(page, {
+      ...args,
+      message: "See https://example.com/demo\r\n\r\nExample signature",
+      send: true,
+    });
+  assert.equal(page.writes.length, 1);
+  assert.equal(page.writes[0][2], signed);
+  assert.equal(receipt.text, signed);
+  assert.equal(receipt.text_matches, true);
+});
+
+test("the command reports a stored body that lost its line breaks without sending again", async () => {
+  const page = fakePage({
+    outcome: (_csrf, _target, _sent, token) => ({
+      json: {
+        value: message({
+          originToken: token,
+          body: { text: "See https://example.com/demoExample signature" },
+        }),
+      },
+    }),
+  });
+  const [receipt] = await getRegistry()
+    .get("linkedin/reply")
+    .func(page, { ...args, message: signed, send: true });
+  assert.equal(receipt.status, "sent");
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(receipt.text_matches, false);
+  assert.equal(page.writes.length, 1);
+});

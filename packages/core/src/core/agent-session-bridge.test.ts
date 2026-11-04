@@ -1,3 +1,4 @@
+import type { RunLineDeps } from "../connections/speaker-messages.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -12,9 +13,13 @@ import type {
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
-import { Pacer } from "../channels/delivery/pacer.js";
-import { type ReplyStream, ReplyStreams, type ReplyTarget } from "../channels/delivery/streams.js";
-import { DeliveryFailure, type DeliveryTransport, plainText } from "../channels/delivery/types.js";
+import { Pacer } from "../participation/reply-delivery/pacer.js";
+import {
+  type ReplyStream,
+  ReplyStreams,
+  type ReplyTarget,
+} from "../participation/reply-delivery/streams.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "../connections/sending.js";
 import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
@@ -572,6 +577,7 @@ describe("AgentSessionBridge reply streaming", () => {
       repo,
       db,
       named = true,
+      runLineDeps,
     }: {
       streamReply: boolean;
       /** A pending promise holds the setting's read open. */
@@ -587,6 +593,8 @@ describe("AgentSessionBridge reply streaming", () => {
       db?: DrizzleDb;
       /** Whether the caller names the conversation. Otherwise the thread does. */
       named?: boolean;
+      /** Chats' lines, given once Chats records what the caller sends. */
+      runLineDeps?: RunLineDeps;
     },
   ) {
     const recording = platform();
@@ -621,7 +629,7 @@ describe("AgentSessionBridge reply streaming", () => {
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, repo, undefined, turns, undefined, replies).attach(
+    new AgentSessionBridge(manager, repo, undefined, turns, undefined, replies, runLineDeps).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -969,6 +977,30 @@ describe("AgentSessionBridge reply streaming", () => {
       close();
     }
   });
+
+  for (const stands of [true, false]) {
+    it(`records an answer it does not stream ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
+      const { repo, db, answers, close } = await recorded();
+      try {
+        const { turnEnd } = run(turnEvents(...answer), {
+          streamReply: false,
+          repo,
+          db,
+          runLineDeps: {
+            lines: { recorded: async () => null, stands: () => stands },
+            links: { prompt: () => {} },
+          },
+        });
+
+        await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+        expect(await answers()).toEqual(
+          stands ? [] : [JSON.stringify([{ type: "text", content: "hi there" }])],
+        );
+      } finally {
+        close();
+      }
+    });
+  }
 
   it("records the answer of a reply whose create may have landed, which its caller does not send", async () => {
     const { repo, db, answers, close } = await recorded();

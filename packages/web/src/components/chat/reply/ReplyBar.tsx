@@ -23,7 +23,12 @@ export function ReplyBar() {
       <span className="flex h-5 shrink-0 items-center" role="img" aria-label={t("reply.action")}>
         <Reply className="size-3.5" aria-hidden />
       </span>
-      <span className="line-clamp-2 min-w-0 flex-1 break-words">{plainQuote(target.preview)}</span>
+      <span className="min-w-0 flex-1">
+        {target.author === "automated" ? (
+          <span className="block truncate text-aux">{target.name ?? t("senderAutomation")}</span>
+        ) : null}
+        <span className="line-clamp-2 break-words">{plainQuote(target.preview)}</span>
+      </span>
       <IconButton
         size="xs"
         label={t("reply.dismiss")}

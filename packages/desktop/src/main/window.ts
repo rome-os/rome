@@ -11,6 +11,7 @@ import {
 
 const PRELOAD_PATH = path.join(__dirname, "..", "preload", "index.js");
 const SETTINGS_HTML = path.join(__dirname, "..", "..", "src", "renderer", "settings.html");
+const AUDIT_HTML = path.join(__dirname, "..", "..", "src", "renderer", "audit.html");
 const ONBOARDING_HTML = path.join(__dirname, "..", "..", "src", "renderer", "onboarding.html");
 const ONBOARDING_URL = pathToFileURL(ONBOARDING_HTML).toString();
 
@@ -179,5 +180,32 @@ export function createSettingsWindow(): BrowserWindow {
 
   win.loadFile(SETTINGS_HTML);
 
+  return win;
+}
+
+/** The local audit log viewer. A `file:` page, so only it gets the preload's `audit` channels. */
+export function createAuditWindow(): BrowserWindow {
+  const existing = BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Rome Audit Log");
+  if (existing) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 700,
+    minHeight: 480,
+    title: "Rome Audit Log",
+    webPreferences: {
+      preload: PRELOAD_PATH,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  win.loadFile(AUDIT_HTML);
   return win;
 }

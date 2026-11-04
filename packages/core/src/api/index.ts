@@ -33,7 +33,7 @@ import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
-import { send } from "../chats/send.js";
+import { send } from "../connections/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
 import { settingsRoutes } from "./routes/settings.js";
@@ -84,8 +84,8 @@ import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
-import { accountLinkOf, connectionKindOf } from "../channels/account-links.js";
-import { byChannel, readAccountAgent } from "../channels/account-agents.js";
+import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
+import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -218,7 +218,7 @@ export function buildApp(
     accounts: new ConnectedAccountsRepository(deps.db),
   };
   const sessionQueries = new SessionQueryService({
-    repository: new SessionQueryRepository(deps.db),
+    repository: new SessionQueryRepository(deps.db, "chats"),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>

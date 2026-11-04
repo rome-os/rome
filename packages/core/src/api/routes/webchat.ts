@@ -1,5 +1,7 @@
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
+import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
@@ -28,7 +30,6 @@ import type {
   TraceSnapshot,
   TraceTokenUsage,
 } from "@rome/api-types/trace-segments";
-import { handoffChildSessionIds } from "../share-snapshot.js";
 import type { ChatShareSnapshot, ChatShareMessage } from "../share-snapshot.js";
 import { createRegistryAppResolver } from "../registry-app-resolver.js";
 import {
@@ -81,9 +82,14 @@ import {
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
 import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
-import type { DashboardInbox } from "../../chats/send.js";
-import { resolveChatSenders } from "./chat-senders.js";
+import type { DashboardInbox } from "../../connections/send.js";
+import {
+  resolveChatSenders,
+  resolveAutomatedSender,
+  automatedMessageNotice,
+} from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -238,7 +244,7 @@ export interface NewChatBody {
 }
 
 function isStoredWebchatSession(session: StoredWebchatSession): boolean {
-  return session.type === "webchat" || session.type === "webchat_handoff";
+  return session.type === "webchat";
 }
 
 function formatFeedback(row: StoredTurnFeedback | null): TurnFeedback | null {
@@ -322,17 +328,16 @@ async function persistRoutineDraftCard(
 }
 
 // Snapshot a suspension into a first-class assistant card message — a
-// `pending_interaction` part for an inline component, or a `handoff` part for a
-// floor transfer. Unlike the ask_user / routine cards (built from the tool
-// INPUT), this is built from the action RESULT: the agent-session executeAction
-// shim returns `{ pendingInteraction: true, ... }` / `{ handoff: true, ... }`
-// on the tool_result. `toolUseId` is the correlation key the component /
+// `pending_interaction` part for an inline component. Unlike the ask_user /
+// routine cards (built from the tool INPUT), this is built from the action
+// RESULT: the agent-session executeAction shim returns
+// `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
 async function persistSuspensionCard(
   webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
   sessionId: string,
   turnId: string,
-  part: Extract<MessagePart, { type: "pending_interaction" | "handoff" }>,
+  part: Extract<MessagePart, { type: "pending_interaction" }>,
 ): Promise<void> {
   try {
     // Push live (message_insert) so the card appears in the transcript as the
@@ -350,28 +355,18 @@ async function persistSuspensionCard(
 }
 
 /** A suspension pulled from an action's tool_result: an inline component the
- * host mounts in the transcript, or a handoff transferring the floor to
- * another agent in a child session. */
-type Suspension =
-  | {
-      kind: "inline";
-      appId: string;
-      componentId: string;
-      props?: Record<string, unknown>;
-      /** Host built-in component (rendered by rome-web): no owning app to
-       * validate; `appId` is the sentinel "core". */
-      builtin?: boolean;
-      /** The card is the only way to answer (see MessagePart.render). */
-      requiresCard?: boolean;
-    }
-  | {
-      kind: "handoff";
-      appId: string;
-      agentName?: string;
-      payload?: Record<string, unknown>;
-      handback?: { schema: Record<string, unknown>; validate?: string };
-      handbackHint?: string;
-    };
+ * host mounts in the transcript. */
+type Suspension = {
+  kind: "inline";
+  appId: string;
+  componentId: string;
+  props?: Record<string, unknown>;
+  /** Host built-in component (rendered by rome-web): no owning app to
+   * validate; `appId` is the sentinel "core". */
+  builtin?: boolean;
+  /** The card is the only way to answer (see MessagePart.render). */
+  requiresCard?: boolean;
+};
 
 type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction" }>;
 
@@ -382,8 +377,7 @@ type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction"
 const isProposeRoutineTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
-/** Pull a suspension descriptor (`pendingInteraction: true` / `handoff: true`)
- * out of an action's tool_result output, whether it arrived structured or
+/** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
  * JSON-serialized through the facade. Returns null for any non-suspended
  * result so the drain loop ignores ordinary tool calls. */
 function readSuspensionFromOutput(output: unknown): Suspension | null {
@@ -429,20 +423,6 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
       };
     }
     return null;
-  }
-  if (o.handoff === true) {
-    const hb = asRecord(o.handback);
-    const schema = hb ? asRecord(hb.schema) : undefined;
-    return {
-      kind: "handoff",
-      appId: o.appId,
-      agentName: typeof o.agentName === "string" ? o.agentName : undefined,
-      payload: asRecord(o.payload),
-      handback: schema
-        ? { schema, validate: typeof hb?.validate === "string" ? hb.validate : undefined }
-        : undefined,
-      handbackHint: typeof o.handbackHint === "string" ? o.handbackHint : undefined,
-    };
   }
   return null;
 }
@@ -555,8 +535,8 @@ function readPlaceWidgetFromOutput(output: unknown): {
   };
 }
 
-/** Interpret a client-posted `interaction_result` part — the shared resolution
- * of an inline interaction or a handoff. The artifact shape is app-defined
+/** Interpret a client-posted `interaction_result` part — the resolution of an
+ * inline interaction. The artifact shape is app-defined
  * (core stays app-agnostic): a `{ dismissed: true }` output ends the flow as a
  * bail, anything else is handed to the calling agent verbatim as the outcome.
  * Returns null when no interaction_result part is present. */
@@ -605,19 +585,12 @@ function interpretInteractionResult(parts: unknown): {
 }
 
 /** Every suspension currently awaiting resolution on a session, keyed by
- * toolUseId: each `pending_interaction` / `handoff` card with no matching
- * `interaction_result` yet, carrying the card fields resolution needs
- * (`handbackHint`, `childSessionId` — handoff cards only). Drives the
- * fail-closed resolution guard — a resolution is honored only when it cites an
- * open toolUseId, so stale/forged/double resolutions are rejected. A map
- * because inline components don't lock the thread, so several can be open at
- * once; a handoff is kept single-open by the client (it locks the parent
- * thread), but the guard treats both uniformly. (A handoff's design
- * conversation lives in the card's spawned child session, so the parent never
- * reroutes turns — it always runs its own locked agent.) */
+ * toolUseId: each `pending_interaction` card with no matching
+ * `interaction_result` yet. Drives the fail-closed resolution guard — a
+ * resolution is honored only when it cites an open toolUseId, so
+ * stale/forged/double resolutions are rejected. A map because inline
+ * components don't lock the thread, so several can be open at once. */
 interface OpenSuspensionCard {
-  handbackHint?: string;
-  childSessionId?: string;
   /** A host-owned built-in card (a question or the connect-AI card) that a
    * typed chat reply dismisses — mirrors rome-web's auto-dismiss rule. */
   dismissedByReply?: boolean;
@@ -646,19 +619,11 @@ async function findOpenSuspensions(
       const part = p as {
         type?: unknown;
         toolUseId?: unknown;
-        handbackHint?: unknown;
-        childSessionId?: unknown;
         render?: { builtin?: unknown; componentId?: unknown };
       };
-      if (
-        (part.type === "pending_interaction" || part.type === "handoff") &&
-        typeof part.toolUseId === "string"
-      ) {
+      if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
         cards.set(part.toolUseId, {
-          handbackHint: typeof part.handbackHint === "string" ? part.handbackHint : undefined,
-          childSessionId: typeof part.childSessionId === "string" ? part.childSessionId : undefined,
           dismissedByReply:
-            part.type === "pending_interaction" &&
             part.render?.builtin === true &&
             BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
         });
@@ -789,7 +754,7 @@ export interface WebchatRuntime {
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
-  /** The dashboard's side of a send into one of its chats (chats/send.ts). */
+  /** The dashboard's side of a send into one of its chats (connections/send.ts). */
   post: DashboardInbox["post"];
   /** Start a chat for the guardian, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
@@ -1270,7 +1235,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
     const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
-    const senders = await resolveChatSenders(deps, actors);
+    const sources = await deps.webchatRepo.getUserMessageSources(sessionId);
+    const senders = await resolveChatSenders(
+      deps,
+      actors,
+      new Map([...sources].filter(([id]) => shownIds.has(id))),
+    );
     if (senders.size === 0) return withTraces;
     return withTraces.map((message) => {
       const sender = senders.get(message.id);
@@ -1316,10 +1286,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  // Freeze the selected turns of a session (plus any handoff child sessions they
-  // open, recursively) into a self-contained ChatShareSnapshot. Reuses the exact
-  // read-path repo methods as /chat so turn grouping + handoff splicing on the
-  // public side go through the identical chat-view pipeline. Trace summaries are
+  // Freeze the selected turns of a session into a self-contained
+  // ChatShareSnapshot. Reuses the exact read-path repo methods as /chat so turn
+  // grouping on the public side goes through the identical chat-view pipeline. Trace summaries are
   // prebuilt here with the guardian's resolver so the public reader needs none.
   const buildChatShareSnapshot = async (
     rootSessionId: string,
@@ -1327,19 +1296,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   ): Promise<ChatShareSnapshot> => {
     const messages: ChatShareMessage[] = [];
     const traces: Record<string, TraceSnapshot> = {};
-    const visited = new Set<string>();
 
-    const addSession = async (sid: string, turnFilter: Set<string> | null): Promise<void> => {
-      if (visited.has(sid)) return;
-      visited.add(sid);
+    const addSession = async (sid: string, turnFilter: Set<string>): Promise<void> => {
       const rows = await deps.webchatRepo.getMessages(sid);
       const traceContents = await deps.webchatRepo.getTraceContents(sid);
       const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
-      const childSessionIds: string[] = [];
       for (const row of rows) {
-        // A child session is frozen whole (turnFilter null); the root keeps only
-        // the chosen turns. Rows with no turnId are skipped under a filter.
-        if (turnFilter && (!row.turnId || !turnFilter.has(row.turnId))) continue;
+        // Only the chosen turns are kept; rows with no turnId are skipped.
+        if (!row.turnId || !turnFilter.has(row.turnId)) continue;
         const message: ChatShareMessage = {
           id: row.id,
           sessionId: row.sessionId,
@@ -1370,10 +1334,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
         }
         messages.push(message);
-        childSessionIds.push(...handoffChildSessionIds(row.content));
-      }
-      for (const childSid of childSessionIds) {
-        await addSession(childSid, null);
       }
     };
 
@@ -1423,27 +1383,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
   const generateShareToken = (): string => randomBytes(32).toString("base64url");
-
-  const resolveSessionHandback = (
-    session: StoredWebchatSession,
-  ): { schema: Record<string, unknown>; validate?: string } | undefined => {
-    if (session.type !== "webchat_handoff" || !session.handoffSpec) return undefined;
-    try {
-      const spec = JSON.parse(session.handoffSpec) as { schema?: unknown; validate?: unknown };
-      if (spec.schema && typeof spec.schema === "object") {
-        return {
-          schema: spec.schema as Record<string, unknown>,
-          validate: typeof spec.validate === "string" ? spec.validate : undefined,
-        };
-      }
-    } catch (err) {
-      log.warn("ignoring malformed handoffSpec", {
-        sessionId: session.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-    return undefined;
-  };
 
   /**
    * Start an exact fork from a resumable webchat session. Consuming
@@ -1531,7 +1470,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           romeSessionId: input.session.id,
           contextSuffix: buildWebchatContextSuffix(),
-          handback: resolveSessionHandback(input.session),
           selectionId: modelSelection?.id,
           reasoningEffort: await resolveRequestedReasoningEffort(undefined),
         },
@@ -2404,7 +2342,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         path: listing.folder.path,
       };
     }
-    const id = randomUUID();
+    // Time-ordered, so new chats sit together in the id index (RFC 9562).
+    const id = uuidv7();
     const name = body.name || "New Chat";
     let project;
     try {
@@ -3218,6 +3157,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   type SendBody = {
     inputId?: string;
+    automatedSource?: unknown;
+    automatedActorKind?: unknown;
     threadId?: string;
     text?: string;
     personaId?: string;
@@ -3291,6 +3232,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return {
         inputId: getString("inputId"),
+        automatedSource: getString("automatedSource"),
+        automatedActorKind: getString("automatedActorKind"),
         threadId: getString("threadId"),
         text: getString("text"),
         personaId: getString("personaId"),
@@ -3312,6 +3255,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     body: SendBody,
     said: { saidBy?: Account } = {},
   ): Promise<RouteAnswer> => {
+    const actor = await currentSessionActor();
+    const sourceId =
+      actor?.kind === "guardian" &&
+      actor.via === "loopback" &&
+      typeof body.automatedSource === "string"
+        ? automatedSenderId(body.automatedSource, body.automatedActorKind)
+        : undefined;
+    const saidBy = sourceId ? { platform: "webchat", id: sourceId } : said.saidBy;
+    const automated = saidBy ? await resolveAutomatedSender(deps, saidBy.id) : null;
     if (
       body.inputId &&
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.inputId)
@@ -3382,24 +3334,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The session's open interactions gate resolution: a resolution turn is
     // honored only when it cites the toolUseId of a card still awaiting a
     // result. Several inline components can be open at once, so this is a set
-    // membership check; a workspace design conversation runs in the card's child
-    // session, so the parent never reroutes turns to a borrowed agent.
+    // membership check.
     const openSuspensions = await findOpenSuspensions(deps.webchatRepo, sessionId);
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
-    }
-    // A handback (not a dismissal) carries the card's hint into the resuming
-    // prompt, so the caller learns its exact next step instead of a bare
-    // "continue". `<childSessionId>` resolves to the handoff's child session —
-    // the id the caller may need to act on the result (e.g. workflow_build's
-    // designSessionId).
-    if (resolution && !resolution.dismissed) {
-      const card = openSuspensions.get(resolution.toolUseId);
-      if (card?.handbackHint) {
-        resolution.prompt +=
-          "\n\n" + card.handbackHint.replaceAll("<childSessionId>", card.childSessionId ?? "");
-      }
     }
 
     let reply: Extract<ReplyResolution, { ok: true }> | undefined;
@@ -3499,7 +3438,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached system prefix in PromptBuilder stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
-    const promptText = workspaceSection ? `${workspaceSection}\n\n${repliedPrompt}` : repliedPrompt;
+    const contextPrompt = workspaceSection
+      ? `${workspaceSection}\n\n${repliedPrompt}`
+      : repliedPrompt;
+    const promptText = automated
+      ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
+      : contextPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3542,6 +3486,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
+    let largeModelSelection = session.largeModelSelection;
+    if (sessionId === CONCIERGE_CHAT_ID) {
+      await deps.concierge?.switchIfExhausted(sessionId);
+      // A background turn may also have moved the chat since this send read it.
+      largeModelSelection =
+        (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
+    }
     // A branch has no stored selection: it continues the provider thread
     // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
@@ -3550,7 +3501,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,
-              largeModelSelection: session.largeModelSelection,
+              largeModelSelection,
             },
             messageCount,
             body.largeModelSelection,
@@ -3578,11 +3529,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
 
-    // A handoff child session minted with a handback contract exposes the
-    // conversational `submit_output` tool on every turn (interactive summon).
-    // Re-derived from the row on every acquire, so it survives backend restarts.
-    const handback = resolveSessionHandback(session);
-
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
     // it persists this message and terminates through the normal trace/SSE
@@ -3608,15 +3554,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (
-      !(await deps.webchatRepo.recordUserInput(
-        inputId,
-        sessionId,
-        userContent,
-        await currentSessionActor(),
-        said.saidBy,
-      ))
-    ) {
+    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent, actor, saidBy))) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return answer({ error: "inputId is already in use" }, 409);
       return answer({
@@ -3647,7 +3585,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           romeSessionId: sessionId,
           contextSuffix,
-          handback,
           // Null clears a selection an open session still holds, so a chat
           // switched back to Auto follows its pin again.
           selectionId: modelSelection?.id ?? null,
@@ -3908,59 +3845,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   msg.input,
                 );
               }
-              // The borrowed agent relayed the guardian's verbal approval: snapshot
-              // a marker the client picks up to resolve the handback with the
-              // standing submission — the same outcome as clicking Approve. No
-              // payload travels here; the client ships the last submitted payload,
-              // so a stray confirm with nothing submitted is a client-side no-op.
-              if (
-                msg.type === "tool_use" &&
-                session.type === "webchat_handoff" &&
-                (msg.tool === "confirm_output" || msg.tool.endsWith("__confirm_output"))
-              ) {
-                try {
-                  await deps.webchatRepo.addMessage(
-                    randomUUID(),
-                    sessionId,
-                    "assistant",
-                    JSON.stringify([{ type: "handback_approved" }]),
-                    turnId,
-                  );
-                } catch (err) {
-                  log.warn("failed to persist handback_approved", {
-                    sessionId,
-                    turnId,
-                    error: err instanceof Error ? err.message : String(err),
-                  });
-                }
-              }
-              // A valid submission in a handoff child conversation: snapshot it
-              // as a submission_card so the host renders the Approve /
-              // Keep-editing gate. The payload IS the candidate handback —
-              // Approve posts it verbatim as the parent's interaction_result; a
-              // later submission supersedes this card (the client treats only the
-              // newest card as active).
-              if (msg.type === "structured_output" && session.type === "webchat_handoff") {
-                const payload =
-                  msg.payload && typeof msg.payload === "object" && !Array.isArray(msg.payload)
-                    ? (msg.payload as Record<string, unknown>)
-                    : { value: msg.payload };
-                try {
-                  await deps.webchatRepo.addMessage(
-                    randomUUID(),
-                    sessionId,
-                    "assistant",
-                    JSON.stringify([{ type: "submission_card", payload }]),
-                    turnId,
-                  );
-                } catch (err) {
-                  log.warn("failed to persist submission_card", {
-                    sessionId,
-                    turnId,
-                    error: err instanceof Error ? err.message : String(err),
-                  });
-                }
-              }
               // An activated propose_routine's card. An error result created no
               // routine and asks the agent to retry, so it gets no card; any
               // other result (created, or the draft fallback) does, and the
@@ -3971,17 +3855,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 if (msg.isError !== true) await persistActivatedCard(msg.toolUseId, toolInput);
               }
               // Parked suspension: any action that returned a pending_interaction
-              // or handoff result surfaces it on its tool_result. Snapshot a card
-              // keyed by toolUseId so the host renders it and can match the later
-              // interaction_result back to this call. Fail closed on both kinds —
-              // the owning app must actually be installed, and an inline
-              // component must be declared in its app.yaml `components:` list. A
-              // handoff also mints a dedicated child session for its
-              // design conversation so it never interleaves with this (parent)
-              // thread.
+              // result surfaces it on its tool_result. Snapshot a card keyed by
+              // toolUseId so the host renders it and can match the later
+              // interaction_result back to this call. Fail closed — the owning
+              // app must actually be installed, and the inline component must be
+              // declared in its app.yaml `components:` list.
               if (msg.type === "tool_result") {
                 const suspension = readSuspensionFromOutput(msg.output);
-                if (suspension && suspension.kind === "inline" && suspension.builtin) {
+                if (suspension?.builtin) {
                   // Host built-in inline card (the ask_question question-card,
                   // the connect_ai ai-tools-card): rendered by rome-web, so
                   // there is no owning app to validate.
@@ -3999,57 +3880,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       appId: suspension.appId,
                     });
                   } else if (
-                    suspension.kind === "inline" &&
                     !(resolvedApp.manifest.components ?? []).includes(suspension.componentId)
                   ) {
                     log.warn("rejected suspension: component not declared by app", {
                       sessionId,
                       appId: suspension.appId,
                       componentId: suspension.componentId,
-                    });
-                  } else if (suspension.kind === "handoff") {
-                    const handoffAgentName = suspension.agentName;
-                    const childSessionId = randomUUID();
-                    const summary =
-                      typeof suspension.payload?.summary === "string"
-                        ? suspension.payload.summary
-                        : undefined;
-                    const childName = summary?.trim()
-                      ? summary.trim().slice(0, 50)
-                      : `${suspension.appId} design`;
-                    try {
-                      await deps.webchatRepo.createSession(
-                        childSessionId,
-                        childName,
-                        undefined,
-                        sessionProjectName,
-                        null,
-                        sessionProjectPath,
-                        handoffAgentName ?? null,
-                        "webchat_handoff",
-                        // The handback contract rides on the child row, so every
-                        // turn of the child conversation (including after a
-                        // backend restart) re-derives its submit_output tool.
-                        suspension.handback ? JSON.stringify(suspension.handback) : null,
-                        { inheritOwnerFrom: sessionId },
-                        // The specialist keeps working in the parent chat's folder.
-                        session.deviceFolder ?? null,
-                      );
-                    } catch (err) {
-                      log.warn("failed to mint handoff child session", {
-                        sessionId,
-                        childSessionId,
-                        error: err instanceof Error ? err.message : String(err),
-                      });
-                    }
-                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
-                      type: "handoff",
-                      toolUseId: msg.toolUseId,
-                      appId: suspension.appId,
-                      agentName: handoffAgentName,
-                      payload: suspension.payload,
-                      childSessionId,
-                      handbackHint: suspension.handbackHint,
                     });
                   } else {
                     await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {

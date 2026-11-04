@@ -32,6 +32,14 @@ function fakeGateway() {
   };
 }
 
+const audit = {
+  hint: "",
+  start: async () => 1,
+  end: () => {},
+  host: () => {},
+  status: async () => ({ state: "ok" as const }),
+};
+
 function host(overrides: Partial<DeviceHostOptions> = {}) {
   const gateway = fakeGateway();
   const statuses: DeviceStatus[] = [];
@@ -43,6 +51,7 @@ function host(overrides: Partial<DeviceHostOptions> = {}) {
     onRevoked: rs.fn(async () => undefined),
     prepare: rs.fn(async () => undefined),
     onStatus: (status) => statuses.push(status),
+    audit,
     connect: gateway.connect,
     ...overrides,
   };
@@ -87,6 +96,13 @@ describe("DeviceHost", () => {
       deviceId: credential.deviceSessionId,
       name: "RayBook",
     });
+  });
+
+  it("records every remote request in the app's audit log", async () => {
+    const { subject, gateway } = host();
+    subject.start();
+    await settle();
+    expect(gateway.calls[0]?.audit).toBe(audit);
   });
 
   it("reports the name Rome Cloud gives the device once online", async () => {

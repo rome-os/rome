@@ -7,9 +7,11 @@ import {
   type ActionConfig,
   type ActionResult,
   type AppActionRuntimeDeps,
+  type ChannelsService,
   isCoreMainAgentId,
 } from "@rome-os/app-runtime";
-import { onRomeAccount } from "../../lib/chat-activity.js";
+import { ACCOUNT_KINDS, onRomeAccount } from "../../lib/chat-activity.js";
+import { chatReadsOf } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_account_chats");
@@ -53,6 +55,9 @@ interface MessageRow {
   created_at: number;
   /** Lines the chat holds in the window, kept or not. */
   chat_total: number;
+  /** On a line another of Rome's accounts said in a shared chat, that
+   *  account, whose agent this chat's answering agent is not. */
+  other_account?: string;
 }
 
 interface Chat {
@@ -77,6 +82,7 @@ function named(name: string): string {
 }
 
 function speakerOf(row: MessageRow): string {
+  if (row.other_account) return `Agent on Rome's account ${named(row.other_account)} (Rome)`;
   if (row.outbound) {
     // An account can be linked to an agent other than main, whose lines are
     // not Rome's own.
@@ -172,7 +178,21 @@ function formatChats(rows: MessageRow[]): { content: string; shown: number } {
   return { content, shown };
 }
 
-export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
+/** The account each of Rome's channels is, by channel name. Empty where
+ *  the host lists no channels. */
+async function accountsByChannel(
+  channels: ChannelsService | undefined,
+): Promise<Map<string, string>> {
+  const listed = (await channels?.list()) ?? [];
+  return new Map(
+    listed.flatMap((channel) => (channel.account ? [[channel.name, channel.account.id]] : [])),
+  );
+}
+
+export function createAction(
+  config: ActionConfig,
+  deps: AppActionRuntimeDeps<{ channelsService?: ChannelsService }>,
+): Action {
   const { appContext } = deps;
 
   return {
@@ -200,12 +220,55 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // gone. 'notification' is a line that passed outside a turn: someone the
       // agent did not answer, or Rome sending untied to one. Rome's own lines
       // are told apart by the rule of `agentMessageOutbound` in
-      // packages/core/src/channels/messages-agent.ts. Lines stored in the same
+      // packages/core/src/chats/history/messages-agent.ts. Lines stored in the same
       // second keep the order they were stored in.
       let rows: MessageRow[];
+      const reads = chatReadsOf(appContext);
       try {
-        rows = appContext.db.connection.all(
-          sql`
+        if (reads) {
+          // Through Chats, which reads every line Rome sent as `assistant`.
+          const since = new Date(cutoffSeconds * 1000);
+          rows = [];
+          const accounts = await accountsByChannel(deps.channelsService);
+          for (const chat of await reads.recentChats({
+            since,
+            where: { accountKinds: ACCOUNT_KINDS },
+          })) {
+            const lines = await reads.transcript(chat.sessionId, { since });
+            // The account the session speaks as, by its channel.
+            const ownAccount = chat.channel ? (accounts.get(chat.channel.name) ?? null) : null;
+            for (const line of lines.slice(-MESSAGES_PER_CHAT)) {
+              // A chat can hold several of Rome's accounts, each with its own
+              // agent, so only this session's account's lines are its agent's.
+              // Where the account is unknown, no line names an agent.
+              const other =
+                line.role === "assistant" && (ownAccount === null || line.senderId !== ownAccount)
+                  ? (line.senderId ?? "unknown")
+                  : undefined;
+              rows.push({
+                session_id: chat.sessionId,
+                session_name: chat.name,
+                thread_name: chat.threadName,
+                channel: chat.channel?.name ?? chat.chat.platform,
+                connection_kind: chat.channel?.kind ?? chat.chat.platform,
+                platform: chat.chat.platform,
+                role: line.role,
+                agent_name: chat.agentName,
+                outbound: line.role === "assistant" ? 1 : 0,
+                ...(other ? { other_account: other } : {}),
+                sender_name: line.senderName,
+                sender_id: line.senderId,
+                content: line.content,
+                created_at: Math.floor(line.createdAt.getTime() / 1000),
+                chat_total: lines.length,
+              });
+            }
+          }
+          // Each account's chats together, as the formatting groups them.
+          rows.sort((a, b) => a.channel.localeCompare(b.channel));
+        } else
+          rows = appContext.db.connection.all(
+            sql`
             SELECT * FROM (
               SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
                 s.source_channel AS channel,
@@ -233,7 +296,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             WHERE newest <= ${MESSAGES_PER_CHAT}
             ORDER BY channel, session_id, created_at ASC, stored ASC
           `,
-        ) as MessageRow[];
+          ) as MessageRow[];
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("failed to query account chats", { error: message });

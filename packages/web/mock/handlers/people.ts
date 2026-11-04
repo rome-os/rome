@@ -610,18 +610,12 @@ export interface AccountRef {
 }
 
 /**
- * One person's dynamics, newest first, the way the route merges them: the
- * WhatsApp mirror holds full threads, and every other channel contributes the
- * single line the sentinel recorded. Entries are generic — source, time, body,
- * direction, ref — so nothing here knows it is looking at WhatsApp.
+ * One account's dynamics, newest first: the WhatsApp mirror holds full
+ * threads, and every other channel contributes the single line the sentinel
+ * recorded. Entries are generic — source, time, body, direction, ref — so
+ * nothing here knows it is looking at WhatsApp. Always an answer: an account
+ * Rome has never heard from has an empty history, not a missing one.
  */
-export function personTimeline(personId: string): Message[] | null {
-  const channels = persons.find((person) => person.id === personId)?.channelMappings;
-  return channels ? timelineForChannels(channels) : null;
-}
-
-/** One account's dynamics, newest first. Always an answer: an account Rome has
- *  never heard from has an empty history, not a missing one. */
 export function accountTimeline(ref: AccountRef): Message[] {
   return timelineForChannels([ref]);
 }

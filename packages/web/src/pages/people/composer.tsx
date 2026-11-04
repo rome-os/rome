@@ -1,16 +1,12 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, SendHorizontal } from "lucide-react";
-import { canSend, type LinkedAccount, type PersonResource } from "@rome/api-types/people";
+import { SendHorizontal } from "lucide-react";
+import type { LinkedAccount, PersonResource } from "@rome/api-types/people";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import { PAGE_FLOOR } from "@/shell/PageShell";
 import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { sendRefusalKey, type RefusedSendState } from "./send-copy";
@@ -31,9 +27,8 @@ import { accountHandle } from "./send-model";
  * typed past; on its own line it can carry the whole name and leave the box the
  * full width, at every card width, with no stacking rule to switch.
  *
- * The picker appears only in the merged view, and only when more than one
- * account can be written to. Inside an account view the view is the target, so a
- * second choice would be asking the guardian to say the same thing twice.
+ * There is no picker: the account on screen is the target, so a second choice
+ * would be asking the guardian to say the same thing twice.
  *
  * An account that cannot be written to shows why instead of a text box. The
  * reason is the state the server declared, rendered through `./send-copy.ts` —
@@ -42,22 +37,19 @@ import { accountHandle } from "./send-model";
 export function Composer({
   person,
   target,
-  onChangeTarget,
   onSend,
 }: {
   person: PersonResource;
   /** The account this composer writes to, or null when the person holds none
    *  at all. */
   target: LinkedAccount | null;
-  /** Offered where there is something to pick: the merged view. Null inside an
-   *  account view, where the view already names the target. */
-  onChangeTarget: ((account: LinkedAccount) => void) | null;
   onSend: (account: LinkedAccount, text: string) => void;
 }) {
   const { t } = useTranslation("people");
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const coarsePointer = useCoarsePointer();
 
   // Nothing at all for a person Rome holds no address for. The dossier header
   // already says they have no accounts, and this slot is for a channel giving a
@@ -83,7 +75,6 @@ export function Composer({
     return <Note>{refusalText(t, target.send, target.channel)}</Note>;
   }
 
-  const options = person.accounts.filter(canSend);
   const text = draft.trim();
   function submit() {
     const message = draftRef.current.trim();
@@ -99,23 +90,25 @@ export function Composer({
     <Floor>
       <p className="mb-2 flex items-center gap-2 text-aux text-muted-foreground">
         <span>{t("send.to")}</span>
-        {onChangeTarget && options.length > 1 ? (
-          <TargetMenu options={options} value={target} onChange={onChangeTarget} />
-        ) : (
-          <TargetChip account={target} />
-        )}
+        <TargetChip account={target} />
       </p>
-      <div className="flex items-center gap-2">
-        <Input
+      {/* A text area, because a single-line input turns a pasted line break
+          into a space. A signature under a link then reads as part of it. The
+          padding centers one line in the control height, so an empty box
+          stands as tall as the Send button. */}
+      <div className="flex items-end gap-2">
+        <Textarea
           ref={inputRef}
-          size="sm"
+          rows={1}
+          className="max-h-48 min-h-[var(--control-h-sm)] rounded-[var(--control-r-sm)] px-[var(--control-px-start-sm)] py-[calc((var(--control-h-sm)_-_2px_-_1lh)_/_2)]"
           value={draft}
           onChange={(event) => {
             draftRef.current = event.target.value;
             setDraft(event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            // Same Enter rule as the chat composer: Shift+Enter starts a new line.
+            if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
               event.preventDefault();
               submit();
             }
@@ -153,53 +146,6 @@ function TargetChip({ account }: { account: LinkedAccount }) {
         {channelLabel(t, account.channel)} · {accountHandle(account)}
       </span>
     </Badge>
-  );
-}
-
-/** The target, visible at rest and one click from being changed. */
-function TargetMenu({
-  options,
-  value,
-  onChange,
-}: {
-  options: LinkedAccount[];
-  value: LinkedAccount;
-  onChange: (account: LinkedAccount) => void;
-}) {
-  const { t } = useTranslation("people");
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Badge variant="muted" asChild>
-          <button
-            type="button"
-            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-expanded:text-foreground"
-          >
-            <ChannelGlyph channel={value.channel} />
-            <span className="truncate">
-              {channelLabel(t, value.channel)} · {accountHandle(value)}
-            </span>
-            <ChevronDown aria-hidden="true" />
-          </button>
-        </Badge>
-      </DropdownMenuTrigger>
-      {/* Opens upward: the chip sits on a floor pinned to the bottom of the
-          viewport, so below it there is nothing but the edge. */}
-      <DropdownMenuContent align="start" side="top">
-        {options.map((account) => (
-          <DropdownMenuItem
-            key={`${account.channel}:${account.channelUserId}`}
-            onSelect={() => onChange(account)}
-          >
-            <ChannelGlyph channel={account.channel} />
-            <span>{channelLabel(t, account.channel)}</span>
-            <span className="font-mono text-badge text-subtle-foreground">
-              {accountHandle(account)}
-            </span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

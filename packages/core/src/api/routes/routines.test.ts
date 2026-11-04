@@ -333,6 +333,32 @@ describe("Routines API", () => {
     expect(accepted.status).toBe(201);
   });
 
+  it("accepts args for an action whose schema requires the engine-injected __triggerPayload", async () => {
+    // code-review's pr-webhook requires __triggerPayload, which the engine adds
+    // on every fire and which args may not contain.
+    const baseDeps = await buildTestDeps(testDb.db);
+    registerStubAction(baseDeps.actionRegistry, "webhook_action", {
+      inputSchema: {
+        type: "object",
+        properties: { githubEvent: { type: "string" }, __triggerPayload: { type: "object" } },
+        required: ["githubEvent", "__triggerPayload"],
+      },
+    });
+    const guardedApp = new Hono().route("/", routinesRoutes({ ...baseDeps, routineEngine }));
+
+    const res = await guardedApp.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "webhook",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "12:00" },
+        actionName: "webhook_action",
+        args: { githubEvent: "pull_request" },
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
   it("rejects an actionName that is not a registered action and names the remedy", async () => {
     // The propose_routine card POSTs here; when actionRegistry is wired (as in
     // production) a routine bound to an unbuilt action is rejected with the

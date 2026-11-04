@@ -103,6 +103,11 @@ export interface SetupGrant {
    *  same terminal write (e.g. Discord's verified author id). Omit for connection kinds
    *  with no guardian-link step. */
   guardianChannelUserId?: string;
+  /** True when `guardianChannelUserId` is one more of the guardian's accounts
+   *  rather than a newer id for one they hold, so the mapping only ever adds a
+   *  link. A signed-in account is one: the guardian may hold several on a
+   *  platform, and re-pointing their only link there would take one away. */
+  addsGuardianAccount?: boolean;
   /** The success view the standard "done" renderer presents. */
   summary?: SetupView;
 }

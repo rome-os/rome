@@ -41,6 +41,17 @@ describe("resultOf", () => {
 });
 
 describe("summarize", () => {
+  it("reads a shell's -c flag in linear time on long flag-like arguments", () => {
+    const long = `-${"c".repeat(100_000)}!`;
+    const started = performance.now();
+    expect(commandText(row({ command: "sh", args: [long, "x"] }))).toBe(
+      `sh ${JSON.stringify(long)} x`,
+    );
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(commandText(row({ command: "sh", args: ["-c", "echo hi"] }))).toBe("echo hi");
+    expect(commandText(row({ command: "bash", args: ["-lc", "ls"] }))).toBe("ls");
+  });
+
   it("joins a script's lines and quotes an argv", () => {
     const script = row({ command: "/bin/bash", args: ["-lc", "set -e\n cd ~/rome\npnpm test"] });
     expect(summarize(script)).toBe("set -e; cd ~/rome; pnpm test");

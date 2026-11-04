@@ -1,6 +1,6 @@
 // The Discord descriptor. Two layers under test:
 //   1. isDiscordAuthError / descriptor shape / token-validate wiring — pure.
-//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../channels/discord.js)
+//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../connections/kinds/discord/discord.js)
 //      captures the descriptor's `onGatewayFault` wiring and lets us drive a
 //      login rejection (DiscordjsError) and live gateway faults, asserting they
 //      surface as CredentialRejected{ grant: "bot" } vs. Disconnected.
@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
-import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
+import type { ChannelApiRequest, ChannelApiResult } from "../../apps/platform-requests.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
 
@@ -54,7 +54,9 @@ const fakeState: {
   channels: [],
 };
 
-rs.mock("../../channels/discord.js", () => ({
+const FAKE_REPLY_DELIVERY = { capabilities: { maxPartLength: 2000, edit: true } };
+
+rs.mock("../kinds/discord/discord.js", () => ({
   DiscordAdapter: class {
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;
@@ -74,6 +76,9 @@ rs.mock("../../channels/discord.js", () => ({
     async send(chatId: ChatId, message: unknown): Promise<MessageReceipt> {
       fakeState.sent.push({ chatId, message });
       return { chatId, messageId: "sent-1" };
+    }
+    replyDelivery() {
+      return FAKE_REPLY_DELIVERY;
     }
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
@@ -229,6 +234,10 @@ describe("discord descriptor shape", () => {
       messageId: "sent-1",
     });
     expect(fakeState.sent).toEqual([{ chatId: "chan-1", message: { text: "hi" } }]);
+  });
+
+  it("offers reply delivery through the adapter's bot", () => {
+    expect(buildTalker().talker.replyDelivery).toBe(FAKE_REPLY_DELIVERY);
   });
 
   it("exposes provider-neutral activity", async () => {

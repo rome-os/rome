@@ -22,7 +22,7 @@ import {
   type TelegramUserLoginHandle,
   type TelegramUserLoginOutcome,
   type TelegramUserSettings,
-} from "../../channels/telegram-user.js";
+} from "../kinds/telegram-user/telegram-user.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";
@@ -121,6 +121,8 @@ describe("makeTelegramUserSetup", () => {
     expect(commit.mock.calls[0][0]).toEqual({
       credential: { material: telegramUserMaterialFromSettings(ACCOUNT), expiresAt: "never" },
       profile: telegramUserProfileFromSettings(ACCOUNT),
+      guardianChannelUserId: "42",
+      addsGuardianAccount: true,
       summary: {
         title: "Telegram account connected",
         body: ["Guardian is connected and can send and read messages as you."],

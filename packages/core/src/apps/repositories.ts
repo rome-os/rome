@@ -8,11 +8,13 @@ import type {
 } from "@rome-os/app-runtime";
 import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
-import { openChannelChat } from "../chats/open-chat.js";
+import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { applyGuardianProfile } from "../lib/guardian-profile.js";
+import { type AppChatReadsDeps, appChatReads } from "./chat-reads.js";
+import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
@@ -21,6 +23,15 @@ export interface CreateAppRuntimeRepositoriesDeps {
   chatRepo: ChatsByKey;
   /** Where a message an app sent is put on record. */
   chatMessages: Pick<MessageRepository, "recordSent">;
+  /** Chats and Agents' speakers. Given, a channel thread's chat starts in
+   *  Chats and its session stands in it as the channel account's speaker. */
+  speakers?: OpenSpeakerDeps;
+  /** Chats, read and written for apps. Given, an app reads its chats
+   *  through `recentChats`, `transcript` and `traces`, and its lines go on
+   *  record in Chats: `addMessage`, `promoteMessageToUser`, `send` and
+   *  `sendEmail`. Its `open` opens every channel session, so it has to put
+   *  the session in Chats. The Chats switch passes it. */
+  inChats?: { reads: AppChatReadsDeps; writes: AppChatWritesDeps };
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
   guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
@@ -29,7 +40,22 @@ export interface CreateAppRuntimeRepositoriesDeps {
 export function createAppRuntimeRepositories(
   deps: CreateAppRuntimeRepositoriesDeps,
 ): AppRuntimeRepositories {
-  const chats = createChatRepository(deps.webchatRepo, deps.chatRepo, deps.chatMessages);
+  const legacy = createChatRepository(
+    deps.webchatRepo,
+    deps.chatRepo,
+    deps.chatMessages,
+    deps.speakers,
+  );
+  const chats: ChatRepository = deps.inChats
+    ? {
+        ...legacy,
+        ...appChatReads(deps.inChats.reads),
+        ...appChatWrites(deps.inChats.writes),
+        // A session opens in Chats too, where the writes find it.
+        ensureChannelChat: deps.inChats.writes.open,
+        ensureChannelConversation: deps.inChats.writes.open,
+      }
+    : legacy;
   return {
     settings: createAppSettingsRepository(deps.settingsRepo),
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
@@ -67,9 +93,10 @@ function createChatRepository(
   repo: WebChatRepository,
   chats: ChatsByKey,
   messages: Pick<MessageRepository, "recordSent">,
+  speakers?: OpenSpeakerDeps,
 ): ChatRepository {
   const open: ChatRepository["ensureChannelChat"] = (input) =>
-    openChannelChat({ chats, webchatRepo: repo }, input);
+    openChannelChat({ chats, webchatRepo: repo, ...(speakers ? { speakers } : {}) }, input);
   return {
     ensureChannelChat: open,
     ensureChannelConversation: open,

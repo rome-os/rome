@@ -2,29 +2,44 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import {
-  latestDynamic,
+  compareDisplayNames,
   type PeopleList,
   type LinkedAccount,
   type PersonResource,
   type TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
-import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  createTestDb,
+  buildTestDeps,
+  ownedByGuardian,
+  type TestDb,
+  type TestDeps,
+} from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { channels as channelRows, romeAgentMessages } from "../../db/schema.js";
+import { sayOnChannel } from "../../test/speakers.js";
+import { channels as channelRows } from "../../db/schema.js";
 
-// GET /people/:id/messages — one person's history merged across every account
-// they are linked to. These tests pin what the merge answers over real stores:
-// which of the overlapping ones an account's entries come from, that a channel
-// filter narrows to one, and that walking the cursor visits each entry once.
+// GET /people/:id/messages — one of a person's accounts, its history. These
+// tests pin what the read answers over real stores: which of the overlapping
+// ones an account's entries come from, that only the named account is read,
+// that only the guardian's own connected accounts are read through, and that
+// walking the cursor visits each entry once.
+
+/** Every channel these tests read through, as the guardian's own. */
+const GUARDIAN_CHANNELS = [
+  { channel: "telegram", platform: "telegram" },
+  { channel: "whatsapp", platform: "whatsapp" },
+  { channel: "linkedin", platform: "linkedin" },
+];
 
 const WA_JID = "15550009999@s.whatsapp.net";
 const WA_LID = "88881111@lid";
 const TG_THREAD = "tg-timeline";
-const GROUP_THREAD = "tg-group-timeline";
+const WA = `whatsapp:${WA_JID}`;
+const TG = `telegram:${TG_THREAD}`;
 
 const at = (iso: string) => new Date(iso);
-const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
 /** An account's naming, and only that. The assertions that use it are about
  *  which name a channel puts on an account; whether Rome can send there and
@@ -42,14 +57,13 @@ describe("People timeline API", () => {
   let testDb: TestDb;
   let deps: TestDeps;
   let app: Hono;
-  let baseline: BaselineIds;
   let personId: string;
-  let telegramSessionId: string;
 
   beforeEach(async () => {
     testDb = createTestDb();
-    baseline = await seedBaseline(testDb.db);
+    await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
+    ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", GUARDIAN_CHANNELS);
     app = new Hono().route("/", peopleRoutes(deps));
 
     personId = await deps.peopleRepo.create({
@@ -111,83 +125,83 @@ describe("People timeline API", () => {
       },
     ]);
 
-    // Telegram: no mirror, so her direct conversation is the channel session's
-    // own transcript.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    // Telegram: no mirror, so her direct conversation is Rome's own, in Chats.
+    sayOnChannel(deps, {
       channel: "telegram",
-      threadId: TG_THREAD,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "user",
-      content: textContent("did you see the invite"),
-      platformMessageId: "tg-100",
-      senderId: TG_THREAD,
+      address: TG_THREAD,
+      key: "tg-100",
       senderName: "Nadia Cross",
-      createdAt: at("2026-08-03T08:00:00Z"),
+      text: "did you see the invite",
+      at: at("2026-08-03T08:00:00Z"),
     });
-    telegramSessionId = conversation.id;
-    await testDb.db.insert(romeAgentMessages).values({
-      id: "tg-100-reply",
-      sessionId: conversation.id,
-      role: "assistant",
-      content: textContent("just did — replying now"),
-      createdAt: at("2026-08-03T08:01:00Z"),
+    sayOnChannel(deps, {
+      channel: "telegram",
+      address: TG_THREAD,
+      key: "tg-100-reply",
+      fromRome: true,
+      text: "just did — replying now",
+      at: at("2026-08-03T08:01:00Z"),
     });
   });
 
   afterEach(() => testDb.close());
 
-  async function fetchTimeline(id: string, query = ""): Promise<TimelinePage> {
-    const res = await app.request(`/people/${id}/messages${query}`);
+  /** One account's page: `account` is `platform:address`, split at the first
+   *  colon as an account ref is. */
+  async function fetchTimeline(id: string, account: string, query = ""): Promise<TimelinePage> {
+    const colon = account.indexOf(":");
+    const named = new URLSearchParams({
+      channel: account.slice(0, colon),
+      channelUserId: account.slice(colon + 1),
+    });
+    const res = await app.request(`/people/${id}/messages?${named}${query}`);
     expect(res.status).toBe(200);
     return (await res.json()) as TimelinePage;
   }
 
-  it("returns entries across every account of the person, newest first", async () => {
-    const page = await fetchTimeline(personId);
-    expect(page.entries.map((entry) => [entry.source, entry.body])).toEqual([
-      ["telegram", "just did — replying now"],
-      ["telegram", "did you see the invite"],
-      ["whatsapp", "yes — 7pm"],
-      ["whatsapp", "are we still on for friday"],
+  it("returns only the named account's entries, newest first", async () => {
+    const whatsapp = await fetchTimeline(personId, WA);
+    expect(whatsapp.entries.map((entry) => [entry.source, entry.direction, entry.body])).toEqual([
+      ["whatsapp", "outbound", "yes — 7pm"],
+      ["whatsapp", "inbound", "are we still on for friday"],
     ]);
-    expect(page.entries.map((entry) => entry.direction)).toEqual([
-      "outbound",
-      "inbound",
-      "outbound",
-      "inbound",
+    expect(whatsapp.nextCursor).toBeNull();
+
+    const telegram = await fetchTimeline(personId, TG);
+    expect(telegram.entries.map((entry) => [entry.source, entry.direction, entry.body])).toEqual([
+      ["telegram", "outbound", "just did — replying now"],
+      ["telegram", "inbound", "did you see the invite"],
     ]);
-    expect(page.nextCursor).toBeNull();
   });
 
   it("leaves out group conversations and reactions", async () => {
-    const bodies = (await fetchTimeline(personId)).entries.map((entry) => entry.body);
+    const bodies = [
+      ...(await fetchTimeline(personId, WA)).entries,
+      ...(await fetchTimeline(personId, TG)).entries,
+    ].map((entry) => entry.body);
     expect(bodies).not.toContain("posted in the group");
     expect(bodies).not.toContain("👍");
   });
 
   it("pages by nextCursor with no duplicate and no missing entry", async () => {
-    const whole = (await fetchTimeline(personId)).entries;
+    const whole = (await fetchTimeline(personId, WA)).entries;
 
     const walked: TimelinePage["entries"] = [];
-    let query = "?limit=1";
+    let query = "&limit=1";
     for (let page = 0; page < 10; page += 1) {
-      const next = await fetchTimeline(personId, query);
+      const next = await fetchTimeline(personId, WA, query);
       expect(next.entries).toHaveLength(1);
       walked.push(...next.entries);
       if (next.nextCursor === null) break;
-      query = `?limit=1&cursor=${encodeURIComponent(next.nextCursor)}`;
+      query = `&limit=1&cursor=${encodeURIComponent(next.nextCursor)}`;
     }
     expect(walked).toEqual(whole);
   });
 
-  it("resumes inside a second that two stores both wrote to", async () => {
-    // Whole seconds collide across stores, so the cursor has to name an entry
-    // rather than a moment: resuming from the bare timestamp would drop
-    // whatever else landed in the same second.
+  it("resumes inside a second", async () => {
+    // Whole seconds collide, so the cursor has to name an entry rather than a
+    // moment: resuming from the bare timestamp would drop whatever else landed
+    // in the same second.
     const collide = at("2026-08-07T11:11:11Z");
     await deps.whatsAppStoreRepo.upsertMessages([
       {
@@ -211,44 +225,34 @@ describe("People timeline API", () => {
         hasMedia: false,
       },
     ]);
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: telegramSessionId,
-      role: "user",
-      content: textContent("telegram inbound"),
-      platformMessageId: "tg-tie",
-      senderId: TG_THREAD,
-      createdAt: collide,
-    });
 
-    const whole = (await fetchTimeline(personId)).entries;
+    const whole = (await fetchTimeline(personId, WA)).entries;
     const tied = whole.filter((entry) => entry.timestamp === Math.floor(collide.getTime() / 1000));
-    expect(tied.map((entry) => entry.body)).toEqual([
-      "whatsapp outbound",
-      "telegram inbound",
-      "whatsapp inbound",
-    ]);
+    expect(tied.map((entry) => entry.body)).toEqual(["whatsapp outbound", "whatsapp inbound"]);
 
     const walked: TimelinePage["entries"] = [];
-    let query = "?limit=1";
+    let query = "&limit=1";
     for (let page = 0; page < 20; page += 1) {
-      const next = await fetchTimeline(personId, query);
+      const next = await fetchTimeline(personId, WA, query);
       walked.push(...next.entries);
       if (next.nextCursor === null) break;
-      query = `?limit=1&cursor=${encodeURIComponent(next.nextCursor)}`;
+      query = `&limit=1&cursor=${encodeURIComponent(next.nextCursor)}`;
     }
     expect(walked).toEqual(whole);
   });
 
-  it("narrows to one source with ?channel=", async () => {
-    const page = await fetchTimeline(personId, "?channel=whatsapp");
-    expect(page.entries.map((entry) => entry.source)).toEqual(["whatsapp", "whatsapp"]);
-
-    // A channel the person holds no account on is an empty history rather than
-    // a bad request — channels are open-ended.
-    expect((await fetchTimeline(personId, "?channel=discord")).entries).toEqual([]);
+  it("refuses a read that names no account, or one the person does not hold", async () => {
+    // A person has no history joined across their accounts, so there is no
+    // answer for a read that names none.
+    expect((await app.request(`/people/${personId}/messages`)).status).toBe(400);
+    expect((await app.request(`/people/${personId}/messages?channel=whatsapp`)).status).toBe(400);
+    const elsewhere = new URLSearchParams({ channel: "discord", channelUserId: "someone" });
+    expect((await app.request(`/people/${personId}/messages?${elsewhere}`)).status).toBe(400);
   });
 
-  it("gives a sender with only sentinel history both halves of the exchange", async () => {
+  it("reads nothing an account said only to the triage record", async () => {
+    // The triage record is what Rome checked before deciding whether to
+    // answer, not a chat with the guardian.
     const sentinelOnly = await deps.peopleRepo.create({
       displayName: "Sentinel Only",
       bondLevel: "other",
@@ -266,11 +270,17 @@ describe("People timeline API", () => {
       response: "it is — sending you the link",
     });
 
-    const page = await fetchTimeline(sentinelOnly);
-    expect(page.entries.map((entry) => [entry.direction, entry.body])).toEqual([
-      ["outbound", "it is — sending you the link"],
-      ["inbound", "is this the right number for bookings?"],
-    ]);
+    const page = await fetchTimeline(sentinelOnly, "telegram:tg-triaged");
+    expect(page.entries).toEqual([]);
+  });
+
+  it("reads nothing through a connected account that is not the guardian's own", async () => {
+    // The Telegram channel's account is an agent's, not the guardian's, so
+    // what she said there is not a chat with the guardian.
+    await deps.peopleRepo.unlink({ platform: "telegram", id: "guardian-on-telegram" });
+
+    expect((await fetchTimeline(personId, TG)).entries).toEqual([]);
+    expect((await fetchTimeline(personId, WA)).entries.length).toBeGreaterThan(0);
   });
 
   it("reads a mirrored account from the mirror and never twice", async () => {
@@ -278,19 +288,12 @@ describe("People timeline API", () => {
     // own transcript of the channel session, and by the sentinel that triaged
     // it. Production stores the same words in all three; the wording differs
     // here only so the assertion can say which store answered.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "whatsapp",
-      threadId: WA_JID,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: textContent("as the transcript has it"),
-      platformMessageId: "wa-old",
-      senderId: WA_JID,
-      createdAt: at("2026-08-01T09:00:02Z"),
+      address: WA_JID,
+      key: "wa-old",
+      text: "as the transcript has it",
+      at: at("2026-08-01T09:00:02Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "wa-old",
@@ -302,7 +305,7 @@ describe("People timeline API", () => {
       response: "as the sentinel answered it",
     });
 
-    const whatsapp = (await fetchTimeline(personId, "?channel=whatsapp")).entries;
+    const whatsapp = (await fetchTimeline(personId, WA)).entries;
     expect(whatsapp.map((entry) => entry.body)).toEqual([
       "yes — 7pm",
       "are we still on for friday",
@@ -310,27 +313,20 @@ describe("People timeline API", () => {
   });
 
   it("falls back to the channel transcript for an account no mirror holds", async () => {
-    // The same overlap without a mirror: the transcript outranks the sentinel,
-    // so the exchange reads as Rome's own record of it.
+    // The same overlap without a mirror: the exchange reads as Rome's own
+    // record of it, and the triage record is not read.
     const triaged = await deps.peopleRepo.create({
       displayName: "Triaged Talker",
       bondLevel: "other",
       approved: true,
       links: [{ platform: "telegram", id: "tg-both" }],
     });
-    const conversation = await deps.webchatRepo.ensureChannelChat({
+    sayOnChannel(deps, {
       channel: "telegram",
-      threadId: "tg-both",
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: textContent("as the transcript has it"),
-      platformMessageId: "tg-800",
-      senderId: "tg-both",
-      createdAt: at("2026-08-04T08:00:00Z"),
+      address: "tg-both",
+      key: "tg-800",
+      text: "as the transcript has it",
+      at: at("2026-08-04T08:00:00Z"),
     });
     await deps.sentinelLogRepo.create({
       messageId: "tg-800",
@@ -342,42 +338,10 @@ describe("People timeline API", () => {
       response: "as the sentinel answered it",
     });
 
-    const bodies = (await fetchTimeline(triaged)).entries.map((entry) => entry.body);
+    const bodies = (await fetchTimeline(triaged, "telegram:tg-both")).entries.map(
+      (entry) => entry.body,
+    );
     expect(bodies).toEqual(["as the transcript has it"]);
-  });
-
-  it("holds a sentinel row back when the thread it names is a group", async () => {
-    const inGroup = await deps.peopleRepo.create({
-      displayName: "Group Talker",
-      bondLevel: "other",
-      approved: true,
-      links: [{ platform: "telegram", id: "tg-in-group" }],
-    });
-    await deps.webchatRepo.ensureChannelChat({
-      channel: "telegram",
-      threadId: GROUP_THREAD,
-      threadType: "group",
-      agentName: "main",
-    });
-    await deps.sentinelLogRepo.create({
-      messageId: "tg-901",
-      channel: "telegram",
-      channelUserId: "tg-in-group",
-      threadId: GROUP_THREAD,
-      text: "said in a group",
-      action: "ignored",
-    });
-    await deps.sentinelLogRepo.create({
-      messageId: "tg-902",
-      channel: "telegram",
-      channelUserId: "tg-in-group",
-      threadId: "tg-in-group",
-      text: "said to rome",
-      action: "ignored",
-    });
-
-    const bodies = (await fetchTimeline(inGroup)).entries.map((entry) => entry.body);
-    expect(bodies).toEqual(["said to rome"]);
   });
 
   it("reads one account through every address the channel folds onto it", async () => {
@@ -393,7 +357,7 @@ describe("People timeline API", () => {
       links: [{ platform: "whatsapp", id: WA_LID }],
     });
 
-    const page = await fetchTimeline(byLid);
+    const page = await fetchTimeline(byLid, `whatsapp:${WA_LID}`);
     expect(page.entries.map((entry) => entry.body)).toEqual([
       "yes — 7pm",
       "are we still on for friday",
@@ -461,7 +425,7 @@ describe("People timeline API", () => {
       links: [{ platform: "linkedin", id: member }],
     });
 
-    const page = await fetchTimeline(priya);
+    const page = await fetchTimeline(priya, `linkedin:${member}`);
     expect(page.entries.map((entry) => [entry.source, entry.direction, entry.body])).toEqual([
       ["linkedin", "outbound", "thanks — reading it now"],
       ["linkedin", "inbound", "sent you a note about the role"],
@@ -476,23 +440,10 @@ describe("People timeline API", () => {
     const res = await app.request(`/people/${personId}/messages?cursor=not-a-cursor`);
     expect(res.status).toBe(400);
   });
-
-  it("answers an empty page for a person with no accounts", async () => {
-    const unreachable = await deps.peopleRepo.create({
-      displayName: "No Channels",
-      bondLevel: "other",
-      approved: true,
-      links: [],
-    });
-    expect(await fetchTimeline(unreachable)).toEqual({ entries: [], nextCursor: null });
-  });
 });
 
-// GET /people and GET /people/:id — the curated people, their accounts as each
-// platform names them, and the activity a row shows without opening the
-// dossier. What the numbers count is the point of most of these: a person's
-// history is written down in several overlapping stores, so a row that adds
-// them up reports an inbox nobody has.
+// GET /people and GET /people/:id — the curated people, and their accounts as
+// each platform names them, with when each account was last active.
 
 describe("People API", () => {
   const NADIA_JID = "15550001111@s.whatsapp.net";
@@ -508,6 +459,9 @@ describe("People API", () => {
     testDb = createTestDb();
     baseline = await seedBaseline(testDb.db);
     deps = await buildTestDeps(testDb.db);
+    ownedByGuardian(testDb.db, deps.peopleRepo, baseline.persons.guardianId, [
+      { channel: "whatsapp", platform: "whatsapp" },
+    ]);
     app = new Hono().route("/", peopleRoutes(deps));
 
     // One WhatsApp account reachable two ways, which the mirror folds onto the
@@ -673,85 +627,46 @@ describe("People API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("previews the head of the person's own timeline and counts its entries", async () => {
+  it("dates each account by the head of that account's own timeline", async () => {
     const { people } = await fetchList();
 
     for (const person of people) {
-      const timeline = (await fetchTimelineFor(person.id)).entries;
-      expect(person.latest).toEqual(latestDynamic(timeline));
-      expect(person.messageCount).toBe(timeline.length);
+      for (const account of person.accounts) {
+        const named = new URLSearchParams({
+          channel: account.channel,
+          channelUserId: account.channelUserId,
+        });
+        const res = await app.request(`/people/${person.id}/messages?${named}&limit=1`);
+        expect(res.status).toBe(200);
+        const [head] = ((await res.json()) as TimelinePage).entries;
+        expect(account.latestAt).toBe(head?.timestamp ?? null);
+      }
     }
   });
 
-  it("counts one account's history once, whatever it is addressed by", async () => {
+  it("dates one account the same whatever address it is linked by", async () => {
     const nadia = await fetchPerson(nadiaId);
-    // Two mappings onto one mirrored account, and one conversation on it: the
+    // Two links onto one mirrored account, and one conversation on it: the
     // reaction and the group message are not entries, and the two addresses
     // are not two histories.
-    expect(nadia.messageCount).toBe(2);
-    expect(nadia.latest).toEqual({
-      source: "whatsapp",
-      timestamp: Math.floor(at("2026-08-10T09:05:00Z").getTime() / 1000),
-      preview: "yes — 7pm",
-    });
+    const newest = Math.floor(at("2026-08-10T09:05:00Z").getTime() / 1000);
+    expect(nadia.accounts.map((account) => account.latestAt)).toEqual([newest, newest]);
   });
 
-  it("counts one exchange once when three stores wrote it down", async () => {
-    // The mirror, Rome's own transcript of the channel session, and the
-    // sentinel that triaged it all hold the same WhatsApp message. Adding them
-    // would treble the number beside her name.
-    const conversation = await deps.webchatRepo.ensureChannelChat({
-      channel: "whatsapp",
-      threadId: NADIA_JID,
-      threadType: "private",
-      agentName: "main",
-    });
-    await deps.webchatRepo.addConversationMessage({
-      sessionId: conversation.id,
-      role: "notification",
-      content: JSON.stringify([{ type: "text", content: "as the transcript has it" }]),
-      platformMessageId: "wa-n1",
-      senderId: NADIA_JID,
-      createdAt: at("2026-08-10T09:00:02Z"),
-    });
-    await deps.sentinelLogRepo.create({
-      messageId: "wa-n1",
-      channel: "whatsapp",
-      channelUserId: NADIA_JID,
-      threadId: NADIA_JID,
-      text: "as the sentinel logged it",
-      action: "replied",
-      response: "as the sentinel answered it",
-    });
-
-    expect((await fetchPerson(nadiaId)).messageCount).toBe(2);
-  });
-
-  it("orders by newest activity, with people who have said nothing last", async () => {
+  it("orders people by name", async () => {
     const { people } = await fetchList();
-    const silent = people.filter((person) => person.latest === null).map((person) => person.id);
-    const spoken = people.filter((person) => person.latest !== null);
-
-    expect(spoken.map((person) => person.latest?.timestamp)).toEqual(
-      [...spoken.map((person) => person.latest?.timestamp ?? 0)].sort((a, b) => b - a),
-    );
-    expect(people.slice(people.length - silent.length).map((person) => person.id)).toEqual(silent);
-    // The seed has both kinds, so the two assertions above are not vacuous.
-    expect(spoken.length).toBeGreaterThan(1);
-    expect(silent.length).toBeGreaterThan(0);
+    const names = people.map((person) => person.displayName);
+    expect(names).toEqual([...names].sort(compareDisplayNames));
   });
 
-  it("answers a person with no accounts as one with no history", async () => {
+  it("answers a person with no accounts", async () => {
     const unreachable = await deps.peopleRepo.create({
       displayName: "No Channels",
       bondLevel: "other",
       approved: true,
       links: [],
     });
-    const person = await fetchPerson(unreachable);
-    expect(person.accounts).toEqual([]);
-    expect(person.messageCount).toBe(0);
-    expect(person.latest).toBeNull();
+    expect((await fetchPerson(unreachable)).accounts).toEqual([]);
   });
 
   // An account's history is read under every channel Rome has held on its
@@ -784,12 +699,6 @@ describe("People API", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as PeopleList).people.length).toBeGreaterThanOrEqual(PEOPLE);
   }, 60_000);
-
-  async function fetchTimelineFor(id: string): Promise<TimelinePage> {
-    const res = await app.request(`/people/${id}/messages?limit=300`);
-    expect(res.status).toBe(200);
-    return (await res.json()) as TimelinePage;
-  }
 });
 
 // POST /people — the guardian names someone, and says which accounts are

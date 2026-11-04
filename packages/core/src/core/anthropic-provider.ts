@@ -51,7 +51,7 @@ import {
 } from "./anthropic-auth-revoked.js";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { askQuestionParksOnCard } from "./mcp-facade.js";
-import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
+import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 import { anthropicFunding } from "../usage/funding.js";
 import type { UsageFunding } from "../usage/events.js";
@@ -136,7 +136,7 @@ interface AnthropicProviderOptions {
   /** Update runtime auth state before an auth-revoked terminal is exposed. */
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
-  onQuotaExhausted?: () => void;
+  onQuotaExhausted?: (until?: string) => void;
 }
 
 /** Persist the revoked-credential marker before exposing the failed terminal. */
@@ -539,11 +539,9 @@ export class AnthropicProvider implements ModelProvider {
       model,
       systemPrompt,
       subagentTools,
-      handback,
       maxTurns = 1000,
       executeAction,
       executeSubagent,
-      executeSubmitOutput,
       executeDefer,
       routineActivation,
     } = params;
@@ -557,11 +555,9 @@ export class AnthropicProvider implements ModelProvider {
       getActionCatalog: params.getActionCatalog,
       getSkillCatalog: params.getSkillCatalog,
       subagentTools,
-      handback,
       externalMcpServers: params.externalMcpServers,
       executeAction,
       executeSubagent,
-      executeSubmitOutput,
       supportsInteractiveSurface: params.supportsInteractiveSurface,
       interactiveSurfaceDetached: params.interactiveSurfaceDetached,
       executeDefer,
@@ -1026,7 +1022,7 @@ export class AnthropicProvider implements ModelProvider {
               // valid was rejected server-side. Stamp `auth_revoked` and persist
               // the marker so the next state refresh can downgrade the badge.
               if (isAnthropicUsageLimitError(errors) || isAnthropicUsageLimitError(errorText)) {
-                onQuotaExhausted?.();
+                onQuotaExhausted?.(anthropicUsageLimitReset(errorText));
                 terminal = { type: "error", error: errorText, code: "usage_limit", accounting };
               } else if (
                 isAnthropicAuthRevokedError(errors) ||

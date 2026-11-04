@@ -53,6 +53,35 @@ function shape(items: ConciergeItem[]): string[] {
 const build = (rows: ChatRow[], typing = false) => buildConciergeItems(rows, { typing });
 
 describe("buildConciergeItems", () => {
+  it("shows a host quota notice immediately without a bubble and suppresses only the matching generic switch", () => {
+    const message = {
+      ...say("switch", 1_000, "host"),
+      content: JSON.stringify([
+        { type: "quota_switch", from: "anthropic", to: "openai", model: "gpt-6-luna" },
+      ]),
+    };
+    const notice = {
+      kind: "model_switch" as const,
+      key: "generic",
+      model: "gpt-6-luna",
+      turnId: "recovered",
+      sessionId: "concierge",
+    };
+    const initial = build([agentRow(message)]);
+    expect(shape(initial)).toEqual(["notice"]);
+    expect(initial[0]).toMatchObject({ quota: { from: "anthropic", to: "openai" } });
+    expect(
+      shape(
+        build([
+          agentRow(message),
+          notice,
+          agentRow(say("recovered", 2_000)),
+          { ...notice, key: "manual", model: "claude-sonnet-5-5" },
+        ]),
+      ),
+    ).toEqual(["notice", "sep", "A:recovered", "notice"]);
+  });
+
   it("opens with a separator before the first message", () => {
     expect(shape(build([userRow(guardian("u1", 0))]))).toEqual(["sep", "G:u1"]);
   });
@@ -277,5 +306,25 @@ describe("buildConciergeItems reference stability", () => {
     expect(after[1]).toBe(before[1]);
     expect(after[2]).not.toBe(before[2]);
     expect(after[3]).toBe(before[3]);
+  });
+});
+
+it("groups an on-behalf Concierge message with adjacent guardian messages", () => {
+  const automated = guardian("on-behalf", MIN);
+  automated.sender = {
+    kind: "automated",
+    sourceType: "agent",
+    name: "Concierge",
+    iconUrl: null,
+    onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+  };
+  const items = buildConciergeItems([userRow(guardian("typed", 0)), userRow(automated)], {
+    typing: false,
+  });
+  const groups = items.filter((item) => item.kind === "group");
+  expect(groups).toHaveLength(1);
+  expect(groups[0]).toMatchObject({
+    sender: "guardian",
+    entries: [{ message: { id: "typed" } }, { message: { id: "on-behalf" } }],
   });
 });

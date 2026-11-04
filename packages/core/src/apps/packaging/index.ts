@@ -51,7 +51,6 @@ export { ActionConfigSchema, AgentConfigSchema } from "./artifact-config.js";
 export {
   PortableOutputSchemaError,
   assertPortableOutputSchema,
-  compileJsonSchema,
   compileOutputSchema,
   formatOutputSchemaErrors,
   validatePortableOutputSchema,

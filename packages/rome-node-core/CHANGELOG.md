@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/rome-os/rome/compare/node-core-v0.1.5...node-core-v0.1.6) (2026-11-03)
+
+
+### Features
+
+* **rome-node:** local append-only audit log on hosts ([#1647](https://github.com/rome-os/rome/issues/1647)) ([4e0f59f](https://github.com/rome-os/rome/commit/4e0f59fcd0326cdf3b1f9e4327e7f27e8b0274ba))
+
 ## [0.1.5](https://github.com/rome-os/rome/compare/node-core-v0.1.4...node-core-v0.1.5) (2026-10-23)
 
 

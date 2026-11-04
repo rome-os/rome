@@ -39,6 +39,11 @@ export interface ConnectionAccountFields {
   link?: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts?: boolean;
+  /** True when the account's channel does not know which account it is.
+   *  Such a channel is not active: it hears and sends nothing until a grant
+   *  reports its account. Absent for placeholders and services without a
+   *  Talk. */
+  accountUnknown?: boolean;
 }
 
 /** Body of `PUT /api/accounts/:id/agent`, where `:id` is the connection's id.

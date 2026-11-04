@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ReplyOutcome } from "../../../channels/delivery/reply.js";
+import type { ReplyOutcome } from "../../../participation/reply-delivery/reply.js";
 import { checkDelivery, type DeliveryCheck } from "./invariants.js";
 import { MessageStore } from "./peer.js";
 

@@ -306,7 +306,14 @@ const transcripts: Record<string, ChatMessage[]> = {
     curatedChats.map((chat) => [
       chat.id,
       chat.turns.flatMap((item, index) =>
-        turn(chat.id, index + 1, item.at, item.prompt, [text(item.reply), ...(item.blocks ?? [])]),
+        turn(chat.id, index + 1, item.at, item.prompt, [text(item.reply), ...(item.blocks ?? [])])
+          .filter(
+            (row) =>
+              row.role !== "assistant" || item.reply.length > 0 || (item.blocks?.length ?? 0) > 0,
+          )
+          .map((row) =>
+            row.role === "user" && item.sender ? { ...row, sender: item.sender } : row,
+          ),
       ),
     ]),
   ),

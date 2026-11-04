@@ -21,6 +21,9 @@ import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 import { romeSessionKind, withSessionKind } from "../session-kind.js";
+import { CHAT_MESSAGES, CHATS } from "../../chats/storage/messages-sql.js";
+import { messageHolder, type MessageHolder } from "../../connections/chat-adapter.js";
+import { occurrencesOf, type CopiedMessage } from "../../sessions/turn-links.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
 const turnEndTraceBlocks = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
@@ -267,8 +270,133 @@ function rawStats(row: RawSessionStats): RawSessionStats {
   };
 }
 
+/**
+ * Where a session's lines are read from: `legacy` counts the session's own
+ * rows in `rome_agent_messages`; `chats` counts what was said where its
+ * speaker stands, from Chats, beside the session's own traces (and the
+ * lines of a session that stands in no chat). Vocabulary:
+ * docs/domains/chats.md.
+ */
+export type SessionLines = "legacy" | "chats";
+
+/** A row of {@link chatsLineCounts}. */
+interface ChatsLineCountRow {
+  id: string;
+  own: number;
+  lines: number;
+  platform: string | null;
+  key: string | null;
+  chat_id: number | null;
+  thread_id: string | null;
+  created_at: number;
+}
+
+/**
+ * What the transcript of each of sessions `ids` holds, read from Chats: its
+ * own rows in `rome_agent_messages` that Chats does not hold (`own`), and the
+ * lines said where its speaker stands since it joined (`lines`), with where
+ * that is. A session in a chat keeps only traces of its own, and a dashboard
+ * chat its notices too; one in no chat keeps its prompts and answers too.
+ */
+function chatsLineCounts(ids: readonly string[]): SQL {
+  return sql`SELECT s.id AS id,
+    (SELECT count(*) FROM rome_agent_messages t
+      WHERE t.session_id = s.id
+        AND (s.chat_id IS NULL OR t.role NOT IN ('user', 'assistant'))
+        -- A channel chat's notifications are its lines in Chats; only the
+        -- dashboard ('webchat') keeps notices of its own.
+        AND NOT (t.role = 'notification' AND s.chat_id IS NOT NULL
+          AND s.chat_platform IS NOT 'webchat')) AS own,
+    (SELECT count(*) FROM ${CHAT_MESSAGES} m
+      WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+        AND m.said_at >= s.created_at) AS lines,
+    c.platform, c.key, s.chat_id, s.thread_id, s.created_at
+    FROM rome_sessions s LEFT JOIN ${CHATS} c ON c.id = s.chat_id
+    WHERE s.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`;
+}
+
+/** A line as {@link occurrencesOf} reads it, straight from Chats' lines. */
+interface CopiedMessageRow {
+  id: number;
+  key: string;
+  sender_account_id: string | null;
+  sender_agent: string | null;
+  text: string;
+  said_at: number;
+}
+
+function copiedLine(row: CopiedMessageRow): CopiedMessage {
+  return {
+    id: row.id,
+    key: row.key,
+    at: new Date(row.said_at * 1000),
+    body: { text: row.text },
+    ...(row.sender_account_id === null
+      ? {}
+      : {
+          saidBy: {
+            account: { id: row.sender_account_id },
+            ...(row.sender_agent === null ? {} : { agent: row.sender_agent }),
+          },
+        }),
+  };
+}
+
 export class SessionQueryRepository {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private db: DrizzleDb,
+    private readonly lines: SessionLines = "legacy",
+  ) {}
+
+  /** `rows` with each session's line count read from Chats, counted in one
+   *  statement over just these sessions. */
+  private withChatsLineCounts<T extends { id: string; messageCount: number }>(rows: T[]): T[] {
+    if (rows.length === 0) return rows;
+    const counts = this.chatsLineCountsOf(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, messageCount: counts.get(row.id) ?? 0 }));
+  }
+
+  /**
+   * How many lines each of sessions `ids` has in its transcript, read from
+   * Chats. Where each of Rome's accounts holds its own copy of a message (a
+   * Telegram basic group), a message counts once, as the transcript draws it:
+   * such a place is read once for all its sessions, from the earliest one
+   * joined, and only for what tells its copies apart.
+   */
+  private chatsLineCountsOf(ids: readonly string[]): Map<string, number> {
+    const counts = new Map<string, number>();
+    const copied = new Map<string, { holder: MessageHolder; rows: ChatsLineCountRow[] }>();
+    for (const row of this.db.all<ChatsLineCountRow>(chatsLineCounts(ids))) {
+      counts.set(row.id, Number(row.own) + Number(row.lines));
+      const holder =
+        row.platform !== null && row.key !== null ? messageHolder(row.platform, row.key) : null;
+      if (!holder || row.chat_id === null || Number(row.lines) === 0) continue;
+      const place = `${row.chat_id}\n${row.thread_id ?? ""}`;
+      const sessions = copied.get(place) ?? { holder, rows: [] };
+      sessions.rows.push(row);
+      copied.set(place, sessions);
+    }
+    for (const { holder, rows } of copied.values()) {
+      const [{ chat_id, thread_id }] = rows;
+      const since = Math.min(...rows.map((row) => row.created_at));
+      const said = this.db
+        .all<CopiedMessageRow>(
+          sql`SELECT id, key, sender_account_id, sender_agent, text, said_at
+            FROM ${CHAT_MESSAGES} m
+            WHERE chat_id = ${chat_id} AND thread_id IS ${thread_id} AND said_at >= ${since}
+            ORDER BY said_at, id`,
+        )
+        .map(copiedLine);
+      for (const row of rows) {
+        const since = row.created_at * 1000;
+        const own = said.filter((line) => line.at.getTime() >= since);
+        const occurrence = occurrencesOf(own, holder);
+        const lines = new Set(own.map((line) => occurrence.get(line.id) ?? `line:${line.id}`));
+        counts.set(row.id, Number(row.own) + lines.size);
+      }
+    }
+    return counts;
+  }
 
   private runStats(scope: SessionQueryStorageScope) {
     return this.db
@@ -327,6 +455,12 @@ export class SessionQueryRepository {
       .from(romeAgentMessages)
       .groupBy(romeAgentMessages.sessionId)
       .as("session_query_message_counts");
+    // Read from Chats, the page is cut first and only its sessions count
+    // their lines, so the count is never taken over the whole table.
+    const messageCount =
+      this.lines === "chats"
+        ? sql<number>`0`.mapWith(Number)
+        : sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number);
     const predicates = [
       ...sessionPredicates(query.scope, query.search, query.searchAgentNames),
       isNotNull(runStats.sessionId),
@@ -342,11 +476,11 @@ export class SessionQueryRepository {
               ? runStats.error
               : romeSessions.activityAt;
     const primaryOrder = query.sort.direction === "asc" ? asc(sortValue) : desc(sortValue);
-    const rows = await this.db
+    const page = this.db
       .select({
         ...getTableColumns(romeSessions),
         type: romeSessionKind,
-        messageCount: sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number),
+        messageCount,
         stats: {
           runCount: runStats.runCount,
           inputTokens: runStats.inputTokens,
@@ -363,11 +497,16 @@ export class SessionQueryRepository {
       })
       .from(romeSessions)
       .innerJoin(runStats, eq(runStats.sessionId, romeSessions.id))
-      .leftJoin(messageCounts, eq(messageCounts.sessionId, romeSessions.id))
+      .$dynamic();
+    const cut = await (this.lines === "chats"
+      ? page
+      : page.leftJoin(messageCounts, eq(messageCounts.sessionId, romeSessions.id))
+    )
       .where(and(...predicates))
       .orderBy(primaryOrder, desc(romeSessions.createdAt), desc(romeSessions.id))
       .limit(query.limit)
       .offset(query.offset);
+    const rows = this.lines === "chats" ? this.withChatsLineCounts(cut) : cut;
 
     const totalRows = await this.db
       .select({ count: count() })
@@ -489,10 +628,12 @@ export class SessionQueryRepository {
     if (!rows[0]) return null;
     const session = withSessionKind(rows[0]);
     const [messageCountRows, parentRows, childRows] = await Promise.all([
-      this.db
-        .select({ count: count() })
-        .from(romeAgentMessages)
-        .where(eq(romeAgentMessages.sessionId, id)),
+      this.lines === "chats"
+        ? [{ count: this.chatsLineCountsOf([id]).get(id) ?? 0 }]
+        : this.db
+            .select({ count: count() })
+            .from(romeAgentMessages)
+            .where(eq(romeAgentMessages.sessionId, id)),
       session.parentSessionId
         ? this.db.select().from(romeSessions).where(eq(romeSessions.id, session.parentSessionId))
         : Promise.resolve([]),

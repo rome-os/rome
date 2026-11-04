@@ -1258,6 +1258,36 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
+  it("classifies a session-limit result and reports its reset instant", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-11-03T03:00:00Z"));
+    try {
+      mockQuery([
+        {
+          type: "result",
+          subtype: "error",
+          errors: ["You've hit your session limit · resets 9:10pm (America/Los_Angeles)"],
+          num_turns: 1,
+          total_cost_usd: 0,
+          duration_ms: 1,
+        },
+      ]);
+      const onQuotaExhausted = rs.fn();
+      const session = await new AnthropicProvider({
+        env: { PATH: "/usr/bin" },
+        onQuotaExhausted,
+      }).openSession(buildParams());
+      expect((await session.events[Symbol.asyncIterator]().next()).value).toMatchObject({
+        type: "error",
+        code: "usage_limit",
+      });
+      expect(onQuotaExhausted).toHaveBeenCalledWith("2026-11-03T05:10:00.000Z");
+      await session.close();
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   // The SDK ends a turn that hit an API error with a synthetic assistant
   // message flagged `error`, then a `success` result flagged `is_error` whose
   // `result` is the error text.

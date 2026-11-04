@@ -62,8 +62,7 @@ export interface LivePreview {
 // While inline share selection is on (`selection` is set), every selectable turn
 // in the transcript gets a checkbox + click target so the guardian picks the
 // turns to freeze directly on the messages instead of in a separate list. Only
-// rows belonging to `selectableSessionId` (the main session) are checkable —
-// handoff child turns ride along with their parent automatically.
+// rows belonging to `selectableSessionId` (the main session) are checkable.
 export interface ShareSelection {
   selectedTurns: Set<string>;
   selectableSessionId: string;
@@ -96,58 +95,6 @@ export interface MessageListProps {
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
 export type ChatVariant = "default" | "concierge";
-
-// Submission helpers — read a handoff child's messages to drive the composer's
-// Approve affordance. Exported for Chat; pure over a message list.
-
-// A user turn that carries actual typed text — a reply to the agent. The
-// approval-resolution turn (interaction_result only, no text) does NOT count,
-// so it can't supersede the card it's resolving.
-function isHumanReply(msg: ChatMessage): boolean {
-  return parseMessageEntries(msg).some((b) => b.type === "text" && b.content.trim().length > 0);
-}
-
-// The newest still-actionable submission: the specialist's latest submit_output
-// payload, unless the guardian has since replied (which supersedes it until a
-// re-submit). Drives the composer's Approve button.
-export function findActiveSubmission(
-  messages: ChatMessage[],
-): { messageId: string; payload: Record<string, unknown> } | null {
-  let active: { messageId: string; payload: Record<string, unknown> } | null = null;
-  for (const msg of messages) {
-    if (msg.role === "assistant") {
-      const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
-      if (card) active = { messageId: msg.id, payload: card.payload };
-    } else if (msg.role === "user" && active && isHumanReply(msg)) {
-      active = null;
-    }
-  }
-  return active;
-}
-
-// The most recent submission payload, ignoring the supersede rule — verbal
-// approval authorizes the standing submission even though the guardian's "yes"
-// just superseded it for the button.
-export function findLastSubmission(messages: ChatMessage[]): Record<string, unknown> | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role !== "assistant") continue;
-    const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
-    if (card) return card.payload;
-  }
-  return null;
-}
-
-// True once the specialist has relayed the guardian's verbal approval (a
-// `handback_approved` block with no later submission superseding it).
-export function hasPendingApprovalConfirmation(messages: ChatMessage[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const blocks = parseMessageEntries(messages[i]);
-    if (blocks.some((b) => b.type === "handback_approved")) return true;
-    if (blocks.some((b) => b.type === "submission_card")) return false;
-  }
-  return false;
-}
 
 function ArchivedTraceNote() {
   const { t } = useTranslation("activity");
@@ -366,7 +313,6 @@ const RowView = memo(function RowView({
 });
 
 // A block without an agent row at its transcript position carries its own header.
-// Persisted cards stay in RowView so their local state survives the handoff.
 function StandaloneLiveTail({
   live,
   actions,

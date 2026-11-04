@@ -1,8 +1,12 @@
 import { describe, expect, it, afterEach, beforeEach, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { MessageRepository } from "../chats/storage/message-repository.js";
+import { type Message, type RecordedMessage } from "../chats/storage/message.js";
+import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import { TurnLinks } from "../sessions/turn-links.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   AgentTraceRecorder,
   recordAgentTraceBestEffort,
@@ -385,6 +389,46 @@ describe("AgentTraceRecorder", () => {
 
     const transcript = await repo.getMessages("channel:atomic-session");
     expect(transcript.map((message) => message.role)).toEqual(["trace"]);
+  });
+
+  it("keeps recording a turn in a chat after its answer could not be said", async () => {
+    class Failing extends MessageRepository {
+      override record(message: Message): RecordedMessage | null {
+        if (message.body.text === "done") throw new Error("disk full");
+        return super.record(message);
+      }
+    }
+    const chats = new ChatsWebChatRepository(testDb.db, {
+      links: new TurnLinks(testDb.db),
+      lines: new Failing(testDb.db),
+    });
+    await chats.createSession("fork-1", "Fork");
+    const recorder = new AgentTraceRecorder({
+      webchatRepo: chats,
+      agentName: "main",
+      turnId: "turn-1",
+      existingSessionId: "fork-1",
+      traceMessageId: "trace-1",
+      persistTranscript: true,
+    });
+    const warn = rs.fn();
+    const record = (msg: Parameters<AgentTraceRecorder["record"]>[0]) =>
+      recordAgentTraceBestEffort(recorder, msg, { warn }, { turnId: "turn-1", source: "test" });
+
+    await record({ type: "turn_start", turnId: "turn-1", sessionId: "p-1", userPrompt: "hi" });
+    await record({ type: "result", content: "done" });
+    await record({ type: "turn_end", turnId: "turn-1", status: "completed", durationMs: 5 });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const blocks = testDb.db
+      .select()
+      .from(romeAgentTraceBlocks)
+      .where(eq(romeAgentTraceBlocks.messageId, "trace-1"))
+      .all();
+    expect(blocks.map((block) => [block.seq, JSON.parse(block.content).type])).toEqual([
+      [0, "turn_start"],
+      [1, "turn_end"],
+    ]);
   });
 
   it("keeps recorder failures best-effort", async () => {

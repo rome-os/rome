@@ -12,6 +12,8 @@ import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { Chat } from "./Chat";
+import enChat from "@/i18n/locales/en/chat.json";
+import zhChat from "@/i18n/locales/zh-CN/chat.json";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
 import {
@@ -32,10 +34,10 @@ import {
   postSessionTurn,
 } from "@/lib/chat-api";
 
-const t = (key: string) => key;
+let agentRoleLabel = enChat.roles.agent;
+const t = (key: string) => (key === "roles.agent" ? agentRoleLabel : key);
 const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
-const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
@@ -178,7 +180,7 @@ rs.mock("@/components/chat/MessageList", () => ({
         id?: string;
         content: string;
         traceArchived?: boolean;
-        sender?: { name: string | null; avatarUrl: string | null };
+        sender?: { name: string | null; avatarUrl?: string | null; onBehalfOf?: { kind: string } };
       };
     }[];
   }) => (
@@ -209,6 +211,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-row-key={row.key}
             data-timeline-anchor={row.message?.id}
             data-sender={row.message?.sender?.name}
+            data-on-behalf={row.message?.sender?.onBehalfOf?.kind}
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
             {row.message?.content}
@@ -226,9 +229,6 @@ rs.mock("@/components/chat/MessageList", () => ({
         ))}
     </>
   ),
-  findActiveSubmission: mockFindActiveSubmission,
-  findLastSubmission: () => null,
-  hasPendingApprovalConfirmation: () => false,
 }));
 
 rs.mock("@/components/chat/ChatComposer", () => ({
@@ -665,6 +665,19 @@ describe("Chat agent identity", () => {
     expect(screen.queryByLabelText("navbar.sessionModel")).toBeNull();
   });
 
+  it.each([
+    ["en", enChat.roles.agent],
+    ["zh-CN", zhChat.roles.agent],
+  ])("names an unnamed main agent Rome in %s ordinary replies", (_locale, label) => {
+    agentRoleLabel = label;
+    try {
+      renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  " />);
+      expect(screen.getByTestId("message-list").textContent).toBe("Rome");
+    } finally {
+      agentRoleLabel = enChat.roles.agent;
+    }
+  });
+
   it("uses the guardian-chosen name for the default main agent", () => {
     renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  Atlas  " />);
 
@@ -912,35 +925,6 @@ describe("Chat history paging", () => {
     await waitFor(() => expect(shownKeys()).toEqual(["user-6", "user-7", "user-8", "user-9"]));
     expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c9" });
   });
-
-  it("loads a handoff child whole, since its messages are spliced into the transcript", async () => {
-    const handoff = {
-      id: "handoff-msg",
-      sessionId: "session-1",
-      turnId: "turn-1",
-      role: "assistant" as const,
-      content: JSON.stringify([
-        {
-          type: "handoff",
-          toolUseId: "tool-1",
-          appId: "app",
-          childSessionId: "child-1",
-          payload: {},
-        },
-      ]),
-      createdAt: "2026-10-27T12:00:00.000Z",
-    };
-    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
-      messages: [handoff],
-      nextCursor: null,
-    });
-    renderChat(<Chat sessionId="session-1" />);
-
-    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledWith("child-1"));
-    expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[0])).toEqual([
-      "session-1",
-    ]);
-  });
 });
 
 describe("Chat session recovery", () => {
@@ -1112,6 +1096,73 @@ describe("Chat turn poll", () => {
     await flush();
     expect(turnLookups()).toBe(2);
     expect(rs.mocked(openTurnStream).mock.calls.map(([turnId]) => turnId)).toEqual(["turn-9"]);
+    expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+
+  it.each([
+    false,
+    true,
+  ])("loads a remote automated input before its reply ends, on behalf: %s", async (onBehalf) => {
+    const socket = await renderIdle();
+    let loaded!: (messages: import("@/lib/chat-types").ChatMessage[]) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          loaded = resolve;
+        }),
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "remote-turn", status: "running" }]);
+    rs.mocked(openTurnStream).mockImplementationOnce(
+      async (_id, signal) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(
+                  'event: input_status\ndata: {"type":"input_status","inputId":"remote-input","turnId":"remote-turn","state":"accepted"}\n\n',
+                ),
+              );
+              signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        ),
+    );
+    act(() =>
+      socket.receive({
+        type: "event",
+        topic: sessionTopic,
+        event: "session_running",
+        data: { sessionId: "session-1", running: true },
+      }),
+    );
+    await flush();
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    // While the read is pending, no sender-less own-message placeholder is painted.
+    expect(screen.queryByTestId("user-row")).toBeNull();
+    await act(async () =>
+      loaded([
+        {
+          id: "remote-input",
+          sessionId: "session-1",
+          turnId: "remote-turn",
+          role: "user",
+          createdAt: "2026-10-24T12:00:00Z",
+          content: "Remote input",
+          sender: {
+            kind: "automated",
+            sourceType: "app",
+            name: "Daily Report",
+            iconUrl: null,
+            ...(onBehalf ? { onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null } } : {}),
+          },
+        },
+      ]),
+    );
+    await flush();
+    expect(screen.getByTestId("user-row").getAttribute("data-sender")).toBe("Daily Report");
+    expect(screen.getByTestId("user-row").getAttribute("data-on-behalf")).toBe(
+      onBehalf ? "guardian" : null,
+    );
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
   });
 
@@ -1600,166 +1651,10 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
-  it("keeps a background turn's replayed trace and widgets from retargeting the host", async () => {
-    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-    const encoder = new TextEncoder();
-    const dropping: ReadableStreamDefaultController<Uint8Array>[] = [];
-    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
-    rs.mocked(listSessionTurns)
-      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
-      .mockResolvedValue([]);
-    rs.mocked(openTurnStream)
-      .mockImplementationOnce(() =>
-        Promise.resolve(
-          new Response(new ReadableStream<Uint8Array>({ start: (c) => void dropping.push(c) })),
-        ),
-      )
-      .mockImplementationOnce(() =>
-        Promise.resolve(
-          new Response(
-            new ReadableStream<Uint8Array>({
-              start(c) {
-                c.enqueue(
-                  encoder.encode(
-                    'event: segment_upsert\ndata: {"id":"seg-1","kind":"text"}\n\n' +
-                      'event: widget_placement\ndata: {"appId":"notes"}\n\n' +
-                      'event: done\ndata: {"success":true}\n\n',
-                  ),
-                );
-                c.close();
-              },
-            }),
-          ),
-        ),
-      );
-    const onSessionMessage = rs.fn();
-    try {
-      renderChat(<Chat sessionId="session-1" onSessionMessage={onSessionMessage} />);
-      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
-
-      // The parent hands the floor to a specialist child.
-      act(() => {
-        MockEventSource.instances[0]?.emit("message_insert", {
-          id: "m-handoff",
-          sessionId: "session-1",
-          turnId: "turn-1",
-          role: "assistant",
-          content: JSON.stringify([
-            {
-              type: "handoff",
-              toolUseId: "h1",
-              appId: "workflow-studio",
-              childSessionId: "child-1",
-              payload: { agentLabel: "Planner" },
-            },
-          ]),
-          createdAt: "2026-10-06T00:00:00.000Z",
-        });
-      });
-      await waitFor(() =>
-        expect(onSessionMessage).toHaveBeenCalledWith(
-          expect.objectContaining({ sessionId: "child-1" }),
-        ),
-      );
-      onSessionMessage.mockClear();
-
-      // The parent's stream drops and its resumed replay carries a segment.
-      await act(async () => {
-        dropping[0]!.error(new TypeError("network connection was lost"));
-      });
-      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(2), { timeout: 3_000 });
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      });
-      expect(onSessionMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: "session-1", segment: expect.anything() }),
-      );
-      expect(applyAgentPlacement).not.toHaveBeenCalled();
-    } finally {
-      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
-    }
-  });
-
-  it("keeps a background turn's failure off the floor composer", async () => {
-    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-    const encoder = new TextEncoder();
-    const dropping: ReadableStreamDefaultController<Uint8Array>[] = [];
-    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
-    rs.mocked(listSessionTurns)
-      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
-      .mockResolvedValue([]);
-    rs.mocked(openTurnStream)
-      .mockImplementationOnce(() =>
-        Promise.resolve(
-          new Response(new ReadableStream<Uint8Array>({ start: (c) => void dropping.push(c) })),
-        ),
-      )
-      .mockImplementationOnce(() =>
-        Promise.resolve(
-          new Response(
-            new ReadableStream<Uint8Array>({
-              start(c) {
-                c.enqueue(
-                  encoder.encode('event: done\ndata: {"success":false,"error":"parent boom"}\n\n'),
-                );
-                c.close();
-              },
-            }),
-          ),
-        ),
-      );
-    const onSessionMessage = rs.fn();
-    try {
-      renderChat(<Chat sessionId="session-1" onSessionMessage={onSessionMessage} />);
-      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
-
-      // The parent hands the floor to a specialist child.
-      act(() => {
-        MockEventSource.instances[0]?.emit("message_insert", {
-          id: "m-handoff",
-          sessionId: "session-1",
-          turnId: "turn-1",
-          role: "assistant",
-          content: JSON.stringify([
-            {
-              type: "handoff",
-              toolUseId: "h1",
-              appId: "workflow-studio",
-              childSessionId: "child-1",
-              payload: { agentLabel: "Planner" },
-            },
-          ]),
-          createdAt: "2026-10-06T00:00:00.000Z",
-        });
-      });
-      await waitFor(() =>
-        expect(onSessionMessage).toHaveBeenCalledWith(
-          expect.objectContaining({ sessionId: "child-1" }),
-        ),
-      );
-
-      // The parent's stream drops and its resumed replay ends the turn failed.
-      await act(async () => {
-        dropping[0]!.error(new TypeError("network connection was lost"));
-      });
-      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(2), { timeout: 3_000 });
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      });
-      expect(screen.queryByTestId("stream-error")).toBeNull();
-    } finally {
-      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
-    }
-  });
-
   it.each([
-    ["done", '{"success":false,"error":"floor boom"}'],
-    ["stream_error", '{"error":"floor boom"}'],
-  ])("shows the floor turn's own %s failure on the composer", async (event, data) => {
+    ["done", '{"success":false,"error":"turn boom"}'],
+    ["stream_error", '{"error":"turn boom"}'],
+  ])("shows the turn's own %s failure on the composer", async (event, data) => {
     const encoder = new TextEncoder();
     const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
     rs.mocked(listSessionTurns)
@@ -1779,9 +1674,7 @@ describe("Chat turn stream lifecycle", () => {
     );
     try {
       renderChat(<Chat sessionId="session-1" />);
-      await waitFor(() =>
-        expect(screen.getByTestId("stream-error").textContent).toBe("floor boom"),
-      );
+      await waitFor(() => expect(screen.getByTestId("stream-error").textContent).toBe("turn boom"));
     } finally {
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
       rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
@@ -1953,46 +1846,6 @@ describe("Chat while a turn streams text", () => {
 
     expect(renders.chat).toBeLessThanOrEqual(2);
     expect(renders.composer).toBe(0);
-  });
-});
-
-describe("Chat tab status", () => {
-  afterEach(() => {
-    mockFindActiveSubmission.mockReturnValue(null);
-    rs.mocked(listSessionMessages).mockResolvedValue([]);
-    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-  });
-
-  it("counts a specialist submission waiting on Approve as needing the guardian", async () => {
-    mockFindActiveSubmission.mockReturnValue({ messageId: "sub-1", payload: { plan: "x" } });
-    rs.mocked(listSessionTurns).mockResolvedValue([]);
-    rs.mocked(listSessionMessages).mockImplementation(async (sessionId: string) =>
-      sessionId === "session-1"
-        ? [
-            {
-              id: "m-handoff",
-              sessionId: "session-1",
-              turnId: "turn-1",
-              role: "assistant",
-              content: JSON.stringify([
-                {
-                  type: "handoff",
-                  toolUseId: "h1",
-                  appId: "workflow-studio",
-                  childSessionId: "child-1",
-                  payload: { agentLabel: "Planner" },
-                },
-              ]),
-              createdAt: "2026-10-05T00:00:00.000Z",
-            },
-          ]
-        : [],
-    );
-    renderChat(<Chat sessionId="session-1" />);
-
-    await waitFor(() =>
-      expect(mockUseChatTabStatus).toHaveBeenLastCalledWith(false, true, false, expect.any(Number)),
-    );
   });
 });
 

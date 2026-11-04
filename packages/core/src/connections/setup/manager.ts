@@ -27,7 +27,7 @@ import type { PeopleRepository } from "../../db/repositories/people.js";
 import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
-} from "../../channels/guardian-mapping.js";
+} from "../../people/guardian-mapping.js";
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
@@ -328,7 +328,9 @@ export class SetupManager {
       // tell a platform apart by, so the kind names it.
       const platform = platformOf(target.connectionKind);
       const plan = channelUserId
-        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId)
+        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId, {
+            addOnly: given.addsGuardianAccount,
+          })
         : null;
       const opts = {
         ...(plan && channelUserId

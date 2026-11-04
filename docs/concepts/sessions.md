@@ -20,16 +20,16 @@ A Rome session is the durable product boundary around one continuous body of age
 
 ## Model pin
 
-A session remembers the concrete model that produced its history — the **session model pin** — and requests exactly that model on every later turn and resume ([ADR](../adrs/pinned-session-model-fails-closed.md)). Because a pinned session does not drift to another model on its own, its conversation stays reproducible and its prompt cache survives an entitlement or setting change mid-thread.
+A session remembers the concrete model that produced its history — the **session model pin** — and requests exactly that model on every later turn and resume ([ADR](../adrs/pinned-session-model-fails-closed.md)). Except for [Concierge quota failover](../adrs/concierge-quota-failover.md), a pinned session does not move to another model on its own. Its prompt cache survives an entitlement or setting change mid-thread.
 
 **Contracts:**
 
-- A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
+- A successful turn establishes or updates the pin. Only the Concierge chat may change providers automatically through [quota failover](../adrs/concierge-quota-failover.md), and its note names the reason. Other pinned sessions never drift to another model on their own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
 - Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
 - The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again. A side chat promoted to a chat, and a chat with a handoff open, show no selector.
 - A pick on the same provider continues the provider thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
 - The chat shows a short centered note before the first turn that ran on another model than the session's previous turn. It names the model that ran, as the turn's accounting records it, so two picks that a custom provider maps to one model show no note.
-- A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
+- Outside Concierge quota failover, a pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
 - Each successful model turn also records the reasoning effort it ran with, as the provider reports it and in the provider's own terms (for example Claude's `max`, Codex's `xhigh`). Webchat shows that value beside the pinned model, without mapping it to the composer's effort labels. The recorded effort is for display only and never seeds a later turn's effort, which each turn still takes from its own request or the agent's configured effort.
@@ -88,16 +88,11 @@ There are no session-type exceptions: an old subagent remains visible under an a
 A new message reactivates the session and its descendants, not its ancestors or siblings.
 If every session in a tree is idle, all of its traces are archived.
 
-Handoffs have no `parentSessionId`. Their link lives in a transcript card. They use their own session activity.
-The chat view loads a handoff child's history separately and splices it into the visible transcript.
-The calling session's trace summaries and descendant cost rollups do not read handoff traces.
-A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
-
 This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
 Reactivation reveals retained traces while their blocks remain in the database.
 The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
 The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
-Step 2 will add its own archival selection query and must account for handoff links before removing traces.
+Step 2 will add its own archival selection query.
 
 ## Event
 

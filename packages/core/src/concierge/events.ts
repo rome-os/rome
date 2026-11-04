@@ -5,7 +5,7 @@
 import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import type { AgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
 import { createLogger } from "../logger.js";
-import { NUDGE_PROMPT, shouldNudge } from "./nudge.js";
+import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
   CONCIERGE_ACCOUNT,
   type ConciergeService,
@@ -127,6 +127,7 @@ export function startConciergeEvents(
   dispatcher: Pick<AgentLifecycleDispatcher, "onFinished">,
 ): () => void {
   const remindersRunning = new Set<string>();
+  const recoveriesRunning = new Set<string>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
   const coalescer = new TaskEventCoalescer({
@@ -145,7 +146,24 @@ export function startConciergeEvents(
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
     const reminderRunning = remindersRunning.has(chatId);
+    // Snapshot before awaiting settings: a recovery's finish must not recover
+    // again after the running recovery returns and clears its guard.
+    if (recoveriesRunning.has(chatId)) return;
     if (!(await service.isEnabled())) return;
+    if (event.status === "error") {
+      recoveriesRunning.add(chatId);
+      try {
+        const switched = await service.switchIfExhausted(chatId);
+        if (switched)
+          await service.runSystemTurn(
+            chatId,
+            quotaRecoveryPrompt(switched.from === "openai" ? "Codex" : "Claude"),
+          );
+      } finally {
+        recoveriesRunning.delete(chatId);
+      }
+      return;
+    }
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,

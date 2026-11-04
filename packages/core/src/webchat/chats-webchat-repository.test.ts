@@ -1,0 +1,857 @@
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { backfillLegacyChats } from "../db/chats-backfill.js";
+import { resolveChatSenders } from "../api/routes/chat-senders.js";
+import { resolveReply } from "../api/routes/webchat-reply.js";
+import type { ChatId } from "@rome-os/app-runtime";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
+import { ChatRepository } from "../chats/storage/chat-repository.js";
+import { chatKey } from "../chats/storage/place.js";
+import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { type Message, type RecordedMessage } from "../chats/storage/message.js";
+import { MessageRepository } from "../chats/storage/message-repository.js";
+import { TurnLinks } from "../sessions/turn-links.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
+
+// The dashboard's repository over Chats' tables. What these pin: a dashboard
+// chat is a webchat DM keyed by its session, its user and assistant lines are
+// Chats' lines linked to their turns and read back as the transcript, a
+// session's traces stay its own, and a session in no chat keeps its own lines.
+
+const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+
+describe("ChatsWebChatRepository", () => {
+  let testDb: TestDb;
+  let repo: ChatsWebChatRepository;
+  let links: TurnLinks;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    links = new TurnLinks(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db, { links });
+  });
+  afterEach(() => testDb.close());
+
+  const session = (id: string) =>
+    testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id)).get();
+  const ownRows = (id: string) =>
+    testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all();
+
+  it("keeps legacy Concierge attribution and human identities through startup backfill", async () => {
+    const legacy = new WebChatRepository(testDb.db);
+    await legacy.createSession("old-chat", "Before the switch");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    await legacy.recordUserInput("old-concierge", "old-chat", text("Find flights"), guardian, {
+      platform: "webchat",
+      id: "core:concierge",
+    });
+    await legacy.recordUserInput("old-loopback", "old-chat", text("Loopback"), {
+      ...guardian,
+      via: "loopback",
+    });
+    await legacy.recordUserInput("old-cookie", "old-chat", text("Typed"), guardian);
+    await legacy.recordUserInput("old-visitor", "old-chat", text("Visitor"), {
+      kind: "visitor",
+      accountId: "alex",
+      email: "alex@example.com",
+    });
+    backfillLegacyChats(testDb.db);
+    const deps = {
+      db: testDb.db,
+      settingsRepo: { get: async () => "Ray" },
+      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      appCatalog: { get: () => undefined },
+    } as never;
+    const sources = await repo.getUserMessageSources("old-chat");
+    expect(sources).toEqual(new Map([["old-concierge", "core:concierge"]]));
+    const senders = await resolveChatSenders(
+      deps,
+      await repo.getUserMessageActors("old-chat"),
+      sources,
+    );
+    expect(senders.get("old-concierge")).toMatchObject({ kind: "automated", name: "Concierge" });
+    expect(senders.get("old-concierge")).not.toHaveProperty("onBehalfOf");
+    expect(senders.get("old-loopback")).toMatchObject({ kind: "guardian", name: "Ray" });
+    expect(senders.get("old-cookie")).toMatchObject({ kind: "guardian", name: "Ray" });
+    expect(senders.get("old-visitor")).toMatchObject({
+      kind: "visitor",
+      name: "alex@example.com",
+      accountId: "alex",
+    });
+    expect(await repo.getReplyTarget("old-chat", "old-concierge")).not.toBeNull();
+    const page = await repo.getMessagesPage("old-chat", { limit: 10 });
+    expect(page.rows.map((message) => message.id).sort()).toEqual([
+      "old-concierge",
+      "old-cookie",
+      "old-loopback",
+      "old-visitor",
+    ]);
+  });
+
+  it.each([
+    "cookie",
+    "loopback",
+  ] as const)("reads a Concierge input speaking for the guardian via %s", async (via) => {
+    await repo.createSession("concierge-source", "Concierge");
+    const actor = { kind: "guardian" as const, userId: "seat", via };
+    await repo.recordUserInput("concierge-input", "concierge-source", "[]", actor, {
+      platform: "webchat",
+      id: "core:concierge",
+    });
+    const target = await repo.getReplyTarget("concierge-source", "concierge-input");
+    expect(target?.senderId).toBe("core:concierge");
+    expect(target?.actor?.kind).toBe("guardian");
+    expect((await repo.getUserMessageActors("concierge-source")).get("concierge-input")?.kind).toBe(
+      "guardian",
+    );
+    expect(await repo.getUserMessageSources("concierge-source")).toEqual(
+      new Map([["concierge-input", "core:concierge"]]),
+    );
+    const deps = {
+      db: testDb.db,
+      webchatRepo: repo,
+      settingsRepo: { get: async () => "Ray" },
+      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      appCatalog: { get: () => undefined },
+    } as never;
+    const senders = await resolveChatSenders(
+      deps,
+      await repo.getUserMessageActors("concierge-source"),
+      await repo.getUserMessageSources("concierge-source"),
+    );
+    expect(senders.get("concierge-input")).toMatchObject({
+      kind: "automated",
+      name: "Concierge",
+      onBehalfOf: { kind: "guardian", name: "Ray" },
+    });
+    await repo.recordUserInput(
+      "concierge-quote",
+      "concierge-source",
+      JSON.stringify([{ type: "text", content: "Status?" }]),
+      actor,
+      { platform: "webchat", id: "core:concierge" },
+    );
+    const quote = await resolveReply(deps, {
+      sessionId: "concierge-source",
+      messageId: "concierge-quote",
+      ownRowOnly: true,
+    });
+    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Concierge" } });
+    if (quote.ok) expect(quote.promptLine).toContain("Concierge: Status?");
+  });
+
+  it.each([
+    "automated::1::agent:core:main",
+    "automated::1::app:daily-report",
+    "automated::0::agent:coding:coding",
+    "automated::0::app:daily-report",
+    "automated::0::routine:Morning briefing",
+    "automated::0::unknown",
+    "core:concierge",
+    "visitor:assistant",
+    "automated:assistant",
+  ])("keeps source %s separate from ownership and reads it for replies", async (senderId) => {
+    await repo.createSession("source-chat", "Sources");
+    const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+    expect(
+      await repo.recordUserInput("source-input", "source-chat", "[]", actor, {
+        platform: "webchat",
+        id: senderId,
+      }),
+    ).toBe(true);
+    expect(await repo.getUserMessageSources("source-chat")).toEqual(
+      new Map([["source-input", senderId]]),
+    );
+    expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
+    expect((await repo.getMessagesPage("source-chat", { limit: 1 })).rows[0]).toMatchObject({
+      id: "source-input",
+      role: "user",
+    });
+    await repo.updateUserInput("source-chat", {
+      type: "input_status",
+      inputId: "source-input",
+      turnId: "source-turn",
+      state: "accepted",
+    });
+    expect(await repo.getTurnChatMessages("source-chat", "source-turn")).toMatchObject([
+      { id: "source-input", role: "user", senderId },
+    ]);
+    expect(await repo.getUserInput("source-chat", "source-input")).toMatchObject({
+      turnId: "source-turn",
+      inputState: "accepted",
+    });
+    if (senderId.startsWith("automated::")) {
+      expect((await repo.getUserMessageActors("source-chat")).get("source-input")?.kind).toBe(
+        "guardian",
+      );
+    }
+    expect(await repo.getReplyTarget("another-chat", "source-input")).toBeNull();
+    expect(await repo.getSessionOwnerKey("source-chat")).toBeNull();
+    const line = testDb.db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.key, "source-input"))
+      .get();
+    expect(line?.senderAccountId).toBe(
+      senderId.startsWith("automated::")
+        ? senderId
+        : senderId === "core:concierge"
+          ? "guardian"
+          : `agent:${senderId}`,
+    );
+    expect(line?.senderAgent).toBe(senderId.startsWith("automated::") ? null : senderId);
+    await repo.recordUserInput("old-loopback", "source-chat", "[]", actor);
+    expect((await repo.getUserMessageSources("source-chat")).has("old-loopback")).toBe(false);
+    expect((await repo.getUserMessageActors("source-chat")).get("old-loopback")?.kind).toBe(
+      "guardian",
+    );
+  });
+  it("starts a webchat chat for a new session, keyed by the session", async () => {
+    await repo.createSession("chat-1", "Plans", undefined, undefined, null, null, "writer");
+
+    const row = session("chat-1");
+    const chat = testDb.db
+      .select()
+      .from(chats)
+      .where(eq(chats.id, row?.chatId ?? -1))
+      .get();
+    expect(chat?.platform).toBe("webchat");
+    expect(chat?.key).toBe("chat-1");
+    expect(chat?.kind).toBe("dm");
+    expect(row?.accountId).toBe("agent:writer");
+  });
+
+  it("says a turn's prompt and answer in the chat and reads them back as its transcript", async () => {
+    await repo.createSession("chat-1", "Plans");
+    expect(await repo.recordUserInput("in-1", "chat-1", text("Hi"))).toBe(true);
+    expect(await repo.getUserInput("chat-1", "in-1")).toEqual({
+      turnId: null,
+      inputState: "queued",
+    });
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.addMessage("out-1", "chat-1", "assistant", text("Hello"), "turn-1");
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+
+    expect(testDb.db.select().from(chatMessages).all()).toHaveLength(2);
+    expect(ownRows("chat-1").map((row) => row.role)).toEqual(["trace"]);
+    const transcript = await repo.getMessages("chat-1");
+    expect(transcript.map((line) => [line.id, line.role, line.turnId])).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["trace-1", "trace", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+    expect(transcript[0]?.inputState).toBe("accepted");
+    expect(await repo.getUserInput("chat-1", "in-1")).toEqual({
+      turnId: "turn-1",
+      inputState: "accepted",
+    });
+    expect(await repo.getMessageCount("chat-1")).toBe(3);
+    expect(await repo.hasTurnInSession("chat-1", "turn-1")).toBe(true);
+    expect(
+      (await repo.getTurnChatMessages("chat-1", "turn-1")).map((line) => [line.id, line.role]),
+    ).toEqual([
+      ["in-1", "user"],
+      ["out-1", "assistant"],
+    ]);
+    expect((await repo.getReplyTarget("chat-1", "out-1"))?.role).toBe("assistant");
+    expect((await repo.getUserMessageActors("chat-1")).get("in-1")?.kind).toBe("guardian");
+  });
+
+  it("pages a chat's transcript by turn", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("in-1", "chat-1", "user", text("One"), "turn-1");
+    await repo.addMessage("out-1", "chat-1", "assistant", text("1"), "turn-1");
+    await repo.addMessage("in-2", "chat-1", "user", text("Two"), "turn-2");
+    await repo.addMessage("out-2", "chat-1", "assistant", text("2"), "turn-2");
+
+    const page = await repo.getMessagesPage("chat-1", { limit: 1 });
+    expect(page.rows.map((line) => line.id)).toEqual(["in-2", "out-2"]);
+    expect(page.nextCursor).not.toBeNull();
+    const older = await repo.getMessagesPage("chat-1", { limit: 1, before: page.nextCursor });
+    expect(older.rows.map((line) => line.id)).toEqual(["in-1", "out-1"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("keeps the lines of a session in no chat as its own", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
+
+    expect(session("fork-1")?.chatId).toBeNull();
+    expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
+    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+  });
+
+  it("moves a promoted fork's lines into its new chat, linked to their turns", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
+    await repo.addMessage("out-1", "fork-1", "assistant", text("Hello"), "turn-1");
+
+    await repo.promoteForkToChat("fork-1");
+
+    expect(session("fork-1")?.chatId).not.toBeNull();
+    expect(ownRows("fork-1")).toHaveLength(0);
+    expect(
+      (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
+    ).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+  });
+  it("says the prompt and answer of a fork promoted while its turn runs in its chat", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.promoteForkToChat("fork-1");
+    await repo.appendTraceBlocks({
+      messageId: "trace-1",
+      sessionId: "fork-1",
+      turnId: "turn-1",
+      startSeq: 0,
+      blocks: [{ type: "text", content: "thinking" }],
+      transcriptMessages: [
+        { id: "in-1", sessionId: "fork-1", turnId: "turn-1", role: "user", content: text("Hi") },
+        {
+          id: "out-1",
+          sessionId: "fork-1",
+          turnId: "turn-1",
+          role: "assistant",
+          content: text("Hello"),
+        },
+      ],
+    });
+
+    expect(ownRows("fork-1").map((row) => row.role)).toEqual(["trace"]);
+    expect(
+      (await repo.getMessages("fork-1")).map((line) => [line.id, line.role, line.turnId]),
+    ).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["trace-1", "trace", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+  });
+
+  it("leaves a fork whose promotion failed a fork, so promoting it again finishes", async () => {
+    let failures = 1;
+    class Failing extends MessageRepository {
+      override record(message: Message): RecordedMessage | null {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("disk full");
+        }
+        return super.record(message);
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, {
+      links,
+      lines: new Failing(testDb.db),
+    });
+    await failing.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await failing.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
+
+    await expect(failing.promoteForkToChat("fork-1")).rejects.toThrow("disk full");
+    expect(session("fork-1")?.type).toBe("fork");
+    expect(session("fork-1")?.chatId).toBeNull();
+    expect(ownRows("fork-1")).toHaveLength(1);
+
+    await failing.promoteForkToChat("fork-1");
+    expect(session("fork-1")?.chatId).not.toBeNull();
+    expect((await failing.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+  });
+
+  it("refuses an answer it could not record, and emits nothing", async () => {
+    class Failing extends MessageRepository {
+      override record(): RecordedMessage | null {
+        throw new Error("disk full");
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, {
+      links,
+      lines: new Failing(testDb.db),
+    });
+    await failing.createSession("chat-1", "Plans");
+    const emitted: string[] = [];
+    failing.onMessageInserted((message) => emitted.push(message.id));
+
+    await expect(failing.addBackendReplyMessage("chat-1", "turn-1", "Hello")).rejects.toThrow(
+      "disk full",
+    );
+    expect(emitted).toEqual([]);
+  });
+
+  it("writes nothing of a trace batch whose answer could not be said, so a retry finishes it", async () => {
+    let failures = 1;
+    class Failing extends MessageRepository {
+      override record(message: Message): RecordedMessage | null {
+        if (message.key === "out-1" && failures > 0) {
+          failures -= 1;
+          throw new Error("disk full");
+        }
+        return super.record(message);
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, {
+      links,
+      lines: new Failing(testDb.db),
+    });
+    await failing.createSession("chat-1", "Plans");
+    const batch = {
+      messageId: "trace-1",
+      sessionId: "chat-1",
+      turnId: "turn-1",
+      startSeq: 0,
+      blocks: [{ type: "text", content: "thinking" }],
+      transcriptMessages: [
+        {
+          id: "in-1",
+          sessionId: "chat-1",
+          turnId: "turn-1",
+          role: "user" as const,
+          content: text("Hi"),
+        },
+        {
+          id: "out-1",
+          sessionId: "chat-1",
+          turnId: "turn-1",
+          role: "assistant" as const,
+          content: text("Hello"),
+        },
+      ],
+    };
+
+    await expect(failing.appendTraceBlocks(batch)).rejects.toThrow("disk full");
+    expect(ownRows("chat-1")).toEqual([]);
+    expect(testDb.db.select().from(chatMessages).all()).toEqual([]);
+    await failing.appendTraceBlocks(batch);
+    expect(
+      (await failing.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]),
+    ).toEqual([
+      ["in-1", "user", "turn-1"],
+      ["trace-1", "trace", "turn-1"],
+      ["out-1", "assistant", "turn-1"],
+    ]);
+  });
+
+  it("records an input with its queued link or not at all", async () => {
+    let failures = 1;
+    class Failing extends TurnLinks {
+      override prompt(...args: Parameters<TurnLinks["prompt"]>): void {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("disk full");
+        }
+        super.prompt(...args);
+      }
+    }
+    const failing = new ChatsWebChatRepository(testDb.db, { links: new Failing(testDb.db) });
+    await failing.createSession("chat-1", "Plans");
+
+    await expect(failing.recordUserInput("in-1", "chat-1", text("Hi"))).rejects.toThrow(
+      "disk full",
+    );
+    expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
+    expect(await failing.recordUserInput("in-1", "chat-1", text("Hi"))).toBe(true);
+    expect(await failing.getUserInput("chat-1", "in-1")).toEqual({
+      turnId: null,
+      inputState: "queued",
+    });
+  });
+
+  it("reads a line a turn only caught up on by who said it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("out-0", "chat-1", "assistant", text("Reminder"));
+    const roleOf = async () =>
+      (await repo.getMessages("chat-1")).map((line) => [line.id, line.role, line.turnId]);
+    expect(await roleOf()).toEqual([["out-0", "assistant", null]]);
+
+    const line = testDb.db.select().from(chatMessages).get();
+    links.seen([line?.id ?? -1], "chat-1", "turn-2");
+    expect(await roleOf()).toEqual([["out-0", "assistant", null]]);
+  });
+  it("leaves a handoff outside Chats", async () => {
+    await repo.createSession(
+      "handoff-1",
+      "Handoff",
+      undefined,
+      undefined,
+      null,
+      null,
+      null,
+      "webchat_handoff",
+    );
+    expect(session("handoff-1")?.chatId).toBeNull();
+  });
+
+  it("keeps a chat's notifications in its transcript", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set"));
+
+    expect((await repo.getMessages("chat-1")).map((line) => [line.id, line.role])).toEqual([
+      ["note-1", "notification"],
+    ]);
+    expect(await repo.getMessageCount("chat-1")).toBe(1);
+  });
+  it("reads a channel chat's notification once, from Chats, though its old row stays", async () => {
+    const telegram = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "t-1" as ChatId),
+      "dm",
+      "Ana",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:telegram:t-1",
+      type: "channel",
+      name: "Ana",
+      agentName: null,
+    });
+    // As the backfill leaves it: the line in Chats, and its old row kept.
+    testDb.db
+      .update(romeSessions)
+      .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform, createdAt: new Date(0) })
+      .where(eq(romeSessions.id, "channel:telegram:t-1"))
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "note-1",
+        sessionId: "channel:telegram:t-1",
+        role: "notification",
+        content: text("Hi"),
+        createdAt: new Date(),
+      })
+      .run();
+    new MessageRepository(testDb.db).record({
+      direction: "toRome",
+      place: { chat: telegram.ref },
+      saidBy: { account: { platform: "telegram", id: "ana" } },
+      key: "5",
+      body: { text: "Hi" },
+      at: new Date(),
+    });
+
+    expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
+  });
+
+  it("reads its own account's copy of a message where each account holds one", async () => {
+    // A Telegram basic group numbers its messages per member account.
+    const group = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "-42" as ChatId),
+      "group",
+      "Family",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:tg-sales:-42",
+      type: "channel",
+      name: "Family",
+      agentName: null,
+    });
+    testDb.db
+      .update(romeSessions)
+      .set({
+        chatId: group.ref.id,
+        chatPlatform: group.ref.platform,
+        accountId: "111",
+        createdAt: new Date(0),
+      })
+      .where(eq(romeSessions.id, "channel:tg-sales:-42"))
+      .run();
+    const messages = new MessageRepository(testDb.db);
+    for (const key of ["111:5", "222:7"]) {
+      messages.record({
+        direction: "toRome",
+        place: { chat: group.ref },
+        saidBy: { account: { platform: "telegram", id: "ann" } },
+        key,
+        body: { text: "Yo" },
+        at: new Date(1000),
+      });
+    }
+
+    expect((await repo.getMessages("channel:tg-sales:-42")).map((line) => line.id)).toEqual([
+      "111:5",
+    ]);
+    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(1);
+  });
+
+  it("reads a steered input after the card it answers, in the same turn", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Plan a trip"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.addMessage("card-1", "chat-1", "assistant", text("Which city?"), "turn-1");
+    await repo.recordUserInput("in-2", "chat-1", text("Lisbon"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-2",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+
+    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+      "in-1",
+      "card-1",
+      "in-2",
+    ]);
+  });
+
+  it("counts what was said in a chat as its activity for trace retention", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+    testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+      .where(eq(romeAgentMessages.id, "trace-1"))
+      .run();
+    const cutoff = new Date("2026-06-01T00:00:00Z");
+    expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual(["chat-1"]);
+
+    await repo.addMessage("in-1", "chat-1", "user", text("Back again"), "turn-2");
+    expect(await repo.getTraceArchivedSessionIds(["chat-1"], cutoff)).toEqual([]);
+  });
+  it("reads a session in no chat in the order its rows were written", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.addMessage("in-1", "fork-1", "user", text("Plan a trip"), "turn-1");
+    await repo.addMessage("card-1", "fork-1", "assistant", text("Which city?"), "turn-1");
+    await repo.addMessage("in-2", "fork-1", "user", text("Lisbon"), "turn-1");
+
+    expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual([
+      "in-1",
+      "card-1",
+      "in-2",
+    ]);
+  });
+  it("keeps a promoted fork's inputs where they stand, queued or run", async () => {
+    await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+    await repo.recordUserInput("in-1", "fork-1", text("Run"));
+    await repo.updateUserInput("fork-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.recordUserInput("in-2", "fork-1", text("Then this"));
+
+    await repo.promoteForkToChat("fork-1");
+
+    expect(await repo.getUserInput("fork-1", "in-1")).toEqual({
+      turnId: "turn-1",
+      inputState: "accepted",
+    });
+    expect(await repo.getUserInput("fork-1", "in-2")).toEqual({
+      turnId: null,
+      inputState: "queued",
+    });
+  });
+
+  it("records an input an agent said into a chat as that agent's", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Status?"), undefined, {
+      platform: "webchat",
+      id: "concierge",
+    });
+
+    const line = testDb.db.select().from(chatMessages).get();
+    expect(line?.senderAgent).toBe("concierge");
+    expect(line?.senderAccountId).toBe("agent:concierge");
+
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    expect(await repo.getTurnChatMessages("chat-1", "turn-1")).toEqual([
+      { id: "in-1", role: "user", content: text("Status?"), senderId: "concierge" },
+    ]);
+  });
+
+  it("reads an input still queued after the line said before it in the same second", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2030-01-01T12:00:00.100Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.addMessage("out-0", "chat-1", "assistant", text("Reminder"));
+      rs.setSystemTime(new Date("2030-01-01T12:00:00.500Z"));
+      await repo.recordUserInput("in-1", "chat-1", text("Thanks"));
+
+      expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual(["out-0", "in-1"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("reads a trace batch's prompt, trace and answer in order across a second's edge", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2030-01-01T12:00:00.999Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.appendTraceBlocks({
+        messageId: "trace-1",
+        sessionId: "chat-1",
+        turnId: "turn-1",
+        startSeq: 0,
+        blocks: [{ type: "text", content: "thinking" }],
+        transcriptMessages: [
+          { id: "in-1", sessionId: "chat-1", turnId: "turn-1", role: "user", content: text("Hi") },
+          {
+            id: "out-1",
+            sessionId: "chat-1",
+            turnId: "turn-1",
+            role: "assistant",
+            content: text("Hello"),
+          },
+        ],
+      });
+
+      expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+        "in-1",
+        "trace-1",
+        "out-1",
+      ]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+  it("ends a deleted session's dashboard chat with every line said in it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.createSession("chat-2", "Other");
+    await repo.addMessage("in-1", "chat-1", "user", text("Hi"), "turn-1");
+    await repo.addMessage("in-2", "chat-2", "user", text("Hey"), "turn-2");
+
+    await repo.deleteSession("chat-1");
+
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "chat-2" }]);
+    expect(testDb.db.select({ key: chatMessages.key }).from(chatMessages).all()).toEqual([
+      { key: "in-2" },
+    ]);
+  });
+
+  it("ends the dashboard chats of a deleted project's sessions", async () => {
+    await repo.createSession("chat-1", "Plans", undefined, "Trips", null, "/trips");
+    await repo.createSession("chat-2", "Other", undefined, "Work", null, "/work");
+
+    expect(await repo.deleteSessionsByProjectPathPrefix("/trips")).toBe(1);
+
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "chat-2" }]);
+  });
+
+  it("leaves the channel chat a deleted session stood in", async () => {
+    const telegram = new ChatRepository(testDb.db).start(
+      chatKey("telegram", "t-1" as ChatId),
+      "dm",
+      "Ana",
+    );
+    await repo.ensureRomeSession({
+      id: "channel:telegram:t-1",
+      type: "channel",
+      name: "Ana",
+      agentName: null,
+    });
+    testDb.db
+      .update(romeSessions)
+      .set({ chatId: telegram.ref.id, chatPlatform: telegram.ref.platform })
+      .where(eq(romeSessions.id, "channel:telegram:t-1"))
+      .run();
+    const heard = new MessageRepository(testDb.db).record({
+      direction: "toRome",
+      place: { chat: telegram.ref },
+      saidBy: { account: { platform: "telegram", id: "ana" } },
+      key: "5",
+      body: { text: "Hi" },
+      at: new Date(),
+    })!;
+    links.prompt(heard.id, "channel:telegram:t-1", "turn-1");
+
+    await repo.deleteSession("channel:telegram:t-1");
+
+    expect(testDb.db.select({ key: chats.key }).from(chats).all()).toEqual([{ key: "t-1" }]);
+    expect(testDb.db.select({ key: chatMessages.key }).from(chatMessages).all()).toEqual([
+      { key: "5" },
+    ]);
+    expect(links.linkOf("channel:telegram:t-1", heard.id)).toBeNull();
+  });
+
+  it("names a session's dashboard chat with it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    const chatName = () => testDb.db.select({ name: chats.name }).from(chats).get()?.name;
+
+    await repo.updateSessionName("chat-1", "Lisbon trip");
+    expect(chatName()).toBe("Lisbon trip");
+
+    expect(await repo.updateSessionNameIfCurrent("chat-1", "Plans", "Porto trip")).toBe(false);
+    expect(chatName()).toBe("Lisbon trip");
+    expect(await repo.updateSessionNameIfCurrent("chat-1", "Lisbon trip", "Porto trip")).toBe(true);
+    expect(chatName()).toBe("Porto trip");
+  });
+
+  // The list, search and unread count read lines said only in Chats: nothing
+  // below has a row in rome_agent_messages but its trace.
+  it("lists a chat with its line count and a card that waits on the guardian", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.recordUserInput("in-1", "chat-1", text("Pick a date"));
+    await repo.updateUserInput("chat-1", {
+      type: "input_status",
+      inputId: "in-1",
+      turnId: "turn-1",
+      state: "accepted",
+    });
+    await repo.addMessage(
+      "out-1",
+      "chat-1",
+      "assistant",
+      JSON.stringify([{ type: "pending_interaction", id: "q-1" }]),
+      "turn-1",
+    );
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+
+    const [listed] = await repo.listSessions();
+    expect(listed).toMatchObject({ id: "chat-1", messageCount: 3, awaitingGuardian: true });
+  });
+
+  it("finds a chat by what was said in it", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.createSession("chat-2", "Other");
+    await repo.addMessage("out-1", "chat-1", "assistant", text("The ferry leaves at noon"));
+    await repo.addMessage("out-2", "chat-2", "assistant", text("Nothing about boats"));
+
+    const matches = await repo.searchSessionMessages("ferry NOON");
+    expect(
+      matches.map((match) => [match.session.id, match.message.id, match.message.role]),
+    ).toEqual([["chat-1", "out-1", "assistant"]]);
+    expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
+  });
+
+  it("finds a chat by a notice it keeps of its own", async () => {
+    await repo.createSession("chat-1", "Plans");
+    await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set for the ferry"));
+
+    const matches = await repo.searchSessionMessages("ferry");
+    expect(matches.map((match) => [match.session.id, match.message.id])).toEqual([
+      ["chat-1", "note-1"],
+    ]);
+  });
+
+  it("counts the lines from Rome since the chat was last read, up to a cap", async () => {
+    rs.useFakeTimers();
+    try {
+      rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+      await repo.createSession("chat-1", "Plans");
+      await repo.markSessionRead("chat-1");
+      rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
+      for (const id of ["out-1", "out-2", "out-3"]) {
+        await repo.addMessage(id, "chat-1", "assistant", text(id));
+      }
+
+      expect(await repo.countUnreadAgentMessages("chat-1", 10)).toBe(3);
+      expect(await repo.countUnreadAgentMessages("chat-1", 2)).toBe(2);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+});

@@ -64,7 +64,33 @@ describe("ReplyBar", () => {
     expect(screen.getByRole("img", { name: "Reply" })).toBeTruthy();
     expect(bar.lastElementChild?.getAttribute("aria-label")).toBe("Cancel reply");
     expect(screen.getByText("Fly to Lisbon.").className).toContain("line-clamp-2");
-    expect(screen.queryByText(/Replying to|Assistant/)).toBeNull();
+    expect(screen.queryByText(/Replying to|Rome/)).toBeNull();
+  });
+
+  it("names the automated source in both the composer and stored quote", () => {
+    const target: ReplyTarget = {
+      messageId: "m1",
+      author: "automated",
+      name: "Morning briefing",
+      preview: "Prepare today's briefing.",
+    };
+    const { unmount } = render(withDraft(draftOf({ target }), <ReplyBar />));
+    expect(screen.getByText("Morning briefing")).toBeTruthy();
+    expect(screen.queryByText("Guardian")).toBeNull();
+    unmount();
+    render(
+      <QuotedReply
+        part={{
+          type: "reply_to",
+          messageId: "m1",
+          author: "automated",
+          name: "Morning briefing",
+          text: target.preview,
+        }}
+      />,
+    );
+    expect(screen.getByText("Morning briefing")).toBeTruthy();
+    expect(screen.queryByText("Guardian")).toBeNull();
   });
 
   it("dismisses the reply from its ×", () => {
@@ -209,7 +235,7 @@ describe("QuotedReply", () => {
 
     expect(draft.jump).toHaveBeenCalledWith("m1");
     expect(screen.getByText("Fly to Lisbon.")).toBeTruthy();
-    expect(screen.queryByText("Assistant")).toBeNull();
+    expect(screen.queryByText("Rome")).toBeNull();
   });
 
   it("reads markdown as plain text", () => {

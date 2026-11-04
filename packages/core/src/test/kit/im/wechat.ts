@@ -1,4 +1,4 @@
-import { WechatAdapter } from "../../../channels/wechat.js";
+import { WechatAdapter } from "../../../connections/kinds/wechat/wechat.js";
 import { exemplar, loadCapture } from "./capture.js";
 import textCapture from "./captures/wechat-text.capture.json" with { type: "json" };
 import {

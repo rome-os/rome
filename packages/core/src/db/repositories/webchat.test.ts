@@ -1,3 +1,5 @@
+import { resolveChatSenders } from "../../api/routes/chat-senders.js";
+import { resolveReply } from "../../api/routes/webchat-reply.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb, testChatRepository, type TestDb } from "../../test/helpers.js";
@@ -101,6 +103,58 @@ describe("WebChatRepository", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it.each([
+    "cookie",
+    "loopback",
+  ] as const)("reads a Concierge input speaking for the guardian via %s", async (via) => {
+    await repo.createSession("concierge-source", "Concierge");
+    const actor = { kind: "guardian" as const, userId: "seat", via };
+    await repo.recordUserInput("concierge-input", "concierge-source", "[]", actor, {
+      platform: "webchat",
+      id: "core:concierge",
+    });
+    const target = await repo.getReplyTarget("concierge-source", "concierge-input");
+    expect(target?.senderId).toBe("core:concierge");
+    expect(target?.actor?.kind).toBe("guardian");
+    expect((await repo.getUserMessageActors("concierge-source")).get("concierge-input")?.kind).toBe(
+      "guardian",
+    );
+    expect(await repo.getUserMessageSources("concierge-source")).toEqual(
+      new Map([["concierge-input", "core:concierge"]]),
+    );
+    const deps = {
+      db: testDb.db,
+      webchatRepo: repo,
+      settingsRepo: { get: async () => "Ray" },
+      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      appCatalog: { get: () => undefined },
+    } as never;
+    const senders = await resolveChatSenders(
+      deps,
+      await repo.getUserMessageActors("concierge-source"),
+      await repo.getUserMessageSources("concierge-source"),
+    );
+    expect(senders.get("concierge-input")).toMatchObject({
+      kind: "automated",
+      name: "Concierge",
+      onBehalfOf: { kind: "guardian", name: "Ray" },
+    });
+    await repo.recordUserInput(
+      "concierge-quote",
+      "concierge-source",
+      JSON.stringify([{ type: "text", content: "Status?" }]),
+      actor,
+      { platform: "webchat", id: "core:concierge" },
+    );
+    const quote = await resolveReply(deps, {
+      sessionId: "concierge-source",
+      messageId: "concierge-quote",
+      ownRowOnly: true,
+    });
+    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Concierge" } });
+    if (quote.ok) expect(quote.promptLine).toContain("Concierge: Status?");
   });
 
   it.each([
@@ -474,6 +528,42 @@ describe("WebChatRepository", () => {
     expect((await repo.getSession("handoff"))?.parentSessionId).toBeNull();
   });
 
+  it.each([
+    "automated::1::agent:core:main",
+    "automated::1::app:daily-report",
+    "automated::0::agent:coding:coding",
+    "automated::0::app:daily-report",
+    "automated::0::routine:Morning briefing",
+    "automated::0::unknown",
+    "core:concierge",
+    "visitor:assistant",
+    "automated:assistant",
+  ])("keeps source %s separate from ownership and reads it for replies", async (senderId) => {
+    await repo.createSession("source-chat", "Sources");
+    const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+    expect(
+      await repo.recordUserInput("source-input", "source-chat", "[]", actor, {
+        platform: "webchat",
+        id: senderId,
+      }),
+    ).toBe(true);
+    expect(await repo.getUserMessageSources("source-chat")).toEqual(
+      new Map([["source-input", senderId]]),
+    );
+    expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
+    if (senderId.startsWith("automated::")) {
+      expect((await repo.getUserMessageActors("source-chat")).get("source-input")?.kind).toBe(
+        "guardian",
+      );
+    }
+    expect(await repo.getReplyTarget("another-chat", "source-input")).toBeNull();
+    expect(await repo.getSessionOwnerKey("source-chat")).toBeNull();
+    await repo.recordUserInput("old-loopback", "source-chat", "[]", actor);
+    expect((await repo.getUserMessageSources("source-chat")).has("old-loopback")).toBe(false);
+    expect((await repo.getUserMessageActors("source-chat")).get("old-loopback")?.kind).toBe(
+      "guardian",
+    );
+  });
   it("keeps the first input actor on retries by another person", async () => {
     await repo.createSession("chat", "Chat");
     const actor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };

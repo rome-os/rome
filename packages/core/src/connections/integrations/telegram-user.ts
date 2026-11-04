@@ -8,7 +8,7 @@
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the
 // inbound `ChannelMessage`, media download, send — is
-// `TelegramUserAdapter` (packages/core/src/channels/telegram-user.ts), wrapped
+// `TelegramUserAdapter` (packages/core/src/connections/kinds/telegram-user/telegram-user.ts), wrapped
 // here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
 // drive it. The transport already speaks the channel's record, so inbound and
 // send pass through without a projection.
@@ -42,7 +42,7 @@ import {
   TelegramUserAdapter,
   type TelegramUserLoginHandle,
   type TelegramUserSettings,
-} from "../../channels/telegram-user.js";
+} from "../kinds/telegram-user/telegram-user.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -212,9 +212,9 @@ function parseTelegramUserCredentials(
  *   5. stop the login client, then return the terminal grant: the serialized
  *      session material + identity profile.
  * The runtime performs the single durable write from the returned grant;
- * cancel/abandon stops the login client and writes nothing. Unlike the bot
- * channels there is no guardian-link step — a user session IS the guardian's own
- * account, so no `guardianChannelUserId` is mapped.
+ * cancel/abandon stops the login client and writes nothing. A user session is
+ * the guardian's own account, so the grant names it as theirs
+ * (`guardianChannelUserId`), the same id `accountIdOf` records on the channel.
  */
 export function makeTelegramUserSetup(deps: {
   openLogin: (apiId: number, apiHash: string) => TelegramUserLoginHandle;
@@ -313,6 +313,9 @@ export function makeTelegramUserSetup(deps: {
       return {
         credential: { material, expiresAt: "never" },
         profile,
+        ...(account.userId
+          ? { guardianChannelUserId: account.userId, addsGuardianAccount: true }
+          : {}),
         summary: {
           title: "Telegram account connected",
           body: [

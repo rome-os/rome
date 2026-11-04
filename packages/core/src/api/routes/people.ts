@@ -26,10 +26,14 @@ import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
-import { send, type SendResult } from "../../chats/send.js";
-import { directPlace } from "../../people/send.js";
-import { readPersonTimeline } from "../../people/timeline.js";
-import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
+import { send, type SendResult } from "../../connections/send.js";
+import { asGuardian, directPlace } from "../../people/send.js";
+import { readAccountTimeline } from "../../people/timeline.js";
+import {
+  guardianChannels,
+  personMessageStores,
+  timelineAccounts,
+} from "../../people/timeline-sources.js";
 import { accountOfWire, wireOf } from "../../people/wire.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -38,8 +42,8 @@ import type { ApiDeps } from "../deps.js";
 // a refused one answers are the contract's (@rome/api-types/people);
 // serializing a person is `src/people/resource.ts`, creating one is
 // `src/people/create.ts`, editing one `src/people/update.ts`, absorbing one
-// `src/people/merge.ts`, deleting one `src/people/delete.ts`, and which stores a history is merged from is the rest
-// of `src/people/`. The compare-and-swap a link rides on is the person
+// `src/people/merge.ts`, deleting one `src/people/delete.ts`, and which stores an
+// account's history is read from is the rest of `src/people/`. The compare-and-swap a link rides on is the person
 // repository's, because only a transaction there can decide it. These handlers
 // read the request and pick a status code, and hold no rule of their own.
 
@@ -219,11 +223,19 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // sends it. Until then a send without it goes out from Rome's only account
     // on the platform, and is refused while Rome holds several.
     const from = parsed.request.from;
-    const found = await directPlace(deps, account, from);
+    const guardians = await guardianChannels(deps);
+    const found = await directPlace(asGuardian(deps, guardians), account, from);
     if (!found.ok) return respondToSend(c, found);
     return respondToSend(c, await send(deps, found.place, { text: parsed.request.text }, found.as));
   });
 
+  /**
+   * One of the person's accounts, its history paged newest first. A person
+   * has no history joined across their accounts, so the account is required:
+   * `?channel=` names its platform, and a kind of connection reads as its
+   * platform, and `?channelUserId=` its address. An account this person does
+   * not hold is refused, as a send to one is.
+   */
   app.get("/people/:id/messages", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
@@ -234,20 +246,27 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
 
-    // `?channel=` names a platform, as an account's `channel` does, and a kind
-    // of connection reads as its platform. One this person holds no account
-    // on answers an empty page rather than a 400: channels are open — a Rome
-    // App brings its own — so there is no set of names to check one against,
-    // and "no history there" is the true answer for every name that is not a
-    // typo.
     const channel = c.req.query("channel");
-    const platform = channel && platformOf(channel);
-    const [accounts] = await timelineAccounts(deps, [person.links]);
+    const channelUserId = c.req.query("channelUserId");
+    if (!channel || !channelUserId) {
+      return c.json({ error: "channel and channelUserId must name one account" }, 400);
+    }
+    const link = person.links.find(
+      (held) => held.platform === platformOf(channel) && held.id === channelUserId,
+    );
+    if (!link) return c.json({ error: "That account is not linked to this person" }, 400);
 
+    // The fold puts every address of the account on it, so the link is
+    // matched by its address among them, the rule the person read's
+    // `latestAt` uses too.
+    const guardians = await guardianChannels(deps);
+    const [accounts] = await timelineAccounts({ ...deps, guardians }, [person.links]);
     return c.json(
-      await readPersonTimeline(
+      await readAccountTimeline(
         personMessageStores(deps),
-        accounts.filter((account) => !platform || account.channel === platform),
+        (accounts ?? []).filter(
+          (account) => account.channel === link.platform && account.addresses.includes(link.id),
+        ),
         { cursor, limit: timelinePageLimit(c.req.query("limit")) },
       ),
     );

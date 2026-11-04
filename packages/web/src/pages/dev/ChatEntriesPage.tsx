@@ -2,7 +2,7 @@
  * Gallery of the transcript entries, at `/dev/chat-entries`.
  *
  * A block renders only once an agent reaches a particular state — a parked
- * turn, a pending approval, a handoff — and `/chat` opens on an empty composer,
+ * turn or a pending approval — and `/chat` opens on an empty composer,
  * so no product route shows one on load. This page is where the family becomes
  * reachable to a reader and to the layout-invariant sweep.
  *

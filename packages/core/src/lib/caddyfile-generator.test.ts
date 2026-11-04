@@ -160,3 +160,32 @@ describe("generateCaddyfile home-screen manifests and icons", () => {
     }
   });
 });
+
+describe("canonical path guard", () => {
+  const modes = {
+    open: { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} },
+    "public-access": {
+      enableAccessControl: true,
+      allowedApps: ["morning-brief"],
+      cloudEmailAccess: {},
+    },
+  };
+
+  for (const [mode, config] of Object.entries(modes)) {
+    it(`runs before every proxied handler in ${mode} mode`, () => {
+      const caddyfile = generateCaddyfile(config);
+      const guardAt = caddyfile.indexOf("handle @nonCanonicalPath {");
+      const firstProxyAt = caddyfile.indexOf("reverse_proxy");
+      expect(guardAt).toBeGreaterThan(-1);
+      expect(guardAt).toBeLessThan(firstProxyAt);
+    });
+  }
+
+  it("leaves an encoded slash allowed for scoped app ids", () => {
+    const caddyfile = generateCaddyfile(modes.open);
+    const expression =
+      caddyfile.split("\n").find((line) => line.trim().startsWith("expression")) ?? "";
+    expect(expression).toContain("%2[eE]");
+    expect(expression).not.toMatch(/%2\[[^\]]*[fF]/);
+  });
+});

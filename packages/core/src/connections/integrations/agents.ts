@@ -8,12 +8,18 @@
 // grant; the grant only records the agent Cloud assigned. A sender is
 // never mapped to a person here. A sender Cloud marks as in this Rome's own
 // account is linked to the guardian when its message is admitted
-// (channels/agents-guardian.ts); any other sender stays unlinked, and the
+// (people/agents-guardian.ts); any other sender stays unlinked, and the
 // guardian decides whether Rome may answer it. Every agent is addressed by its
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import type { ChannelMessage, ChatId, OutgoingMessage } from "@rome-os/app-runtime";
+import {
+  type ChannelMessage,
+  type ChatId,
+  ChannelSendRefused,
+  type OutgoingMessage,
+} from "@rome-os/app-runtime";
+import { refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -262,13 +268,17 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       // Cloud carries text and data only. Refusing here keeps a partial send
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
-        throw new Error("Agent messages carry text only; send the files another way.");
+        throw new ChannelSendRefused(
+          "attachment_unsupported",
+          "Agent messages carry text only; send the files another way.",
+        );
       }
+      refuseUnshownParts("agents", msg);
       if (!isAgentId(chatId)) {
         throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
       const text = outgoingText(msg);
-      if (!text.trim()) throw new Error("An agent message needs text.");
+      if (!text.trim()) throw new ChannelSendRefused("empty", "An agent message needs text.");
       try {
         const sent = await client.send({
           to: chatId,

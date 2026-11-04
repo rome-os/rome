@@ -29,7 +29,7 @@ import {
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
 } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 import {
   channelChatId,
   isWebchatChat,
@@ -51,9 +51,10 @@ import type {
 import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
-import { agentMessageOutbound } from "../../channels/messages-agent.js";
+import { stripHostOnlyPartsFromContent } from "../../chats/host-only-parts.js";
+import { agentMessageOutbound } from "../../chats/history/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
+import type { ChatRef } from "../../chats/storage/place.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -302,6 +303,19 @@ export interface RomeAgentTranscriptMessageInput {
   turnId: string | null;
   role: "user" | "assistant";
   content: string;
+}
+
+/** A batch of a turn's trace blocks, with the transcript lines it carries. */
+export interface TraceBatch {
+  messageId: string;
+  sessionId: string;
+  turnId: string | null;
+  /** 0-based index of the first block in `blocks` within the whole trace. */
+  startSeq: number;
+  /** Pre-shaped trace blocks (already passed through toTraceEvent). */
+  blocks: unknown[];
+  trigger?: RomeAgentTraceTriggerMetadata;
+  transcriptMessages?: RomeAgentTranscriptMessageInput[];
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
@@ -748,7 +762,17 @@ export class WebChatRepository {
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
 
-  constructor(private db: DrizzleDb) {}
+  constructor(protected readonly db: DrizzleDb) {}
+
+  /** How many lines a listed session holds, as a column of its row. */
+  protected readonly messageCountColumn: SQL<number> = sessionSelectFields.messageCount;
+  /** Whether a listed session waits on the guardian, as a column of its row. */
+  protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
+
+  /** The columns a listed session is read with. */
+  protected sessionFields() {
+    return { ...sessionSelectFields, messageCount: this.messageCountColumn };
+  }
 
   /** Set by {@link leaveOutOfCatchUp}. */
   private wakeUndecided: (messageId: string) => boolean = () => false;
@@ -760,7 +784,7 @@ export class WebChatRepository {
     };
   }
 
-  private emitMessageInserted(message: StoredWebchatMessage): void {
+  protected emitMessageInserted(message: StoredWebchatMessage): void {
     for (const listener of this.messageInsertedListeners) {
       listener(message);
     }
@@ -926,17 +950,7 @@ export class WebChatRepository {
       // Same persistence contract as deleteSession(), but batched for project
       // deletion and all session kinds (top-level chats plus handoff children).
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
-        tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
-        tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
-        tx.delete(romeAgentMessagePlatformIds)
-          .where(inArray(romeAgentMessagePlatformIds.sessionId, chunk))
-          .run();
-        tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, chunk)).run();
-        tx.delete(webchatWorkspaceLayouts)
-          .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
-          .run();
-        tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
-        tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
+        this.deleteSessionRows(tx, chunk);
       }
 
       return sessionIds.length;
@@ -1049,6 +1063,67 @@ export class WebChatRepository {
     agentName: string;
     projectName?: string;
     projectPath?: string;
+    /** Where the session stands in Chats, set on its row when given: the
+     *  chat, the one of Rome's accounts that heard it, and when, which the
+     *  session's activity moves up to. Only Chats' own recording passes it,
+     *  from the Chats switch on. */
+    speaker?: { chat: ChatRef; accountId: string; at: Date };
+  }): Promise<{ id: string; agentName: string | null }> {
+    const opened = await this.openChannelChat(input);
+    const { speaker } = input;
+    if (speaker) {
+      const thread =
+        input.parentThreadId && input.parentThreadId !== input.threadId ? input.threadId : null;
+      // A session first standing in its chat starts just before the line
+      // that opened it, so a catch-up, which reads what was said after the
+      // session's second, reads that line too once it wakes no agent. Where
+      // the account spoke there first, as a send that started the chat, the
+      // session starts before that line instead, so it reads what it said.
+      // Asked only while the session stands nowhere yet: once placed, its
+      // start no longer moves, and every message heard asks this again.
+      const placed = this.db
+        .select({ chatId: romeSessions.chatId })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, opened.id))
+        .get()?.chatId;
+      const firstOwn =
+        placed == null
+          ? this.db.all<{ at: number | null }>(sql`
+              SELECT min(said_at) AS at FROM chat_messages
+              WHERE chat_id = ${speaker.chat.id} AND thread_id IS ${thread}
+                AND sender_account_id = ${speaker.accountId}
+            `)[0]?.at
+          : null;
+      const heardSecond = Math.min(
+        Math.floor(speaker.at.getTime() / 1000),
+        firstOwn ?? Number.POSITIVE_INFINITY,
+      );
+      await this.db
+        .update(romeSessions)
+        .set({
+          createdAt: sql`CASE WHEN ${romeSessions.chatId} IS NULL AND ${romeSessions.createdAt} >= ${heardSecond}
+            THEN ${heardSecond - 1} ELSE ${romeSessions.createdAt} END`,
+          chatId: speaker.chat.id,
+          chatPlatform: speaker.chat.platform,
+          threadId: thread,
+          accountId: speaker.accountId,
+          ...advanceSessionActivitySet(speaker.at),
+        })
+        .where(eq(romeSessions.id, opened.id));
+    }
+    return opened;
+  }
+
+  private async openChannelChat(input: {
+    channel: string;
+    threadId: string;
+    parentThreadId?: string;
+    threadName?: string;
+    threadType?: "private" | "group";
+    agentName: string;
+    projectName?: string;
+    projectPath?: string;
+    speaker?: { chat: ChatRef; accountId: string; at: Date };
   }): Promise<{ id: string; agentName: string | null }> {
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
@@ -1158,6 +1233,15 @@ export class WebChatRepository {
         .run();
       return { inserted: true };
     });
+  }
+
+  /** Move session `sessionId`'s activity up to `at`, never back. */
+  advanceSessionActivity(sessionId: string, at: Date): void {
+    this.db
+      .update(romeSessions)
+      .set(advanceSessionActivitySet(at))
+      .where(eq(romeSessions.id, sessionId))
+      .run();
   }
 
   async promoteConversationMessageToUser(
@@ -1757,21 +1841,28 @@ export class WebChatRepository {
     // resolves on the same tick, but the postgres adapter returns a real
     // Promise — dropping the await would silently turn this into a fire-
     // and-forget delete.
-    await this.db.transaction((tx) => {
-      tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, id)).run();
-      tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).run();
-      tx.delete(romeAgentMessagePlatformIds)
-        .where(eq(romeAgentMessagePlatformIds.sessionId, id))
-        .run();
-      tx.delete(webchatTurnFeedback).where(eq(webchatTurnFeedback.sessionId, id)).run();
-      tx.delete(webchatWorkspaceLayouts).where(eq(webchatWorkspaceLayouts.sessionId, id)).run();
-      // Kill the chat's public shares too. They're keyed by sessionId and only
-      // discoverable via listSharedChatsBySession, so leaving them behind would
-      // strand live, unrevokable links once the source chat is gone. Deleting
-      // the chat must take its public copies with it.
-      tx.delete(sharedChats).where(eq(sharedChats.sessionId, id)).run();
-      tx.delete(romeSessions).where(eq(romeSessions.id, id)).run();
-    });
+    await this.db.transaction((tx) => this.deleteSessionRows(tx, [id]));
+  }
+
+  /**
+   * Delete sessions `ids` and the rows that are theirs alone, inside `tx`.
+   * A subclass that keeps more of a session's rows elsewhere deletes them
+   * here too, so they go in the same transaction.
+   */
+  protected deleteSessionRows(tx: DrizzleTx, ids: string[]): void {
+    tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, ids)).run();
+    tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, ids)).run();
+    tx.delete(romeAgentMessagePlatformIds)
+      .where(inArray(romeAgentMessagePlatformIds.sessionId, ids))
+      .run();
+    tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, ids)).run();
+    tx.delete(webchatWorkspaceLayouts).where(inArray(webchatWorkspaceLayouts.sessionId, ids)).run();
+    // Kill the chat's public shares too. They're keyed by sessionId and only
+    // discoverable via listSharedChatsBySession, so leaving them behind would
+    // strand live, unrevokable links once the source chat is gone. Deleting
+    // the chat must take its public copies with it.
+    tx.delete(sharedChats).where(inArray(sharedChats.sessionId, ids)).run();
+    tx.delete(romeSessions).where(inArray(romeSessions.id, ids)).run();
   }
 
   async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
@@ -1818,9 +1909,9 @@ export class WebChatRepository {
           : undefined;
     return this.db
       .select({
-        ...sessionSelectFields,
+        ...this.sessionFields(),
         lastTurnFailed: sessionLastTurnFailed,
-        awaitingGuardian: sessionAwaitingGuardian,
+        awaitingGuardian: this.awaitingGuardianColumn,
       })
       .from(romeSessions)
       .where(
@@ -1847,6 +1938,15 @@ export class WebChatRepository {
    * message — ordered by message recency, capped at `sessionLimit` sessions.
    */
   async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
+    return this.searchSessionRows(query, options, ["user", "assistant", "notification"]);
+  }
+
+  /** {@link searchSessionMessages} over the sessions' own rows of `roles`. */
+  protected async searchSessionRows(
+    query: string,
+    options: { sessionLimit?: number },
+    roles: readonly ("user" | "assistant" | "notification")[],
+  ) {
     const sessionLimit = Math.max(1, options.sessionLimit ?? 20);
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
@@ -1858,16 +1958,10 @@ export class WebChatRepository {
         sql`lower(${romeAgentMessages.content}) LIKE ${`%${escapeSqlLikePattern(term)}%`} ESCAPE ${SQL_LIKE_ESCAPE}`,
     );
     const rows = await this.db
-      .select({ message: webchatMessageSelectFields, session: sessionSelectFields })
+      .select({ message: webchatMessageSelectFields, session: this.sessionFields() })
       .from(romeAgentMessages)
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
-      .where(
-        and(
-          isWebchatChat,
-          inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
-          ...likePredicates,
-        ),
-      )
+      .where(and(isWebchatChat, inArray(romeAgentMessages.role, [...roles]), ...likePredicates))
       .orderBy(desc(romeAgentMessages.createdAt), desc(romeAgentMessages.id))
       .limit(SEARCH_MESSAGE_SCAN_LIMIT);
 
@@ -1963,7 +2057,7 @@ export class WebChatRepository {
     const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
 
     const rows = await this.db
-      .select(sessionSelectFields)
+      .select(this.sessionFields())
       .from(romeSessions)
       .where(and(...predicates))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id))
@@ -2007,7 +2101,7 @@ export class WebChatRepository {
     const predicates = [isWebchatChat, cursorPredicate];
 
     const rows = await this.db
-      .select(sessionSelectFields)
+      .select(this.sessionFields())
       .from(romeSessions)
       .where(and(...predicates))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id))
@@ -2096,23 +2190,32 @@ export class WebChatRepository {
   }
 
   async updateSessionName(id: string, name: string) {
-    const rows = await this.db
-      .update(romeSessions)
-      .set({ name })
-      .where(eq(romeSessions.id, id))
-      .returning({ id: romeSessions.id });
-    if (rows.length > 0) this.emitSessionNameChanged(id, name);
+    if (await this.renameSession(id, name)) this.emitSessionNameChanged(id, name);
   }
 
   async updateSessionNameIfCurrent(id: string, currentName: string, name: string) {
+    const renamed = await this.renameSession(id, name, currentName);
+    if (renamed) this.emitSessionNameChanged(id, name);
+    return renamed;
+  }
+
+  /**
+   * Name session `id` `name`, when it is named `currentName` if that is
+   * given. A subclass that keeps the name elsewhere too renames it here.
+   * Returns whether the session was renamed.
+   */
+  protected async renameSession(id: string, name: string, currentName?: string): Promise<boolean> {
     const rows = await this.db
       .update(romeSessions)
       .set({ name })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.name, currentName)))
+      .where(
+        and(
+          eq(romeSessions.id, id),
+          currentName === undefined ? undefined : eq(romeSessions.name, currentName),
+        ),
+      )
       .returning({ id: romeSessions.id });
-    const renamed = rows.length > 0;
-    if (renamed) this.emitSessionNameChanged(id, name);
-    return renamed;
+    return rows.length > 0;
   }
 
   async updateSessionProject(
@@ -2143,9 +2246,8 @@ export class WebChatRepository {
   }
 
   /**
-   * Record a dashboard input. `saidBy` is the agent account that said it when
-   * an agent, not the guardian, sends into the chat; its id is kept as the
-   * sender, since the account's platform is the chat's.
+   * Record a dashboard input. `saidBy` records the sending agent account or
+   * tagged automation source, independently of the accountable actor.
    */
   async recordUserInput(
     id: string,
@@ -2381,7 +2483,7 @@ export class WebChatRepository {
    * Callers own how the message is constructed (the parts); this owns the
    * shared persist-and-notify tail.
    */
-  private async insertBackendMessage(
+  protected async insertBackendMessage(
     sessionId: string,
     turnId: string | null,
     role: string,
@@ -2518,19 +2620,20 @@ export class WebChatRepository {
    * that *would* double-write trips the (message_id, seq) primary key and
    * fails loudly instead.
    */
-  async appendTraceBlocks(input: {
-    messageId: string;
-    sessionId: string;
-    turnId: string | null;
-    /** 0-based index of the first block in `blocks` within the whole trace. */
-    startSeq: number;
-    /** Pre-shaped trace blocks (already passed through toTraceEvent). */
-    blocks: unknown[];
-    trigger?: RomeAgentTraceTriggerMetadata;
-    transcriptMessages?: RomeAgentTranscriptMessageInput[];
-  }): Promise<void> {
+  async appendTraceBlocks(input: TraceBatch): Promise<void> {
     if (input.blocks.length === 0) return;
+    // `await` matters: better-sqlite3 transactions are synchronous, but the
+    // call must stay awaited so a future async driver can't turn this into a
+    // fire-and-forget write (same contract as deleteSession).
+    await this.writeTraceBatch(input);
+  }
 
+  /**
+   * Write a trace batch in one transaction, its transcript lines stamped
+   * against `now`. A subclass that writes more with the batch calls this
+   * inside its own transaction, so the batch commits with it or not at all.
+   */
+  protected writeTraceBatch(input: TraceBatch, now = new Date()): void {
     const totals = emptyTraceAccountingTotals();
     const blockRows = input.blocks.map((block, i) => {
       accumulateBlockAccounting(totals, block);
@@ -2543,11 +2646,7 @@ export class WebChatRepository {
     });
     const hasProjectionDelta = totals.hasAccounting;
 
-    // `await` matters: better-sqlite3 transactions are synchronous, but the
-    // call must stay awaited so a future async driver can't turn this into a
-    // fire-and-forget write (same contract as deleteSession).
-    await this.db.transaction((tx) => {
-      const now = new Date();
+    this.db.transaction((tx) => {
       const insertTranscriptMessages = (messages: RomeAgentTranscriptMessageInput[]) => {
         for (const message of messages) {
           const accounting = traceAccountingColumns(message.role, message.content);
@@ -2732,6 +2831,20 @@ export class WebChatRepository {
       );
   }
 
+  async getUserMessageSources(sessionId: string): Promise<Map<string, string>> {
+    const rows = await this.db
+      .select({ id: romeAgentMessages.id, senderId: romeAgentMessages.senderId })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+          isNotNull(romeAgentMessages.senderId),
+        ),
+      );
+    return new Map(rows.flatMap((row) => (row.senderId ? [[row.id, row.senderId] as const] : [])));
+  }
+
   /** The person who sent each user message in a session, for messages that
    * recorded one. */
   async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
@@ -2757,7 +2870,11 @@ export class WebChatRepository {
     (StoredWebchatMessage & { role: "user" | "assistant"; actor: SessionActor | null }) | null
   > {
     const [row] = await this.db
-      .select({ ...webchatMessageSelectFields, actor: romeAgentMessages.actor })
+      .select({
+        ...webchatMessageSelectFields,
+        actor: romeAgentMessages.actor,
+        senderId: romeAgentMessages.senderId,
+      })
       .from(romeAgentMessages)
       .where(
         and(

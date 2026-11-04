@@ -3,16 +3,18 @@ import { Hono } from "hono";
 import type { PersonResource, TimelinePage } from "@rome/api-types/people";
 import { createLinkedInDescriptor } from "../../connections/integrations/linkedin.js";
 import type { Credential, RuntimeKit } from "../../connections/types.js";
-import type { OpencliResult } from "../../channels/linkedin-cli.js";
+import type { OpencliResult } from "../../connections/kinds/linkedin/linkedin-cli.js";
 import {
   buildTestDeps,
   createTestConnections,
   createTestDb,
   FakeTransport,
+  ownedByGuardian,
   testChannels,
   type TestDb,
   type TestDeps,
 } from "../../test/helpers.js";
+import { seedBaseline } from "../../test/seeds.js";
 import { peopleRoutes } from "./people.js";
 
 const MEMBER = "ACoAARecipient";
@@ -39,6 +41,11 @@ describe("LinkedIn replies through People", () => {
   beforeEach(async () => {
     db = createTestDb();
     deps = await buildTestDeps(db.db);
+    // The LinkedIn account Rome is connected as is the guardian's own.
+    await seedBaseline(db.db);
+    ownedByGuardian(db.db, deps.peopleRepo, "guardian", [
+      { channel: "linkedin", platform: "linkedin" },
+    ]);
     run.mockReset();
     run.mockResolvedValue({ code: 0, stdout: JSON.stringify([reply]), stderr: "" });
     await deps.linkedInStoreRepo.upsertThreads([
@@ -103,7 +110,7 @@ describe("LinkedIn replies through People", () => {
       { timeoutMs: 180_000 },
     );
     const timeline = (await (
-      await app.request(`/people/${person}/messages`)
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
     ).json()) as TimelinePage;
     expect(timeline.entries).toHaveLength(1);
     expect(timeline.entries[0]).toMatchObject({
@@ -111,6 +118,41 @@ describe("LinkedIn replies through People", () => {
       direction: "outbound",
       body: reply.text,
     });
+  });
+
+  it("passes a multiline reply through unchanged and mirrors its line breaks", async () => {
+    const text = "See https://example.com/demo\n\nExample signature";
+    run.mockResolvedValueOnce({
+      code: 0,
+      stdout: JSON.stringify([{ ...reply, text, text_matches: true }]),
+      stderr: "",
+    });
+    const response = await app.request(`/people/${person}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "linkedin", channelUserId: MEMBER, text }),
+    });
+    expect(response.status).toBe(200);
+    expect(run).toHaveBeenCalledWith(expect.arrayContaining([text]), expect.anything());
+    const timeline = (await (
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries[0]).toMatchObject({ body: text });
+  });
+
+  it("answers a reply LinkedIn stored with other text as sent, and mirrors what it stored", async () => {
+    const stored = "Thanks forreaching out";
+    run.mockResolvedValueOnce({
+      code: 0,
+      stdout: JSON.stringify([{ ...reply, text: stored, text_matches: false }]),
+      stderr: "",
+    });
+    expect((await post()).status).toBe(200);
+    expect(run).toHaveBeenCalledTimes(1);
+    const timeline = (await (
+      await app.request(`/people/${person}/messages?channel=linkedin&channelUserId=${MEMBER}`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries[0]).toMatchObject({ body: stored });
   });
 
   it("answers a failed reply with LinkedIn's error, and sends nothing more", async () => {

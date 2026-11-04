@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DashboardIdentity } from "@rome/api-types";
 import { Hono, type Context } from "hono";
+import { getPath } from "hono/utils/url";
 import { deleteCookie, getCookie } from "hono/cookie";
 import { and, eq, like, lt } from "drizzle-orm";
 import { guardianAuth, settings } from "../../db/schema.js";
@@ -64,6 +65,37 @@ const PUBLIC_API_PATHS = [
   // token in the path is the credential; management stays under /api/chat/*.
   "/api/share/*",
 ];
+
+// Any absolute origin works: only the path is read back.
+const ROUTING_ORIGIN = "http://verify.invalid";
+
+/**
+ * Turn the raw `X-Forwarded-Uri` into the path the router will serve,
+ * keeping the query string. Every access decision below reads this result.
+ *
+ * The proxied request reaches Hono through WHATWG URL parsing, which
+ * resolves dot segments (including percent-encoded ones) and backslashes,
+ * and then through Hono's `getPath`, which percent-decodes. A decision made
+ * on the raw string can therefore approve a path that the router serves as
+ * a different one. Returns `null`, so the caller rejects the request, when
+ * parsing would change the path, the path starts with `//`, or the URI
+ * carries a fragment.
+ */
+export function resolveRoutedUri(forwardedUri: string): string | null {
+  if (forwardedUri.includes("#")) return null;
+  const queryAt = forwardedUri.indexOf("?");
+  const rawPath = queryAt === -1 ? forwardedUri : forwardedUri.slice(0, queryAt);
+  const query = queryAt === -1 ? "" : forwardedUri.slice(queryAt);
+  if (!rawPath.startsWith("/") || rawPath.startsWith("//")) return null;
+  let url: URL;
+  try {
+    url = new URL(`${ROUTING_ORIGIN}${rawPath}`);
+  } catch {
+    return null;
+  }
+  if (url.pathname !== rawPath) return null;
+  return `${getPath(new Request(url))}${query}`;
+}
 
 /**
  * Decide whether the original request (carried in `X-Forwarded-Uri`) is
@@ -386,7 +418,11 @@ export function authRoutes(deps: ApiDeps): Hono {
   // fall through to the cookie check — effectively "am I logged in" with a
   // userId-in-header response.
   app.get("/auth/verify", async (c) => {
-    const forwardedUri = c.req.header("X-Forwarded-Uri") ?? "";
+    const rawForwardedUri = c.req.header("X-Forwarded-Uri") ?? "";
+    const forwardedUri = rawForwardedUri ? resolveRoutedUri(rawForwardedUri) : "";
+    if (forwardedUri === null) {
+      return c.json({ error: "Bad Request" }, 400);
+    }
     let guardianSession: { userId: string } | null | undefined;
     const getGuardianSession = () => {
       if (guardianSession === undefined) {

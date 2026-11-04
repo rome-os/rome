@@ -28,6 +28,19 @@ describe("the Concierge agent", () => {
     expect(actionName("delete-routine")).toBe("delete_routine");
   });
 
+  it("reads history and checks unfinished work on quota recovery", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(concierge.actions).toContain("system:fetch_channel_history");
+    for (const text of [
+      "<quota_recovery>",
+      "even without `<continuation>`",
+      "Do not repeat confirmed work",
+      "ask the guardian",
+      "`say` only and end with `done`",
+    ])
+      expect(prompt).toContain(text);
+  });
+
   it("names every defer for a row with task:<id> and reads its wake-ups and batches", () => {
     const prompt = concierge.systemPromptPrefix;
     const section = prompt.slice(prompt.indexOf("# Task list"));

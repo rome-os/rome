@@ -93,59 +93,6 @@ describe("Share chat", () => {
     expect(payload.snapshot.messages).toHaveLength(2);
   });
 
-  it("recurses into handoff child sessions", async () => {
-    const sessionId = "sess-handoff";
-    const childId = "sess-child";
-    await deps.webchatRepo.createSession(sessionId, "Parent");
-    await deps.webchatRepo.createSession(
-      childId,
-      "Child",
-      undefined,
-      undefined,
-      null,
-      undefined,
-      undefined,
-      "webchat_handoff",
-    );
-    await deps.webchatRepo.addMessage(
-      "p-u",
-      sessionId,
-      "user",
-      JSON.stringify([{ type: "text", content: "kick off" }]),
-      "turn-1",
-    );
-    await deps.webchatRepo.addMessage(
-      "p-a",
-      sessionId,
-      "assistant",
-      JSON.stringify([
-        { type: "handoff", toolUseId: "h1", appId: "studio", childSessionId: childId },
-      ]),
-      "turn-1",
-    );
-    await deps.webchatRepo.addMessage(
-      "c-a",
-      childId,
-      "assistant",
-      JSON.stringify([{ type: "text", content: "child reply" }]),
-      "child-turn-1",
-    );
-
-    const manage = createWebchatRuntime(deps).routes;
-    const createRes = await manage.request(`/chat/sessions/${sessionId}/share`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ turnIds: ["turn-1"] }),
-    });
-    const created = (await createRes.json()) as { id: string };
-
-    const payload = (await (
-      await shareRoutes(deps).request(`/share/${created.id}`)
-    ).json()) as PublicSharePayload;
-    const sessions = new Set(payload.snapshot.messages.map((m) => m.sessionId));
-    expect(sessions).toEqual(new Set([sessionId, childId]));
-  });
-
   it("strips browser (desktop) widgets from the frozen layout", async () => {
     const sessionId = await seedTwoTurnSession();
     await deps.webchatRepo.saveLayout(sessionId, [

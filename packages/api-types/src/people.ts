@@ -3,9 +3,8 @@
 //
 //   GET    /api/people              -> PeopleList (curated people only)
 //   GET    /api/people/:id          -> PersonResource
-//   GET    /api/people/:id/messages -> TimelinePage
+//   GET    /api/people/:id/messages?channel=&channelUserId= -> TimelinePage
 //   GET    /api/accounts            -> AccountDirectory
-//   GET    /api/accounts/stream     -> AccountStream
 //   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
 //   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
@@ -28,24 +27,16 @@
 // Rome contributes is which person it belongs to. So the writes here move a
 // link between people; none of them creates or destroys the account under it.
 //
-// The bond ladder, the activity order both the person listing and the account
-// stream run on, and a person's timeline paging (`TimelinePage`,
-// `latestDynamic`) live here. What that timeline holds — the message shape, its
-// order and its cursor — is the message module's (`./message.ts`), which this
-// file imports. They are the pieces the two nouns share: a row's `latest` is
-// the head of the timeline the same row opens, and a cursor written against one
-// activity listing has to name a position in the other. A second definition of
-// any of them is a page boundary the two ends disagree about, so each is stated
-// once — the activity order here, the message shape and its order in
-// `./message.ts`.
+// The bond ladder and an account's timeline paging (`TimelinePage`) live here.
+// What that timeline holds — the message shape, its order and its cursor — is
+// the message module's (`./message.ts`), which this file imports.
 //
-// The account read is two reads, because two surfaces ask two questions. The
-// directory is a contacts list: every account, ordered by name, carrying
-// nothing about what anyone said — it is where a guardian looks someone up.
-// The stream is the recents surface: ordered by what happened last, carrying
-// the line to preview, and it only ever holds accounts something has happened
-// on. Each has its own row shape and its own cursor, so neither pays for the
-// other's fields and neither order can be resumed with the other's position.
+// A person carries no history of their own. A timeline is one account's, and
+// a person's page shows one of their accounts at a time.
+//
+// The account read is a contacts list: every account, ordered by name,
+// carrying nothing about what anyone said — it is where a guardian looks
+// someone up.
 
 import type { Account } from "@rome-os/app-runtime";
 import { compareCodePoints, type Message } from "./message.js";
@@ -129,9 +120,7 @@ export { compareCodePoints };
  *
  * Case-folded first so "ada" and "Ada" sit together, then by code point.
  * Accented names therefore sort after unaccented ones, which is the price of an
- * order both ends agree on. It is a small price here: the listings sort by
- * activity first, so a name only ever settles a tie between two rows whose
- * newest dynamic landed in the same second.
+ * order both ends agree on.
  */
 export function compareDisplayNames(a: string, b: string): number {
   const normalizedA = a.normalize("NFC");
@@ -217,15 +206,14 @@ export function isChannelIdentifier(channel: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// A person's merged timeline
+// An account's timeline
 // ---------------------------------------------------------------------------
 //
 // What the timeline holds is a {@link Message}, and the order it is read in and
 // the cursor that resumes it are the message module's ({@link compareMessages},
-// {@link messageCursor}). A person's timeline is still a timeline; its rows are
-// messages, and its paging is the People surface's own — stated below.
+// {@link messageCursor}). Its paging is the People surface's own, stated below.
 
-/** One page of a person's timeline, newest first. `nextCursor` is opaque and
+/** One page of an account's timeline, newest first. `nextCursor` is opaque and
  *  null once the oldest message has been sent. */
 export interface TimelinePage {
   entries: Message[];
@@ -234,25 +222,6 @@ export interface TimelinePage {
 
 export const TIMELINE_PAGE_DEFAULT_LIMIT = 100;
 export const TIMELINE_PAGE_MAX_LIMIT = 300;
-
-/**
- * The dynamic a row reports as `latest`: the newest message of that row's own
- * timeline, projected.
- *
- * One definition rather than two. A separate "newest dynamic" comparison
- * settles a same-second tie on its own terms — timestamps are whole seconds and
- * collide — so a row could preview one event while its timeline opened on
- * another, and neither would be wrong. Deriving the preview from the ordering
- * makes that disagreement unrepresentable.
- *
- * `entries` must already be in {@link compareMessages} order.
- */
-export function latestDynamic(entries: readonly Message[]): AccountDynamic | null {
-  const newest = entries[0];
-  return newest
-    ? { source: newest.source, timestamp: newest.timestamp, preview: newest.body }
-    : null;
-}
 
 /**
  * The page size a `?limit=` value asks for: clamped to `max`, and `fallback`
@@ -279,28 +248,6 @@ export function timelinePageLimit(raw: string | number | null | undefined): numb
     fallback: TIMELINE_PAGE_DEFAULT_LIMIT,
     max: TIMELINE_PAGE_MAX_LIMIT,
   });
-}
-
-/**
- * The newest thing that happened on an account, whichever surface it happened
- * on: what a listing sorts by and what a row shows.
- *
- * A row's `latest` is always {@link latestDynamic} of the history that row
- * opens, so the two are one shape rather than two that can disagree. A producer
- * that computes it any other way can preview one event while its timeline opens
- * on another, and a reader has no way to reconcile the pair.
- *
- * `source` is a channel name today ("whatsapp", "telegram"); a Rome App that
- * starts producing dynamics writes its own name here and the surface renders it
- * through the same glyph lookup.
- */
-export interface AccountDynamic {
-  source: string;
-  /** Epoch seconds. */
-  timestamp: number;
-  /** One line, already trimmed to a preview; null when the dynamic carries no
-   *  text (an image, a call, an app event with no body). */
-  preview: string | null;
 }
 
 /**
@@ -358,8 +305,7 @@ export function accountPresentation(link: AccountLink | null | undefined): Accou
  *
  * A contacts list's row, so it carries who the account is and nothing about
  * what it has done — not a preview, not a count, not even whether there is
- * anything to count. {@link StreamAccount} is the same account on the recents
- * surface, where the activity is the point.
+ * anything to count.
  */
 export interface DirectoryAccount {
   channel: string;
@@ -387,27 +333,6 @@ export interface DirectoryAccount {
   personName: string | null;
 }
 
-/**
- * One account on the stream: the directory's account, plus the activity the
- * stream orders and previews by.
- *
- * `latest` is never null. The stream is the recents surface and only carries
- * accounts something has happened on, so an account with nothing on record is
- * absent rather than present with an empty preview.
- */
-export interface StreamAccount extends DirectoryAccount {
-  /**
-   * The newest thing on record for this account, which is exactly the first
-   * entry of the {@link TimelinePage} this row opens onto.
-   *
-   * The one message-derived fact either account surface carries. How much is
-   * behind it is deliberately not here: a count is a second question about the
-   * same history, asked of every row of a whole listing, and a row that showed
-   * one would be reporting a number nothing beneath it renders.
-   */
-  latest: AccountDynamic;
-}
-
 /** How many accounts sit in each state. */
 export interface AccountCounts extends Record<AccountState, number> {}
 
@@ -428,25 +353,8 @@ export interface AccountDirectory {
    *
    * Every account, the whole mirrored address book included: the directory is
    * a contacts list and holds nothing back, so "unlinked" here counts everyone
-   * Rome has not placed rather than the senders waiting on a decision. The
-   * stream's own counts answer that narrower question, over the accounts
-   * something has actually happened on.
+   * Rome has not placed rather than the senders waiting on a decision.
    */
-  counts: AccountCounts;
-}
-
-/**
- * One page of the account stream, newest activity first.
- *
- * `counts` describes every account with activity the query admits, before
- * `state` narrows the page — which is what makes the Unknown chip's number the
- * senders actually waiting on a decision rather than the size of an address
- * book.
- */
-export interface AccountStream {
-  accounts: StreamAccount[];
-  /** Opaque, and null on the last page. */
-  nextCursor: string | null;
   counts: AccountCounts;
 }
 
@@ -493,11 +401,6 @@ export function accountMatchesQuery(
 /**
  * Where one account sits in the directory's order: the name it is filed under,
  * and its ref to settle a tie.
- *
- * Not the stream's tuple. The directory is a contacts list — ordered by name,
- * carrying no activity at all — so a cursor naming a timestamp would name a
- * position this order does not have, and a page boundary the two ends of the
- * cursor disagree about.
  *
  * A position rather than a row id: between two requests an account is linked,
  * dismissed or renamed, and a cursor that had to find that row again would
@@ -553,97 +456,6 @@ export function parseAccountCursor(raw: string | undefined | null): AccountCurso
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
-}
-
-/**
- * Where one row sits in an activity order: the tuple the ordering reads, and
- * nothing else. A cursor carries this rather than a row id, so resuming needs a
- * position rather than a row that still exists.
- *
- * One position type over both activity listings. The account stream and the
- * person listing are two views of the same activity, so a second tuple would be
- * a second answer to "who is at the top" — and the reasons it is a position
- * rather than a row id, and the reasons every part is escaped, would live in
- * two places that can be fixed apart. Named for the stream because that is the
- * listing that pages.
- */
-export interface StreamCursor {
-  /** The row's `latest.timestamp`, or null for a row that has never done
-   *  anything — those sort last. A stream row always carries one; a person
-   *  nobody has ever written to does not. */
-  timestamp: number | null;
-  displayName: string;
-  id: string;
-}
-
-/**
- * The order both activity listings run on: newest activity first, rows that
- * have never done anything last, ties broken by name and then id so the
- * sequence is total — which is what lets a cursor resume it.
- */
-export function compareStreamCursors(a: StreamCursor, b: StreamCursor): number {
-  const aAt = a.timestamp;
-  const bAt = b.timestamp;
-  if ((aAt == null) !== (bAt == null)) return aAt == null ? 1 : -1;
-  if (aAt !== bAt) return (bAt ?? 0) - (aAt ?? 0);
-  const byName = compareDisplayNames(a.displayName, b.displayName);
-  return byName !== 0 ? byName : compareCodePoints(a.id, b.id);
-}
-
-/**
- * Encode the position a page ended at.
- *
- * The whole ordering tuple, not the last row's id: between two requests a row
- * is linked, merged away, or dismissed — every one of them an ordinary write on
- * this surface — and a cursor that has to find that row again answers the next
- * page empty and truncates the listing until the query is restarted. A position
- * is still a position after the row at it is gone.
- *
- * Each part is escaped, because a display name is guardian-supplied text and an
- * account ref carries a jid; neither can be trusted to avoid the separator.
- */
-export function encodeStreamCursor(cursor: StreamCursor): string {
-  return [cursor.timestamp ?? "", cursor.displayName, cursor.id]
-    .map((part) => encodeURIComponent(String(part)))
-    .join("|");
-}
-
-/** Decode an {@link encodeStreamCursor}, or null when it is not one. */
-export function parseStreamCursor(raw: string | undefined | null): StreamCursor | null {
-  if (!raw) return null;
-  const parts = raw.split("|");
-  if (parts.length !== 3) return null;
-  let decoded: string[];
-  try {
-    decoded = parts.map(decodeURIComponent);
-  } catch {
-    return null;
-  }
-  const [rawTimestamp, displayName, id] = decoded;
-  if (!id) return null;
-  const timestamp = rawTimestamp === "" ? null : Number(rawTimestamp);
-  if (timestamp !== null && !Number.isFinite(timestamp)) return null;
-  return { timestamp, displayName, id };
-}
-
-/** The ordering tuple for any row that carries one, given its id. Widened past
- *  either row type so both activity listings order through
- *  {@link compareStreamCursors} rather than restating it. */
-function activityPosition(
-  row: { displayName: string; latest: AccountDynamic | null },
-  id: string,
-): StreamCursor {
-  return { timestamp: row.latest?.timestamp ?? null, displayName: row.displayName, id };
-}
-
-export function streamCursorOf(account: StreamAccount): StreamCursor {
-  return activityPosition(account, accountRef(account));
-}
-
-/** Whether an account falls after a cursor in {@link compareStreamCursors}
- *  order — i.e. belongs on a later page than the one that cursor ended. */
-export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
-  return compareStreamCursors(cursor, streamCursorOf(account)) < 0;
 }
 
 /** How many accounts one page carries when the caller names no limit, and the
@@ -715,52 +527,6 @@ export function sliceAccountDirectory(
 }
 
 /**
- * Cut one page out of the stream, with the counts that describe the whole of
- * it.
- *
- * Takes every account something has happened on, in any order — the ordering is
- * this function's, as the directory's is {@link sliceAccountDirectory}'s. An
- * account with nothing on record never reaches here: it has no position in an
- * order made of timestamps, and no reader of a recents surface is asking after
- * it.
- *
- * `query` scopes the counts as well as the page, and `state` and the cursor
- * scope the page alone — the same split the directory makes, and for the same
- * reason: a client filtered to one chip still renders every chip's number.
- */
-export function sliceAccountStream(
-  stream: readonly StreamAccount[],
-  options: {
-    query?: string | null;
-    state?: AccountState | null;
-    cursor?: StreamCursor | null;
-    limit?: number | null;
-  } = {},
-): AccountStream {
-  const query = options.query?.trim() ?? "";
-  const matching = query ? stream.filter((a) => accountMatchesQuery(a, query)) : stream;
-
-  const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
-  for (const account of matching) counts[account.state] += 1;
-
-  const ordered = matching
-    .map((account) => ({ account, at: streamCursorOf(account) }))
-    .sort((a, b) => compareStreamCursors(a.at, b.at))
-    .map((entry) => entry.account);
-  const state = options.state;
-  const scoped = state ? ordered.filter((a) => a.state === state) : ordered;
-  const cursor = options.cursor;
-  const remaining = cursor ? scoped.filter((a) => isAfterStreamCursor(a, cursor)) : scoped;
-
-  const accounts = remaining.slice(0, accountPageLimit(options.limit));
-  const last = accounts.at(-1);
-  const nextCursor =
-    remaining.length > accounts.length && last ? encodeStreamCursor(streamCursorOf(last)) : null;
-
-  return { accounts, nextCursor, counts };
-}
-
-/**
  * One account as it appears under the person linked to it.
  *
  * `(channel, channelUserId)` names the account — its channel and its own
@@ -781,11 +547,9 @@ export interface LinkedAccount {
    * When this account itself was last active, in epoch seconds, or null when
    * nothing has ever passed on it.
    *
-   * Per account rather than per person, and that is the point: the person's
-   * own {@link PersonResource.latest} names a channel and not an address, so it
-   * cannot say which of two accounts on one channel was the recent one. This
-   * can, which is what lets a composer open on the account the guardian last
-   * heard from without inventing the answer.
+   * Shown nowhere. It decides which account a person's page opens on
+   * ({@link defaultSendAccount}), the one the guardian last heard from, and
+   * only an account's own time can tell two accounts on one channel apart.
    */
   latestAt: number | null;
   /**
@@ -846,20 +610,16 @@ export function defaultSendAccount(accounts: readonly LinkedAccount[]): LinkedAc
 }
 
 /**
- * A person with their accounts and their activity across all of them.
+ * A person with the accounts linked to them.
  *
  * `bondLevel` is the stored value, free text included: older rows carry levels
  * outside today's ladder ("colleague"), and a reader buckets them with
  * {@link normalizeBondLevel} rather than the contract pretending they cannot
  * exist.
  *
- * `latest` and `messageCount` describe one history — the merged timeline
- * `GET /api/people/:id/messages` pages. `latest` is {@link latestDynamic} of
- * it and `messageCount` is how many entries it holds, so the line a row
- * previews is the line its dossier opens on, and the number beside it counts
- * what the dossier will show. A group conversation contributes to neither: a
- * message names no sender, so nothing said in a room of ten people is
- * attributable to one of them.
+ * No activity. A history is one account's, read with
+ * `GET /api/people/:id/messages` for that account, and a person is not a
+ * history joined across their accounts.
  *
  * `memoryPath` is the profile Rome has written about them, as a path under the
  * memory root — the same address the memory file browser reads. Null when no
@@ -871,8 +631,6 @@ export interface PersonResource {
   displayName: string;
   bondLevel: string;
   accounts: LinkedAccount[];
-  messageCount: number;
-  latest: AccountDynamic | null;
   memoryPath: string | null;
 }
 
@@ -960,16 +718,13 @@ export function personMatchesQuery(person: PersonResource, query: string): boole
 }
 
 /**
- * The listing's order: newest activity first, people who have never said
- * anything last, ties broken by name and then id.
- *
- * The account stream's order, not a second one that happens to agree — the two
- * listings are two views of the same activity, so an order defined twice is two
- * answers to "who is at the top" and, once this listing takes a cursor, a row
- * skipped or repeated at every page boundary.
+ * The listing's order: by display name, ties broken by id so the sequence is
+ * total. A person carries no activity to order by, since a history is one
+ * account's.
  */
 export function comparePeople(a: PersonResource, b: PersonResource): number {
-  return compareStreamCursors(activityPosition(a, a.id), activityPosition(b, b.id));
+  const byName = compareDisplayNames(a.displayName, b.displayName);
+  return byName !== 0 ? byName : compareCodePoints(a.id, b.id);
 }
 
 /**

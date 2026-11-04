@@ -2,6 +2,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
+import type { ChatReads, MessageRef, Place } from "./chats.js";
 
 export { z };
 export type { JSONSchema };
@@ -154,6 +155,7 @@ export interface FavorRequirementConfig {
  * object to Rome APIs and must not inspect or reconstruct its fields. */
 export type RomeSessionType =
   | "webchat"
+  /** A handoff chat from before handoffs were removed. Rome creates no new ones. */
   | "webchat_handoff"
   | "channel"
   | "action"
@@ -254,8 +256,7 @@ export interface PendingApproval {
  *
  * Resolves by posting an `interaction_result` (the produced artifact, or
  * `{ dismissed: true }`) on the session, which re-drives the calling agent
- * with a server-built outcome prompt. Control never leaves the calling agent —
- * for a transfer of the floor to another agent, see {@link Handoff}.
+ * with a server-built outcome prompt. Control never leaves the calling agent.
  */
 export interface PendingInteraction {
   appId: string;
@@ -271,70 +272,6 @@ export interface PendingInteraction {
     componentId: string;
     props?: Record<string, unknown>;
   };
-}
-
-/**
- * Result contract of a handoff's child conversation — what the specialist
- * agent must hand back before control returns to the caller.
- */
-export interface HandbackSpec {
-  /**
-   * JSON Schema the handback artifact must satisfy. The specialist agent gets
-   * a `submit_output` tool AJV-validated against it; invalid submissions
-   * bounce back as tool errors until they conform.
-   */
-  schema: Record<string, unknown>;
-  /**
-   * Optional action the host runs on each submission AFTER the schema passes,
-   * for app-specific semantic checks the schema can't express. It receives the
-   * candidate payload as its input and must return `{ valid: boolean,
-   * errors?: string[] }` in `data`. Invalid (or any validator failure —
-   * fail-closed) bounces the submission back to the agent with the errors.
-   * Must be read-only: it can run once per submission attempt.
-   */
-  validate?: string;
-}
-
-/**
- * Transfer the floor to another agent. When an agent-callable action returns
- * this, the calling agent suspends and the host opens a dedicated child session
- * the guardian collaborates in with `agentName` (see Workflow Studio's
- * `design_workflow`). The parent thread is locked until control returns.
- *
- * The handoff itself mounts no app surface — the summoned agent brings one up on
- * demand by calling the `show_app` action (e.g. Workflow Studio's author shows
- * its live storyboard once there is a plan to preview). `appId` only names the
- * app that owns the handoff (the host install-checks it).
- *
- * The handback: when `handback` is set, a schema-valid (and, if declared,
- * app-validated) `submit_output` submission renders an approval card in the
- * child session; guardian approval ends the handoff and posts the payload as
- * an `interaction_result` on the parent session, re-driving the caller with a
- * server-built outcome prompt (plus `handbackHint`). Dismissal hands control
- * back with `{ dismissed: true }` and no artifact.
- */
-export interface Handoff {
-  /** The host rejects the handoff unless this app is installed. */
-  appId: string;
-  /**
-   * Off-webchat fallback. Only webchat can run a handoff; on a messaging
-   * channel (or inside a subagent) the calling agent relays this text as prose
-   * and the guardian's reply arrives as the next turn.
-   */
-  promptText: string;
-  /**
-   * Agent the guardian collaborates with in the child session. Omit for a
-   * handoff that needs no conversation.
-   */
-  agentName?: string;
-  payload?: Record<string, unknown>;
-  handback?: HandbackSpec;
-  /**
-   * Appended to the resolution prompt the resumed caller receives, so the
-   * caller learns its exact next step. The literal token `<childSessionId>` is
-   * substituted with the handoff's child session id by the host.
-   */
-  handbackHint?: string;
 }
 
 /** True only for Rome Core's default agent, in legacy or canonical form. */
@@ -384,8 +321,7 @@ export interface PlaceWidget {
  * `runAction`, webhook invocation records — so the states are modeled as a union
  * rather than independent flags: a result is exactly one of completed (`ok`),
  * domain-rejected (`error`), suspended on approval, suspended on an inline
- * guardian input (`pending_interaction`), suspended on a handoff to another agent
- * (`handoff`), or completed-with-a-widget-placed (`place_widget`, which does NOT
+ * guardian input (`pending_interaction`), or completed-with-a-widget-placed (`place_widget`, which does NOT
  * suspend). Infrastructure failures (handler throw, serialization, worker crash)
  * are NOT `error` results — they surface as a thrown {@link ActionInvocationError}.
  * The `error` variant is for domain rejections the caller can act on ("routine
@@ -396,7 +332,6 @@ export type ActionResult<T = unknown> =
   | { status: "error"; error: string }
   | { status: "pending_approval"; approval: PendingApproval }
   | { status: "pending_interaction"; interaction: PendingInteraction }
-  | { status: "handoff"; handoff: Handoff }
   | { status: "place_widget"; placement: PlaceWidget };
 
 const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
@@ -1432,7 +1367,8 @@ export interface OutgoingMessageBase {
   /**
    * Structured message parts. When provided, replaces the plain-text path so
    * channels that support rich content (web chat today) can render typed
-   * blocks like approval cards. Channels without rich support ignore it.
+   * blocks like approval cards. A channel that cannot show a part refuses the
+   * message with {@link ChannelSendRefused} `part_unsupported`.
    */
   parts?: MessagePart[];
   /**
@@ -1587,42 +1523,11 @@ export type MessagePart =
     }
   | {
       /**
-       * A handoff in progress: the calling agent suspended and `agentName`
-       * holds the floor in `childSessionId` (the spawned design conversation).
-       * The summoned agent brings up its own surface on the child session, so
-       * the card carries no `surface` of its own. The webchat drain loop
-       * snapshots this part keyed by the tool call's id.
-       */
-      type: "handoff";
-      toolUseId: string;
-      appId: string;
-      agentName?: string;
-      payload?: Record<string, unknown>;
-      childSessionId?: string;
-      /** Mirrors {@link Handoff.handbackHint}; appended to the resolution
-       * prompt when the handoff resolves with an artifact. */
-      handbackHint?: string;
-    }
-  | {
-      /**
-       * A schema-valid payload the specialist agent submitted via
-       * `submit_output` in a handoff child session that carries a handback
-       * contract. The host renders it as an approval card: Approve ends the
-       * handoff with `payload` as the output; "keep editing" feedback continues
-       * the conversation and a later submission supersedes this card.
-       */
-      type: "submission_card";
-      payload: Record<string, unknown>;
-    }
-  | {
-      /**
-       * Resolution of an inline interaction or a handoff — the single
-       * resolution part both suspension kinds share. Lives in a user-role
+       * Resolution of an inline interaction. Lives in a user-role
        * webchat message so the UI derives "this resolved" by scanning for a
        * matching toolUseId, and the server re-drives the calling agent with a
-       * server-built outcome prompt. `output` is the produced artifact (a
-       * handoff's approved handback payload, or an inline component's result),
-       * or `{ dismissed: true }`.
+       * server-built outcome prompt. `output` is the inline component's
+       * result, or `{ dismissed: true }`.
        */
       type: "interaction_result";
       toolUseId: string;
@@ -1761,6 +1666,10 @@ export interface ChannelMessage {
    *  what {@link ChannelsService.query} answers: pass it as
    *  {@link ChannelMessageQuery.after} to read the messages older than it. */
   cursor?: string;
+  /** The message as Chats recorded it, to quote with `replyTo` or to open a
+   *  thread at (`@rome-os/app-runtime/chats`). Absent from a host that
+   *  predates Chats. */
+  ref?: MessageRef;
 }
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
@@ -1924,8 +1833,54 @@ export interface ChannelDirectMessaging {
   conversationFor(channelUserId: string): Promise<ChatId | null>;
 }
 
+/**
+ * Why a channel refused a send before anything reached the platform:
+ *
+ * - `empty`: the message has no text and no attachment to show.
+ * - `part_unsupported`: a part's type is one the channel does not show.
+ *   A text platform shows `text` parts and nothing else.
+ * - `attachment_unsupported`: an attachment the channel cannot carry.
+ * - `reply_unaddressable`: `replyToMessageId` names no message the channel
+ *   can answer, so the reply would land somewhere else. A platform with no
+ *   way to quote at all, such as WhatsApp or WeChat, answers in place, as
+ *   does a reply the channel's placement keeps out of a thread.
+ */
+export type ChannelSendRefusal =
+  | "empty"
+  | "part_unsupported"
+  | "attachment_unsupported"
+  | "reply_unaddressable";
+
+/** A channel's refusal of a send, before anything reached the platform. */
+export class ChannelSendRefused extends Error {
+  constructor(
+    readonly reason: ChannelSendRefusal,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ChannelSendRefused";
+  }
+}
+
+/** Whether `error` is a {@link ChannelSendRefused}, matched by name and
+ *  reason so it holds across module copies. */
+export function isChannelSendRefused(error: unknown): error is ChannelSendRefused {
+  return (
+    error instanceof Error &&
+    error.name === "ChannelSendRefused" &&
+    typeof (error as { reason?: unknown }).reason === "string"
+  );
+}
+
 /** Sending on a channel. */
 export interface ChannelSend {
+  /**
+   * Sends `message` to `chatId`. Resolves only once the platform has taken
+   * all of it. When the channel cannot deliver the message as given, it
+   * rejects with {@link ChannelSendRefused} and sends nothing. It never drops
+   * a part, an attachment or a quote it could not resolve and reports the
+   * rest as sent.
+   */
   send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
@@ -1942,7 +1897,14 @@ export interface ChannelSend {
  * {@link ChatRef} (conversation settings, stop), resolved by the
  * channel so a subscriber does not track what backs it.
  */
-export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ChatRef };
+export type InboundEvent = {
+  kind: "message";
+  message: ChannelMessage;
+  ref: ChatRef;
+  /** Where the message was said, to send a reply into with `deps.chats`
+   *  (`@rome-os/app-runtime/chats`). Absent from a host that predates Chats. */
+  place?: Place;
+};
 
 /**
  * Hearing what arrives on a channel. Every implementation owes all five:
@@ -2109,6 +2071,10 @@ export interface ActionRunContext {
 }
 
 export interface CurrentActionContext {
+  /** The runtime-recorded source of this action chain, separate from its accountable actor. */
+  initiator?: string;
+  /** Kind of the chain's accountable session, before any loopback HTTP hop. */
+  actorKind?: "guardian" | "visitor" | "anonymous";
   actionName?: string;
   executionId?: string;
   rootExecutionId?: string;
@@ -2324,7 +2290,7 @@ export interface EnsureChannelChatInput {
   projectPath?: string;
 }
 
-export interface ChatRepository {
+export interface ChatRepository extends Partial<ChatReads> {
   ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
   /** @deprecated Use `ensureChannelChat`, which does the same. */
   ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;
@@ -2339,6 +2305,53 @@ export interface ChatRepository {
     createdAt?: Date;
   }): Promise<{ inserted: boolean }>;
   promoteMessageToUser(sessionId: string, platformMessageId: string): Promise<void>;
+  /**
+   * Say a message where session `sessionId` stands, as its account on
+   * `channel`: the host sends it through the chat's adapter, records it once
+   * the platform took it, and makes it turn `turnId`'s answer when the turn
+   * knows it (`knownToProvider`). `content` is the line as it goes on record,
+   * as JSON parts, when it says more than the platform shows. Throws the
+   * platform's refusal, and records nothing then. Answers the platform's id
+   * for the message, when it gave one. Absent on a host that does not keep
+   * chats in Chats yet; use `recordOutboundMessage` after sending there.
+   */
+  send?(input: {
+    sessionId: string;
+    channel: string;
+    text?: string;
+    parts?: MessagePart[];
+    attachments?: OutgoingAttachment[];
+    content?: string;
+    replyToPlatformMessageId?: string;
+    turnId?: string;
+    knownToProvider: boolean;
+  }): Promise<{ messageId?: string }>;
+  /**
+   * Send an email as Rome's account on `channel`, on thread `threadId`, or
+   * on a new thread when none is named, through the account's chat adapter,
+   * and record it once in the thread's chat: as session `sessionId`'s when
+   * one is named, else main's there, which joins when it is not there yet.
+   * It is turn `turnId`'s answer when the turn knows it (`knownToProvider`).
+   * Throws the provider's refusal, and records nothing then. Answers the
+   * provider's ids for the message and its thread. Absent where `send` is.
+   */
+  sendEmail?(input: {
+    channel: string;
+    threadId?: string;
+    sessionId?: string;
+    text?: string;
+    parts?: MessagePart[];
+    /** The line as it goes on record, as JSON parts. */
+    content?: string;
+    email: Omit<
+      OutgoingEmailMessage,
+      "kind" | "text" | "parts" | "attachments" | "replyToMessageId" | "turnId"
+    >;
+    turnId?: string;
+    knownToProvider: boolean;
+  }): Promise<{ messageId: string | null; threadId: string }>;
+  /** @deprecated A host that keeps chats in Chats records what `send` and
+   *  `sendEmail` send; this is for one that does not yet. */
   recordOutboundMessage(input: {
     sessionId: string;
     content: string;
@@ -2760,6 +2773,15 @@ export interface PersonRecord {
   approved?: boolean | null;
   createdAt?: Date;
   [key: string]: unknown;
+}
+
+/**
+ * Who people are, as an app may ask. An action receives it as `deps.people`.
+ */
+export interface PeopleService {
+  /** The guardian's linked accounts, to reach them on with `deps.chats.dm`.
+   *  Empty while no account is linked to the guardian. */
+  guardian(): Promise<{ accounts: Account[] }>;
 }
 
 /**

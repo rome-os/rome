@@ -32,7 +32,14 @@ import { LoadChart } from "./load-chart.js";
 import { format, messagesFor, plural, type NodeUiMessages } from "./messages.js";
 import { DeviceIcon, ResultMark, resultPaint, useNow } from "./parts.js";
 import type { NodeActionResult, NodeActionRow } from "./protocol.js";
-import { BUCKET_MS, failureRate, statsByPeer, windowStart } from "./stats.js";
+import {
+  BUCKET_MS,
+  failureRate,
+  statsByPeer,
+  windowStart,
+  type DeviceStats,
+  type ResultCounts,
+} from "./stats.js";
 import type { NodeDevice, NodeDeviceManage, NodeThisDevice } from "./types.js";
 import {
   activeTextFilter,
@@ -289,12 +296,130 @@ export function NodeDeviceActivity({
     device.id,
   );
   const selectedRow = list.rows.find((row) => row.id === selectedId) ?? fetched;
+  return (
+    <NodeActivityView
+      device={device}
+      nav={nav}
+      locale={locale}
+      now={now}
+      actions={
+        manage || thisDevice ? (
+          <DeviceMenu device={device} self={thisDevice} manage={manage} m={m} />
+        ) : undefined
+      }
+      notice={
+        socket.link !== "open" ? (
+          <p role="status" className="text-ui text-muted-foreground">
+            {m.link[socket.link]}
+          </p>
+        ) : null
+      }
+      series={series}
+      statsUnavailable={!supported}
+      result={result}
+      onResult={setResult}
+      bucket={bucket}
+      onBucket={setBucket}
+      search={search}
+      onSearch={setSearch}
+      searching={Boolean(text)}
+      rows={list.rows}
+      loading={list.loading}
+      hasMore={list.hasMore}
+      onLoadMore={list.loadMore}
+      selectedId={selectedId}
+      selectedRow={selectedRow ?? null}
+      onSelect={select}
+      renderDetail={(row) => (
+        <CommandDetail row={row} device={device} now={now} context={context} />
+      )}
+    />
+  );
+}
+
+/** What `NodeActivityView` shows: the data and the state its host owns. */
+export interface NodeActivityViewProps {
+  device: NodeDevice;
+  /** Replaces the device name in the header. */
+  title?: string;
+  /** Replaces the platform and status line under the title. */
+  subtitle?: string;
+  nav?: ReactNode;
+  /** The header's "…" menu. */
+  actions?: ReactNode;
+  /** A line or alert under the header, such as a lost connection. */
+  notice?: ReactNode;
+  /** Shows only the header and the notice, when there is no activity to read. */
+  hideActivity?: boolean;
+  locale?: string;
+  now: number;
+  /** The last 24 hours: the totals and the chart. */
+  series?: DeviceStats;
+  statsUnavailable?: boolean;
+  /** The filter counts. Defaults to the 24-hour totals of `series`. */
+  counts?: ResultCounts;
+  result: NodeActionResult | "all";
+  onResult(result: NodeActionResult | "all"): void;
+  bucket: number | null;
+  onBucket(bucket: number | null): void;
+  search: string;
+  onSearch(search: string): void;
+  /** True while a text filter applies, which hides the count beside the search box. */
+  searching: boolean;
+  rows: NodeActionRow[];
+  loading: boolean;
+  hasMore: boolean;
+  onLoadMore(): void;
+  selectedId: number | null;
+  selectedRow: NodeActionRow | null;
+  onSelect(id: number | null): void;
+  renderDetail(row: NodeActionRow): ReactNode;
+}
+
+/**
+ * The device activity layout without a data source: the header, the totals with the result
+ * filter and the load chart, search, the day-grouped command list, and the selected command's
+ * detail beside the list on a wide container and in a sheet on a narrow one.
+ * Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
+ */
+export function NodeActivityView({
+  device,
+  title,
+  subtitle,
+  nav,
+  actions,
+  notice,
+  hideActivity,
+  locale,
+  now,
+  series,
+  statsUnavailable,
+  counts: countsProp,
+  result,
+  onResult,
+  bucket,
+  onBucket,
+  search,
+  onSearch,
+  searching,
+  rows,
+  loading,
+  hasMore,
+  onLoadMore,
+  selectedId,
+  selectedRow,
+  onSelect,
+  renderDetail,
+}: NodeActivityViewProps) {
+  const m = messagesFor(locale);
   const [frame, width] = useWidth<HTMLDivElement>();
   const wide = width >= SPLIT_PX;
   const countText = (count: number) => plural(m.detail.count, count, locale);
   const counts = series?.counts;
   const scoped =
-    bucket === null ? counts : series?.buckets.find((item) => item.start === bucket)?.counts;
+    bucket === null
+      ? (countsProp ?? counts)
+      : series?.buckets.find((item) => item.start === bucket)?.counts;
   const rate = counts ? failureRate(counts) : null;
   const searchShort = search.trim().length > 0 && !activeTextFilter(search);
   const platform = platformOf(device.platform).label;
@@ -302,7 +427,7 @@ export function NodeDeviceActivity({
 
   // Groups rows by day, newest first.
   const groups: { day: number; rows: NodeActionRow[] }[] = [];
-  for (const row of list.rows) {
+  for (const row of rows) {
     const day = startOfDay(row.startedAt);
     const last = groups.at(-1);
     if (last?.day === day) last.rows.push(row);
@@ -331,10 +456,7 @@ export function NodeDeviceActivity({
     }),
   );
 
-  const detail = selectedRow ? (
-    <CommandDetail row={selectedRow} device={device} now={now} context={context} />
-  ) : null;
-
+  const detail = selectedRow ? renderDetail(selectedRow) : null;
   return (
     <div ref={frame} className="flex min-w-0 flex-col gap-6">
       <PageHeader>
@@ -342,194 +464,193 @@ export function NodeDeviceActivity({
         <div className="flex min-w-0 items-center gap-3">
           <DeviceIcon platform={device.platform} status={device.status} className="size-10" />
           <PageHeading className="min-w-0">
-            <PageTitle className="break-words">{device.name}</PageTitle>
+            <PageTitle className="break-words">{title ?? device.name}</PageTitle>
             <p className="text-aux text-muted-foreground">
-              {[platform, device.status ? m.status[device.status] : null]
-                .filter(Boolean)
-                .join(" · ")}
+              {subtitle ??
+                [platform, device.status ? m.status[device.status] : null]
+                  .filter(Boolean)
+                  .join(" · ")}
             </p>
           </PageHeading>
         </div>
-        {(manage || thisDevice) && (
-          <PageActions>
-            <DeviceMenu device={device} self={thisDevice} manage={manage} m={m} />
-          </PageActions>
-        )}
+        {actions && <PageActions>{actions}</PageActions>}
       </PageHeader>
 
-      {socket.link !== "open" && (
-        <p role="status" className="text-ui text-muted-foreground">
-          {m.link[socket.link]}
-        </p>
-      )}
+      {notice}
 
-      <Card className="gap-4 px-4">
-        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-          <div className="flex min-w-0 flex-col gap-1">
-            <p className="flex flex-wrap items-baseline gap-x-2">
-              <span className="text-display tabular-nums text-foreground">
-                {(counts?.all ?? 0).toLocaleString(locale)}
-              </span>
-              <span className="text-ui text-muted-foreground">
-                {plural(m.detail.commandsInDay, counts?.all ?? 0, locale)}
-              </span>
-            </p>
-            {counts && counts.all > 0 && (
-              <p className="text-aux text-muted-foreground tabular-nums">
-                {[
-                  format(m.detail.average, {
-                    rate: (counts.all / (24 * 60)).toLocaleString(locale, {
-                      maximumFractionDigits: 1,
-                    }),
-                  }),
-                  series?.peak
-                    ? format(m.detail.peakAt, {
-                        count: series.peak.counts.all,
-                        time: clock(series.peak.start, locale, false),
-                      })
-                    : null,
-                  rate !== null
-                    ? format(m.detail.failedShare, {
-                        rate: rate.toLocaleString(locale, {
-                          style: "percent",
+      {!hideActivity && (
+        <>
+          <Card className="gap-4 px-4">
+            <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-display tabular-nums text-foreground">
+                    {(counts?.all ?? 0).toLocaleString(locale)}
+                  </span>
+                  <span className="text-ui text-muted-foreground">
+                    {plural(m.detail.commandsInDay, counts?.all ?? 0, locale)}
+                  </span>
+                </p>
+                {counts && counts.all > 0 && (
+                  <p className="text-aux text-muted-foreground tabular-nums">
+                    {[
+                      format(m.detail.average, {
+                        rate: (counts.all / (24 * 60)).toLocaleString(locale, {
                           maximumFractionDigits: 1,
                         }),
-                      })
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            )}
-            {!supported && <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>}
-          </div>
-          <FilterChipGroup
-            aria-label={m.detail.resultFilter}
-            options={options}
-            value={result}
-            onValueChange={setResult}
-            className="max-w-full"
-          />
-        </div>
-        {series && (
-          <LoadChart
-            buckets={series.buckets}
-            bucketMs={BUCKET_MS}
-            m={m}
-            locale={locale}
-            size="lg"
-            countText={countText}
-            selected={bucket}
-            onSelect={setBucket}
-          />
-        )}
-      </Card>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="min-w-48 flex-1">
-            <Input
-              type="search"
-              icon={<Search />}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={m.detail.searchPlaceholder}
-              aria-label={m.detail.search}
-            />
-          </div>
-          {bucket !== null && (
-            <span className="inline-flex h-[var(--control-h-md)] items-center gap-1 rounded-[var(--control-r-md)] border border-border pl-3 pr-1 font-mono text-aux text-foreground tabular-nums">
-              {format(m.detail.window, {
-                from: clock(bucket, locale, false),
-                to: clock(bucket + BUCKET_MS, locale, false),
-              })}
-              <IconButton
-                size="xs"
-                label={m.detail.clearWindow}
-                icon={<X />}
-                onClick={() => setBucket(null)}
+                      }),
+                      series?.peak
+                        ? format(m.detail.peakAt, {
+                            count: series.peak.counts.all,
+                            time: clock(series.peak.start, locale, false),
+                          })
+                        : null,
+                      rate !== null
+                        ? format(m.detail.failedShare, {
+                            rate: rate.toLocaleString(locale, {
+                              style: "percent",
+                              maximumFractionDigits: 1,
+                            }),
+                          })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+                {statsUnavailable && (
+                  <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
+                )}
+              </div>
+              <FilterChipGroup
+                aria-label={m.detail.resultFilter}
+                options={options}
+                value={result}
+                onValueChange={onResult}
+                className="max-w-full"
               />
-            </span>
-          )}
-          {scoped && !text && (
-            <span className="text-aux text-muted-foreground tabular-nums">
-              {plural(m.detail.count, scoped[result], locale)}
-            </span>
-          )}
-        </div>
-        {searchShort && <p className="text-aux text-muted-foreground">{m.detail.searchHint}</p>}
-      </div>
-
-      <div className={cn("grid items-start gap-4", wide && "grid-cols-[minmax(0,1fr)_22rem]")}>
-        <Card className="gap-0 overflow-hidden py-0">
-          {wide && (
-            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_4.5rem_6rem] gap-3 border-b border-border px-[var(--row-px-sm)] py-2 text-aux text-muted-foreground">
-              <span>{m.detail.columns.time}</span>
-              <span>{m.detail.columns.command}</span>
-              <span className="text-right">{m.detail.columns.duration}</span>
-              <span>{m.detail.columns.result}</span>
             </div>
-          )}
-          {groups.length === 0 ? (
-            <p className="px-4 py-6 text-ui text-muted-foreground">
-              {list.loading ? m.detail.loading : m.detail.empty}
-            </p>
-          ) : (
-            groups.map((group) => (
-              <section key={group.day} aria-label={dayLabel(group.day)}>
-                <h3 className="border-b border-border-subtle bg-surface-muted px-[var(--row-px-sm)] py-2 text-aux font-medium text-muted-foreground">
-                  {dayLabel(group.day)}
-                </h3>
-                <List asChild>
-                  <ul aria-busy={list.loading}>
-                    {group.rows.map((row) => (
-                      <CommandRow
-                        key={row.id}
-                        row={row}
-                        selected={row.id === selectedId}
-                        onSelect={() => select(row.id === selectedId && wide ? null : row.id)}
-                        wide={wide}
-                        now={now}
-                        locale={locale}
-                        m={m}
-                      />
-                    ))}
-                  </ul>
-                </List>
-              </section>
-            ))
-          )}
-          {list.hasMore && (
-            <div className="border-t border-border p-3">
-              <Button variant="outline" size="sm" disabled={list.loading} onClick={list.loadMore}>
-                {m.detail.loadMore}
-              </Button>
-            </div>
-          )}
-        </Card>
-        {wide && (
-          <Card className="sticky top-4 px-4">
-            {detail ?? <p className="text-ui text-muted-foreground">{m.detail.select}</p>}
+            {series && (
+              <LoadChart
+                buckets={series.buckets}
+                bucketMs={BUCKET_MS}
+                m={m}
+                locale={locale}
+                size="lg"
+                countText={countText}
+                selected={bucket}
+                onSelect={onBucket}
+              />
+            )}
           </Card>
-        )}
-      </div>
 
-      {!wide && (
-        <Sheet
-          open={Boolean(selectedRow)}
-          onClose={() => select(null)}
-          widthClassName="w-full max-w-md"
-          className="overflow-y-auto"
-        >
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-            <SheetTitle className="truncate text-section">{device.name}</SheetTitle>
-            <SheetDescription className="sr-only">
-              {selectedRow ? summarize(selectedRow) : null}
-            </SheetDescription>
-            <IconButton label={m.detail.close} icon={<X />} onClick={() => select(null)} />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-48 flex-1">
+                <Input
+                  type="search"
+                  icon={<Search />}
+                  value={search}
+                  onChange={(event) => onSearch(event.target.value)}
+                  placeholder={m.detail.searchPlaceholder}
+                  aria-label={m.detail.search}
+                />
+              </div>
+              {bucket !== null && (
+                <span className="inline-flex h-[var(--control-h-md)] items-center gap-1 rounded-[var(--control-r-md)] border border-border pl-3 pr-1 font-mono text-aux text-foreground tabular-nums">
+                  {format(m.detail.window, {
+                    from: clock(bucket, locale, false),
+                    to: clock(bucket + BUCKET_MS, locale, false),
+                  })}
+                  <IconButton
+                    size="xs"
+                    label={m.detail.clearWindow}
+                    icon={<X />}
+                    onClick={() => onBucket(null)}
+                  />
+                </span>
+              )}
+              {scoped && !searching && (
+                <span className="text-aux text-muted-foreground tabular-nums">
+                  {plural(m.detail.count, scoped[result], locale)}
+                </span>
+              )}
+            </div>
+            {searchShort && <p className="text-aux text-muted-foreground">{m.detail.searchHint}</p>}
           </div>
-          <div className="p-4">{detail}</div>
-        </Sheet>
+
+          <div className={cn("grid items-start gap-4", wide && "grid-cols-[minmax(0,1fr)_22rem]")}>
+            <Card className="gap-0 overflow-hidden py-0">
+              {wide && (
+                <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_4.5rem_6rem] gap-3 border-b border-border px-[var(--row-px-sm)] py-2 text-aux text-muted-foreground">
+                  <span>{m.detail.columns.time}</span>
+                  <span>{m.detail.columns.command}</span>
+                  <span className="text-right">{m.detail.columns.duration}</span>
+                  <span>{m.detail.columns.result}</span>
+                </div>
+              )}
+              {groups.length === 0 ? (
+                <p className="px-4 py-6 text-ui text-muted-foreground">
+                  {loading ? m.detail.loading : m.detail.empty}
+                </p>
+              ) : (
+                groups.map((group) => (
+                  <section key={group.day} aria-label={dayLabel(group.day)}>
+                    <h3 className="border-b border-border-subtle bg-surface-muted px-[var(--row-px-sm)] py-2 text-aux font-medium text-muted-foreground">
+                      {dayLabel(group.day)}
+                    </h3>
+                    <List asChild>
+                      <ul aria-busy={loading}>
+                        {group.rows.map((row) => (
+                          <CommandRow
+                            key={row.id}
+                            row={row}
+                            selected={row.id === selectedId}
+                            onSelect={() => onSelect(row.id === selectedId && wide ? null : row.id)}
+                            wide={wide}
+                            now={now}
+                            locale={locale}
+                            m={m}
+                          />
+                        ))}
+                      </ul>
+                    </List>
+                  </section>
+                ))
+              )}
+              {hasMore && (
+                <div className="border-t border-border p-3">
+                  <Button variant="outline" size="sm" disabled={loading} onClick={onLoadMore}>
+                    {m.detail.loadMore}
+                  </Button>
+                </div>
+              )}
+            </Card>
+            {wide && (
+              <Card className="sticky top-4 px-4">
+                {detail ?? <p className="text-ui text-muted-foreground">{m.detail.select}</p>}
+              </Card>
+            )}
+          </div>
+
+          {!wide && (
+            <Sheet
+              open={Boolean(selectedRow)}
+              onClose={() => onSelect(null)}
+              widthClassName="w-full max-w-md"
+              className="overflow-y-auto"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+                <SheetTitle className="truncate text-section">{title ?? device.name}</SheetTitle>
+                <SheetDescription className="sr-only">
+                  {selectedRow ? summarize(selectedRow) : null}
+                </SheetDescription>
+                <IconButton label={m.detail.close} icon={<X />} onClick={() => onSelect(null)} />
+              </div>
+              <div className="p-4">{detail}</div>
+            </Sheet>
+          )}
+        </>
       )}
     </div>
   );

@@ -4,7 +4,7 @@
 // Vocabulary: docs/concepts/people.md. The wire shapes are the People
 // contract's (`@rome/api-types/people`).
 //
-// Saying the message is `chats/send.ts`'s, which takes a place. This module
+// Saying the message is `connections/send.ts`'s, which takes a place. This module
 // finds the place: the direct message that reaches the account a send names.
 //
 // A send names its account. There is no entry point here that takes a person
@@ -28,7 +28,10 @@
 
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
-import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import {
+  ChannelNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
 import {
   type Sender,
@@ -39,9 +42,22 @@ import {
   type SendDeps,
   type SendIntoPlaceDeps,
   type SendResult,
-} from "../chats/send.js";
+} from "../connections/send.js";
 
 export { sendersOf, type SendDeps };
+
+/**
+ * `deps` with its senders cut to the guardian's own accounts. A person's page
+ * shows the guardian's chats with them, so it sends only from the guardian's
+ * own accounts: a message sent from an agent's account would land in a chat
+ * the page does not show.
+ */
+export function asGuardian<Deps extends SendDeps>(
+  deps: Deps,
+  guardians: (channel: string) => boolean,
+): Deps {
+  return { ...deps, sendersOn: (platform: string) => sendersOf(deps, platform).filter(guardians) };
+}
 
 /** A resolved target: the channel it is on, that channel's send port, and the
  *  conversation on it that reaches this account. It names the channel, not
@@ -165,9 +181,10 @@ export async function readSendStates(
  * Its key is the address the sender's channel holds for the direct message,
  * which is the platform's own id for it over today's storage, so the send has
  * to go out as `as`: another account's channel may hold another address.
+ * With `recording`, the direct message is held in Chats from here on.
  */
 export async function directPlace(
-  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf">,
+  deps: Pick<SendIntoPlaceDeps, keyof SendDeps | "accountOf" | "recording">,
   account: Account,
   from?: Account,
 ): Promise<{ ok: true; place: Place; as: Sender } | Extract<SendResult, { ok: false }>> {
@@ -184,5 +201,17 @@ export async function directPlace(
   const as: Sender = from ?? deps.accountOf?.(sender) ?? { channel: sender };
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
-  return { ok: true, place: placeIn(chatKey(account.platform, resolution.target.chatId)), as };
+  const address = resolution.target.chatId;
+  if (deps.recording) {
+    // Held in Chats before the send, so the send finds the direct message at
+    // the address and says the line there, not in a group.
+    const { adapters, chats } = deps.recording;
+    // The channel may have come back as another account while the lookup
+    // ran, and the address is this one's: keep it under no other.
+    if ("id" in as && adapters.knownAccountOn(sender)?.id !== as.id) {
+      return { ok: false, send: "not-connected" };
+    }
+    chats.start(adapters.directMessageReached(sender, account.id, address), "dm", null);
+  }
+  return { ok: true, place: placeIn(chatKey(account.platform, address)), as };
 }

@@ -77,7 +77,14 @@ export function ConciergeTranscript({
           if (item.kind === "separator")
             return <ConciergeTimeSeparator key={item.key} at={item.at} />;
           if (item.kind === "notice")
-            return <ModelSwitchNotice key={item.key} model={item.model} className="mb-0" />;
+            return (
+              <ModelSwitchNotice
+                key={item.key}
+                model={item.model}
+                quota={item.quota}
+                className="mb-0"
+              />
+            );
           return (
             <ConciergeGroup
               key={item.key}

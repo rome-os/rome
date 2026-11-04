@@ -1,4 +1,4 @@
-import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
+import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -7,11 +7,17 @@ import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
-import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
-import type { MessageRepository } from "../chats/message-repository.js";
+import type {
+  Channels,
+  PlatformOfChannel,
+  RecordedOn,
+} from "../chats/connected-accounts/connected-account.js";
+import type { SendRecording } from "../connections/send.js";
+import type { ChatRepository } from "../chats/storage/chat-repository.js";
+import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
-import type { AccountNames } from "../channels/account-names.js";
-import type { ExternalAgents } from "../channels/agents-accounts.js";
+import type { AccountNames } from "../chats/accounts/account-names.js";
+import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -54,7 +60,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
-import type { AccountListening } from "../channels/account-agents.js";
+import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
@@ -91,7 +97,7 @@ export interface ApiDeps {
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (channels/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
@@ -107,6 +113,9 @@ export interface ApiDeps {
   sendersOn: SendersOn;
   /** Rome's own account on a channel, which a send names as `from`. */
   accountOf: ChannelRecordsRepository["accountOf"];
+  /** Where People reads Rome's transcript from: its legacy table by default,
+   *  or Chats. */
+  transcript?: "legacy" | "chats";
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */
@@ -116,8 +125,12 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
-  /** What was said in each place (docs/domains/chats.md#message). */
-  chatMessages: Pick<MessageRepository, "recent" | "before" | "recordSent">;
+  /** Where a send into a place is said and put on record in Chats. */
+  recording: SendRecording;
+  /** The chats Rome takes part in, by their adapter's keys. */
+  chats: Pick<ChatRepository, "byKey">;
+  /** What was said in each chat, as Chats records it. */
+  messages: Pick<ChatLines, "read">;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

@@ -2,6 +2,12 @@
 
 When an agent takes part in a chat: what wakes it, what it reads, and where it speaks. Participation reads the record [Chats](chats.md) keeps and speaks back into it, and starts a turn of an [agent](agents.md). The pattern both ways is the same: Chats keeps the record and offers it, the agent judges what to read and where to speak, and a guardrail bounds the speaking.
 
+## Speaker
+
+A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is read off the agent's session, not stored.
+
+- A session is in a chat when it has a speaker there. The session keeps its own id. No table holds speakers and nothing names one by an id of its own.
+
 ## Wake
 
 The moment a message is judged to need the agent and the agent starts a turn. The chat's [reply rule](chats.md#reply-rule) decides it.
