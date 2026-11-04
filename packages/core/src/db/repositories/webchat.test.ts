@@ -2,7 +2,7 @@ import { resolveChatSenders } from "../../api/routes/chat-senders.js";
 import { resolveReply } from "../../api/routes/webchat-reply.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
-import { createTestDb, testChatRepository, type TestDb } from "../../test/helpers.js";
+import { createTestDb, testChatsWiring, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
@@ -659,7 +659,7 @@ describe("WebChatRepository", () => {
     expect(archived?.pinnedAt).not.toBeNull();
     expect(ids(await repo.listSessions("archived"))).toEqual(["chat-1"]);
 
-    const settings = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const settings = new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db));
     expect(settings.listKnown({})).toEqual([]);
   });
 
