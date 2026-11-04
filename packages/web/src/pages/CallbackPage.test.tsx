@@ -196,6 +196,22 @@ describe("CallbackPage return-leg routing", () => {
     expect(String(toast.mock.calls[0]![0])).toContain("Rome ended the connection");
   });
 
+  it("tells the guardian when a connect through the redeem ended the connection", async () => {
+    const toast = rs.spyOn(sonner, "toast").mockImplementation(() => "t");
+    stubFetch({
+      redeem: () =>
+        new Response(
+          JSON.stringify({ ok: true, nextPath: "/settings/connections/shopify", ended: true }),
+          { status: 200 },
+        ),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-shop&state=s-shop");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/settings/connections/shopify");
+    expect(toast).toHaveBeenCalledTimes(1);
+  });
+
   it("lands on the connections list when the matched setup names no connection kind", async () => {
     stubFetch({
       setupReturn: () =>

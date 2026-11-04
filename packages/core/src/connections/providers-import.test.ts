@@ -412,8 +412,16 @@ describe("a sign-in fix that reaches another account", () => {
     await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
     const [first] = registry.find("github");
 
-    await importProviderBundle(registry, "github", { accessToken: "gho-2" }, { subject: "99" });
+    const ended: string[] = [];
+    await importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "99" },
+      { onEnded: (id) => ended.push(id) },
+    );
 
+    expect(ended).toEqual([first!.id]);
     const connections = registry.find("github");
     expect(connections).toHaveLength(1);
     expect(connections[0]!.id).not.toBe(first!.id);

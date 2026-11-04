@@ -164,7 +164,7 @@ export async function importProviderBundle(
   provider: OAuthProvider,
   bundle: OAuthTokenBundle,
   account?: unknown,
-  opts: { signIn?: boolean } = {},
+  opts: { signIn?: boolean; onEnded?: (id: string) => void } = {},
 ): Promise<boolean> {
   if (!registry.isRegistered(provider)) return false;
   const credential = credentialFromBundle(provider, bundle);
@@ -177,14 +177,10 @@ export async function importProviderBundle(
   // running at the same time finishes before this redeem starts and the redeem
   // makes a fresh connection, rather than restoring custody to one going away.
   await registry.withGrantSection(provider, grant, () =>
-    registry.giveGrant(
-      provider,
-      undefined,
-      grant,
-      credential,
-      profile,
-      opts.signIn ? { signIn: true } : {},
-    ),
+    registry.giveGrant(provider, undefined, grant, credential, profile, {
+      ...(opts.signIn ? { signIn: true } : {}),
+      ...(opts.onEnded ? { onEnded: opts.onEnded } : {}),
+    }),
   );
   return true;
 }

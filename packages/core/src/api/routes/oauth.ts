@@ -155,12 +155,19 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       // (a sign-in redeem has no session yet). Signing in never disturbs a
       // connection, so one that reaches another account grants nothing.
       const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
+      // Set when the redeem reached another account and ended the connection.
+      let ended = false;
       const imported = await importProviderBundle(
         deps.connectionRegistry,
         redeemed.provider,
         redeemed.tokens,
         redeemed.profile ?? {},
-        { signIn: !existingSession },
+        {
+          signIn: !existingSession,
+          onEnded: () => {
+            ended = true;
+          },
+        },
       );
       if (!imported) {
         throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
@@ -182,6 +189,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
         ok: true,
         provider: redeemed.provider,
         nextPath,
+        ...(ended ? { ended: true } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "OAuth handoff redemption failed.";
