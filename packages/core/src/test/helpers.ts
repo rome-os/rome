@@ -86,6 +86,7 @@ import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatsWiring } from "../chats-wiring.js";
+import { openChannelChat } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
@@ -749,6 +750,23 @@ export async function buildTestDeps(
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo,
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
