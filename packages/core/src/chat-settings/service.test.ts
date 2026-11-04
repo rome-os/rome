@@ -1115,6 +1115,33 @@ describe("ChatSettingsService", () => {
     expect((await service.get(throughSales)).effective.enabled).toBe(false);
   });
 
+  it("names no chat after the address a direct message was first reached at", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const atPerson = { ...throughSales, chatId: "ou_ray" as ChatId };
+    const reset = (policy: { mode: "none" } | { mode: "daily"; atHour: number }) =>
+      service.update({
+        ref: atPerson,
+        set: { session: { reset: policy } },
+        clear: [],
+        actor: { kind: "guardian" },
+      });
+    await reset({ mode: "none" });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId)!;
+    // A send places the direct message at its chat id before Ray names it.
+    const chat = wired.chats.find(ruled.chatId!)!;
+    new ChatAddresses(testDb!.db).bind(
+      { platform: "feishu", id: "ou_sales" },
+      wired.adapters.keyOf(chat.ref).externalId,
+      "oc_ray",
+    );
+
+    await reset({ mode: "daily", atHour: 4 });
+    expect(wired.chats.find(ruled.chatId!)!.name).toBeNull();
+
+    wired.chats.start(wired.adapters.keyOf(chat.ref), "dm", "Ray");
+    expect(wired.chats.find(ruled.chatId!)!.name).toBe("Ray");
+  });
+
   it("names no chat after the placeholder a session opened without a name took", async () => {
     const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
     const ref = { ...throughSales, chatId: "ou_ray" as ChatId };

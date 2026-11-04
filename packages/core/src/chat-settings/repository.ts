@@ -363,14 +363,24 @@ export class ChatSettingsRepository {
         const chat =
           (existing?.chatId ? this.deps.chats.find(existing.chatId)?.ref : null) ??
           this.startChat(descriptor, channel, kindKnown);
-        // An address standing in for a name the platform has not given is no
-        // name: the first message there names the chat.
-        const placeholder = isPlaceholderName(channel, descriptor);
-        if (!placeholder) this.deps.chats.rename(chat, descriptor.displayName);
         // The session messages through `channel` reach the chat at: its id
         // and its stored address name the same address, as the session the
         // first message there opens would.
         const at = this.reachedAt(channel, chat, descriptor.ref.chatId);
+        // An address standing in for a name the platform has not given is no
+        // name: the first message there names the chat. That covers every
+        // address the chat was reached at, as a direct message's first one,
+        // which its key names, once a send placed it at another.
+        const held = this.deps.chats.find(chat.id);
+        const keyed = held
+          ? addressOf({ platform: chat.platform, externalId: held.key as ChatId })
+          : null;
+        const placeholder = isPlaceholderName(
+          channel,
+          descriptor,
+          keyed === null ? [at] : [at, keyed],
+        );
+        if (!placeholder) this.deps.chats.rename(chat, descriptor.displayName);
         const id = channelChatId(channel, at);
         const name = placeholder ? at : descriptor.displayName;
         const now = new Date();
@@ -613,7 +623,12 @@ export function withRoutingOf(
 /** Whether a conversation's name only stands in for one the platform has not
  *  given: its address, or the `channel:address` name a session opened with no
  *  name takes, as `backfillChannelConversationName` reads them. */
-function isPlaceholderName(channel: string, descriptor: ChatDescriptor): boolean {
-  const address = descriptor.ref.chatId;
-  return [address, `${channel}:${address}`].includes(descriptor.displayName);
+function isPlaceholderName(
+  channel: string,
+  descriptor: ChatDescriptor,
+  otherAddresses: readonly string[] = [],
+): boolean {
+  return [descriptor.ref.chatId, ...otherAddresses].some((address) =>
+    [address, `${channel}:${address}`].includes(descriptor.displayName),
+  );
 }
