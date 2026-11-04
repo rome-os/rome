@@ -1368,7 +1368,7 @@ export interface OutgoingMessageBase {
    * Structured message parts. When provided, replaces the plain-text path so
    * channels that support rich content (web chat today) can render typed
    * blocks like approval cards. A channel that cannot show a part refuses the
-   * message with {@link ChannelSendRefused} `part_unsupported`.
+   * message with {@link SendRefused} `part_unsupported`.
    */
   parts?: MessagePart[];
   /**
@@ -1845,39 +1845,51 @@ export interface ChannelDirectMessaging {
  *   way to quote at all, such as WhatsApp or WeChat, answers in place, as
  *   does a reply the channel's placement keeps out of a thread.
  */
-export type ChannelSendRefusal =
+export type SendRefusedReason =
   | "empty"
   | "part_unsupported"
   | "attachment_unsupported"
   | "reply_unaddressable";
 
-/** A channel's refusal of a send, before anything reached the platform. */
-export class ChannelSendRefused extends Error {
+/** A refusal of a send, before anything reached the platform. */
+export class SendRefused extends Error {
   constructor(
-    readonly reason: ChannelSendRefusal,
+    readonly reason: SendRefusedReason,
     message: string,
   ) {
     super(message);
+    // The name an app's copy of an older SDK matches a refusal by, kept until
+    // the breaking release that drops the deprecated aliases.
     this.name = "ChannelSendRefused";
   }
 }
 
-/** Whether `error` is a {@link ChannelSendRefused}, matched by name and
- *  reason so it holds across module copies. */
-export function isChannelSendRefused(error: unknown): error is ChannelSendRefused {
+/** Whether `error` is a {@link SendRefused}, matched by name and reason so it
+ *  holds across module copies. A refusal is named `ChannelSendRefused` today,
+ *  and `SendRefused` once the deprecated aliases go, so both match. */
+export function isSendRefused(error: unknown): error is SendRefused {
   return (
     error instanceof Error &&
-    error.name === "ChannelSendRefused" &&
+    (error.name === "SendRefused" || error.name === "ChannelSendRefused") &&
     typeof (error as { reason?: unknown }).reason === "string"
   );
 }
+
+/** @deprecated Use {@link SendRefusedReason}. */
+export type ChannelSendRefusal = SendRefusedReason;
+/** @deprecated Use {@link SendRefused}. */
+export const ChannelSendRefused = SendRefused;
+/** @deprecated Use {@link SendRefused}. */
+export type ChannelSendRefused = SendRefused;
+/** @deprecated Use {@link isSendRefused}. */
+export const isChannelSendRefused = isSendRefused;
 
 /** Sending on a channel. */
 export interface ChannelSend {
   /**
    * Sends `message` to `chatId`. Resolves only once the platform has taken
    * all of it. When the channel cannot deliver the message as given, it
-   * rejects with {@link ChannelSendRefused} and sends nothing. It never drops
+   * rejects with {@link SendRefused} and sends nothing. It never drops
    * a part, an attachment or a quote it could not resolve and reports the
    * rest as sent.
    */
