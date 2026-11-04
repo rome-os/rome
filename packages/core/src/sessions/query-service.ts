@@ -590,7 +590,7 @@ export class SessionQueryService {
         return {
           key: "source:none",
           label: "Not in a chat",
-          description: "Subagents, forks and action runs",
+          description: "Sessions that stand in no chat",
           iconUrl: null,
           kind: "named",
           dimension: {
