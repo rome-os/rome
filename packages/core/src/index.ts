@@ -49,7 +49,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
 
@@ -122,7 +122,7 @@ import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/acco
 import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
 import { ReplyStreams } from "./participation/reply-delivery/streams.js";
 import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
-import { sendApprovalCard } from "./actions/approval-card.js";
+import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
@@ -585,6 +585,9 @@ async function main() {
   // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
+  // The built channels, recording what is sent on them in Chats. An approval's
+  // card goes out on these, so it is on record as the platform shows it.
+  let recordedChannels: readonly Channel[] = [];
   // Reply streaming is off until the guardian turns it on under
   // Experimental features in Advanced settings. Off, sends go out unpaced and
   // replies go out whole. On, a channel that can stream paces every write of its
@@ -613,6 +616,7 @@ async function main() {
     pacing: replyPacing,
     accounts,
   });
+  const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
   const listedAgents = externalAgents({
@@ -853,7 +857,7 @@ async function main() {
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
-      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
+      onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
   );
   const appConnections = new AppConnectionBroker(
@@ -1604,6 +1608,7 @@ async function main() {
     own: [webchat],
   });
   builtChannels = channels;
+  recordedChannels = chatsWired.recordedSends(channels);
   const accountNames = createAccountNames({
     channels,
     sentinelLogRepo,
@@ -1869,6 +1874,7 @@ async function main() {
       const metadata = actionRegistry.getMetadata(actionName);
       return metadata?.ownerType === "app" ? metadata.ownerId : null;
     },
+    sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();

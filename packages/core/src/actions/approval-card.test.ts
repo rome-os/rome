@@ -5,7 +5,7 @@ import {
   ChannelSendRefused,
   type MessageReceipt,
 } from "@rome-os/app-runtime";
-import { sendApprovalCard } from "./approval-card.js";
+import { recordedCardChannels, sendApprovalCard } from "./approval-card.js";
 
 const RECEIPT: MessageReceipt = { messageId: "m1", chatId: "c1" as ChatId };
 
@@ -136,5 +136,26 @@ describe("sendApprovalCard", () => {
 
     expect(sendable.send).not.toHaveBeenCalled();
     expect(unsendable.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordedCardChannels", () => {
+  it("sends on the connection that records its sends, and on Rome's own channels as they are", async () => {
+    const recorded = rs.fn(async () => RECEIPT);
+    const service = {
+      list: async () => [],
+      send: rs.fn<ChannelsService["send"]>(async () => RECEIPT),
+    };
+    const channels = recordedCardChannels(service, () => [
+      { name: "telegram_user", send: { send: recorded } } as never,
+    ]);
+    const message = { text: "Approval needed" };
+
+    await channels.send("telegram_user", "t1" as ChatId, message);
+    await channels.send("webchat", "w1" as ChatId, message);
+
+    expect(recorded).toHaveBeenCalledWith("t1", message);
+    expect(service.send).toHaveBeenCalledTimes(1);
+    expect(service.send).toHaveBeenCalledWith("webchat", "w1", message);
   });
 });

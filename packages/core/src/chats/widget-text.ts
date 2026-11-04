@@ -30,7 +30,12 @@ function previewLines(preview: PreviewPayload): string[] {
 export function approvalCardText(card: ApprovalCard): string {
   const title = card.preview.kind === "generic" ? card.preview.title : "send this message";
   const lines = [`${APPROVAL_HEADING[card.status] ?? APPROVAL_HEADING.pending}: ${title}`];
-  lines.push(...previewLines(card.preview).filter((line) => line.trim()));
+  // An app's preview is not checked, so a field it left out reads as nothing.
+  lines.push(
+    ...previewLines(card.preview).filter(
+      (line): line is string => typeof line === "string" && line.trim() !== "",
+    ),
+  );
   if (card.status === "pending")
     lines.push("The guardian approves or denies it on Rome's dashboard.");
   return lines.join("\n");

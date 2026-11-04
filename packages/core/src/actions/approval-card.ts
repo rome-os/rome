@@ -1,9 +1,46 @@
 // An approval's card, put in the conversation the approval came from. The
-// main process and an action worker both send it through the channels
-// service, so each answers `onApprovalCreated` the same way.
+// main process sends it on the connections it records sends on, and an action
+// worker asks main to, so the card is on record in that chat either way.
 
-import type { ChannelsService, ChatId, PreviewPayload, ThreadContext } from "@rome-os/app-runtime";
+import type {
+  Channel,
+  ChannelsService,
+  ChatId,
+  PreviewPayload,
+  ThreadContext,
+} from "@rome-os/app-runtime";
 import type { ApprovalCreatedEvent } from "./engine.js";
+
+/** What putting an approval's card in a conversation reads of the approval. */
+export type ApprovalCard = Pick<
+  ApprovalCreatedEvent,
+  "approvalId" | "actionName" | "preview" | "channelContext"
+>;
+
+/** What a card is sent with: the connections Rome lists, and a send. */
+export type ApprovalCardChannels = Pick<ChannelsService, "list" | "send">;
+
+/**
+ * `service` sending on the connection named in `recorded()` when it lists one,
+ * so the card goes on record in its chat as the platform shows it. A channel
+ * Rome serves itself, such as the dashboard, records its own sends and is
+ * sent on through `service`.
+ */
+export function recordedCardChannels(
+  service: ApprovalCardChannels,
+  recorded: () => readonly Channel[],
+): ApprovalCardChannels {
+  return {
+    list: () => service.list(),
+    send: (target, chatId, message) => {
+      const send =
+        typeof target === "string"
+          ? recorded().find((channel) => channel.name === target)?.send
+          : undefined;
+      return send ? send.send(chatId, message) : service.send(target, chatId, message);
+    },
+  };
+}
 
 /** What a card says where someone other than the guardian may read it. The
  *  preview holds what the approval holds back, such as a message meant for
@@ -32,8 +69,8 @@ function readByGuardianOnly(context: ThreadContext, platform: string | undefined
  * that fails rejects here, so the engine logs it.
  */
 export async function sendApprovalCard(
-  channels: Pick<ChannelsService, "list" | "send">,
-  { approvalId, actionName, preview, channelContext }: ApprovalCreatedEvent,
+  channels: ApprovalCardChannels,
+  { approvalId, actionName, preview, channelContext }: ApprovalCard,
 ): Promise<void> {
   if (!channelContext) return;
   const target = (await channels.list()).find((channel) => channel.name === channelContext.channel);

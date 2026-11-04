@@ -65,6 +65,13 @@ describe("widgetText", () => {
     expect(widgetText(card({ preview: undefined as never }))).toBeUndefined();
   });
 
+  it("reads a field an app's preview left out as nothing", () => {
+    const partial = card({ preview: { kind: "generic", title: "Deploy" } as never });
+    expect(widgetText(partial)).toBe(
+      "Approval needed: Deploy\nThe guardian approves or denies it on Rome's dashboard.",
+    );
+  });
+
   it("is how a recorded card reads as plain text", () => {
     expect(partsText([{ type: "text", content: "Before I send it:" }, card()])).toBe(
       `Before I send it:\n${widgetText(card())}`,

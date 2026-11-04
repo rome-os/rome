@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+import { widgetText } from "../widget-text.js";
 import { messageContentText } from "./messages-agent.js";
 
 describe("messageContentText", () => {
@@ -10,5 +11,18 @@ describe("messageContentText", () => {
     ]);
 
     expect(messageContentText(content)).toBe("3 options");
+  });
+
+  it("reads a card as the plain-text line a text-only platform showed", () => {
+    const card = {
+      type: "approval_card",
+      approvalId: "a-1",
+      actionName: "deploy",
+      preview: { kind: "generic", title: "Deploy", summary: "Ship it" },
+      status: "approved",
+    } as const;
+    const content = JSON.stringify([{ type: "text", content: "Before I go on:" }, card]);
+
+    expect(messageContentText(content)).toBe(`Before I go on:\n${widgetText(card)}`);
   });
 });
