@@ -209,22 +209,36 @@ describe("GET /concierge/tasks", () => {
   });
 });
 
-describe("/concierge/following", () => {
+describe("/concierge/connectors", () => {
   const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
   let testDb: TestDb;
   let enabled: boolean;
   const calls: unknown[][] = [];
   const listing = {
-    sources: [
+    connectors: [
       {
-        source: "gmail",
+        id: "gmail",
         label: "Gmail",
-        status: "ready",
-        account: "me@example.com",
-        target: null,
-        kinds: [{ kind: "new_mail", label: "New mail from people", default: true }],
-        options: [],
-        follows: [],
+        connection: { status: "connected" },
+        act: true,
+        watch: {
+          status: "ready",
+          account: "me@example.com",
+          target: null,
+          kinds: [{ kind: "new_mail", label: "New mail from people", default: true }],
+          options: [],
+          follows: [],
+        },
+      },
+      {
+        id: "slack",
+        label: "Slack",
+        connection: {
+          status: "not_connected",
+          connect: { kind: "rome_oauth", method: "POST", path: "/api/oauth/slack/start" },
+        },
+        act: false,
+        watch: null,
       },
     ],
     rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
@@ -270,16 +284,16 @@ describe("/concierge/following", () => {
   });
 
   it("answers the same structure the Concierge reads, for the guardian only, while the Concierge is on", async () => {
-    expect((await app().request("/concierge/following")).status).toBe(401);
-    await expect((await app().request("/concierge/following", guardian)).json()).resolves.toEqual(
+    expect((await app().request("/concierge/connectors")).status).toBe(401);
+    await expect((await app().request("/concierge/connectors", guardian)).json()).resolves.toEqual(
       listing,
     );
     enabled = false;
-    expect((await app().request("/concierge/following", guardian)).status).toBe(404);
+    expect((await app().request("/concierge/connectors", guardian)).status).toBe(404);
   });
 
   it("changes one follow by the names the list gives", async () => {
-    const response = await send("/concierge/following/item", "PUT", {
+    const response = await send("/concierge/connectors/follow", "PUT", {
       source: "gmail",
       options: { recipients: "to" },
       kinds: { new_mail: true },
@@ -298,25 +312,26 @@ describe("/concierge/following", () => {
       ],
     ]);
     expect(
-      (await send("/concierge/following/item", "PUT", { source: "github", target: "x/y" })).status,
+      (await send("/concierge/connectors/follow", "PUT", { source: "github", target: "x/y" }))
+        .status,
     ).toBe(404);
-    expect((await send("/concierge/following/item", "PUT", {})).status).toBe(400);
+    expect((await send("/concierge/connectors/follow", "PUT", {})).status).toBe(400);
   });
 
   it("unfollows by source and target", async () => {
-    expect((await send("/concierge/following/item?source=gmail", "DELETE")).status).toBe(200);
+    expect((await send("/concierge/connectors/follow?source=gmail", "DELETE")).status).toBe(200);
     expect(
-      (await send("/concierge/following/item?source=github&target=a/b", "DELETE")).status,
+      (await send("/concierge/connectors/follow?source=github&target=a/b", "DELETE")).status,
     ).toBe(404);
     expect(calls.at(-1)).toEqual(["unfollow", "github", "a/b"]);
   });
 
   it("changes the rules and refuses values out of bounds", async () => {
-    const response = await send("/concierge/following/rules", "PUT", { minSpacingMinutes: 10 });
+    const response = await send("/concierge/connectors/rules", "PUT", { minSpacingMinutes: 10 });
     await expect(response.json()).resolves.toEqual({
       rules: { maxTurnsPerHour: 2, minSpacingMinutes: 10, quietHours: null },
     });
-    expect((await send("/concierge/following/rules", "PUT", { maxTurnsPerHour: 99 })).status).toBe(
+    expect((await send("/concierge/connectors/rules", "PUT", { maxTurnsPerHour: 99 })).status).toBe(
       400,
     );
   });

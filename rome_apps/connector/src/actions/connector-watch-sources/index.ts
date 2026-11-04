@@ -6,7 +6,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { watchSourceDeps } from "../../watch/runtime.js";
-import { listWatchSources } from "../../watch/sources.js";
+import { listConnectors } from "../../watch/sources.js";
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
@@ -14,7 +14,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
     schema: z.object({}),
     execute: async () => ({
       status: "ok",
-      data: { sources: await listWatchSources(watchSourceDeps(deps)) },
+      data: { connectors: await listConnectors(watchSourceDeps(deps)) },
     }),
   });
 }

@@ -83,15 +83,31 @@ export const CONCIERGE_FOLLOW_MAX_SPACING_MINUTES = 120;
 export const CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH = 500;
 
 /**
- * Whether a source can be followed now. The connection that owns the source
- * decides it; `statusReason` says what is missing and how to fix it.
+ * Whether a connector can be watched now. The connection that owns it decides;
+ * `statusReason` says what is missing and how to fix it.
  */
-export type ConciergeFollowSourceStatus =
-  | "ready"
-  | "not_connected"
-  | "no_relay"
-  | "not_supported"
-  | "error";
+export type ConciergeWatchStatus = "ready" | "not_connected" | "no_relay" | "error";
+
+/** Whether Rome holds working access to a connector. */
+export type ConciergeConnectionStatus = "connected" | "not_connected" | "expired";
+
+/**
+ * How a client starts connecting a connector: one HTTP call on this Rome that
+ * answers `{ redirectUrl }` to open. `settings` means the dashboard's Settings
+ * page is the only way in.
+ */
+export type ConciergeConnectEntry =
+  | { kind: "rome_oauth"; method: "POST"; path: string }
+  | {
+      kind: "composio";
+      method: "POST";
+      path: string;
+      body: { provider: string };
+      /** Sign in to Composio first, with `login`, when Rome is not signed in. */
+      needsLogin: boolean;
+      login: { method: "POST"; path: string };
+    }
+  | { kind: "settings"; path: string };
 
 /** One kind of event a source can tell of, in the guardian's words. */
 export interface ConciergeFollowKindDto {
@@ -125,11 +141,9 @@ export interface ConciergeFollowDto {
   preference: string | null;
 }
 
-/** One source, what it offers, and what is followed there. */
-export interface ConciergeFollowSourceDto {
-  source: string;
-  label: string;
-  status: ConciergeFollowSourceStatus;
+/** What can be watched through a connector, and what the Concierge follows there. */
+export interface ConciergeWatchDto {
+  status: ConciergeWatchStatus;
   statusReason?: string;
   /** Who events are judged for: the GitHub login, the mailbox address. */
   account?: string;
@@ -140,17 +154,36 @@ export interface ConciergeFollowSourceDto {
   follows: ConciergeFollowDto[];
 }
 
+/** One of the Concierge's connectors: a tool it can act through, watch, or both. */
+export interface ConciergeConnectorDto {
+  id: string;
+  label: string;
+  glyph?: string;
+  connection: {
+    status: ConciergeConnectionStatus;
+    reason?: string;
+    /** Present when not connected: how a client starts connecting it. */
+    connect?: ConciergeConnectEntry;
+  };
+  /** The Concierge can use it by delegating work to a task chat: it is connected. */
+  act: boolean;
+  /** Null when the connector cannot be watched. */
+  watch: ConciergeWatchDto | null;
+}
+
 /**
- * `GET /concierge/following`, and what the Concierge's following list returns:
- * one structure for the panel and the agent.
+ * `GET /api/concierge/connectors`, and what the Concierge's following list
+ * returns: one structure for every client and the agent. Which connectors are
+ * listed is decided here, not by the client.
  */
-export interface ConciergeFollowingResponse {
-  sources: ConciergeFollowSourceDto[];
+export interface ConciergeConnectorsResponse {
+  connectors: ConciergeConnectorDto[];
   rules: ConciergeFollowRules;
 }
 
 /** A change to one follow: kinds on or off by name, options by key, the preference. */
 export interface ConciergeFollowChange {
+  /** The connector id. */
   source: string;
   target?: string;
   kinds?: Record<string, boolean>;

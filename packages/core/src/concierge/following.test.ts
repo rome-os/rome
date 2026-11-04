@@ -4,9 +4,11 @@ import type { Routine } from "../routines/types.js";
 import {
   type ConciergeFollowing,
   type ConciergeFollowingDeps,
+  type ProviderConnector,
   renderAlertBatch,
   startConciergeFollowing,
   validateRulesChange,
+  watchProvidersOf,
   type WatchSource,
 } from "./following.js";
 import type { ConciergeService } from "./service.js";
@@ -16,9 +18,21 @@ const repoTrigger = (type: string) => ({
   filter: [{ field: "repository.full_name", equals: "{target}" }],
 });
 
-/** The sources a connector would answer, trimmed to what the tests need. */
-const sources = (gmailStatus: WatchSource["status"] = "ready"): WatchSource[] => [
-  {
+/** The connectors a provider would answer, trimmed to what the tests need. */
+const watchOf = (
+  source: Omit<WatchSource, "provider" | "source" | "label"> & { source: string; label: string },
+): ProviderConnector => {
+  const { source: id, label, ...watch } = source;
+  return {
+    id,
+    label,
+    connection: { status: watch.status === "not_connected" ? "not_connected" : "connected" },
+    act: watch.status !== "not_connected",
+    watch,
+  };
+};
+const sources = (gmailStatus: WatchSource["status"] = "ready"): ProviderConnector[] => [
+  watchOf({
     source: "github",
     label: "GitHub",
     status: "ready",
@@ -64,8 +78,8 @@ const sources = (gmailStatus: WatchSource["status"] = "ready"): WatchSource[] =>
       },
       { key: "ignorePeople", label: "Ignore these people", type: "list", default: [] },
     ],
-  },
-  {
+  }),
+  watchOf({
     source: "gmail",
     label: "Gmail",
     status: gmailStatus,
@@ -93,24 +107,24 @@ const sources = (gmailStatus: WatchSource["status"] = "ready"): WatchSource[] =>
         default: "to_and_cc",
       },
     ],
-  },
-  {
-    source: "notion",
-    label: "Notion",
-    status: "not_supported",
-    statusReason: "Notion is connected, but Rome cannot follow it yet.",
-    target: null,
-    kinds: [],
-    options: [],
-  },
+  }),
+  { id: "notion", label: "Notion", connection: { status: "connected" }, act: true, watch: null },
 ];
 
-function setup(options: { refuse?: string; gmailStatus?: WatchSource["status"] } = {}) {
+function setup(
+  options: {
+    refuse?: string;
+    gmailStatus?: WatchSource["status"];
+    /** The connectors a second provider app lists. */
+    second?: ProviderConnector[];
+  } = {},
+) {
   const routines = new Map<string, Routine>();
   const active = new Set<string>();
   const settings = new Map<string, unknown>();
   const actions: Action[] = [];
   const calls: [string, Record<string, unknown>][] = [];
+  const changes: number[] = [];
   let following: ConciergeFollowing | null = null;
   let nextId = 0;
   const deps: ConciergeFollowingDeps = {
@@ -142,10 +156,38 @@ function setup(options: { refuse?: string; gmailStatus?: WatchSource["status"] }
       deactivate: async (id) => void active.delete(id),
     },
     actions: { register: (action) => void actions.push(action) },
-    runWatch: async (name, args) => {
+    providers: () => [
+      {
+        appId: "connector",
+        actions: {
+          sources: "connector:connector_watch_sources",
+          ensure: "connector:connector_watch_ensure",
+          judge: "connector:connector_watch_judge",
+          release: "connector:connector_watch_release",
+        },
+      },
+      ...(options.second
+        ? [
+            {
+              appId: "second",
+              actions: {
+                sources: "second:list",
+                ensure: "second:ensure",
+                judge: "second:judge",
+                release: "second:release",
+              },
+            },
+          ]
+        : []),
+    ],
+    runAction: async (qualified, args) => {
+      if (qualified === "second:list") {
+        return { status: "ok", data: { connectors: options.second ?? [] } };
+      }
+      const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
-        return { status: "ok", data: { sources: sources(options.gmailStatus) } };
+        return { status: "ok", data: { connectors: sources(options.gmailStatus) } };
       }
       if (name === "connector_watch_ensure") {
         return options.refuse && args.source === "github"
@@ -185,11 +227,12 @@ function setup(options: { refuse?: string; gmailStatus?: WatchSource["status"] }
     isEnabled: async () => true,
     findChatId: async () => "concierge",
     runSystemTurn: async () => undefined,
+    followingChanged: () => void changes.push(1),
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
   const stop = startConciergeFollowing(service, deps);
   const action = (name: string) => actions.find((a) => a.config.name === name)!;
-  return { routines, active, calls, settings, action, following: () => following!, stop };
+  return { routines, active, calls, changes, settings, action, following: () => following!, stop };
 }
 
 const keys = (s: ReturnType<typeof setup>) => [...s.routines.values()].map((r) => r.key).sort();
@@ -200,18 +243,25 @@ describe("following_list", () => {
     await s.following().follow({ source: "github", target: "acme/widgets" });
     const list = await s.following().list();
     expect(list.rules).toEqual({ maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null });
-    expect(list.sources.map((x) => [x.source, x.status, x.statusReason ?? null])).toEqual([
-      ["github", "ready", null],
-      ["gmail", "not_connected", "Gmail is not connected."],
-      ["notion", "not_supported", "Notion is connected, but Rome cannot follow it yet."],
+    expect(
+      list.connectors.map((x) => [
+        x.id,
+        x.act,
+        x.watch?.status ?? null,
+        x.watch?.statusReason ?? null,
+      ]),
+    ).toEqual([
+      ["github", true, "ready", null],
+      ["gmail", false, "not_connected", "Gmail is not connected."],
+      ["notion", true, null, null],
     ]);
     // The raw events behind each kind stay between core and the connector.
-    expect(list.sources[0]?.kinds[0]).toEqual({
+    expect(list.connectors[0]?.watch?.kinds[0]).toEqual({
       kind: "review_requested",
       label: "Review requested of you",
       default: true,
     });
-    expect(list.sources[0]?.follows).toEqual([
+    expect(list.connectors[0]?.watch?.follows).toEqual([
       {
         target: "acme/widgets",
         state: "active",
@@ -237,6 +287,8 @@ describe("follow", () => {
       options: { ignorePeople: ["dependabot"] },
       preference: "Only PRs that touch the billing code matter.",
     });
+    // Clients hear that something changed, and read the list again.
+    expect(s.changes.length).toBeGreaterThan(0);
     const ensures = s.calls.filter(([name]) => name === "connector_watch_ensure");
     expect(ensures.map(([, args]) => args.dryRun)).toEqual([true, false]);
     expect(keys(s)).toEqual([
@@ -251,7 +303,7 @@ describe("follow", () => {
       filter: [{ field: "repository.full_name", equals: "acme/widgets" }],
     });
     expect(s.active.size).toBe(2);
-    const [follow] = (await s.following().list()).sources[0]!.follows;
+    const [follow] = (await s.following().list()).connectors[0]!.watch!.follows;
     expect(follow?.options.ignorePeople).toEqual(["dependabot"]);
     expect(follow?.preference).toBe("Only PRs that touch the billing code matter.");
   });
@@ -288,7 +340,7 @@ describe("follow", () => {
       gmailStatus: "not_connected",
     });
     await expect(s.following().follow({ source: "slack" })).rejects.toThrow(
-      'Rome cannot follow "slack". Sources: github, gmail, notion.',
+      'Rome cannot follow "slack". Sources that can be followed: github, gmail.',
     );
     await expect(s.following().follow({ source: "github" })).rejects.toThrow(
       /owner\/name, for example rome-os\/rome/,
@@ -297,7 +349,7 @@ describe("follow", () => {
       "Gmail cannot be followed now: Gmail is not connected.",
     );
     await expect(s.following().follow({ source: "notion" })).rejects.toThrow(
-      /cannot follow it yet/,
+      /Rome cannot follow "notion"/,
     );
     await expect(
       s.following().follow({ source: "github", target: "acme/widgets" }),
@@ -355,7 +407,7 @@ describe("configure and unfollow", () => {
     await s.following().follow({ source: "gmail" });
     expect(await s.following().unfollow("gmail", "")).toEqual({ removed: true });
     expect(s.routines.size).toBe(0);
-    expect((await s.following().list()).sources[1]?.follows).toEqual([]);
+    expect((await s.following().list()).connectors[1]?.watch?.follows).toEqual([]);
     expect(s.calls.some(([name]) => name === "connector_watch_release")).toBe(true);
     expect(await s.following().unfollow("gmail", "")).toEqual({ removed: false });
   });
@@ -458,6 +510,61 @@ describe("the follow actions", () => {
       ),
     ).toEqual({ status: "ok", data: { ignored: "not followed" } });
     s.stop();
+  });
+});
+
+describe("watchProvidersOf", () => {
+  it("finds every app that declares watch, with its actions qualified by its id", () => {
+    const actions = { sources: "s", ensure: "e", judge: "j", release: "other:r" };
+    expect(
+      watchProvidersOf([
+        { appId: "connector", manifest: { watchProvider: actions } },
+        { appId: "notes", manifest: {} },
+        { appId: "mail", manifest: { watchProvider: actions } },
+      ]),
+    ).toEqual([
+      {
+        appId: "connector",
+        actions: {
+          sources: "connector:s",
+          ensure: "connector:e",
+          judge: "connector:j",
+          release: "other:r",
+        },
+      },
+      {
+        appId: "mail",
+        actions: { sources: "mail:s", ensure: "mail:e", judge: "mail:j", release: "other:r" },
+      },
+    ]);
+  });
+
+  it("merges the connectors of two providers, the first winning a shared id", async () => {
+    const s = setup({
+      second: [
+        {
+          id: "gmail",
+          label: "Other Gmail",
+          connection: { status: "connected" },
+          act: true,
+          watch: null,
+        },
+        {
+          id: "linear",
+          label: "Linear",
+          connection: { status: "connected" },
+          act: true,
+          watch: null,
+        },
+      ],
+    });
+    const { connectors } = await s.following().list();
+    expect(connectors.map((c) => [c.id, c.label])).toEqual([
+      ["github", "GitHub"],
+      ["gmail", "Gmail"],
+      ["notion", "Notion"],
+      ["linear", "Linear"],
+    ]);
   });
 });
 

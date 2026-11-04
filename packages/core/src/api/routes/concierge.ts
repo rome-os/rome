@@ -1,6 +1,6 @@
 import {
   CONCIERGE_DONE_DAYS,
-  type ConciergeFollowingResponse,
+  type ConciergeConnectorsResponse,
   type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Context } from "hono";
@@ -85,9 +85,10 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     });
   });
 
-  // The Following panel: every source the guardian's connections offer, what
-  // the Concierge follows there, and the rules. The same structure the
-  // Concierge's following list returns. Guardian-only; 404 while off.
+  // The Concierge's connectors: every tool it can act through or watch, with
+  // what it follows there, and the rules. The same structure its following
+  // list returns, read by the web Following panel and native clients.
+  // Guardian-only; 404 while off.
   const followingOf = async (c: Context) => {
     if (!(await resolveGuardianSession(c, deps.db))) {
       return { error: c.json({ error: "Not authenticated" }, 401) };
@@ -100,18 +101,49 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
   };
   const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-  app.get("/concierge/following", async (c) => {
+  app.get("/concierge/connectors", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
     try {
-      return c.json((await following.list()) satisfies ConciergeFollowingResponse);
+      return c.json((await following.list()) satisfies ConciergeConnectorsResponse);
     } catch (err) {
       return c.json({ error: messageOf(err) }, 502);
     }
   });
 
+  // The same `connectors_changed` events as the `concierge.connectors` topic of
+  // the live events socket, for a client that cannot open the socket.
+  app.get("/concierge/connectors/events", async (c) => {
+    const { error } = await followingOf(c);
+    if (error) return error;
+    const concierge = deps.concierge!;
+    return streamSSE(c, async (sse) => {
+      let close!: () => void;
+      let finished = false;
+      const closed = new Promise<void>((resolve) => {
+        close = resolve;
+      });
+      let unsubscribe = () => {};
+      const heartbeat = setInterval(() => {
+        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
+      }, 20_000);
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+        close();
+      }
+      unsubscribe = concierge.subscribeFollowing((event, data) => {
+        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
+      });
+      sse.onAbort(finish);
+      await closed;
+    });
+  });
+
   // Changes one follow: kinds on or off, options, the preference.
-  app.put("/concierge/following/item", async (c) => {
+  app.put("/concierge/connectors/follow", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
     const body = await c.req.json<Record<string, unknown>>().catch(() => null);
@@ -127,7 +159,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     }
   });
 
-  app.delete("/concierge/following/item", async (c) => {
+  app.delete("/concierge/connectors/follow", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
     const source = c.req.query("source")?.trim();
@@ -138,7 +170,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     return c.json(result);
   });
 
-  app.put("/concierge/following/rules", async (c) => {
+  app.put("/concierge/connectors/rules", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
     const body = await c.req.json<Record<string, unknown>>().catch(() => null);

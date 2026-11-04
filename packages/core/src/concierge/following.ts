@@ -14,11 +14,12 @@ import {
   CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH,
   type ConciergeFollowChange,
   type ConciergeFollowDto,
-  type ConciergeFollowingResponse,
+  type ConciergeConnectorDto,
+  type ConciergeConnectorsResponse,
   type ConciergeFollowKindDto,
   type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
-  type ConciergeFollowSourceDto,
+  type ConciergeWatchDto,
 } from "@rome/api-types/concierge";
 import type { Action } from "../actions/types.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
@@ -51,13 +52,6 @@ export const CONCIERGE_FOLLOWING_ACTIONS = {
   list: "core:concierge_following_list",
   configure: "core:concierge_following_configure",
 } as const;
-/** The connector's watch actions core reads sources through. */
-export const WATCH_ACTIONS = {
-  sources: "connector_watch_sources",
-  ensure: "connector_watch_ensure",
-  judge: "connector_watch_judge",
-  release: "connector_watch_release",
-} as const;
 /** Routine keys of follows: `concierge-follow:<source>:<target>:<eventName>`. */
 const ROUTINE_KEY_PREFIX = "concierge-follow:";
 /** The guardian setting that holds the rules and the follows. */
@@ -71,9 +65,52 @@ type ActionOutcome = { status: string; data?: unknown; error?: string };
 
 type WatchTrigger = { eventName: string; filter?: { field: string; equals: string }[] };
 
-/** A source as the connector describes it, with the raw events behind each kind. */
-export interface WatchSource extends Omit<ConciergeFollowSourceDto, "follows" | "kinds"> {
-  kinds: (ConciergeFollowKindDto & { triggers: WatchTrigger[] })[];
+/** The actions one app provides watch through, qualified by the app's id. */
+export interface WatchProvider {
+  appId: string;
+  actions: { sources: string; ensure: string; judge: string; release: string };
+}
+
+/**
+ * The watch providers among the enabled apps: each app that declares
+ * `watchProvider` in its manifest, with its action names qualified by its id.
+ * Core never names a provider.
+ */
+export function watchProvidersOf(
+  apps: readonly { appId: string; manifest: { watchProvider?: WatchProvider["actions"] } }[],
+): WatchProvider[] {
+  return apps.flatMap((app) => {
+    const declared = app.manifest.watchProvider;
+    if (!declared) return [];
+    const qualify = (name: string) => (name.includes(":") ? name : `${app.appId}:${name}`);
+    return [
+      {
+        appId: app.appId,
+        actions: {
+          sources: qualify(declared.sources),
+          ensure: qualify(declared.ensure),
+          judge: qualify(declared.judge),
+          release: qualify(declared.release),
+        },
+      },
+    ];
+  });
+}
+
+/** A connector as its provider describes it, with the raw events behind each watch kind. */
+export interface ProviderConnector extends Omit<ConciergeConnectorDto, "watch"> {
+  watch:
+    | (Omit<ConciergeWatchDto, "follows" | "kinds"> & {
+        kinds: (ConciergeFollowKindDto & { triggers: WatchTrigger[] })[];
+      })
+    | null;
+}
+
+/** A watchable connector, flattened for following: its id is the follow's source. */
+export interface WatchSource extends NonNullable<ProviderConnector["watch"]> {
+  source: string;
+  label: string;
+  provider: WatchProvider;
 }
 
 /** One follow, as stored. */
@@ -98,16 +135,18 @@ export interface ConciergeFollowingDeps {
   >;
   routineEngine: Pick<RoutineEngine, "activate" | "deactivate">;
   actions: { register(action: Action): void };
-  /** Runs one of the connector's watch actions as the Concierge. */
-  runWatch(name: string, args: Record<string, unknown>): Promise<ActionOutcome>;
+  /** The apps that declare `watchProvider` in their manifest, read live. */
+  providers(): WatchProvider[];
+  /** Runs an action as the Concierge. */
+  runAction(name: string, args: Record<string, unknown>): Promise<ActionOutcome>;
   settings: Pick<SettingsRepository, "get" | "set">;
   now?: () => number;
 }
 
 /** What the Concierge's actions and the dashboard's Following panel reach. */
 export interface ConciergeFollowing {
-  /** Every source with its status, offer and follows, and the rules. */
-  list(): Promise<ConciergeFollowingResponse>;
+  /** Every connector with its connection, act and watch (with follows), and the rules. */
+  list(): Promise<ConciergeConnectorsResponse>;
   /** Follows a target, or changes a follow that exists. Throws with what the source needs. */
   follow(change: ConciergeFollowChange): Promise<ConciergeFollowDto>;
   /** Changes a follow that exists. Null when it does not. */
@@ -339,8 +378,11 @@ export function startConciergeFollowing(
   // not call other actions. The connector's watch actions, and the queue's
   // timer that starts a Concierge turn, run in the context of boot instead.
   const outsideAction = AsyncLocalStorage.snapshot();
-  const runWatch = (name: string, args: Record<string, unknown>) =>
-    outsideAction(() => deps.runWatch(name, args));
+  const run = (
+    provider: WatchProvider,
+    action: keyof WatchProvider["actions"],
+    args: Record<string, unknown>,
+  ) => outsideAction(() => deps.runAction(provider.actions[action], args));
 
   // Read at boot and kept current by every write, since scheduling reads it synchronously.
   let rules = CONCIERGE_FOLLOW_DEFAULT_RULES;
@@ -351,6 +393,7 @@ export function startConciergeFollowing(
   const writeStored = async (next: StoredFollowing) => {
     await deps.settings.set(CONCIERGE_FOLLOWING_SETTING_KEY, next);
     rules = parseFollowRules(next);
+    service.followingChanged();
   };
   void readStored()
     .then((stored) => {
@@ -358,25 +401,49 @@ export function startConciergeFollowing(
     })
     .catch(() => undefined);
 
-  let sourcesCache: { at: number; sources: WatchSource[] } | null = null;
-  const readSources = async (fresh = false): Promise<WatchSource[]> => {
-    if (!fresh && sourcesCache && now() - sourcesCache.at < SOURCES_TTL_MS) {
-      return sourcesCache.sources;
+  let connectorsCache: {
+    at: number;
+    connectors: (ProviderConnector & { provider: WatchProvider })[];
+  } | null = null;
+  /** Every provider's connectors, the first provider winning a shared id. */
+  const readConnectors = async (fresh = false) => {
+    if (!fresh && connectorsCache && now() - connectorsCache.at < SOURCES_TTL_MS) {
+      return connectorsCache.connectors;
     }
-    const outcome = await runWatch(WATCH_ACTIONS.sources, {});
-    if (outcome.status !== "ok") throw new Error(failure(WATCH_ACTIONS.sources, outcome));
-    const sources = ((outcome.data as { sources?: unknown } | undefined)?.sources ??
-      []) as WatchSource[];
-    sourcesCache = { at: now(), sources };
-    return sources;
+    const connectors: (ProviderConnector & { provider: WatchProvider })[] = [];
+    for (const provider of deps.providers()) {
+      const outcome = await run(provider, "sources", {}).catch((error: unknown) => ({
+        status: "error",
+        error: messageOf(error),
+      }));
+      if (outcome.status !== "ok") {
+        log.warn("watch provider unavailable", {
+          appId: provider.appId,
+          error: (outcome as ActionOutcome).error,
+        });
+        continue;
+      }
+      const listed = ((outcome as ActionOutcome).data as { connectors?: unknown } | undefined)
+        ?.connectors;
+      for (const connector of (Array.isArray(listed) ? listed : []) as ProviderConnector[]) {
+        if (connectors.some((c) => c.id === connector.id)) continue;
+        connectors.push({ ...connector, provider });
+      }
+    }
+    connectorsCache = { at: now(), connectors };
+    return connectors;
   };
+  const readSources = async (fresh = false): Promise<WatchSource[]> =>
+    (await readConnectors(fresh)).flatMap((c) =>
+      c.watch ? [{ ...c.watch, source: c.id, label: c.label, provider: c.provider }] : [],
+    );
   const sourceOf = async (name: string, fresh = false) => {
     const sources = await readSources(fresh);
     const found = sources.find((s) => s.source === name);
     if (!found) {
       const names = sources.map((s) => s.source).join(", ") || "none";
       throw new Error(
-        `Rome cannot follow "${name}". Sources: ${names}. ${CONCIERGE_FOLLOWING_ACTIONS.list} says what each one needs.`,
+        `Rome cannot follow "${name}". Sources that can be followed: ${names}. ${CONCIERGE_FOLLOWING_ACTIONS.list} says what each one needs.`,
       );
     }
     return found;
@@ -533,27 +600,42 @@ export function startConciergeFollowing(
     return next;
   };
 
-  const ensure = async (follow: FollowRecord, dryRun: boolean) => {
+  const ensure = async (provider: WatchProvider, follow: FollowRecord, dryRun: boolean) => {
     if (follow.kinds.length === 0) return;
-    const outcome = await runWatch(WATCH_ACTIONS.ensure, {
+    const outcome = await run(provider, "ensure", {
       source: follow.source,
       target: follow.target,
       kinds: follow.kinds,
       dryRun,
     });
-    if (outcome.status !== "ok") throw new Error(failure(WATCH_ACTIONS.ensure, outcome));
+    if (outcome.status !== "ok") throw new Error(failure(provider.actions.ensure, outcome));
   };
 
   const following: ConciergeFollowing = {
     async list() {
-      const [sources, stored] = await Promise.all([readSources(true), readStored()]);
+      const [connectors, stored] = await Promise.all([readConnectors(true), readStored()]);
       return {
-        sources: sources.map(({ kinds, ...source }) => ({
-          ...source,
-          kinds: kinds.map(({ triggers: _triggers, ...kind }) => kind),
-          follows: stored.follows
-            .filter((f) => f.source === source.source)
-            .map((f) => toDto({ ...source, kinds }, f)),
+        connectors: connectors.map(({ provider: _provider, watch, ...connector }) => ({
+          ...connector,
+          watch: watch
+            ? {
+                ...watch,
+                kinds: watch.kinds.map(({ triggers: _triggers, ...kind }) => kind),
+                follows: stored.follows
+                  .filter((f) => f.source === connector.id)
+                  .map((f) =>
+                    toDto(
+                      {
+                        ...watch,
+                        source: connector.id,
+                        label: connector.label,
+                        provider: _provider,
+                      },
+                      f,
+                    ),
+                  ),
+              }
+            : null,
         })),
         rules: parseFollowRules(stored),
       };
@@ -597,8 +679,8 @@ export function startConciergeFollowing(
       };
       const next = { ...applyChange(source, base, change), account };
       // Check first, so a refusal (no admin rights for a webhook) leaves nothing behind.
-      await ensure(next, true);
-      await ensure(next, false);
+      await ensure(source.provider, next, true);
+      await ensure(source.provider, next, false);
       await syncRoutines(source, next);
       await writeStored({
         ...stored,
@@ -618,7 +700,7 @@ export function startConciergeFollowing(
       const next = applyChange(source, existing, change);
       const added = next.kinds.filter((k) => !existing.kinds.includes(k));
       if (added.length > 0 && source.status === "ready") {
-        await ensure({ ...next, kinds: added }, false);
+        await ensure(source.provider, { ...next, kinds: added }, false);
       }
       await syncRoutines(source, next);
       await writeStored({
@@ -646,11 +728,16 @@ export function startConciergeFollowing(
         await writeStored({ ...stored, follows: stored.follows.filter((f) => f !== existing) });
         removed = true;
         // Nothing is released yet; the connector answers so (rome-os/rome#1658).
-        await runWatch(WATCH_ACTIONS.release, {
-          source: existing.source,
-          target: existing.target,
-          consumer: CONSUMER,
-        }).catch(() => undefined);
+        const provider = (await readSources().catch(() => [])).find(
+          (s) => s.source === existing.source,
+        )?.provider;
+        if (provider) {
+          await run(provider, "release", {
+            source: existing.source,
+            target: existing.target,
+            consumer: CONSUMER,
+          }).catch(() => undefined);
+        }
       }
       return { removed };
     },
@@ -674,8 +761,9 @@ export function startConciergeFollowing(
       if (follows.length === 0) return;
       const sources = await readSources(true);
       for (const follow of follows) {
-        if (sources.find((s) => s.source === follow.source)?.status !== "ready") continue;
-        await ensure(follow, false).catch((error: unknown) =>
+        const source = sources.find((s) => s.source === follow.source);
+        if (source?.status !== "ready") continue;
+        await ensure(source.provider, follow, false).catch((error: unknown) =>
           log.warn("follow subscription not restored", {
             source: follow.source,
             target: follow.target,
@@ -715,7 +803,9 @@ export function startConciergeFollowing(
         (f) => f.source === source && f.target === target,
       );
       if (!follow) return { status: "ok", data: { ignored: "not followed" } };
-      const outcome = await runWatch(WATCH_ACTIONS.judge, {
+      const provider = (await readSources()).find((s) => s.source === source)?.provider;
+      if (!provider) return { status: "ok", data: { ignored: "no provider watches it now" } };
+      const outcome = await run(provider, "judge", {
         source,
         eventName,
         payload,
@@ -724,7 +814,7 @@ export function startConciergeFollowing(
         options: follow.options,
       });
       if (outcome.status !== "ok") {
-        return { status: "error", error: failure(WATCH_ACTIONS.judge, outcome) };
+        return { status: "error", error: failure(provider.actions.judge, outcome) };
       }
       const judged = outcome.data as
         | { relevant: false; reason: string }
@@ -844,7 +934,7 @@ const CHANGE_SCHEMA_PROPERTIES = {
 /**
  * The four follow operations as actions. They run in main (the coordination
  * list in actions/engine.ts); every call to the connector goes through
- * `runWatch`, outside the action's own async context.
+ * `run`, outside the action's own async context.
  */
 function registerFollowingActions(
   actions: { register(action: Action): void },

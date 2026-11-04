@@ -85,19 +85,20 @@ export function watchSourceDeps(deps: AppActionRuntimeDeps): WatchSourceDeps {
     relayDepositUrl: () => resolveRelayDepositUrl(deps.appContext.repositories.settings),
     githubLogin: githubLoginFor,
     composioSignedIn: async () => (await loadConnectorClient()) !== null,
-    composioToolkits: async () => {
+    composioAccounts: async () => {
       const client = await loadConnectorClient();
       if (!client) return [];
-      return (await client.listConnectedAccounts(ROME_USER_ID))
-        .filter((account) => account.status === "ACTIVE")
-        .map((account) => account.toolkitSlug.toLowerCase());
+      return (await client.listConnectedAccounts(ROME_USER_ID)).map((account) => ({
+        toolkit: account.toolkitSlug.toLowerCase(),
+        status: account.status.toUpperCase(),
+      }));
     },
     gmailAddress,
-    romeManagedToolkits: async () => {
-      const out: string[] = [];
-      if (await readSlackOAuthTokens()) out.push("slack");
-      if (await readShopifyOAuthToken()) out.push("shopify");
-      return out;
+    romeManagedConnected: async (toolkit) => {
+      if (toolkit === "github") return (await readGithubOAuthToken()) !== null;
+      if (toolkit === "slack") return (await readSlackOAuthTokens()) !== null;
+      if (toolkit === "shopify") return (await readShopifyOAuthToken()) !== null;
+      return false;
     },
   };
 }

@@ -62,3 +62,39 @@ describe("AppManifestSchema eventSources", () => {
     );
   });
 });
+
+describe("AppManifestSchema watchProvider", () => {
+  const provider = {
+    sources: "watch_sources",
+    ensure: "watch_ensure",
+    judge: "watch_judge",
+    release: "watch_release",
+  };
+
+  it("accepts the four actions an app provides watch through", () => {
+    expect(AppManifestSchema.parse({ ...base, watchProvider: provider }).watchProvider).toEqual(
+      provider,
+    );
+  });
+
+  it("rejects a missing action and unknown fields", () => {
+    const { release: _release, ...missing } = provider;
+    expect(() => AppManifestSchema.parse({ ...base, watchProvider: missing })).toThrow();
+    expect(() =>
+      AppManifestSchema.parse({ ...base, watchProvider: { ...provider, extra: "x" } }),
+    ).toThrow();
+  });
+
+  it("is declared by the connector app", async () => {
+    const path = fileURLToPath(
+      new URL("../../../../../rome_apps/connector/app.yaml", import.meta.url),
+    );
+    const manifest = AppManifestSchema.parse(parseYaml(await readFile(path, "utf-8")));
+    expect(manifest.watchProvider).toEqual({
+      sources: "connector_watch_sources",
+      ensure: "connector_watch_ensure",
+      judge: "connector_watch_judge",
+      release: "connector_watch_release",
+    });
+  });
+});

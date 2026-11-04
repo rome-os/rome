@@ -46,7 +46,7 @@ What a connection lets Rome hear from the external system without being asked: a
 - A connection that can watch says what can be watched through it: each source, the kinds of event there in the guardian's words, the options that tune them, and who events are judged for, which is the connected account itself (the GitHub login, the mailbox address).
 - Whether a source can be watched now is the connection's to say, with what is missing and how to fix it: not connected, no relay for events to reach Rome, no admin rights on a repository. Another connected app that cannot be watched says so too.
 - The connection **judges** every raw event before anyone sees it. It drops what does not concern the guardian, their own actions, bulk and automated mail, and gives the rest one shape: who, what, a link, a short excerpt, and plain facts such as addressed to the guardian or only in cc, or from a bot.
-- Watching is something others use; it has no agent of its own. The Concierge's following is one user of it. A subscription at the external system, such as a repository's webhook, may serve several users at once, so one user stopping leaves the subscription in place.
+- Watching is something others use. It has no agent of its own. The Concierge's following is one user of it. A subscription at the external system, such as a repository's webhook, may serve several users at once, so one user stopping leaves the subscription in place.
 
 ## Decided against
 

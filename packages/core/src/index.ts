@@ -160,7 +160,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
-import { startConciergeFollowing } from "./concierge/following.js";
+import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -1204,7 +1204,10 @@ async function main() {
     routines: routinesRepo,
     routineEngine,
     actions: actionRegistry,
-    runWatch: (name, args) => actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
+    // Every enabled app that declares `watchProvider`, read live so an install
+    // or disable takes effect without a restart. Core names no provider.
+    providers: () => watchProvidersOf(appCatalog.listResolved()),
+    runAction: (name, args) => actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
     settings: settingsRepo,
   });
 

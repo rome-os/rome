@@ -61,6 +61,15 @@ actions:
   - actions/connector-watch-judge
   - actions/connector-watch-release
 
+# What this app's connections let Rome watch. Core discovers watch providers
+# from this declaration and never names the app; the Concierge's following
+# reads the connectors, kinds and options through `sources`.
+watchProvider:
+  sources: connector_watch_sources
+  ensure: connector_watch_ensure
+  judge: connector_watch_judge
+  release: connector_watch_release
+
 # Events this app delivers on the bus. A `defer` on one of them calls
 # `ensureAction` to subscribe first, and `search_event_catalog` lists `types`
 # before they are first emitted. `keys`: filter fields that pick the repo or org.

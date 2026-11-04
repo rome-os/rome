@@ -1,13 +1,14 @@
 name: connector_watch_sources
 type: custom
 description: |
-  The sources Rome can watch through this app's connections, for followers
-  such as the Concierge. Each source comes with its status (ready,
-  not_connected, no_relay, not_supported, error) and a reason saying what is
-  missing, the connected account events are judged for (GitHub login, mailbox
-  address), the target format, the kinds of event in guardian-readable words,
-  and the options that tune them. Other connected apps come back as
-  not_supported. Reads only; changes nothing.
+  The connectors this app offers a follower such as the Concierge. Each comes
+  with its connection (connected, not_connected or expired; when not
+  connected, the HTTP call a client makes to start connecting it), whether
+  Rome can act through it (it is connected), and, for one that can be watched,
+  its watch section: status (ready, not_connected, no_relay, error) with a
+  reason saying what is missing, the account events are judged for, the target
+  format, the kinds of event in guardian-readable words, and the options that
+  tune them. Reads only; changes nothing.
 entry: ./index.ts
 visibility: explicit
 complexity: simple

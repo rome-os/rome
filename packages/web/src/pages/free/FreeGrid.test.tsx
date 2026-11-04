@@ -186,25 +186,29 @@ describe("FreeGrid mobile header", () => {
           Response.json(
             url === "/api/settings"
               ? {}
-              : url === "/api/concierge/following"
+              : url === "/api/concierge/connectors"
                 ? {
-                    sources: [
+                    connectors: [
                       {
-                        source: "github",
+                        id: "github",
                         label: "GitHub",
-                        status: "ready",
-                        target: null,
-                        kinds: [],
-                        options: [],
-                        follows: [
-                          {
-                            target: "acme/widgets",
-                            state: "active",
-                            kinds: [],
-                            options: {},
-                            preference: null,
-                          },
-                        ],
+                        connection: { status: "connected" },
+                        act: true,
+                        watch: {
+                          status: "ready",
+                          target: null,
+                          kinds: [],
+                          options: [],
+                          follows: [
+                            {
+                              target: "acme/widgets",
+                              state: "active",
+                              kinds: [],
+                              options: {},
+                              preference: null,
+                            },
+                          ],
+                        },
                       },
                     ],
                     rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
