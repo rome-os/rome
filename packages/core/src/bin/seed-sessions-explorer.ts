@@ -2,7 +2,7 @@ import "dotenv/config";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
 
 const DEMO_PREFIX = "demo:sessions:";
@@ -52,7 +52,7 @@ const profiles = [
 
 await runMigrations();
 const db = getDb();
-const repo = new WebChatRepository(db);
+const repo = new ChatsWebChatRepository(db);
 
 const existing = await db
   .select({ id: romeSessions.id })
