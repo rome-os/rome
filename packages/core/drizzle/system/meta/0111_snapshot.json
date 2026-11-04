@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "52b2ac9d-3a9a-491a-b16c-6eac90fadfce",
+  "id": "b6be04ea-aa18-4a6d-82bf-1706b132b147",
   "prevId": "583e8533-4893-471a-8e94-ec09c7df945e",
   "tables": {
     "account_profiles": {
@@ -1262,6 +1262,30 @@
           "name": "connected_accounts_platform_account_id_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "connected_accounts_unplaced": {
+      "name": "connected_accounts_unplaced",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

@@ -25,11 +25,15 @@ describe("the connected accounts by account migration", () => {
       );
       CREATE TABLE connected_accounts (connection_id text PRIMARY KEY NOT NULL, agent text);
       INSERT INTO connection_grants (custody, state, platform, account_id) VALUES
+        ('c-old', 'unauthorized', NULL, NULL),
         ('c-feishu', 'authorized', 'feishu', 'app-1'),
         ('c-broken', 'degraded', 'telegram', 'bot-1'),
         ('c-revoked', 'unauthorized', NULL, NULL),
         ('c-new', 'unauthorized', NULL, NULL);
       INSERT INTO channels (id, platform, connection_id, platform_account_id) VALUES
+        -- An older, revoked connection whose channel record names the account
+        -- a live grant reaches: the live grant's agent wins.
+        ('feishu-old', 'feishu', 'c-old', 'app-1'),
         -- The grant's own account wins over a channel record that disagrees.
         ('feishu', 'feishu', 'c-feishu', 'stale-app'),
         -- A revoked grant names no account, so its channel record does.
@@ -37,6 +41,7 @@ describe("the connected accounts by account migration", () => {
         -- Knows no account yet.
         ('telegram_user', 'telegram', 'c-new', NULL);
       INSERT INTO connected_accounts (connection_id, agent) VALUES
+        ('c-old', 'old:agent'),
         ('c-feishu', 'sales:agent'),
         ('c-broken', 'core:main'),
         ('c-revoked', 'support:agent'),
@@ -55,5 +60,10 @@ describe("the connected accounts by account migration", () => {
       { platform: "feishu", account_id: "app-1", agent: "sales:agent" },
       { platform: "telegram", account_id: "bot-1", agent: "core:main" },
     ]);
+    // A link with no account to key it on waits for the boot pass, and one with
+    // no agent has nothing to keep.
+    expect(
+      sqlite.prepare("SELECT connection_id, agent FROM connected_accounts_unplaced").all(),
+    ).toEqual([{ connection_id: "c-new", agent: "sales:agent" }]);
   });
 });

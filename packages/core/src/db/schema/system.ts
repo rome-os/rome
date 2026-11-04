@@ -1183,6 +1183,16 @@ export const connectedAccounts = sqliteTable(
   (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
 );
 
+// An agent link the move to account keys could not place yet, because its
+// connection had not recorded the account it reaches. The boot pass that
+// records grants' accounts places each one, and a connection that reports its
+// account later takes its link then. A row goes once placed, or once its
+// connection is gone.
+export const connectedAccountsUnplaced = sqliteTable("connected_accounts_unplaced", {
+  connectionId: text("connection_id").primaryKey(),
+  agent: text("agent").notNull(),
+});
+
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
 // stored as plain JSON (encryption was deliberately dropped); the envelope
