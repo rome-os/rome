@@ -14,7 +14,7 @@ The connector app already holds every credential, every subscription and the rel
 
 ## Decision
 
-Every service difference lives in the connection. The connector app declares a watch provider with four actions: it lists what can be watched and whether it works, subscribes, normalizes a raw event into one common shape with plain facts, and releases a subscription. Core finds the provider from the app's declaration and never names a service or the app.
+Every service difference lives in the connection. The connector app declares a watch provider with four actions: it lists what can be watched and whether it works, subscribes, normalizes a raw event into one common shape with generic fields (`byYou`, `addressedTo`) and labels of its own choosing, and releases a subscription. Core finds the provider from the app's declaration and never names a service or the app.
 
 ## Alternatives
 

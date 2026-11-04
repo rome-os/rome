@@ -88,7 +88,10 @@ export interface ConciergeDeps {
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
-  runBackendTurn: (params: BackendTurnParams, options?: { quiet?: boolean }) => Promise<void>;
+  runBackendTurn: (
+    params: BackendTurnParams,
+    options?: { quiet?: boolean; inputLabel?: string },
+  ) => Promise<void>;
 }
 
 export class ConciergeService {
@@ -215,7 +218,7 @@ export class ConciergeService {
   async runSystemTurn(
     chatId: string,
     prompt: string,
-    options: { quiet?: boolean } = {},
+    options: { quiet?: boolean; inputLabel?: string } = {},
   ): Promise<void> {
     const sessionId = await this.runtimeSessionId(chatId);
     if (!sessionId) return;

@@ -36,7 +36,7 @@ const reviewRequest = (extra: Record<string, unknown> = {}) => ({
 });
 
 describe("normalizeGithub", () => {
-  it("gives a review request in the common shape, with whether it is of the guardian as a fact", async () => {
+  it("gives a review request in the common shape, direct when it is of the guardian", async () => {
     const mine = await normalizeGithub(
       "pull_request",
       reviewRequest({ requested_reviewer: { login: "octo-me" } }),
@@ -51,29 +51,21 @@ describe("normalizeGithub", () => {
         actor: "alice",
         subject: "Fix it",
         url: "https://github.com/acme/widgets/pull/7",
-        facts: {
-          repo: "acme/widgets",
-          bot: false,
-          byYou: false,
-          number: "7",
-          on: "pull_request",
-          author: "alice",
-          yours: false,
-          reviewer: "octo-me",
-          aboutYou: true,
-        },
+        byYou: false,
+        addressedTo: "direct",
+        labels: ["pull-request", "review-requested"],
       },
     });
-    // A request of someone else is kept too: triage decides.
+    // A request of someone else is kept too, addressed to others: triage decides.
     const theirs = await normalizeGithub(
       "pull_request",
       reviewRequest({ requested_reviewer: { login: "bob" } }),
       ctx(),
     );
-    expect(theirs).toMatchObject({ keep: true, event: { facts: { aboutYou: false } } });
+    expect(theirs).toMatchObject({ keep: true, event: { addressedTo: "other" } });
   });
 
-  it("marks a request of a team the guardian is on", async () => {
+  it("makes a request of a team the guardian is on direct", async () => {
     const result = await normalizeGithub(
       "pull_request",
       reviewRequest({ requested_team: { slug: "core" } }),
@@ -81,23 +73,34 @@ describe("normalizeGithub", () => {
     );
     expect(result).toMatchObject({
       keep: true,
-      event: { facts: { team: "core", aboutYou: true } },
+      event: { addressedTo: "direct", labels: ["pull-request", "review-requested", "team-review"] },
     });
   });
 
-  it("keeps the guardian's own actions and bots, marked as such", async () => {
-    const own = await normalizeGithub(
-      "issue_comment",
-      {
-        action: "created",
-        repository,
-        sender: { login: "octo-me" },
-        issue: { number: 3, title: "Bug", user: { login: "alice" } },
-        comment: { id: 9, body: "On it", html_url: "https://x/c/9" },
-      },
-      ctx(),
-    );
-    expect(own).toMatchObject({ keep: true, event: { facts: { byYou: true, yours: false } } });
+  it("marks the guardian's own actions and bots, and a mention as direct", async () => {
+    const comment = (sender: string, body: string, threadAuthor = "alice") =>
+      normalizeGithub(
+        "issue_comment",
+        {
+          action: "created",
+          repository,
+          sender: { login: sender },
+          issue: { number: 3, title: "Bug", user: { login: threadAuthor } },
+          comment: { id: 9, body, html_url: "https://x/c/9" },
+        },
+        ctx(),
+      );
+    expect(await comment("octo-me", "On it")).toMatchObject({
+      keep: true,
+      event: { byYou: true, addressedTo: "other", labels: ["issue", "comment"] },
+    });
+    expect(await comment("bob", "@octo-me can you look?")).toMatchObject({
+      keep: true,
+      event: { byYou: false, addressedTo: "direct", labels: ["issue", "comment", "mention"] },
+    });
+    expect(await comment("bob", "thanks", "octo-me")).toMatchObject({
+      event: { addressedTo: "direct" },
+    });
     const bot = await normalizeGithub(
       "pull_request",
       {
@@ -110,11 +113,11 @@ describe("normalizeGithub", () => {
     );
     expect(bot).toMatchObject({
       keep: true,
-      event: { kind: "new_pr_or_issue", facts: { bot: true } },
+      event: { kind: "new_pr_or_issue", labels: ["bot", "pull-request", "opened"] },
     });
   });
 
-  it("gives every failed run, with who triggered it and the branch as facts", async () => {
+  it("gives every failed run, by the guardian when they triggered it, with labels", async () => {
     const run = (triggerer: string, branch: string) => ({
       action: "completed",
       repository,
@@ -136,12 +139,18 @@ describe("normalizeGithub", () => {
       event: {
         id: "github:acme/widgets:run:11:2",
         kind: "your_ci_failed",
-        facts: { triggeredByYou: true, onDefaultBranch: false, branch: "fix", pr: "7" },
+        byYou: true,
+        addressedTo: "direct",
+        labels: ["ci-failed", "pull-request"],
       },
     });
     expect(await normalizeGithub("workflow_run", run("bob", "main"), ctx())).toMatchObject({
       keep: true,
-      event: { facts: { triggeredByYou: false, onDefaultBranch: true } },
+      event: {
+        byYou: false,
+        addressedTo: "other",
+        labels: ["ci-failed", "default-branch", "pull-request"],
+      },
     });
     const passed = run("bob", "main");
     passed.workflow_run.conclusion = "success";
@@ -160,7 +169,7 @@ describe("normalizeGithub", () => {
     };
     expect(await normalizeGithub("pull_request", closed, ctx())).toMatchObject({
       keep: true,
-      event: { kind: "your_pr_closed", facts: { outcome: "merged", yours: true } },
+      event: { kind: "your_pr_closed", addressedTo: "direct", labels: ["pull-request", "merged"] },
     });
     expect(
       await normalizeGithub("pull_request", closed, ctx({ kinds: new Set(["review_requested"]) })),
@@ -200,31 +209,33 @@ describe("normalizeGmail", () => {
         subject: "Lunch on Friday?",
         url: "https://mail.google.com/mail/u/0/#all/t1",
         excerpt: "Are you free on Friday at noon?",
-        facts: {
-          mailbox: "me@example.com",
-          recipient: "to",
-          byYou: false,
-          inInbox: true,
-          automatedSender: false,
-        },
+        byYou: false,
+        addressedTo: "direct",
+        labels: [],
       },
     });
   });
 
-  it("keeps cc, tabs, automated, list, bulk and own mail, each as a fact", () => {
-    const facts = (payload: Record<string, unknown>) => {
+  it("keeps cc, tabs, automated, list, bulk and own mail, each in the generic shape", () => {
+    const event = (payload: Record<string, unknown>) => {
       const result = normalizeGmail(payload, { address });
       expect(result.keep).toBe(true);
-      return result.keep ? result.event.facts : {};
+      return result.keep ? result.event : undefined;
     };
-    expect(facts(withHeaders({ Cc: "me@example.com" }, { to: "bo@y.io" })).recipient).toBe("cc");
-    expect(facts(mail({ label_ids: ["INBOX", "CATEGORY_PROMOTIONS"] })).category).toBe(
-      "promotions",
+    expect(event(withHeaders({ Cc: "me@example.com" }, { to: "bo@y.io" }))?.addressedTo).toBe(
+      "copy",
     );
-    expect(facts(mail({ sender: "noreply@github.com" })).automatedSender).toBe(true);
-    expect(facts(withHeaders({ "List-Unsubscribe": "<mailto:u@x.io>" })).listMail).toBe(true);
-    expect(facts(withHeaders({ Precedence: "bulk" })).bulk).toBe(true);
-    expect(facts(mail({ sender: "me@example.com" })).byYou).toBe(true);
+    expect(event(mail({ to: "list@x.io" }))?.addressedTo).toBe("other");
+    expect(event(mail({ label_ids: ["INBOX", "CATEGORY_PROMOTIONS"] }))?.labels).toEqual([
+      "promotions",
+    ]);
+    expect(event(mail({ label_ids: ["INBOX", "CATEGORY_UPDATES"] }))?.labels).toEqual(["updates"]);
+    expect(event(mail({ sender: "noreply@github.com" }))?.labels).toEqual(["automated"]);
+    expect(event(withHeaders({ "List-Unsubscribe": "<mailto:u@x.io>" }))?.labels).toEqual([
+      "mailing-list",
+    ]);
+    expect(event(withHeaders({ Precedence: "bulk" }))?.labels).toEqual(["bulk"]);
+    expect(event(mail({ sender: "me@example.com" }))?.byYou).toBe(true);
   });
 
   it("drops only spam, trash and a mail with no id", () => {
@@ -291,7 +302,7 @@ describe("isAutomatedSender", () => {
     const result = normalizeGmail(mail({ sender: "LinkedIn <jobalerts-noreply@linkedin.com>" }), {
       address,
     });
-    expect(result).toMatchObject({ keep: true, event: { facts: { automatedSender: true } } });
+    expect(result).toMatchObject({ keep: true, event: { labels: ["automated"] } });
   });
 });
 

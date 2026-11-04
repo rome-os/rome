@@ -8,6 +8,7 @@
 
 import { textMessageContent, transcriptMessageId } from "../core/agent-trace-recorder.js";
 import type { AgentRunnerInterface } from "../core/types.js";
+import type { AddressedTo } from "./event-shape.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 
 export const TRIAGE_AGENT = "core:concierge-triage";
@@ -34,7 +35,12 @@ export interface FollowEvent {
   subject?: string;
   url?: string;
   excerpt?: string;
-  facts: Record<string, string | number | boolean>;
+  /** The guardian did it. */
+  byYou: boolean;
+  /** How it is addressed to the guardian: theirs or asking them, copied, or neither. */
+  addressedTo: AddressedTo;
+  /** What else its connection knows, in short words the connection chose. */
+  labels: string[];
   /** When it reached Rome, epoch milliseconds. */
   at: number;
 }
@@ -57,7 +63,8 @@ export interface TriageInput {
     source: string;
     target: string;
     kinds: string[];
-    options: Record<string, unknown>;
+    /** The follow's options, each as one line in the guardian's words. */
+    options: string[];
     preference: string | null;
   }[];
   /** What the guardian was told recently, so it is not told again. */

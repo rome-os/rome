@@ -613,6 +613,17 @@ export class AgentRunner {
           turnId: handle.turnId,
           source: "agent-runner",
         });
+        // The turn's input, under the caller's label, right after it starts.
+        if (msg.type === "turn_start" && params.inputLabel) {
+          await recorder
+            .recordSystemInput(params.inputLabel, params.prompt)
+            .catch((error: unknown) =>
+              log.warn("system input not recorded", {
+                turnId: handle.turnId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+        }
       }
       yield msg;
     }

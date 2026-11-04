@@ -5,6 +5,7 @@ import { ChatBubble } from "@/components/chat/ChatBubble";
 import { TranscriptEntry } from "@/components/chat/TranscriptEntry";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
+import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
 import { ErrorRunView } from "./ErrorEventView";
@@ -86,6 +87,8 @@ export function renderSingleEntry(
           userPrompt={block.userPrompt}
         />
       );
+    case "system_input":
+      return <SystemInputView key={key} label={block.label} content={block.content} />;
     case "thinking":
       return <ThinkingBlock key={key} content={block.content} />;
     case "tool_use":

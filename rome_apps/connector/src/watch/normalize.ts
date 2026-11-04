@@ -1,11 +1,19 @@
 // Turning a raw event from a watched source into the common shape a follower
-// reads: the kind it is, who did it, a link, a short excerpt, and plain facts
-// (from a bot, about the guardian, sent to them or in cc). Whether it matters is
-// not decided here: the Concierge's triage reads the facts. Only spam, trash and
-// events of a kind the follow does not have on are dropped. Each event's id is
-// stable, so its follower drops a repeat delivery.
+// reads: the kind it is, who did it, a link, a short excerpt, whether the
+// guardian did it, how it is addressed to them, and labels, short words this
+// connection chooses for what else it knows (a bot, a mailing list, a failed
+// run). Whether it matters is not decided here. Only spam, trash and events of
+// a kind the follow does not have on are dropped. Each event's id is stable,
+// so its follower drops a repeat delivery.
 
 import { excerptOf, subjectOf } from "./text.js";
+
+/**
+ * How an event is addressed to the guardian: `direct` when it is theirs or
+ * asks them (sent To them, a review requested of them, their own pull
+ * request), `copy` when they are copied, `other` otherwise.
+ */
+export type AddressedTo = "direct" | "copy" | "other";
 
 /** An event as a follower reads it. Every text field came from outside Rome. */
 export interface WatchEvent {
@@ -17,14 +25,16 @@ export interface WatchEvent {
   subject?: string;
   url?: string;
   excerpt?: string;
-  /** Plain facts with plain-name keys, such as `recipient: "cc"`, `bot: true`, `repo`. */
-  facts: Record<string, string | number | boolean>;
+  /** The guardian did it. */
+  byYou: boolean;
+  addressedTo: AddressedTo;
+  /** What else the connection knows, in short lowercase words. */
+  labels: string[];
 }
 
 export type Normalized = { keep: true; event: WatchEvent } | { keep: false; reason: string };
 
 type Json = Record<string, unknown>;
-type Facts = Record<string, string | number | boolean | undefined>;
 
 const obj = (value: unknown): Json =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : {};
@@ -39,12 +49,10 @@ const same = (a: string | undefined, b: string | undefined) =>
   a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
 const drop = (reason: string): Normalized => ({ keep: false, reason });
 
-/** The facts that have a value. */
-function facts(record: Facts): WatchEvent["facts"] {
-  const out: WatchEvent["facts"] = {};
-  for (const [key, value] of Object.entries(record)) if (value !== undefined) out[key] = value;
-  return out;
-}
+/** The labels that apply, each once. */
+const labelsOf = (...labels: (string | false | undefined)[]): string[] => [
+  ...new Set(labels.filter((label): label is string => Boolean(label))),
+];
 
 // ---------------------------------------------------------------------------
 // GitHub
@@ -81,7 +89,14 @@ export async function normalizeGithub(
   const event = (
     kind: string,
     id: string,
-    fields: { subject?: string; url?: string; text?: string; facts?: Facts },
+    fields: {
+      subject?: string;
+      url?: string;
+      text?: string;
+      addressedTo: AddressedTo;
+      byYou?: boolean;
+      labels: (string | false | undefined)[];
+    },
   ): Normalized => {
     if (!ctx.kinds.has(kind)) return drop("not a kind this follow has on");
     const quoted = excerptOf(fields.text);
@@ -96,7 +111,9 @@ export async function normalizeGithub(
         ...(subject ? { subject } : {}),
         ...(fields.url ? { url: fields.url } : {}),
         ...(quoted ? { excerpt: quoted } : {}),
-        facts: facts({ repo, bot, byYou: same(actor, login), ...fields.facts }),
+        byYou: fields.byYou ?? same(actor, login),
+        addressedTo: fields.addressedTo,
+        labels: labelsOf(bot && "bot", ...fields.labels),
       },
     };
   };
@@ -106,10 +123,9 @@ export async function normalizeGithub(
     case "issues": {
       const item = obj(type === "pull_request" ? payload.pull_request : payload.issue);
       const number = str(item.number);
-      const on = type === "pull_request" ? "pull_request" : "issue";
-      const author = loginOf(item.user);
+      const on = type === "pull_request" ? "pull-request" : "issue";
+      const yours = same(loginOf(item.user), login);
       const shared = { subject: str(item.title), url: str(item.html_url) };
-      const base = { number, on, author, yours: same(author, login) };
       if (type === "pull_request" && payload.action === "review_requested") {
         const reviewer = loginOf(payload.requested_reviewer);
         const team = str(obj(payload.requested_team).slug);
@@ -118,27 +134,31 @@ export async function normalizeGithub(
           same(reviewer, login) || (team !== undefined && (await ctx.isTeamMember(org, team)));
         return event("review_requested", `pr:${number}:review_requested:${reviewer ?? team}`, {
           ...shared,
-          facts: { ...base, reviewer, team, aboutYou: ofYou },
+          addressedTo: ofYou || yours ? "direct" : "other",
+          labels: [on, "review-requested", team && "team-review"],
         });
       }
       if (type === "pull_request" && payload.action === "closed") {
         return event("your_pr_closed", `pr:${number}:closed`, {
           ...shared,
-          facts: { ...base, outcome: item.merged === true ? "merged" : "closed" },
+          addressedTo: yours ? "direct" : "other",
+          labels: [on, item.merged === true ? "merged" : "closed"],
         });
       }
       if (payload.action === "assigned") {
-        const assignee = loginOf(payload.assignee);
-        return event("assigned_to_you", `${on}:${number}:assigned:${assignee}`, {
+        const toYou = same(loginOf(payload.assignee), login);
+        return event("assigned_to_you", `${on}:${number}:assigned:${loginOf(payload.assignee)}`, {
           ...shared,
-          facts: { ...base, assignee, aboutYou: same(assignee, login) },
+          addressedTo: toYou ? "direct" : "other",
+          labels: [on, "assigned"],
         });
       }
       if (payload.action === "opened") {
         return event("new_pr_or_issue", `${on}:${number}:opened`, {
           ...shared,
           text: str(item.body),
-          facts: base,
+          addressedTo: mentions(str(item.body), login) ? "direct" : "other",
+          labels: [on, "opened"],
         });
       }
       return drop(`GitHub ${type}.${String(payload.action)} is not a kind follows describe`);
@@ -147,18 +167,13 @@ export async function normalizeGithub(
       if (payload.action !== "submitted") return drop("not a submitted review");
       const pr = obj(payload.pull_request);
       const review = obj(payload.review);
-      const author = loginOf(pr.user);
+      const state = str(review.state)?.toLowerCase().replaceAll("_", "-") ?? "commented";
       return event("review_on_your_pr", `review:${str(review.id)}`, {
         subject: str(pr.title),
         url: str(review.html_url) ?? str(pr.html_url),
         text: str(review.body),
-        facts: {
-          number: str(pr.number),
-          on: "pull_request",
-          author,
-          yours: same(author, login),
-          state: str(review.state)?.toLowerCase() ?? "commented",
-        },
+        addressedTo: same(loginOf(pr.user), login) ? "direct" : "other",
+        labels: ["pull-request", "review", state],
       });
     }
     case "issue_comment":
@@ -167,19 +182,14 @@ export async function normalizeGithub(
       const comment = obj(payload.comment);
       const body = str(comment.body);
       const thread = type === "issue_comment" ? obj(payload.issue) : obj(payload.pull_request);
-      const author = loginOf(thread.user);
       const isPr = type === "pull_request_review_comment" || "pull_request" in thread;
+      const mentioned = mentions(body, login);
       return event("comment_or_mention", `comment:${str(comment.id)}`, {
         subject: str(thread.title),
         url: str(comment.html_url),
         text: body,
-        facts: {
-          number: str(thread.number),
-          on: isPr ? "pull_request" : "issue",
-          author,
-          yours: same(author, login),
-          mentionsYou: mentions(body, login),
-        },
+        addressedTo: mentioned || same(loginOf(thread.user), login) ? "direct" : "other",
+        labels: [isPr ? "pull-request" : "issue", "comment", mentioned && "mention"],
       });
     }
     case "workflow_run": {
@@ -188,22 +198,19 @@ export async function normalizeGithub(
         return drop("not a failed run");
       }
       const branch = str(run.head_branch);
+      const triggeredByYou =
+        same(loginOf(run.triggering_actor), login) || same(loginOf(run.actor), login);
       const prs = Array.isArray(run.pull_requests) ? run.pull_requests.map(obj) : [];
       return event("your_ci_failed", `run:${str(run.id)}:${str(run.run_attempt) ?? "1"}`, {
         subject: str(run.display_title) ?? str(run.name),
         url: str(run.html_url),
-        facts: {
-          workflow: str(run.name),
-          branch,
-          pr:
-            prs
-              .map((pr) => str(pr.number))
-              .filter(Boolean)
-              .join(",") || undefined,
-          triggeredByYou:
-            same(loginOf(run.triggering_actor), login) || same(loginOf(run.actor), login),
-          onDefaultBranch: branch !== undefined && same(branch, str(repository.default_branch)),
-        },
+        byYou: triggeredByYou,
+        addressedTo: triggeredByYou ? "direct" : "other",
+        labels: [
+          "ci-failed",
+          branch !== undefined && same(branch, str(repository.default_branch)) && "default-branch",
+          prs.length > 0 && "pull-request",
+        ],
       });
     }
     default:
@@ -216,13 +223,12 @@ export async function normalizeGithub(
 // ---------------------------------------------------------------------------
 
 const DROPPED_LABELS = ["SPAM", "TRASH"];
-/** Gmail's tabs, as the fact `category`. */
+/** Gmail's tabs, as labels. */
 const CATEGORIES: Record<string, string> = {
   CATEGORY_PROMOTIONS: "promotions",
   CATEGORY_SOCIAL: "social",
   CATEGORY_FORUMS: "forums",
   CATEGORY_UPDATES: "updates",
-  CATEGORY_PERSONAL: "primary",
 };
 /**
  * Senders no person answers from: a no-reply, notification, bounce or
@@ -280,7 +286,7 @@ export function normalizeGmail(payload: Json, ctx: { address: string }): Normali
   const preview = obj(payload.preview);
   const subject = subjectOf(str(payload.subject) ?? str(preview.subject) ?? head.get("subject"));
   const quoted = excerptOf(str(preview.body) ?? str(field(payload, "message_text", "messageText")));
-  const category = labelIds.map((label) => CATEGORIES[label]).find(Boolean);
+  const recipient: AddressedTo = to.includes(me) ? "direct" : cc.includes(me) ? "copy" : "other";
   return {
     keep: true,
     event: {
@@ -293,16 +299,15 @@ export function normalizeGmail(payload: Json, ctx: { address: string }): Normali
         ? { url: `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(thread)}` }
         : {}),
       ...(quoted ? { excerpt: quoted } : {}),
-      facts: facts({
-        mailbox: me,
-        recipient: to.includes(me) ? "to" : cc.includes(me) ? "cc" : "other",
-        byYou: sender === me,
-        category,
-        inInbox: labelIds.length === 0 ? undefined : labelIds.includes("INBOX"),
-        automatedSender: sender ? isAutomatedSender(sender) : undefined,
-        listMail: head.has("list-unsubscribe") || head.has("list-id") || undefined,
-        bulk: BULK_PRECEDENCE.test(head.get("precedence")?.trim() ?? "") || undefined,
-      }),
+      byYou: sender === me,
+      addressedTo: recipient,
+      labels: labelsOf(
+        ...labelIds.map((label) => CATEGORIES[label]),
+        labelIds.length > 0 && !labelIds.includes("INBOX") && "not-in-inbox",
+        sender !== undefined && isAutomatedSender(sender) && "automated",
+        (head.has("list-unsubscribe") || head.has("list-id")) && "mailing-list",
+        BULK_PRECEDENCE.test(head.get("precedence")?.trim() ?? "") && "bulk",
+      ),
     },
   };
 }

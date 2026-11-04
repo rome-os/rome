@@ -23,7 +23,9 @@ const event = (id: string, at = Date.now()): FollowEvent => ({
   kind: "review_requested",
   target: "acme/widgets",
   account: "octo-me",
-  facts: {},
+  byYou: false,
+  addressedTo: "direct",
+  labels: [],
   at,
 });
 

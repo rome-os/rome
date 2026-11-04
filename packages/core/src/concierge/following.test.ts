@@ -123,7 +123,12 @@ const sources = (gmailStatus: WatchSource["status"] = "ready"): ProviderSources 
           ],
           default: "about_me",
         },
-        { key: "ignorePeople", label: "Ignore these people", type: "list", default: [] },
+        {
+          key: "ignorePeople",
+          label: "Ignore these people",
+          type: "list",
+          default: [],
+        },
       ],
     },
     {
@@ -175,6 +180,7 @@ function setup(
   const calls: [string, Record<string, unknown>][] = [];
   const omitted: [string, string[]][] = [];
   const turns: string[] = [];
+  const inputLabels: (string | undefined)[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
   const testDb = createTestDb();
@@ -269,7 +275,13 @@ function setup(
           : { status: "ok", data: { subscription: args.dryRun ? "inactive" : "created" } };
       }
       if (name === "connector_watch_normalize") {
-        const payload = args.payload as { keep?: boolean; id?: string };
+        const payload = args.payload as {
+          keep?: boolean;
+          id?: string;
+          kind?: string;
+          actor?: string;
+          byYou?: boolean;
+        };
         return payload.keep
           ? {
               status: "ok",
@@ -278,11 +290,13 @@ function setup(
                 event: {
                   id: payload.id ?? "github:acme/widgets:pr:7",
                   source: "github",
-                  kind: "review_requested",
-                  actor: "alice",
+                  kind: payload.kind ?? "review_requested",
+                  actor: payload.actor ?? "alice",
                   subject: "Fix it",
                   url: `https://github.com/acme/widgets/pull/${payload.id ?? "7"}`,
-                  facts: { aboutYou: true, repo: "acme/widgets", "bad key": "x" },
+                  byYou: payload.byYou ?? false,
+                  addressedTo: "direct",
+                  labels: ["pull-request", "review-requested", "Bad Label!"],
                 },
               },
             }
@@ -302,8 +316,13 @@ function setup(
   const service = {
     isEnabled: async () => true,
     findChatId: async () => "concierge",
-    runSystemTurn: async (_chatId: string, prompt: string) => {
+    runSystemTurn: async (
+      _chatId: string,
+      prompt: string,
+      turnOptions?: { inputLabel?: string },
+    ) => {
       turns.push(prompt);
+      inputLabels.push(turnOptions?.inputLabel);
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
@@ -316,6 +335,7 @@ function setup(
     settings,
     action,
     turns,
+    inputLabels,
     triaged,
     prompts,
     omitted,
@@ -710,13 +730,17 @@ describe("the follow pipeline", () => {
     rs.useRealTimers();
   });
 
-  const fire = (s: ReturnType<typeof setup>, id: string) =>
+  const fire = (
+    s: ReturnType<typeof setup>,
+    id: string,
+    more: { kind?: string; actor?: string; byYou?: boolean } = {},
+  ) =>
     s.action("core:concierge_follow_event").execute(
       {
         source: "github",
         target: "acme/widgets",
         eventName: "provider:event:github.pull_request",
-        __triggerPayload: { keep: true, id },
+        __triggerPayload: { keep: true, id, ...more },
       },
       {} as never,
     );
@@ -788,7 +812,7 @@ describe("the follow pipeline", () => {
     s.stop();
   });
 
-  it("gives the triage the guardian's preference and options, and only plain fact keys", async () => {
+  it("gives the triage the guardian's preference and options, and only clean labels", async () => {
     rs.useFakeTimers();
     const s = setup();
     await s.following().follow({
@@ -801,10 +825,48 @@ describe("the follow pipeline", () => {
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     const [prompt] = s.prompts;
     expect(prompt).toContain('"preference": "Billing only"');
-    expect(prompt).toContain('"bob"');
+    expect(prompt).toContain('"Ignore these people: bob"');
     expect(prompt).toContain('"account": "octo-me"');
-    expect(prompt).toContain('"aboutYou": true');
-    expect(prompt).not.toContain("bad key");
+    expect(prompt).toContain('"addressedTo": "direct"');
+    expect(prompt).toContain('"review-requested"');
+    expect(prompt).not.toContain("Bad Label");
+    s.stop();
+  });
+
+  it("drops nothing in code: options, the guardian's own actions and anyone's events go to triage", async () => {
+    rs.useFakeTimers();
+    const s = setup();
+    await s.following().follow({
+      source: "github",
+      target: "acme/widgets",
+      options: { ignorePeople: ["dependabot"] },
+    });
+    expect(await fire(s, "own", { byYou: true })).toEqual({
+      status: "ok",
+      data: { queued: "review_requested" },
+    });
+    await fire(s, "bot", { actor: "dependabot[bot]" });
+    await fire(s, "run", { byYou: true, kind: "your_ci_failed" });
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    // The model sees all three, and the options as the guardian's wishes in words.
+    expect(s.triaged).toEqual([["own", "bot", "run"]]);
+    const prompt = s.prompts[0]!;
+    expect(prompt).toContain('"byYou": true');
+    expect(prompt).toContain('"What to hear about: Only what concerns me"');
+    expect(prompt).toContain('"Ignore these people: dependabot"');
+    expect(prompt).not.toContain('"ignorePeople"');
+    s.stop();
+  });
+
+  it("keeps each following turn's input in its trace, labelled", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e2: "digest" } });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await fire(s, "e1");
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.inputLabels).toEqual(["Following · important (1)", "Following · digest (2)"]);
     s.stop();
   });
 

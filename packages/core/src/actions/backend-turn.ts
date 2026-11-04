@@ -47,6 +47,8 @@ export interface BackendTurnOptions {
   /** The turn is housekeeping for the agent: a chat that draws a typing
    *  indicator for a running turn holds it back until the agent speaks. */
   quiet?: boolean;
+  /** Keeps the turn's input in its saved trace under this label. */
+  inputLabel?: string;
 }
 
 export interface BackendEmitOptions {
@@ -143,7 +145,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
-    trace: Pick<RunParams, "persistTrace" | "persistTranscript" | "persistAnswer"> = {},
+    trace: Pick<
+      RunParams,
+      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel"
+    > = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -264,7 +269,11 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             await deps.beforeTurn?.(params);
             let reply = "";
             let turnId: string | undefined;
-            const trace = { persistTrace: true, persistTranscript: false };
+            const trace = {
+              persistTrace: true,
+              persistTranscript: false,
+              ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+            };
             for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
               if (msg.type === "turn_start") turnId = msg.turnId;
               if (msg.type === "result") reply = msg.content;
@@ -290,7 +299,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // A speaker puts the answer on record as it says it, so the trace keeps
       // the turn but writes no answer of its own: one that was never sent
       // must not read as said, and one that was must not be said twice.
-      const trace = { persistAnswer: false };
+      const trace = {
+        persistAnswer: false,
+        ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
+      };
       for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;

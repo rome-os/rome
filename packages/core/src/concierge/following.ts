@@ -39,6 +39,8 @@ import {
   renderImportantTurn,
 } from "./alerts.js";
 import { mergeConnectors, type ProviderService, type ProviderWatchSection } from "./connectors.js";
+import { addressedToOf, cleanLabels } from "./event-shape.js";
+import { optionValue, renderOptions } from "./follow-options.js";
 import type { ConciergeService } from "./service.js";
 import {
   type FollowEvent,
@@ -292,22 +294,6 @@ export function validateRulesChange(input: Record<string, unknown>): Partial<Con
   return change;
 }
 
-/** An option's value: what the follow stored when it fits, else the default. */
-function optionValue(
-  option: ConciergeFollowOptionDto,
-  stored: unknown,
-): string | boolean | string[] {
-  if (option.type === "boolean") return typeof stored === "boolean" ? stored : option.default;
-  if (option.type === "list") {
-    return Array.isArray(stored)
-      ? stored.filter((item): item is string => typeof item === "string" && item.trim() !== "")
-      : option.default;
-  }
-  return typeof stored === "string" && option.values?.some((v) => v.value === stored)
-    ? stored
-    : option.default;
-}
-
 /** Checks option values against the source's options. Throws naming what fits. */
 export function validateOptions(
   source: Pick<WatchSource, "source" | "options">,
@@ -357,20 +343,7 @@ const failure = (name: string, outcome: ActionOutcome) =>
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** An event as its connection put it in the common shape. */
-type NormalizedEvent = Omit<FollowEvent, "target" | "account" | "at">;
-
-/** Keeps only facts a prompt can carry: plain-name keys with plain values. */
-function plainFacts(value: unknown): FollowEvent["facts"] {
-  const out: FollowEvent["facts"] = {};
-  if (!value || typeof value !== "object") return out;
-  for (const [key, fact] of Object.entries(value as Record<string, unknown>)) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-    if (typeof fact === "string" || typeof fact === "number" || typeof fact === "boolean") {
-      out[key] = fact;
-    }
-  }
-  return out;
-}
+type NormalizedEvent = Omit<FollowEvent, "target" | "account" | "at"> & Record<string, unknown>;
 
 const chunks = <T>(items: T[], size: number): T[][] =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, i) =>
@@ -483,7 +456,11 @@ export function startConciergeFollowing(
       }
       // The Concierge decides whether to tell each item now. Either way every
       // item also goes into the next digest.
-      await service.runSystemTurn(chatId, renderImportantTurn(items, held), { quiet: true });
+      // Its input stays in the run's trace, so Sessions shows why it said what it said.
+      await service.runSystemTurn(chatId, renderImportantTurn(items, held), {
+        quiet: true,
+        inputLabel: `Following · important (${items.length})`,
+      });
       await deps.items.markOffered(
         items.map((item) => item.id),
         new Date(now()),
@@ -505,6 +482,7 @@ export function startConciergeFollowing(
     );
     const timezone = await resolveGuardianTimezone(deps.settings);
     const decisions: TriageDecision[] = [];
+    const sources = await readSources().catch(() => [] as WatchSource[]);
     for (const part of chunks(fresh, MAX_EVENTS_PER_TRIAGE)) {
       const inPart = new Set(part.map((e) => `${e.source}:${e.target}`));
       const input: TriageInput = {
@@ -518,7 +496,11 @@ export function startConciergeFollowing(
             source,
             target,
             kinds,
-            options,
+            // The guardian's wishes in words, from the catalog's declarations.
+            options: renderOptions(
+              sources.find((s) => s.source === source)?.options ?? [],
+              options,
+            ),
             preference,
           })),
         recentlyTold: told.map((item) => ({
@@ -585,7 +567,10 @@ export function startConciergeFollowing(
     log.info("following digest", { items: owed.length, delivered: chatId !== null });
     if (!chatId) return { items: 0 };
     await outsideAction(() =>
-      service.runSystemTurn(chatId, renderDigestTurn(owed), { quiet: true }),
+      service.runSystemTurn(chatId, renderDigestTurn(owed), {
+        quiet: true,
+        inputLabel: `Following · digest (${owed.length})`,
+      }),
     );
     await deps.items.markDigested(
       owed.map((item) => item.id),
@@ -1029,7 +1014,9 @@ export function startConciergeFollowing(
         ...(typeof raw.subject === "string" ? { subject: raw.subject } : {}),
         ...(typeof raw.url === "string" ? { url: raw.url } : {}),
         ...(typeof raw.excerpt === "string" ? { excerpt: raw.excerpt } : {}),
-        facts: plainFacts(raw.facts),
+        byYou: raw.byYou === true,
+        addressedTo: addressedToOf(raw.addressedTo),
+        labels: cleanLabels(raw.labels),
         at: now(),
       };
       const queued = outsideAction(() => batcher.add(event));

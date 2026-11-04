@@ -62,6 +62,46 @@ describe("backend turn delivery", () => {
     });
   });
 
+  it("asks the runner to keep a turn's input only when the caller labels it", async () => {
+    const run = async (options?: { inputLabel?: string }) => {
+      const agentRunner = createMockAgentRunner([
+        [
+          { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+          { type: "result", content: "" },
+        ],
+      ]);
+      const webchat = {
+        name: "webchat",
+        send: { send: rs.fn(), direct: null, activity: null },
+      } as unknown as Channel;
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: (name) => (name === "webchat" ? webchat : null),
+      });
+      runner.setWebchatRuntime({
+        enqueueSessionTask: async (_sessionId, task) => {
+          await task({ emit: async () => undefined });
+        },
+      });
+      await runner.runAndDeliver(
+        {
+          agentName: "core:concierge",
+          sessionId: "s",
+          channel: "webchat",
+          threadId: "concierge",
+          prompt: "<external_events/>",
+        },
+        options,
+      );
+      return agentRunner.calls[0];
+    };
+    expect(await run({ inputLabel: "Following · digest (2)" })).toMatchObject({
+      inputLabel: "Following · digest (2)",
+    });
+    // A task event, a nudge or a defer resume passes no label and keeps no input.
+    expect(await run()).not.toHaveProperty("inputLabel");
+  });
+
   it("passes a quiet turn's option to the webchat runtime, and nothing for an ordinary one", async () => {
     const run = async (options?: { quiet?: boolean }) => {
       const agentRunner = createMockAgentRunner([

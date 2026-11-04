@@ -100,7 +100,8 @@ export const GITHUB_WATCHABLE: Watchable = {
       triggers: [repo("issues"), repo("pull_request")],
     },
   ],
-  // Guidance for triage, in the guardian's words; no option filters in code.
+  // The guardian's explicit wishes, stored as structured values. A follower
+  // renders them in words for its triage, as guidance, never as filters.
   options: [
     {
       key: "scope",
@@ -126,7 +127,12 @@ export const GITHUB_WATCHABLE: Watchable = {
       default: [],
       itemHint: "GitHub logins; empty means everyone",
     },
-    { key: "includeBots", label: "Include bots", type: "boolean", default: false },
+    {
+      key: "includeBots",
+      label: "Include bots",
+      type: "boolean",
+      default: false,
+    },
   ],
 };
 
@@ -161,12 +167,6 @@ export const GMAIL_WATCHABLE: Watchable = {
       default: "to_and_cc",
     },
     {
-      key: "includeUpdates",
-      label: "Include Gmail's Updates tab",
-      type: "boolean",
-      default: false,
-    },
-    {
       key: "vipSenders",
       label: "Always tell me about these senders",
       type: "list",
@@ -179,26 +179,6 @@ export const GMAIL_WATCHABLE: Watchable = {
 export const WATCHABLES: readonly Watchable[] = [GITHUB_WATCHABLE, GMAIL_WATCHABLE];
 
 export const watchableOf = (source: string) => WATCHABLES.find((w) => w.source === source);
-
-/** An option's value, from what the follow stored or else its default. */
-export function optionValue(
-  watchable: Watchable,
-  options: Record<string, unknown> | undefined,
-  key: string,
-): unknown {
-  const option = watchable.options.find((o) => o.key === key);
-  const stored = options?.[key];
-  if (!option) return stored;
-  if (option.type === "boolean") return typeof stored === "boolean" ? stored : option.default;
-  if (option.type === "list") {
-    return Array.isArray(stored)
-      ? stored.filter((item): item is string => typeof item === "string" && item.trim() !== "")
-      : option.default;
-  }
-  return typeof stored === "string" && option.values?.some((v) => v.value === stored)
-    ? stored
-    : option.default;
-}
 
 /** The bus name of a trigger's raw event. */
 export const eventNameOf = (trigger: Pick<WatchTrigger, "provider" | "type">) =>

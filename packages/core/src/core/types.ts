@@ -23,6 +23,10 @@ export interface RunParams extends SdkRunParams {
    *  off, so the answer is recorded once, and only once it went out. A
    *  recorded subagent or fork conversation keeps it anyway. */
   persistAnswer?: boolean;
+  /** Keeps this turn's prompt in its saved trace under this label, as a
+   *  `system_input` block. Only callers that ask for it; nothing more is
+   *  sent to the model. */
+  inputLabel?: string;
 }
 
 export interface ForkRunParams extends SdkForkRunParams {
