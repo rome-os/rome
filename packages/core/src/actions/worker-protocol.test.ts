@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { ActionInvocationError, isSendRefused, SendRefused } from "@rome-os/app-runtime";
-import { fromWireError, toWireError } from "./worker-protocol.js";
+import { fromWireError, sendRefusalOf, toWireError } from "./worker-protocol.js";
 
 describe("worker error envelope", () => {
   it("rebuilds a refused send as one", () => {
@@ -16,11 +16,19 @@ describe("worker error envelope", () => {
       "whatsapp cannot quote a message",
       "reply_unaddressable",
     );
-    expect(toWireError(nested)).toEqual({
+    const wire = toWireError(nested);
+    expect(wire).toEqual({
       name: "ActionInvocationError",
       message: "whatsapp cannot quote a message",
       refusal: "reply_unaddressable",
     });
+    const rebuilt = fromWireError(wire);
+    expect(rebuilt).toMatchObject({
+      name: "ActionInvocationError",
+      refusal: "reply_unaddressable",
+    });
+    expect(sendRefusalOf(rebuilt)).toBe("reply_unaddressable");
+    expect(toWireError(rebuilt)).toEqual(wire);
   });
 
   it("carries no refusal for any other failure", () => {

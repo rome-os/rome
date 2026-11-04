@@ -80,6 +80,13 @@ export function sendRefusalOf(err: unknown): SendRefusedReason | undefined {
 /** The error `wire` describes, with the name and message an in-process
  *  caller would have seen, and a refused send rebuilt as one. */
 export function fromWireError(wire: WireError): Error {
+  if (wire.refusal && wire.name === "ActionInvocationError") {
+    // A called action's refusal, which the action let pass up, keeps the
+    // field `ActionInvocationError` carries it in.
+    const err = Object.assign(new Error(wire.message), { refusal: wire.refusal });
+    err.name = wire.name;
+    return err;
+  }
   const err = wire.refusal ? new SendRefused(wire.refusal, wire.message) : new Error(wire.message);
   err.name = wire.name;
   return err;
