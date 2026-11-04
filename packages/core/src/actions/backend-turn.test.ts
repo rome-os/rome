@@ -218,6 +218,8 @@ describe("backend turn delivery", () => {
         messages: null,
         directory: null,
       }),
+      chats: { ensureChannelChat: async () => ({ id: "session-1" }) },
+      replies: { send: async () => null },
     });
 
     await expect(
