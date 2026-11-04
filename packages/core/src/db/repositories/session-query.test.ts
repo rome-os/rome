@@ -82,7 +82,7 @@ describe("SessionQueryRepository", () => {
         threadId: "7",
         name: "Launch topic",
       });
-      // A speaker of an account no recorded channel holds.
+      // A speaker of an account no recorded connection holds still reads its platform.
       fixture.speaker({ id: "stray", chat: group, accountId: "bot-gone" });
       testDb.db
         .insert(romeSessions)
@@ -113,47 +113,51 @@ describe("SessionQueryRepository", () => {
       });
     }
 
-    it("reads each speaker's channel, place and kind from its chat and account", async () => {
+    it("reads where each session stands from its speaker's chat and account", async () => {
       seeded();
       const repository = new SessionQueryRepository(testDb.db, "legacy", channels);
 
       const rows = Object.fromEntries(
         (await page(repository)).rows.map((row) => [
           row.id,
-          [row.channel, row.placeName, row.speakerKind],
+          [row.chatPlatform, row.accountId, row.placeName, row.placeKind],
         ]),
       );
 
       expect(rows).toEqual({
-        dashboard: ["webchat", "Weekly planning", "dm"],
-        dm: ["telegram", "Dana", "dm"],
-        group: ["telegram", "Release crew", "group"],
-        topic: ["telegram", "Launch topic", "topic"],
-        stray: [null, "Release crew", "group"],
-        sub: [null, null, null],
+        dashboard: ["webchat", "guardian", "Weekly planning", "directMessage"],
+        dm: ["telegram", "bot-sales", "Dana", "directMessage"],
+        group: ["telegram", "bot-sales", "Release crew", "group"],
+        topic: ["telegram", "bot-sales", "Launch topic", "thread"],
+        stray: ["telegram", "bot-gone", "Release crew", "group"],
+        sub: [null, null, null, null],
       });
       const detail = await repository.getSessionDetailRows("topic");
-      expect([
-        detail?.session.channel,
-        detail?.session.placeName,
-        detail?.session.speakerKind,
-      ]).toEqual(["telegram", "Launch topic", "topic"]);
+      expect([detail?.session.placeName, detail?.session.placeKind]).toEqual([
+        "Launch topic",
+        "thread",
+      ]);
     });
 
-    it("filters and counts sessions by the channel their speaker speaks through", async () => {
+    it("filters and counts sessions by the platform of the chat they stand in", async () => {
       seeded();
       const repository = new SessionQueryRepository(testDb.db, "legacy", channels);
 
-      const onTelegram = await page(repository, { channels: ["telegram"] });
-      const internal = await page(repository, { includeInternalSource: true, channels: [] });
+      const onTelegram = await page(repository, { platforms: ["telegram"] });
+      const noChat = await page(repository, { includeNoChat: true, platforms: [] });
 
-      expect(onTelegram.rows.map((row) => row.id).sort()).toEqual(["dm", "group", "topic"]);
-      expect(internal.rows.map((row) => row.id).sort()).toEqual(["stray", "sub"]);
+      expect(onTelegram.rows.map((row) => row.id).sort()).toEqual([
+        "dm",
+        "group",
+        "stray",
+        "topic",
+      ]);
+      expect(noChat.rows.map((row) => row.id)).toEqual(["sub"]);
       expect(
         Object.fromEntries(
-          (await page(repository)).facets.channels.map((facet) => [facet.value, facet.count]),
+          (await page(repository)).facets.platforms.map((facet) => [facet.value, facet.count]),
         ),
-      ).toEqual({ webchat: 1, telegram: 3, null: 2 });
+      ).toEqual({ webchat: 1, telegram: 4, null: 1 });
     });
   });
 

@@ -231,7 +231,7 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
     return (
       clean(session.placeName) ??
       clean(session.name) ??
-      humanize(session.channel) ??
+      humanize(session.chatPlatform) ??
       `Channel ${shortIdentifier(session.id)}`
     );
   }
@@ -340,7 +340,7 @@ export class SessionQueryService {
     if (session.type !== "channel" || !session.channel) return session.agentName;
     const linked = accountAgentOf(session.channel);
     if (!linked) return session.agentName;
-    if (session.speakerKind !== "dm") {
+    if (session.placeKind !== "directMessage") {
       // A null routing override is an explicit pin to main.
       if (session.channelSettings?.overrides.routing?.agentName === null) return null;
       if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
@@ -414,13 +414,13 @@ export class SessionQueryService {
       ownerAgentNames: scope.sessions?.owners ? Array.from(ownerAgentNames) : undefined,
       includeUninstalledOwners,
       knownAgentNames,
-      channels: sources
+      platforms: sources
         ?.filter(
-          (source): source is Extract<(typeof sources)[number], { kind: "channel" }> =>
-            source.kind === "channel",
+          (source): source is Extract<(typeof sources)[number], { kind: "platform" }> =>
+            source.kind === "platform",
         )
-        .map((source) => source.channel),
-      includeInternalSource: sources?.some((source) => source.kind === "internal"),
+        .map((source) => source.platform),
+      includeNoChat: sources?.some((source) => source.kind === "noChat"),
       projectPathPrefix: scope.sessions?.projectPathPrefix,
       models: scope.runs?.models?.map((model) =>
         model.kind === "unknown"
@@ -460,11 +460,12 @@ export class SessionQueryService {
       projectPath: session.projectPath,
       agentName,
       type: session.type as RomeSessionType,
-      channel: session.channel,
+      platform: session.chatPlatform,
+      accountId: session.accountId,
       chatId: session.chatId === null ? null : String(session.chatId),
       threadId: session.threadId,
       placeName: session.placeName,
-      speakerKind: session.speakerKind,
+      placeKind: session.placeKind,
       triggerKind: session.triggerKind,
       triggerName: session.triggerName,
       triggerActionName: session.triggerActionName,
@@ -585,32 +586,32 @@ export class SessionQueryService {
       };
     }
     if (by === "source") {
-      if (!run.channel) {
+      if (!run.platform) {
         return {
-          key: "source:internal",
-          label: "Internal",
-          description: "Background and internal runs",
+          key: "source:none",
+          label: "Not in a chat",
+          description: "Subagents, forks and action runs",
           iconUrl: null,
           kind: "named",
           dimension: {
             dimension: "source",
-            state: "internal",
-            channel: null,
-            label: "Internal",
+            state: "noChat",
+            platform: null,
+            label: "Not in a chat",
           },
         };
       }
       return {
-        key: `source:${run.channel}`,
-        label: titleCase(run.channel),
-        description: "External source",
+        key: `source:${run.platform}`,
+        label: titleCase(run.platform),
+        description: "Chats on this platform",
         iconUrl: null,
         kind: "named",
         dimension: {
           dimension: "source",
-          state: "channel",
-          channel: run.channel,
-          label: titleCase(run.channel),
+          state: "platform",
+          platform: run.platform,
+          label: titleCase(run.platform),
         },
       };
     }

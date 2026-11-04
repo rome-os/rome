@@ -96,12 +96,12 @@ import {
   formatDate,
   formatOutcome,
   SESSION_TYPE_LABELS,
-  sourceLabel,
+  platformLabel,
 } from "./sessions-format";
 
 const PAGE_SIZE = 50;
 const ALL = "__all__";
-const INTERNAL_SOURCE = "__internal__";
+const NO_CHAT = "__no_chat__";
 const NO_OP = () => {};
 
 function sessionAgentLabel(agentName: string | null | undefined): string {
@@ -479,7 +479,7 @@ function SessionsIndexPage({
             <div className="mt-2 truncate text-aux text-muted-foreground">
               {session.type === "action"
                 ? (sessionTriggerLabel(session) ?? "Background run")
-                : (session.placeName ?? sourceLabel(session.channel))}
+                : (session.placeName ?? platformLabel(session.platform))}
             </div>
           </div>
         ),
@@ -570,9 +570,9 @@ function SessionsIndexPage({
         setType(dimension.value as RomeSessionType);
       } else if (dimension.dimension === "source") {
         setSource(
-          dimension.state === "internal"
-            ? { kind: "internal" }
-            : { kind: "channel", channel: dimension.channel },
+          dimension.state === "noChat"
+            ? { kind: "noChat" }
+            : { kind: "platform", platform: dimension.platform },
         );
       } else if (dimension.dimension === "agent") {
         setAgentName(dimension.name);
@@ -638,7 +638,7 @@ function SessionsIndexPage({
     source
       ? {
           key: "source",
-          label: `Source: ${sourceLabel(source.kind === "internal" ? null : source.channel)}`,
+          label: `Platform: ${platformLabel(source.kind === "noChat" ? null : source.platform)}`,
           clear: () => setSource(undefined),
         }
       : null,
@@ -801,36 +801,33 @@ function SessionsIndexPage({
                     </Select>
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor={sourceFieldId}>Source</FieldLabel>
+                    <FieldLabel htmlFor={sourceFieldId}>Platform</FieldLabel>
                     <Select
                       value={
-                        source?.kind === "internal"
-                          ? INTERNAL_SOURCE
-                          : source?.kind === "channel"
-                            ? source.channel
+                        source?.kind === "noChat"
+                          ? NO_CHAT
+                          : source?.kind === "platform"
+                            ? source.platform
                             : ALL
                       }
                       onValueChange={(value) =>
                         setSource(
                           value === ALL
                             ? undefined
-                            : value === INTERNAL_SOURCE
-                              ? { kind: "internal" }
-                              : { kind: "channel", channel: value },
+                            : value === NO_CHAT
+                              ? { kind: "noChat" }
+                              : { kind: "platform", platform: value },
                         )
                       }
                     >
                       <SelectTrigger id={sourceFieldId} className="w-full">
-                        <SelectValue placeholder="Source" />
+                        <SelectValue placeholder="Platform" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={ALL}>All sources</SelectItem>
-                        {(data?.facets.channels ?? []).map((facet) => (
-                          <SelectItem
-                            key={facet.value ?? INTERNAL_SOURCE}
-                            value={facet.value ?? INTERNAL_SOURCE}
-                          >
-                            {sourceLabel(facet.value)} ({facet.count})
+                        <SelectItem value={ALL}>All platforms</SelectItem>
+                        {(data?.facets.platforms ?? []).map((facet) => (
+                          <SelectItem key={facet.value ?? NO_CHAT} value={facet.value ?? NO_CHAT}>
+                            {platformLabel(facet.value)} ({facet.count})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1125,10 +1122,10 @@ function ReadOnlySessionChat({
   }, [messages]);
   const identity = useMemo<AgentIdentity>(
     () => ({
-      name: session.agentName ? artifactLocalName(session.agentName) : session.channel || "Rome",
+      name: session.agentName ? artifactLocalName(session.agentName) : session.platform || "Rome",
       iconUrl: null,
     }),
-    [session.agentName, session.channel],
+    [session.agentName, session.platform],
   );
   const view = useMemo(
     () => buildChatView(messagesBySession, session.id, identity),
@@ -1259,7 +1256,7 @@ function SessionDetailsSheet({
     ["Owner", session.owner.label],
     ["Agent", sessionAgentLabel(session.agentName)],
     ["Type", SESSION_TYPE_LABELS[session.type]],
-    ["Source", sourceLabel(session.channel)],
+    ["Platform", platformLabel(session.platform)],
     ["Trigger", sessionTriggerLabel(session)],
     ["Project", session.projectPath ?? session.projectName],
     ["Created", formatDate(session.createdAt)],
@@ -1589,7 +1586,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           </div>
           <p className="truncate text-aux text-muted-foreground">
             {session
-              ? `${session.owner.label} · ${sessionAgentLabel(session.agentName)} · ${sourceLabel(session.channel)}`
+              ? `${session.owner.label} · ${sessionAgentLabel(session.agentName)} · ${platformLabel(session.platform)}`
               : sessionId}
           </p>
         </div>

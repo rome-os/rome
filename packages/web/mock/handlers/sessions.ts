@@ -92,11 +92,12 @@ const record = (seed: SessionSeed): RomeSessionExplorerRecord => ({
   projectName: "default",
   projectPath: "default",
   agentName: null,
-  channel: null,
+  platform: null,
+  accountId: null,
   chatId: null,
   threadId: null,
   placeName: null,
-  speakerKind: null,
+  placeKind: null,
   triggerKind: null,
   triggerName: null,
   triggerActionName: null,
@@ -131,9 +132,10 @@ const fromSeededChat = (
     owner: SEEDED_CHAT_OWNERS[chat.id] ?? CORE_OWNER,
     projectName: chat.projectName,
     projectPath: chat.projectName,
-    channel: "webchat",
+    platform: "webchat",
+    accountId: "guardian",
     chatId: chat.id,
-    speakerKind: "dm",
+    placeKind: "directMessage",
     createdAt: chat.createdAt,
     activityAt: chat.activityAt,
     messageCount: chat.messageCount,
@@ -165,10 +167,11 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "channel",
     agentName: "envoy",
     owner: CORE_OWNER,
-    channel: "whatsapp",
+    platform: "whatsapp",
+    accountId: "whatsapp-bot",
     chatId: "whatsapp-dana",
     placeName: "Dana Whitfield",
-    speakerKind: "dm",
+    placeKind: "directMessage",
     createdAt: ago(3 * HOUR),
     activityAt: ago(28 * 60 * 1000),
     messageCount: 14,
@@ -184,10 +187,11 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "channel",
     agentName: "envoy",
     owner: CORE_OWNER,
-    channel: "telegram",
+    platform: "telegram",
+    accountId: "telegram-bot",
     chatId: "telegram-ines",
     placeName: "Ines Ferreira",
-    speakerKind: "dm",
+    placeKind: "directMessage",
     createdAt: ago(2 * DAY),
     activityAt: ago(5 * HOUR),
     messageCount: 9,
@@ -203,10 +207,11 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "channel",
     agentName: "envoy",
     owner: CORE_OWNER,
-    channel: "email",
+    platform: "email",
+    accountId: "email-bot",
     chatId: "email-invoice-8821",
     placeName: "Bay Plumbing Co.",
-    speakerKind: "dm",
+    placeKind: "directMessage",
     createdAt: ago(9 * DAY),
     activityAt: ago(9 * DAY),
     messageCount: 4,
@@ -440,8 +445,8 @@ const matchesOwner = (owner: RomeSessionOwner, filter: SessionOwnerFilter): bool
   return owner.type === "unknown";
 };
 
-const matchesSource = (channel: string | null, filter: SessionSourceFilter): boolean =>
-  filter.kind === "internal" ? channel === null : channel === filter.channel;
+const matchesSource = (platform: string | null, filter: SessionSourceFilter): boolean =>
+  filter.kind === "noChat" ? platform === null : platform === filter.platform;
 
 /** The fields core's search predicate spans, in the same order. */
 const searchFields = (session: RomeSessionExplorerRecord): (string | null)[] => [
@@ -546,7 +551,7 @@ export function sessionQueryHandlers(
           return false;
         if (
           sessionScope?.sources &&
-          !sessionScope.sources.some((filter) => matchesSource(session.channel, filter))
+          !sessionScope.sources.some((filter) => matchesSource(session.platform, filter))
         )
           return false;
         const prefix = sessionScope?.projectPathPrefix?.replace(/\/+$/, "");
@@ -584,7 +589,7 @@ export function sessionQueryHandlers(
         // narrowed list narrows its own dropdowns.
         facets: {
           types: facet(sorted.map((session) => session.type)),
-          channels: facet(sorted.map((session) => session.channel)),
+          platforms: facet(sorted.map((session) => session.platform)),
         },
       };
       return HttpResponse.json(result);

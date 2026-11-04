@@ -138,11 +138,12 @@ const FORK_SESSION = {
   projectPath: "default",
   agentName: null,
   type: "fork",
-  channel: null,
+  platform: null,
+  accountId: null,
   chatId: null,
   threadId: null,
   placeName: null,
-  speakerKind: null,
+  placeKind: null,
   triggerKind: "fork",
   triggerName: "feedback",
   triggerActionName: null,
@@ -271,7 +272,7 @@ beforeEach(() => {
     offset: 0,
     limit: 5,
     nextOffset: null,
-    facets: { types: [], channels: [] },
+    facets: { types: [], platforms: [] },
   });
   rs.mocked(listRomeSessionMessages).mockResolvedValue([]);
   rs.mocked(listSessionTurns).mockResolvedValue([
@@ -746,7 +747,7 @@ describe("SessionsPage explorer", () => {
       nextOffset: null,
       facets: {
         types: [{ value: "action", count: 1 }],
-        channels: [{ value: null, count: 1 }],
+        platforms: [{ value: null, count: 1 }],
       },
     });
 
@@ -816,14 +817,14 @@ describe("SessionsPage explorer", () => {
       nextOffset: null,
       facets: {
         types: [{ value: "action", count: 1 }],
-        channels: [{ value: null, count: 1 }],
+        platforms: [{ value: null, count: 1 }],
       },
     });
 
     renderIndex("/sessions/all");
     expect((await screen.findAllByText("Review pull request 42")).length).toBeGreaterThan(0);
 
-    // Type and Source live behind one control, so neither is on the row until
+    // Type and Platform live behind one control, so neither is on the row until
     // the popover opens.
     expect(screen.queryByRole("combobox", { name: "Type" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Filter/ }));
