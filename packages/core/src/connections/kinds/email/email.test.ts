@@ -321,6 +321,17 @@ describe("EmailAdapter.send", () => {
     expect(provider.send).not.toHaveBeenCalled();
   });
 
+  it("refuses an empty reply before looking the quoted email up", async () => {
+    const provider = holding();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("t1" as ChatId, { text: "  ", replyToMessageId: "<CAF123@mail.example.com>" }),
+    ).rejects.toMatchObject({ reason: "empty" });
+    expect(provider.getMessage).not.toHaveBeenCalled();
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
   it("answers inReplyToMessageId over a chat-style reply", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);

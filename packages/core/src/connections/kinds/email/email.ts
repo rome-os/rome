@@ -373,11 +373,6 @@ export class EmailAdapter {
     const inReplyTo =
       email?.inReplyToMessageId ??
       replyToShaped("email", message.replyToMessageId, EMAIL_MESSAGE_ID);
-    // A chat-style quote answers an email in the chat it is sent to, as on
-    // every platform. Only the email field reaches into another thread.
-    if (inReplyTo && email?.inReplyToMessageId === undefined) {
-      await this.refuseQuoteOutside(threadId, email, inReplyTo);
-    }
     // Blank text says nothing, so the text parts speak, as on every channel.
     const bodyText = messageAsText(message).trim();
 
@@ -398,6 +393,11 @@ export class EmailAdapter {
     }
     if (!text && !html) {
       throw new SendRefused("empty", "Email requires non-empty text or HTML. No email was sent.");
+    }
+    // A chat-style quote answers an email in the chat it is sent to, as on
+    // every platform. Only the email field reaches into another thread.
+    if (inReplyTo && email?.inReplyToMessageId === undefined) {
+      await this.refuseQuoteOutside(threadId, email, inReplyTo);
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
