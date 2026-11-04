@@ -70,7 +70,7 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 - "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it. What a wake is and what follows it is in [Participation](participation.md#wake).
 - For a delegate on the guardian's own account, the current behaviour stays as it is.
 - A chat with an assistant has one reply rule, every message, and the guardian cannot change it.
-- Which domain owns the reply rule is pending the Envoy design. Until then it is stored as today, on the row of Rome's account in the chat, found by chat and account. The Chats migration moves everything else off that row and leaves the reply rule where it is.
+- The reply rule is Chats' setting (Ouou, 2026-11-04). It is stored as today, on the row of Rome's account in the chat, found by chat and account, and the Chats migration moves everything else off that row and leaves it where it is. [Participation](participation.md#wake) reads it to decide the wake, and the mention check that serves "when it is needed" is Participation's.
 
 ## Message
 
@@ -146,6 +146,8 @@ What a platform says about an [account](#account): its display name, handle and 
 ## Envoy
 
 The feature's name: linking agents to accounts so they can take part in chats on platforms. Not a thing in the model. The things are the two kinds of link below. The dashboard's use of the name as a page title is branding.
+
+- Envoy is not a context either, and the code has no envoy folder (Ouou, 2026-11-04). Linking an agent to a connected account, the kind of link, and whether Rome listens to an account are Chats' rules and live under Chats. The [reply rule](#reply-rule) is a Chats setting; the wake it decides, and the mention check, are [Participation](participation.md#wake)'s.
 
 ## Own account
 
