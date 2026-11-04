@@ -257,8 +257,9 @@ function settledBefore<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
 
 export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
   return async (interact, ctx) => {
-    // Agent-ready always registers a new app, which a renewal must refuse, so
-    // renewing goes straight to the existing app's credentials.
+    // Agent-ready always registers a new app, which would end the connection
+    // a renewal fixes, so renewing goes straight to the existing app's
+    // credentials.
     const { mode, domain: domainChoice } = ctx.renewing
       ? { ...(await interact.prompt(FEISHU_RENEW_FORM)), mode: "manual" }
       : await interact.prompt(FEISHU_MODE_FORM);

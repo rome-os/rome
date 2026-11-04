@@ -168,7 +168,11 @@ export function registerBuiltinConnections(
     registry.register(
       makeOAuthProviderDescriptor(provider, {
         beginRedirect: (opts) =>
-          createRomeCloudOAuthStartRedirect(deps.db, provider, { ...opts, reconnect: true }),
+          createRomeCloudOAuthStartRedirect(deps.db, provider, {
+            ...opts,
+            reconnect: true,
+            intent: "connect",
+          }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
           const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);

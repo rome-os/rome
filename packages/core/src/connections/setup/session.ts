@@ -18,6 +18,7 @@
 // coroutine unwinds to `cancelled`.
 
 import type {
+  SetupCommitted,
   SetupGrant,
   SetupContext,
   SetupFn,
@@ -52,8 +53,9 @@ export interface SetupSessionDeps {
   fn: SetupFn;
   /** The single durable write, run exactly once when the coroutine returns. A
    *  throw here fails the setup (nothing partial is left observable). It
-   *  answers the id of the connection it wrote, which `done` reports. */
-  commit: (grant: SetupGrant, signal: AbortSignal) => Promise<string | void>;
+   *  answers the connection it wrote, and any it ended, which `done`
+   *  reports. */
+  commit: (grant: SetupGrant, signal: AbortSignal) => Promise<SetupCommitted | void>;
   /** Optional override of the default working view (progress snapshot). */
   workingView?: SetupView;
   /** The setup renews a connection that already names its account. */
@@ -163,10 +165,15 @@ export class SetupSession {
     try {
       const grant = await this.#deps.fn(interact, ctx);
       // The one durable write; `done` is set only after it resolves.
-      const connectionId = await this.#deps.commit(grant, this.#abort.signal);
+      const committed = await this.#deps.commit(grant, this.#abort.signal);
+      const { connectionId, ended } = committed ?? {};
       this.#terminate({
         status: "done",
-        grant: { summary: grant.summary, ...(connectionId ? { connectionId } : {}) },
+        grant: {
+          summary: grant.summary,
+          ...(connectionId ? { connectionId } : {}),
+          ...(ended ? { ended } : {}),
+        },
       });
     } catch (err) {
       if (this.#abort.signal.aborted) {

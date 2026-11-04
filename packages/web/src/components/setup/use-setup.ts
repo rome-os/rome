@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   cancelSetup,
   getSetupState,
@@ -32,6 +34,33 @@ export interface UseSetupOptions {
   onDone?: (connectionId: string | null) => void;
 }
 
+/** The id of the toast that says a setup ended the connection `ended`, so the
+ *  setup's card and the OAuth callback that followed it show it once. */
+export function endedNoticeId(ended: string): string {
+  return `setup-ended:${ended}`;
+}
+
+// How often, and for how long, a setup is followed once no card shows it.
+const FOLLOW_POLL_MS = 1000;
+const FOLLOW_LIMIT = 120;
+
+/** Poll a setup that no card shows any more until it finishes, and toast when
+ *  it ended a connection. The OAuth callback hands its setup here, and so does
+ *  a card that goes away mid-setup: a fix that reaches another account ends
+ *  the connection whose card was showing it. */
+export async function followSetupForEnded(cid: string, notice: string): Promise<void> {
+  for (let i = 0; i < FOLLOW_LIMIT; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
+    const state = await getSetupState(cid).catch(() => null);
+    if (!state) return;
+    if (!isTerminalSetup(state)) continue;
+    if (state.status === "done" && state.grant?.ended) {
+      toast(notice, { id: endedNoticeId(state.grant.ended) });
+    }
+    return;
+  }
+}
+
 // Poll interval while the setup awaits an external event.
 const POLL_MS = 2000;
 
@@ -56,6 +85,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useTranslation("settings");
   const doneFiredRef = useRef(false);
   // Set once the card unmounts, so a start that answers afterwards is not
   // left running.
@@ -70,10 +100,16 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setState(next);
       if (next.status === "done" && !doneFiredRef.current) {
         doneFiredRef.current = true;
+        // A fix that reached another account ended the connection it fixed.
+        // The card drops its done view once the new account reads working, and
+        // can move to the new account's page, so this goes out as a toast.
+        if (next.grant?.ended) {
+          toast(t("connections.accounts.endedAnother"), { id: endedNoticeId(next.grant.ended) });
+        }
         onDone?.(next.grant?.connectionId ?? null);
       }
     },
-    [onDone],
+    [onDone, t],
   );
 
   const reset = useCallback(() => {
@@ -204,6 +240,23 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
     if (!cancelOnLeave) return;
     return () => {
       if (liveCidRef.current) void cancelSetup(liveCidRef.current);
+    };
+  }, [cancelOnLeave]);
+  // A setup that can still finish without the guardian, when the card goes
+  // away, is followed to its end, so the guardian still hears that it ended a
+  // connection. One waiting on the guardian's input cannot finish without
+  // its card.
+  const endedNoticeRef = useRef("");
+  endedNoticeRef.current = t("connections.accounts.endedAnother");
+  const followCidRef = useRef<string | null>(null);
+  followCidRef.current =
+    cid && (state?.status === "presenting" || state?.status === "awaiting-redirect") ? cid : null;
+  useEffect(() => {
+    if (cancelOnLeave) return;
+    return () => {
+      if (followCidRef.current) {
+        void followSetupForEnded(followCidRef.current, endedNoticeRef.current);
+      }
     };
   }, [cancelOnLeave]);
   useEffect(() => {

@@ -31,7 +31,7 @@ import {
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
-import type { SetupGrant, SetupState } from "./types.js";
+import type { SetupCommitted, SetupGrant, SetupState } from "./types.js";
 
 /** The narrow registry surface the manager drives — every real
  *  `ConnectionRegistry` satisfies it structurally, and tests fake it directly. */
@@ -203,10 +203,12 @@ export class SetupManager {
 
   /** Cancel the live setup addressed by `(idOrKind, grant)`, if any, and wait
    *  for it to unwind. Teardown uses this so a revoke cannot be silently undone
-   *  by an in-flight setup's terminal write. No-op when nothing is active. */
-  async cancelActive(idOrKind: string, grant: string): Promise<void> {
+   *  by an in-flight setup's terminal write. Answers the state the setup ended
+   *  in, which is `done` when its write was already committing, or null when
+   *  nothing was active. */
+  async cancelActive(idOrKind: string, grant: string): Promise<SetupState | null> {
     const cid = this.activeFor(idOrKind, grant);
-    if (cid) await this.cancel(cid);
+    return cid ? ((await this.cancel(cid)) ?? null) : null;
   }
 
   /** Feed the guardian's answers to a setup awaiting input. */
@@ -318,7 +320,7 @@ export class SetupManager {
     grant: string,
     given: SetupGrant,
     signal: AbortSignal,
-  ): Promise<string> {
+  ): Promise<SetupCommitted> {
     return this.#deps.registry.withGrantSection(target.connectionKind, grant, async () => {
       // A cancel that landed while the write waited for the section wins, so
       // an abandoned setup leaves nothing behind.
@@ -335,27 +337,41 @@ export class SetupManager {
       const opts = {
         ...(plan && channelUserId
           ? {
-              inTx: (tx: DrizzleTx) =>
+              // A grant that reaches another account leaves the guardian's
+              // first account theirs, so its People link stays and the new
+              // account is added beside it.
+              inTx: (
+                tx: DrizzleTx,
+                { reachesAnotherAccount }: { reachesAnotherAccount: boolean },
+              ) =>
                 applyGuardianMappingWithinTx(
                   tx,
                   this.#deps.peopleRepo,
                   platform,
                   channelUserId,
-                  plan,
+                  reachesAnotherAccount && plan.op === "update"
+                    ? { op: "add", guardianId: plan.guardianId }
+                    : plan,
                 ),
             }
           : {}),
         ...(target.another ? { another: true } : {}),
       };
+      let ended: string | undefined;
       const connection = await this.#deps.registry.giveGrant(
         target.connectionKind,
         target.connectionId,
         grant,
         given.credential,
         given.profile,
-        Object.keys(opts).length > 0 ? opts : undefined,
+        {
+          ...opts,
+          onEnded: (id) => {
+            ended = id;
+          },
+        },
       );
-      return connection.id;
+      return { connectionId: connection.id, ...(ended ? { ended } : {}) };
     });
   }
 }

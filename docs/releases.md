@@ -12,13 +12,13 @@ The workflow starts every Monday through Friday at 08:30 in `America/Los_Angeles
 
 Each scheduled run increments the patch component of the highest stable git tag, even when `main` has no new commits. For example, `v1.1.9` becomes `v1.1.10`. Prerelease and package tags do not affect that choice.
 
-The release uses the `main` commit that triggered the schedule. Its latest push CI run must have succeeded before the workflow creates a tag. Missing, failed, cancelled, or unfinished CI stops the release without creating a tag.
+The release uses the newest commit in the history of the `main` commit that triggered the schedule whose push CI run succeeded. When that is not the triggering commit, because the triggering commit's CI is unfinished, failed, or cancelled, the run page shows a warning that names both commits. The run creates no tag when no commit has passed CI, or when the newest one that has is already in the highest stable tag.
 
 The scheduled run creates an annotated tag with `GITHUB_TOKEN` and publishes it in the same run. No additional token or repository secret is required. All production Docker publish runs share one concurrency group, so version allocation and `latest` updates run serially.
 
 Rerunning a scheduled run reuses its original tag. To retry a failed build or publish, rerun the failed jobs. The [tagging contract](#tagging-contract) rejects any attempt to overwrite an image version that already exists.
 
-A manual run follows the same rules. Start it from the workflow's **Run workflow** button on `main`. It bumps the patch version of the latest `main` commit after that commit's CI passes. A run started from any other branch fails without creating a tag.
+A manual run allocates its version the same way, but never falls back to an older commit. Start it from the workflow's **Run workflow** button on `main`. It bumps the patch version of the latest `main` commit after that commit's CI passes, and fails without creating a tag until then. A run started from any other branch also fails without creating a tag.
 
 ### Manual releases
 
