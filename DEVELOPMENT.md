@@ -168,6 +168,16 @@ the name of a worktree directory: `pnpm gc:worktrees` names a worktree's
 stack after its directory, and keeps it only while its containers show
 another checkout started it (#1314).
 
+**Gotcha:** while a stack runs, its `rome.db` under `~/.rome-worktrees/<slug>/`
+is the container's database, not a file the host may open. SQLite keeps the
+index of its write-ahead log in shared memory (`rome.db-shm`), and that memory
+is not shared between the host and the container's VM. A host `sqlite3` or
+script that opens the file, even to read it, can corrupt the server's view of
+the database. In one run the server then failed a query with "database disk
+image is malformed" and lost a write it had already answered. Change data
+through the API, or from inside the container with `docker exec`. Open the
+file from the host only after `docker compose ... stop`.
+
 **Gotcha:** bare-metal `pnpm start` (host Node, no container) still
 writes to `~/.rome/<profile>/`, so it does *not* share state with
 `pnpm dev:all`. Mixing the two paths against the same source tree
