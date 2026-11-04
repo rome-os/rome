@@ -54,7 +54,6 @@ describe("People send API", () => {
     personId = await deps.peopleRepo.create({
       displayName: "Send Target",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "telegram", id: TG }],
     });
   });
@@ -214,7 +213,6 @@ describe("People send API — after the channel answers", () => {
     personId = await deps.peopleRepo.create({
       displayName: "Folded Contact",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "whatsapp", id: LID }],
     });
   });
@@ -306,7 +304,6 @@ describe("People on an account whose channel id is opaque", () => {
     personId = await deps.peopleRepo.create({
       displayName: "Ada",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "telegram", id: ADA }],
     });
 

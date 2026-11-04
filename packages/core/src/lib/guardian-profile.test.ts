@@ -135,7 +135,6 @@ describe("applyGuardianProfile", () => {
       id: "alex-doe",
       displayName: "Alex Doe",
       profilePath: "memory/relationship/GUARDIAN.md",
-      approved: true,
     });
     expect(await settingsRepo.get("guardianName")).toBe("Alex Doe");
     expect(await settingsRepo.get("agentName")).toBe("Atlas");
@@ -218,7 +217,6 @@ describe("applyGuardianProfile", () => {
         id: "alex",
         displayName: "Alex",
         bondLevel: "acquaintance",
-        approved: true,
         createdAt: new Date(),
       })
       .run();

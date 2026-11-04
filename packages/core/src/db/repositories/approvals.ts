@@ -2,13 +2,7 @@ import { and, eq, or, desc, sql, ne } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import {
-  pairingPayload,
-  PAIRING_HISTORY_PAGE_SIZE,
-  APPROVAL_TYPES,
-  type ApprovalStatus,
-  type ApprovalType,
-} from "@rome/api-types/approvals";
+import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from "@rome/api-types/approvals";
 
 type ApprovalRow = typeof approvals.$inferSelect;
 type ResolveAction = "approve" | "reject";
@@ -57,62 +51,13 @@ export class ApprovalsRepository {
 
   constructor(private db: DrizzleDb) {}
 
-  /** Closes every pairing request still pending. Rome creates none and
-   *  resolves none (docs/domains/people.md#stranger), so a stored one is
-   *  history, shown as expired. */
-  expirePairings(now = Date.now()) {
-    this.db
-      .update(approvals)
-      .set({
-        status: "rejected",
-        resolvedAt: new Date(now),
-        resolvedBy: "system:expiry",
-        payload: sql`json_set(${approvals.payload}, '$.resolution', 'expired')`,
-      })
-      .where(
-        and(
-          eq(approvals.type, "person_mapping"),
-          eq(approvals.status, "pending"),
-          sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
-        ),
-      )
-      .run();
-  }
-
-  async list(status?: ApprovalStatus, pairingHistoryOffset = 0) {
-    this.expirePairings();
-    const pairing = and(
-      eq(approvals.type, "person_mapping"),
-      sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
-    )!;
-    const history = this.db
+  async list(status?: ApprovalStatus) {
+    return this.db
       .select()
       .from(approvals)
-      .where(
-        and(
-          pairing,
-          ne(approvals.status, "pending"),
-          status ? eq(approvals.status, status) : undefined,
-        ),
-      )
+      .where(status ? eq(approvals.status, status) : undefined)
       .orderBy(desc(approvals.createdAt), desc(approvals.id))
-      .limit(PAIRING_HISTORY_PAGE_SIZE)
-      .offset(pairingHistoryOffset)
       .all();
-    const current =
-      pairingHistoryOffset === 0
-        ? this.db
-            .select()
-            .from(approvals)
-            .where(
-              and(
-                or(eq(approvals.status, "pending"), sql`not coalesce(${pairing}, 0)`),
-                status ? eq(approvals.status, status) : undefined,
-              ),
-            )
-            .all()
-        : [];
-    return [...current, ...history].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   async create(data: {
@@ -168,17 +113,14 @@ export class ApprovalsRepository {
   }
 
   async findPending() {
-    this.expirePairings();
     return this.db.select().from(approvals).where(eq(approvals.status, "pending"));
   }
 
   async findByType(type: ApprovalType) {
-    this.expirePairings();
     return this.db.select().from(approvals).where(eq(approvals.type, type));
   }
 
   async findById(id: string) {
-    this.expirePairings();
     const rows = await this.db.select().from(approvals).where(eq(approvals.id, id));
     return rows[0] ?? null;
   }
@@ -193,7 +135,6 @@ export class ApprovalsRepository {
       return { outcome: "not_found" };
     }
 
-    if (pairingPayload(existing)) return { outcome: "already_resolved", approval: existing };
     const nextStatus = action === "approve" ? "approved" : "rejected";
     const shouldQueueExecution = action === "approve" && existing.type === "action_execution";
 

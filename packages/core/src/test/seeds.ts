@@ -89,7 +89,6 @@ async function seedPersonsBaseline(db: DrizzleDb) {
     displayName: "Guardian",
     bondLevel: "guardian",
     profilePath: GUARDIAN_PROFILE_PATH,
-    approved: true,
   });
   repo.linkStated({ platform: "telegram", id: "tg-guardian" }, guardianId);
   repo.linkStated({ platform: "webchat", id: "web-guardian" }, guardianId);
@@ -97,21 +96,18 @@ async function seedPersonsBaseline(db: DrizzleDb) {
   const innerCircleId = await repo.create({
     displayName: "Alice Inner",
     bondLevel: "inner-circle",
-    approved: true,
     links: [{ platform: "telegram", id: "tg-alice" }],
   });
 
   const acquaintanceId = await repo.create({
     displayName: "Bob Acquaintance",
     bondLevel: "acquaintance",
-    approved: true,
     links: [{ platform: "telegram", id: "tg-bob" }],
   });
 
   const otherId = await repo.create({
     displayName: "Carol Other",
     bondLevel: "other",
-    approved: true,
     links: [{ platform: "whatsapp", id: "wa-carol" }],
   });
 

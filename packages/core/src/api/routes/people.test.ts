@@ -69,7 +69,6 @@ describe("People timeline API", () => {
     personId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
       bondLevel: "acquaintance",
-      approved: true,
       links: [
         { platform: "whatsapp", id: WA_JID },
         { platform: "telegram", id: TG_THREAD },
@@ -256,7 +255,6 @@ describe("People timeline API", () => {
     const sentinelOnly = await deps.peopleRepo.create({
       displayName: "Sentinel Only",
       bondLevel: "other",
-      approved: true,
       links: [{ platform: "telegram", id: "tg-triaged" }],
     });
     await deps.sentinelLogRepo.create({
@@ -318,7 +316,6 @@ describe("People timeline API", () => {
     const triaged = await deps.peopleRepo.create({
       displayName: "Triaged Talker",
       bondLevel: "other",
-      approved: true,
       links: [{ platform: "telegram", id: "tg-both" }],
     });
     sayOnChannel(deps, {
@@ -353,7 +350,6 @@ describe("People timeline API", () => {
     const byLid = await deps.peopleRepo.create({
       displayName: "Nadia By LID",
       bondLevel: "other",
-      approved: true,
       links: [{ platform: "whatsapp", id: WA_LID }],
     });
 
@@ -421,7 +417,6 @@ describe("People timeline API", () => {
     const priya = await deps.peopleRepo.create({
       displayName: "Priya Nair",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "linkedin", id: member }],
     });
 
@@ -517,7 +512,6 @@ describe("People API", () => {
     nadiaId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
       bondLevel: "acquaintance",
-      approved: true,
       links: [
         { platform: "whatsapp", id: NADIA_JID },
         { platform: "whatsapp", id: NADIA_LID },
@@ -663,7 +657,6 @@ describe("People API", () => {
     const unreachable = await deps.peopleRepo.create({
       displayName: "No Channels",
       bondLevel: "other",
-      approved: true,
       links: [],
     });
     expect((await fetchPerson(unreachable)).accounts).toEqual([]);
@@ -689,7 +682,6 @@ describe("People API", () => {
       await deps.peopleRepo.create({
         displayName: `Telegram ${i}`,
         bondLevel: "other",
-        approved: true,
         links: [{ platform: "telegram", id: `tg-many-${i}` }],
       });
     }
@@ -764,7 +756,6 @@ describe("People create API", () => {
     const alice = await deps.peopleRepo.create({
       displayName: "Alice Marsh",
       bondLevel: "inner-circle",
-      approved: true,
       links: [{ platform: "whatsapp", id: ALICE_JID }],
     });
 
@@ -1376,7 +1367,6 @@ describe("People merge", () => {
     const empty = await deps.peopleRepo.create({
       displayName: "Alice Again",
       bondLevel: "other",
-      approved: true,
     });
 
     const res = await merge(alice, { from: empty });
@@ -1412,7 +1402,6 @@ describe("People merge", () => {
     const duplicate = await deps.peopleRepo.create({
       displayName: "Me",
       bondLevel: "other",
-      approved: true,
       links: [{ platform: "whatsapp", id: "wa-me" }],
     });
 

@@ -27,7 +27,6 @@ skills:
   - skills/custom-dependencies
 
 actions:
-  - actions/add-person-mapping
   - actions/app-management
   - actions/app-store-search
   - actions/create-routine

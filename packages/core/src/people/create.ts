@@ -47,7 +47,6 @@ export async function createPerson(
       bondLevel: request.bondLevel,
       // The guardian typed this person in, so there is nobody left to approve
       // them — the same standing every person the dashboard creates has.
-      approved: true,
       links: request.accounts.map(accountOfWire),
     });
   } catch (err) {

@@ -68,7 +68,6 @@ describe("PeopleRepository", () => {
     expect(person).not.toBeNull();
     expect(person!.displayName).toBe("Alice");
     expect(person!.bondLevel).toBe("inner-circle");
-    expect(person!.approved).toBe(false);
   });
 
   it("createChannelMapping() inserts channel mapping linked to person", async () => {
@@ -92,14 +91,12 @@ describe("PeopleRepository", () => {
     const id = await repo.create({
       displayName: "Dana",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "telegram", id: "tg-dana" }],
     });
 
     expect(id).toBe("dana");
     const found = await repo.byAccount({ platform: "telegram", id: "tg-dana" });
     expect(found!.id).toBe("dana");
-    expect(found!.approved).toBe(true);
   });
 
   it("create() leaves no person behind when a mapping write fails", async () => {
@@ -278,18 +275,6 @@ describe("PeopleRepository", () => {
 
     const person = await repo.byId(personId);
     expect(person!.bondLevel).toBe("inner-circle");
-  });
-
-  it("approve() sets approved=true", async () => {
-    const personId = await repo.create({
-      displayName: "Frank",
-      bondLevel: "acquaintance",
-    });
-
-    await testDb.db.update(persons).set({ approved: true }).where(eq(persons.id, personId));
-
-    const person = await repo.byId(personId);
-    expect(person!.approved).toBe(true);
   });
 
   it("findByDisplayName() handles duplicate names", async () => {

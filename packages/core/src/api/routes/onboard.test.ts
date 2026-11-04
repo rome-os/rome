@@ -56,7 +56,7 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
       .from(persons)
       .where(eq(persons.bondLevel, "guardian"))
       .all();
-    expect(person).toMatchObject({ displayName: "alex", approved: true });
+    expect(person).toMatchObject({ displayName: "alex" });
 
     const stored = Object.fromEntries(
       testDb.db
