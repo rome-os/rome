@@ -5,11 +5,9 @@ import { rs } from "@rstest/core";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { channelOver, describeAdapterConformance } from "../test/kit/im/adapter-conformance.js";
-import { exemplar, loadCapture } from "../test/kit/im/capture.js";
-import wechatTextCapture from "../test/kit/im/captures/wechat-text.capture.json" with {
-  type: "json",
-};
+import { channelOver, describeAdapterConformance } from "./kit/im/adapter-conformance.js";
+import { exemplar, loadCapture } from "./kit/im/capture.js";
+import wechatTextCapture from "./kit/im/captures/wechat-text.capture.json" with { type: "json" };
 import {
   DISCORD_CHANNEL,
   DISCORD_DM,
@@ -18,7 +16,7 @@ import {
   DISCORD_THREAD,
   DISCORD_USER,
   DiscordPeer,
-} from "../test/kit/im/discord.js";
+} from "./kit/im/discord.js";
 import {
   FEISHU_BOT,
   FEISHU_CHAT,
@@ -27,16 +25,16 @@ import {
   FEISHU_SECOND_BOT,
   FEISHU_USER,
   FeishuPeer,
-} from "../test/kit/im/feishu.js";
-import { EMAIL_MAILBOX, EmailPeer } from "../test/kit/im/email.js";
+} from "./kit/im/feishu.js";
+import { EMAIL_MAILBOX, EmailPeer } from "./kit/im/email.js";
 import {
   TELEGRAM_CHAT,
   TELEGRAM_GROUP,
   TELEGRAM_SECOND_TOKEN,
   TELEGRAM_TOKEN,
   TelegramPeer,
-} from "../test/kit/im/telegram.js";
-import { WECHAT_USER, WechatPeer } from "../test/kit/im/wechat.js";
+} from "./kit/im/telegram.js";
+import { WECHAT_USER, WechatPeer } from "./kit/im/wechat.js";
 
 const wechatCapture = loadCapture(wechatTextCapture);
 
