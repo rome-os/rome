@@ -758,10 +758,6 @@ export class AgentRunner {
         projectPath: thread?.projectPath,
         // Later turns of the side chat read the folder from this row.
         deviceFolder: thread?.deviceFolder ?? null,
-        sourceChannel: thread?.channel ?? null,
-        sourceThreadId: thread?.threadId ?? null,
-        sourceThreadName: thread?.threadName ?? null,
-        sourceThreadType: thread?.threadType ?? null,
         trigger,
         parentSessionId: parent ? parentSessionId : null,
         parentTurnId: parent ? (params.parentTurnId ?? null) : null,
