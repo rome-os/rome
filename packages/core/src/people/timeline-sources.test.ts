@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account, AccountId, Accounts } from "../chats/accounts/accounts.js";
 import type { Channels } from "../chats/connected-accounts/connected-account.js";
-import { romeAccountsOn, timelineAccounts } from "./timeline-sources.js";
+import { timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
   id: id as AccountId,
@@ -249,21 +249,5 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
       // Rome holds no Feishu app, so nothing stores a Feishu account's history.
       { channel: "feishu", storedUnder: [], addresses: ["ou_grace"] },
     ]);
-  });
-});
-
-describe("romeAccountsOn", () => {
-  it("names the account the channel's record holds", () => {
-    const accountOf = () => ({ platform: "telegram", id: "bot-live" });
-    expect(romeAccountsOn({ accountOf }, "tg-bot")).toEqual([
-      { platform: "telegram", id: "bot-live" },
-    ]);
-  });
-
-  // A channel's name names no account, and a disconnected account's chats are
-  // not read: a person's page reads only the guardian's connected accounts.
-  it("names no account while the channel's record holds none", () => {
-    expect(romeAccountsOn({ accountOf: () => null }, "tg-bot")).toEqual([]);
-    expect(romeAccountsOn({}, "tg-other")).toEqual([]);
   });
 });
