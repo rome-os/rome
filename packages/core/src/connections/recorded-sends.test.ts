@@ -11,7 +11,7 @@ import {
   type OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import type { ChannelSend } from "../channels/channel.js";
+import type { ChannelSend } from "../chats/connected-accounts/connected-account.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";

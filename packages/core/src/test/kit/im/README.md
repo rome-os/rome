@@ -84,7 +84,7 @@ When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** o
 
 ## Streaming replies
 
-A test channel can carry `delivery`, the platform's reply delivery transport from `src/channels/delivery/transports/`. A scenario streams a scripted agent reply through `ReplyDelivery` and that transport, so the platform's real SDK writes the messages the peer shows. Of the test channels, Telegram and Discord have a transport. The streaming scenario skips WeChat and its table row says so. Feishu has a transport too, and `feishu.integration.test.ts` streams replies through it against `FeishuPeer` and checks the same invariants.
+A test channel can carry `delivery`, the platform's reply delivery transport from `src/connections/kinds/<kind>/reply-writes.ts`. A scenario streams a scripted agent reply through `ReplyDelivery` and that transport, so the platform's real SDK writes the messages the peer shows. Of the test channels, Telegram and Discord have a transport. The streaming scenario skips WeChat and its table row says so. Feishu has a transport too, and `feishu.integration.test.ts` streams replies through it against `FeishuPeer` and checks the same invariants.
 
 A scenario fills the agent and Rome lanes of a trace with `note`: `note("agent", ...)` for each event the agent emits, and `note("rome", ...)` for each write the engine makes. `check(checkDelivery(...))` runs the rules in `invariants.ts`, records each verdict, and fails the step naming every rule that broke.
 

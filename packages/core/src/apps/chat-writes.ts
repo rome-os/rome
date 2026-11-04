@@ -16,9 +16,9 @@ import type {
   MessagePart,
   OutgoingAttachment,
 } from "@rome-os/app-runtime";
-import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
+import { stripHostOnlyPartsFromContent } from "../chats/host-only-parts.js";
 import { v7 as uuidv7 } from "uuid";
-import { messageContentText } from "../channels/messages-agent.js";
+import { messageContentText } from "../chats/history/messages-agent.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";

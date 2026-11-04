@@ -5,7 +5,7 @@
 // Nothing calls this yet: the Chats switch moves Agents' replies onto it.
 
 import type { Channel, ChatId } from "@rome-os/app-runtime";
-import type { DeliveryPolicy } from "../channels/delivery/types.js";
+import type { DeliveryPolicy } from "../connections/sending.js";
 import type { OutboundMessage } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import type { ChatAdapters, Outbound, StreamedReply } from "../connections/chat-adapter.js";

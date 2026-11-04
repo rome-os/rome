@@ -8,7 +8,7 @@
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the
 // inbound `ChannelMessage`, media download, send — is
-// `TelegramUserAdapter` (packages/core/src/channels/telegram-user.ts), wrapped
+// `TelegramUserAdapter` (packages/core/src/connections/kinds/telegram-user/telegram-user.ts), wrapped
 // here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
 // drive it. The transport already speaks the channel's record, so inbound and
 // send pass through without a projection.
@@ -42,7 +42,7 @@ import {
   TelegramUserAdapter,
   type TelegramUserLoginHandle,
   type TelegramUserSettings,
-} from "../../channels/telegram-user.js";
+} from "../kinds/telegram-user/telegram-user.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {

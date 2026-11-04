@@ -15,7 +15,7 @@
 //     reaches it over one RPC. The reply still goes out on the channel's `send`
 //     port, which pushes it to open chats.
 //   - other channels: run the turn, then hand the reply to the channel's `send`
-//     port (channels/channel.ts).
+//     port (chats/connected-accounts/connected-account.ts).
 //
 // The AgentSession stays channel-agnostic: it produces the turn; this
 // orchestrator, sitting above it, owns delivery — exactly as message_handler and
@@ -27,7 +27,7 @@ import type {
   ChatId,
   ChatRepository,
 } from "@rome-os/app-runtime";
-import type { Channel } from "../channels/channel.js";
+import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import type { ChatRepository as ChatsByKey } from "../chats/chat-repository.js";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";

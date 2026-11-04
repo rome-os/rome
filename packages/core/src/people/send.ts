@@ -28,7 +28,10 @@
 
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
-import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import {
+  ChannelNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
 import {
   type Sender,

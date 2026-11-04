@@ -17,8 +17,8 @@ import {
   type TestConnections,
   recordedConnectionKindOf,
 } from "../helpers.js";
-import type { Channels } from "../../channels/channel.js";
-import { channelList } from "../../channels/channel-list.js";
+import type { Channels } from "../../chats/connected-accounts/connected-account.js";
+import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChannelApiResult } from "../../channels/api-request.js";
+import type { ChannelApiResult } from "../../apps/platform-requests.js";
 import type { ConnectionState } from "../../connections/types.js";
 import { CredentialRejected } from "../../connections/errors.js";
 import { anotherAccountKey } from "../../connections/setup/manager.js";

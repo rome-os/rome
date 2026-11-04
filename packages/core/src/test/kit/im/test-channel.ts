@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
-import type { DeliveryTransport } from "../../../channels/delivery/types.js";
+import type { DeliveryTransport } from "../../../connections/sending.js";
 import { DISCORD_USER, DiscordPeer } from "./discord.js";
 import type { Peer } from "./peer.js";
 import { TELEGRAM_CHAT, TelegramPeer } from "./telegram.js";

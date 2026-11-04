@@ -1,4 +1,4 @@
-import type { ExternalAgents } from "../channels/agents-accounts.js";
+import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -54,26 +54,29 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { PeopleRepository } from "../db/repositories/people.js";
-import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
+import { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
-import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
-import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
-import { createAccountNames } from "../channels/account-names.js";
-import type { Accounts } from "../channels/accounts.js";
-import type { Channel, Channels } from "../channels/channel.js";
+import { LinkedInAccounts } from "../chats/accounts/linkedin.js";
+import { WhatsAppAccounts } from "../chats/accounts/whatsapp.js";
+import { createAccountNames } from "../chats/accounts/account-names.js";
+import type { Accounts } from "../chats/accounts/accounts.js";
+import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
 import { ChatEvents } from "../chats/events.js";
 import { StoredMessages } from "../chats/message-repository.js";
-import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type {
+  ChannelOf,
+  ConnectionPortsDeps,
+} from "../chats/connected-accounts/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
-import { channelList } from "../channels/channel-list.js";
-import { createChannelsService } from "../channels/channels-service.js";
+import { channelList } from "../chats/connected-accounts/connected-account-list.js";
+import { createChannelsService } from "../apps/accounts-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type { AccountLinkOf } from "../channels/account-links.js";
+import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";

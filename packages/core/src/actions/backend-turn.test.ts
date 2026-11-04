@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
-import type { Channel } from "../channels/channel.js";
+import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { chatKey, placeIn } from "../chats/place.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";

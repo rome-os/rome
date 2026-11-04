@@ -6,7 +6,7 @@ import {
   linkedinThreads,
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
+import { linkedInMemberIdFromProfileUrl } from "../../connections/kinds/linkedin/linkedin-sync.js";
 import type {
   LinkedInHistoryMessage,
   LinkedInMessageInput,
@@ -18,7 +18,7 @@ import type {
   LinkedInThreadCursor,
   LinkedInThreadInput,
   LinkedInThreadParticipantInput,
-} from "../../channels/linkedin-sync.js";
+} from "../../connections/kinds/linkedin/linkedin-sync.js";
 
 // The member-id form lives with the poller/store contract, not here: it is the
 // address both sides of the mirror agree on. Re-exported so callers reading

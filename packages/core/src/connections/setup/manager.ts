@@ -27,7 +27,7 @@ import type { PeopleRepository } from "../../db/repositories/people.js";
 import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
-} from "../../channels/guardian-mapping.js";
+} from "../../people/guardian-mapping.js";
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";

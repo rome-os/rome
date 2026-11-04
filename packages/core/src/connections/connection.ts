@@ -2,7 +2,7 @@
 // touches the store or a live capability. Vocabulary:
 // docs/domains/connections.md.
 
-import { domainOf, domainOfGrant, platformOf } from "../channels/platform.js";
+import { domainOf, domainOfGrant, platformOf } from "./platform.js";
 import { DifferentAccountError } from "./errors.js";
 import type { GrantAccount, GrantValue, PersistedCredential } from "./grant.js";
 import type { ConnectionDescriptor, ConnectionId, Credential, ProfileRecord } from "./types.js";

@@ -20,15 +20,15 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { MailProvider, SendMailInput } from "../lib/rome-cloud-mail.js";
 import type { LarkChannel } from "@larksuiteoapi/node-sdk";
-import { DiscordAdapter } from "../channels/discord.js";
-import { EmailAdapter } from "../channels/email.js";
-import { FeishuAdapter } from "../channels/feishu.js";
-import { SlackAdapter, type SlackWebApi } from "../channels/slack.js";
-import { TelegramAdapter } from "../channels/telegram.js";
-import { TelegramUserAdapter } from "../channels/telegram-user.js";
-import { WebChatAdapter } from "../channels/webchat.js";
-import { WechatAdapter } from "../channels/wechat.js";
-import { WhatsAppAdapter } from "../channels/whatsapp.js";
+import { DiscordAdapter } from "../connections/kinds/discord/discord.js";
+import { EmailAdapter } from "../connections/kinds/email/email.js";
+import { FeishuAdapter } from "../connections/kinds/feishu/feishu.js";
+import { SlackAdapter, type SlackWebApi } from "../connections/kinds/slack/slack.js";
+import { TelegramAdapter } from "../connections/kinds/telegram/telegram.js";
+import { TelegramUserAdapter } from "../connections/kinds/telegram-user/telegram-user.js";
+import { WebChatAdapter } from "../chats/dashboard/webchat.js";
+import { WechatAdapter } from "../connections/kinds/wechat/wechat.js";
+import { WhatsAppAdapter } from "../connections/kinds/whatsapp/whatsapp.js";
 
 /** An adapter under the contract, over a fake of its platform. */
 interface Harness {

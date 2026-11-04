@@ -1,7 +1,7 @@
 // One account's history. The message shape, the ordering and the cursor are
 // the message module's (@rome/api-types/message), and the page that wraps them
 // is the People contract's (@rome/api-types/people); a store is the channel's
-// (`AccountMessages`, in channels/messages.js). An account is read once per
+// (`AccountMessages`, in chats/history/messages.js). An account is read once per
 // channel it is stored under, and from more than one store when those channels
 // are held by different stores, so this module merges those reads into one
 // page.
@@ -13,7 +13,7 @@ import {
   messageCursor,
   type Message,
 } from "@rome/api-types/message";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
 
 /**
  * One page of an account's history, newest first, resuming after `cursor`.

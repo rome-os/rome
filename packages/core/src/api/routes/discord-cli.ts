@@ -5,7 +5,7 @@ import {
   filterChannelApiResponseHeaders,
   type ChannelApiRequest,
   type ChannelApiResult,
-} from "../../channels/api-request.js";
+} from "../../apps/platform-requests.js";
 import { createLogger } from "../../logger.js";
 import {
   DISCORD_BROKER_CHANNEL_HEADER,

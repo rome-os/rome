@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
-import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import {
+  type Channel,
+  ChannelNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
 import { send } from "../connections/send.js";
 import { directPlace, readSendStates, resolveSendTarget } from "./send.js";
 
