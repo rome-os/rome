@@ -344,9 +344,9 @@ const CARD = {
   type: "approval_card",
   approvalId: "a-1",
   actionName: "send_email",
-  description: "Send it?",
+  preview: { kind: "generic", title: "Send an email", summary: "To Dana, about Friday" },
   status: "pending",
-} as unknown as NonNullable<OutgoingMessage["parts"]>[number];
+} as NonNullable<OutgoingMessage["parts"]>[number];
 
 describe.each(SUBJECTS)("$channel send", (subject) => {
   it("refuses a message that says nothing, and sends nothing", async () => {
@@ -377,7 +377,8 @@ describe.each(SUBJECTS)("$channel send", (subject) => {
   it("refuses a part it does not show rather than drop it", async () => {
     const harness = subject.make();
     const forged = { type: "routine_draft_card" } as unknown as typeof CARD;
-    const unshown = subject.shows.includes(CARD.type) ? [forged] : [CARD, forged];
+    const bare = { ...CARD, preview: undefined } as unknown as typeof CARD;
+    const unshown = subject.shows.includes(CARD.type) ? [forged] : [bare, forged];
     for (const part of unshown) {
       await expect(
         harness.send({ text: "Look", parts: [{ type: "text", content: "Look" }, part] }),
@@ -385,6 +386,29 @@ describe.each(SUBJECTS)("$channel send", (subject) => {
     }
     expect(harness.calls()).toBe(0);
   });
+
+  if (!subject.shows.includes(CARD.type)) {
+    it("sends an approval card it cannot draw as the card's plain-text version", async () => {
+      const harness = subject.make();
+      await harness.send({ parts: [CARD] });
+      const [said] = harness.texts();
+      expect(said).toContain("Approval needed: Send an email");
+      expect(said).toContain("To Dana, about Friday");
+      expect(said).toContain("The guardian approves or denies it on Rome");
+    });
+
+    it("sends `text` and then the card's plain-text version, never the text alone", async () => {
+      const harness = subject.make();
+      await harness.send({
+        text: "Before I send it:",
+        parts: [{ type: "text", content: "x" }, CARD],
+      });
+      const [said] = harness.texts();
+      expect(said).toContain("Before I send it:");
+      expect(said).toContain("Approval needed: Send an email");
+      expect(said).not.toContain("x\n");
+    });
+  }
 
   if (subject.attachments === "none") {
     it("refuses any attachment, and sends nothing", async () => {

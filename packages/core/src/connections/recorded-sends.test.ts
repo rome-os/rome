@@ -2,6 +2,7 @@
 // address, else in the chat Rome holds there, recorded once either way.
 // Contract: docs/architecture/channels.md#chat-adapters.
 
+import { messageAsText } from "./outbound/send-refusals.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   type Channel,
@@ -445,6 +446,23 @@ describe("recordedSends", () => {
     expect(lines()[0]?.text).toBe("[image: sunset]");
   });
 
+  it("record a message's text in place of its text parts, beside the card it sends", async () => {
+    const card = {
+      type: "approval_card",
+      approvalId: "a-1",
+      actionName: "deploy",
+      preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+      status: "pending",
+    } as const;
+    await send("telegram").send("-100" as ChatId, {
+      text: "Look",
+      parts: [{ type: "text", content: "Unsent" }, card],
+    });
+
+    const [row] = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
+    expect(JSON.parse(row?.parts ?? "[]")).toEqual([{ type: "text", content: "Look" }, card]);
+  });
+
   it("record nothing when the port refuses a message with nothing in it", async () => {
     beforeSend = () => {
       throw new SendRefused("empty", "A message needs text or an attachment");
@@ -471,7 +489,7 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([]);
   });
 
-  it("send an email's reply recipients, and its text from its parts when it has none", async () => {
+  it("send an email's reply recipients, and and its parts as they are when it has no text", async () => {
     await send("email").send(
       "thread-7" as ChatId,
       {
@@ -483,10 +501,12 @@ describe("recordedSends", () => {
     );
 
     expect(sent[0]?.message).toMatchObject({
-      text: "From parts",
+      text: "",
+      parts: [{ type: "text", content: "From parts" }],
       cc: ["ann@example.com"],
       bcc: ["log@example.com"],
     });
+    expect(messageAsText(sent[0]?.message ?? {})).toBe("From parts");
   });
 
   it("keep a thread a plain message reaches on an email channel as a group", async () => {
