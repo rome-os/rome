@@ -123,14 +123,14 @@ A participant's identity on a platform. A colleague's Feishu identity is an acco
 
 ## Connected account
 
-One of Rome's accounts as Chats sees it: a [connection](connections.md#connection) that lets Rome chat, with the agent that speaks through it.
+One of Rome's accounts as Chats sees it: an [account](#account) Rome holds, or held, a [connection](connections.md#connection) to that lets Rome chat as it, with the agent that speaks through it. Its two ends are the account and the agent (Ouou, 2026-11-04).
 
-- A connected account has the identity of its connection and no other. Its one attribute is its agent.
-- It starts when its connection is connected, with no agent, and ends when the connection is disconnected, for every kind of connection. Connecting the same account again makes a new connected account, with no agent.
-- The account it stands for is the one its connection's grant names. One connection reaches an account at a time, so one connected account stands for it at a time.
-- The guardian links, switches and unlinks its agent on the connected account, naming it by its connection. The dashboard shows it by its account's platform, id and name.
+- A connected account has the identity of its account, platform and the platform's own id, and no other. Its one attribute is its agent.
+- It starts when a connection to the account is first connected, with no agent. Disconnecting takes away Rome's reach, not the connected account: the agent link stays, Rome does not hear or speak through the account until it is connected again, and connecting the same account again finds the same connected account with its agent. Unlinking the agent is the guardian's own step.
+- A connection reaches one account for its whole life, and at most one connection reaches an account at a time, so a connected account is reached by at most one connection, or by none while disconnected.
+- The guardian links, switches and unlinks its agent on the connected account, naming it by its account. The dashboard shows it by its account's platform, id and name, and whether a connection reaches it.
 - A message or a participant names an account by platform and the platform's own id, never by a connection. A message remembers who said it, not the connection that carried it. Rome finds the connection when it sends, as the one whose grant reaches the account.
-- Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from its kind of connection: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
+- Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from the kind of connection that reaches it: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
 
 ## Account profile
 
@@ -161,8 +161,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
 - **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
-- **A record of Rome's account kept by its platform and id rather than by its connection.** It would outlive the connection and survive a reconnect, so a new connection would inherit an agent the guardian never set on it. A connection whose grant has not yet reported its account would have no record to hold an agent.
-- **Linking an agent by the account's platform and id.** A dashboard tab left open across a disconnect and a reconnect would link an agent to a connection the guardian never looked at. The connection's identity changes on reconnect, so a stale command is refused.
+- **The connected account as the connection, with the agent dying on disconnect.** This was the rule until 2026-11-04. Its forces were that a reconnect would inherit an agent the guardian never set, and that a connection with no account reported yet had no record to hold one. Neither holds: the guardian set the agent on that account, and a connection is active only once the platform has reported its account. The account is what the guardian means by "the sales agent", so the link hangs on it.
 - **Storing the kind of link.** It follows from the kind of connection, and a stored copy could disagree with it. It becomes the guardian's choice only if a kind of connection ever allows both.
 - **A per-chat choice of agent that overrides the account's agent.** An account named "Sales agent" has to be the sales agent wherever it appears, and a per-chat override breaks that intuition.
 - **At most one account per agent per platform.** A guardian with two Feishu accounts for one agent is an ordinary case, and the rule forced a "move the link" behaviour nobody asked for.
