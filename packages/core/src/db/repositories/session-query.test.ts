@@ -61,6 +61,103 @@ describe("SessionQueryRepository", () => {
     ).resolves.toEqual([]);
   });
 
+  describe("reading where a speaker stands", () => {
+    const at = new Date(0);
+
+    function seeded() {
+      const fixture = speakerFixture(testDb.db);
+      const dashboard = fixture.chat("webchat", "chat-1", "dm", "Weekly planning");
+      fixture.speaker({ id: "dashboard", chat: dashboard, accountId: "guardian" });
+      const dm = fixture.chat("telegram", "dana", "dm", "Dana");
+      fixture.speaker({ id: "dm", chat: dm, accountId: "bot-sales" });
+      const group = fixture.chat("telegram", "-42", "group", "Release crew");
+      fixture.speaker({ id: "group", chat: group, accountId: "bot-sales" });
+      fixture.speaker({
+        id: "topic",
+        chat: group,
+        accountId: "bot-sales",
+        threadId: "7",
+        name: "Launch topic",
+      });
+      // A speaker of an account Rome no longer records still reads its platform.
+      fixture.speaker({ id: "stray", chat: group, accountId: "bot-gone" });
+      testDb.db
+        .insert(romeSessions)
+        .values({ id: "sub", name: "Sub", type: "subagent", createdAt: at, activityAt: at })
+        .run();
+      // One run each, as the explorer lists only sessions that ran.
+      for (const sessionId of ["dashboard", "dm", "group", "topic", "stray", "sub"]) {
+        testDb.db
+          .insert(romeAgentMessages)
+          .values({
+            id: `trace-${sessionId}`,
+            sessionId,
+            role: "trace",
+            content: "[]",
+            turnId: `turn-${sessionId}`,
+            createdAt: new Date(1000),
+          })
+          .run();
+      }
+    }
+
+    async function page(repository: SessionQueryRepository, scope = {}) {
+      return repository.querySessionPage({
+        scope: { from: null, to: new Date(10_000_000), ...scope },
+        sort: { field: "activity", direction: "desc" },
+        offset: 0,
+        limit: 10,
+      });
+    }
+
+    it("reads where each session stands from its speaker's chat and account", async () => {
+      seeded();
+      const repository = new SessionQueryRepository(testDb.db);
+
+      const rows = Object.fromEntries(
+        (await page(repository)).rows.map((row) => [
+          row.id,
+          [row.chatPlatform, row.accountId, row.placeName, row.placeKind],
+        ]),
+      );
+
+      expect(rows).toEqual({
+        dashboard: ["webchat", "guardian", "Weekly planning", "directMessage"],
+        dm: ["telegram", "bot-sales", "Dana", "directMessage"],
+        group: ["telegram", "bot-sales", "Release crew", "group"],
+        topic: ["telegram", "bot-sales", "Launch topic", "thread"],
+        stray: ["telegram", "bot-gone", "Release crew", "group"],
+        sub: [null, null, null, null],
+      });
+      const detail = await repository.getSessionDetailRows("topic");
+      expect([detail?.session.placeName, detail?.session.placeKind]).toEqual([
+        "Launch topic",
+        "thread",
+      ]);
+    });
+
+    it("filters and counts sessions by the platform of the chat they stand in", async () => {
+      seeded();
+      const repository = new SessionQueryRepository(testDb.db);
+
+      const onTelegram = await page(repository, { platforms: ["telegram"] });
+      const noChat = await page(repository, { includeNoChat: true, platforms: [] });
+
+      expect(onTelegram.rows.map((row) => row.id).sort()).toEqual([
+        "dm",
+        "group",
+        "stray",
+        "topic",
+      ]);
+      expect(noChat.rows.map((row) => row.id)).toEqual(["sub"]);
+      expect(
+        Object.fromEntries(
+          (await page(repository)).facets.platforms.map((facet) => [facet.value, facet.count]),
+        ),
+      ).toEqual({ webchat: 1, telegram: 4, null: 1 });
+    });
+  });
+
   describe("counting messages from Chats", () => {
     const at = (seconds: number) => new Date(seconds * 1000);
 

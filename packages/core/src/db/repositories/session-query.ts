@@ -19,8 +19,10 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { RunOutcome, SessionsSort } from "@rome/api-types/sessions";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { DrizzleDb } from "../index.js";
-import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
+import { chats, romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 import { romeSessionKind, withSessionKind } from "../session-kind.js";
+import { chatIdsOfKind } from "../../chats/storage/chat-repository.js";
+import { channelOfAccountSql } from "./channel-records.js";
 import { CHAT_MESSAGES } from "../../chats/storage/messages-sql.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
@@ -44,34 +46,56 @@ const pinnedToMain = sql`coalesce(json_type(${romeSessions.channelSettings}, '$.
  * It mirrors `answeringAgent` in sessions/query-service.ts, the rules in
  * docs/architecture/channels.md#an-accounts-agent.
  */
-function answeringAgentName(accountAgents?: Record<string, string>): SQL<string | null> {
-  const links = Object.entries(accountAgents ?? {});
+function answeringAgentName(scope: SessionQueryStorageScope): SQL<string | null> {
+  const links = Object.entries(scope.accountAgents ?? {});
   if (links.length === 0) return sql<string | null>`${romeSessions.agentName}`;
   const onLinkedChannel = and(
     sql`${romeSessionKind} = 'channel'`,
     inArray(
-      romeSessions.sourceChannel,
-      links.map(([channel]) => channel),
+      speakerChannel,
+      links.map(([name]) => name),
     ),
   );
-  const accountAgent = sql`case ${romeSessions.sourceChannel} ${sql.join(
+  const accountAgent = sql`case ${speakerChannel} ${sql.join(
     links.map(
-      ([channel, agent]) =>
-        sql`when ${channel} then ${isCoreMainAgentId(agent) ? sql`null` : agent}`,
+      ([name, agent]) => sql`when ${name} then ${isCoreMainAgentId(agent) ? sql`null` : agent}`,
     ),
     sql` `,
   )} end`;
   // A null routing override is an explicit pin to main.
   return sql<string | null>`case when ${onLinkedChannel} then case
-    when ${romeSessions.sourceThreadType} IS 'private' then ${accountAgent}
+    when ${placeKind} = 'directMessage' then ${accountAgent}
     when ${pinnedToMain} then null
     when coalesce(${romeSessions.agentName}, 'main') in ('main', 'core:main') then ${accountAgent}
     else ${romeSessions.agentName} end else ${romeSessions.agentName} end`;
 }
 
 function normalizedAgentName(scope: SessionQueryStorageScope): SQL<string> {
-  return sql<string>`coalesce(${answeringAgentName(scope.accountAgents)}, 'main')`;
+  return sql<string>`coalesce(${answeringAgentName(scope)}, 'main')`;
 }
+
+/**
+ * The channel a session's speaker speaks through: the one that records its
+ * account on its chat's platform, null for a session in no chat or a
+ * dashboard chat. It only finds the agent of the account a speaker speaks
+ * as, which is still keyed by channel; the explorer shows the chat's
+ * platform. Vocabulary: docs/domains/participation.md#speaker.
+ */
+const speakerChannel = channelOfAccountSql(romeSessions.chatPlatform, romeSessions.accountId);
+
+/** The kind of place a session stands in: a thread when its speaker stands
+ *  in one, else its chat's kind; null for a session in no chat. */
+const placeKind = sql<"directMessage" | "group" | "thread" | null>`(case
+  when ${romeSessions.chatId} is null then null
+  when ${romeSessions.threadId} is not null then 'thread'
+  when ${romeSessions.chatId} in ${chatIdsOfKind("dm")} then 'directMessage'
+  else 'group' end)`;
+
+/** The name of the place a session's speaker stands in: its chat's, or a
+ *  thread's own. */
+const placeName = sql<string | null>`(case
+  when ${romeSessions.threadId} is not null then ${romeSessions.name}
+  else (select ${chats.name} from ${chats} where ${chats.id} = ${romeSessions.chatId}) end)`;
 
 const SQL_LIKE_ESCAPE = "\\";
 
@@ -87,8 +111,10 @@ export interface SessionQueryStorageScope {
   ownerAgentNames?: string[];
   includeUninstalledOwners?: boolean;
   knownAgentNames?: string[];
-  sourceChannels?: string[];
-  includeInternalSource?: boolean;
+  /** The platforms whose chats a session may stand in. */
+  platforms?: string[];
+  /** Whether a session that stands in no chat matches too. */
+  includeNoChat?: boolean;
   projectPathPrefix?: string;
   models?: Array<{ provider?: string; name: string } | { unknown: true }>;
   outcomes?: RunOutcome[];
@@ -112,7 +138,8 @@ export interface RawSessionRunAggregate {
   modelName: string | null;
   agentName: string | null;
   sessionType: string;
-  sourceChannel: string | null;
+  /** The platform of the chat the session stands in; null in no chat. */
+  platform: string | null;
   projectPath: string | null;
 }
 
@@ -181,12 +208,12 @@ function sessionPredicates(
     }
     predicates.push(ownerPredicates.length > 0 ? or(...ownerPredicates)! : sql`0 = 1`);
   }
-  if (scope.sourceChannels || scope.includeInternalSource) {
+  if (scope.platforms || scope.includeNoChat) {
     const sourcePredicates: SQL[] = [];
-    if (scope.sourceChannels?.length) {
-      sourcePredicates.push(inArray(romeSessions.sourceChannel, scope.sourceChannels));
+    if (scope.platforms?.length) {
+      sourcePredicates.push(inArray(romeSessions.chatPlatform, scope.platforms));
     }
-    if (scope.includeInternalSource) sourcePredicates.push(isNull(romeSessions.sourceChannel));
+    if (scope.includeNoChat) sourcePredicates.push(isNull(romeSessions.chatId));
     predicates.push(sourcePredicates.length > 0 ? or(...sourcePredicates)! : sql`0 = 1`);
   }
   if (scope.projectPathPrefix) {
@@ -204,9 +231,9 @@ function sessionPredicates(
     const fields = [
       romeSessions.name,
       romeSessions.id,
-      romeSessions.sourceThreadName,
-      romeSessions.sourceThreadId,
-      answeringAgentName(scope.accountAgents),
+      placeName,
+      romeSessions.threadId,
+      answeringAgentName(scope),
       romeSessions.triggerName,
       romeSessions.triggerActionName,
       romeSessions.triggerExecutionId,
@@ -397,6 +424,11 @@ export class SessionQueryRepository {
       .select({
         ...getTableColumns(romeSessions),
         type: romeSessionKind,
+        // Where the speaker stands, read from its chat. `channel` only
+        // finds the agent of the account it speaks as.
+        channel: speakerChannel,
+        placeKind,
+        placeName,
         messageCount,
         stats: {
           runCount: runStats.runCount,
@@ -439,23 +471,23 @@ export class SessionQueryRepository {
         .groupBy(romeSessionKind)
         .orderBy(asc(romeSessionKind)),
       this.db
-        .select({ value: romeSessions.sourceChannel, count: count() })
+        .select({ value: romeSessions.chatPlatform, count: count() })
         .from(romeSessions)
         .innerJoin(runStats, eq(runStats.sessionId, romeSessions.id))
         .where(and(...predicates))
-        .groupBy(romeSessions.sourceChannel)
-        .orderBy(asc(romeSessions.sourceChannel)),
+        .groupBy(romeSessions.chatPlatform)
+        .orderBy(asc(romeSessions.chatPlatform)),
     ]);
     return {
       rows: rows.map((row) => ({ ...row, stats: rawStats(row.stats) })),
       total: totalRows[0]?.count ?? 0,
-      facets: { types: typeRows, sourceChannels: sourceRows },
+      facets: { types: typeRows, platforms: sourceRows },
     };
   }
 
   async queryRunAggregates(scope: SessionQueryStorageScope): Promise<RawSessionRunAggregate[]> {
     const interval = sql<number>`cast(${romeAgentMessages.createdAt} / 900 as integer)`;
-    const agentName = answeringAgentName(scope.accountAgents);
+    const agentName = answeringAgentName(scope);
     const rows = await this.db
       .select({
         sessionId: romeAgentMessages.sessionId,
@@ -493,7 +525,7 @@ export class SessionQueryRepository {
         modelName,
         agentName,
         sessionType: romeSessionKind,
-        sourceChannel: romeSessions.sourceChannel,
+        platform: romeSessions.chatPlatform,
         projectPath: romeSessions.projectPath,
       })
       .from(romeAgentMessages)
@@ -514,7 +546,7 @@ export class SessionQueryRepository {
         modelName,
         agentName,
         romeSessionKind,
-        romeSessions.sourceChannel,
+        romeSessions.chatPlatform,
         romeSessions.projectPath,
       );
     return rows.map((row) => ({
@@ -535,13 +567,20 @@ export class SessionQueryRepository {
       modelName: row.modelName,
       agentName: row.agentName,
       sessionType: row.sessionType,
-      sourceChannel: row.sourceChannel,
+      platform: row.platform,
       projectPath: row.projectPath,
     }));
   }
 
   async getSessionDetailRows(id: string) {
-    const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+    // Each row with where its speaker stands, read from its chat.
+    const columns = {
+      ...getTableColumns(romeSessions),
+      channel: speakerChannel,
+      placeKind,
+      placeName,
+    };
+    const rows = await this.db.select(columns).from(romeSessions).where(eq(romeSessions.id, id));
     if (!rows[0]) return null;
     const session = withSessionKind(rows[0]);
     const [messageCountRows, parentRows, childRows] = await Promise.all([
@@ -552,9 +591,12 @@ export class SessionQueryRepository {
             .from(romeAgentMessages)
             .where(eq(romeAgentMessages.sessionId, id)),
       session.parentSessionId
-        ? this.db.select().from(romeSessions).where(eq(romeSessions.id, session.parentSessionId))
+        ? this.db
+            .select(columns)
+            .from(romeSessions)
+            .where(eq(romeSessions.id, session.parentSessionId))
         : Promise.resolve([]),
-      this.db.select().from(romeSessions).where(eq(romeSessions.parentSessionId, id)),
+      this.db.select(columns).from(romeSessions).where(eq(romeSessions.parentSessionId, id)),
     ]);
     return {
       session,

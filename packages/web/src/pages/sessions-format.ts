@@ -10,7 +10,7 @@ export const SESSION_TYPE_LABELS: Record<RomeSessionType, string> = {
   webchat: "Chat",
   webchat_handoff: "Handoff",
   channel: "Channel",
-  action: "Automation",
+  action: "Action run",
   fork: "Branch",
   subagent: "Subagent",
 };
@@ -60,8 +60,10 @@ export function costCoverage(usage: RunUsageSummary, runCount: number): string |
   return `${usage.costedRunCount} of ${runCount} runs costed`;
 }
 
-export function sourceLabel(value: string | null): string {
-  if (!value) return "Internal";
+/** The platform of the chat a session stands in, for display. A subagent,
+ *  fork or action run stands in no chat. */
+export function platformLabel(value: string | null): string {
+  if (!value) return "Not in a chat";
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 

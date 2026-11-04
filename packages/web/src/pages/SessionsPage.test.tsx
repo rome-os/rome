@@ -138,10 +138,12 @@ const FORK_SESSION = {
   projectPath: "default",
   agentName: null,
   type: "fork",
-  sourceChannel: "webchat",
-  sourceThreadId: "original-chat",
-  sourceThreadName: "Original chat",
-  sourceThreadType: "private",
+  platform: null,
+  accountId: null,
+  chatId: null,
+  threadId: null,
+  placeName: null,
+  placeKind: null,
   triggerKind: "fork",
   triggerName: "feedback",
   triggerActionName: null,
@@ -270,7 +272,7 @@ beforeEach(() => {
     offset: 0,
     limit: 5,
     nextOffset: null,
-    facets: { types: [], sourceChannels: [] },
+    facets: { types: [], platforms: [] },
   });
   rs.mocked(listRomeSessionMessages).mockResolvedValue([]);
   rs.mocked(listSessionTurns).mockResolvedValue([
@@ -745,7 +747,7 @@ describe("SessionsPage explorer", () => {
       nextOffset: null,
       facets: {
         types: [{ value: "action", count: 1 }],
-        sourceChannels: [{ value: null, count: 1 }],
+        platforms: [{ value: null, count: 1 }],
       },
     });
 
@@ -815,31 +817,31 @@ describe("SessionsPage explorer", () => {
       nextOffset: null,
       facets: {
         types: [{ value: "action", count: 1 }],
-        sourceChannels: [{ value: null, count: 1 }],
+        platforms: [{ value: null, count: 1 }],
       },
     });
 
     renderIndex("/sessions/all");
     expect((await screen.findAllByText("Review pull request 42")).length).toBeGreaterThan(0);
 
-    // Type and Source live behind one control, so neither is on the row until
+    // Type and Platform live behind one control, so neither is on the row until
     // the popover opens.
     expect(screen.queryByRole("combobox", { name: "Type" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Filter/ }));
     const typeField = await screen.findByRole("combobox", { name: "Type" });
     fireEvent.keyDown(typeField, { key: "Enter" });
-    fireEvent.click(await screen.findByRole("option", { name: /Automation/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Action run/ }));
     await waitFor(() =>
       expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: "action" })),
     );
 
     // What is set shows as a removable chip under the toolbar.
-    const chip = await screen.findByRole("button", { name: "Clear Type: Automation" });
+    const chip = await screen.findByRole("button", { name: "Clear Type: Action run" });
     fireEvent.click(chip);
     await waitFor(() =>
       expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: undefined })),
     );
-    expect(screen.queryByRole("button", { name: "Clear Type: Automation" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear Type: Action run" })).toBeNull();
 
     // The table header carries the order: first click takes the field at its
     // useful end, a second reverses it.
