@@ -177,13 +177,13 @@ describe("resolveEmailReplyTarget", () => {
     ]);
   });
 
-  it("rejects a missing thread and suggests an explicit provider message ID", async () => {
+  it("rejects a missing thread and points to the email field that names the email to answer", async () => {
     const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
       messages: [item("other")],
     }));
 
     await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toThrow(
-      "replyToMessageId",
+      "inReplyToMessageId",
     );
     expect(listMessages).toHaveBeenCalledTimes(1);
   });
@@ -209,6 +209,16 @@ describe("resolveEmailReplyTarget", () => {
       "No email was sent",
     );
     expect(listMessages).toHaveBeenCalledTimes(3);
+  });
+
+  it("names the reply field of both the SDK and send_message when the lookup gives up", async () => {
+    const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
+      messages: [item("other")],
+    }));
+    const result = resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel);
+
+    await expect(result).rejects.toThrow("`inReplyToMessageId`");
+    await expect(result).rejects.toThrow("`replyToMessageId` in send_message");
   });
 
   it("bounds an endless stream of empty pages", async () => {

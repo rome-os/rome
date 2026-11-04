@@ -706,6 +706,48 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
     );
   });
 
+  it("fails a slow lookup of a quoted email with no email sent, before the RPC times out", async () => {
+    rs.useFakeTimers();
+    const h = await throughRpc({
+      getMessage: rs.fn(() => after(MAIL_REQUEST_TIMEOUT_MS - 1, { threadId: THREAD } as never)),
+    });
+
+    // An app quoting through the channels service reaches the adapter as is.
+    const outcome = h.channels
+      .send("email", THREAD as ChatId, { text: "reply", replyToMessageId: "<q-1@mail.example>" })
+      .then(
+        () => new Error("expected the send to fail"),
+        (err: unknown) => err,
+      );
+    await rs.advanceTimersByTimeAsync(DEFAULT_RPC_TIMEOUT_MS * 3);
+    const error = await outcome;
+
+    expect(error).not.toBeInstanceOf(IpcRpcTimeoutError);
+    expect(String(error)).toContain("No email was sent");
+    expect(h.provider.send).not.toHaveBeenCalled();
+  });
+
+  it("finishes a quoted email's lookup and a slow provider send inside the RPC deadline", async () => {
+    rs.useFakeTimers();
+    const h = await throughRpc({
+      getMessage: rs.fn(() => after(REPLY_LOOKUP_BUDGET_MS - 1, { threadId: THREAD } as never)),
+      send: rs.fn(() =>
+        after(MAIL_REQUEST_TIMEOUT_MS - 1, { messageId: "sent-1", threadId: THREAD }),
+      ),
+    });
+
+    const outcome = h.channels.send("email", THREAD as ChatId, {
+      text: "reply",
+      replyToMessageId: "<q-1@mail.example>",
+    });
+    await rs.advanceTimersByTimeAsync(DEFAULT_RPC_TIMEOUT_MS - 1);
+
+    await expect(outcome).resolves.toMatchObject({ messageId: "sent-1" });
+    expect(h.provider.send).toHaveBeenCalledWith(
+      expect.objectContaining({ inReplyToMessageId: "<q-1@mail.example>" }),
+    );
+  });
+
   it("replies to Rome's own message when the budget ends before any inbound turns up", async () => {
     rs.useFakeTimers();
     let page = 0;

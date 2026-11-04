@@ -180,6 +180,9 @@ export class MailProviderError extends Error {
     message: string,
     readonly status?: number,
     readonly code?: string,
+    /** The status of the mail provider behind Rome Cloud, which Rome Cloud
+     *  forwards beside its own. */
+    readonly providerStatus?: number,
   ) {
     super(message);
     this.name = "MailProviderError";
@@ -262,6 +265,7 @@ export class RomeCloudMailProvider implements MailProvider {
         `Rome Cloud mail API ${path} failed (${response.status})${parts.length ? `: ${parts.join(" — ")}` : ""}`,
         response.status,
         body?.error,
+        typeof body?.providerStatus === "number" ? body.providerStatus : undefined,
       );
     }
 
