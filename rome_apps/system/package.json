@@ -15,9 +15,6 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/react": "^19.1.0",
-    "better-sqlite3": "^13.0.3",
-    "drizzle-orm": "^0.45.1"
+    "@types/react": "^19.1.0"
   }
 }
