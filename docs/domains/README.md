@@ -85,6 +85,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 
 Diffs still owed to the model, each a change of its own:
 
+- A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
 - One group is one chat across all of Rome's accounts in it.

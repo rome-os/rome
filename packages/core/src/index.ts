@@ -595,7 +595,6 @@ async function main() {
   const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
   const replyStreams = new ReplyStreams({
     streaming: replyStreamingOn,
-    replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
     // A reply is said through its session's speaker, on the platform's own
     // send port, so it is recorded once.
@@ -2001,7 +2000,6 @@ async function main() {
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
-      transcript: "chats",
       accountNames,
       assistants: listedAgents,
       webchatRepo,
