@@ -21,8 +21,8 @@ import { StoredMessages } from "../chats/message-repository.js";
 import { chatKey, type Place, placeIn } from "../chats/place.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
-import { deferred, type VisibleMessage } from "../test/kit/im/peer.js";
+import { createTestDb, type TestDb } from "./helpers.js";
+import { deferred, type VisibleMessage } from "./kit/im/peer.js";
 
 /** A production adapter running against its platform's peer, with a person
  *  Rome's account can reach directly. */
