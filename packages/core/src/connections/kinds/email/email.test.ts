@@ -440,11 +440,33 @@ describe("EmailAdapter.send", () => {
     expect(provider.listMessages).not.toHaveBeenCalled();
   });
 
-  it("refuses an approval card it cannot show, and calls no provider", async () => {
+  it("refuses an email with its own HTML and a card, and calls no provider", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const sent = adapter.send("t-approval" as ChatId, {
+    await expect(
+      adapter.send("zoolsher@gmail.com" as ChatId, {
+        kind: "email",
+        html: "<p>Report</p>",
+        parts: [
+          {
+            type: "approval_card",
+            approvalId: "approval-1",
+            actionName: "send_message",
+            preview: { kind: "generic", title: "Send email", summary: "Send it." },
+            status: "pending",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("sends an approval card as the card's plain-text version", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("zoolsher@gmail.com" as ChatId, {
       parts: [
         {
           type: "approval_card",
@@ -456,12 +478,9 @@ describe("EmailAdapter.send", () => {
       ],
     });
 
-    await expect(sent).rejects.toMatchObject({
-      name: "ChannelSendRefused",
-      reason: "part_unsupported",
-    });
-    expect(provider.send).not.toHaveBeenCalled();
-    expect(provider.listMessages).not.toHaveBeenCalled();
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].text).toContain("Approval needed: Send email");
+    expect(provider.sent[0].text).toContain("The agent wants to send.");
   });
 
   it("names the rejected recipient and the fix when no address resolves", async () => {

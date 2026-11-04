@@ -25,6 +25,8 @@ import { appChats } from "./app-chats.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { ChatAdapters, chatAt } from "./chat-adapter.js";
 import { chatKey } from "./chat-ids.js";
+import { messageAsText } from "./outbound/send-refusals.js";
+import { widgetText } from "../chats/widget-text.js";
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
 const SECOND_BOT: Account = { platform: "telegram", id: "rome-bot-2" };
@@ -375,6 +377,30 @@ describe("appChats", () => {
       expect(sent[0]?.message).toEqual({ text: "", parts: [card] });
       const recorded = testDb.db.all<{ parts: string }>(sql`SELECT parts FROM chat_messages`);
       expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([card]);
+    });
+
+    it("hands a text-only connection a card's plain-text line once, in its place", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      const card = {
+        type: "approval_card",
+        approvalId: "ap-1",
+        actionName: "deploy",
+        preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+        status: "pending",
+      } as const;
+
+      await chats.send(group, {
+        parts: [
+          { type: "text", content: "Before I go on:" },
+          card,
+          { type: "text", content: "Back soon." },
+        ],
+      });
+
+      const line = widgetText(card) ?? "";
+      expect(messageAsText(sent[0]?.message ?? {})).toBe(
+        ["Before I go on:", line, "Back soon."].join("\n\n"),
+      );
     });
 
     it("answers what the channel refuses as unsupported, and records nothing", async () => {

@@ -12,6 +12,7 @@ import type { Account, ChatId } from "@rome-os/app-runtime";
 import { CHAT_MESSAGES, CHATS } from "../storage/messages-sql.js";
 import { addressOf, chatAt } from "../../connections/chat-adapter.js";
 import { chatKey } from "../../connections/chat-ids.js";
+import { widgetText } from "../widget-text.js";
 
 /**
  * The sender id Rome stamps on a message it sent itself.
@@ -168,11 +169,11 @@ function chatsTranscriptDetail(raw: Record<string, unknown>, entry: Message): Me
   return detail;
 }
 
-/** The line a stored agent message renders as: its text parts, joined.
- *  Non-text parts (cards, recaps, errors) carry no conversation, nor does a
- *  dashboard turn's narration on its way to the answer (a commentary part).
- *  Content that does not parse is a row with nothing to show rather than a
- *  failed read. */
+/** The line a stored agent message renders as: its text parts and each
+ *  widget's plain-text line, joined, as a text-only platform showed it. Other
+ *  parts (recaps, errors) carry no conversation, nor does a dashboard turn's
+ *  narration on its way to the answer (a commentary part). Content that does
+ *  not parse is a row with nothing to show rather than a failed read. */
 export function messageContentText(raw: string | null): string | null {
   if (raw === null) return null;
   let parsed: unknown;
@@ -183,16 +184,17 @@ export function messageContentText(raw: string | null): string | null {
   }
   if (!Array.isArray(parsed)) return null;
   const text = parsed
-    .filter((part): part is Extract<MessagePart, { type: "text" }> => {
-      if (typeof part !== "object" || part === null) return false;
+    .flatMap((part): string[] => {
+      if (typeof part !== "object" || part === null) return [];
       const candidate = part as { type?: unknown; content?: unknown; turnPhase?: unknown };
-      return (
-        candidate.type === "text" &&
-        typeof candidate.content === "string" &&
-        candidate.turnPhase !== "commentary"
-      );
+      if (candidate.type === "text") {
+        return typeof candidate.content === "string" && candidate.turnPhase !== "commentary"
+          ? [candidate.content]
+          : [];
+      }
+      const line = widgetText(part as MessagePart);
+      return line === undefined ? [] : [line];
     })
-    .map((part) => part.content)
     .join("\n");
   return text.length > 0 ? text : null;
 }

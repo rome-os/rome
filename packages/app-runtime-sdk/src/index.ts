@@ -1367,8 +1367,10 @@ export interface OutgoingMessageBase {
   /**
    * Structured message parts. When provided, replaces the plain-text path so
    * channels that support rich content (web chat today) can render typed
-   * blocks like approval cards. A channel that cannot show a part refuses the
-   * message with {@link SendRefused} `part_unsupported`.
+   * blocks like approval cards. A channel that cannot draw an approval card
+   * sends the card's plain-text version instead. A channel that cannot show
+   * any other part refuses the message with {@link SendRefused}
+   * `part_unsupported`.
    */
   parts?: MessagePart[];
   /**
