@@ -94,6 +94,32 @@ describe("appChatReads", () => {
       ).toEqual([]);
     });
 
+    it("names each session's place: its chat's name, or its topic's", async () => {
+      telegramBot();
+      const group = fixture.chat("telegram", "-100", "group", "Ops");
+      fixture.speaker({ id: "s-group", chat: group, accountId: "rome-bot", createdAt: at(0) });
+      fixture.speaker({
+        id: "s-topic",
+        chat: group,
+        accountId: "rome-bot",
+        threadId: "7",
+        name: "Launch",
+        createdAt: at(0),
+      });
+      fixture.say({ id: "m-1", chat: group, from: "alice", at: at(2_000) });
+      fixture.say({ id: "m-2", chat: group, threadId: "7", from: "alice", at: at(2_100) });
+
+      const recent = await reads.recentChats({
+        since: at(1_000),
+        where: { accountKinds: ["telegram"] },
+      });
+
+      expect(recent.map((chat) => [chat.sessionId, chat.threadName])).toEqual([
+        ["s-topic", "Launch"],
+        ["s-group", "Ops"],
+      ]);
+    });
+
     it("lists a chat by its channel's kind, even on a platform the kind is not named for", async () => {
       testDb.db
         .insert(channels)
