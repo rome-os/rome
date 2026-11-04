@@ -240,7 +240,7 @@ export interface RecentChat {
   /** The session's name, as the dashboard lists it. */
   readonly name: string;
   /** The place's name: the topic's when the session stands in a topic, else
-   *  the chat's, or null when its platform names neither. */
+   *  the chat's, or null when the chat has no name. */
   readonly threadName: string | null;
   /** Who a dashboard chat belongs to: `guardian`, or `visitor:<id>`. */
   readonly ownerKey: string;
