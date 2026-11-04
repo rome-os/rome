@@ -124,7 +124,6 @@ import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
@@ -393,9 +392,6 @@ interface ManagerDeps {
    *  catch-up reads and marks. Absent, a channel session catches up on
    *  nothing. */
   turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
-  /** The platform a channel's accounts live on. Absent, a channel's name
-   *  is its platform. */
-  platformOfChannel?: PlatformOfChannel;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
