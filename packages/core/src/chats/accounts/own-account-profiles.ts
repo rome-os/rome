@@ -44,17 +44,19 @@ function profileOf(
 /** Copy the name a grant reports for the account it reaches into the account
  *  profile cache, in the grant's transaction. Never throws. */
 export function rememberOwnAccountProfile(
-  repo: Pick<AccountProfilesRepository, "fromConnection">,
+  repo: Pick<AccountProfilesRepository, "fromConnection" | "fillFromConnection">,
   exec: DrizzleDb | DrizzleTx,
   descriptor: ConnectionDescriptor | null | undefined,
   account: GrantAccount | undefined,
   record: ProfileRecord | undefined,
+  opts: { onlyIfMissing?: boolean } = {},
 ): void {
   if (!account || !record) return;
   const profile = profileOf(descriptor, record);
   if (!profile) return;
+  const write = opts.onlyIfMissing ? repo.fillFromConnection : repo.fromConnection;
   try {
-    repo.fromConnection(exec, { platform: account.platform, id: account.accountId }, profile);
+    write.call(repo, exec, { platform: account.platform, id: account.accountId }, profile);
   } catch (err) {
     log.warn("could not keep a connected account's name in the account profile cache", {
       platform: account.platform,
@@ -63,11 +65,12 @@ export function rememberOwnAccountProfile(
   }
 }
 
-/** Copy every held grant's account name into the cache, once at boot, so the
- *  accounts connected before the cache learned from grants keep their name
- *  after a disconnect, and a dropped cache is rebuilt. */
+/** Copy every held grant's account name into the cache where it holds none,
+ *  once at boot, so the accounts connected before the cache learned from
+ *  grants keep their name after a disconnect, and a dropped cache is rebuilt.
+ *  A name the cache learned since the grant was given is newer, so it stays. */
 export function backfillOwnAccountProfiles(
-  repo: Pick<AccountProfilesRepository, "fromConnection">,
+  repo: Pick<AccountProfilesRepository, "fromConnection" | "fillFromConnection">,
   db: DrizzleDb,
   connections: StoredConnection[],
   descriptorOf: Descriptors,
@@ -79,6 +82,7 @@ export function backfillOwnAccountProfiles(
       descriptorOf(connection.connectionKind),
       connection.grant.account,
       connection.grant.profile,
+      { onlyIfMissing: true },
     );
   }
 }

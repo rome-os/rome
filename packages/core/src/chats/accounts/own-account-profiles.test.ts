@@ -134,4 +134,22 @@ describe("own account profiles", () => {
       { accountId: "100", connectionId: null, name: "sales_bot" },
     ]);
   });
+
+  it("keeps a name a message taught after the grant when it backfills at boot", async () => {
+    const { db, ledger, profiles, descriptor, registry } = setup();
+    const conn = await registry.connect(SERVICE);
+    await registry.giveGrant(SERVICE, conn.id, "bot", credential, {
+      botId: "100",
+      username: "sales_bot",
+    });
+    await profiles.fromMessage(
+      { platform: SERVICE, id: "100" },
+      { displayName: null, handle: "sales_desk_bot", avatarUrl: null },
+    );
+
+    backfillOwnAccountProfiles(profiles, db, await ledger.all(), () => descriptor);
+
+    const [profile] = await profiles.profilesOf([{ platform: SERVICE, id: "100" }]);
+    expect(profile?.handle).toBe("sales_desk_bot");
+  });
 });

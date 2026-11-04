@@ -100,6 +100,22 @@ export class AccountProfilesRepository {
       .run();
   }
 
+  /** Record what a held grant says about Rome's own account where the cache
+   *  has learned nothing about it yet. The boot backfill uses it, so a name a
+   *  later message or fix taught is never put back to the grant's older one. */
+  fillFromConnection(
+    exec: DrizzleDb | DrizzleTx,
+    account: Account,
+    profile: AccountProfile,
+    now = new Date(),
+  ): void {
+    exec
+      .insert(accountProfiles)
+      .values({ ...rowOf(account, profile), source: "connection", updatedAt: now })
+      .onConflictDoNothing()
+      .run();
+  }
+
   /** The profile of each account, positionally, or null for an account the
    *  cache has learned nothing about. */
   async profilesOf(accounts: Account[]): Promise<Array<AccountProfile | null>> {
