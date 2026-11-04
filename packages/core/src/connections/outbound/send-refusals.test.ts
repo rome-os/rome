@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { numericReplyTo, refuseAttachments, refuseReplies, textToSend } from "./send-refusals.js";
 
-const refused = (reason: string) => ({ name: "ChannelSendRefused", reason });
+const refused = (reason: string) => ({ name: "SendRefused", reason });
 
 describe("textToSend", () => {
   it("sends the message's text, else its text parts", () => {

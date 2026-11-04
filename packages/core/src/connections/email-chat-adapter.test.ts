@@ -109,7 +109,7 @@ describe("emailChatAdapter", () => {
 
     await expect(
       adapter.send(chat.externalId, null, { text: "again", replyTo: "rome:local-1" }),
-    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    ).rejects.toMatchObject({ name: "SendRefused", reason: "reply_unaddressable" });
     expect(sent).toHaveLength(1);
   });
 

@@ -7,7 +7,7 @@ import type {
 import type { MessagePart } from "../../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../../logger.js";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import { withoutHostOnlyParts } from "../host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { DEFAULT_BOT_DISPLAY_NAME } from "../../participation/mention-only.js";
@@ -80,7 +80,7 @@ export class WebChatAdapter {
     // repository itself (see host-only-parts.ts), so a sender's is refused.
     const given = withoutHostOnlyParts(message.parts ?? []);
     if (message.parts && given.length < message.parts.length) {
-      throw new ChannelSendRefused(
+      throw new SendRefused(
         "part_unsupported",
         "Only Rome itself shows a routine_draft_card on the dashboard",
       );
@@ -105,10 +105,7 @@ export class WebChatAdapter {
     }
 
     if (parts.length === 0) {
-      throw new ChannelSendRefused(
-        "empty",
-        "A dashboard message needs text, parts or an attachment",
-      );
+      throw new SendRefused("empty", "A dashboard message needs text, parts or an attachment");
     }
 
     const messageId = uuid();

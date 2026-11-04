@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import {
   type ChannelsService,
   type ChatId,
-  ChannelSendRefused,
+  SendRefused,
   type MessageReceipt,
 } from "@rome-os/app-runtime";
 import { sendApprovalCard } from "./approval-card.js";
@@ -51,7 +51,7 @@ describe("sendApprovalCard", () => {
   it("rejects with the refusal of a channel that cannot show a card", async () => {
     const target = channels(true);
     target.send.mockRejectedValue(
-      new ChannelSendRefused("part_unsupported", "telegram_user shows text only"),
+      new SendRefused("part_unsupported", "telegram_user shows text only"),
     );
 
     await expect(
@@ -59,7 +59,7 @@ describe("sendApprovalCard", () => {
         ...approval,
         channelContext: { channel: "telegram_user", threadId: "t1" },
       } as never),
-    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
+    ).rejects.toMatchObject({ name: "SendRefused", reason: "part_unsupported" });
   });
 
   it("sends nothing without a conversation or on a channel that cannot send", async () => {

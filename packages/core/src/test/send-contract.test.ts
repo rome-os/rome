@@ -1,6 +1,6 @@
 // One suite every channel adapter's `send` runs through: the contract on the
 // SDK's `ChannelSend.send`. An adapter parses what it is given and, when it
-// cannot deliver the message as given, refuses it with `ChannelSendRefused`
+// cannot deliver the message as given, refuses it with `SendRefused`
 // before anything reaches the platform. It never drops a part, an attachment
 // or a quote and reports the rest as sent, and it never sends part of a
 // message and then fails on the rest.
@@ -330,7 +330,7 @@ const SUBJECTS: readonly Subject[] = [
   },
 ];
 
-const refused = (reason: string) => ({ name: "ChannelSendRefused", reason });
+const refused = (reason: string) => ({ name: "SendRefused", reason });
 
 const CARD = {
   type: "approval_card",

@@ -1096,7 +1096,7 @@ describe("FeishuAdapter", () => {
 
   it("refuses a message with no text, and one with an attachment it cannot carry", async () => {
     await expect(adapter.send("oc_chat" as ChatId, {})).rejects.toMatchObject({
-      name: "ChannelSendRefused",
+      name: "SendRefused",
       reason: "empty",
     });
     await expect(
@@ -1104,7 +1104,7 @@ describe("FeishuAdapter", () => {
         text: "see file",
         attachments: [{ type: "image", source: "/tmp/a.png" }],
       }),
-    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "attachment_unsupported" });
+    ).rejects.toMatchObject({ name: "SendRefused", reason: "attachment_unsupported" });
     expect(channel.sent).toHaveLength(0);
   });
 

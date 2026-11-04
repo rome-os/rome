@@ -337,7 +337,7 @@ describe("EmailAdapter.send", () => {
     const adapter = makeAdapter(provider);
 
     await expect(adapter.send("t-empty" as ChatId, { text: "   " })).rejects.toMatchObject({
-      name: "ChannelSendRefused",
+      name: "SendRefused",
       reason: "empty",
     });
 
@@ -362,7 +362,7 @@ describe("EmailAdapter.send", () => {
     });
 
     await expect(sent).rejects.toMatchObject({
-      name: "ChannelSendRefused",
+      name: "SendRefused",
       reason: "part_unsupported",
     });
     expect(provider.send).not.toHaveBeenCalled();
