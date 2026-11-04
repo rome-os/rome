@@ -154,9 +154,9 @@ export const accountProfiles = sqliteTable(
     handle: text("handle"),
     avatarUrl: text("avatar_url"),
     // Where the row was learned. A platform's address book outranks the name a
-    // sender put on a message, so a message never overwrites a row the address
-    // book wrote.
-    source: text("source", { enum: ["address_book", "message"] }).notNull(),
+    // sender put on a message and the name a grant reported for Rome's own
+    // account, so neither overwrites a row the address book wrote.
+    source: text("source", { enum: ["address_book", "message", "connection"] }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
