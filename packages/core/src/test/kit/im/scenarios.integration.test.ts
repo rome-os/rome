@@ -30,7 +30,7 @@ const TODAY: Record<
   }
 > = {
   telegram: { linksReply: true, longText: "message is too long", streams: true },
-  // Discord answers a message only in a thread, which a DM has none of.
+  // Discord quotes the message natively where no thread is opened on it, as in a DM.
   discord: { linksReply: true, longText: [2000, 2000, 1000], streams: true },
   // iLink has no reply reference, so a reply is refused, and it documents no
   // length limit for the peer to model.

@@ -1421,8 +1421,11 @@ Use \`/channel agent clear\` to undo.`,
       replyTo && targetChannel === channel
         ? { messageReference: replyTo, failIfNotExists: true }
         : undefined;
+    // A quote does not mention its author, as an unquoted answer did not.
     const quoting = <T extends object>(options: T): T => {
-      const quoted = quote ? { ...options, reply: quote } : options;
+      const quoted = quote
+        ? { ...options, reply: quote, allowedMentions: { ...ALL_MENTIONS, repliedUser: false } }
+        : options;
       quote = undefined;
       return quoted;
     };
@@ -1434,7 +1437,7 @@ Use \`/channel agent clear\` to undo.`,
         // Discord has a 2000 character limit per message
         const chunks = splitMessage(text);
         for (const chunk of chunks) {
-          const sent = await sendQuoting(targetChannel, quoting({ content: chunk }), replyTo);
+          const sent = await sendQuoting(targetChannel, quoting({ content: chunk }));
           messageId ??= sent.id;
         }
       }
@@ -1580,18 +1583,20 @@ Use \`/channel agent clear\` to undo.`,
       ? new AttachmentBuilder(att.source, { name: basename(att.source) })
       : new AttachmentBuilder(createReadStream(att.source), { name: basename(att.source) });
 
-    const sent = await sendQuoting(
-      channel,
-      quoting({ content: att.caption, files: [file] }),
-      undefined,
-    );
+    const sent = await sendQuoting(channel, quoting({ content: att.caption, files: [file] }));
     return sent.id;
   }
 }
 
-/** Discord's error codes for a quote of a message it cannot find: unknown
- *  message, and a form whose message reference names none. */
-const UNKNOWN_QUOTE_CODES = new Set([10008, 50035]);
+/** Whether `err` is Discord saying it cannot find the message a send quotes:
+ *  an unknown message, or an invalid form whose fault is the message
+ *  reference. Any other invalid form is the send's own fault. */
+function isUnknownQuote(err: unknown): boolean {
+  if (!(err instanceof DiscordAPIError)) return false;
+  if (Number(err.code) === 10008) return true;
+  const errors = (err.rawError as { errors?: Record<string, unknown> }).errors;
+  return Number(err.code) === 50035 && errors?.message_reference !== undefined;
+}
 
 /** Sends `options` on `channel`, refusing as `reply_unaddressable` the quote
  *  Discord cannot find. Only the first message of a send quotes, so nothing
@@ -1599,21 +1604,26 @@ const UNKNOWN_QUOTE_CODES = new Set([10008, 50035]);
 async function sendQuoting(
   channel: SendableChannel,
   options: MessageCreateOptions,
-  replyTo: string | undefined,
 ): Promise<Message> {
   try {
     return await channel.send(options);
   } catch (err) {
-    const quoted = options.reply !== undefined;
-    if (quoted && err instanceof DiscordAPIError && UNKNOWN_QUOTE_CODES.has(Number(err.code))) {
+    const quoted = options.reply?.messageReference;
+    if (quoted && isUnknownQuote(err)) {
       throw new SendRefused(
         "reply_unaddressable",
-        `discord cannot find message ${JSON.stringify(replyTo)} to answer`,
+        `discord cannot find message ${JSON.stringify(quoted)} to answer`,
       );
     }
     throw err;
   }
 }
+
+/** The mentions Discord parses when a message names none of its own, kept
+ *  when a quote turns off the mention of its author. */
+const ALL_MENTIONS = {
+  parse: ["users", "roles", "everyone"] as ("users" | "roles" | "everyone")[],
+};
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;

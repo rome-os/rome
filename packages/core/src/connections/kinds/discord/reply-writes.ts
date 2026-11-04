@@ -22,8 +22,9 @@ const RESEND_DELAYS_MS = [250, 1000];
 
 /**
  * Reply delivery over Discord's REST API. A message holds Markdown, as a whole
- * reply does, and does not point at the user's message, since a whole reply
- * does not either. Discord allows any number of edits.
+ * reply does, and quotes the user's message where no thread was opened on it,
+ * without mentioning its author, as a whole reply does. Discord allows any
+ * number of edits.
  *
  * discord.js sends a request again when it times out, its connection resets,
  * or Discord answers with a server error, a create included. Each create
@@ -66,7 +67,10 @@ export function discordTransport({
       // reply does.
       const quote =
         replyTo && target === chat
-          ? { message_reference: { message_id: replyTo, fail_if_not_exists: true } }
+          ? {
+              message_reference: { message_id: replyTo, fail_if_not_exists: true },
+              allowed_mentions: { parse: ["users", "roles", "everyone"], replied_user: false },
+            }
           : {};
       const body = {
         content: text,

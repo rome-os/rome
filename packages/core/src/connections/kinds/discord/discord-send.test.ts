@@ -122,7 +122,11 @@ describe("DiscordAdapter.send", () => {
 
   it("refuses a reply to a message Discord cannot find", async () => {
     const unknown = new DiscordAPIError(
-      { code: 50035, message: "Invalid Form Body" },
+      {
+        code: 50035,
+        message: "Invalid Form Body",
+        errors: { message_reference: { _errors: [{ code: "REPLIES_UNKNOWN_MESSAGE" }] } },
+      } as never,
       50035,
       400,
       "POST",
@@ -134,6 +138,39 @@ describe("DiscordAdapter.send", () => {
     await expect(
       adapter.send(channel.id as ChatId, { text: "Re", replyToMessageId: "123456789012345678" }),
     ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+  });
+
+  it("passes on an invalid form that is not the quote's fault", async () => {
+    const tooLong = new DiscordAPIError(
+      {
+        code: 50035,
+        message: "Invalid Form Body",
+        errors: { content: { _errors: [{ code: "BASE_TYPE_MAX_LENGTH" }] } },
+      } as never,
+      50035,
+      400,
+      "POST",
+      "/channels/discord-chat-1/messages",
+      {},
+    );
+    const { channel, adapter } = chatOf(ChannelType.DM, rs.fn().mockRejectedValue(tooLong));
+
+    await expect(
+      adapter.send(channel.id as ChatId, { text: "Re", replyToMessageId: "123456789012345678" }),
+    ).rejects.toBe(tooLong);
+  });
+
+  it("quotes without mentioning the author of the quoted message", async () => {
+    const { channel, adapter, send } = chatOf(ChannelType.DM);
+
+    await adapter.send(channel.id as ChatId, {
+      text: "Re",
+      replyToMessageId: "123456789012345678",
+    });
+
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      allowedMentions: { parse: ["users", "roles", "everyone"], repliedUser: false },
+    });
   });
 
   it("passes on a failure of a send that quotes nothing", async () => {
