@@ -111,7 +111,7 @@ function recentChats(
     JOIN ${CHATS} c ON c.id = s.chat_id
     LEFT JOIN channels ch ON ch.platform = c.platform
       AND coalesce(ch.platform_account_id, ch.id) = s.account_id
-    LEFT JOIN connected_accounts ca ON ca.connection_id = ch.connection_id
+    LEFT JOIN connected_accounts ca ON ca.platform = c.platform AND ca.account_id = s.account_id
     JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id

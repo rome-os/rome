@@ -529,10 +529,20 @@ async function main() {
         case "revoked":
           channelRecords.forget();
           return;
-        case "disconnected":
+        case "disconnected": {
+          // A revoked grant names no account, so its channel record does,
+          // read before the channel is vacated. A stale record can name an
+          // account another connection's grant reaches now, and that
+          // connection keeps its agent.
+          const recorded = event.account ? null : connectedAccounts.accountOf(tx, connection.id);
+          const account =
+            event.account ??
+            (recorded && !connectedAccounts.grantReaches(tx, recorded) ? recorded : null);
           channelRecords.vacate(tx, connection.id);
-          connectedAccounts.remove(tx, connection.id);
+          if (account) connectedAccounts.remove(tx, account);
+          connectedAccounts.forgetUnplaced(tx, connection.id);
           return;
+        }
       }
     },
   });
@@ -1751,6 +1761,9 @@ async function main() {
   // A grant from before grants named their account learns it now, so the next
   // connect of that account is refused.
   await recordGrantAccounts(connectionRegistry);
+  // Agent links the move to account keys could not place go to the accounts
+  // their connections now reach.
+  connectedAccounts.placeUnplaced();
   // Connections minted before channels were recorded get theirs now. Each
   // connection kind held one, so each takes its connection kind's name.
   await claimChannels(

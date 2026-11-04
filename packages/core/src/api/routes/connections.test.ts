@@ -24,7 +24,12 @@ import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { PeopleRepository } from "../../db/repositories/people.js";
-import { createTestDb, identityConnectionKindOf, testAccountLinkOf } from "../../test/helpers.js";
+import {
+  createTestDb,
+  grantReaching,
+  identityConnectionKindOf,
+  testAccountLinkOf,
+} from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
 
@@ -536,6 +541,14 @@ describe("GET /connections accounts", () => {
     registry.register({ ...telegram.descriptor, connectionKind: "telegram" });
     const conn = await registry.connect("telegram");
     const channel = records.idOf(conn.id) as string;
+    // The account's agent is kept by the account, so the grant reaches one.
+    new DrizzleConnectionsRepository(db).save(db, {
+      id: conn.id,
+      connectionKind: "telegram",
+      label: "telegram",
+      createdAt: new Date(),
+      grant: grantReaching("telegram", "bot-1"),
+    });
     const accounts = new ConnectedAccountsRepository(db);
     accounts.link(conn.id, "sales:agent");
 

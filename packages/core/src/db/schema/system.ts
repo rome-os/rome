@@ -1168,15 +1168,29 @@ export const channels = sqliteTable(
   ],
 );
 
-// Chats' record of a connected account: one row per connection that lets
-// Rome chat, keyed by that connection and holding the agent that speaks
-// through the account, null for none. It lives exactly as long as its
-// connection. Vocabulary: docs/domains/chats.md#connected-account.
-export const connectedAccounts = sqliteTable("connected_accounts", {
-  connectionId: text("connection_id")
-    .primaryKey()
-    .references(() => connections.id, { onDelete: "cascade" }),
-  agent: text("agent"),
+// Chats' record of a connected account: one row per account Rome holds a
+// connection to that lets it chat, keyed by the account (the platform and the
+// platform's own id) and holding the agent that speaks through it, null for
+// none. A connection whose grant has not reported its account yet has no row.
+// Vocabulary: docs/domains/chats.md#connected-account.
+export const connectedAccounts = sqliteTable(
+  "connected_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    agent: text("agent"),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
+);
+
+// An agent link the move to account keys could not place yet, because its
+// connection had not recorded the account it reaches. The boot pass that
+// records grants' accounts places each one, and a connection that reports its
+// account later takes its link then. A row goes once placed, or once its
+// connection is gone.
+export const connectedAccountsUnplaced = sqliteTable("connected_accounts_unplaced", {
+  connectionId: text("connection_id").primaryKey(),
+  agent: text("agent").notNull(),
 });
 
 // The grant ledger. Rows record outcomes only — never step/flow state

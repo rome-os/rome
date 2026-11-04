@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import { NO_GRANT } from "../../connections/grant.js";
+import { platformOf } from "../../connections/platform.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { createTestDb, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
+import { createTestDb, grantReaching, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectedAccountsRoutes } from "./connected-accounts.js";
 
@@ -32,7 +32,7 @@ describe("connected account routes", () => {
         ...connection,
         label: connection.connectionKind,
         createdAt: NOW,
-        grant: NO_GRANT,
+        grant: grantReaching(platformOf(connection.connectionKind), `acct-${connection.id}`),
       });
       records.claim(db, connection, NOW, channel ? { id: channel } : {});
       accounts.add(db, connection.id);

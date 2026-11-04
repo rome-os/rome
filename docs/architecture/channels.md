@@ -91,7 +91,7 @@ A reply can reach a chat as the agent writes it, rather than whole after the run
 
 ## An account's agent
 
-An [agent](../concepts/agents.md) can be linked to one of Rome's accounts, which the code stores on the account's [connected account](../domains/chats.md#connected-account), keyed by its connection. A channel reads its agent through the connection behind it. `GET /api/connections` lists each account with its agent and the account its grant reaches, and `?platform=&accountId=` finds the connection that reaches one account. `PUT /api/accounts/:id/agent` links an agent, switches it, or unlinks it with `null`, naming the connected account by its connection's id ([`connected-accounts.ts`](../../packages/api-types/src/connected-accounts.ts)). The account's agent answers in the chats on its channel.
+An [agent](../concepts/agents.md) can be linked to one of Rome's accounts, which the code stores on the account's [connected account](../domains/chats.md#connected-account), keyed by the account: its platform and the platform's own id. A channel reads its agent through the connection behind it, as the agent of the account that connection's grant reaches. A connection whose grant has not reported its account has no connected account and cannot be linked. `GET /api/connections` lists each account with its agent and the account its grant reaches, and `?platform=&accountId=` finds the connection that reaches one account. `PUT /api/accounts/:id/agent` links an agent, switches it, or unlinks it with `null`, naming the connected account by its connection's id ([`connected-accounts.ts`](../../packages/api-types/src/connected-accounts.ts)). The account's agent answers in the chats on its channel.
 
 ### Invariants
 

@@ -7,6 +7,9 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
+import { givenGrant } from "../connections/connection.js";
+import type { GrantValue } from "../connections/grant.js";
+import type { Credential } from "../connections/types.js";
 import type { AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
@@ -1345,4 +1348,16 @@ export function ownedByGuardian(
       .run();
     peopleRepo.linkStated(account, guardianId);
   }
+}
+
+/** A grant, as a fix or a connect leaves it, that reaches the account
+ *  `accountId` on `platform`. */
+export function grantReaching(platform: string, accountId: string): GrantValue {
+  return givenGrant(
+    new Date("2026-01-01T00:00:00.000Z"),
+    { material: { token: "test" } } as unknown as Credential,
+    "test-epoch",
+    undefined,
+    { platform, accountId },
+  );
 }
