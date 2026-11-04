@@ -55,7 +55,10 @@ export interface ChatMessage extends Omit<OutgoingChatMessage, "replyToMessageId
 
 /** A message the platform took. Chats has recorded it before this answers. */
 export interface Sent {
-  readonly message: MessageRef;
+  /** Rome's record of the message. Absent when the platform took the message
+   *  but Rome could not read its record back, so the app is not handed an id
+   *  that names no message. */
+  readonly message?: MessageRef;
   /** The platform's own id for the message, when it gave one. */
   readonly platformMessageId?: string;
   /** The thread the platform placed the message in, when it is in one. It can
@@ -122,7 +125,7 @@ export function isSendError(error: unknown): error is SendError {
 }
 
 /** Who a send goes out as: one of Rome's accounts in the chat. Needed where
- *  several of Rome's accounts are, and in a dashboard chat. */
+ *  several of Rome's accounts are. An app does not send into a dashboard chat. */
 export interface SendOptions {
   as?: Account;
 }

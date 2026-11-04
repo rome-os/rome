@@ -303,7 +303,8 @@ function senderAs(deps: AppChatsDeps, account: Account, opts?: { inferred: boole
 /**
  * The SDK's answer for a message the platform took, which never throws:
  * reporting a sent message as failed invites a second one. A record that did
- * not land is logged and answered by the id Rome holds for the message, if any.
+ * not land is logged and answered by the id Rome holds for the message. With
+ * none, the answer names no message.
  */
 function sentOf(
   deps: AppChatsDeps,
@@ -323,10 +324,9 @@ function sentOf(
   if (recorded === null) {
     log.warn("an app's send went out but is not on record", { chat: chat.ref.id });
   }
-  const message = { chat: chat.ref, id: recorded ?? 0 };
   const platformMessageId = platformIdOfMessage(key, sender.account.id, messageKey);
   return {
-    message,
+    ...(recorded !== null ? { message: { chat: chat.ref, id: recorded } } : {}),
     ...(platformMessageId ? { platformMessageId } : {}),
     ...(landedIn !== null && recorded !== null ? { thread: { chat: chat.ref, id: recorded } } : {}),
     delivery: { state: "sent", at },
