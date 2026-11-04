@@ -11,6 +11,9 @@ import { connectionPorts } from "../chats/connected-accounts/connection-ports.js
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { chatsWiring } from "../chats-wiring.js";
 import { openChannelChat } from "../connections/open-chat.js";
+import { startChannelChat } from "../connections/channel-chat.js";
+import { MessageRepository } from "../chats/storage/message-repository.js";
+import { placeIn } from "../chats/storage/place.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -939,6 +942,49 @@ describe("ChatSettingsService", () => {
       chatId: ruled!.chatId,
     });
     expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("reads a direct message a send opened as one, though asked for a group", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    // A send opened the direct message at an address that names no kind,
+    // and stood no speaker in it.
+    startChannelChat(wired, { channel: "feishu", threadId: "oc_ray", threadType: "private" });
+    const ref = { ...throughSales, chatId: "oc_ray" as ChatId };
+
+    expect((await service.get(ref)).supportedFields).toEqual(["session.reset"]);
+    await expect(
+      service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } }),
+    ).rejects.toThrow('Unsupported conversation setting "enabled"');
+  });
+
+  it("places a speaker a rule starts before what its account already said there", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup();
+    // A send said something in the group before any rule, and opened no
+    // session.
+    const { chat } = startChannelChat(wired, { channel: "feishu", threadId: "oc_group" });
+    await new MessageRepository(testDb!.db).send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: { platform: "feishu", id: "ou_sales" }, agent: "main" },
+        parts: [{ type: "text", content: "hello" }],
+      },
+      async () => ({ key: "sent-1" }),
+    );
+    // Said well before the rule, so a placement at now would miss it.
+    const sentAt = new Date(Date.UTC(2026, 0, 1));
+    testDb!.db.run(sql`UPDATE chat_messages SET said_at = ${sentAt.getTime() / 1000}`);
+
+    await service.update({
+      ref: throughSales,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    expect(repository.find("feishu", "oc_group" as ChatId)!.createdAt.getTime()).toBeLessThan(
+      sentAt.getTime(),
+    );
   });
 
   it("names no chat after the placeholder a session opened without a name took", async () => {

@@ -5,7 +5,7 @@ import { and, asc, desc, eq, isNotNull, isNull, like, or, sql, type SQL } from "
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { chatIdsOn, type ChatRepository } from "../chats/storage/chat-repository.js";
-import type { Chat } from "../chats/storage/chat.js";
+import type { Chat, ChatKind } from "../chats/storage/chat.js";
 import { placeIn, type ChatKey, type ChatRef } from "../chats/storage/place.js";
 import { startChannelChat } from "../connections/channel-chat.js";
 import { type ChatAdapters, kindNamedBy } from "../connections/chat-adapter.js";
@@ -222,12 +222,13 @@ export class ChatSettingsRepository {
     return account ? kindNamedBy(account.platform, chatId) : null;
   }
 
-  /** "group" when Rome holds a group at address `chatId` on `channel`'s
+  /** The kind of the chat Rome holds at address `chatId` on `channel`'s
    *  platform, through any of its accounts, whose kind is then fixed; else
-   *  null. */
-  heldKind(channel: string, chatId: ChatId): "group" | null {
+   *  null. An address bound to a direct message holds that one, though asked
+   *  for a group. */
+  heldKind(channel: string, chatId: ChatId): ChatKind | null {
     if (!this.deps.adapters.knownAccountOn(channel)) return null;
-    return this.chatOf(channel, chatId, "group") ? "group" : null;
+    return this.deps.chats.byKey(this.keyOf(channel, chatId, "group"))?.kind ?? null;
   }
 
   /** The platform channel `channel`'s account lives on. */
@@ -295,9 +296,20 @@ export class ChatSettingsRepository {
         // a retired one left by a reconnect is not.
         const id = channelChatId(channel, descriptor.ref.chatId);
         const now = new Date();
-        // Placed before anything was said, it starts a second early, so the
-        // first message, heard within the second, is one it has not seen.
-        const placedAt = new Date(Math.floor(now.getTime() / 1000) * 1000 - 1000);
+        // A speaker first placed here starts a second before now, so the first
+        // message, heard within the second, is one it has not seen. Where the
+        // account already spoke here, as a send that opened no session, it
+        // starts before that message instead, so it reads what it said, as
+        // `ensureChannelChat` places one.
+        const firstOwn = tx.all<{ at: number | null }>(sql`
+          SELECT min(said_at) AS at FROM chat_messages
+          WHERE chat_id = ${chat.id} AND thread_id IS NULL AND sender_account_id = ${via.id}
+        `)[0]?.at;
+        const startSecond = Math.min(
+          Math.floor(now.getTime() / 1000),
+          firstOwn ?? Number.POSITIVE_INFINITY,
+        );
+        const placedAt = new Date((startSecond - 1) * 1000);
         // The legacy source columns are still written for readers that have
         // not moved to the speaker's chat and account.
         const sourceThreadType = !kindKnown
@@ -336,6 +348,8 @@ export class ChatSettingsRepository {
             // before it stood in a chat stands here now, and one left by the
             // account the channel was paired as before moves here, as the
             // first message after a re-pairing moves it.
+            createdAt: sql`CASE WHEN ${romeSessions.chatId} IS NULL AND ${romeSessions.createdAt} >= ${startSecond}
+              THEN ${startSecond - 1} ELSE ${romeSessions.createdAt} END`,
             chatId: chat.id,
             chatPlatform: chat.platform,
             accountId: via.id,

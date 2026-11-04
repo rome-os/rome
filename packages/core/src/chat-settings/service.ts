@@ -683,9 +683,14 @@ export class ChatSettingsService implements ChatSettingsControl {
       ref,
       connectionKind: connection.connectionKind,
       service: connection.connectionKind,
-      // The kind the address names, as the chat would start with, else a
-      // guess that `knownKind` does not count as known.
-      kind: (channel ? this.deps.repository.namedKind(channel, ref.chatId) : null) ?? "channel",
+      // The kind the address names, as the chat would start with, or of the
+      // chat Rome holds there, else a guess that `knownKind` does not count
+      // as known.
+      kind:
+        (channel
+          ? (this.deps.repository.namedKind(channel, ref.chatId) ??
+            this.deps.repository.heldKind(channel, ref.chatId))
+          : null) ?? "channel",
       displayName: ref.chatId,
     };
     this.remember(descriptor);
