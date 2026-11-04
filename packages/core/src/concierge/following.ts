@@ -45,6 +45,18 @@ const log = createLogger("concierge-following");
 
 /** The action each follow routine fires. */
 export const CONCIERGE_FOLLOW_ACTION = "core:concierge_follow_event";
+/**
+ * The Concierge's own actions for what it follows. Explicit, so only an agent
+ * that lists them (the Concierge) may call them. The model reaches them through
+ * `execute_action`, whose allow-list is read at call time, so a running thread
+ * picks them up without restarting.
+ */
+export const CONCIERGE_FOLLOWING_ACTIONS = {
+  follow: "core:concierge_follow",
+  unfollow: "core:concierge_unfollow",
+  list: "core:concierge_following_list",
+  configure: "core:concierge_following_configure",
+} as const;
 /** Routine keys of followed items: `concierge-follow:<source>:<target>:<kind>`. */
 const ROUTINE_KEY_PREFIX = "concierge-follow:";
 /** The guardian setting that holds the rules. */
@@ -457,7 +469,7 @@ export function startConciergeFollowing(
       const supported = FOLLOW_SOURCE_INFO.map((info) => info.source).join(", ");
       if (!isFollowSource(source)) {
         throw new Error(
-          `Rome cannot follow "${source}". Supported sources: ${supported}. following_list says what each one needs.`,
+          `Rome cannot follow "${source}". Supported sources: ${supported}. core:concierge_following_list says what each one needs.`,
         );
       }
       if (source === "github") {
@@ -571,6 +583,7 @@ export function startConciergeFollowing(
     },
   };
   service.attachFollowing(following);
+  registerFollowingActions(deps.actions, following, outsideAction);
 
   // Another app may remove a subscription it shares with these routines (a
   // repo's webhook), which stops them without a word. Subscribing again
@@ -592,4 +605,174 @@ export function startConciergeFollowing(
     coalescer.stop();
     service.attachFollowing(null);
   };
+}
+
+const followingActionConfig = (
+  name: string,
+  description: string,
+  sideEffects: "read-only" | "write",
+) => ({
+  name,
+  type: "system" as const,
+  description,
+  // Explicit: only an agent whose allow-list names it may call it.
+  visibility: "explicit" as const,
+  complexity: "simple" as const,
+  speed: "fast" as const,
+  reliability: "high" as const,
+  sideEffects,
+});
+
+const errorOf = (error: unknown) => ({
+  status: "error" as const,
+  error: error instanceof Error ? error.message : String(error),
+});
+
+/**
+ * The four follow operations as actions. They run in main (the coordination
+ * list in actions/engine.ts). `follow` subscribes at the source through the
+ * connector's actions, so it runs outside the action's own async context,
+ * like the queue's delivery timer.
+ */
+function registerFollowingActions(
+  actions: { register(action: Action): void },
+  following: ConciergeFollowing,
+  outsideAction: <T>(fn: () => T) => T,
+): void {
+  const supported = FOLLOW_SOURCE_INFO.map((info) => info.source).join(", ");
+  actions.register({
+    config: followingActionConfig(
+      CONCIERGE_FOLLOWING_ACTIONS.follow,
+      "Follow something for the guardian, such as a code repo or their inbox, and hear about its events that concern them. " +
+        "Events then arrive as <external_events> batches. Following the same thing again is harmless. " +
+        `Which sources exist and what each takes as target and options: ${CONCIERGE_FOLLOWING_ACTIONS.list}.`,
+      "write",
+    ),
+    inputSchema: {
+      type: "object",
+      required: ["source"],
+      properties: {
+        source: {
+          type: "string",
+          description: `Where it lives, as ${CONCIERGE_FOLLOWING_ACTIONS.list} names it.`,
+        },
+        target: {
+          type: "string",
+          description: "What to follow there, in the source's format. Some sources take none.",
+        },
+        options: {
+          type: "object",
+          description: "Inputs the source asks for, by name. Usually none.",
+        },
+      },
+    },
+    execute: async (args) => {
+      try {
+        const target =
+          typeof args.target === "string" && args.target.trim() ? args.target.trim() : undefined;
+        const options =
+          args.options && typeof args.options === "object" && !Array.isArray(args.options)
+            ? (args.options as Record<string, unknown>)
+            : undefined;
+        const source = typeof args.source === "string" ? args.source.trim() : "";
+        const data = await outsideAction(() =>
+          following.follow({
+            source,
+            ...(target ? { target } : {}),
+            ...(options ? { options } : {}),
+          }),
+        );
+        return { status: "ok", data };
+      } catch (error) {
+        return errorOf(error);
+      }
+    },
+  });
+  actions.register({
+    config: followingActionConfig(
+      CONCIERGE_FOLLOWING_ACTIONS.list,
+      "List what the Concierge follows for the guardian, with each kind of event on or off, the rules (rate limit, quiet hours), and the sources it can follow with what each needs.",
+      "read-only",
+    ),
+    inputSchema: { type: "object", properties: {} },
+    execute: async () => {
+      try {
+        return {
+          status: "ok",
+          data: {
+            following: await following.list(),
+            rules: await following.rules(),
+            sources: FOLLOW_SOURCE_INFO,
+          },
+        };
+      } catch (error) {
+        return errorOf(error);
+      }
+    },
+  });
+  actions.register({
+    config: followingActionConfig(
+      CONCIERGE_FOLLOWING_ACTIONS.unfollow,
+      `Stop following something for the guardian. Take source and target from ${CONCIERGE_FOLLOWING_ACTIONS.list}.`,
+      "write",
+    ),
+    inputSchema: {
+      type: "object",
+      required: ["source", "target"],
+      properties: { source: { type: "string" }, target: { type: "string" } },
+    },
+    execute: async (args) => {
+      const source = typeof args.source === "string" ? args.source.trim() : "";
+      if (!isFollowSource(source)) {
+        return {
+          status: "error",
+          error: `Rome follows nothing at "${source}". Supported sources: ${supported}.`,
+        };
+      }
+      try {
+        return { status: "ok", data: await following.unfollow(source, String(args.target ?? "")) };
+      } catch (error) {
+        return errorOf(error);
+      }
+    },
+  });
+  actions.register({
+    config: followingActionConfig(
+      CONCIERGE_FOLLOWING_ACTIONS.configure,
+      "Change the rules for what the Concierge follows, when the guardian asks. They hold for every source. Fields left out stay. " +
+        "quietHours is a daily window in the guardian's timezone: events then wait and arrive as one batch when it ends; null turns it off. " +
+        "maxTurnsPerHour and minSpacingMinutes bound how often these events may reach the Concierge.",
+      "write",
+    ),
+    inputSchema: {
+      type: "object",
+      properties: {
+        quietHours: {
+          type: ["object", "null"],
+          required: ["start", "end"],
+          properties: {
+            start: { type: "string", description: "HH:mm, 24-hour, e.g. 22:00" },
+            end: { type: "string", description: "HH:mm, 24-hour, e.g. 08:00" },
+          },
+        },
+        maxTurnsPerHour: {
+          type: "integer",
+          minimum: 1,
+          maximum: CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR,
+        },
+        minSpacingMinutes: {
+          type: "integer",
+          minimum: 0,
+          maximum: CONCIERGE_FOLLOW_MAX_SPACING_MINUTES,
+        },
+      },
+    },
+    execute: async (args) => {
+      try {
+        return { status: "ok", data: await following.setRules(validateRulesChange(args)) };
+      } catch (error) {
+        return errorOf(error);
+      }
+    },
+  });
 }

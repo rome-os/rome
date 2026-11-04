@@ -333,6 +333,67 @@ describe("follow, for any source", () => {
   });
 });
 
+describe("the follow actions", () => {
+  const actionNamed = (s: ReturnType<typeof setup>, name: string) =>
+    s.actions.find((action) => action.config.name === name)!;
+
+  it("are explicit, so only an agent that lists them can call them", () => {
+    const s = setup();
+    for (const name of [
+      "core:concierge_follow",
+      "core:concierge_unfollow",
+      "core:concierge_following_list",
+      "core:concierge_following_configure",
+      "core:concierge_follow_event",
+    ]) {
+      expect(actionNamed(s, name).config.visibility).toBe("explicit");
+    }
+  });
+
+  it("follow answers an unknown source with the supported ones, and follows a known one", async () => {
+    const s = setup();
+    const follow = actionNamed(s, "core:concierge_follow");
+    expect(await follow.execute({ source: "slack" }, {} as never)).toEqual({
+      status: "error",
+      error: expect.stringContaining("Supported sources: github, gmail."),
+    });
+    const result = await follow.execute({ source: "gmail" }, {} as never);
+    expect(result).toMatchObject({
+      status: "ok",
+      data: { source: "gmail", target: "me@example.com" },
+    });
+  });
+
+  it("following_list returns what is followed, the rules and the sources", async () => {
+    const s = setup();
+    await s.following().followGmail();
+    const result = (await actionNamed(s, "core:concierge_following_list").execute(
+      {},
+      {} as never,
+    )) as {
+      data: { following: unknown[]; rules: unknown; sources: { source: string }[] };
+    };
+    expect(result.data.following).toHaveLength(1);
+    expect(result.data.sources.map((info) => info.source)).toEqual(["github", "gmail"]);
+  });
+
+  it("unfollow and configure check their input", async () => {
+    const s = setup();
+    expect(
+      await actionNamed(s, "core:concierge_unfollow").execute(
+        { source: "x", target: "y" },
+        {} as never,
+      ),
+    ).toMatchObject({ status: "error" });
+    expect(
+      await actionNamed(s, "core:concierge_following_configure").execute(
+        { maxTurnsPerHour: 0 },
+        {} as never,
+      ),
+    ).toMatchObject({ status: "error" });
+  });
+});
+
 describe("FOLLOW_SOURCE_INFO", () => {
   it("describes every source with its kinds, so no tool definition names one", () => {
     expect(FOLLOW_SOURCE_INFO.map((info) => info.source)).toEqual(["github", "gmail"]);

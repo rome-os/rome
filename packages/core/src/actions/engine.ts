@@ -141,9 +141,15 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
-  // Queues an event from something the Concierge follows. Its delivery timer
-  // starts the Concierge's turn outside the action's context (concierge/following.ts).
+  // What the Concierge follows (concierge/following.ts). The event action
+  // queues an event; its delivery timer starts the Concierge's turn outside
+  // the action's context. `follow` subscribes at the source through connector
+  // actions, also called outside the action's context.
   "core:concierge_follow_event",
+  "core:concierge_follow",
+  "core:concierge_unfollow",
+  "core:concierge_following_list",
+  "core:concierge_following_configure",
 ]);
 
 export interface ActionRunContext {
