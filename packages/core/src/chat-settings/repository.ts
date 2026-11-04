@@ -288,8 +288,9 @@ export class ChatSettingsRepository {
           this.startChat(descriptor, channel, kindKnown);
         // An address standing in for a name the platform has not given is no
         // name: the first message there names the chat.
-        const named = descriptor.displayName !== descriptor.ref.chatId;
-        if (named) this.deps.chats.rename(chat, descriptor.displayName);
+        if (!isPlaceholderName(channel, descriptor)) {
+          this.deps.chats.rename(chat, descriptor.displayName);
+        }
         // The session messages through `channel` at the address reach, which
         // a retired one left by a reconnect is not.
         const id = channelChatId(channel, descriptor.ref.chatId);
@@ -384,7 +385,7 @@ export class ChatSettingsRepository {
     return startChannelChat(this.deps, {
       channel,
       threadId: address,
-      ...(descriptor.displayName !== address ? { threadName: descriptor.displayName } : {}),
+      ...(isPlaceholderName(channel, descriptor) ? {} : { threadName: descriptor.displayName }),
       ...(kindKnown ? { threadType: descriptor.kind === "dm" ? "private" : "group" } : {}),
     }).chat;
   }
@@ -497,4 +498,12 @@ export function withRoutingOf(
   if (routing === undefined) return rule;
   const base = rule ?? { ...stored!, overrides: {} };
   return { ...base, overrides: { ...base.overrides, routing } };
+}
+
+/** Whether a conversation's name only stands in for one the platform has not
+ *  given: its address, or the `channel:address` name a session opened with no
+ *  name takes, as `backfillChannelConversationName` reads them. */
+function isPlaceholderName(channel: string, descriptor: ChatDescriptor): boolean {
+  const address = descriptor.ref.chatId;
+  return [address, `${channel}:${address}`].includes(descriptor.displayName);
 }

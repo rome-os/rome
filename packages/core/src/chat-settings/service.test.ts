@@ -941,6 +941,29 @@ describe("ChatSettingsService", () => {
     expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
   });
 
+  it("names no chat after the placeholder a session opened without a name took", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+    const input = {
+      channel: "feishu",
+      threadId: "ou_ray",
+      threadType: "private" as const,
+      agentName: "main",
+    };
+    await openSpeaker(testDb!.db, input, wired);
+
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBeNull();
+
+    await openSpeaker(testDb!.db, { ...input, threadName: "Ray" }, wired);
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
+  });
+
   it("moves the speaker to the account its channel is paired as now when a rule is set", async () => {
     const { service, repository, wired, paired, throughSales } = await twoAccountsInOneGroup();
     const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
