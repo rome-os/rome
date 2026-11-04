@@ -4171,82 +4171,6 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("injects pending channel notifications and exact reply context once before the current message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "channel-context",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "user",
-        content: textContent("original message"),
-        platformMessageId: "original-message",
-        senderName: "Alice",
-        createdAt: new Date("2026-08-03T08:00:00.000Z"),
-      });
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "notification",
-        content: textContent("ambient update"),
-        platformMessageId: "ambient-message",
-        senderName: "Bob",
-        createdAt: new Date("2026-08-03T08:01:00.000Z"),
-      });
-
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-conversation-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "current message",
-          channelThreadKey: "discord:channel-context",
-          romeSessionId: conversation.id,
-          platformMessageId: "current-message",
-          replyTo: {
-            messageId: "original-message",
-            content: "stale provider snapshot",
-            senderName: "Wrong sender",
-          },
-          threadContext: {
-            channel: "discord",
-            threadId: "channel-context",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
-
-      expect(providerPrompts).toHaveLength(1);
-      const prompt = providerPrompts[0] ?? "";
-      expect(prompt).toContain("<conversation_context>");
-      expect(prompt).toContain("Bob: ambient update");
-      expect(prompt).toContain("<reply_context>");
-      expect(prompt).toContain("Alice: original message");
-      expect(prompt).not.toContain("stale provider snapshot");
-      expect(prompt).toContain("<current_message>\ncurrent message\n</current_message>");
-      expect(prompt.indexOf("<conversation_context>")).toBeLessThan(
-        prompt.indexOf("<reply_context>"),
-      );
-      expect(prompt.indexOf("<reply_context>")).toBeLessThan(prompt.indexOf("<current_message>"));
-
-      await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
-    });
-
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
@@ -4416,148 +4340,37 @@ describe("AgentRunner", () => {
       expect(prompt.indexOf("Bob: start here")).toBeLessThan(prompt.indexOf("Rome: on it"));
     });
 
-    it("injects a child thread's parent starter before Rome's first reply and the current message", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const parent = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "parent-channel-thread-starter",
-        agentName: "main",
-      });
-      const child = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "child-thread-starter-context",
-        parentThreadId: "parent-channel-thread-starter",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      await webchatRepo.addConversationMessage({
-        sessionId: parent.id,
-        role: "user",
-        content: textContent("Should we ship on Friday?"),
-        platformMessageId: "thread-starter-message",
-        senderName: "Alice",
-      });
-      await webchatRepo.recordOutboundConversationMessage({
-        sessionId: child.id,
-        content: textContent("We should check the release checklist first."),
-        platformMessageId: "rome-first-thread-reply",
-        senderId: "rome",
-        senderName: "Rome",
-        replyToPlatformMessageId: "thread-starter-message",
-        knownToProvider: false,
-      });
+    it("carries only the newest 20 unseen lines, and counts the rest", async () => {
+      const at = new Date("2026-08-03T08:00:00.000Z");
+      const unseen: UnseenLine[] = Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        senderName: "Participant",
+        text: `ambient ${index + 1}`,
+        at,
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      }));
 
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-child-thread-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "What deadline did you mean?",
-          channelThreadKey: "discord:child-thread-starter-context",
-          romeSessionId: child.id,
-          platformMessageId: "child-current-message",
-          threadContext: {
-            channel: "discord",
-            threadId: "child-thread-starter-context",
-            parentThreadId: "parent-channel-thread-starter",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
+      const prompt = await linkedPrompt(unseen, { threadId: "bounded-chat" });
 
-      expect(providerPrompts).toHaveLength(1);
-      const prompt = providerPrompts[0] ?? "";
-      expect(prompt).toContain("Alice: Should we ship on Friday?");
-      expect(prompt).toContain("Rome: We should check the release checklist first.");
-      expect(prompt).toContain(
-        "<current_message>\nWhat deadline did you mean?\n</current_message>",
-      );
-      expect(prompt.indexOf("Alice: Should we ship on Friday?")).toBeLessThan(
-        prompt.indexOf("Rome: We should check the release checklist first."),
-      );
-      expect(prompt.indexOf("Rome: We should check the release checklist first.")).toBeLessThan(
-        prompt.indexOf("<current_message>"),
-      );
-      await expect(webchatRepo.loadConversationContext(child.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
-    });
-
-    it("injects only the latest 20 pending notifications and marks the omitted snapshot consumed", async () => {
-      const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelChat({
-        channel: "discord",
-        threadId: "bounded-channel-context",
-        agentName: "main",
-      });
-      const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
-      for (let index = 0; index < 21; index += 1) {
-        await webchatRepo.addConversationMessage({
-          sessionId: conversation.id,
-          role: "notification",
-          content: textContent(`ambient ${index + 1}`),
-          platformMessageId: `ambient-${index + 1}`,
-          senderName: "Participant",
-          createdAt: new Date(Date.UTC(2026, 7, 3, 8, index)),
-        });
-      }
-
-      const providerPrompts: string[] = [];
-      const provider: ModelProvider = {
-        id: "mock",
-        displayName: "mock-bounded-conversation-context",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (input) {
-          providerPrompts.push(input.prompt);
-          yield { type: "result", content: "ok" };
-        }),
-      };
-      await collectMessages(
-        createRunner(provider).run({
-          agentName: "test-main",
-          prompt: "current message",
-          channelThreadKey: "discord:bounded-channel-context",
-          romeSessionId: conversation.id,
-          platformMessageId: "current-message",
-          threadContext: {
-            channel: "discord",
-            threadId: "bounded-channel-context",
-            channelUserId: "guardian",
-            threadType: "group",
-          },
-        }),
-      );
-
-      const prompt = providerPrompts[0] ?? "";
       expect(prompt).toContain("[1 earlier messages omitted]");
       expect(prompt).not.toContain("Participant: ambient 1\n");
       expect(prompt).toContain("Participant: ambient 2");
       expect(prompt).toContain("Participant: ambient 21");
-      await expect(webchatRepo.loadConversationContext(conversation.id)).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
     });
 
-    it("uses provider-supplied reply content for the current turn without persisting a synthetic message", async () => {
+    it("quotes the platform's copy of the message replied to when Rome holds none", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "wechat",
         threadId: "wechat-runtime-reply",
         agentName: "main",
       });
+      const turnLinks: Pick<TurnLinks, "unseen" | "seen"> = {
+        unseen: () => [],
+        seen: () => undefined,
+      };
       const providerPrompts: string[] = [];
       const provider: ModelProvider = {
         id: "mock",
@@ -4570,7 +4383,7 @@ describe("AgentRunner", () => {
       };
 
       await collectMessages(
-        createRunner(provider).run({
+        createRunner(provider, undefined, { turnLinks }).run({
           agentName: "test-main",
           prompt: "What does the first word mean?",
           channelThreadKey: "wechat:wechat-runtime-reply",
@@ -4593,13 +4406,6 @@ describe("AgentRunner", () => {
       expect(providerPrompts[0]).toContain(
         "<reply_context>\nRome: Jack Ma profile\n</reply_context>",
       );
-      await expect(
-        webchatRepo.loadConversationContext(conversation.id, "wechat-server-42"),
-      ).resolves.toEqual({
-        unseen: [],
-        threadStarter: null,
-        repliedTo: null,
-      });
     });
   });
 

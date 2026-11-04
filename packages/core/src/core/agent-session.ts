@@ -122,16 +122,9 @@ import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
-import type {
-  StoredConversationContextMessage,
-  WebChatRepository,
-} from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
-import { ChatEvents, type Via } from "../chats/events.js";
-import type { SaidMessage } from "../chats/message.js";
-import { StoredMessages, type MessageRepository } from "../chats/message-repository.js";
-import { chatKey, placeIn, type Place } from "../chats/place.js";
 import type { ContextLine, TurnLinks } from "../sessions/turn-links.js";
 import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
@@ -142,27 +135,6 @@ import {
 } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
-
-function conversationMessageText(content: string): string {
-  try {
-    const parts = JSON.parse(content) as unknown;
-    if (!Array.isArray(parts)) return content;
-    return parts
-      .flatMap((part) =>
-        part &&
-        typeof part === "object" &&
-        "type" in part &&
-        part.type === "text" &&
-        "content" in part &&
-        typeof part.content === "string"
-          ? [part.content]
-          : [],
-      )
-      .join("\n");
-  } catch {
-    return content;
-  }
-}
 
 /** One line of the context a turn's prompt opens with. */
 interface ConversationContextLine {
@@ -181,26 +153,6 @@ function contextLine(message: ContextLine): ConversationContextLine {
   };
 }
 
-function storedContextLine(
-  message: Omit<StoredConversationContextMessage, "createdAt"> & { createdAt?: Date },
-): ConversationContextLine {
-  return {
-    id: message.id,
-    sender: message.senderName,
-    text: conversationMessageText(message.content),
-    ...(message.createdAt ? { createdAt: message.createdAt } : {}),
-  };
-}
-
-function saidContextLine(message: SaidMessage): ConversationContextLine {
-  return {
-    id: message.id,
-    sender: message.senderName ?? null,
-    text: message.body.text,
-    createdAt: message.at,
-  };
-}
-
 function conversationContextLine(line: ConversationContextLine): string {
   return replyContextLine({
     createdAt: line.createdAt,
@@ -209,40 +161,9 @@ function conversationContextLine(line: ConversationContextLine): string {
   });
 }
 
-/** The record of one channel's chats alone, for a manager given no
- *  {@link MessageRepository}. Nothing is recorded through it. */
-function channelMessages(
-  rows: WebChatRepository,
-  channel: string,
-): Pick<MessageRepository, "find"> {
-  return new StoredMessages(rows, new ChatEvents(), { channelsOn: () => [channel] });
-}
-
 /** How many of the messages the agent has not seen a turn's prompt carries.
  *  The rest are counted, not shown. */
 const CATCH_UP_LIMIT = 20;
-
-/**
- * The newest of `unseen` as the place's record holds them, oldest first, at
- * most {@link CATCH_UP_LIMIT}, and how many more there were
- * (docs/domains/participation.md#projection), read as the account the agent
- * was woken on heard it, which is the record the unseen ids name. `unseen`
- * comes oldest first.
- */
-async function catchUp(
-  messages: Pick<MessageRepository, "find">,
-  place: Place,
-  via: Pick<Via, "channel">,
-  unseen: readonly { id: string }[],
-): Promise<{ lines: SaidMessage[]; omitted: number }> {
-  const shown = unseen.slice(-CATCH_UP_LIMIT);
-  const lines = await messages.find(
-    place,
-    shown.map((message) => message.id),
-    via,
-  );
-  return { lines, omitted: unseen.length - shown.length };
-}
 
 function prependConversationContext(
   prompt: string,
@@ -468,12 +389,9 @@ interface ManagerDeps {
   lifecycleDispatcher: AgentLifecycleDispatcher;
   /** Stable conversation transcript and notification context store. */
   webchatRepo?: WebChatRepository;
-  /** What was said in each place, read for the agent's catch-up at a wake.
-   *  Absent, the catch-up reads the woken channel's own record only. */
-  chatMessages?: Pick<MessageRepository, "find">;
-  /** Each session's links to what was said where it stands. Given, a wake's
-   *  catch-up reads and marks them in place of `webchatRepo`'s rows. Nothing
-   *  passes it until the Chats switch. */
+  /** Each session's links to what was said where it stands, which a wake's
+   *  catch-up reads and marks. Absent, a channel session catches up on
+   *  nothing. */
   turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
   /** The platform a channel's accounts live on. Absent, a channel's name
    *  is its platform. */
@@ -3478,7 +3396,6 @@ class AgentSessionImpl implements AgentSession {
       // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
-      let pendingConversationMessageIds: string[] = [];
       let unseenLineIds: number[] = [];
       // A channel conversation stores lines the agent never saw as turns. The
       // surface says whether this channel does; webchat, for one, does not.
@@ -3514,48 +3431,6 @@ class AgentSessionImpl implements AgentSession {
             ...shown.map(contextLine),
           ],
           omittedNotificationCount: unseen.length - shown.length,
-          repliedTo,
-        });
-      } else if (catchesUp && this.deps.webchatRepo && sink.threadContext && channel) {
-        const storedContext = await this.deps.webchatRepo.loadConversationContext(
-          sink.romeSessionId,
-          sink.replyTo?.messageId,
-        );
-        // The agent catches up on the place the waking message was said in:
-        // the chat, or the thread in it.
-        const woken = sink.threadContext;
-        const parent = woken.parentThreadId;
-        const place = placeIn(
-          chatKey(
-            this.deps.platformOfChannel?.(channel) ?? channel,
-            (parent ?? woken.threadId) as ChatId,
-          ),
-          parent === undefined ? undefined : (woken.threadId as ChatId),
-        );
-        const caughtUp = await catchUp(
-          this.deps.chatMessages ?? channelMessages(this.deps.webchatRepo, channel),
-          place,
-          { channel },
-          storedContext.unseen,
-        );
-        const repliedTo = storedContext.repliedTo
-          ? storedContextLine(storedContext.repliedTo)
-          : sink.replyTo?.content
-            ? {
-                id: `runtime-reply:${sink.replyTo.messageId}`,
-                sender: sink.replyTo.senderName ?? null,
-                text: sink.replyTo.content,
-              }
-            : null;
-        pendingConversationMessageIds = storedContext.unseen.map((message) => message.id);
-        userPrompt = prependConversationContext(userPrompt, {
-          notifications: [
-            ...(storedContext.threadStarter
-              ? [storedContextLine(storedContext.threadStarter)]
-              : []),
-            ...caughtUp.lines.map(saidContextLine),
-          ],
-          omittedNotificationCount: caughtUp.omitted,
           repliedTo,
         });
       }
@@ -3721,22 +3596,6 @@ class AgentSessionImpl implements AgentSession {
               } catch (err) {
                 // As below: the turn goes on, and a later turn retries.
                 log.warn("failed to mark conversation context seen", {
-                  romeSessionId: sink.romeSessionId,
-                  turnId: sink.turnId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }
-            if (this.deps.webchatRepo && pendingConversationMessageIds.length > 0) {
-              try {
-                await this.deps.webchatRepo.markConversationContextInjected(
-                  pendingConversationMessageIds,
-                  sink.turnId,
-                );
-              } catch (err) {
-                // Provider dispatch already succeeded. Keep the turn alive and
-                // leave rows pending so a later turn can safely retry context.
-                log.warn("failed to mark conversation context injected", {
                   romeSessionId: sink.romeSessionId,
                   turnId: sink.turnId,
                   error: err instanceof Error ? err.message : String(err),
