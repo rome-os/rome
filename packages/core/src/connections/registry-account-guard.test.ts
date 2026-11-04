@@ -439,6 +439,49 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     }
   });
 
+  it("ends the last connection a run of fixes started when a disconnect waited on them", async () => {
+    let releaseClear: () => void = () => {};
+    const clearing = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    let clears = 0;
+    const db = createTestDb();
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(db.db),
+    });
+    registry.register({
+      ...botIdDescriptor(),
+      severalAccounts: false,
+      custody: {
+        sync: async () => {},
+        clear: () => (clears++ === 0 ? clearing : Promise.resolve()),
+      },
+    });
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+
+      // Two grants that address no connection, as a provider redeem does, each
+      // reaching another bot: 100 is ended for 900, then 900 for 901.
+      const toSecond = registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-9"), {
+        botId: "900",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const toThird = registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-10"), {
+        botId: "901",
+      });
+      const disconnect = registry.disconnect(first.id);
+      releaseClear();
+      await toSecond;
+      await toThird;
+      await disconnect;
+
+      expect(registry.all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("records the account a grant reaches, and clears it on disconnect", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {

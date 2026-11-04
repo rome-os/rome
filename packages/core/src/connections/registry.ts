@@ -170,7 +170,7 @@ export class ConnectionRegistry {
   /** The connection a fix that reached another account started in place of
    *  each connection it ended, so a disconnect asked for before that fix
    *  finished ends the connection it started. */
-  private readonly startedInPlaceOf = new WeakMap<ConnectionImpl, ConnectionId>();
+  private readonly startedInPlaceOf = new WeakMap<ConnectionImpl, ConnectionImpl>();
   private readonly unlockHandlers: Record<Capability, Array<(conn: Connection) => void>> = {
     chat: [],
     act: [],
@@ -387,8 +387,7 @@ export class ConnectionRegistry {
         // away the access they were fixing, so this ends that connection.
         let current: ConnectionImpl | undefined = conn;
         while (current && this.connections.get(current.id) !== current) {
-          const next = this.startedInPlaceOf.get(current);
-          current = next ? this.connections.get(next) : undefined;
+          current = this.startedInPlaceOf.get(current);
         }
         if (!current) return;
         await current.disconnect(grant);
@@ -538,7 +537,6 @@ export class ConnectionRegistry {
         // transaction.
         await ending.disconnect(ending.descriptor.grant, { inTx: write });
         this.connections.delete(ending.id);
-        this.startedInPlaceOf.set(ending, id);
         opts.onEnded?.(ending.id);
       } else {
         commit();
@@ -546,6 +544,7 @@ export class ConnectionRegistry {
       try {
         conn = new ConnectionImpl(record, registered!.descriptor, this);
         this.connections.set(id, conn);
+        if (ending) this.startedInPlaceOf.set(ending, conn);
         await conn.hydrate(grantValue);
       } catch (err) {
         logActivationFailure(err);
