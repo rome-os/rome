@@ -40,6 +40,8 @@ describe("recordedSends", () => {
   let afterSend: () => void;
   /** Runs before the port takes a send, as an adapter checks one. */
   let beforeSend: (message: OutgoingMessage) => void;
+  /** The id the port gives its `n`th message. */
+  let idOf: (n: number) => string;
 
   beforeEach(() => {
     testDb = createTestDb();
@@ -47,6 +49,7 @@ describe("recordedSends", () => {
     landsAt = {};
     afterSend = () => {};
     beforeSend = () => {};
+    idOf = (n) => `m-${n}`;
     let next = 0;
     /** A channel whose send port answers each message with the next id, at
      *  the address it names, or at a new email thread when it names none. */
@@ -61,7 +64,7 @@ describe("recordedSends", () => {
             afterSend();
             return {
               chatId: (landsAt[address] ?? (address || "thread-new")) as ChatId,
-              messageId: `m-${++next}`,
+              messageId: idOf(++next),
             } satisfies MessageReceipt;
           },
         },
@@ -391,23 +394,47 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([{ chat: "thread-real", text: "Thanks", sender_agent: "sales" }]);
   });
 
-  it("read a chat-style quote on an email channel as the email it answers", async () => {
+  it("read a chat-style quote on an email channel as the email it answers in that thread", async () => {
+    idOf = (n) => `<m-${n}@mail.example.com>`;
     await send("email").send("thread-7" as ChatId, { text: "Booked?" });
 
-    const receipt = await send("email").send("thread-9" as ChatId, {
+    const receipt = await send("email").send("thread-7" as ChatId, {
       text: "Thanks",
-      replyToMessageId: "m-1",
+      replyToMessageId: "<m-1@mail.example.com>",
     });
 
     expect(receipt.chatId).toBe("thread-7");
     expect(sent[1]).toMatchObject({
       address: "thread-7",
-      message: { kind: "email", inReplyToMessageId: "m-1" },
+      message: { kind: "email", inReplyToMessageId: "<m-1@mail.example.com>" },
     });
-    expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
   });
 
-  it("answer the email a reply names over a chat-style quote", async () => {
+  it("refuse a chat-style quote of an email in another thread, or on a new email, and send nothing", async () => {
+    idOf = (n) => `<m-${n}@mail.example.com>`;
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    for (const address of ["thread-9", "bob@example.com"]) {
+      await expect(
+        send("email").send(address as ChatId, {
+          text: "Thanks",
+          replyToMessageId: "<m-1@mail.example.com>",
+        }),
+      ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    }
+    expect(sent).toHaveLength(1);
+  });
+
+  it("refuse a chat-style quote that is not an email's Message-ID, even of an email Rome holds", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    await expect(
+      send("email").send("thread-7" as ChatId, { text: "Thanks", replyToMessageId: "m-1" }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("answer the email a reply names over a chat-style quote, in whatever thread", async () => {
     await send("email").send("thread-7" as ChatId, { text: "Booked?" });
 
     await send("email").send(
@@ -420,7 +447,7 @@ describe("recordedSends", () => {
       } as OutgoingMessage,
     );
 
-    expect(sent[1]?.message).toMatchObject({ inReplyToMessageId: "m-1" });
+    expect(sent[1]).toMatchObject({ address: "thread-7", message: { inReplyToMessageId: "m-1" } });
   });
 
   it("record an HTML-only email by its text with its links, and an attachment by a note", async () => {

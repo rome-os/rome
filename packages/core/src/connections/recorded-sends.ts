@@ -11,10 +11,12 @@ import {
   type MessageReceipt,
   type OutgoingEmailMessage,
   type OutgoingMessage,
+  SendRefused,
 } from "@rome-os/app-runtime";
 import type { ChannelSend } from "../chats/connected-accounts/connected-account.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import { partsText } from "../chats/storage/message.js";
+import { EMAIL_MESSAGE_ID, replyToShaped } from "./outbound/send-refusals.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
@@ -115,12 +117,14 @@ export function recordedSends<C extends Channel>(
         // The port quotes by the platform's id, an email by the provider's.
         // On email a chat-style quote is a reply too, and the email a reply
         // names wins over it.
-        const answers = emails
-          ? (email?.inReplyToMessageId ?? message.replyToMessageId)
-          : undefined;
-        const quoted = emails ? answers : message.replyToMessageId;
+        const answers = email?.inReplyToMessageId;
+        const chatQuote = emails && answers === undefined ? message.replyToMessageId : undefined;
+        if (chatQuote !== undefined) {
+          refuseQuoteElsewhere(local, channel.name, address, chatQuote);
+        }
+        const quoted = emails ? (answers ?? chatQuote) : message.replyToMessageId;
         let at = address;
-        if (!email && answers === undefined && namesNewEmail(local, channel.name, address)) {
+        if (!email && namesNewEmail(local, channel.name, address)) {
           // The email port takes a plain message to an address, or to the
           // guardian, as a new email to them.
           return await openThread(local, channel, out, {
@@ -132,7 +136,8 @@ export function recordedSends<C extends Channel>(
         // A blank id is a reply too, which the port refuses, rather than
         // read as no reply.
         if (answers !== undefined) {
-          // The provider sends a reply into the thread of the email it
+          // The email field may name an email in any thread. The provider
+          // sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there. An
           // email Rome does not hold, as one fetched from the mailbox
           // directly, sits in a thread Rome learns only from the provider's
@@ -238,6 +243,29 @@ function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string
   if (deps.adapters.platformOn(channel) !== EMAIL_PLATFORM) return false;
   const named = address.trim().toLowerCase() === "guardian" || address.includes("@");
   return named && !deps.chats.byKey(deps.adapters.chatAt(channel, address, "group"));
+}
+
+/**
+ * Refuses a chat-style quote on email channel `channel` that the message to
+ * `address` cannot carry: an id that is not an email's Message-ID, a quote on
+ * a new email, and a quote of an email Rome holds in another thread. As on
+ * every platform, a quote answers a message in the chat it is sent to. Only
+ * `inReplyToMessageId` reaches into another thread.
+ */
+function refuseQuoteElsewhere(
+  deps: RecordedSendsDeps,
+  channel: string,
+  address: string,
+  quote: string,
+): void {
+  replyToShaped("email", quote, EMAIL_MESSAGE_ID);
+  const held = threadOf(deps, channel, quote);
+  if (namesNewEmail(deps, channel, address) || (held && address.trim() && held !== address)) {
+    throw new SendRefused(
+      "reply_unaddressable",
+      `email ${JSON.stringify(quote)} is not in the thread this message goes to`,
+    );
+  }
 }
 
 /** The address of the email thread that holds the email the provider calls

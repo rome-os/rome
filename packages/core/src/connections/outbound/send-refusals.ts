@@ -132,6 +132,9 @@ export async function attachmentsToSend(
   return attachments;
 }
 
+/** An email's Message-ID, `local@domain`, in angle brackets or without. */
+export const EMAIL_MESSAGE_ID = /^(?:<[^\s<>@]+@[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+)$/;
+
 /** Refuses a `replyTo` that is not of `pattern`, the shape of a message id on
  *  a channel named `channel`, and answers it otherwise. */
 export function replyToShaped(

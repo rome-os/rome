@@ -9,7 +9,11 @@ import type {
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
 import { SendRefused } from "@rome-os/app-runtime";
-import { refuseUnshownParts, replyToShaped } from "../../outbound/send-refusals.js";
+import {
+  EMAIL_MESSAGE_ID,
+  refuseUnshownParts,
+  replyToShaped,
+} from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import { mapGuardianToChannel } from "../../../people/guardian-mapping.js";
@@ -126,9 +130,6 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
     fileName: p.name,
   }));
 }
-
-/** An email's Message-ID, `local@domain`, in angle brackets or without. */
-const MESSAGE_ID = /^(?:<[^\s<>@]+@[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+)$/;
 
 function textFromParts(parts: OutgoingMessage["parts"]): string {
   if (!parts) return "";
@@ -370,7 +371,8 @@ export class EmailAdapter {
     // A reply is email's own quote: it names the email it answers in
     // In-Reply-To. The email field wins over the chat-style one.
     const inReplyTo =
-      email?.inReplyToMessageId ?? replyToShaped("email", message.replyToMessageId, MESSAGE_ID);
+      email?.inReplyToMessageId ??
+      replyToShaped("email", message.replyToMessageId, EMAIL_MESSAGE_ID);
     // Blank text says nothing, so the text parts speak, as on every channel.
     const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
 
