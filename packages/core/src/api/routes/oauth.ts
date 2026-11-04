@@ -155,6 +155,11 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       // (a sign-in redeem has no session yet). Signing in never disturbs a
       // connection, so one that reaches another account grants nothing.
       const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
+      // The guardian is recognized the way the start routes recognize them,
+      // trusted loopback included, so a connect it started is never read as a
+      // sign-in.
+      const connecting =
+        existingSession !== null || (await resolveGuardianSession(c, deps.db)) !== null;
       // Set when the redeem reached another account and ended the connection.
       let ended = false;
       const imported = await importProviderBundle(
@@ -163,7 +168,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
         redeemed.tokens,
         redeemed.profile ?? {},
         {
-          signIn: !existingSession,
+          signIn: !connecting,
           onEnded: () => {
             ended = true;
           },

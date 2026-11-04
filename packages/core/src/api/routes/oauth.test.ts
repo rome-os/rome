@@ -19,7 +19,11 @@ const {
   redeemRomeCloudOAuthHandoff,
   syncProviderTokenFile,
   syncGithubShellIntegrationForProvider,
+  resolveGuardianSession,
 } = rs.hoisted(() => ({
+  resolveGuardianSession: rs.fn(
+    async (..._a: unknown[]): Promise<{ userId: string; via: string } | null> => null,
+  ),
   redeemRomeCloudOAuthHandoff: rs.fn(),
   syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
@@ -50,6 +54,7 @@ rs.mock("../../lib/auth.js", () => ({
   verifySession: rs.fn(() => null),
   issueGuardianSession: rs.fn(),
 }));
+rs.mock("../../lib/guardian-session.js", () => ({ resolveGuardianSession }));
 rs.mock("../../lib/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   getEnabledOAuthProviders: () => ["github", "slack"],
@@ -187,6 +192,57 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const conn = registry.find("google")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().user).toBe("authorized");
+  });
+
+  it("reads a trusted-loopback guardian's redeem as a connect, which ends the connection to another account", async () => {
+    const registry = makeRegistry();
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { subject: "42" },
+      tokens: { accessToken: "gho-1" },
+      metadata: null,
+    });
+    await postRedeem(makeDeps(registry));
+    const [first] = registry.find("github");
+
+    resolveGuardianSession.mockResolvedValueOnce({ userId: "guardian-1", via: "loopback" });
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { subject: "99" },
+      tokens: { accessToken: "gho-2" },
+      metadata: null,
+    });
+    const res = await postRedeem(makeDeps(registry));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ended: true });
+    const connections = registry.find("github");
+    expect(connections).toHaveLength(1);
+    expect(connections[0]!.id).not.toBe(first!.id);
+  });
+
+  it("leaves the connection alone when a sign-in redeem reaches another account", async () => {
+    const registry = makeRegistry();
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { subject: "42" },
+      tokens: { accessToken: "gho-1" },
+      metadata: null,
+    });
+    await postRedeem(makeDeps(registry));
+    const [first] = registry.find("github");
+
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "github",
+      profile: { subject: "99" },
+      tokens: { accessToken: "gho-2" },
+      metadata: null,
+    });
+    const res = await postRedeem(makeDeps(registry));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).not.toHaveProperty("ended");
+    expect(registry.find("github").map((connection) => connection.id)).toEqual([first!.id]);
   });
 
   it("fails the redeem when the ledger import throws — nothing reports connected", async () => {
