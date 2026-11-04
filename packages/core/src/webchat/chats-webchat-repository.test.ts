@@ -278,8 +278,8 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
-  // Until #1671 settles where they live, a session in no chat keeps its
-  // prompts and answers as its own.
+  // A subagent, fork or action run stands in no chat, so its prompts and
+  // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");

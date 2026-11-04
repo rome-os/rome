@@ -272,7 +272,7 @@ function rawStats(row: RawSessionStats): RawSessionStats {
  * Where a session's messages are counted from: `legacy` counts the session's
  * own rows in `rome_agent_messages`; `chats` counts the messages said where
  * its speaker stands, from Chats, beside the session's own traces, or all
- * its own rows when it stands in no chat (#1671). Vocabulary:
+ * its own rows when it stands in no chat. Vocabulary:
  * docs/domains/chats.md.
  */
 export type SessionLines = "legacy" | "chats";

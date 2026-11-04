@@ -804,7 +804,7 @@ function storedLine(row: LineRow): TranscriptLine {
 /**
  * The transcript lines of `sessionIds`, as one table: what was said where
  * each session stands, from Chats, beside the session's traces, and the
- * rows of a session that stands in no chat (#1671). Every message recorded
+ * own rows of a session that stands in no chat. Every message recorded
  * there is a line, so each of Rome's accounts' copies in a Telegram basic
  * group is one (#1670), and a dashboard notice is not a line (#1672). A line is the session's prompt or answer by its turn link; a line
  * with none, or only caught up on, is its agent's when its account said it,

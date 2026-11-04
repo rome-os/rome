@@ -93,7 +93,7 @@ describe("SessionQueryRepository", () => {
       own("chat-1", "a", "assistant", 202);
     }
 
-    /** A subagent in no chat, which keeps its prompt, trace and answer (#1671). */
+    /** A subagent in no chat, which keeps its prompt, trace and answer. */
     function seededSubagent() {
       testDb.db
         .insert(romeSessions)
