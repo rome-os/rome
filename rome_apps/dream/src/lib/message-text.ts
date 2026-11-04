@@ -1,6 +1,6 @@
 /**
- * The readable text of a stored `rome_agent_messages.content`, or "" when it
- * holds none. Tool calls and tool results are dropped. Content that is not
+ * The readable text of a message's stored content, as Chats hands it in a
+ * `ChatLine`, or "" when it holds none. Tool calls and tool results are dropped. Content that is not
  * JSON is returned as it is, trimmed.
  */
 export function extractText(rawContent: string): string {
