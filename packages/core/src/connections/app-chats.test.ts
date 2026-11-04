@@ -12,7 +12,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
-import { ChannelNotConnected } from "../chats/connected-accounts/connected-account.js";
+import { AccountNotConnected } from "../chats/connected-accounts/connected-account.js";
 import { SendRefused } from "@rome-os/app-runtime";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -419,7 +419,7 @@ describe("appChats", () => {
     it("answers a Connection whose talk is locked as not connected, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelNotConnected("telegram");
+        throw new AccountNotConnected("telegram");
       };
 
       expect(await refusal(chats.send(group, { text: "x" }))).toBe("not_connected");

@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
-import type { ChannelApiRequest, ChannelApiResult } from "../../apps/platform-requests.js";
+import type { ConnectionApiRequest, ConnectionApiResult } from "../../apps/platform-requests.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
 
@@ -34,8 +34,8 @@ const fakeState: {
   typedThread?: string;
   inbound?: (msg: ChannelMessage) => Promise<void>;
   sent: Array<{ chatId: ChatId; message: unknown }>;
-  apiRequests: ChannelApiRequest[];
-  apiResult: ChannelApiResult;
+  apiRequests: ConnectionApiRequest[];
+  apiResult: ConnectionApiResult;
   stopCalls: number;
   channels: Array<{
     id: string;
@@ -89,7 +89,7 @@ rs.mock("../kinds/discord/discord.js", () => ({
     listGuildChannels() {
       return fakeState.channels;
     }
-    async executeApiRequest(request: ChannelApiRequest) {
+    async executeApiRequest(request: ConnectionApiRequest) {
       fakeState.apiRequests.push(request);
       return fakeState.apiResult;
     }
@@ -345,7 +345,7 @@ describe("discord descriptor shape", () => {
       persist: async () => {},
       registerIngress: () => () => {},
     });
-    const request: ChannelApiRequest = {
+    const request: ConnectionApiRequest = {
       method: "GET",
       path: "/users/@me",
       query: [],
@@ -380,7 +380,7 @@ describe("discord descriptor shape", () => {
         headers: {},
         body: null,
         timeoutMs: 30_000,
-      } satisfies ChannelApiRequest,
+      } satisfies ConnectionApiRequest,
     });
 
     await expect(request).rejects.toMatchObject({ name: "CredentialRejected", grant: "bot" });

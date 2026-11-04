@@ -18,7 +18,7 @@ import {
 } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
-import { mapGuardianToChannel } from "../../../people/guardian-mapping.js";
+import { linkGuardianToAccount } from "../../../people/guardian-mapping.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
@@ -232,7 +232,7 @@ export class EmailAdapter {
     // known address lands on the trusted path. The inbound gate still enforces
     // authentication before honoring this mapping (see ingestInbound).
     if (this.guardianEmail) {
-      await mapGuardianToChannel(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
+      await linkGuardianToAccount(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
         log.warn("failed to preset guardian email mapping", {
           error: err instanceof Error ? err.message : String(err),
         });

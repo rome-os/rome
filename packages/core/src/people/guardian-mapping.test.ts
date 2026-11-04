@@ -3,7 +3,7 @@ import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/hel
 import { PeopleRepository } from "../db/repositories/people.js";
 import {
   applyGuardianMappingWithinTx,
-  mapGuardianToChannel,
+  linkGuardianToAccount,
   planGuardianMapping,
 } from "./guardian-mapping.js";
 
@@ -34,7 +34,7 @@ describe("guardian channel mapping", () => {
   it("leaves an account the guardian dismissed alone, on both paths", async () => {
     await repo.dismiss({ platform: "telegram", id: "tg-dismissed" });
 
-    expect(await mapGuardianToChannel(repo, "telegram", "tg-dismissed")).toBe(false);
+    expect(await linkGuardianToAccount(repo, "telegram", "tg-dismissed")).toBe(false);
     expect(await planGuardianMapping(repo, "telegram", "tg-dismissed")).toEqual({ op: "noop" });
     expect(await accounts("telegram")).toEqual([]);
     expect(await repo.isDismissed({ platform: "telegram", id: "tg-dismissed" })).toBe(true);
@@ -43,7 +43,7 @@ describe("guardian channel mapping", () => {
   it("re-canonicalizes the guardian's only account on the channel", async () => {
     await repo.linkStated({ platform: "whatsapp", id: "15551234567:8@s.whatsapp.net" }, "guardian");
 
-    expect(await mapGuardianToChannel(repo, "whatsapp", "15551234567@s.whatsapp.net")).toBe(true);
+    expect(await linkGuardianToAccount(repo, "whatsapp", "15551234567@s.whatsapp.net")).toBe(true);
     expect(await accounts("whatsapp")).toEqual(["15551234567@s.whatsapp.net"]);
   });
 
@@ -51,7 +51,7 @@ describe("guardian channel mapping", () => {
     await repo.linkStated({ platform: "whatsapp", id: "15551234567:8@s.whatsapp.net" }, "guardian");
     await repo.linkStated({ platform: "telegram", id: "tg-guardian" }, "guardian");
 
-    await mapGuardianToChannel(repo, "whatsapp", "15551234567@s.whatsapp.net");
+    await linkGuardianToAccount(repo, "whatsapp", "15551234567@s.whatsapp.net");
     expect(await accounts("telegram")).toEqual(["tg-guardian"]);
   });
 
@@ -59,7 +59,7 @@ describe("guardian channel mapping", () => {
     await repo.linkStated({ platform: "telegram", id: "tg-work" }, "guardian");
     await repo.linkStated({ platform: "telegram", id: "tg-personal" }, "guardian");
 
-    expect(await mapGuardianToChannel(repo, "telegram", "tg-third")).toBe(true);
+    expect(await linkGuardianToAccount(repo, "telegram", "tg-third")).toBe(true);
     expect(await accounts("telegram")).toEqual(["tg-personal", "tg-third", "tg-work"]);
   });
 
@@ -112,7 +112,7 @@ describe("guardian channel mapping", () => {
       { id: "guardian", links: [{ platform: "telegram", id: "tg-gone" }] },
     ] as unknown as Awaited<ReturnType<PeopleRepository["byBondLevel"]>>);
 
-    expect(await mapGuardianToChannel(repo, "telegram", "tg-new")).toBe(true);
+    expect(await linkGuardianToAccount(repo, "telegram", "tg-new")).toBe(true);
     expect(await accounts("telegram")).toEqual(["tg-new"]);
   });
 
@@ -177,7 +177,7 @@ describe("guardian channel mapping", () => {
     const alice = await repo.create({ displayName: "Alice", bondLevel: "acquaintance" });
     await repo.linkStated({ platform: "telegram", id: "tg-alice" }, alice);
 
-    expect(await mapGuardianToChannel(repo, "telegram", "tg-alice")).toBe(false);
+    expect(await linkGuardianToAccount(repo, "telegram", "tg-alice")).toBe(false);
     expect(await planGuardianMapping(repo, "telegram", "tg-alice")).toEqual({ op: "noop" });
     expect(await accounts("telegram")).toEqual([]);
   });

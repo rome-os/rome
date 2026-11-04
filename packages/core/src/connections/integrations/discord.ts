@@ -385,7 +385,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               }
               return adapter
                 .executeApiRequest(
-                  call.input as import("../../apps/platform-requests.js").ChannelApiRequest,
+                  call.input as import("../../apps/platform-requests.js").ConnectionApiRequest,
                 )
                 .then((result) => {
                   if (result.response?.status === 401) {

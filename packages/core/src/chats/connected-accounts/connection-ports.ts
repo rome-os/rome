@@ -25,9 +25,9 @@ import type { ChannelRecordsRepository } from "../../db/repositories/channel-rec
 import { createLogger } from "../../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import {
-  ChannelNotConnected,
-  type ChannelDirectory,
-  type ChannelReplies,
+  AccountNotConnected,
+  type AccountChats,
+  type AccountReplies,
   type ChannelSend,
 } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
@@ -99,7 +99,7 @@ export function recordedChannelOf(
 export interface ConnectionPorts {
   send: ChannelSend | null;
   inbound: ChannelInbound | null;
-  directory: ChannelDirectory;
+  directory: AccountChats;
 }
 
 /**
@@ -149,7 +149,7 @@ function connectionsOf(backing: Backing): Connection[] {
  * whether it lists conversations, so the port is present for every channel a
  * Talk backs, and one whose Connection lists none answers empty.
  */
-function connectionDirectory(backing: Backing): ChannelDirectory {
+function connectionDirectory(backing: Backing): AccountChats {
   const { connectionKind } = backing;
   return {
     async listConversations({ connectionId, ...input }) {
@@ -187,7 +187,7 @@ function connectionFor(backing: Backing): Connection | null {
 /**
  * Sends on `connection`'s live talker. A Connection whose credentials are
  * locked or degraded has none, and sending on it refuses with
- * {@link ChannelNotConnected}, as a channel no Connection backs does. With `pacing`, a
+ * {@link AccountNotConnected}, as a channel no Connection backs does. With `pacing`, a
  * send waits its turn in the Connection's pacer while reply streaming is on,
  * and resolves once it has run. With streaming off it runs at once.
  */
@@ -199,7 +199,7 @@ export async function sendThrough(
 ): Promise<MessageReceipt> {
   const send = async () => {
     const sent = connection.withTalker((talker) => talker.send(chatId, message));
-    if (!sent) throw new ChannelNotConnected(connection.connectionKind);
+    if (!sent) throw new AccountNotConnected(connection.connectionKind);
     return sent;
   };
   return pacing ? pacing.run(connection, chatId, send) : send();
@@ -214,7 +214,7 @@ export async function sendThrough(
 function connectionReplies(
   connection: Connection,
   pacing: ConnectionPacing,
-): ChannelReplies | null {
+): AccountReplies | null {
   const declared = connection.withTalker((talker) => talker.replyDelivery);
   const pacer = pacing.pacerFor(connection);
   if (!declared || !pacer) return null;
@@ -255,7 +255,7 @@ async function callTalker<T>(
   call: (talker: Omit<Talker, "start" | "stop">) => Promise<T> | undefined,
 ): Promise<T> {
   const called = connection.withTalker(call);
-  if (!called) throw new ChannelNotConnected(connection.connectionKind);
+  if (!called) throw new AccountNotConnected(connection.connectionKind);
   return called;
 }
 
@@ -264,12 +264,12 @@ function connectionSend(backing: Backing): ChannelSend {
   // What `direct` answers while no Connection exists for the channel: the
   // lookup itself says so, the way `send` does, rather than passing for a
   // channel that cannot reach an account directly.
-  const notConnected = () => Promise.reject(new ChannelNotConnected(channel));
+  const notConnected = () => Promise.reject(new AccountNotConnected(channel));
   const unbacked: ChannelDirectMessaging = { chatFor: notConnected, conversationFor: notConnected };
   return {
     async send(chatId, message) {
       const connection = connectionFor(backing);
-      if (!connection) throw new ChannelNotConnected(channel);
+      if (!connection) throw new AccountNotConnected(channel);
       return sendThrough(connection, chatId, message, backing.deps.pacing);
     },
     get replies() {

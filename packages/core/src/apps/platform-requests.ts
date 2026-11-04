@@ -1,16 +1,17 @@
-/** HTTP methods supported by a channel's authenticated provider API surface. */
-export const CHANNEL_API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
-export type ChannelApiHttpMethod = (typeof CHANNEL_API_METHODS)[number];
+/** HTTP methods a connection's authenticated platform API accepts. */
+export const CONNECTION_API_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+export type ConnectionApiHttpMethod = (typeof CONNECTION_API_METHODS)[number];
 
 /**
- * Provider-neutral request executed by the current channel connection epoch.
+ * A request a connection runs under its grant's current epoch, the same for
+ * every kind of connection.
  *
  * `path` is provider-relative by design: implementations own the API origin
  * and authentication material, so callers can neither choose a host nor read
  * a credential.
  */
-export interface ChannelApiRequest {
-  method: ChannelApiHttpMethod;
+export interface ConnectionApiRequest {
+  method: ConnectionApiHttpMethod;
   path: string;
   /** Ordered pairs preserve repeated keys and caller order. */
   query: Array<[string, string]>;
@@ -19,24 +20,24 @@ export interface ChannelApiRequest {
   timeoutMs: number;
 }
 
-export interface ChannelApiResponse {
+export interface ConnectionApiResponse {
   status: number;
   headers: Record<string, string>;
   body: unknown;
 }
 
-export type ChannelApiFailureType = "network" | "timeout" | "rate_limit" | "response_too_large";
+export type ConnectionApiFailureType = "network" | "timeout" | "rate_limit" | "response_too_large";
 
-export interface ChannelApiFailure {
-  type: ChannelApiFailureType;
+export interface ConnectionApiFailure {
+  type: ConnectionApiFailureType;
   message: string;
   retryAfterMs?: number;
 }
 
 /** Serializable connection-epoch result with no SDK objects or credentials. */
-export type ChannelApiResult =
-  | { response: ChannelApiResponse; error?: never }
-  | { response?: never; error: ChannelApiFailure };
+export type ConnectionApiResult =
+  | { response: ConnectionApiResponse; error?: never }
+  | { response?: never; error: ConnectionApiFailure };
 
 const PROTECTED_REQUEST_HEADERS = new Set([
   "authorization",
@@ -48,15 +49,15 @@ const PROTECTED_REQUEST_HEADERS = new Set([
 
 const UNSAFE_RESPONSE_HEADERS = new Set(["authorization", "proxy-authorization", "set-cookie"]);
 
-export function isChannelApiHttpMethod(value: string): value is ChannelApiHttpMethod {
-  return (CHANNEL_API_METHODS as readonly string[]).includes(value);
+export function isConnectionApiHttpMethod(value: string): value is ConnectionApiHttpMethod {
+  return (CONNECTION_API_METHODS as readonly string[]).includes(value);
 }
 
-export function isProtectedChannelApiRequestHeader(name: string): boolean {
+export function isProtectedConnectionApiRequestHeader(name: string): boolean {
   return PROTECTED_REQUEST_HEADERS.has(name.trim().toLowerCase());
 }
 
-export function filterChannelApiResponseHeaders(
+export function filterConnectionApiResponseHeaders(
   headers: Iterable<[string, string]>,
 ): Record<string, string> {
   const safe: Array<[string, string]> = [];

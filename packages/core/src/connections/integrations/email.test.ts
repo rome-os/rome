@@ -128,7 +128,7 @@ function makeSettingsRepo(
   } as SettingsRepository & { store: Record<string, unknown> };
 }
 
-/** A person-mapping fake: no guardian person exists, so mapGuardianToChannel is a
+/** A person-mapping fake: no guardian person exists, so linkGuardianToAccount is a
  *  no-op — keeps start() off any write path in the descriptor tests. */
 function makePersonMappingRepo(): PeopleRepository {
   return {
