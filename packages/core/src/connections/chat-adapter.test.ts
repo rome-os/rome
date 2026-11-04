@@ -479,7 +479,7 @@ describe("channelAdapter", () => {
 
     await expect(
       adapter.send(delivered[0]!.chat.externalId, null, { text: "hello", replyTo: "rome:local-1" }),
-    ).rejects.toMatchObject({ name: "SendRefused", reason: "reply_unaddressable" });
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
     expect(sent).toEqual([]);
   });
 

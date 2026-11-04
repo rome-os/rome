@@ -247,7 +247,7 @@ describe("WebChatAdapter", () => {
 
     for (const send of [forged, cardOnly]) {
       await expect(send).rejects.toMatchObject({
-        name: "SendRefused",
+        name: "ChannelSendRefused",
         reason: "part_unsupported",
       });
     }
@@ -263,7 +263,7 @@ describe("WebChatAdapter", () => {
       { parts: [{ type: "text" as const, content: "" }] },
     ]) {
       await expect(adapter.send("sess-empty" as ChatId, blank)).rejects.toMatchObject({
-        name: "SendRefused",
+        name: "ChannelSendRefused",
         reason: "empty",
       });
     }

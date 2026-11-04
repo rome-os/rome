@@ -169,7 +169,7 @@ describe("recordedSends", () => {
           ],
         } as unknown as OutgoingMessage,
       ),
-    ).rejects.toMatchObject({ name: "SendRefused", reason: "part_unsupported" });
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
     expect(lines()).toEqual([]);
   });
 
@@ -451,7 +451,7 @@ describe("recordedSends", () => {
     };
     for (const name of ["telegram", "email"]) {
       await expect(send(name).send("thread-1" as ChatId, { text: "  " })).rejects.toMatchObject({
-        name: "SendRefused",
+        name: "ChannelSendRefused",
         reason: "empty",
       });
     }
@@ -549,7 +549,7 @@ describe("recordedSends", () => {
           text: "Hi",
         } as OutgoingMessage,
       ),
-    ).rejects.toMatchObject({ name: "SendRefused", reason: "reply_unaddressable" });
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
     expect(sent).toEqual([]);
     expect(lines()).toEqual([]);
   });
