@@ -1,7 +1,7 @@
 // Reply rules, kept on each of Rome's speakers. Vocabulary:
 // docs/domains/participation.md#speaker and docs/domains/chats.md#chat.
 
-import { and, asc, eq, isNotNull, isNull, like, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { chatIdsOn, type ChatRepository } from "../chats/storage/chat-repository.js";
@@ -9,7 +9,7 @@ import type { Chat } from "../chats/storage/chat.js";
 import { placeIn, type ChatKey, type ChatRef } from "../chats/storage/place.js";
 import { startChannelChat } from "../connections/channel-chat.js";
 import { type ChatAdapters, kindNamedBy } from "../connections/chat-adapter.js";
-import { chatMessages, romeAgentMessages, romeSessions } from "../db/schema/system.js";
+import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
@@ -151,7 +151,14 @@ export class ChatSettingsRepository {
       );
     }
     if (input.query?.trim()) {
-      predicates.push(like(romeSessions.name, `%${input.query.trim()}%`));
+      // The name a listing shows: the chat's, or a thread's own.
+      const pattern = `%${input.query.trim()}%`;
+      predicates.push(
+        or(
+          sql`${romeSessions.chatId} in (SELECT ${chats.id} FROM ${chats} WHERE ${chats.name} LIKE ${pattern})`,
+          and(isNotNull(romeSessions.threadId), like(romeSessions.name, pattern)),
+        )!,
+      );
     }
     const rows = this.db
       .select()
@@ -293,10 +300,13 @@ export class ChatSettingsRepository {
           .set({
             name: descriptor.displayName,
             ...(sourceThreadType === null ? {} : { sourceThreadType }),
-            // A row stored before it stood in a chat stands in this one now.
-            chatId: sql`coalesce(${romeSessions.chatId}, ${chat.id})`,
-            chatPlatform: sql`coalesce(${romeSessions.chatPlatform}, ${chat.platform})`,
-            accountId: sql`coalesce(${romeSessions.accountId}, ${via.id})`,
+            // The row is this account's speaker in this chat. One stored
+            // before it stood in a chat stands here now, and one left by the
+            // account the channel was paired as before moves here, as the
+            // first message after a re-pairing moves it.
+            chatId: chat.id,
+            chatPlatform: chat.platform,
+            accountId: via.id,
             // The routing marker is this account's alone, so only its row holds it.
             channelSettings: input.settings,
             ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
@@ -409,10 +419,11 @@ export class ChatSettingsRepository {
           sourceThreadName: descriptor.displayName,
           sourceThreadType,
           parentSessionId,
-          chatId: sql`coalesce(${romeSessions.chatId}, ${parent?.chatId ?? null})`,
-          chatPlatform: sql`coalesce(${romeSessions.chatPlatform}, ${parent?.chatPlatform ?? null})`,
-          threadId: sql`coalesce(${romeSessions.threadId}, ${descriptor.ref.chatId})`,
-          accountId: sql`coalesce(${romeSessions.accountId}, ${via.id})`,
+          // As in `mutate`, the row is this account's speaker, in its
+          // parent's chat when Rome holds that parent.
+          ...(parent?.chatId ? { chatId: parent.chatId, chatPlatform: parent.chatPlatform } : {}),
+          threadId: descriptor.ref.chatId,
+          accountId: via.id,
           channelSettings: input.settings,
           ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
         })

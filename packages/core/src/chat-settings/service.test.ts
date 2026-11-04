@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { sql } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, ChatRef, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, kindChannelOf, testChatsWiring, type TestDb } from "../test/helpers.js";
@@ -696,11 +697,13 @@ describe("ChatSettingsService", () => {
     const support = await connectLive(registry, "wechat");
     const channelOf = (connection: { id: string }) =>
       connection.id === sales.id ? "feishu" : "feishu-2";
+    // The account the sales channel is paired as, which a re-pairing changes.
+    const paired = { sales: "ou_sales" };
     const wired = chatsWiring(testDb.db, {
       channelsOn: (platform) => (platform === "feishu" ? ["feishu", "feishu-2"] : []),
       accountOf: (name) =>
         name === "feishu"
-          ? { platform: "feishu", id: "ou_sales" }
+          ? { platform: "feishu", id: paired.sales }
           : name === "feishu-2"
             ? { platform: "feishu", id: "ou_support" }
             : null,
@@ -732,7 +735,7 @@ describe("ChatSettingsService", () => {
     const standIn = (channel: "feishu" | "feishu-2") =>
       openSpeaker(testDb!.db, { channel, threadId: "oc_group", agentName: "main" }, wired);
 
-    return { service, repository, wired, standIn, throughSales, throughSupport };
+    return { service, repository, wired, paired, standIn, throughSales, throughSupport };
   }
 
   it("serializes writers through two of Rome's accounts in one group", async () => {
@@ -881,6 +884,52 @@ describe("ChatSettingsService", () => {
       chatId: ruled!.chatId,
     });
     expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("moves the speaker to the account its channel is paired as now when a rule is set", async () => {
+    const { service, repository, wired, paired, throughSales } = await twoAccountsInOneGroup();
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+    await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "ou_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+    const before = repository.find("feishu", "ou_ray" as ChatId)!;
+
+    paired.sales = "ou_sales_again";
+    await service.update({
+      ref,
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+
+    const after = repository.find("feishu", "ou_ray" as ChatId);
+    expect(after).toMatchObject({ id: before.id, accountId: "ou_sales_again", kind: "dm" });
+    expect(after!.chatId).not.toBe(before.chatId);
+    expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
+  });
+
+  it("finds a speaker by the name of its chat, whatever its session is titled", async () => {
+    const { repository, standIn } = await twoAccountsInOneGroup();
+    await standIn("feishu");
+    await standIn("feishu-2");
+    const [sales, support] = ["feishu", "feishu-2"].map(
+      (channel) => repository.find(channel, "oc_group" as ChatId)!,
+    );
+    {
+      // The chat is named Launch; one session's title is something else.
+      testDb!.db.run(sql`UPDATE chats SET name = 'Launch' WHERE id = ${sales!.chatId}`);
+      testDb!.db.run(sql`UPDATE rome_sessions SET name = 'Renamed' WHERE id = ${support!.id}`);
+    }
+
+    expect(
+      repository
+        .listKnown({ query: "Launch" })
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual([sales!.id, support!.id].sort());
+    expect(repository.listKnown({ query: "Renamed" })).toEqual([]);
   });
 
   it("paginates beyond a bounded live directory first page", async () => {
