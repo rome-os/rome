@@ -390,6 +390,50 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("records fresh runs that name one session into it, each in its own agent session", async () => {
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    await webchatRepo.ensureRomeSession({
+      id: "shared-record",
+      type: "action",
+      name: "Shared record",
+      agentName: "test-main",
+    });
+    const opened: { sessionId: string; isNewSession: boolean }[] = [];
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: async (params) => {
+        opened.push({ sessionId: params.sessionId, isNewSession: params.isNewSession === true });
+        return createSessionFromRun(
+          "anthropic",
+          async function* () {
+            yield { type: "result", content: "decided" };
+          },
+          params,
+        );
+      },
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+    for (const prompt of ["batch one", "batch two"]) {
+      await collectMessages(
+        runner.run({ agentName: "test-main", prompt, romeSessionId: "shared-record" }),
+      );
+    }
+    // No history carried: each run opened a session of its own, new to the provider.
+    expect(opened).toHaveLength(2);
+    expect(opened.every((o) => o.isNewSession)).toBe(true);
+    expect(opened[0]?.sessionId).not.toBe(opened[1]?.sessionId);
+    // Both runs are in the one session: a trace and an answer each.
+    const roles = (await webchatRepo.getMessages("shared-record")).map((m) => m.role);
+    expect(roles.filter((role) => role === "trace")).toHaveLength(2);
+    expect(roles.filter((role) => role === "assistant")).toHaveLength(2);
+    await manager.shutdown();
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {

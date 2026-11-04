@@ -10,7 +10,9 @@ import {
   parseTriage,
   runTriage,
   TRIAGE_AGENT,
+  TRIAGE_SESSION_ID,
   type TriageInput,
+  type TriageRecordStore,
 } from "./triage.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -188,8 +190,67 @@ describe("runTriage", () => {
           await new Promise(() => undefined);
         })(),
     };
-    const slow = await runTriage(stuck, input([event("a")]), 10);
+    const slow = await runTriage(stuck, input([event("a")]), { timeoutMs: 10 });
     expect(slow.error).toBe("triage timed out");
     expect(slow.decisions[0]?.decision).toBe("digest");
+  });
+});
+
+describe("runTriage records", () => {
+  it("runs fresh, in the one triage session, and keeps each run's input as its user message", async () => {
+    const params: Record<string, unknown>[] = [];
+    const runner: AgentRunnerInterface = {
+      run: (p) =>
+        (async function* () {
+          params.push(p as unknown as Record<string, unknown>);
+          yield { type: "turn_start", turnId: `turn-${params.length}` } as never;
+          yield {
+            type: "result",
+            content: JSON.stringify({
+              items: [{ id: "a", decision: "important", reason: "r", line: "l" }],
+            }),
+          } as never;
+        })(),
+    };
+    const ensured: unknown[] = [];
+    const messages: unknown[][] = [];
+    const record = {
+      ensureRomeSession: async (session: unknown) => void ensured.push(session),
+      addMessage: async (...args: unknown[]) => void messages.push(args),
+    } as unknown as TriageRecordStore;
+
+    await runTriage(runner, input([event("a")]), { record });
+    await runTriage(runner, input([event("b")]), { record });
+
+    // A fresh agent session per run: no channel key, so nothing is resumed.
+    expect(params.map((p) => p.channelThreadKey)).toEqual([undefined, undefined]);
+    expect(params.map((p) => p.romeSessionId)).toEqual([TRIAGE_SESSION_ID, TRIAGE_SESSION_ID]);
+    expect(params.some((p) => "persistTrace" in p)).toBe(false);
+    expect(ensured[0]).toMatchObject({
+      id: TRIAGE_SESSION_ID,
+      name: "Concierge triage",
+      agentName: TRIAGE_AGENT,
+    });
+    // Each run's input, under its own turn.
+    expect(messages.map((m) => [m[1], m[2], m[4]])).toEqual([
+      [TRIAGE_SESSION_ID, "user", "turn-1"],
+      [TRIAGE_SESSION_ID, "user", "turn-2"],
+    ]);
+    expect(String(messages[0]?.[3])).toContain('\\"id\\": \\"a\\"');
+    expect(String(messages[1]?.[3])).toContain('\\"id\\": \\"b\\"');
+  });
+
+  it("keeps no trace without a record store", async () => {
+    const params: Record<string, unknown>[] = [];
+    const runner: AgentRunnerInterface = {
+      run: (p) =>
+        (async function* () {
+          params.push(p as unknown as Record<string, unknown>);
+          yield { type: "result", content: JSON.stringify({ items: [] }) } as never;
+        })(),
+    };
+    await runTriage(runner, input([event("a")]));
+    expect(params[0]).toMatchObject({ persistTrace: false });
+    expect(params[0]).not.toHaveProperty("romeSessionId");
   });
 });

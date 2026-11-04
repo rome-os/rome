@@ -294,12 +294,12 @@ export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean 
   return threadContext?.channel !== "webchat";
 }
 
-function textMessageContent(content: string): string {
+export function textMessageContent(content: string): string {
   const parts: MessagePart[] = [{ type: "text", content }];
   return JSON.stringify(parts);
 }
 
-function transcriptMessageId(
+export function transcriptMessageId(
   sessionId: string,
   turnId: string,
   role: RomeAgentTranscriptMessageInput["role"],

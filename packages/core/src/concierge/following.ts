@@ -46,6 +46,7 @@ import {
   runTriage,
   type TriageDecision,
   type TriageInput,
+  type TriageRecordStore,
 } from "./triage.js";
 
 const log = createLogger("concierge-following");
@@ -198,6 +199,8 @@ export interface ConciergeFollowingDeps {
   >;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
+  /** Where triage runs are recorded, so Sessions shows them. */
+  triageRecord?: TriageRecordStore;
   now?: () => number;
 }
 
@@ -526,7 +529,7 @@ export function startConciergeFollowing(
         })),
         now: new Date(now()).toLocaleString("en-GB", { timeZone: timezone, hour12: false }),
       };
-      const result = await runTriage(deps.agentRunner, input);
+      const result = await runTriage(deps.agentRunner, input, { record: deps.triageRecord });
       if (result.error)
         log.warn("triage failed; its events go to the digest", {
           events: part.length,

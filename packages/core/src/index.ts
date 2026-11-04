@@ -1239,6 +1239,7 @@ async function main() {
     connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
     items: new ConciergeFollowItemsRepository(db),
     agentRunner,
+    triageRecord: webchatRepo,
   });
 
   const approvalHandler = new ApprovalHandler(

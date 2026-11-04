@@ -6,9 +6,17 @@
 // event gets a decision, so an event the run missed lands in the digest
 // rather than nowhere.
 
+import { textMessageContent, transcriptMessageId } from "../core/agent-trace-recorder.js";
 import type { AgentRunnerInterface } from "../core/types.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
 
 export const TRIAGE_AGENT = "core:concierge-triage";
+/**
+ * The one session every triage run is recorded in, so Sessions shows
+ * "Concierge triage" with one run per batch. Each run is still a fresh agent
+ * session: no batch sees another's events.
+ */
+export const TRIAGE_SESSION_ID = "concierge-triage";
 /** Events one triage run reads; a larger batch is split into several runs. */
 export const MAX_EVENTS_PER_TRIAGE = 50;
 const TRIAGE_TIMEOUT_MS = 120_000;
@@ -121,21 +129,54 @@ export function parseTriage(output: unknown, events: FollowEvent[]): TriageDecis
   });
 }
 
-/** Runs one fresh triage. A failed run sends every event to the digest. */
+/** Where triage runs are recorded: the session, and each run's input as its user message. */
+export type TriageRecordStore = Pick<WebChatRepository, "ensureRomeSession" | "addMessage">;
+
+/** Makes sure the one triage session exists. */
+async function ensureTriageSession(store: TriageRecordStore): Promise<void> {
+  await store.ensureRomeSession({
+    id: TRIAGE_SESSION_ID,
+    type: "action",
+    name: "Concierge triage",
+    agentName: TRIAGE_AGENT,
+  });
+}
+
+/**
+ * Runs one fresh triage. A failed run sends every event to the digest. With a
+ * record store, the run's trace, its input and its decisions are kept in the
+ * one triage session.
+ */
 export async function runTriage(
   runner: AgentRunnerInterface,
   input: TriageInput,
-  timeoutMs = TRIAGE_TIMEOUT_MS,
+  options: { record?: TriageRecordStore; timeoutMs?: number } = {},
 ): Promise<{ decisions: TriageDecision[]; error?: string }> {
+  const timeoutMs = options.timeoutMs ?? TRIAGE_TIMEOUT_MS;
+  const prompt = buildTriagePrompt(input);
+  const record = options.record;
   const collect = async () => {
+    if (record) await ensureTriageSession(record);
     let content = "";
     let error = "";
+    // No channel key: a fresh agent session per run. The named session only
+    // gathers the runs' records.
     for await (const message of runner.run({
       agentName: TRIAGE_AGENT,
-      prompt: buildTriagePrompt(input),
+      prompt,
       initiatedBy: "system",
-      persistTrace: false,
+      ...(record ? { romeSessionId: TRIAGE_SESSION_ID } : { persistTrace: false }),
     })) {
+      // A run in a named session keeps its trace and answer; its input is ours to keep.
+      if (message.type === "turn_start" && record) {
+        await record.addMessage(
+          transcriptMessageId(TRIAGE_SESSION_ID, message.turnId, "user"),
+          TRIAGE_SESSION_ID,
+          "user",
+          textMessageContent(prompt),
+          message.turnId,
+        );
+      }
       if (message.type === "result") content = message.content;
       if (message.type === "error") error = message.error;
     }
