@@ -261,8 +261,9 @@ export function makeSlackBotSetup(deps: {
   createSocket?: CreateSlackSocket;
 }): SetupFn {
   return async (interact, ctx) => {
-    // A new app is a new bot, which a renewal must refuse, so renewing skips
-    // the name and the create link and asks the existing app for its tokens.
+    // A new app is a new bot, which would end the connection a renewal fixes,
+    // so renewing skips the name and the create link and asks the existing
+    // app for its tokens.
     const name = ctx.renewing ? undefined : await promptBotName(interact);
     let error: string | undefined;
     let material: { botToken: string; appToken: string };

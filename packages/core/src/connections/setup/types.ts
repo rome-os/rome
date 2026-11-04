@@ -172,9 +172,10 @@ export interface SetupContext {
   step<T>(label: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** The setup's cancellation signal — aborts when the guardian cancels. */
   readonly signal: AbortSignal;
-  /** The setup renews a connection that already names its account, so only
-   *  that same account can grant. A flow that always creates a new account
-   *  has nothing to offer here. */
+  /** The setup renews a connection that already names its account. Another
+   *  account would end that connection and start a new one, so a flow that
+   *  always creates a new account offers only the existing one's credentials
+   *  here. */
   readonly renewing?: boolean;
 }
 
