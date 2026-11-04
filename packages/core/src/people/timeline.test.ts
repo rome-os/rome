@@ -1,7 +1,7 @@
 import { describe, it, expect } from "@rstest/core";
 import { parseMessageCursor, type Message } from "@rome/api-types/message";
-import { memoryMessages } from "../channels/messages-memory.js";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
+import { memoryMessages } from "../chats/history/messages-memory.js";
+import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
 import { readAccountTimeline } from "./timeline.js";
 
 // The merge above the stores: what a page is, how it resumes, and which store

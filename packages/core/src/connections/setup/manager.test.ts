@@ -73,7 +73,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
       // The atomic write: record the credential, then run the guardian-mapping
       // participant exactly as the real `grant` does inside its transaction.
       imports.push({ id: conn.id, grant, credential, profile });
-      opts?.inTx?.(FAKE_TX);
+      opts?.inTx?.(FAKE_TX, { reachesAnotherAccount: false });
       return conn;
     },
   };
@@ -217,7 +217,7 @@ describe("SetupManager", () => {
     expect(mgr.state(started.cid)).toEqual({ status: "cancelled" });
     expect(mgr.activeFor("conn-A", "bot")).toBeNull();
     // No-op when nothing is active.
-    await expect(mgr.cancelActive("conn-A", "bot")).resolves.toBeUndefined();
+    await expect(mgr.cancelActive("conn-A", "bot")).resolves.toBeNull();
   });
 
   it("serializes concurrent forced starts so exactly one setup stays active", async () => {

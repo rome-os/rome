@@ -97,25 +97,3 @@ export class Disconnected extends Error {
     this.name = "Disconnected";
   }
 }
-
-/**
- * `ConnectionRegistry.giveGrant` refuses to put a different account onto a
- * Connection whose grant still names its own, because the new account would
- * take over that account's channel, history and agent. The message reads to
- * the guardian on a failed setup, and the grant writes nothing.
- */
-export class DifferentAccountError extends Error {
-  readonly connectionKind: string;
-  readonly connectionId: ConnectionId;
-
-  constructor(connectionKind: string, connectionId: ConnectionId, severalAccounts: boolean) {
-    super(
-      severalAccounts
-        ? "This is a different account. Reconnect with the same account, or add this one as another account."
-        : "This is a different account. Reconnect with the same account, or disconnect this one first.",
-    );
-    this.name = "DifferentAccountError";
-    this.connectionKind = connectionKind;
-    this.connectionId = connectionId;
-  }
-}

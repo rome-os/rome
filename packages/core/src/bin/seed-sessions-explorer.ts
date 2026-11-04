@@ -1,11 +1,19 @@
 import "dotenv/config";
-import { eq, like } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import {
+  chatMessages,
+  chats,
+  romeAgentMessages,
+  romeAgentTraceBlocks,
+  romeSessions,
+} from "../db/schema.js";
 
 const DEMO_PREFIX = "demo:sessions:";
+// The account Rome speaks as in the demo's group chats.
+const DEMO_ACCOUNT = "demo-bot";
 
 const profiles = [
   {
@@ -52,7 +60,7 @@ const profiles = [
 
 await runMigrations();
 const db = getDb();
-const repo = new WebChatRepository(db);
+const repo = new ChatsWebChatRepository(db);
 
 const existing = await db
   .select({ id: romeSessions.id })
@@ -67,14 +75,8 @@ for (let index = 0; index < 32; index += 1) {
   const id = `${DEMO_PREFIX}${String(index + 1).padStart(2, "0")}`;
   const daysAgo = index % 14;
   const activityAt = new Date(now.getTime() - daysAgo * 864e5 - (index % 5) * 36e5);
-  const sourceChannel =
-    profile.type === "webchat"
-      ? "webchat"
-      : profile.type === "channel"
-        ? index % 2
-          ? "email"
-          : "feishu"
-        : null;
+  // A channel session speaks in a group chat on one of Rome's accounts.
+  const platform = profile.type === "channel" ? (index % 2 ? "email" : "feishu") : null;
   const triggerName =
     profile.type === "action"
       ? index % 2
@@ -98,10 +100,6 @@ for (let index = 0; index < 32; index += 1) {
     agentName: profile.agent === "main" ? null : profile.agent,
     projectName: index % 2 ? "rome" : "default",
     projectPath: index % 2 ? "rome" : "default",
-    sourceChannel,
-    sourceThreadId: sourceChannel ? `thread-${index + 1}` : null,
-    sourceThreadName: sourceChannel ? `Release planning · ${index + 1}` : null,
-    sourceThreadType: sourceChannel ? "group" : null,
     trigger: triggerName
       ? {
           triggerKind: "action",
@@ -113,9 +111,34 @@ for (let index = 0; index < 32; index += 1) {
     parentSessionId: profile.type === "subagent" ? `${DEMO_PREFIX}04` : null,
     parentTurnId: profile.type === "subagent" ? `${DEMO_PREFIX}turn:parent:${index}` : null,
   });
+  if (platform) {
+    const key = `${DEMO_PREFIX}chat:${index + 1}`;
+    await db
+      .insert(chats)
+      .values({
+        platform,
+        key,
+        kind: "group",
+        name: `Release planning · ${index + 1}`,
+        startedAt: new Date(activityAt.getTime() - 3 * 36e5),
+      })
+      .onConflictDoNothing();
+    const chat = await db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(and(eq(chats.platform, platform), eq(chats.key, key)))
+      .get();
+    if (!chat) throw new Error(`Demo chat ${platform}:${key} was not stored`);
+    await db
+      .update(romeSessions)
+      .set({ chatId: chat.id, chatPlatform: platform, accountId: DEMO_ACCOUNT })
+      .where(eq(romeSessions.id, id));
+  }
   await db
     .update(romeSessions)
-    .set({ createdAt: new Date(activityAt.getTime() - 45 * 60_000), activityAt })
+    // Before the first run: a chat's session reads only what was said after it
+    // started there.
+    .set({ createdAt: new Date(activityAt.getTime() - 3 * 36e5), activityAt })
     .where(eq(romeSessions.id, id));
 
   const runs = 1 + ((index * 7) % 5);
@@ -179,36 +202,43 @@ for (let index = 0; index < 32; index += 1) {
       },
     ]);
     if (runIndex === 0) {
-      await db.insert(romeAgentMessages).values([
+      // Through the repository, so a chat's prompt and answer are said in it
+      // and linked to the turn, then dated around the run.
+      const said = [
         {
-          id: `${id}:user:${runIndex + 1}`,
-          sessionId: id,
-          turnId: `${id}:turn:${runIndex + 1}`,
+          key: `${id}:user:${runIndex + 1}`,
           role: "user",
-          content: JSON.stringify([
-            {
-              type: "text",
-              content: "Review the latest state and summarize what needs attention.",
-            },
-          ]),
-          createdAt: new Date(createdAt.getTime() - 1_000),
+          text: "Review the latest state and summarize what needs attention.",
+          at: new Date(createdAt.getTime() - 1_000),
         },
         {
-          id: `${id}:assistant:${runIndex + 1}`,
-          sessionId: id,
-          turnId: `${id}:turn:${runIndex + 1}`,
+          key: `${id}:assistant:${runIndex + 1}`,
           role: "assistant",
-          content: JSON.stringify([
-            {
-              type: "text",
-              content: "I reviewed the latest state and recorded the result for this demo run.",
-            },
-          ]),
-          createdAt: new Date(createdAt.getTime() + 1_000),
+          text: "I reviewed the latest state and recorded the result for this demo run.",
+          at: new Date(createdAt.getTime() + 1_000),
         },
-      ]);
+      ];
+      for (const message of said) {
+        await repo.addMessage(
+          message.key,
+          id,
+          message.role,
+          JSON.stringify([{ type: "text", content: message.text }]),
+          turnId,
+        );
+        await db
+          .update(chatMessages)
+          .set({ saidAt: message.at })
+          .where(eq(chatMessages.key, message.key));
+        await db
+          .update(romeAgentMessages)
+          .set({ createdAt: message.at })
+          .where(eq(romeAgentMessages.id, message.key));
+      }
     }
   }
+  // Writing a message moves the session's activity to now; put it back.
+  await db.update(romeSessions).set({ activityAt }).where(eq(romeSessions.id, id));
 }
 
 console.log(

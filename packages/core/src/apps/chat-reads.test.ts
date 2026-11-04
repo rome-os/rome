@@ -12,6 +12,7 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { speakerFixture } from "../test/speakers.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { appChatReads } from "./chat-reads.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const at = (seconds: number) => new Date(seconds * 1000);
 
@@ -24,7 +25,7 @@ describe("appChatReads", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
     links = new TurnLinks(testDb.db);
     fixture = speakerFixture(testDb.db);
     reads = appChatReads({
@@ -93,6 +94,32 @@ describe("appChatReads", () => {
       ).toEqual([]);
     });
 
+    it("names each session's place: its chat's name, or its topic's", async () => {
+      telegramBot();
+      const group = fixture.chat("telegram", "-100", "group", "Ops");
+      fixture.speaker({ id: "s-group", chat: group, accountId: "rome-bot", createdAt: at(0) });
+      fixture.speaker({
+        id: "s-topic",
+        chat: group,
+        accountId: "rome-bot",
+        threadId: "7",
+        name: "Launch",
+        createdAt: at(0),
+      });
+      fixture.say({ id: "m-1", chat: group, from: "alice", at: at(2_000) });
+      fixture.say({ id: "m-2", chat: group, threadId: "7", from: "alice", at: at(2_100) });
+
+      const recent = await reads.recentChats({
+        since: at(1_000),
+        where: { accountKinds: ["telegram"] },
+      });
+
+      expect(recent.map((chat) => [chat.sessionId, chat.threadName])).toEqual([
+        ["s-topic", "Launch"],
+        ["s-group", "Ops"],
+      ]);
+    });
+
     it("lists a chat by its channel's kind, even on a platform the kind is not named for", async () => {
       testDb.db
         .insert(channels)
@@ -138,8 +165,11 @@ describe("appChatReads", () => {
       const link = (agent: string | null) =>
         testDb.db
           .insert(connectedAccounts)
-          .values({ connectionId: "conn-1", agent })
-          .onConflictDoUpdate({ target: connectedAccounts.connectionId, set: { agent } })
+          .values({ platform: "telegram", accountId: "rome-bot", agent })
+          .onConflictDoUpdate({
+            target: [connectedAccounts.platform, connectedAccounts.accountId],
+            set: { agent },
+          })
           .run();
       const dm = fixture.chat("telegram", "dm:rome-bot:42", "dm", "Wei");
       fixture.speaker({ id: "s-1", chat: dm, accountId: "rome-bot", createdAt: at(0) });

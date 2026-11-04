@@ -98,6 +98,7 @@ function makeServer(
     agentNames?: unknown;
     appConnections?: unknown;
     appIdForAction?: (actionName: string) => string | null;
+    sendApprovalCard?: WorkerRpcServices["sendApprovalCard"];
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -137,6 +138,7 @@ function makeServer(
     agentNames: overrides.agentNames,
     appConnections: overrides.appConnections,
     appIdForAction: overrides.appIdForAction ?? (() => null),
+    sendApprovalCard: overrides.sendApprovalCard ?? rs.fn(async () => {}),
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -354,6 +356,27 @@ describe("WorkerRpcServer param validation", () => {
 
     expect(response.result).toBeUndefined();
     expect(response.error).toMatch(/apps\.create: invalid params/);
+  });
+
+  describe("approvals.sendCard", () => {
+    it("has main send a worker's approval card, and refuses one with no approval", async () => {
+      const sendApprovalCard = rs.fn(async () => {});
+      const { server } = makeServer({ sendApprovalCard });
+      const fake = connect(server);
+      const card = {
+        approvalId: "ap-1",
+        actionName: "deploy",
+        preview: { kind: "generic", title: "Deploy", summary: "Ship it" },
+        channelContext: { channel: "telegram", threadId: "t1" },
+      };
+
+      await rpc(fake, "approvals.sendCard", card);
+      const refused = await rpc(fake, "approvals.sendCard", { actionName: "deploy" });
+
+      expect(sendApprovalCard).toHaveBeenCalledTimes(1);
+      expect(sendApprovalCard).toHaveBeenCalledWith(card);
+      expect(refused.error).toMatch(/approvals\.sendCard: invalid params/);
+    });
   });
 
   describe("channels.*", () => {

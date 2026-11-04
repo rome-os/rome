@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { Channel, ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
@@ -13,17 +13,20 @@ import type {
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
-import { Pacer } from "../channels/delivery/pacer.js";
-import { type ReplyStream, ReplyStreams, type ReplyTarget } from "../channels/delivery/streams.js";
-import { DeliveryFailure, type DeliveryTransport, plainText } from "../channels/delivery/types.js";
+import { Pacer } from "../participation/reply-delivery/pacer.js";
+import { ReplyDelivery } from "../participation/reply-delivery/reply.js";
+import {
+  type ReplyStream,
+  ReplyStreams,
+  type ReplyTarget,
+} from "../participation/reply-delivery/streams.js";
+import { type DeliveryTransport, plainText } from "../connections/sending.js";
 import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
-import type { DrizzleDb } from "../db/index.js";
-import { createTestDb, testChatRepository } from "../test/helpers.js";
+import { createTestDb } from "../test/helpers.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -118,7 +121,7 @@ describe("AgentSessionBridge conversation", () => {
   it("records a turn with no caller conversation in the one the session recorded", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.ensureRomeSession({
         id: "child-chat",
         type: "subagent",
@@ -571,7 +574,6 @@ describe("AgentSessionBridge reply streaming", () => {
       replies: replacement,
       transport: own,
       repo,
-      db,
       named = true,
       runLineDeps,
     }: {
@@ -585,8 +587,6 @@ describe("AgentSessionBridge reply streaming", () => {
       transport?: DeliveryTransport;
       /** The repository the turn and its reply are recorded in. */
       repo?: WebChatRepository;
-      /** The database under `repo`, which the reply finds its place in. */
-      db?: DrizzleDb;
       /** Whether the caller names the conversation. Otherwise the thread does. */
       named?: boolean;
       /** Chats' lines, given once Chats records what the caller sends. */
@@ -612,16 +612,33 @@ describe("AgentSessionBridge reply streaming", () => {
         } as unknown as ReplyStreams)
       : new ReplyStreams({
           streaming: async () => on,
-          replies: (channel) =>
-            channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
-          ...(repo && db
-            ? {
-                messages: new StoredMessages(repo, new ChatEvents(), { channelsOn: () => [] }),
-                places: testChatRepository(db),
-              }
-            : {}),
+          // A speaker that stands in the Telegram chat the run answers, and
+          // writes there through the platform. What it records is Chats'
+          // business, covered with the speaker's own tests.
+          speakers: {
+            channel: (name) => (name === "telegram" ? ({ name } as Channel) : undefined),
+            replies: {
+              stream: async (_sessionId, _channel, out) => {
+                const delivery = new ReplyDelivery({
+                  transport,
+                  pacer: new Pacer(budget, systemClock),
+                  policy: out.policy,
+                  conversation: "chat-1",
+                  clock: out.clock,
+                });
+                return {
+                  accept: (event) => delivery.accept(event),
+                  stop: () => void delivery.stop(),
+                  settle: async (stopped) => ({
+                    outcome: await (stopped ? delivery.stop() : delivery.finish()),
+                    shown: [],
+                  }),
+                };
+              },
+            },
+          },
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -680,7 +697,7 @@ describe("AgentSessionBridge reply streaming", () => {
     const { written, turnEnd } = run(turnEvents(...answer), { streamReply: true });
 
     await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(written).toEqual([["chat-1", "hi there", "msg-1"]]);
+    expect(written).toEqual([["chat-1", "hi there", undefined]]);
     expect(JSON.stringify(turnEnd())).toContain(
       JSON.stringify({ status: "delivered", messageIds: ["m1"] }),
     );
@@ -790,7 +807,7 @@ describe("AgentSessionBridge reply streaming", () => {
     const { written, edits, turnEnd, turns } = run(events, { streamReply: true, interrupt });
     const ref = { connectionId: "c", chatId: "chat-1" as ChatId };
 
-    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
+    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", undefined]]));
     await turns.getActiveByConversation(ref)?.interrupt?.("chat-stop");
     expect(interrupt).toHaveBeenCalledWith("chat-stop");
 
@@ -818,7 +835,7 @@ describe("AgentSessionBridge reply streaming", () => {
     const interrupt = rs.fn(async () => undefined);
     const { written, edits, turns, workerGone } = run(events, { streamReply: true, interrupt });
 
-    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
+    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", undefined]]));
     workerGone();
     await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
 
@@ -864,7 +881,7 @@ describe("AgentSessionBridge reply streaming", () => {
   });
 
   it("writes nothing when the worker disconnects while the reply opens, and records the answer as usual", async () => {
-    const { repo, db, answers, close } = await recorded();
+    const { repo, answers, close } = await recorded();
     try {
       let read!: (on: boolean) => void;
       const setting = new Promise<boolean>((resolve) => (read = resolve));
@@ -874,7 +891,6 @@ describe("AgentSessionBridge reply streaming", () => {
         on: setting,
         interrupt,
         repo,
-        db,
       });
 
       workerGone();
@@ -892,7 +908,7 @@ describe("AgentSessionBridge reply streaming", () => {
   /** A repository holding the conversation the run is recorded in. */
   async function recorded() {
     const testDb = createTestDb();
-    const repo = new WebChatRepository(testDb.db);
+    const repo = new ChatsWebChatRepository(testDb.db);
     await repo.ensureRomeSession({
       id: "conversation-1",
       type: "channel",
@@ -905,83 +921,16 @@ describe("AgentSessionBridge reply streaming", () => {
       (await repo.getMessages("conversation-1"))
         .filter((message) => message.role === "assistant")
         .map((message) => message.content);
-    return { repo, db: testDb.db, answers, close: () => testDb.close() };
+    return { repo, answers, close: () => testDb.close() };
   }
-
-  it("records a streamed reply as the turn's one answer, under the message a quote of the answer names", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const { written, turnEnd } = run(
-        turnEvents({ type: "text", content: "Looking." }, ...answer),
-        { streamReply: true, repo, db },
-      );
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(written.map(([, text]) => text)).toEqual(["Looking.", "hi there"]);
-      const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
-      expect(await answers()).toEqual([shown]);
-      const { repliedTo } = await repo.loadConversationContext("conversation-1", "m2");
-      expect(repliedTo?.content).toBe(shown);
-    } finally {
-      close();
-    }
-  });
-
-  it("finds the recorded answer from a quote of any message the reply wrote", async () => {
-    const { repo, db, close } = await recorded();
-    try {
-      const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
-        streamReply: true,
-        repo,
-        db,
-      });
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
-      const { repliedTo } = await repo.loadConversationContext("conversation-1", "m1");
-      expect(repliedTo?.content).toBe(shown);
-    } finally {
-      close();
-    }
-  });
-
-  it("records only what a reply that failed partway showed", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const transport: DeliveryTransport = {
-        capabilities: { maxPartLength: 100, edit: true, budget },
-        codec: plainText,
-        async create(conversation, text) {
-          if (text !== "Looking.") throw new DeliveryFailure("rejected", "refused");
-          return { messageId: "m1", chatId: conversation };
-        },
-        async edit() {},
-      };
-      const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
-        streamReply: true,
-        repo,
-        db,
-        transport,
-      });
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(JSON.stringify(turnEnd())).toContain(
-        JSON.stringify({ status: "partial", messageIds: ["m1"] }),
-      );
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "Looking." }])]);
-    } finally {
-      close();
-    }
-  });
 
   for (const stands of [true, false]) {
     it(`records an answer it does not stream ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
-      const { repo, db, answers, close } = await recorded();
+      const { repo, answers, close } = await recorded();
       try {
         const { turnEnd } = run(turnEvents(...answer), {
           streamReply: false,
           repo,
-          db,
           runLineDeps: {
             lines: { recorded: async () => null, stands: () => stands },
             links: { prompt: () => {} },
@@ -998,39 +947,20 @@ describe("AgentSessionBridge reply streaming", () => {
     });
   }
 
-  it("records the answer of a reply whose create may have landed, which its caller does not send", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const transport: DeliveryTransport = {
-        capabilities: { maxPartLength: 100, edit: true, budget },
-        codec: plainText,
-        async create() {
-          throw new DeliveryFailure("unknown", "no answer");
-        },
-        async edit() {},
-      };
-      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, db, transport });
+  it("opens the reply in the conversation its turn is recorded in, when the caller names none", async () => {
+    const { turnEnd, targets } = run(turnEvents(...answer), {
+      streamReply: true,
+      named: false,
+      replies: {
+        accept: () => {},
+        settle: async () => ({ status: "delivered", parts: [] }),
+        stop: () => {},
+      },
+    });
 
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(JSON.stringify(turnEnd())).toContain(
-        JSON.stringify({ status: "unknown", messageIds: [] }),
-      );
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
-    } finally {
-      close();
-    }
-  });
-
-  it("records a streamed reply in the conversation its turn is recorded in, when the caller names none", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, db, named: false });
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
-      expect(await repo.getMessages("channel:telegram:chat-1")).toEqual([]);
-    } finally {
-      close();
-    }
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(targets).toEqual([
+      expect.objectContaining({ channel: "telegram", romeSessionId: "conversation-1" }),
+    ]);
   });
 });

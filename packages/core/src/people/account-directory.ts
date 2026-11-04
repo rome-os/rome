@@ -5,7 +5,7 @@
 //
 // An account is one person on one platform, whatever addresses that platform
 // reaches them at. Which of them fold together is the address book's own
-// answer, read once through `AccountFold` (../channels/account-fold.ts), so
+// answer, read once through `AccountFold` (../chats/accounts/account-fold.ts), so
 // nothing here is platform-specific and adding a mirror changes nothing in this
 // file. The sentinel log still names the channel a sender wrote on, so its
 // rows are read as accounts on that channel's platform where they are folded.
@@ -19,9 +19,13 @@ import {
   type DirectoryAccount,
 } from "@rome/api-types/people";
 import type { Account } from "@rome-os/app-runtime";
-import type { AccountNames } from "../channels/account-names.js";
-import { foldAccounts } from "../channels/account-fold.js";
-import { addressBooks, type Channels, type PlatformOfChannel } from "../channels/channel.js";
+import type { AccountNames } from "../chats/accounts/account-names.js";
+import { foldAccounts } from "../chats/accounts/account-fold.js";
+import {
+  addressBooks,
+  type Channels,
+  type PlatformOfChannel,
+} from "../chats/connected-accounts/connected-account.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 

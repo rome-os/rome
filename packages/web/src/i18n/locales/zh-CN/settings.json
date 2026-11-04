@@ -108,6 +108,7 @@
     "accounts": {
       "add": "添加另一个账号",
       "addedNotShown": "账号已连接，可在连接列表中找到。",
+      "endedAnother": "这是另一个账号，所以 Rome 结束了与之前账号的连接，并连接了这个账号。",
       "newAccount": "新账号",
       "noAgent": "无。Rome 不监听此账号。",
       "changeInEnvoys": "在外派智能体中更改",

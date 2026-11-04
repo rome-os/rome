@@ -11,12 +11,14 @@ import {
   type MessageReceipt,
   type OutgoingEmailMessage,
   type OutgoingMessage,
+  SendRefused,
 } from "@rome-os/app-runtime";
-import type { ChannelSend } from "../channels/channel.js";
+import type { ChannelSend } from "../chats/connected-accounts/connected-account.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
-import { partsText } from "../chats/storage/message.js";
+import { EMAIL_MESSAGE_ID, replyToShaped } from "./outbound/send-refusals.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
+import { partsWithText } from "../chats/storage/message.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -73,7 +75,7 @@ function recordedParts(out: Out): MessagePart[] {
   );
   // A part only Rome's host makes, such as a routine draft card, never gets
   // here: the adapter refused the send.
-  const parts = [...(out.parts ?? [])];
+  const parts = out.parts?.length ? partsWithText(out.text, out.parts) : [];
   if (parts.length) {
     return notes.length ? [...parts, { type: "text", content: notes.join("\n") }] : parts;
   }
@@ -104,8 +106,9 @@ export function recordedSends<C extends Channel>(
         const emails = deps.adapters.platformOn(channel.name) === EMAIL_PLATFORM;
         const email = emails && message.kind === "email" ? message : undefined;
         const out: Out = {
-          // The port reads a message without text by its parts.
-          text: message.text ?? (message.parts ? partsText(message.parts) : ""),
+          // The port reads a message without text by its parts, in their
+          // order.
+          text: message.text ?? "",
           ...(message.parts?.length ? { parts: message.parts } : {}),
           ...(message.attachments?.length ? { attachments: message.attachments } : {}),
           ...(email?.html ? { html: email.html } : {}),
@@ -113,9 +116,14 @@ export function recordedSends<C extends Channel>(
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
         // The port quotes by the platform's id, an email by the provider's.
-        // The email port quotes only the email a reply names, and reads no
-        // chat's quote hint.
-        const quoted = emails ? email?.inReplyToMessageId : message.replyToMessageId;
+        // On email a chat-style quote is a reply too, and the email a reply
+        // names wins over it.
+        const answers = email?.inReplyToMessageId;
+        const chatQuote = emails && answers === undefined ? message.replyToMessageId : undefined;
+        if (chatQuote !== undefined) {
+          refuseQuoteElsewhere(local, channel.name, address, chatQuote, email?.to !== undefined);
+        }
+        const quoted = emails ? (answers ?? chatQuote) : message.replyToMessageId;
         let at = address;
         if (!email && namesNewEmail(local, channel.name, address)) {
           // The email port takes a plain message to an address, or to the
@@ -128,16 +136,17 @@ export function recordedSends<C extends Channel>(
         }
         // A blank id is a reply too, which the port refuses, rather than
         // read as no reply.
-        if (email?.inReplyToMessageId !== undefined) {
-          // The provider sends a reply into the thread of the email it
+        if (answers !== undefined) {
+          // The email field may name an email in any thread. The provider
+          // sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there. An
           // email Rome does not hold, as one fetched from the mailbox
           // directly, sits in a thread Rome learns only from the provider's
           // receipt: the port sends the reply, and it is recorded there.
-          const answered = threadOf(local, channel.name, email.inReplyToMessageId);
+          const answered = threadOf(local, channel.name, answers);
           if (!answered) {
             const receipt = await send.send(address, message);
-            await recordDelivered(local, channel.name, receipt, out, email.inReplyToMessageId);
+            await recordDelivered(local, channel.name, receipt, out, answers);
             return receipt;
           }
           at = answered;
@@ -235,6 +244,39 @@ function namesNewEmail(deps: RecordedSendsDeps, channel: string, address: string
   if (deps.adapters.platformOn(channel) !== EMAIL_PLATFORM) return false;
   const named = address.trim().toLowerCase() === "guardian" || address.includes("@");
   return named && !deps.chats.byKey(deps.adapters.chatAt(channel, address, "group"));
+}
+
+/**
+ * Refuses a chat-style quote on email channel `channel` that the message to
+ * `address` cannot carry: an id that is not an email's Message-ID, a quote on
+ * a new email, on one that names its own recipients, or at a blank address, and a quote of an email Rome does not
+ * hold in that thread. The provider sends a reply into the thread of the
+ * email it answers, so an email Rome holds elsewhere, or does not hold, could
+ * take the message out of the chat it is sent to. As on every platform, a
+ * quote answers a message in that chat. Only `inReplyToMessageId` reaches into
+ * another thread.
+ */
+function refuseQuoteElsewhere(
+  deps: RecordedSendsDeps,
+  channel: string,
+  address: string,
+  quote: string,
+  namesRecipients: boolean,
+): void {
+  replyToShaped("email", quote, EMAIL_MESSAGE_ID);
+  const held = threadOf(deps, channel, quote);
+  if (
+    namesRecipients ||
+    !address.trim() ||
+    namesNewEmail(deps, channel, address) ||
+    held !== address
+  ) {
+    throw new SendRefused(
+      "reply_unaddressable",
+      `email ${JSON.stringify(quote)} is not in the thread this message goes to. ` +
+        "Name it in inReplyToMessageId to answer an email in another thread.",
+    );
+  }
 }
 
 /** The address of the email thread that holds the email the provider calls

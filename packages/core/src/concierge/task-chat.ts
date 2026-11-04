@@ -3,13 +3,13 @@
 
 import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { messageContentText } from "../channels/messages-agent.js";
+import { messageContentText } from "../chats/history/messages-agent.js";
 import type { SaidMessage as StoredLine } from "../chats/storage/message.js";
 import { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import { placeIn as placeInChat } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
-import { WEBCHAT_CHANNEL } from "../channels/webchat-channel.js";
+import { WEBCHAT_CHANNEL } from "../chats/dashboard/dashboard-account.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { MessagePage, MessageRepository } from "../chats/message-repository.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";

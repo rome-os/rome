@@ -1,5 +1,5 @@
 import { Bot } from "grammy";
-import { TelegramAdapter } from "../../../channels/telegram.js";
+import { TelegramAdapter } from "../../../connections/kinds/telegram/telegram.js";
 import { exemplar, loadCapture } from "./capture.js";
 import textCapture from "./captures/telegram-text.capture.json" with { type: "json" };
 import {

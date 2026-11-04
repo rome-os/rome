@@ -101,7 +101,7 @@ describe("GET /concierge/tasks", () => {
       conciergeRoutes({
         concierge,
         db: testDb.db,
-        webchatRepo: new WebChatRepository(testDb.db),
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
       }),
     );
   };
@@ -148,7 +148,7 @@ describe("GET /concierge/tasks", () => {
   });
 
   it("carries the linked chat's id and current name, and leaves archived rows out", async () => {
-    const chats = new WebChatRepository(testDb.db);
+    const chats = new ChatsWebChatRepository(testDb.db);
     await chats.createSession("chat-1", "Chat one");
     const [row] = await repo.upsertMany([{ title: "Linked", state: "doing", sessionId: "chat-1" }]);
     await chats.updateSessionName("chat-1", "Renamed");

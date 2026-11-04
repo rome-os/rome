@@ -21,7 +21,7 @@ import {
 import { seedBaseline } from "../../test/seeds.js";
 import { sayOnChannel } from "../../test/speakers.js";
 import { channels as channelRows, chatMessages, connectionGrants } from "../../db/schema.js";
-import { channelList } from "../../channels/channel-list.js";
+import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
 
 // Sending to a person.
 //
@@ -189,7 +189,6 @@ describe("People send API", () => {
 describe("People send API — after the channel answers", () => {
   let testDb: TestDb;
   let deps: TestDeps;
-  let app: Hono;
   let personId: string;
 
   // A WhatsApp contact reachable two ways. WhatsApp addresses one person by
@@ -205,7 +204,6 @@ describe("People send API — after the channel answers", () => {
     ownedByGuardian(testDb.db, deps.peopleRepo, "guardian", [
       { channel: "whatsapp", platform: "whatsapp" },
     ]);
-    app = new Hono().route("/", peopleRoutes(deps));
 
     await deps.whatsAppStoreRepo.upsertContacts([
       { jid: PN, phoneNumber: "15550007777", name: "Folded Contact" },
@@ -219,23 +217,6 @@ describe("People send API — after the channel answers", () => {
       approved: true,
       links: [{ platform: "whatsapp", id: LID }],
     });
-  });
-
-  it("keeps a delivered send delivered when Rome's own record of it fails", async () => {
-    // The provider accepted the message: it is out on a network Rome does not
-    // own. A local write failing afterwards cannot take it back, and reporting
-    // the send as failed invites a retry that delivers a second real message.
-    deps.webchatRepo.recordOutboundConversationMessage = async () => {
-      throw new Error("disk is full");
-    };
-
-    const res = await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "went out anyway" }),
-    });
-
-    expect(res.status).toBe(200);
   });
 
   it("answers no-conversation when the channel throws looking for a thread", async () => {

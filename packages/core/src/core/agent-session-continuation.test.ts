@@ -1,3 +1,4 @@
+import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -17,6 +18,7 @@ import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import {
+  AgentRunner,
   createSessionFromRun,
   type ModelProvider,
   type ModelRunParams,
@@ -35,6 +37,7 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { ThreadContext } from "./types.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -191,7 +194,7 @@ describe("continuation notice through AgentSessionManager", () => {
     loader = new AgentLoader(artifactIdentity);
     sessionsRepo = new SessionsRepository(testDb.db);
     sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
-    webchatRepo = new WebChatRepository(testDb.db);
+    webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
@@ -334,6 +337,88 @@ describe("continuation notice through AgentSessionManager", () => {
     const session = await acquire(createManager(), "claude-sonnet");
     await chatTurn(session, "first");
     expect(continuationOf(anthropic.calls[0]?.prompt)).toBeNull();
+  });
+
+  it.each([
+    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai"],
+    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic"],
+    [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai"],
+    [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic"],
+  ] as const)("cold background resume concierge=%s %s to %s", async (concierge, from, to, source, target) => {
+    const chatId = concierge ? "concierge" : CHAT;
+    const agentName = concierge ? "core:concierge" : AGENT;
+    if (concierge) {
+      await writeFile(
+        join(directory, "concierge.yaml"),
+        JSON.stringify({
+          name: "concierge",
+          description: "Fixture",
+          tier: "medium",
+          systemPromptPrefix: "Answer",
+          tools: [],
+          actions: ["system:fetch_channel_history"],
+          permissionMode: "default",
+        }),
+      );
+      await loader.loadAll(directory);
+      await webchatRepo.createSession(
+        chatId,
+        "Concierge",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        agentName,
+      );
+    }
+    const manager = createManager();
+    const context = { ...threadContext, threadId: chatId, romeSessionId: chatId };
+    const session = await manager.acquire(
+      { agentName, channelThreadKey: `webchat:${chatId}` },
+      { workingDir: directory, threadContext: context, romeSessionId: chatId, selectionId: from },
+    );
+    for await (const _ of session.sendTurn(
+      { prompt: "first" },
+      { threadContext: context, romeSessionId: chatId },
+    ).events) {
+    }
+    if (concierge) {
+      const raw = healthyState();
+      raw.claude.quotaExhausted = source === "anthropic";
+      raw.codex.quotaExhausted = source === "openai";
+      await webchatRepo.updateSessionLargeModelSelection(chatId, from);
+      const service = new ConciergeService({
+        webchatRepo,
+        sessionManager,
+        agentSessionManager: manager,
+        aiToolState: { get: () => raw },
+      } as unknown as ConciergeDeps);
+      expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
+    } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);
+    await manager.shutdown();
+    const runner = new AgentRunner(createManager(), loader);
+    for await (const _ of runner.run({
+      agentName,
+      sessionId: session.sessionId,
+      prompt: "recover unfinished work",
+      threadContext: context,
+    })) {
+    }
+    const calls = (concierge ? target : source) === "openai" ? openai.calls : anthropic.calls;
+    const prompt = calls.at(-1)?.prompt;
+    expect(continuationOf(prompt)).toEqual(
+      concierge ? expect.stringContaining("system:fetch_channel_history") : null,
+    );
+    expect(await sessionsRepo.findById(session.sessionId)).toMatchObject({
+      provider: concierge ? target : source,
+      model: concierge
+        ? to === "claude-sonnet"
+          ? "claude-sonnet-5-5"
+          : to
+        : from === "claude-sonnet"
+          ? "claude-sonnet-5-5"
+          : from,
+    });
   });
 
   it("clears an open chat's selection with null and keeps it with undefined", async () => {

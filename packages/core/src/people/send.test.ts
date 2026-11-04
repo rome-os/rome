@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
-import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import {
+  type Channel,
+  AccountNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
 import { send } from "../connections/send.js";
 import { directPlace, readSendStates, resolveSendTarget } from "./send.js";
 
@@ -19,7 +23,7 @@ describe("readSendStates", () => {
       channel(
         "unbacked",
         sending({
-          chatFor: () => Promise.reject(new ChannelNotConnected("unbacked")),
+          chatFor: () => Promise.reject(new AccountNotConnected("unbacked")),
         }),
       ),
       channel("read-only", null),
@@ -54,7 +58,7 @@ describe("readSendStates", () => {
 describe("a link on a platform Rome holds accounts on", () => {
   const open = (name: string) => channel(name, sending({ chatFor: async (id) => id as ChatId }));
   const unbacked = (name: string) =>
-    channel(name, sending({ chatFor: () => Promise.reject(new ChannelNotConnected(name)) }));
+    channel(name, sending({ chatFor: () => Promise.reject(new AccountNotConnected(name)) }));
   const link = { platform: "telegram", id: "u" };
   const platformOfChannel = (name: string) => (name.startsWith("tg-") ? "telegram" : name);
 

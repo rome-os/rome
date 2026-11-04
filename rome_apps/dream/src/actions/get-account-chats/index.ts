@@ -1,6 +1,5 @@
 // Recent chats on every one of Rome's accounts, read from Rome's own
 // transcript. Accounts and channels: docs/architecture/channels.md.
-import { sql } from "drizzle-orm";
 import {
   createAppLogger,
   type Action,
@@ -10,7 +9,7 @@ import {
   type ChannelsService,
   isCoreMainAgentId,
 } from "@rome-os/app-runtime";
-import { ACCOUNT_KINDS, onRomeAccount } from "../../lib/chat-activity.js";
+import { ACCOUNT_KINDS } from "../../lib/chat-activity.js";
 import { chatReadsOf } from "../../lib/chat-lines.js";
 import { extractText } from "../../lib/message-text.js";
 
@@ -25,20 +24,7 @@ const CHARS_IN_ALL = 60_000;
 
 const ACCOUNT_SEPARATOR = "\n\n---\n\n";
 
-// The agent that answers a chat, over `rome_sessions s` and `channels c`, by
-// core's rule (`answeringAgentName` in
-// packages/core/src/db/repositories/session-query.ts): on an account with an
-// agent, a private chat and a chat stored as main take the account's agent,
-// unless the chat is pinned to main. Main reads as null.
-const ACCOUNT_AGENT = sql`CASE WHEN c.agent IN ('main', 'core:main') THEN NULL ELSE c.agent END`;
-const ANSWERING_AGENT = sql`CASE WHEN c.agent IS NOT NULL THEN CASE
-    WHEN s.source_thread_type IS 'private' THEN ${ACCOUNT_AGENT}
-    WHEN coalesce(json_type(s.channel_settings, '$.overrides.routing.agentName') = 'null', 0) = 1 THEN NULL
-    WHEN coalesce(s.agent_name, 'main') IN ('main', 'core:main') THEN ${ACCOUNT_AGENT}
-    ELSE s.agent_name END
-  ELSE s.agent_name END`;
-
-interface MessageRow {
+export interface MessageRow {
   session_id: string;
   session_name: string;
   thread_name: string | null;
@@ -109,7 +95,7 @@ function formatLine(m: MessageRow): string | null {
 }
 
 /** The chats as Dream reads them, and how many lines that shows. */
-function formatChats(rows: MessageRow[]): { content: string; shown: number } {
+export function formatChats(rows: MessageRow[]): { content: string; shown: number } {
   if (rows.length === 0) {
     return { content: "(No chats on Rome's accounts in the requested window.)", shown: 0 };
   }
@@ -214,89 +200,49 @@ export function createAction(
 
       log.info("fetching account chats", { windowHours, cutoffSeconds });
 
-      // Every conversation on one of Rome's accounts. A channel's id is the
-      // connection kind only for that kind's first account, so the kind and
-      // platform come from `channels`, and from the id only when its record is
-      // gone. 'notification' is a line that passed outside a turn: someone the
-      // agent did not answer, or Rome sending untied to one. Rome's own lines
-      // are told apart by the rule of `agentMessageOutbound` in
-      // packages/core/src/channels/messages-agent.ts. Lines stored in the same
-      // second keep the order they were stored in.
-      let rows: MessageRow[];
-      const reads = chatReadsOf(appContext);
+      // Every conversation on one of Rome's accounts, through Chats, which
+      // reads every line Rome sent as `assistant`.
+      const rows: MessageRow[] = [];
       try {
-        if (reads) {
-          // Through Chats, which reads every line Rome sent as `assistant`.
-          const since = new Date(cutoffSeconds * 1000);
-          rows = [];
-          const accounts = await accountsByChannel(deps.channelsService);
-          for (const chat of await reads.recentChats({
-            since,
-            where: { accountKinds: ACCOUNT_KINDS },
-          })) {
-            const lines = await reads.transcript(chat.sessionId, { since });
-            // The account the session speaks as, by its channel.
-            const ownAccount = chat.channel ? (accounts.get(chat.channel.name) ?? null) : null;
-            for (const line of lines.slice(-MESSAGES_PER_CHAT)) {
-              // A chat can hold several of Rome's accounts, each with its own
-              // agent, so only this session's account's lines are its agent's.
-              // Where the account is unknown, no line names an agent.
-              const other =
-                line.role === "assistant" && (ownAccount === null || line.senderId !== ownAccount)
-                  ? (line.senderId ?? "unknown")
-                  : undefined;
-              rows.push({
-                session_id: chat.sessionId,
-                session_name: chat.name,
-                thread_name: chat.threadName,
-                channel: chat.channel?.name ?? chat.chat.platform,
-                connection_kind: chat.channel?.kind ?? chat.chat.platform,
-                platform: chat.chat.platform,
-                role: line.role,
-                agent_name: chat.agentName,
-                outbound: line.role === "assistant" ? 1 : 0,
-                ...(other ? { other_account: other } : {}),
-                sender_name: line.senderName,
-                sender_id: line.senderId,
-                content: line.content,
-                created_at: Math.floor(line.createdAt.getTime() / 1000),
-                chat_total: lines.length,
-              });
-            }
+        const reads = chatReadsOf(appContext);
+        const since = new Date(cutoffSeconds * 1000);
+        const accounts = await accountsByChannel(deps.channelsService);
+        for (const chat of await reads.recentChats({
+          since,
+          where: { accountKinds: ACCOUNT_KINDS },
+        })) {
+          const lines = await reads.transcript(chat.sessionId, { since });
+          // The account the session speaks as, by its channel.
+          const ownAccount = chat.channel ? (accounts.get(chat.channel.name) ?? null) : null;
+          for (const line of lines.slice(-MESSAGES_PER_CHAT)) {
+            // A chat can hold several of Rome's accounts, each with its own
+            // agent, so only this session's account's lines are its agent's.
+            // Where the account is unknown, no line names an agent.
+            const other =
+              line.role === "assistant" && (ownAccount === null || line.senderId !== ownAccount)
+                ? (line.senderId ?? "unknown")
+                : undefined;
+            rows.push({
+              session_id: chat.sessionId,
+              session_name: chat.name,
+              thread_name: chat.threadName,
+              channel: chat.channel?.name ?? chat.chat.platform,
+              connection_kind: chat.channel?.kind ?? chat.chat.platform,
+              platform: chat.chat.platform,
+              role: line.role,
+              agent_name: chat.agentName,
+              outbound: line.role === "assistant" ? 1 : 0,
+              ...(other ? { other_account: other } : {}),
+              sender_name: line.senderName,
+              sender_id: line.senderId,
+              content: line.content,
+              created_at: Math.floor(line.createdAt.getTime() / 1000),
+              chat_total: lines.length,
+            });
           }
-          // Each account's chats together, as the formatting groups them.
-          rows.sort((a, b) => a.channel.localeCompare(b.channel));
-        } else
-          rows = appContext.db.connection.all(
-            sql`
-            SELECT * FROM (
-              SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
-                s.source_channel AS channel,
-                coalesce(c.connection_kind, s.source_channel) AS connection_kind,
-                coalesce(c.platform, s.source_channel) AS platform, m.role,
-                ${ANSWERING_AGENT} AS agent_name,
-                CASE
-                  WHEN m.role = 'assistant' THEN 1
-                  WHEN m.role = 'notification' AND m.sender_id = 'rome' THEN 1
-                  ELSE 0
-                END AS outbound,
-                m.sender_name, m.sender_id, m.content, m.created_at,
-                ROW_NUMBER() OVER (
-                  PARTITION BY m.session_id ORDER BY m.created_at DESC, m.rowid DESC
-                ) AS newest,
-                m.rowid AS stored,
-                COUNT(*) OVER (PARTITION BY m.session_id) AS chat_total
-              FROM rome_agent_messages m
-              JOIN rome_sessions s ON s.id = m.session_id
-              LEFT JOIN channels c ON c.id = s.source_channel
-              WHERE m.created_at >= ${cutoffSeconds}
-                AND m.role IN ('user', 'assistant', 'notification')
-                AND ${onRomeAccount}
-            )
-            WHERE newest <= ${MESSAGES_PER_CHAT}
-            ORDER BY channel, session_id, created_at ASC, stored ASC
-          `,
-          ) as MessageRow[];
+        }
+        // Each account's chats together, as the formatting groups them.
+        rows.sort((a, b) => a.channel.localeCompare(b.channel));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("failed to query account chats", { error: message });

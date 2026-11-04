@@ -8,6 +8,7 @@
 // Chats switch adds them to the app repositories and moves the inbox and
 // `send_message` onto them.
 
+import { partsWithText } from "../chats/storage/message.js";
 import { actionExecutionContext } from "../actions/context.js";
 import type {
   Channel,
@@ -16,12 +17,11 @@ import type {
   MessagePart,
   OutgoingAttachment,
 } from "@rome-os/app-runtime";
-import { stripHostOnlyPartsFromContent } from "../channels/host-only-parts.js";
+import { stripHostOnlyPartsFromContent } from "../chats/host-only-parts.js";
 import { v7 as uuidv7 } from "uuid";
-import { messageContentText } from "../channels/messages-agent.js";
+import { messageContentText } from "../chats/history/messages-agent.js";
 import { htmlToMarkdown } from "../lib/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
-import { partsText } from "../chats/storage/message.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";
 import { type ChatAdapters, platformIdOfMessage } from "../connections/chat-adapter.js";
@@ -41,7 +41,7 @@ const log = createLogger("app-chat-writes");
 
 export type ChatWrites = Pick<
   Required<ChatRepository>,
-  "addMessage" | "promoteMessageToUser" | "send" | "sendEmail" | "recordOutboundMessage"
+  "addMessage" | "promoteMessageToUser" | "send" | "sendEmail"
 >;
 
 export interface AppChatWritesDeps {
@@ -273,33 +273,6 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       return { inserted: true };
     },
 
-    // An app built before `send` sends on its own and then names what went
-    // out. It goes on record in Chats as the speaker's, as a send would put
-    // it, so Chats' readers see it.
-    async recordOutboundMessage(input) {
-      const speaker = speakerOf(input.sessionId);
-      const key = input.platformMessageId
-        ? deps.lines.keyIn(speaker, input.platformMessageId)
-        : `rome:${uuidv7()}`;
-      const sent = await deps.messages.send(
-        {
-          direction: "fromRome",
-          place: speaker.place,
-          saidBy: {
-            account: { platform: speaker.place.chat.platform, id: speaker.accountId },
-            agent: agentOf(deps, input.turnId).agent ?? speaker.agent,
-          },
-          parts: recordedOf(input.content),
-          ...replyToIn(deps, speaker, input.replyToPlatformMessageId),
-        },
-        // Delivered already: recording says so.
-        async () => ({ key }),
-      );
-      if (sent.id !== null && input.knownToProvider && input.turnId)
-        deps.links.answer(sent.id, input.sessionId, input.turnId);
-      active(input.sessionId, sent.at);
-    },
-
     async promoteMessageToUser(sessionId, platformMessageId) {
       const line = await deps.lines.recorded(sessionId, platformMessageId);
       if (line) deps.links.prompt(line.id, sessionId);
@@ -316,9 +289,9 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
         input.sessionId,
         channel,
         {
-          // A channel that shows text alone shows this, so parts-only sends
-          // say their text parts.
-          text: input.text ?? (parts ? partsText(parts) : ""),
+          // A channel that shows text alone reads parts-only sends by their
+          // parts, in their order.
+          text: input.text ?? "",
           ...(parts ? { parts } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           ...replyToIn(deps, speaker, input.replyToPlatformMessageId),
@@ -328,7 +301,12 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
           ...agentOf(deps, input.turnId),
           recorded: input.content
             ? recordedOf(input.content)
-            : withNotes(parts ?? [{ type: "text", content: input.text ?? "" }], input.attachments),
+            : withNotes(
+                parts
+                  ? partsWithText(input.text, parts)
+                  : [{ type: "text", content: input.text ?? "" }],
+                input.attachments,
+              ),
         },
       );
       if (!sent) throw new Error(`Session ${input.sessionId} stands in no chat`);
@@ -347,12 +325,13 @@ export function appChatWrites(deps: AppChatWritesDeps): ChatWrites {
       const composed = input.content ? recordedOf(input.content) : undefined;
       const recorded = composed?.length ? composed : undefined;
       const { to, cc, bcc, subject, html, inReplyToMessageId } = input.email;
-      // An email's body is its text, else the text of its parts. An
-      // HTML-only email goes on record as the text its HTML reads as.
-      const text = input.text ?? (parts ? partsText(parts) : "");
+      // An email's body is its text, else its parts, which the email port
+      // reads in their order. An HTML-only email goes on record as the text
+      // its HTML reads as.
+      const text = input.text ?? "";
       const shown = text.trim() || (html ? htmlToMarkdown(html, true).trim() : "");
-      const onRecord: readonly MessagePart[] = recorded ??
-        parts ?? [{ type: "text", content: shown }];
+      const onRecord: readonly MessagePart[] =
+        recorded ?? (parts ? partsWithText(input.text, parts) : [{ type: "text", content: shown }]);
       const out: Omit<EmailOutbound, "replyTo"> = {
         text,
         ...(parts ? { parts } : {}),

@@ -12,6 +12,7 @@ import type {
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -29,6 +30,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
     releases[Math.max(0, turnIndex - 1)]?.resolve();
   });
   const session: AgentSession = {
+    selectModel: () => {},
     key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
     sessionId,
     status: "idle",
@@ -79,7 +81,7 @@ describe("SubagentExecutionService", () => {
 
   beforeEach(async () => {
     db = createTestDb();
-    repo = new WebChatRepository(db.db);
+    repo = new ChatsWebChatRepository(db.db);
     await repo.ensureRomeSession({
       id: "parent-1",
       type: "webchat",

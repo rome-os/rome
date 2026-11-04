@@ -1,36 +1,37 @@
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repo = resolve(here, "../../../..");
+const JOURNAL = resolve(here, "../../drizzle/system/meta/_journal.json");
+const APPS = resolve(here, "../../../../rome_apps");
 
-/** Every migration journal in the repo: core's system migrations and each app's. */
-function journals(): string[] {
-  const apps = resolve(repo, "rome_apps");
-  return [
-    resolve(here, "../../drizzle/system/meta/_journal.json"),
-    ...readdirSync(apps)
-      .map((app) => resolve(apps, app, "src/db/migrations/meta/_journal.json"))
-      .filter((path) => existsSync(path)),
-  ];
+/** The entries of a journal that are stamped no later than the one before them. */
+function outOfOrder(path: string): string[] {
+  const { entries } = JSON.parse(readFileSync(path, "utf8")) as {
+    entries: { tag: string; when: number }[];
+  };
+  return entries.flatMap((entry, i) => {
+    const before = entries[i - 1];
+    return before && entry.when <= before.when ? [`${entry.tag} after ${before.tag}`] : [];
+  });
 }
 
-describe("migration journals", () => {
-  // Drizzle applies a migration only when its `when` is later than the last one
-  // a database applied. A new entry stamped earlier than the one before it is
-  // skipped on every existing database, while a fresh test database applies it.
-  it("stamp every migration later than the one before it", () => {
-    for (const path of journals()) {
-      const { entries } = JSON.parse(readFileSync(path, "utf8")) as {
-        entries: { tag: string; when: number }[];
-      };
-      const late = entries.filter((entry, i) => i > 0 && entry.when <= entries[i - 1]!.when);
-      expect({ path: path.slice(repo.length + 1), late: late.map((e) => e.tag) }).toEqual({
-        path: path.slice(repo.length + 1),
-        late: [],
-      });
+describe("system migration journal", () => {
+  // Drizzle's SQLite migrator applies only the migrations whose `when` is
+  // later than the newest one a database has recorded. A migration stamped
+  // earlier than one before it runs on a fresh database, so tests pass, and
+  // is skipped on every database that already exists.
+  it("stamps every migration later than the one before it", () => {
+    expect(outOfOrder(JOURNAL)).toEqual([]);
+  });
+
+  it("holds for every app's journal too", () => {
+    for (const app of readdirSync(APPS)) {
+      const path = resolve(APPS, app, "src/db/migrations/meta/_journal.json");
+      if (!existsSync(path)) continue;
+      expect({ app, late: outOfOrder(path) }).toEqual({ app, late: [] });
     }
   });
 });

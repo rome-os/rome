@@ -1,9 +1,10 @@
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
+import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
-import type { EmailInboundResult } from "../channels/email-control.js";
-import { emailConnection } from "../channels/channels-service.js";
-import type { ChannelOf } from "../channels/connection-ports.js";
+import type { EmailInboundResult } from "../connections/kinds/email/email-control.js";
+import { emailConnection } from "../apps/accounts-service.js";
+import type { ChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import type {
   BackendTurnRunner,
   ChatId,
@@ -16,6 +17,8 @@ import type {
   UpdateChatSettingsInput,
   ResetChatSettingsInput,
   ListChatSettingsInput,
+  PreviewPayload,
+  ThreadContext,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
@@ -26,7 +29,7 @@ import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
-import type { AgentNamesService } from "../channels/agent-names.js";
+import type { AgentNamesService } from "../chats/accounts/agent-names.js";
 import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
@@ -43,6 +46,17 @@ const AccountOrChannel = z.union([
   z.string().min(1),
   z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
 ]);
+
+// An approval's card, which a worker asks main to put in the conversation the
+// approval came from, so it is recorded in that chat as main records it.
+const ApprovalCardParams = z.object({
+  approvalId: z.string(),
+  actionName: z.string(),
+  preview: z.custom<PreviewPayload>((val) => typeof val === "object" && val !== null).optional(),
+  channelContext: z
+    .custom<ThreadContext>((val) => typeof val === "object" && val !== null)
+    .optional(),
+});
 
 const ChannelsSendParams = z.object({
   channel: AccountOrChannel,
@@ -288,6 +302,9 @@ export interface WorkerRpcServices {
   appConnections: AppConnectionBrokerPort;
   /** Resolve the owner from the action that the Core IPC boundary captured. */
   appIdForAction: (actionName: string) => string | null;
+  /** Puts an approval's card in the conversation it came from, recorded in
+   *  that chat (`approvals.sendCard`). */
+  sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
 }
 
 export class WorkerRpcServer {
@@ -301,6 +318,10 @@ export class WorkerRpcServer {
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
         "channels.send": (params) => this.handleChannelsSend(params),
+        "approvals.sendCard": (params) =>
+          this.services.sendApprovalCard(
+            parseParams("approvals.sendCard", ApprovalCardParams, params),
+          ),
         "channels.query": (params) => this.handleChannelsQuery(params),
         "agentNames.resolve": (params) => {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);

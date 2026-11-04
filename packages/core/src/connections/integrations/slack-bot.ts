@@ -5,7 +5,7 @@
 // agents in one workspace are two apps. The guardian creates the app from a
 // prefilled manifest link, installs it, and pastes its two tokens back. Rome
 // never creates or configures Slack apps itself, so it holds no configuration
-// token. The transport is `SlackAdapter` (packages/core/src/channels/slack.ts),
+// token. The transport is `SlackAdapter` (packages/core/src/connections/kinds/slack/slack.ts),
 // which opens its own Socket Mode connection. Only TERMINAL failures reach
 // `fault`:
 //   - a refused bot or app-level token, an uninstalled app, or revoked tokens
@@ -27,7 +27,7 @@ import {
   isSlackCredentialError,
   readSocketAppId,
   slackWebApi,
-} from "../../channels/slack.js";
+} from "../kinds/slack/slack.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupForm, SetupFormField, SetupInteraction } from "../setup/types.js";
@@ -261,8 +261,9 @@ export function makeSlackBotSetup(deps: {
   createSocket?: CreateSlackSocket;
 }): SetupFn {
   return async (interact, ctx) => {
-    // A new app is a new bot, which a renewal must refuse, so renewing skips
-    // the name and the create link and asks the existing app for its tokens.
+    // A new app is a new bot, which would end the connection a renewal fixes,
+    // so renewing skips the name and the create link and asks the existing
+    // app for its tokens.
     const name = ctx.renewing ? undefined : await promptBotName(interact);
     let error: string | undefined;
     let material: { botToken: string; appToken: string };

@@ -203,6 +203,22 @@ describe("Rome Cloud OAuth brokering", () => {
       expect(body.code_verifier).toBeTruthy();
       expect(body).not.toHaveProperty("tenant");
     });
+
+    it("answers what the attempt was started for", async () => {
+      setInstanceTokenInMemory("romeinst_test-token");
+      const signIn = new URL(
+        await createRomeCloudOAuthStartRedirect(db, "github", { intent: "sign-in" }),
+      ).searchParams.get("state")!;
+      const older = await startState();
+      stubRedeemFetch();
+
+      await expect(redeemRomeCloudOAuthHandoff(db, "h-1", signIn)).resolves.toMatchObject({
+        intent: "sign-in",
+      });
+      await expect(redeemRomeCloudOAuthHandoff(db, "h-2", older)).resolves.toMatchObject({
+        intent: null,
+      });
+    });
   });
 
   describe("refreshRomeCloudOAuthGrant", () => {

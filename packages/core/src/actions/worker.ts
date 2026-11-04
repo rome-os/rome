@@ -8,6 +8,7 @@ import {
 import {
   isActionWorkerPayload,
   isActionWorkerShutdown,
+  toWireError,
   type ActionWorkerMessage,
   type ActionWorkerPayload,
 } from "./worker-protocol.js";
@@ -101,10 +102,7 @@ void getEngine().catch((err) => {
   sendThenExit(
     {
       type: "error",
-      error:
-        err instanceof Error
-          ? { name: err.name, message: err.message }
-          : { name: "Error", message: String(err) },
+      error: toWireError(err),
     },
     1,
   ).catch(() => process.exit(1));
@@ -141,10 +139,7 @@ process.on("message", (message: unknown) => {
     .catch((err) =>
       sendMessage({
         type: "error",
-        error:
-          err instanceof Error
-            ? { name: err.name, message: err.message }
-            : { name: "Error", message: String(err) },
+        error: toWireError(err),
       }),
     )
     .finally(() => {

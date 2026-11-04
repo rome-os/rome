@@ -30,8 +30,8 @@ import {
   WechatUserRuntime,
   type WechatUserChat,
   type WechatUserStatus,
-} from "../../channels/wechat-user.js";
-import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
+} from "../kinds/wechat-user/wechat-user.js";
+import { WECHAT_USER_CHANNEL } from "../../chats/history/wechat-user-messages.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";

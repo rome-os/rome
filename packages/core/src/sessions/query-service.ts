@@ -207,7 +207,7 @@ function sessionTypeLabel(type: string): string {
       webchat: "Chat",
       webchat_handoff: "Handoff",
       channel: "Channel",
-      action: "Automation",
+      action: "Action run",
       subagent: "Subagent",
       fork: "Branch",
     }[type] ?? titleCase(type)
@@ -229,9 +229,9 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
   };
   if (session.type === "channel") {
     return (
-      clean(session.sourceThreadName) ??
+      clean(session.placeName) ??
       clean(session.name) ??
-      humanize(session.sourceChannel) ??
+      humanize(session.chatPlatform) ??
       `Channel ${shortIdentifier(session.id)}`
     );
   }
@@ -240,7 +240,7 @@ function sessionDisplayTitle(session: SessionRow, owner: RomeSessionOwner): stri
       humanize(session.triggerName) ??
       humanize(session.triggerActionName) ??
       humanize(session.agentName) ??
-      `Automation ${shortIdentifier(session.id)}`
+      `Action run ${shortIdentifier(session.id)}`
     );
   }
   if (session.type === "subagent") {
@@ -337,10 +337,10 @@ export class SessionQueryService {
    * has no shape for no agent.
    */
   private answeringAgent(session: SessionRow, accountAgentOf: AccountAgentOf): string | null {
-    if (session.type !== "channel" || !session.sourceChannel) return session.agentName;
-    const linked = accountAgentOf(session.sourceChannel);
+    if (session.type !== "channel" || !session.channel) return session.agentName;
+    const linked = accountAgentOf(session.channel);
     if (!linked) return session.agentName;
-    if (session.sourceThreadType !== "private") {
+    if (session.placeKind !== "directMessage") {
       // A null routing override is an explicit pin to main.
       if (session.channelSettings?.overrides.routing?.agentName === null) return null;
       if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
@@ -414,13 +414,13 @@ export class SessionQueryService {
       ownerAgentNames: scope.sessions?.owners ? Array.from(ownerAgentNames) : undefined,
       includeUninstalledOwners,
       knownAgentNames,
-      sourceChannels: sources
+      platforms: sources
         ?.filter(
-          (source): source is Extract<(typeof sources)[number], { kind: "channel" }> =>
-            source.kind === "channel",
+          (source): source is Extract<(typeof sources)[number], { kind: "platform" }> =>
+            source.kind === "platform",
         )
-        .map((source) => source.channel),
-      includeInternalSource: sources?.some((source) => source.kind === "internal"),
+        .map((source) => source.platform),
+      includeNoChat: sources?.some((source) => source.kind === "noChat"),
       projectPathPrefix: scope.sessions?.projectPathPrefix,
       models: scope.runs?.models?.map((model) =>
         model.kind === "unknown"
@@ -460,10 +460,12 @@ export class SessionQueryService {
       projectPath: session.projectPath,
       agentName,
       type: session.type as RomeSessionType,
-      sourceChannel: session.sourceChannel,
-      sourceThreadId: session.sourceThreadId,
-      sourceThreadName: session.sourceThreadName,
-      sourceThreadType: session.sourceThreadType,
+      platform: session.chatPlatform,
+      accountId: session.accountId,
+      chatId: session.chatId === null ? null : String(session.chatId),
+      threadId: session.threadId,
+      placeName: session.placeName,
+      placeKind: session.placeKind,
       triggerKind: session.triggerKind,
       triggerName: session.triggerName,
       triggerActionName: session.triggerActionName,
@@ -584,32 +586,32 @@ export class SessionQueryService {
       };
     }
     if (by === "source") {
-      if (!run.sourceChannel) {
+      if (!run.platform) {
         return {
-          key: "source:internal",
-          label: "Internal",
-          description: "Background and internal runs",
+          key: "source:none",
+          label: "Not in a chat",
+          description: "Sessions that stand in no chat",
           iconUrl: null,
           kind: "named",
           dimension: {
             dimension: "source",
-            state: "internal",
-            channel: null,
-            label: "Internal",
+            state: "noChat",
+            platform: null,
+            label: "Not in a chat",
           },
         };
       }
       return {
-        key: `source:${run.sourceChannel}`,
-        label: titleCase(run.sourceChannel),
-        description: "External source",
+        key: `source:${run.platform}`,
+        label: titleCase(run.platform),
+        description: "Chats on this platform",
         iconUrl: null,
         kind: "named",
         dimension: {
           dimension: "source",
-          state: "channel",
-          channel: run.sourceChannel,
-          label: titleCase(run.sourceChannel),
+          state: "platform",
+          platform: run.platform,
+          label: titleCase(run.platform),
         },
       };
     }

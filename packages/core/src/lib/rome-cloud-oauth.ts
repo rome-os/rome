@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { RenewalUnavailable } from "../connections/errors.js";
 import { eq, lt } from "drizzle-orm";
-import { oauthPendingAttempts } from "../db/schema.js";
+import { type OAuthAttemptIntent, oauthPendingAttempts } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { getInstanceToken } from "./instance-identity.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "./rome-cloud-origin.js";
@@ -28,6 +28,9 @@ export interface RomeCloudOAuthRedeemResponse {
   profile?: Record<string, unknown> | null;
   tokens: OAuthTokenBundle;
   metadata?: Record<string, unknown> | null;
+  /** What the attempt was started for, or null for one started before Rome
+   *  recorded it. */
+  intent?: OAuthAttemptIntent | null;
 }
 
 const PENDING_ATTEMPT_TTL_MS = 10 * 60 * 1000;
@@ -75,7 +78,7 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
 export async function createRomeCloudOAuthStartRedirect(
   db: DrizzleDb,
   provider: OAuthProvider,
-  opts?: { reconnect?: boolean; shop?: string },
+  opts?: { reconnect?: boolean; shop?: string; intent?: OAuthAttemptIntent },
 ): Promise<string> {
   const romeCloudOrigin = getRomeCloudOrigin();
   if (!romeCloudOrigin) {
@@ -102,6 +105,7 @@ export async function createRomeCloudOAuthStartRedirect(
     codeVerifier,
     createdAt: now,
     expiresAt: new Date(now.getTime() + PENDING_ATTEMPT_TTL_MS),
+    intent: opts?.intent ?? null,
   });
 
   // Front-channel authorize. Rome Cloud takes the account from the dashboard cookie
@@ -217,6 +221,7 @@ export async function redeemRomeCloudOAuthHandoff(
       data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
         ? (data.metadata as Record<string, unknown>)
         : null,
+    intent: pendingAttempt.intent ?? null,
   };
 }
 

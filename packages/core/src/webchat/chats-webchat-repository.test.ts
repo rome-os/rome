@@ -1,3 +1,7 @@
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { backfillLegacyChats } from "../db/chats-backfill.js";
+import { resolveChatSenders } from "../api/routes/chat-senders.js";
+import { resolveReply } from "../api/routes/webchat-reply.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
@@ -34,6 +38,175 @@ describe("ChatsWebChatRepository", () => {
   const ownRows = (id: string) =>
     testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all();
 
+  it("keeps legacy Concierge attribution and human identities through startup backfill", async () => {
+    const legacy = new WebChatRepository(testDb.db);
+    await legacy.createSession("old-chat", "Before the switch");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    await legacy.recordUserInput("old-concierge", "old-chat", text("Find flights"), guardian, {
+      platform: "webchat",
+      id: "core:concierge",
+    });
+    await legacy.recordUserInput("old-loopback", "old-chat", text("Loopback"), {
+      ...guardian,
+      via: "loopback",
+    });
+    await legacy.recordUserInput("old-cookie", "old-chat", text("Typed"), guardian);
+    await legacy.recordUserInput("old-visitor", "old-chat", text("Visitor"), {
+      kind: "visitor",
+      accountId: "alex",
+      email: "alex@example.com",
+    });
+    backfillLegacyChats(testDb.db);
+    const deps = {
+      db: testDb.db,
+      settingsRepo: { get: async () => "Ray" },
+      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      appCatalog: { get: () => undefined },
+    } as never;
+    const sources = await repo.getUserMessageSources("old-chat");
+    expect(sources).toEqual(new Map([["old-concierge", "core:concierge"]]));
+    const senders = await resolveChatSenders(
+      deps,
+      await repo.getUserMessageActors("old-chat"),
+      sources,
+    );
+    expect(senders.get("old-concierge")).toMatchObject({ kind: "automated", name: "Concierge" });
+    expect(senders.get("old-concierge")).not.toHaveProperty("onBehalfOf");
+    expect(senders.get("old-loopback")).toMatchObject({ kind: "guardian", name: "Ray" });
+    expect(senders.get("old-cookie")).toMatchObject({ kind: "guardian", name: "Ray" });
+    expect(senders.get("old-visitor")).toMatchObject({
+      kind: "visitor",
+      name: "alex@example.com",
+      accountId: "alex",
+    });
+    expect(await repo.getReplyTarget("old-chat", "old-concierge")).not.toBeNull();
+    const page = await repo.getMessagesPage("old-chat", { limit: 10 });
+    expect(page.rows.map((message) => message.id).sort()).toEqual([
+      "old-concierge",
+      "old-cookie",
+      "old-loopback",
+      "old-visitor",
+    ]);
+  });
+
+  it.each([
+    "cookie",
+    "loopback",
+  ] as const)("reads a Concierge input speaking for the guardian via %s", async (via) => {
+    await repo.createSession("concierge-source", "Concierge");
+    const actor = { kind: "guardian" as const, userId: "seat", via };
+    await repo.recordUserInput("concierge-input", "concierge-source", "[]", actor, {
+      platform: "webchat",
+      id: "core:concierge",
+    });
+    const target = await repo.getReplyTarget("concierge-source", "concierge-input");
+    expect(target?.senderId).toBe("core:concierge");
+    expect(target?.actor?.kind).toBe("guardian");
+    expect((await repo.getUserMessageActors("concierge-source")).get("concierge-input")?.kind).toBe(
+      "guardian",
+    );
+    expect(await repo.getUserMessageSources("concierge-source")).toEqual(
+      new Map([["concierge-input", "core:concierge"]]),
+    );
+    const deps = {
+      db: testDb.db,
+      webchatRepo: repo,
+      settingsRepo: { get: async () => "Ray" },
+      agentLoader: { getAllRecords: () => new Map([["core:concierge", { metadata: {} }]]) },
+      appCatalog: { get: () => undefined },
+    } as never;
+    const senders = await resolveChatSenders(
+      deps,
+      await repo.getUserMessageActors("concierge-source"),
+      await repo.getUserMessageSources("concierge-source"),
+    );
+    expect(senders.get("concierge-input")).toMatchObject({
+      kind: "automated",
+      name: "Concierge",
+      onBehalfOf: { kind: "guardian", name: "Ray" },
+    });
+    await repo.recordUserInput(
+      "concierge-quote",
+      "concierge-source",
+      JSON.stringify([{ type: "text", content: "Status?" }]),
+      actor,
+      { platform: "webchat", id: "core:concierge" },
+    );
+    const quote = await resolveReply(deps, {
+      sessionId: "concierge-source",
+      messageId: "concierge-quote",
+      ownRowOnly: true,
+    });
+    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Concierge" } });
+    if (quote.ok) expect(quote.promptLine).toContain("Concierge: Status?");
+  });
+
+  it.each([
+    "automated::1::agent:core:main",
+    "automated::1::app:daily-report",
+    "automated::0::agent:coding:coding",
+    "automated::0::app:daily-report",
+    "automated::0::routine:Morning briefing",
+    "automated::0::unknown",
+    "core:concierge",
+    "visitor:assistant",
+    "automated:assistant",
+  ])("keeps source %s separate from ownership and reads it for replies", async (senderId) => {
+    await repo.createSession("source-chat", "Sources");
+    const actor = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+    expect(
+      await repo.recordUserInput("source-input", "source-chat", "[]", actor, {
+        platform: "webchat",
+        id: senderId,
+      }),
+    ).toBe(true);
+    expect(await repo.getUserMessageSources("source-chat")).toEqual(
+      new Map([["source-input", senderId]]),
+    );
+    expect((await repo.getReplyTarget("source-chat", "source-input"))?.senderId).toBe(senderId);
+    expect((await repo.getMessagesPage("source-chat", { limit: 1 })).rows[0]).toMatchObject({
+      id: "source-input",
+      role: "user",
+    });
+    await repo.updateUserInput("source-chat", {
+      type: "input_status",
+      inputId: "source-input",
+      turnId: "source-turn",
+      state: "accepted",
+    });
+    expect(await repo.getTurnChatMessages("source-chat", "source-turn")).toMatchObject([
+      { id: "source-input", role: "user", senderId },
+    ]);
+    expect(await repo.getUserInput("source-chat", "source-input")).toMatchObject({
+      turnId: "source-turn",
+      inputState: "accepted",
+    });
+    if (senderId.startsWith("automated::")) {
+      expect((await repo.getUserMessageActors("source-chat")).get("source-input")?.kind).toBe(
+        "guardian",
+      );
+    }
+    expect(await repo.getReplyTarget("another-chat", "source-input")).toBeNull();
+    expect(await repo.getSessionOwnerKey("source-chat")).toBeNull();
+    const line = testDb.db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.key, "source-input"))
+      .get();
+    expect(line?.senderAccountId).toBe(
+      senderId.startsWith("automated::")
+        ? senderId
+        : senderId === "core:concierge"
+          ? "guardian"
+          : `agent:${senderId}`,
+    );
+    expect(line?.senderAgent).toBe(senderId.startsWith("automated::") ? null : senderId);
+    await repo.recordUserInput("old-loopback", "source-chat", "[]", actor);
+    expect((await repo.getUserMessageSources("source-chat")).has("old-loopback")).toBe(false);
+    expect((await repo.getUserMessageActors("source-chat")).get("old-loopback")?.kind).toBe(
+      "guardian",
+    );
+  });
   it("starts a webchat chat for a new session, keyed by the session", async () => {
     await repo.createSession("chat-1", "Plans", undefined, undefined, null, null, "writer");
 
@@ -105,6 +278,8 @@ describe("ChatsWebChatRepository", () => {
     expect(older.nextCursor).toBeNull();
   });
 
+  // A subagent, fork or action run stands in no chat, so its prompts and
+  // answers are its own.
   it("keeps the lines of a session in no chat as its own", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.addMessage("in-1", "fork-1", "user", text("Hi"), "turn-1");
@@ -112,6 +287,7 @@ describe("ChatsWebChatRepository", () => {
     expect(session("fork-1")?.chatId).toBeNull();
     expect(testDb.db.select().from(chatMessages).all()).toHaveLength(0);
     expect((await repo.getMessages("fork-1")).map((line) => line.id)).toEqual(["in-1"]);
+    expect(await repo.getMessageCount("fork-1")).toBe(1);
   });
 
   it("moves a promoted fork's lines into its new chat, linked to their turns", async () => {
@@ -312,14 +488,13 @@ describe("ChatsWebChatRepository", () => {
     expect(session("handoff-1")?.chatId).toBeNull();
   });
 
-  it("keeps a chat's notifications in its transcript", async () => {
+  // A dashboard notice is not a message in Chats yet (#1672).
+  it("leaves a dashboard notice out of its chat's transcript", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set"));
 
-    expect((await repo.getMessages("chat-1")).map((line) => [line.id, line.role])).toEqual([
-      ["note-1", "notification"],
-    ]);
-    expect(await repo.getMessageCount("chat-1")).toBe(1);
+    expect(await repo.getMessages("chat-1")).toEqual([]);
+    expect(await repo.getMessageCount("chat-1")).toBe(0);
   });
   it("reads a channel chat's notification once, from Chats, though its old row stays", async () => {
     const telegram = new ChatRepository(testDb.db).start(
@@ -361,7 +536,9 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getMessages("channel:telegram:t-1")).map((line) => line.id)).toEqual(["5"]);
   });
 
-  it("reads its own account's copy of a message where each account holds one", async () => {
+  // Each of Rome's accounts records its own copy (#1670), and every message
+  // recorded in the place is a line.
+  it("reads every account's copy of a message where each account holds one", async () => {
     // A Telegram basic group numbers its messages per member account.
     const group = new ChatRepository(testDb.db).start(
       chatKey("telegram", "-42" as ChatId),
@@ -398,8 +575,9 @@ describe("ChatsWebChatRepository", () => {
 
     expect((await repo.getMessages("channel:tg-sales:-42")).map((line) => line.id)).toEqual([
       "111:5",
+      "222:7",
     ]);
-    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(1);
+    expect(await repo.getMessageCount("channel:tg-sales:-42")).toBe(2);
   });
 
   it("reads a steered input after the card it answers, in the same turn", async () => {
@@ -453,6 +631,7 @@ describe("ChatsWebChatRepository", () => {
       "in-2",
     ]);
   });
+
   it("keeps a promoted fork's inputs where they stand, queued or run", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
     await repo.recordUserInput("in-1", "fork-1", text("Run"));
@@ -654,14 +833,11 @@ describe("ChatsWebChatRepository", () => {
     expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
   });
 
-  it("finds a chat by a notice it keeps of its own", async () => {
+  it("leaves a dashboard notice out of search, as out of the transcript", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set for the ferry"));
 
-    const matches = await repo.searchSessionMessages("ferry");
-    expect(matches.map((match) => [match.session.id, match.message.id])).toEqual([
-      ["chat-1", "note-1"],
-    ]);
+    expect(await repo.searchSessionMessages("ferry")).toEqual([]);
   });
 
   it("counts the lines from Rome since the chat was last read, up to a cap", async () => {

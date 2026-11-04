@@ -7,9 +7,9 @@ import type {
   InboundEvent,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { ChatBuffers } from "../channels/conversation-buffer.js";
-import { Pacer } from "../channels/delivery/pacer.js";
-import { DeliveryFailure, type DeliveryTransport, plainText } from "../channels/delivery/types.js";
+import { ChatBuffers } from "../participation/conversation-buffer.js";
+import { Pacer } from "../participation/reply-delivery/pacer.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "./sending.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { chats } from "../db/schema.js";
@@ -802,5 +802,8 @@ describe("kindNamedBy", () => {
     expect(kindNamedBy("whatsapp", "120363@g.us")).toBe("group");
     expect(kindNamedBy("whatsapp", "4479@s.whatsapp.net")).toBe("dm");
     expect(kindNamedBy("discord", "1234567890")).toBeNull();
+    expect(kindNamedBy("feishu", "ou_abc")).toBe("dm");
+    expect(kindNamedBy("lark", "ou_abc")).toBe("dm");
+    expect(kindNamedBy("lark", "oc_abc")).toBeNull();
   });
 });

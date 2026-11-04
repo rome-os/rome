@@ -2,8 +2,6 @@
 // replies over one database, built once so startup, the action worker and
 // tests hold the same objects wired the same way. Vocabulary:
 // docs/domains/chats.md and docs/domains/participation.md.
-//
-// Nothing live uses it yet: the Chats switch moves startup onto it.
 
 import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";

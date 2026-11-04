@@ -28,7 +28,10 @@
 
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
-import { ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
+import {
+  AccountNotConnected,
+  type ChannelSend,
+} from "../chats/connected-accounts/connected-account.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
 import {
   type Sender,
@@ -77,7 +80,7 @@ export type Resolution = { ok: true; target: SendTarget } | { ok: false; send: R
  * Whether the channel does direct messaging is a synchronous read of its send
  * port. Only asking for the thread that reaches this account can reach a
  * provider, and it is also what says no Connection exists for the channel:
- * the port rejects with {@link ChannelNotConnected} then, as a send would.
+ * the port rejects with {@link AccountNotConnected} then, as a send would.
  */
 async function sendStateOf(
   deps: SendDeps,
@@ -106,7 +109,7 @@ async function sendStateOf(
   try {
     chatId = await direct.chatFor(account.id);
   } catch (err) {
-    if (err instanceof ChannelNotConnected) return { state: "not-connected" };
+    if (err instanceof AccountNotConnected) return { state: "not-connected" };
     chatId = null;
   }
   if (chatId === null) return { state: "no-conversation" };

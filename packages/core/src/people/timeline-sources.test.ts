@@ -1,9 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
-import type { Account, AccountId, Accounts } from "../channels/accounts.js";
-import type { Channels } from "../channels/channel.js";
-import { romeSessions } from "../db/schema.js";
-import { createTestDb } from "../test/helpers.js";
-import { romeAccountsOn, timelineAccounts } from "./timeline-sources.js";
+import type { Account, AccountId, Accounts } from "../chats/accounts/accounts.js";
+import type { Channels } from "../chats/connected-accounts/connected-account.js";
+import { timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
   id: id as AccountId,
@@ -251,72 +249,5 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
       // Rome holds no Feishu app, so nothing stores a Feishu account's history.
       { channel: "feishu", storedUnder: [], addresses: ["ou_grace"] },
     ]);
-  });
-});
-
-describe("romeAccountsOn", () => {
-  const platformOfChannel = () => "telegram";
-
-  function seeded() {
-    const { db } = createTestDb();
-    db.insert(romeSessions)
-      .values({
-        id: "s-dm",
-        name: "DM",
-        type: "channel",
-        sourceChannel: "tg-bot",
-        accountId: "bot-123",
-        createdAt: new Date(0),
-        activityAt: new Date(0),
-      })
-      .run();
-    return db;
-  }
-
-  it("names the account the channel's record holds", () => {
-    const db = seeded();
-    const accountOf = () => ({ platform: "telegram", id: "bot-live" });
-    expect(romeAccountsOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual([
-      { platform: "telegram", id: "bot-live" },
-      { platform: "telegram", id: "bot-123" },
-    ]);
-  });
-
-  // A kept connection signed in as another account keeps the chats its
-  // earlier accounts had, keyed by them.
-  it("names every account Rome spoke as there, newest first, once each", () => {
-    const db = seeded();
-    db.insert(romeSessions)
-      .values(
-        ["bot-456", "bot-123"].map((accountId, at) => ({
-          id: `s-${at}`,
-          name: "DM",
-          type: "channel" as const,
-          sourceChannel: "tg-bot",
-          accountId,
-          createdAt: new Date(1000 * (at + 1)),
-          activityAt: new Date(1000 * (at + 1)),
-        })),
-      )
-      .run();
-    const accountOf = () => ({ platform: "telegram", id: "bot-123" });
-    expect(romeAccountsOn({ db, platformOfChannel, accountOf }, "tg-bot")).toEqual([
-      { platform: "telegram", id: "bot-123" },
-      { platform: "telegram", id: "bot-456" },
-    ]);
-  });
-
-  // Disconnecting an account clears its record, and its chats stay keyed by
-  // the account that spoke in them.
-  it("names the account Rome spoke as once the record holds none", () => {
-    const db = seeded();
-    expect(romeAccountsOn({ db, platformOfChannel, accountOf: () => null }, "tg-bot")).toEqual([
-      { platform: "telegram", id: "bot-123" },
-    ]);
-  });
-
-  it("names no account where the channel knows none and Rome never spoke there", () => {
-    const db = seeded();
-    expect(romeAccountsOn({ db, platformOfChannel }, "tg-other")).toEqual([]);
   });
 });

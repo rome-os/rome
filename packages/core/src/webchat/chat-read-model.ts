@@ -21,14 +21,14 @@
 // until the Chats switch moves it here.
 
 import { sql } from "drizzle-orm";
+import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { SaidMessage } from "../chats/storage/message.js";
 import { MessageRepository, type MessageCursor } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
-import { messageHolder, type MessageHolder } from "../connections/chat-adapter.js";
-import { occurrencesOf, TurnLinks, type TurnLink } from "../sessions/turn-links.js";
+import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
 
 /** How the dashboard draws a line. A line from Rome names the agent that said
  *  it; a line that prompted a turn is the guardian's (or a visitor's) input;
@@ -158,24 +158,21 @@ export class ChatReadModel {
    * drawn under the first link, so it is never drawn twice. A message outside
    * any turn counts as a turn of its own. A turn is placed by its newest
    * line and shown whole, with all its lines, even where other turns' lines
-   * fall between them, so pages never split or repeat a turn. Where each of
-   * Rome's accounts holds its own copy of a message (a Telegram basic group),
-   * the message is drawn once, as the first copy a turn took, and every turn
-   * on any copy has its trace shown. Null when the session stands in no chat.
+   * fall between them, so pages never split or repeat a turn. Every message
+   * recorded in the place is drawn, so where each of Rome's accounts holds
+   * its own copy of one (#1670), each copy is. Null when the session stands
+   * in no chat.
    */
   async chatTranscript(sessionId: string, page?: TranscriptPage): Promise<Transcript | null> {
     const speaker = await this.speakerOf(sessionId);
     if (!speaker) return null;
-    const { place, since, holder } = speaker;
-    const copies = new Map<number, number[]>();
+    const { place, since } = speaker;
     // A speaker sees what was said where it stands from when it joined: a line
     // said in a group before Rome's account was there never reached it.
     const seen = (said: readonly SaidMessage[]) => said.filter((message) => message.at >= since);
-    const drawn = (said: readonly SaidMessage[]) =>
-      holder ? this.oneCopyEach(place, said, copies, holder) : said;
     if (!page) {
       const read = await this.messages.read(place);
-      return this.transcriptOf(sessionId, drawn(seen(read.messages)), null, copies);
+      return this.transcriptOf(sessionId, seen(read.messages), null);
     }
     // A cursor names the newest line of the oldest turn already shown, by
     // its key, as every line goes out. This page holds turns whose newest
@@ -195,12 +192,11 @@ export class ChatReadModel {
       const read = await this.messages.read(place, { before: batch, limit: page.limit * 4 });
       const shown = seen(read.messages);
       const links = this.links.turnsOf(shown.map((message) => message.id));
-      for (const message of [...drawn(shown)].reverse()) {
+      for (const message of [...shown].reverse()) {
         const key = turnKey(message, links);
         if (kept.has(key) || passed.has(key)) continue;
-        // The turn is placed by the newest line it draws, so a copy it
-        // leaves to another turn never moves it.
-        const lines = drawn(seen(await this.linesOfTurn(place, message, links.get(message.id))));
+        // The turn is placed by the newest line it draws.
+        const lines = seen(await this.linesOfTurn(place, message, links.get(message.id)));
         const newest = lines.at(-1) ?? message;
         // A turn whose newest line is newer than the cursor was shown before.
         if (!older(newest)) {
@@ -224,50 +220,7 @@ export class ChatReadModel {
       sessionId,
       lines,
       more && next ? { at: next.at.getTime() / 1000, id: next.key } : null,
-      copies,
     );
-  }
-
-  /**
-   * `said` with one line of each message the accounts in `place` each hold a
-   * copy of: the first copy said that a turn took or queued as a prompt,
-   * or the first one recorded when none was. Records in `copies` every copy of each line kept. Copies
-   * share their second, so the lines said in those seconds hold them all,
-   * and a message reads the same however a page splits it.
-   */
-  private oneCopyEach(
-    place: Place,
-    said: readonly SaidMessage[],
-    copies: Map<number, number[]>,
-    holder: MessageHolder,
-  ): SaidMessage[] {
-    if (said.length === 0) return [];
-    const seconds = [...new Set(said.map((message) => Math.floor(message.at.getTime() / 1000)))];
-    const near = this.messages.byIds(
-      this.db
-        .all<{ id: number }>(sql`
-          SELECT id FROM ${CHAT_MESSAGES}
-          WHERE chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
-            AND said_at IN (SELECT value FROM json_each(${JSON.stringify(seconds)}))
-        `)
-        .map((row) => row.id),
-    );
-    const occurrence = occurrencesOf(near, holder);
-    const links = this.links.turnsOf(near.map((message) => message.id));
-    const message = new Map<string, number[]>();
-    for (const line of near) {
-      const of = occurrence.get(line.id);
-      if (of !== undefined) message.set(of, [...(message.get(of) ?? []), line.id]);
-    }
-    const drawnAs = (ids: readonly number[]) => ids.find((id) => links.has(id)) ?? Math.min(...ids);
-    return said.filter((line) => {
-      const of = occurrence.get(line.id);
-      const all = of === undefined ? undefined : message.get(of);
-      if (!all) return true;
-      if (drawnAs(all) !== line.id) return false;
-      copies.set(line.id, all);
-      return true;
-    });
   }
 
   /** Every line drawn under the turn `link` names, `message` among them,
@@ -303,14 +256,13 @@ export class ChatReadModel {
     sessionId: string,
     messages: readonly SaidMessage[],
     nextCursor: TranscriptCursor | null,
-    copies: ReadonlyMap<number, readonly number[]> = new Map(),
   ): Promise<Transcript> {
     const ids = messages.map((message) => message.id);
     const links = this.links.turnsOf(ids);
     const lines = messages.map((message) => chatLine(message, links.get(message.id), sessionId));
-    // Every turn a shown line, or a copy of it, prompted or answered has its
-    // trace shown, also one whose lines are drawn under another agent's turn.
-    const turns = await this.turnsAt(ids.flatMap((id) => copies.get(id) ?? [id]));
+    // Every turn a shown line prompted or answered has its trace shown, also
+    // one whose lines are drawn under another agent's turn.
+    const turns = await this.turnsAt(ids);
     return { lines, traces: await this.tracesOf(turns), nextCursor };
   }
 
@@ -397,20 +349,16 @@ export class ChatReadModel {
     };
   }
 
-  /** The place the session stands in, its chat's key and its thread, when
-   *  the speaker joined it, and which of Rome's accounts holds each line where
-   *  each holds its own copy of a message. */
-  private async speakerOf(
-    sessionId: string,
-  ): Promise<{ place: Place; since: Date; holder: MessageHolder | null } | null> {
+  /** The place the session stands in, its chat and its thread, and when the
+   *  speaker joined it. */
+  private async speakerOf(sessionId: string): Promise<{ place: Place; since: Date } | null> {
     const [row] = await this.db.all<{
       platform: string;
-      key: string;
       chat_id: number;
       thread_id: string | null;
       created_at: number;
     }>(sql`
-      SELECT c.platform, c.key, c.id AS chat_id, r.thread_id, r.created_at
+      SELECT c.platform, c.id AS chat_id, r.thread_id, r.created_at
       FROM rome_sessions r JOIN ${CHATS} c ON c.id = r.chat_id
       WHERE r.id = ${sessionId}
     `);
@@ -421,7 +369,6 @@ export class ChatReadModel {
         (row.thread_id ?? undefined) as ChatId | undefined,
       ),
       since: new Date(row.created_at * 1000),
-      holder: messageHolder(row.platform, row.key),
     };
   }
 
@@ -524,8 +471,6 @@ export class ChatReadModel {
    * How many lines from Rome the chat got since the guardian last read it,
    * counting at most `cap`. A chat never marked read has none. Times have
    * one-second precision, so a line in the same second as the mark is read.
-   * A message each of Rome's accounts holds a copy of counts once, as the
-   * transcript draws it.
    */
   async unreadCount(sessionId: string, cap: number): Promise<number> {
     const speaker = await this.speakerOf(sessionId);
@@ -536,23 +481,10 @@ export class ChatReadModel {
     const { place } = speaker;
     const fromRome = sql`chat_id = ${place.chat.id} AND thread_id IS ${place.threadId ?? null}
       AND sender_agent IS NOT NULL AND said_at > ${mark.at}`;
-    if (!speaker.holder) {
-      const [row] = await this.db.all<{ count: number }>(sql`
-        SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_MESSAGES} WHERE ${fromRome} LIMIT ${cap})
-      `);
-      return Number(row?.count ?? 0);
-    }
-    // Copies share their second, and each second holds at least one message,
-    // so the first `cap` seconds with a line from Rome hold enough to count.
-    const lines = await this.db.all<{ id: number }>(sql`
-      SELECT id FROM ${CHAT_MESSAGES} WHERE ${fromRome} AND said_at IN (
-        SELECT DISTINCT said_at FROM ${CHAT_MESSAGES} WHERE ${fromRome} ORDER BY said_at LIMIT ${cap}
-      )
+    const [row] = await this.db.all<{ count: number }>(sql`
+      SELECT count(*) AS count FROM (SELECT 1 FROM ${CHAT_MESSAGES} WHERE ${fromRome} LIMIT ${cap})
     `);
-    const said = this.messages.byIds(lines.map((line) => line.id));
-    const occurrence = occurrencesOf(said, speaker.holder);
-    const messages = new Set(said.map((line) => occurrence.get(line.id) ?? `line:${line.id}`));
-    return Math.min(messages.size, cap);
+    return Number(row?.count ?? 0);
   }
 }
 
@@ -574,20 +506,28 @@ function chatLine(
   link: TurnLink | undefined,
   openedSessionId: string,
 ): TranscriptLine {
+  const prompt = link?.role === "prompt";
+  const accountId = message.saidBy?.account.id;
+  // A dashboard source account is attribution, not a person an app can address.
+  const sourceId =
+    message.saidBy?.agent ??
+    (accountId?.startsWith("automated::")
+      ? accountId
+      : accountId?.startsWith("agent:")
+        ? accountId.slice(6)
+        : undefined);
+  const source =
+    prompt && message.place.chat.platform === "webchat" ? automatedSource(sourceId) : null;
   return {
     id: message.key,
     sessionId: link?.sessionId ?? openedSessionId,
     turnId: link?.turnId ?? null,
     inputState: link?.inputState ?? null,
     role:
-      message.direction === "fromRome"
-        ? "assistant"
-        : link?.role === "prompt"
-          ? "user"
-          : "notification",
+      message.direction === "fromRome" && !source ? "assistant" : prompt ? "user" : "notification",
     content: message.parts,
-    senderAccountId: message.saidBy?.account.id ?? null,
-    senderName: message.senderName ?? null,
+    senderAccountId: source ? null : (accountId ?? null),
+    senderName: source ? "Automation" : (message.senderName ?? null),
     createdAt: message.at,
   };
 }

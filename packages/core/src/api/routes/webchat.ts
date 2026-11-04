@@ -1,3 +1,4 @@
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
@@ -12,7 +13,7 @@ import {
   type Link as OtelLink,
 } from "@opentelemetry/api";
 import { createLogger } from "../../logger.js";
-import { logInboundChannelMessage } from "../../telemetry.js";
+import { logInboundMessage } from "../../telemetry.js";
 import { getGuardianProfileFile } from "../../profile-memory.js";
 import { toTraceEvent, toWebchatSessionResponse, type TraceableEvent } from "../helpers.js";
 import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
@@ -82,8 +83,13 @@ import {
 } from "../../core/conversation-title.js";
 import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import type { DashboardInbox } from "../../connections/send.js";
-import { resolveChatSenders } from "./chat-senders.js";
+import {
+  resolveChatSenders,
+  resolveAutomatedSender,
+  automatedMessageNotice,
+} from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
@@ -1229,7 +1235,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
     const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
-    const senders = await resolveChatSenders(deps, actors);
+    const sources = await deps.webchatRepo.getUserMessageSources(sessionId);
+    const senders = await resolveChatSenders(
+      deps,
+      actors,
+      new Map([...sources].filter(([id]) => shownIds.has(id))),
+    );
     if (senders.size === 0) return withTraces;
     return withTraces.map((message) => {
       const sender = senders.get(message.id);
@@ -3146,6 +3157,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   type SendBody = {
     inputId?: string;
+    automatedSource?: unknown;
+    automatedActorKind?: unknown;
     threadId?: string;
     text?: string;
     personaId?: string;
@@ -3219,6 +3232,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return {
         inputId: getString("inputId"),
+        automatedSource: getString("automatedSource"),
+        automatedActorKind: getString("automatedActorKind"),
         threadId: getString("threadId"),
         text: getString("text"),
         personaId: getString("personaId"),
@@ -3240,6 +3255,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     body: SendBody,
     said: { saidBy?: Account } = {},
   ): Promise<RouteAnswer> => {
+    const actor = await currentSessionActor();
+    const sourceId =
+      actor?.kind === "guardian" &&
+      actor.via === "loopback" &&
+      typeof body.automatedSource === "string"
+        ? automatedSenderId(body.automatedSource, body.automatedActorKind)
+        : undefined;
+    const saidBy = sourceId ? { platform: "webchat", id: sourceId } : said.saidBy;
+    const automated = saidBy ? await resolveAutomatedSender(deps, saidBy.id) : null;
     if (
       body.inputId &&
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.inputId)
@@ -3414,7 +3438,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached system prefix in PromptBuilder stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
-    const promptText = workspaceSection ? `${workspaceSection}\n\n${repliedPrompt}` : repliedPrompt;
+    const contextPrompt = workspaceSection
+      ? `${workspaceSection}\n\n${repliedPrompt}`
+      : repliedPrompt;
+    const promptText = automated
+      ? `${automatedMessageNotice(automated)}\n\n${contextPrompt}`
+      : contextPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3457,6 +3486,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
+    let largeModelSelection = session.largeModelSelection;
+    if (sessionId === CONCIERGE_CHAT_ID) {
+      await deps.concierge?.switchIfExhausted(sessionId);
+      // A background turn may also have moved the chat since this send read it.
+      largeModelSelection =
+        (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
+    }
     // A branch has no stored selection: it continues the provider thread
     // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
@@ -3465,7 +3501,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,
-              largeModelSelection: session.largeModelSelection,
+              largeModelSelection,
             },
             messageCount,
             body.largeModelSelection,
@@ -3518,15 +3554,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (
-      !(await deps.webchatRepo.recordUserInput(
-        inputId,
-        sessionId,
-        userContent,
-        await currentSessionActor(),
-        said.saidBy,
-      ))
-    ) {
+    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent, actor, saidBy))) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return answer({ error: "inputId is already in use" }, 409);
       return answer({
@@ -3537,7 +3565,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         inputState: existing.inputState,
       });
     }
-    logInboundChannelMessage({
+    logInboundMessage({
       channel: "webchat",
       threadId: sessionId,
       channelUserId,

@@ -50,7 +50,7 @@ export interface AIToolState {
   get(): AIToolStateValue;
   refresh(provider?: AIToolProviderId): Promise<AIToolStateValue>;
   markAuthRevoked(provider: AIToolProviderId): Promise<void>;
-  markQuotaExhausted(provider: AIToolProviderId): void;
+  markQuotaExhausted(provider: AIToolProviderId, until?: string): void;
   close(): void;
 }
 
@@ -315,7 +315,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       }
       notifyCodexLoginChanged(previousCodexLogin);
     },
-    markQuotaExhausted(provider) {
+    markQuotaExhausted(provider, until) {
       // A failure before the usage reset agrees with the snapshot, so the
       // reset still ends it. A failure after the reset comes from a limit the
       // snapshot did not show, so it holds until a successful usage probe or
@@ -328,12 +328,15 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         return until !== undefined && Date.parse(until) > failedAt ? until : undefined;
       };
       const resetAtFailure = resetAhead(provider === "openai" ? value.codex : value.claude);
+      const explicitUntil = Date.parse(until ?? "") > failedAt ? until : undefined;
       const fallbackUntil = new Date(failedAt + QUOTA_FALLBACK_MS).toISOString();
       const applyRuntimeSignal = (): boolean => {
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
         target.quotaExhaustedUntil =
-          (target.quotaExhausted ? resetAhead(target) : resetAtFailure) ?? fallbackUntil;
+          explicitUntil ??
+          (target.quotaExhausted ? resetAhead(target) : resetAtFailure) ??
+          fallbackUntil;
         target.quotaExhausted = true;
         return true;
       };

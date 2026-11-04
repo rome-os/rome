@@ -30,6 +30,7 @@ const REQUIRED_FIELDS = {
   pending_interaction: { toolUseId: "string", appId: "string", render: "object" },
   interaction_result: { toolUseId: "string" },
   error: { error: "string" },
+  quota_switch: { from: "string", to: "string", model: "string" },
   task_chat: { chatId: "string", title: "string" },
   reply_to: { messageId: "string", author: "string", text: "string" },
 } satisfies {

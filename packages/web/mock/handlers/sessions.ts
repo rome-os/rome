@@ -92,10 +92,12 @@ const record = (seed: SessionSeed): RomeSessionExplorerRecord => ({
   projectName: "default",
   projectPath: "default",
   agentName: null,
-  sourceChannel: null,
-  sourceThreadId: null,
-  sourceThreadName: null,
-  sourceThreadType: null,
+  platform: null,
+  accountId: null,
+  chatId: null,
+  threadId: null,
+  placeName: null,
+  placeKind: null,
   triggerKind: null,
   triggerName: null,
   triggerActionName: null,
@@ -130,8 +132,10 @@ const fromSeededChat = (
     owner: SEEDED_CHAT_OWNERS[chat.id] ?? CORE_OWNER,
     projectName: chat.projectName,
     projectPath: chat.projectName,
-    sourceChannel: "webchat",
-    sourceThreadType: "private",
+    platform: "webchat",
+    accountId: "guardian",
+    chatId: chat.id,
+    placeKind: "directMessage",
     createdAt: chat.createdAt,
     activityAt: chat.activityAt,
     messageCount: chat.messageCount,
@@ -163,10 +167,11 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "channel",
     agentName: "envoy",
     owner: CORE_OWNER,
-    sourceChannel: "whatsapp",
-    sourceThreadId: "whatsapp-dana",
-    sourceThreadName: "Dana Whitfield",
-    sourceThreadType: "direct",
+    platform: "whatsapp",
+    accountId: "whatsapp-bot",
+    chatId: "whatsapp-dana",
+    placeName: "Dana Whitfield",
+    placeKind: "directMessage",
     createdAt: ago(3 * HOUR),
     activityAt: ago(28 * 60 * 1000),
     messageCount: 14,
@@ -182,10 +187,11 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "channel",
     agentName: "envoy",
     owner: CORE_OWNER,
-    sourceChannel: "telegram",
-    sourceThreadId: "telegram-ines",
-    sourceThreadName: "Ines Ferreira",
-    sourceThreadType: "direct",
+    platform: "telegram",
+    accountId: "telegram-bot",
+    chatId: "telegram-ines",
+    placeName: "Ines Ferreira",
+    placeKind: "directMessage",
     createdAt: ago(2 * DAY),
     activityAt: ago(5 * HOUR),
     messageCount: 9,
@@ -201,10 +207,11 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "channel",
     agentName: "envoy",
     owner: CORE_OWNER,
-    sourceChannel: "email",
-    sourceThreadId: "email-invoice-8821",
-    sourceThreadName: "Bay Plumbing Co.",
-    sourceThreadType: "direct",
+    platform: "email",
+    accountId: "email-bot",
+    chatId: "email-invoice-8821",
+    placeName: "Bay Plumbing Co.",
+    placeKind: "directMessage",
     createdAt: ago(9 * DAY),
     activityAt: ago(9 * DAY),
     messageCount: 4,
@@ -342,10 +349,6 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "fork",
     agentName: "main",
     owner: CORE_OWNER,
-    sourceChannel: "webchat",
-    sourceThreadId: "mock-chat-3",
-    sourceThreadName: "Weekly planning",
-    sourceThreadType: "private",
     triggerKind: "fork",
     triggerName: "feedback",
     parentSessionId: "mock-chat-3",
@@ -424,10 +427,6 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     type: "webchat_handoff",
     agentName: "envoy",
     owner: CORE_OWNER,
-    sourceChannel: "webchat",
-    sourceThreadId: "mock-chat-4",
-    sourceThreadName: "Plumber for the leak",
-    sourceThreadType: "private",
     parentSessionId: "mock-chat-4",
     createdAt: ago(26 * DAY),
     activityAt: ago(26 * DAY),
@@ -446,15 +445,15 @@ const matchesOwner = (owner: RomeSessionOwner, filter: SessionOwnerFilter): bool
   return owner.type === "unknown";
 };
 
-const matchesSource = (channel: string | null, filter: SessionSourceFilter): boolean =>
-  filter.kind === "internal" ? channel === null : channel === filter.channel;
+const matchesSource = (platform: string | null, filter: SessionSourceFilter): boolean =>
+  filter.kind === "noChat" ? platform === null : platform === filter.platform;
 
 /** The fields core's search predicate spans, in the same order. */
 const searchFields = (session: RomeSessionExplorerRecord): (string | null)[] => [
   session.name,
   session.id,
-  session.sourceThreadName,
-  session.sourceThreadId,
+  session.placeName,
+  session.threadId,
   session.agentName,
   session.triggerName,
   session.triggerActionName,
@@ -552,7 +551,7 @@ export function sessionQueryHandlers(
           return false;
         if (
           sessionScope?.sources &&
-          !sessionScope.sources.some((filter) => matchesSource(session.sourceChannel, filter))
+          !sessionScope.sources.some((filter) => matchesSource(session.platform, filter))
         )
           return false;
         const prefix = sessionScope?.projectPathPrefix?.replace(/\/+$/, "");
@@ -590,7 +589,7 @@ export function sessionQueryHandlers(
         // narrowed list narrows its own dropdowns.
         facets: {
           types: facet(sorted.map((session) => session.type)),
-          sourceChannels: facet(sorted.map((session) => session.sourceChannel)),
+          platforms: facet(sorted.map((session) => session.platform)),
         },
       };
       return HttpResponse.json(result);

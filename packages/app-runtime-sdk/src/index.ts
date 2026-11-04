@@ -1367,8 +1367,10 @@ export interface OutgoingMessageBase {
   /**
    * Structured message parts. When provided, replaces the plain-text path so
    * channels that support rich content (web chat today) can render typed
-   * blocks like approval cards. A channel that cannot show a part refuses the
-   * message with {@link ChannelSendRefused} `part_unsupported`.
+   * blocks like approval cards. A channel that cannot draw an approval card
+   * sends the card's plain-text version instead. A channel that cannot show
+   * any other part refuses the message with {@link SendRefused}
+   * `part_unsupported`.
    */
   parts?: MessagePart[];
   /**
@@ -1841,43 +1843,55 @@ export interface ChannelDirectMessaging {
  *   A text platform shows `text` parts and nothing else.
  * - `attachment_unsupported`: an attachment the channel cannot carry.
  * - `reply_unaddressable`: `replyToMessageId` names no message the channel
- *   can answer, so the reply would land somewhere else. A platform with no
- *   way to quote at all, such as WhatsApp or WeChat, answers in place, as
- *   does a reply the channel's placement keeps out of a thread.
+ *   can answer, so the reply would land somewhere else. That includes any
+ *   reply on a platform Rome cannot quote on, such as WhatsApp or WeChat.
+ *   The sender drops the quote and sends again.
  */
-export type ChannelSendRefusal =
+export type SendRefusedReason =
   | "empty"
   | "part_unsupported"
   | "attachment_unsupported"
   | "reply_unaddressable";
 
-/** A channel's refusal of a send, before anything reached the platform. */
-export class ChannelSendRefused extends Error {
+/** A refusal of a send, before anything reached the platform. */
+export class SendRefused extends Error {
   constructor(
-    readonly reason: ChannelSendRefusal,
+    readonly reason: SendRefusedReason,
     message: string,
   ) {
     super(message);
+    // The name an app's copy of an older SDK matches a refusal by, kept until
+    // the breaking release that drops the deprecated aliases.
     this.name = "ChannelSendRefused";
   }
 }
 
-/** Whether `error` is a {@link ChannelSendRefused}, matched by name and
- *  reason so it holds across module copies. */
-export function isChannelSendRefused(error: unknown): error is ChannelSendRefused {
+/** Whether `error` is a {@link SendRefused}, matched by name and reason so it
+ *  holds across module copies. A refusal is named `ChannelSendRefused` today,
+ *  and `SendRefused` once the deprecated aliases go, so both match. */
+export function isSendRefused(error: unknown): error is SendRefused {
   return (
     error instanceof Error &&
-    error.name === "ChannelSendRefused" &&
+    (error.name === "SendRefused" || error.name === "ChannelSendRefused") &&
     typeof (error as { reason?: unknown }).reason === "string"
   );
 }
+
+/** @deprecated Use {@link SendRefusedReason}. */
+export type ChannelSendRefusal = SendRefusedReason;
+/** @deprecated Use {@link SendRefused}. */
+export const ChannelSendRefused = SendRefused;
+/** @deprecated Use {@link SendRefused}. */
+export type ChannelSendRefused = SendRefused;
+/** @deprecated Use {@link isSendRefused}. */
+export const isChannelSendRefused = isSendRefused;
 
 /** Sending on a channel. */
 export interface ChannelSend {
   /**
    * Sends `message` to `chatId`. Resolves only once the platform has taken
    * all of it. When the channel cannot deliver the message as given, it
-   * rejects with {@link ChannelSendRefused} and sends nothing. It never drops
+   * rejects with {@link SendRefused} and sends nothing. It never drops
    * a part, an attachment or a quote it could not resolve and reports the
    * rest as sent.
    */
@@ -2071,6 +2085,10 @@ export interface ActionRunContext {
 }
 
 export interface CurrentActionContext {
+  /** The runtime-recorded source of this action chain, separate from its accountable actor. */
+  initiator?: string;
+  /** Kind of the chain's accountable session, before any loopback HTTP hop. */
+  actorKind?: "guardian" | "visitor" | "anonymous";
   actionName?: string;
   executionId?: string;
   rootExecutionId?: string;
@@ -2309,7 +2327,8 @@ export interface ChatRepository extends Partial<ChatReads> {
    * as JSON parts, when it says more than the platform shows. Throws the
    * platform's refusal, and records nothing then. Answers the platform's id
    * for the message, when it gave one. Absent on a host that does not keep
-   * chats in Chats yet; use `recordOutboundMessage` after sending there.
+   * chats in Chats, where an app has no way to put a message it sends on
+   * record, so it does not send one there.
    */
   send?(input: {
     sessionId: string;
@@ -2346,18 +2365,6 @@ export interface ChatRepository extends Partial<ChatReads> {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<{ messageId: string | null; threadId: string }>;
-  /** @deprecated A host that keeps chats in Chats records what `send` and
-   *  `sendEmail` send; this is for one that does not yet. */
-  recordOutboundMessage(input: {
-    sessionId: string;
-    content: string;
-    platformMessageId?: string;
-    senderId?: string;
-    senderName?: string;
-    replyToPlatformMessageId?: string;
-    turnId?: string;
-    knownToProvider: boolean;
-  }): Promise<void>;
 }
 
 export interface WebChatRecapSession {
@@ -2563,6 +2570,10 @@ export class ActionInvocationError extends Error {
     readonly actionName: string,
     readonly code: ActionInvocationErrorCode,
     message: string,
+    /** Why a send was refused, when the handler failed on a
+     *  {@link SendRefused}, so the caller can rewrite the message and send
+     *  it again. */
+    readonly refusal?: SendRefusedReason,
   ) {
     super(message);
     this.name = "ActionInvocationError";

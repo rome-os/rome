@@ -17,8 +17,8 @@ import {
   type TestConnections,
   recordedConnectionKindOf,
 } from "../helpers.js";
-import type { Channels } from "../../channels/channel.js";
-import { channelList } from "../../channels/channel-list.js";
+import type { Channels } from "../../chats/connected-accounts/connected-account.js";
+import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
@@ -33,6 +33,9 @@ import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
 import { ApprovalHandler } from "../../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../../actions/backend-turn.js";
+import { chatsWiring } from "../../chats-wiring.js";
+import { openChannelChat } from "../../connections/open-chat.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
 import { SessionManager } from "../../core/session-manager.js";
@@ -309,9 +312,38 @@ async function buildHarness(
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 
+  // Chats as production wires it, so a continuation's reply is said through
+  // its session's speaker. Each test channel is its own platform, and Rome's
+  // account on it is named like it.
+  const chatsWired = chatsWiring(db, {
+    accountOf: (channel) => ({ platform: channel, id: channel }),
+    platformOfChannel: (channel) => channel,
+    channelsOn: (platform) => [platform],
+  });
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo: new ChatsWebChatRepository(db, {
+              chats: chatsWired.chats,
+              lines: chatsWired.messages,
+              links: chatsWired.links,
+            }),
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,

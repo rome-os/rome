@@ -19,6 +19,48 @@ function probes(overrides: Partial<AIToolStateProbes> = {}): AIToolStateProbes {
 }
 
 describe("AIToolState", () => {
+  it("keeps the explicit future reset through an older probe's replay", async () => {
+    let release!: (usage: AIToolUsageStatus | null) => void;
+    const state = createAIToolState({
+      probes: probes({
+        claudeUsage: () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const refresh = state.refresh("anthropic");
+    const until = new Date(Date.now() + 6 * 3_600_000).toISOString();
+    state.markQuotaExhausted("anthropic", until);
+    release({
+      checkedAt: new Date().toISOString(),
+      source: "test",
+      fiveHour: { usedPercent: 100, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
+    });
+    await refresh;
+    expect(state.get().claude.quotaExhaustedUntil).toBe(until);
+    state.close();
+  });
+  it.each([
+    undefined,
+    "invalid",
+    "2000-01-01T00:00:00Z",
+  ])("keeps the fallback for %s until", (until) => {
+    const state = createAIToolState({
+      probes: probes(),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const before = Date.now();
+    state.markQuotaExhausted("anthropic", until);
+    expect(Date.parse(state.get().claude.quotaExhaustedUntil!)).toBeGreaterThanOrEqual(
+      before + 5 * 3_600_000,
+    );
+    state.close();
+  });
+
   it("starts with conservative Sol and Luna access until the plan is known", () => {
     const state = createAIToolState({
       probes: probes(),

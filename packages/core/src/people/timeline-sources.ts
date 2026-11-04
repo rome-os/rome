@@ -19,7 +19,11 @@
 
 import type { Account } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
-import { foldAccounts, type AccountFold, type AddressBooks } from "../channels/account-fold.js";
+import {
+  foldAccounts,
+  type AccountFold,
+  type AddressBooks,
+} from "../chats/accounts/account-fold.js";
 import {
   addressBooks,
   storedOn,
@@ -27,10 +31,9 @@ import {
   messageStores,
   type Channels,
   type PlatformOfChannel,
-} from "../channels/channel.js";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
-import { agentMessages, chatsAgentMessages } from "../channels/messages-agent.js";
-import { sql } from "drizzle-orm";
+} from "../chats/connected-accounts/connected-account.js";
+import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
+import { chatsAgentMessages } from "../chats/history/messages-agent.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 
@@ -56,14 +59,8 @@ export function personMessageStores(deps: {
   platformOfChannel: PlatformOfChannel;
   /** Rome's own account on a channel, or null while its record knows none. */
   accountOf?: (channel: string) => Account | null;
-  /** Where Rome's transcript is read from: its legacy table by default, or
-   *  Chats. */
-  transcript?: "legacy" | "chats";
 }): AccountMessages[] {
-  const transcript =
-    deps.transcript === "chats"
-      ? chatsAgentMessages(deps.db, (channel) => romeAccountsOn(deps, channel))
-      : agentMessages(deps.db);
+  const transcript = chatsAgentMessages(deps.db, (channel) => deps.accountOf?.(channel) ?? null);
   return [...messageStores(deps.channels), transcript];
 }
 
@@ -85,42 +82,6 @@ export async function guardianChannels(deps: {
     const account = deps.accountOf?.(channel);
     return account != null && own.has(`${account.platform}\u0000${account.id}`);
   };
-}
-
-/**
- * Every account Rome has spoken as on channel `channel`, as the chats it spoke
- * in name them: the channel record's while it holds one, then each account
- * Rome's speakers on that channel spoke as, newest first. A kept connection
- * can be signed in as another account, and a history told to an earlier or
- * disconnected account still reads. Absent any, none: a channel's name
- * names no account.
- */
-export function romeAccountsOn(
-  deps: {
-    db: DrizzleDb;
-    platformOfChannel: PlatformOfChannel;
-    accountOf?: (channel: string) => Account | null;
-  },
-  channel: string,
-): Account[] {
-  const platform = deps.platformOfChannel(channel);
-  const recorded = deps.accountOf?.(channel);
-  const spoke = deps.db.all<{ account_id: string }>(sql`
-    SELECT account_id FROM rome_sessions
-    WHERE source_channel = ${channel} AND account_id IS NOT NULL
-    GROUP BY account_id ORDER BY max(created_at) DESC
-  `);
-  const ids = new Set<string>();
-  const accounts: Account[] = [];
-  for (const account of [
-    ...(recorded ? [recorded] : []),
-    ...spoke.map((row) => ({ platform, id: row.account_id })),
-  ]) {
-    if (ids.has(account.id)) continue;
-    ids.add(account.id);
-    accounts.push(account);
-  }
-  return accounts;
 }
 
 /**

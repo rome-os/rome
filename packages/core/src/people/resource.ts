@@ -10,9 +10,9 @@ import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, PersonResource } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
 import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
-import type { AccountNames } from "../channels/account-names.js";
-import type { Channels, PlatformOfChannel } from "../channels/channel.js";
-import type { MessageAccount } from "../channels/messages.js";
+import type { AccountNames } from "../chats/accounts/account-names.js";
+import type { Channels, PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
+import type { MessageAccount } from "../chats/history/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
@@ -29,9 +29,6 @@ export interface PeopleReadDeps extends SendDeps {
   /** Rome's own account on a channel, to name a sender by. Absent, no sender
    *  is named. */
   accountOf?: ChannelRecordsRepository["accountOf"];
-  /** Where Rome's transcript is read from: its legacy table by default, or
-   *  Chats. */
-  transcript?: "legacy" | "chats";
 }
 
 /** A person as the repository reads them: the row and the accounts linked to

@@ -2,7 +2,7 @@
 //
 // Telegram is a Talker with a single `bot` grant (a pasted bot token). The
 // transport core — the inbound `ChannelMessage`, attachment extraction, send
-// formatting — is `TelegramAdapter` (packages/core/src/channels/telegram.ts),
+// formatting — is `TelegramAdapter` (packages/core/src/connections/kinds/telegram/telegram.ts),
 // wrapped here so the runtime's grant-epoch lifecycle and fault→grant-state
 // mapping (registry.ts) drive it. The transport already speaks the channel's
 // record, so inbound and send pass through without a projection. grammy owns
@@ -16,7 +16,7 @@
 import { Bot, GrammyError } from "grammy";
 import { z } from "zod";
 import type { TalkFeatures } from "../types.js";
-import { TelegramAdapter, type CreateTelegramBot } from "../../channels/telegram.js";
+import { TelegramAdapter, type CreateTelegramBot } from "../kinds/telegram/telegram.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";

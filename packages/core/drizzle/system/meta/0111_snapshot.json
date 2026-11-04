@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8c193c70-325e-40b9-9805-828077d410f7",
+  "id": "b6be04ea-aa18-4a6d-82bf-1706b132b147",
   "prevId": "583e8533-4893-471a-8e94-ec09c7df945e",
   "tables": {
     "account_profiles": {
@@ -1082,115 +1082,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "concierge_follow_items": {
-      "name": "concierge_follow_items",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "decision": {
-          "name": "decision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "line": {
-          "name": "line",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "offered_at": {
-          "name": "offered_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "digested_at": {
-          "name": "digested_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_concierge_follow_items_event": {
-          "name": "idx_concierge_follow_items_event",
-          "columns": [
-            "event_id"
-          ],
-          "isUnique": true
-        },
-        "idx_concierge_follow_items_digest": {
-          "name": "idx_concierge_follow_items_digest",
-          "columns": [
-            "digested_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "concierge_tasks": {
       "name": "concierge_tasks",
       "columns": {
@@ -1338,10 +1229,17 @@
     "connected_accounts": {
       "name": "connected_accounts",
       "columns": {
-        "connection_id": {
-          "name": "connection_id",
+        "platform": {
+          "name": "platform",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -1354,21 +1252,39 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "connected_accounts_connection_id_connections_id_fk": {
-          "name": "connected_accounts_connection_id_connections_id_fk",
-          "tableFrom": "connected_accounts",
-          "tableTo": "connections",
-          "columnsFrom": [
-            "connection_id"
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "connected_accounts_platform_account_id_pk": {
+          "columns": [
+            "platform",
+            "account_id"
           ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "name": "connected_accounts_platform_account_id_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "connected_accounts_unplaced": {
+      "name": "connected_accounts_unplaced",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

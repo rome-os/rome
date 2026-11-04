@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChannelApiResult } from "../../channels/api-request.js";
+import type { ConnectionApiResult } from "../../apps/platform-requests.js";
 import type { ConnectionState } from "../../connections/types.js";
 import { CredentialRejected } from "../../connections/errors.js";
 import { anotherAccountKey } from "../../connections/setup/manager.js";
@@ -13,7 +13,7 @@ const SETUP_KEYS = {
 } as const;
 
 function appWith(
-  execute?: (request: unknown) => Promise<ChannelApiResult>,
+  execute?: (request: unknown) => Promise<ConnectionApiResult>,
   opts: {
     activeSetup?: "placeholder" | "another" | "existing";
     botState?: ConnectionState;
@@ -129,7 +129,7 @@ describe("Discord CLI loopback broker routes", () => {
 
   it("auth checks the live /users/@me identity", async () => {
     const execute = rs.fn(
-      async (): Promise<ChannelApiResult> => ({
+      async (): Promise<ConnectionApiResult> => ({
         response: {
           status: 200,
           headers: { "content-type": "application/json" },

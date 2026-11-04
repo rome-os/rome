@@ -29,6 +29,7 @@ import { currentSessionId } from "../telemetry-context.js";
 import { sessionKeyChannel } from "../core/agent-session-key.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
+  fromWireError,
   isActionWorkerMessage,
   type ActionWorkerPayload,
   type ActionWorkerShutdown,
@@ -1533,9 +1534,7 @@ export class ActionEngine {
           finish({ reusable: false });
           // Rebuild the worker's thrown error from its wire envelope so the
           // caller sees the same name/message an in-process run would produce.
-          const err = new Error(message.error.message);
-          err.name = message.error.name;
-          reject(err);
+          reject(fromWireError(message.error));
           return;
         }
       };

@@ -1,15 +1,18 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Pacer } from "../../../channels/delivery/pacer.js";
-import { ReplyDelivery } from "../../../channels/delivery/reply.js";
-import type { FeishuStreamingStyle } from "../../../channels/delivery/streaming-switch.js";
-import { FEISHU_MAX_EDITS, feishuTransport } from "../../../channels/delivery/transports/feishu.js";
+import { Pacer } from "../../../participation/reply-delivery/pacer.js";
+import { ReplyDelivery } from "../../../participation/reply-delivery/reply.js";
+import type { FeishuStreamingStyle } from "../../../participation/reply-delivery/streaming-switch.js";
+import {
+  FEISHU_MAX_EDITS,
+  feishuTransport,
+} from "../../../connections/kinds/feishu/reply-writes.js";
 import {
   DeliveryFailure,
   type DeliveryPolicy,
   type DeliveryTransport,
-} from "../../../channels/delivery/types.js";
+} from "../../../connections/sending.js";
 import { systemClock } from "../../../lib/clock.js";
 import { comparable, exemplar, loadCapture } from "./capture.js";
 import postCapture from "./captures/feishu-post.capture.json" with { type: "json" };

@@ -1,6 +1,6 @@
 // The Discord descriptor. Two layers under test:
 //   1. isDiscordAuthError / descriptor shape / token-validate wiring — pure.
-//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../channels/discord.js)
+//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../connections/kinds/discord/discord.js)
 //      captures the descriptor's `onGatewayFault` wiring and lets us drive a
 //      login rejection (DiscordjsError) and live gateway faults, asserting they
 //      surface as CredentialRejected{ grant: "bot" } vs. Disconnected.
@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
-import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
+import type { ConnectionApiRequest, ConnectionApiResult } from "../../apps/platform-requests.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
 
@@ -34,8 +34,8 @@ const fakeState: {
   typedThread?: string;
   inbound?: (msg: ChannelMessage) => Promise<void>;
   sent: Array<{ chatId: ChatId; message: unknown }>;
-  apiRequests: ChannelApiRequest[];
-  apiResult: ChannelApiResult;
+  apiRequests: ConnectionApiRequest[];
+  apiResult: ConnectionApiResult;
   stopCalls: number;
   channels: Array<{
     id: string;
@@ -56,7 +56,7 @@ const fakeState: {
 
 const FAKE_REPLY_DELIVERY = { capabilities: { maxPartLength: 2000, edit: true } };
 
-rs.mock("../../channels/discord.js", () => ({
+rs.mock("../kinds/discord/discord.js", () => ({
   DiscordAdapter: class {
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;
@@ -89,7 +89,7 @@ rs.mock("../../channels/discord.js", () => ({
     listGuildChannels() {
       return fakeState.channels;
     }
-    async executeApiRequest(request: ChannelApiRequest) {
+    async executeApiRequest(request: ConnectionApiRequest) {
       fakeState.apiRequests.push(request);
       return fakeState.apiResult;
     }
@@ -345,7 +345,7 @@ describe("discord descriptor shape", () => {
       persist: async () => {},
       registerIngress: () => () => {},
     });
-    const request: ChannelApiRequest = {
+    const request: ConnectionApiRequest = {
       method: "GET",
       path: "/users/@me",
       query: [],
@@ -380,7 +380,7 @@ describe("discord descriptor shape", () => {
         headers: {},
         body: null,
         timeoutMs: 30_000,
-      } satisfies ChannelApiRequest,
+      } satisfies ConnectionApiRequest,
     });
 
     await expect(request).rejects.toMatchObject({ name: "CredentialRejected", grant: "bot" });

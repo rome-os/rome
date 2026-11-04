@@ -159,6 +159,7 @@ describe("callAction", () => {
       },
       async () => {
         expect(getCurrentActionContext()).toEqual({
+          initiator: "channel:webchat",
           actionName: undefined,
           executionId: "exec-4",
           rootExecutionId: "exec-4",

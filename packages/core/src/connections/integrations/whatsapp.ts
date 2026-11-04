@@ -4,7 +4,7 @@
 // (Baileys auth state) that comes from scanning a linking QR on the phone. The
 // transport core — the inbound `ChannelMessage`, address-book sync, media
 // download, the generation-gated reconnect loop — is `WhatsAppAdapter`
-// (packages/core/src/channels/whatsapp.ts), wrapped here. The transport already
+// (packages/core/src/connections/kinds/whatsapp/whatsapp.ts), wrapped here. The transport already
 // speaks the channel's record, so inbound and send pass through without a
 // projection.
 //
@@ -27,8 +27,8 @@
 
 import { z } from "zod";
 import type { TalkFeatures } from "../types.js";
-import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../../channels/whatsapp.js";
-import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
+import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../kinds/whatsapp/whatsapp.js";
+import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type {
