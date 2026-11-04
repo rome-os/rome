@@ -29,9 +29,6 @@ export interface PeopleReadDeps extends SendDeps {
   /** Rome's own account on a channel, to name a sender by. Absent, no sender
    *  is named. */
   accountOf?: ChannelRecordsRepository["accountOf"];
-  /** Where Rome's transcript is read from: its legacy table by default, or
-   *  Chats. */
-  transcript?: "legacy" | "chats";
 }
 
 /** A person as the repository reads them: the row and the accounts linked to
