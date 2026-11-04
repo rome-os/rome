@@ -497,8 +497,6 @@ describe("AgentRunner", () => {
         parentTurnId: "parent-turn-1",
         triggerKind: "fork",
         triggerName: "recap",
-        sourceChannel: "webchat",
-        sourceThreadId: "parent-chat",
         // Follow-up turns of the side chat rebuild their context from this row.
         deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
       });
