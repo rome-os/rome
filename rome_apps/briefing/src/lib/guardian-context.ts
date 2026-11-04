@@ -1,5 +1,4 @@
-import { sql } from "drizzle-orm";
-import type { RomeAppContext } from "@rome-os/app-runtime";
+import { createAppLogger, type RomeAppContext } from "@rome-os/app-runtime";
 import type { ChatReads } from "@rome-os/app-runtime/chats";
 import { unwrap } from "./action-result.js";
 
@@ -8,6 +7,8 @@ import { unwrap } from "./action-result.js";
 // guardian's own chat words are read: a dashboard chat a visitor owns or wrote
 // in is left out whole (the same rule Dream's chat-activity uses), as are
 // archived chats and the agent's replies.
+
+const log = createAppLogger("briefing_guardian_context");
 
 const WINDOW_HOURS = 48;
 const MAX_MESSAGES = 60;
@@ -38,10 +39,13 @@ export async function gatherGuardianContext(
   };
 }
 
-/** The chat reads Rome hands this app, or null when the host offers none. */
-function chatReadsOf(appContext: RomeAppContext): ChatReads | null {
+/** The chat reads Rome hands this app. Briefing reads chats only through
+ *  them, so a host that offers none is an error. */
+function chatReadsOf(appContext: RomeAppContext): ChatReads {
   const chats = appContext.repositories?.chats;
-  if (!chats?.recentChats || !chats.transcript || !chats.traces) return null;
+  if (!chats?.recentChats || !chats.transcript || !chats.traces) {
+    throw new Error("Briefing reads chats through Chats, and this host offers no chat reads");
+  }
   return chats as ChatReads;
 }
 
@@ -74,29 +78,15 @@ async function readRecentChats(
   now: number,
 ): Promise<string | null> {
   const cutoff = Math.floor((now - WINDOW_HOURS * 60 * 60 * 1000) / 1000);
+  // The chats are optional context, so a failed read leaves them out of the
+  // brief rather than failing it.
   let rows: MessageRow[];
-  const reads = chatReadsOf(appContext);
   try {
-    rows = reads
-      ? await guardianRequests(reads, new Date(cutoff * 1000))
-      : (appContext.db.connection.all(sql`
-      SELECT s.name AS chat, m.content, m.created_at
-      FROM rome_agent_messages m
-      JOIN rome_sessions s ON s.id = m.session_id
-      WHERE (s.type IN ('webchat', 'webchat_handoff')
-          OR (s.type = 'channel' AND s.chat_platform = 'webchat'))
-        AND coalesce(s.owner_key, 'guardian') = 'guardian'
-        AND s.id NOT IN (
-          SELECT session_id FROM rome_agent_messages
-          WHERE role = 'user' AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
-        )
-        AND s.archived_at IS NULL
-        AND m.role = 'user'
-        AND m.created_at >= ${cutoff}
-      ORDER BY m.created_at DESC
-      LIMIT ${MAX_MESSAGES}
-    `) as MessageRow[]);
-  } catch {
+    rows = await guardianRequests(chatReadsOf(appContext), new Date(cutoff * 1000));
+  } catch (err) {
+    log.warn("left the guardian's chats out of the brief", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 
