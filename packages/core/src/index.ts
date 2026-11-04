@@ -1007,7 +1007,7 @@ async function main() {
     run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
   });
   const chatSettings = new ChatSettingsService({
-    repository: new ChatSettingsRepository(db, chatRepo),
+    repository: new ChatSettingsRepository(db, chatsWired),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,
