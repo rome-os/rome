@@ -55,7 +55,7 @@ export interface SetupSessionDeps {
    *  throw here fails the setup (nothing partial is left observable). It
    *  answers the connection it wrote, and any it ended, which `done`
    *  reports. */
-  commit: (grant: SetupGrant, signal: AbortSignal) => Promise<SetupCommitted | string | void>;
+  commit: (grant: SetupGrant, signal: AbortSignal) => Promise<SetupCommitted | void>;
   /** Optional override of the default working view (progress snapshot). */
   workingView?: SetupView;
   /** The setup renews a connection that already names its account. */
@@ -166,10 +166,7 @@ export class SetupSession {
       const grant = await this.#deps.fn(interact, ctx);
       // The one durable write; `done` is set only after it resolves.
       const committed = await this.#deps.commit(grant, this.#abort.signal);
-      const { connectionId, ended } =
-        typeof committed === "string"
-          ? { connectionId: committed, ended: undefined }
-          : (committed ?? {});
+      const { connectionId, ended } = committed ?? {};
       this.#terminate({
         status: "done",
         grant: {

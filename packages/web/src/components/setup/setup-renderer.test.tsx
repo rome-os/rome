@@ -138,18 +138,6 @@ describe("SetupRenderer standard renderers", () => {
   it("done renders the summary view", () => {
     renderState({ status: "done", grant: { summary: { title: "Discord connected" } } });
     expect(screen.getByText("Discord connected")).toBeTruthy();
-    expect(screen.queryByTestId("setup-ended-another")).toBeNull();
-  });
-
-  it("done says so when a fix reached another account and ended the connection", () => {
-    renderState({
-      status: "done",
-      grant: { summary: { title: "Telegram connected" }, connectionId: "c2", ended: "c1" },
-    });
-    expect(screen.getByTestId("setup-ended-another").textContent).toContain(
-      "Rome ended the connection to the earlier account",
-    );
-    expect(screen.getByText("Telegram connected")).toBeTruthy();
   });
 
   it("failed renders the reason and a retry", () => {

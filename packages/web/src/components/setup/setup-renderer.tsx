@@ -40,9 +40,6 @@ export interface SetupLabels {
   retry: string;
   continue: string;
   connected: string;
-  /** Shown when a fix reached another account, so Rome ended the connection
-   *  it fixed and connected that account instead. */
-  endedAnother: string;
   failed: string;
   cancelled: string;
 }
@@ -53,8 +50,6 @@ const DEFAULT_LABELS: SetupLabels = {
   retry: "Try again",
   continue: "Continue",
   connected: "Connected",
-  endedAnother:
-    "This is a different account, so Rome ended the connection to the earlier account and connected this one. The earlier account keeps its agent and its chats, and shows as disconnected.",
   failed: "Something went wrong",
   cancelled: "Cancelled",
 };
@@ -106,11 +101,6 @@ export function StandardSetupRenderer(
     case "done":
       return (
         <div className="space-y-1" data-testid="setup-done">
-          {state.grant.ended && (
-            <p className="text-aux text-muted-foreground" data-testid="setup-ended-another">
-              {labels.endedAnother}
-            </p>
-          )}
           {state.grant.summary ? (
             <ViewBody view={state.grant.summary} />
           ) : (

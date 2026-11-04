@@ -32,6 +32,7 @@ import { createTestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
 import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
+import { SignInOtherAccountError } from "./errors.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
@@ -419,6 +420,43 @@ describe("a sign-in fix that reaches another account", () => {
     expect(connections[0]!.id).not.toBe(first!.id);
     const rec = await grantProfile(registry, "github");
     expect(rec?.profile).toMatchObject({ subject: "99" });
+  });
+
+  it("refuses a sign-in to Rome with another account and keeps the one connected", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [first] = registry.find("github");
+
+    await expect(
+      importProviderBundle(
+        registry,
+        "github",
+        { accessToken: "gho-2" },
+        { subject: "99" },
+        { signIn: true },
+      ),
+    ).rejects.toBeInstanceOf(SignInOtherAccountError);
+
+    expect(registry.find("github").map((connection) => connection.id)).toEqual([first!.id]);
+    const rec = await grantProfile(registry, "github");
+    expect(rec?.profile).toMatchObject({ subject: "42" });
+    expect(rec?.credential?.material).toMatchObject({ kind: "inline" });
+  });
+
+  it("lets a sign-in to Rome with the same account renew the grant", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [first] = registry.find("github");
+
+    await importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "42" },
+      { signIn: true },
+    );
+
+    expect(registry.find("github").map((connection) => connection.id)).toEqual([first!.id]);
   });
 });
 

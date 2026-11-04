@@ -108,6 +108,7 @@
     "accounts": {
       "add": "Add another account",
       "addedNotShown": "Account connected. Find it in the Connections list.",
+      "endedAnother": "This is a different account, so Rome ended the connection to the earlier account and connected this one. The earlier account keeps its agent and its chats, and shows as disconnected.",
       "newAccount": "New account",
       "noAgent": "None. Rome does not listen to this account.",
       "changeInEnvoys": "Change in Envoys",

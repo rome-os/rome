@@ -151,20 +151,23 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       // Default to an empty profile when the provider returned no identity, so the
       // grant still records a grant outcome — scopes and Slack's teamId come
       // from the token bundle even when the identity fields are sparse.
+      // An already-signed-in guardian redeeming here is connecting a provider
+      // (a sign-in redeem has no session yet). Signing in is not a fix, so it
+      // never ends the connection to another account.
+      const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
       const imported = await importProviderBundle(
         deps.connectionRegistry,
         redeemed.provider,
         redeemed.tokens,
         redeemed.profile ?? {},
+        { signIn: !existingSession },
       );
       if (!imported) {
         throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
       }
 
-      // An already-signed-in guardian redeeming here is connecting a provider
-      // (a sign-in redeem has no session yet), so land them on that connection's
-      // own page — the surface that shows the grant it just granted.
-      const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
+      // A connecting guardian lands on that connection's own page, the
+      // surface that shows the grant it just granted.
       const nextPath = existingSession
         ? `/settings/connections/${encodeURIComponent(redeemed.provider)}`
         : guardian.onboardingComplete

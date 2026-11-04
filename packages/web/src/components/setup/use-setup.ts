@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   cancelSetup,
   getSetupState,
@@ -56,6 +58,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useTranslation("settings");
   const doneFiredRef = useRef(false);
   // Set once the card unmounts, so a start that answers afterwards is not
   // left running.
@@ -70,10 +73,14 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setState(next);
       if (next.status === "done" && !doneFiredRef.current) {
         doneFiredRef.current = true;
+        // A fix that reached another account ended the connection it fixed.
+        // The card drops its done view once the new account reads working, and
+        // can move to the new account's page, so this goes out as a toast.
+        if (next.grant?.ended) toast(t("connections.accounts.endedAnother"));
         onDone?.(next.grant?.connectionId ?? null);
       }
     },
-    [onDone],
+    [onDone, t],
   );
 
   const reset = useCallback(() => {

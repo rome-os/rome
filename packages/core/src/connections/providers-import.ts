@@ -143,8 +143,11 @@ export function grantProfileFromBundle(
  * first redeem; later redeems fix the one that exists. Like every grant, a
  * redeem for an account other than the one the connection reaches ends that
  * connection and starts one to the other account, and it refuses an account
- * another connection holds (`AccountAlreadyConnectedError`). It runs in the grant's section, so it never
- * interleaves with a disconnect or a setup's terminal write.
+ * another connection holds (`AccountAlreadyConnectedError`). A redeem that
+ * signs in to Rome is not a fix: one for another account fails
+ * (`SignInOtherAccountError`) and leaves the connection as it is. It runs in
+ * the grant's section, so it never interleaves with a disconnect or a setup's
+ * terminal write.
  *
  * A no-op (returns `false`) when the bundle has no usable token, or when the
  * registry doesn't declare the provider's descriptor (a test wiring a subset of
@@ -161,6 +164,7 @@ export async function importProviderBundle(
   provider: OAuthProvider,
   bundle: OAuthTokenBundle,
   account?: unknown,
+  opts: { signIn?: boolean } = {},
 ): Promise<boolean> {
   if (!registry.isRegistered(provider)) return false;
   const credential = credentialFromBundle(provider, bundle);
@@ -173,7 +177,14 @@ export async function importProviderBundle(
   // running at the same time finishes before this redeem starts and the redeem
   // makes a fresh connection, rather than restoring custody to one going away.
   await registry.withGrantSection(provider, grant, () =>
-    registry.giveGrant(provider, undefined, grant, credential, profile),
+    registry.giveGrant(
+      provider,
+      undefined,
+      grant,
+      credential,
+      profile,
+      opts.signIn ? { signIn: true } : {},
+    ),
   );
   return true;
 }
