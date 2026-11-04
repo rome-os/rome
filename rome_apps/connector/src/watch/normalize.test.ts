@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import { GITHUB_WATCHABLE } from "./catalog.js";
-import { addressesIn, type GithubContext, normalizeGithub, normalizeGmail } from "./normalize.js";
+import {
+  addressesIn,
+  type GithubContext,
+  isAutomatedSender,
+  normalizeGithub,
+  normalizeGmail,
+} from "./normalize.js";
 
 const repository = { full_name: "acme/widgets", default_branch: "main" };
 const me = "Octo-Me";
@@ -243,6 +249,67 @@ describe("normalizeGmail", () => {
     );
     expect(result).toMatchObject({ keep: true, event: { id: "gmail:me@example.com:m9" } });
     expect(result.keep && result.event.excerpt?.length).toBe(501);
+  });
+});
+
+describe("isAutomatedSender", () => {
+  it("finds a no-reply, notification, bounce or mailer token anywhere in the local part", () => {
+    for (const sender of [
+      "jobalerts-noreply@linkedin.com",
+      "noreply@github.com",
+      "no-reply@accounts.google.com",
+      "donotreply@bank.example",
+      "do-not-reply@shop.example",
+      "invoice+noreply@stripe.com",
+      "notifications@github.com",
+      "team.notification@vendor.example",
+      "MAILER-DAEMON@mx.example",
+      "postmaster@mail.example",
+      "bounce-12345@em.sendgrid.net",
+      "bounces+abc@mailgun.example",
+    ]) {
+      expect({ sender, automated: isAutomatedSender(sender) }).toEqual({ sender, automated: true });
+    }
+  });
+
+  it("leaves a person whose name only contains those letters", () => {
+    for (const sender of [
+      "noriko@example.com",
+      "bouncer.lee@example.com",
+      "postmasterson@example.com",
+      "ana@x.io",
+      "notifyme.sam@example.com",
+    ]) {
+      expect({ sender, automated: isAutomatedSender(sender) }).toEqual({
+        sender,
+        automated: false,
+      });
+    }
+  });
+
+  it("marks such a sender on the mail, without dropping it", () => {
+    const result = normalizeGmail(mail({ sender: "LinkedIn <jobalerts-noreply@linkedin.com>" }), {
+      address,
+    });
+    expect(result).toMatchObject({ keep: true, event: { facts: { automatedSender: true } } });
+  });
+});
+
+describe("Gmail subjects and excerpts", () => {
+  it("are cleaned of padding before they are kept", () => {
+    const cgj = String.fromCodePoint(0x034f);
+    const zwsp = String.fromCodePoint(0x200b);
+    const result = normalizeGmail(
+      mail({
+        subject: `New jobs for you${zwsp}`,
+        preview: { body: `3 new roles match your search ${`${cgj} `.repeat(60)}` },
+      }),
+      { address },
+    );
+    expect(result).toMatchObject({
+      keep: true,
+      event: { subject: "New jobs for you", excerpt: "3 new roles match your search" },
+    });
   });
 });
 

@@ -5,7 +5,7 @@
 // events of a kind the follow does not have on are dropped. Each event's id is
 // stable, so its follower drops a repeat delivery.
 
-const EXCERPT_CHARS = 500;
+import { excerptOf, subjectOf } from "./text.js";
 
 /** An event as a follower reads it. Every text field came from outside Rome. */
 export interface WatchEvent {
@@ -38,12 +38,6 @@ const loginOf = (user: unknown) => str(obj(user).login);
 const same = (a: string | undefined, b: string | undefined) =>
   a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
 const drop = (reason: string): Normalized => ({ keep: false, reason });
-
-function excerpt(text: string | undefined): string | undefined {
-  const trimmed = text?.replace(/\s+/g, " ").trim();
-  if (!trimmed) return undefined;
-  return trimmed.length > EXCERPT_CHARS ? `${trimmed.slice(0, EXCERPT_CHARS)}…` : trimmed;
-}
 
 /** The facts that have a value. */
 function facts(record: Facts): WatchEvent["facts"] {
@@ -90,7 +84,8 @@ export async function normalizeGithub(
     fields: { subject?: string; url?: string; text?: string; facts?: Facts },
   ): Normalized => {
     if (!ctx.kinds.has(kind)) return drop("not a kind this follow has on");
-    const quoted = excerpt(fields.text);
+    const quoted = excerptOf(fields.text);
+    const subject = subjectOf(fields.subject);
     return {
       keep: true,
       event: {
@@ -98,7 +93,7 @@ export async function normalizeGithub(
         source: "github",
         kind,
         ...(actor ? { actor } : {}),
-        ...(fields.subject ? { subject: fields.subject } : {}),
+        ...(subject ? { subject } : {}),
         ...(fields.url ? { url: fields.url } : {}),
         ...(quoted ? { excerpt: quoted } : {}),
         facts: facts({ repo, bot, byYou: same(actor, login), ...fields.facts }),
@@ -229,9 +224,18 @@ const CATEGORIES: Record<string, string> = {
   CATEGORY_UPDATES: "updates",
   CATEGORY_PERSONAL: "primary",
 };
-/** Senders no person answers from. */
-const AUTOMATED_SENDER =
-  /^(no-?reply|do-?not-?reply|notifications?|notify|mailer-daemon|postmaster|bounces?)([+._-][^@]*)?@/i;
+/**
+ * Senders no person answers from: a no-reply, notification, bounce or
+ * mailer token anywhere in the address's local part, as a whole token between
+ * `.`, `_`, `+` or `-` (`jobalerts-noreply@`, `noreply.billing@`), so a name
+ * that only contains those letters (`noriko@`, `bouncer.lee@`) is a person.
+ */
+export function isAutomatedSender(address: string): boolean {
+  const local = address.split("@")[0]?.toLowerCase() ?? "";
+  return /(^|[._+-])(no-?reply|do-?not-?reply|notifications?|notify|mailer-daemon|postmaster|bounces?)($|[._+-])/.test(
+    local,
+  );
+}
 const BULK_PRECEDENCE = /^(bulk|list|junk)$/i;
 
 /** Composio names a field in snake case in one place and camel case in another. */
@@ -274,8 +278,8 @@ export function normalizeGmail(payload: Json, ctx: { address: string }): Normali
   const cc = addressesIn(head.get("cc") ?? str(field(payload, "cc", "cc")));
   const thread = str(field(payload, "thread_id", "threadId"));
   const preview = obj(payload.preview);
-  const subject = str(payload.subject) ?? str(preview.subject) ?? head.get("subject");
-  const quoted = excerpt(str(preview.body) ?? str(field(payload, "message_text", "messageText")));
+  const subject = subjectOf(str(payload.subject) ?? str(preview.subject) ?? head.get("subject"));
+  const quoted = excerptOf(str(preview.body) ?? str(field(payload, "message_text", "messageText")));
   const category = labelIds.map((label) => CATEGORIES[label]).find(Boolean);
   return {
     keep: true,
@@ -295,7 +299,7 @@ export function normalizeGmail(payload: Json, ctx: { address: string }): Normali
         byYou: sender === me,
         category,
         inInbox: labelIds.length === 0 ? undefined : labelIds.includes("INBOX"),
-        automatedSender: sender ? AUTOMATED_SENDER.test(sender) : undefined,
+        automatedSender: sender ? isAutomatedSender(sender) : undefined,
         listMail: head.has("list-unsubscribe") || head.has("list-id") || undefined,
         bulk: BULK_PRECEDENCE.test(head.get("precedence")?.trim() ?? "") || undefined,
       }),
