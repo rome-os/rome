@@ -1284,6 +1284,8 @@ export class WebChatRepository {
     }
   }
 
+  /** The conversation at channel address `threadId` on `channel`, by the id
+   *  {@link channelChatId} gives it, or null when none is there. */
   private async findChannelConversation(
     channel: string,
     threadId: string,
@@ -1303,31 +1305,27 @@ export class WebChatRepository {
       .from(romeSessions)
       .where(
         and(
+          eq(romeSessions.id, channelChatId(channel, threadId)),
           eq(romeSessions.type, "channel"),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
         ),
       )
       .limit(1);
     return rows[0] ?? null;
   }
 
-  /** The id of the conversation a channel address names, or null when none
-   *  exists yet. A webchat conversation's address is its own id. Forks and
-   *  subagent runs copy their parent's address, so only conversation types
-   *  match. */
+  /** The id of the conversation a channel address names, by the id
+   *  {@link channelChatId} gives it, or null when none exists yet. A webchat
+   *  conversation's address is its own id. Only conversation types match. */
   async findChatIdByAddress(channel: string, threadId: string): Promise<string | null> {
     const rows = await this.db
       .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(
         and(
+          eq(romeSessions.id, channelChatId(channel, threadId)),
           inArray(romeSessions.type, ["webchat_handoff", "channel"]),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
         ),
       )
-      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
       .limit(1);
     return rows[0]?.id ?? null;
   }
