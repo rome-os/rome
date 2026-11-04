@@ -31,15 +31,19 @@ export class ChatRepository {
 
   /**
    * The chat the adapter keys `key`, started with `kind` and `name` when Rome
-   * holds none by that key yet. A chat already there is answered as it is:
-   * its kind never changes, and its name changes only through {@link rename}.
-   * Safe to call for every message.
+   * holds none by that key yet. A chat already there keeps its kind, which
+   * never changes, and its name, which changes only through {@link rename}.
+   * One started before its platform named it, as one a reply rule was set
+   * in, takes the first name `name` gives. Safe to call for every message.
    */
   start(key: ChatKey, kind: ChatKind, name: string | null): Chat {
     this.db
       .insert(chats)
       .values({ platform: key.platform, key: key.externalId, kind, name, startedAt: new Date() })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: [chats.platform, chats.key],
+        set: { name: sql`coalesce(${chats.name}, excluded.name)` },
+      })
       .run();
     const chat = this.byKey(key);
     if (!chat) throw new Error(`Chat ${key.platform}:${key.externalId} was not stored`);

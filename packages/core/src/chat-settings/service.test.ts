@@ -1061,6 +1061,24 @@ describe("ChatSettingsService", () => {
     });
   });
 
+  it("names a chat a rule started by the first message the platform names", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    await service.update({
+      ref: { ...throughSales, chatId: "ou_ray" as ChatId },
+      set: { session: { reset: { mode: "none" } } },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const ruled = repository.find("feishu", "ou_ray" as ChatId)!;
+
+    // A message records its chat as the inbound recording does.
+    const chat = wired.chats.find(ruled.chatId!)!;
+    wired.chats.start(wired.adapters.keyOf(chat.ref), "dm", "Ray");
+
+    expect(repository.find("feishu", "ou_ray" as ChatId)?.placeName).toBe("Ray");
+    expect(repository.listKnown({ query: "Ray" }).map((row) => row.id)).toEqual([ruled.id]);
+  });
+
   it("names no chat after the placeholder a session opened without a name took", async () => {
     const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
     const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
