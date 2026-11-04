@@ -74,25 +74,11 @@ export class ChatsWebChatRepository extends WebChatRepository {
   protected override readonly messageCountColumn = chatsSessionMessageCount;
   protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
 
-  /** Searches the dashboard chats' messages in Chats and the notices each
-   *  dashboard session keeps of its own, at most one match per chat, the
-   *  most recent, most recent first. */
+  /** Searches the dashboard chats' messages in Chats, at most one match per
+   *  chat, the most recent, most recent first. A dashboard notice is not in
+   *  Chats yet (#1672), so search, like the transcript, leaves it out. */
   override async searchSessionMessages(query: string, options: { sessionLimit?: number } = {}) {
-    const limit = Math.max(1, options.sessionLimit ?? 20);
-    const [said, notices] = await Promise.all([
-      this.searchChats(query, limit),
-      this.searchSessionRows(query, { sessionLimit: limit }, ["notification"]),
-    ]);
-    const newest = new Map<string, (typeof said)[number]>();
-    for (const match of [...said, ...notices]) {
-      const kept = newest.get(match.session.id);
-      if (!kept || match.message.createdAt > kept.message.createdAt) {
-        newest.set(match.session.id, match);
-      }
-    }
-    return [...newest.values()]
-      .sort((a, b) => b.message.createdAt.getTime() - a.message.createdAt.getTime())
-      .slice(0, limit);
+    return this.searchChats(query, Math.max(1, options.sessionLimit ?? 20));
   }
 
   /** The dashboard chats' messages in Chats that match `query`, at most one

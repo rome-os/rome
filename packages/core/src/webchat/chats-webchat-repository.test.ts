@@ -833,14 +833,11 @@ describe("ChatsWebChatRepository", () => {
     expect(matches[0]?.message.snippet).toContain("ferry leaves at noon");
   });
 
-  it("finds a chat by a notice it keeps of its own", async () => {
+  it("leaves a dashboard notice out of search, as out of the transcript", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("note-1", "chat-1", "notification", text("Reminder set for the ferry"));
 
-    const matches = await repo.searchSessionMessages("ferry");
-    expect(matches.map((match) => [match.session.id, match.message.id])).toEqual([
-      ["chat-1", "note-1"],
-    ]);
+    expect(await repo.searchSessionMessages("ferry")).toEqual([]);
   });
 
   it("counts the lines from Rome since the chat was last read, up to a cap", async () => {
