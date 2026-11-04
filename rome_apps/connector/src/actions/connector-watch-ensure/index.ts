@@ -18,6 +18,7 @@ import {
   resolveGithubHookSetup,
 } from "../connector-github-subscribe/index.js";
 import { createGithubHookClient } from "../github-hook-client.js";
+import { withGithubHookLock } from "../github-hook-lock.js";
 
 const log = createAppLogger("connector_watch_ensure");
 
@@ -66,22 +67,24 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       const [owner, name] = repo.split("/") as [string, string];
       const states: string[] = [];
       try {
-        for (const event of events) {
-          states.push(
-            await ensureGithubEvent({
-              client,
-              targetName: repo,
-              targetField: "repository.full_name",
-              canonicalName: async () =>
-                (await octokit.rest.repos.get({ owner, repo: name })).data.full_name,
-              relayDepositUrl,
-              legacyInstanceUrl,
-              event,
-              dryRun,
-              secret: () => ensureGithubWebhookSecret(deps),
-            }),
-          );
-        }
+        await withGithubHookLock(deps.appContext.db, { repo }, async () => {
+          for (const event of events) {
+            states.push(
+              await ensureGithubEvent({
+                client,
+                targetName: repo,
+                targetField: "repository.full_name",
+                canonicalName: async () =>
+                  (await octokit.rest.repos.get({ owner, repo: name })).data.full_name,
+                relayDepositUrl,
+                legacyInstanceUrl,
+                event,
+                dryRun,
+                secret: () => ensureGithubWebhookSecret(deps),
+              }),
+            );
+          }
+        });
       } catch (err) {
         const error =
           err instanceof GithubTargetCaseError ? err.message : describeGithubError(repo, err);

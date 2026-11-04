@@ -180,13 +180,14 @@ export const AppManifestSchema = z
     suggestedChannelBindings: z.array(SuggestedChannelBindingSchema).optional(),
     eventSources: z.array(EventSourceDeclarationSchema).optional(),
     // The actions by which the app provides watch: core discovers followable
-    // sources from this, never by an app's name.
+    // sources from this, never by an app's name. Local names only, so an app
+    // can name nothing but its own actions.
     watchProvider: z
       .object({
-        sources: z.string().min(1),
-        ensure: z.string().min(1),
-        judge: z.string().min(1),
-        release: z.string().min(1),
+        sources: ArtifactLocalNameSchema,
+        ensure: ArtifactLocalNameSchema,
+        judge: ArtifactLocalNameSchema,
+        release: ArtifactLocalNameSchema,
       })
       .strict()
       .optional(),

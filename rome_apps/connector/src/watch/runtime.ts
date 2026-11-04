@@ -4,6 +4,7 @@
 
 import { Octokit } from "@octokit/rest";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
+import type { ActiveTrigger } from "../api/composio-client.js";
 import { ensureComposioWebhookRegistered } from "../api/composio-webhook.js";
 import { readGithubOAuthToken } from "../api/github-proxy.js";
 import { resolveRelayDepositUrl } from "../api/relay-webhook.js";
@@ -59,6 +60,19 @@ async function gmailAccountId(): Promise<{
   return { client, id: resolved.id };
 }
 
+/**
+ * Whether an active Composio trigger already delivers what a Gmail follow
+ * needs: the new-mail trigger, for the connected account, with this app's
+ * config. One for another account or another label does not.
+ */
+export function armsGmailWatch(trigger: ActiveTrigger, accountId: string): boolean {
+  if (trigger.triggerName.toUpperCase() !== GMAIL_TRIGGER_SLUG) return false;
+  if (!trigger.connectedAccountIds.includes(accountId)) return false;
+  return Object.entries(GMAIL_TRIGGER_CONFIG).every(
+    ([key, value]) => JSON.stringify(trigger.triggerConfig[key]) === JSON.stringify(value),
+  );
+}
+
 export async function gmailAddress(): Promise<string> {
   const { client, id } = await gmailAccountId();
   const cached = gmailAddresses.get(id);
@@ -109,8 +123,8 @@ export async function ensureGmailTrigger(
   if (!(await resolveRelayDepositUrl(deps.appContext.repositories.settings))) {
     return { ok: false, error: "This Rome has no relay mailbox, so mail events cannot reach it." };
   }
-  const active = (await account.client.listActiveTriggers()).some(
-    (trigger) => trigger.triggerName.toUpperCase() === GMAIL_TRIGGER_SLUG,
+  const active = (await account.client.listActiveTriggers()).some((trigger) =>
+    armsGmailWatch(trigger, account.id),
   );
   if (dryRun) return { ok: true, subscription: active ? "active" : "inactive" };
   await ensureComposioWebhookRegistered({

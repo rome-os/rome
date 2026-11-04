@@ -1207,7 +1207,8 @@ async function main() {
     actions: actionRegistry,
     // Every enabled app that declares `watchProvider`, read live so an install
     // or disable takes effect without a restart. Core names no provider.
-    providers: () => watchProvidersOf(appCatalog.listResolved()),
+    providers: () =>
+      watchProvidersOf(appCatalog.listResolved(), (name) => actionRegistry.getMetadata(name)),
     runAction: (name, args) => actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
     settings: settingsRepo,
     // The same projection `GET /connections` serves, so both read one model.

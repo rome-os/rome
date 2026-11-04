@@ -23,6 +23,7 @@ describe("the watch catalog", () => {
         for (const trigger of kind.triggers) {
           const eventName = eventNameOf(trigger);
           const declared = sources.find((source) => {
+            if (!source.events.includes("*")) return source.events === eventName;
             const [prefix, suffix] = source.events.split("*") as [string, string];
             if (!eventName.startsWith(prefix) || !eventName.endsWith(suffix)) return false;
             return source.types?.includes(
@@ -39,11 +40,13 @@ describe("the watch catalog", () => {
     }
   });
 
-  it("declares Gmail's new mail, so a defer on it subscribes like GitHub's", async () => {
-    const gmail = (await declaredSources()).find((s) => s.events === "provider:event:gmail.*");
-    expect(gmail).toMatchObject({
-      types: ["gmail_new_gmail_message"],
-      ensureAction: "connector_event_ensure",
-    });
+  it("declares Gmail's new mail alone, so other Gmail events stay undeclared", async () => {
+    const gmail = (await declaredSources()).filter((s) => s.events.includes(":gmail."));
+    expect(gmail).toEqual([
+      {
+        events: "provider:event:gmail.gmail_new_gmail_message",
+        ensureAction: "connector_event_ensure",
+      },
+    ]);
   });
 });

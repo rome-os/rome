@@ -16,6 +16,7 @@ import { resolveRelayDepositUrl } from "../../api/relay-webhook.js";
 import { SettingsStore } from "../../api/settings-store.js";
 import { buildTopic } from "../../api/topic.js";
 import { romeManagedConnectHint } from "../../shared.js";
+import { withGithubHookLock } from "../github-hook-lock.js";
 import {
   createGithubHookClient,
   type GithubHookClient,
@@ -209,13 +210,16 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       const secret = await ensureGithubWebhookSecret(deps);
 
       try {
-        const result = await subscribeGithubWebhook({
-          client: createGithubHookClient(octokit, repo ? { repo } : { org: org as string }),
-          relayDepositUrl,
-          legacyInstanceUrl,
-          requestedEvents: events,
-          secret,
-        });
+        const target = repo ? { repo } : { org: org as string };
+        const result = await withGithubHookLock(deps.appContext.db, target, () =>
+          subscribeGithubWebhook({
+            client: createGithubHookClient(octokit, target),
+            relayDepositUrl,
+            legacyInstanceUrl,
+            requestedEvents: events,
+            secret,
+          }),
+        );
         // The eventName a routine's event-bus trigger binds to, per event. A
         // wildcard ('*') has no fixed topic — each delivery fires its own
         // `github.<event>`, so we can't enumerate them ahead of time.

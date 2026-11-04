@@ -57,8 +57,7 @@ describe("AppManifestSchema eventSources", () => {
         ensureAction: "connector_event_ensure",
       }),
       {
-        events: "provider:event:gmail.*",
-        types: ["gmail_new_gmail_message"],
+        events: "provider:event:gmail.gmail_new_gmail_message",
         ensureAction: "connector_event_ensure",
       },
     ]);
@@ -87,6 +86,13 @@ describe("AppManifestSchema watchProvider", () => {
     expect(() => AppManifestSchema.parse({ ...base, watchProvider: missing })).toThrow();
     expect(() =>
       AppManifestSchema.parse({ ...base, watchProvider: { ...provider, extra: "x" } }),
+    ).toThrow();
+    // Only its own actions: a namespaced name could point at another app's.
+    expect(() =>
+      AppManifestSchema.parse({
+        ...base,
+        watchProvider: { ...provider, release: "connector:connector_github_unsubscribe" },
+      }),
     ).toThrow();
   });
 

@@ -75,26 +75,33 @@ export interface WatchProvider {
 /**
  * The watch providers among the enabled apps: each app that declares
  * `watchProvider` in its manifest, with its action names qualified by its id.
- * Core never names a provider.
+ * Core never names a provider. Core runs these actions as the Concierge, so an
+ * app whose four names are not all its own actions provides nothing.
  */
 export function watchProvidersOf(
   apps: readonly { appId: string; manifest: { watchProvider?: WatchProvider["actions"] } }[],
+  /** Who registered an action, as the action registry says. */
+  ownerOf: (action: string) => { ownerType: string; ownerId: string } | undefined,
 ): WatchProvider[] {
   return apps.flatMap((app) => {
     const declared = app.manifest.watchProvider;
     if (!declared) return [];
-    const qualify = (name: string) => (name.includes(":") ? name : `${app.appId}:${name}`);
-    return [
-      {
-        appId: app.appId,
-        actions: {
-          sources: qualify(declared.sources),
-          ensure: qualify(declared.ensure),
-          judge: qualify(declared.judge),
-          release: qualify(declared.release),
-        },
-      },
-    ];
+    const isOwn = (name: string) => {
+      const owner = ownerOf(name);
+      return owner?.ownerType === "app" && owner.ownerId === app.appId;
+    };
+    const actions = {
+      sources: `${app.appId}:${declared.sources}`,
+      ensure: `${app.appId}:${declared.ensure}`,
+      judge: `${app.appId}:${declared.judge}`,
+      release: `${app.appId}:${declared.release}`,
+    };
+    const foreign = Object.values(actions).filter((name) => !isOwn(name));
+    if (foreign.length > 0) {
+      log.warn("watch provider names actions it does not have", { appId: app.appId, foreign });
+      return [];
+    }
+    return [{ appId: app.appId, actions }];
   });
 }
 
@@ -308,6 +315,11 @@ function attr(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
+/** An attribute name an outside event may use: a plain identifier, and none Rome sets itself. */
+const FIELD_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const RESERVED_KEYS = new Set(["kind", "source", "at", "untrusted", "held"]);
+const fieldKey = (key: string) => FIELD_KEY.test(key) && !RESERVED_KEYS.has(key);
+
 const text = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -325,7 +337,11 @@ export function renderAlertBatch(
       `kind="${attr(event.kind)}"`,
       `source="${attr(event.source)}"`,
       `at="${new Date(event.at).toISOString()}"`,
-      ...Object.entries(event.fields).map(([key, value]) => `${key}="${attr(value)}"`),
+      // Keys come from the judge's output too: one that is not a plain name could
+      // close the tag and write outside the untrusted block, so it is dropped.
+      ...Object.entries(event.fields)
+        .filter(([key]) => fieldKey(key))
+        .map(([key, value]) => `${key}="${attr(value)}"`),
     ].join(" ");
     return event.text ? `<event ${attrs}>\n${text(event.text)}\n</event>` : `<event ${attrs}/>`;
   });
@@ -619,7 +635,16 @@ export function startConciergeFollowing(
     if (outcome.status !== "ok") throw new Error(failure(provider.actions.ensure, outcome));
   };
 
-  const following: ConciergeFollowing = {
+  // Every change reads the whole setting and writes it back, so two at once
+  // (two execute_action calls, chat and the API) would lose one. They take turns.
+  let writes: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(task: () => Promise<T>): Promise<T> => {
+    const next = writes.then(task);
+    writes = next.catch(() => undefined);
+    return next;
+  };
+
+  const unserialized: ConciergeFollowing = {
     async list() {
       const [{ services, watch }, stored, connections] = await Promise.all([
         readProviders(true),
@@ -776,6 +801,13 @@ export function startConciergeFollowing(
         );
       }
     },
+  };
+  const following: ConciergeFollowing = {
+    ...unserialized,
+    follow: (change) => exclusive(() => unserialized.follow(change)),
+    configure: (change) => exclusive(() => unserialized.configure(change)),
+    unfollow: (source, target) => exclusive(() => unserialized.unfollow(source, target)),
+    setRules: (change) => exclusive(() => unserialized.setRules(change)),
   };
   service.attachFollowing(following);
 

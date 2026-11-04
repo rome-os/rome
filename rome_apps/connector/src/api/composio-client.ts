@@ -126,6 +126,8 @@ export interface ComposioClientOptions {
 export interface ActiveTrigger {
   triggerInstanceId: string;
   triggerName: string;
+  /** The connected account it fires for, in both of Composio's id forms. */
+  connectedAccountIds: string[];
   triggerConfig: Record<string, unknown>;
   updatedAt: string;
 }
@@ -799,6 +801,9 @@ export class ComposioClient {
         out.push({
           triggerInstanceId: row.id,
           triggerName: row.trigger_name,
+          connectedAccountIds: [row.connected_account_id, row.connected_account_uuid].filter(
+            (id): id is string => typeof id === "string" && id.length > 0,
+          ),
           triggerConfig: (row.trigger_config ?? {}) as Record<string, unknown>,
           updatedAt: row.updated_at,
         });

@@ -16,6 +16,7 @@ import {
   resolveGithubHookSetup,
   subscribeGithubWebhook,
 } from "../connector-github-subscribe/index.js";
+import { withGithubHookLock } from "../github-hook-lock.js";
 import {
   createGithubHookClient,
   type GithubHook,
@@ -173,17 +174,19 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!resolved.ok) return { status: "error", error: resolved.error };
       const { octokit, relayDepositUrl, legacyInstanceUrl } = resolved.setup;
       try {
-        const subscription = await ensureGithubEvent({
-          client: createGithubHookClient(octokit, target),
-          targetName,
-          targetField,
-          canonicalName: () => readGithubCanonicalName(octokit, target),
-          relayDepositUrl,
-          legacyInstanceUrl,
-          event,
-          dryRun,
-          secret: () => ensureGithubWebhookSecret(deps),
-        });
+        const subscription = await withGithubHookLock(deps.appContext.db, target, () =>
+          ensureGithubEvent({
+            client: createGithubHookClient(octokit, target),
+            targetName,
+            targetField,
+            canonicalName: () => readGithubCanonicalName(octokit, target),
+            relayDepositUrl,
+            legacyInstanceUrl,
+            event,
+            dryRun,
+            secret: () => ensureGithubWebhookSecret(deps),
+          }),
+        );
         if (subscription === "created") {
           log.info("github event subscribed", { target: targetName, event });
         }
