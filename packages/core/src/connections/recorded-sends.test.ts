@@ -391,14 +391,36 @@ describe("recordedSends", () => {
     expect(lines()).toEqual([{ chat: "thread-real", text: "Thanks", sender_agent: "sales" }]);
   });
 
-  it("quote on an email channel only the email a reply names, not a chat's quote hint", async () => {
+  it("read a chat-style quote on an email channel as the email it answers", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
+    const receipt = await send("email").send("thread-9" as ChatId, {
+      text: "Thanks",
+      replyToMessageId: "m-1",
+    });
+
+    expect(receipt.chatId).toBe("thread-7");
+    expect(sent[1]).toMatchObject({
+      address: "thread-7",
+      message: { kind: "email", inReplyToMessageId: "m-1" },
+    });
+    expect(lines().map((line) => line.chat)).toEqual(["thread-7", "thread-7"]);
+  });
+
+  it("answer the email a reply names over a chat-style quote", async () => {
+    await send("email").send("thread-7" as ChatId, { text: "Booked?" });
+
     await send("email").send(
-      "thread-7" as ChatId,
-      { kind: "email", text: "Hi", replyToMessageId: "other-thread-mail" } as OutgoingMessage,
+      "thread-9" as ChatId,
+      {
+        kind: "email",
+        text: "Thanks",
+        inReplyToMessageId: "m-1",
+        replyToMessageId: "other-thread-mail",
+      } as OutgoingMessage,
     );
 
-    expect(sent[0]?.message).not.toHaveProperty("inReplyToMessageId");
-    expect(lines().map((line) => line.chat)).toEqual([chatAt("email", "thread-7").externalId]);
+    expect(sent[1]?.message).toMatchObject({ inReplyToMessageId: "m-1" });
   });
 
   it("record an HTML-only email by its text with its links, and an attachment by a note", async () => {

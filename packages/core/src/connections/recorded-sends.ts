@@ -113,11 +113,14 @@ export function recordedSends<C extends Channel>(
           ...(email?.bcc?.length ? { bcc: email.bcc } : {}),
         };
         // The port quotes by the platform's id, an email by the provider's.
-        // The email port quotes only the email a reply names, and reads no
-        // chat's quote hint.
-        const quoted = emails ? email?.inReplyToMessageId : message.replyToMessageId;
+        // On email a chat-style quote is a reply too, and the email a reply
+        // names wins over it.
+        const answers = emails
+          ? (email?.inReplyToMessageId ?? message.replyToMessageId)
+          : undefined;
+        const quoted = emails ? answers : message.replyToMessageId;
         let at = address;
-        if (!email && namesNewEmail(local, channel.name, address)) {
+        if (!email && answers === undefined && namesNewEmail(local, channel.name, address)) {
           // The email port takes a plain message to an address, or to the
           // guardian, as a new email to them.
           return await openThread(local, channel, out, {
@@ -128,16 +131,16 @@ export function recordedSends<C extends Channel>(
         }
         // A blank id is a reply too, which the port refuses, rather than
         // read as no reply.
-        if (email?.inReplyToMessageId !== undefined) {
+        if (answers !== undefined) {
           // The provider sends a reply into the thread of the email it
           // answers, whatever address it names, so it is recorded there. An
           // email Rome does not hold, as one fetched from the mailbox
           // directly, sits in a thread Rome learns only from the provider's
           // receipt: the port sends the reply, and it is recorded there.
-          const answered = threadOf(local, channel.name, email.inReplyToMessageId);
+          const answered = threadOf(local, channel.name, answers);
           if (!answered) {
             const receipt = await send.send(address, message);
-            await recordDelivered(local, channel.name, receipt, out, email.inReplyToMessageId);
+            await recordDelivered(local, channel.name, receipt, out, answers);
             return receipt;
           }
           at = answered;

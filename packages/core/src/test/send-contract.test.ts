@@ -321,7 +321,13 @@ const SUBJECTS: readonly Subject[] = [
   },
   { channel: "whatsapp", make: whatsapp, shows: [], attachments: "files", urls: false },
   { channel: "wechat", make: wechat, shows: [], attachments: "files", urls: false },
-  { channel: "email", make: email, shows: [], attachments: "none" },
+  {
+    channel: "email",
+    make: email,
+    shows: [],
+    attachments: "none",
+    unanswerable: ["", "  ", "abc", "msg_1", "<abc>", "a b@example.com", "<a@example.com"],
+  },
   {
     channel: "webchat",
     make: webchat,

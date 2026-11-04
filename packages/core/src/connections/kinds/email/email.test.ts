@@ -250,6 +250,44 @@ describe("EmailAdapter.send", () => {
     expect(receipt).toEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
+  it("answers the email a reply names, in In-Reply-To", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("t1" as ChatId, {
+      text: "On it",
+      replyToMessageId: "<CAF123@mail.example.com>",
+    });
+
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].inReplyToMessageId).toBe("<CAF123@mail.example.com>");
+    expect(provider.listMessages).not.toHaveBeenCalled();
+  });
+
+  it("answers inReplyToMessageId over a chat-style reply", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("t1" as ChatId, {
+      kind: "email",
+      text: "On it",
+      inReplyToMessageId: "msg_9",
+      replyToMessageId: "<CAF123@mail.example.com>",
+    });
+
+    expect(provider.sent[0].inReplyToMessageId).toBe("msg_9");
+  });
+
+  it("refuses a reply to an id that is not an email's Message-ID, and sends nothing", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("t1" as ChatId, { text: "On it", replyToMessageId: "12345" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
   it("starts a fresh email when a chat-style conversation names an address", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);

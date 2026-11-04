@@ -9,7 +9,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
 import { ChannelSendRefused } from "@rome-os/app-runtime";
-import { refuseUnshownParts } from "../../outbound/send-refusals.js";
+import { refuseUnshownParts, replyToShaped } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import { mapGuardianToChannel } from "../../../people/guardian-mapping.js";
@@ -126,6 +126,9 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
     fileName: p.name,
   }));
 }
+
+/** An email's Message-ID, `local@domain`, in angle brackets or without. */
+const MESSAGE_ID = /^(?:<[^\s<>@]+@[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+)$/;
 
 function textFromParts(parts: OutgoingMessage["parts"]): string {
   if (!parts) return "";
@@ -281,7 +284,9 @@ export class EmailAdapter {
    * such as approval cards have no email rendering, so the adapter skips them and
    * receipts the conversation it was asked for, without a `messageId`.
    *
-   * A thread reply targets the newest received message in the thread, falling
+   * A reply names the email it answers in In-Reply-To: `inReplyToMessageId`,
+   * else `replyToMessageId`, which must be an email's Message-ID. Without one,
+   * a thread reply targets the newest received message in the thread, falling
    * back to the newest message Rome sent for a thread nobody else wrote in.
    */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
@@ -362,6 +367,10 @@ export class EmailAdapter {
         "Email inReplyToMessageId must not be blank. No email was sent.",
       );
     }
+    // A reply is email's own quote: it names the email it answers in
+    // In-Reply-To. The email field wins over the chat-style one.
+    const inReplyTo =
+      email?.inReplyToMessageId ?? replyToShaped("email", message.replyToMessageId, MESSAGE_ID);
     // Blank text says nothing, so the text parts speak, as on every channel.
     const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
 
@@ -392,8 +401,8 @@ export class EmailAdapter {
 
     // An explicit message ID wins. A thread miss must not become a fresh send,
     // even when the caller also supplied `to`.
-    if (email?.inReplyToMessageId) {
-      const inReplyToMessageId = email.inReplyToMessageId;
+    if (inReplyTo) {
+      const inReplyToMessageId = inReplyTo;
       const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
       return { sent, startedThread: false };
     }
