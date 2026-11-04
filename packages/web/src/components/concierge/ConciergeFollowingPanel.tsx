@@ -117,7 +117,10 @@ export function ConciergeFollowingPanel() {
               ? t("concierge.following.notConnected", { source: connector.label })
               : undefined;
         return (
-          <section key={connector.service} data-following-source={connector.service}>
+          <section
+            key={`${connector.origin}:${connector.service}`}
+            data-following-source={connector.service}
+          >
             <SectionHeading>
               {watch.account
                 ? t("concierge.following.sourceWithAccount", {

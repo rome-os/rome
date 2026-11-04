@@ -606,17 +606,23 @@ describe("watchProvidersOf", () => {
   it("merges two providers, the first winning a shared service", async () => {
     const s = setup({
       second: {
-        services: [composio("gmail", "Other Gmail", true), composio("linear", "Linear", true)],
+        services: [
+          composio("gmail", "Other Gmail", true),
+          composio("linear", "Linear", true),
+          composio("telegram_user", "Telegram (Composio)", true),
+        ],
         watch: [],
       },
     });
     const { connectors } = await s.following().list();
+    // Telegram the toolkit is listed beside Telegram the channel.
     expect(connectors.map((c) => [c.service, c.label])).toEqual([
       ["github", "GitHub"],
       ["gmail", "Gmail"],
       ["telegram_user", "Telegram"],
       ["notion", "Notion"],
       ["linear", "Linear"],
+      ["telegram_user", "Telegram (Composio)"],
     ]);
   });
 });

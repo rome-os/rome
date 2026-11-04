@@ -117,35 +117,31 @@ export function mergeConnectors(input: {
       ),
     },
   }));
-  const known = new Set(fromConnections.map((entry) => entry.service));
-  const fromProviders: ConciergeConnectorDto[] = input.services
-    .filter((service) => !known.has(service.service))
-    .map((service) => {
-      const section = sectionOf(service.service);
-      // Composio's access is all or nothing: connected, it lets a task chat act.
-      const act: ConciergeCapabilityStatus =
-        service.state === "working"
-          ? { state: "unlocked" }
-          : { state: "needs-auth", missingGrants: [] };
-      return {
-        service: service.service,
-        label: service.label,
-        origin: "composio",
-        connectionId: null,
-        state: service.state,
-        account: section?.account ?? null,
-        connect: service.connect,
-        capabilities: {
-          chat: { state: "unsupported" },
-          act,
-          watch: watchCapability(
-            { state: "unsupported" },
-            section,
-            input.followsOf(service.service),
-          ),
-        },
-      };
-    });
+  // A Composio toolkit may share a name with a different Rome connection
+  // (Discord the toolkit, Discord the chat channel): both are listed, told
+  // apart by `origin`.
+  const fromProviders: ConciergeConnectorDto[] = input.services.map((service) => {
+    const section = sectionOf(service.service);
+    // Composio's access is all or nothing: connected, it lets a task chat act.
+    const act: ConciergeCapabilityStatus =
+      service.state === "working"
+        ? { state: "unlocked" }
+        : { state: "needs-auth", missingGrants: [] };
+    return {
+      service: service.service,
+      label: service.label,
+      origin: "composio",
+      connectionId: null,
+      state: service.state,
+      account: section?.account ?? null,
+      connect: service.connect,
+      capabilities: {
+        chat: { state: "unsupported" },
+        act,
+        watch: watchCapability({ state: "unsupported" }, section, input.followsOf(service.service)),
+      },
+    };
+  });
   const all = [...fromConnections, ...fromProviders];
   return [...all.filter(isWatchable), ...all.filter((entry) => !isWatchable(entry))];
 }
