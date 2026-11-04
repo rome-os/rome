@@ -22,10 +22,13 @@ import type { ApiDeps } from "../deps.js";
 /** The Shopify card, where a signed-out browser finishes a Shopify-initiated install. */
 const SHOPIFY_SETTINGS_PATH = "/settings/connections/shopify";
 
-/** An attempt started by a recognized guardian connects a provider; any other
- *  signs in to Rome. Recognized the way the guardian is everywhere, trusted
- *  loopback included. */
+/** An attempt the login page starts (`?intent=sign-in`) signs in to Rome,
+ *  even when the browser holds a session by the time the guardian clicks.
+ *  Any other attempt started by a recognized guardian connects a provider,
+ *  and one started by anyone else signs in. Recognized the way the guardian is
+ *  everywhere, trusted loopback included. */
 async function attemptIntentOf(c: Context, db: ApiDeps["db"]): Promise<OAuthAttemptIntent> {
+  if (c.req.query("intent") === "sign-in") return "sign-in";
   return (await resolveGuardianSession(c, db)) ? "connect" : "sign-in";
 }
 
