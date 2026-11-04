@@ -290,9 +290,7 @@ describe("People on an account whose channel id is opaque", () => {
     deps = {
       ...base,
       channels: channelList({
-        db: base.db,
-        whatsAppAccounts: base.whatsAppAccounts,
-        linkedInAccounts: base.linkedInAccounts,
+        kinds: base.kinds,
         connections: {
           registry: base.connections,
           channelOf: (connection) =>
@@ -413,9 +411,7 @@ describe("People on an account whose channel id is opaque", () => {
     const rebooted: TestDeps = {
       ...deps,
       channels: channelList({
-        db: deps.db,
-        whatsAppAccounts: deps.whatsAppAccounts,
-        linkedInAccounts: deps.linkedInAccounts,
+        kinds: deps.kinds,
       }),
     };
     app = new Hono().route("/", peopleRoutes(rebooted));

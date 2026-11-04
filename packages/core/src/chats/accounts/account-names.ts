@@ -10,11 +10,8 @@ import { platformOf } from "@rome/api-types/platform";
 import type { SentinelLogRepository } from "../../db/repositories/sentinel-log.js";
 import type { AccountProfiles } from "./account-profiles.js";
 import type { Accounts } from "./accounts.js";
-import {
-  addressBooks,
-  type Channels,
-  type PlatformOfChannel,
-} from "../connected-accounts/connected-account.js";
+import { addressBooks, type ConnectionKinds } from "../../connections/connection-kind.js";
+import type { PlatformOfChannel } from "../connected-accounts/connected-account.js";
 
 /**
  * What to call an account, on any channel.
@@ -88,16 +85,16 @@ export class AccountNames {
   }
 }
 
-/** A provider joins the directory by taking an entry in the channel list
- *  (channel-list.ts), and every caller keeps asking the same one question. */
+/** A provider joins the directory by being a kind with an address book
+ *  (`ConnectionKind`), and every caller keeps asking the same one question. */
 export function createAccountNames(deps: {
-  channels: Channels;
+  kinds: ConnectionKinds;
   sentinelLogRepo: SentinelLogRepository;
   platformOfChannel?: PlatformOfChannel;
   profiles?: Pick<AccountProfiles, "displayNames">;
 }): AccountNames {
   return new AccountNames(
-    addressBooks(deps.channels, deps.platformOfChannel ?? platformOf),
+    addressBooks(deps.kinds, deps.platformOfChannel ?? platformOf),
     deps.sentinelLogRepo,
     deps.profiles,
   );

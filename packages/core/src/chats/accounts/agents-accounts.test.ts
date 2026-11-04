@@ -5,7 +5,7 @@ import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../t
 import { seedBaseline } from "../../test/seeds.js";
 import { createAccountNames } from "./account-names.js";
 import { agentsAccounts, externalAgents } from "./agents-accounts.js";
-import type { Channels } from "../connected-accounts/connected-account.js";
+import type { ConnectionKinds } from "../../connections/connection-kind.js";
 
 const HOME = { agentId: "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70", name: "home-rome" };
 const ATLAS = "6f1c2d9e-0a4b-4c1d-9e2f-3a4b5c6d7e8f";
@@ -162,23 +162,20 @@ describe("a dot on the People page", () => {
   afterEach(() => testDb.close());
 
   it("is listed unlinked, then as the person the guardian links it to", async () => {
-    const channels: Channels = [
+    const kinds: ConnectionKinds = [
       {
         name: "agents",
         accounts: agentsAccounts(
           externalAgents({ client: cloud([atlas]), isConnected: () => true }),
         ),
-        send: null,
-        inbound: null,
         messages: null,
-        directory: null,
       },
     ];
     const read = () =>
       readAccountDirectory({
         ...deps,
-        channels,
-        accountNames: createAccountNames({ channels, sentinelLogRepo: deps.sentinelLogRepo }),
+        kinds,
+        accountNames: createAccountNames({ kinds, sentinelLogRepo: deps.sentinelLogRepo }),
       });
     const find = async () =>
       (await read()).find((a) => a.channel === "agents" && a.channelUserId === ATLAS);
@@ -207,7 +204,7 @@ describe("another account's agent on the People page", () => {
   afterEach(() => testDb.close());
 
   it("is listed unlinked under its agent id, named with its account", async () => {
-    const channels: Channels = [
+    const kinds: ConnectionKinds = [
       {
         name: "agents",
         accounts: agentsAccounts(
@@ -216,16 +213,13 @@ describe("another account's agent on the People page", () => {
             isConnected: () => true,
           }),
         ),
-        send: null,
-        inbound: null,
         messages: null,
-        directory: null,
       },
     ];
     const accounts = await readAccountDirectory({
       ...deps,
-      channels,
-      accountNames: createAccountNames({ channels, sentinelLogRepo: deps.sentinelLogRepo }),
+      kinds,
+      accountNames: createAccountNames({ kinds, sentinelLogRepo: deps.sentinelLogRepo }),
     });
     expect(accounts.find((a) => a.channel === "agents")).toMatchObject({
       channelUserId: FRIEND_ATLAS,

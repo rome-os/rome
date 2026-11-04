@@ -19,6 +19,7 @@ import {
   type TestDb,
 } from "../../test/helpers.js";
 import { channelList } from "./connected-account-list.js";
+import { connectionKinds } from "../../connections/connection-kind.js";
 
 // The inbound instrumentation the channel-message hook hears every channel
 // through, over the production channel list and fake transports.
@@ -37,9 +38,11 @@ function hear(
   const transport = new FakeTransport(channel);
   const channels = withInboundSpans(
     channelList({
-      db: testDb.db,
-      whatsAppAccounts: noAccounts,
-      linkedInAccounts: noAccounts,
+      kinds: connectionKinds({
+        db: testDb.db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+      }),
       connections: {
         registry: createTestConnections(new Map([[channel, transport]])),
         channelOf: kindChannelOf,
@@ -165,9 +168,11 @@ describe("channel:{name}.handle span", () => {
     const transport = new FakeTransport("telegram");
     withInboundSpans(
       channelList({
-        db: testDb.db,
-        whatsAppAccounts: noAccounts,
-        linkedInAccounts: noAccounts,
+        kinds: connectionKinds({
+          db: testDb.db,
+          whatsAppAccounts: noAccounts,
+          linkedInAccounts: noAccounts,
+        }),
         connections: {
           registry: createTestConnections(new Map([["telegram", transport]])),
           channelOf: kindChannelOf,

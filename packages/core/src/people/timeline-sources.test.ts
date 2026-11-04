@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { Account, AccountId, Accounts } from "../chats/accounts/accounts.js";
 import type { Channels } from "../chats/connected-accounts/connected-account.js";
+import type { ConnectionKinds } from "../connections/connection-kind.js";
 import { timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
@@ -33,18 +34,22 @@ class FakeAccounts {
   }
 }
 
-/** A channel list as this file reads one: names bound to address books, a null
- *  book for a channel that can say nothing about who it reaches. No message
- *  store or transport, since nothing under test reads a history or sends. */
-const channelList = (books: Record<string, Accounts | null>): Channels =>
-  Object.entries(books).map(([name, accounts]) => ({
+/** The kinds and channels as this file reads them: a kind's name bound to
+ *  its address book, a null book for a kind that can say nothing about who it
+ *  reaches, and a channel of the same name for the history stored under it.
+ *  No message store or transport, since nothing under test reads a history
+ *  or sends. */
+const sources = (
+  books: Record<string, Accounts | null>,
+): { channels: Channels; kinds: ConnectionKinds } => ({
+  channels: Object.keys(books).map((name) => ({
     name,
-    accounts,
-    messages: null,
     send: null,
     inbound: null,
     directory: null,
-  }));
+  })),
+  kinds: Object.entries(books).map(([name, accounts]) => ({ name, accounts, messages: null })),
+});
 
 const ada = "12025550100@s.whatsapp.net";
 const adaLid = "77770001@lid";
@@ -56,7 +61,7 @@ describe("timelineAccounts", () => {
   it("collapses two addresses of one account onto one account", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp }) }, [
       [
         { platform: "whatsapp", id: ada },
         { platform: "whatsapp", id: adaLid },
@@ -77,7 +82,7 @@ describe("timelineAccounts", () => {
     const profileUrl = "https://www.linkedin.com/in/ada/";
     const linkedin = new FakeAccounts([account(memberId)], { [profileUrl]: memberId });
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ linkedin }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ linkedin }) }, [
       [
         { platform: "linkedin", id: memberId },
         { platform: "linkedin", id: profileUrl },
@@ -93,7 +98,7 @@ describe("timelineAccounts", () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
     const telegram = new FakeAccounts([account(adaTelegram, [adaTelegram, adaTelegramHandle])]);
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp, telegram }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp, telegram }) }, [
       [
         { platform: "whatsapp", id: adaLid },
         { platform: "telegram", id: adaTelegramHandle },
@@ -122,7 +127,7 @@ describe("timelineAccounts", () => {
       "+1 202 555 0100": ada,
     });
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp }) }, [
       [{ platform: "whatsapp", id: "+1 202 555 0100" }],
     ]);
 
@@ -135,7 +140,7 @@ describe("timelineAccounts", () => {
   it("carries every address of an account a mapping names under one of them", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp }) }, [
       [{ platform: "whatsapp", id: adaLid }],
     ]);
 
@@ -146,7 +151,7 @@ describe("timelineAccounts", () => {
   it("keeps two accounts apart", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid]), account(grace)]);
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp }) }, [
       [
         { platform: "whatsapp", id: adaLid },
         { platform: "whatsapp", id: grace },
@@ -159,7 +164,7 @@ describe("timelineAccounts", () => {
   it("gives an address the address book does not hold its own timeline", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
 
-    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp }) }, [
       [{ platform: "whatsapp", id: "12025550999@s.whatsapp.net" }],
     ]);
 
@@ -171,10 +176,9 @@ describe("timelineAccounts", () => {
   it("gives a channel with no address book the link's own address", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])]);
 
-    const [accounts] = await timelineAccounts(
-      { channels: channelList({ whatsapp, linkedin: null }) },
-      [[{ platform: "linkedin", id: "ACoAAAda0001" }]],
-    );
+    const [accounts] = await timelineAccounts({ ...sources({ whatsapp, linkedin: null }) }, [
+      [{ platform: "linkedin", id: "ACoAAAda0001" }],
+    ]);
 
     expect(accounts).toEqual([
       { channel: "linkedin", storedUnder: ["linkedin"], addresses: ["ACoAAAda0001"] },
@@ -186,7 +190,7 @@ describe("timelineAccounts", () => {
   it("answers one result per group, in the order given", async () => {
     const whatsapp = new FakeAccounts([account(ada, [ada, adaLid]), account(grace)]);
 
-    const groups = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+    const groups = await timelineAccounts({ ...sources({ whatsapp }) }, [
       [{ platform: "whatsapp", id: grace }],
       [],
       [{ platform: "whatsapp", id: adaLid }],
@@ -213,7 +217,7 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
     feishu: "lark",
   };
   const platformOfChannel = (name: string) => platforms[name] ?? name;
-  const channels = channelList({
+  const read = sources({
     telegram: null,
     telegram_user: null,
     "tg-second": null,
@@ -223,7 +227,7 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
   // Once per channel, so each channel's history is claimed by the store that
   // holds it rather than the account's whole history by one store.
   it("reads the account under every channel on its platform, one read per channel", async () => {
-    const [accounts] = await timelineAccounts({ channels, platformOfChannel }, [
+    const [accounts] = await timelineAccounts({ ...read, platformOfChannel }, [
       [{ platform: "telegram", id: adaTelegram }],
     ]);
 
@@ -237,7 +241,7 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
   });
 
   it("reads an account under the channel whose platform it is on, whatever the channel's name", async () => {
-    const [accounts] = await timelineAccounts({ channels, platformOfChannel }, [
+    const [accounts] = await timelineAccounts({ ...read, platformOfChannel }, [
       [
         { platform: "lark", id: "ou_ada" },
         { platform: "feishu", id: "ou_grace" },

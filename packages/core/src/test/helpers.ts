@@ -72,6 +72,7 @@ import type {
 } from "../chats/connected-accounts/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
+import { connectionKinds } from "../connections/connection-kind.js";
 import { createChannelsService } from "../apps/accounts-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -434,9 +435,11 @@ export function testChannels(
   connections: TestConnections,
 ): Channels {
   return channelList({
-    db: deps.db,
-    whatsAppAccounts: deps.whatsAppAccounts,
-    linkedInAccounts: deps.linkedInAccounts,
+    kinds: connectionKinds({
+      db: deps.db,
+      whatsAppAccounts: deps.whatsAppAccounts,
+      linkedInAccounts: deps.linkedInAccounts,
+    }),
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 }
@@ -613,8 +616,9 @@ export async function buildTestDeps(
   );
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
+  const kinds = connectionKinds({ db, whatsAppAccounts, linkedInAccounts });
   const accountNames = createAccountNames({
-    channels,
+    kinds,
     sentinelLogRepo,
     platformOfChannel: (name) => channelRecords.platformOfChannel(name),
   });
@@ -817,6 +821,7 @@ export async function buildTestDeps(
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
   const channelsService = createChannelsService({
     channels: () => channels,
+    kinds: () => kinds,
     registry: connections,
     channelOf: kindChannelOf,
   });
@@ -837,6 +842,7 @@ export async function buildTestDeps(
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
+    kinds,
     platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
     recordedOn: (platform: string) => channelRecords.namesOn(platform),
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),

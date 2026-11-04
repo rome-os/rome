@@ -6,7 +6,7 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { channelMessageOrder } from "../history/messages.js";
-import { WEBCHAT_SURFACE, webchatChannel } from "./dashboard-account.js";
+import { WEBCHAT_SURFACE, webchatChannel, webchatKind } from "./dashboard-account.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
 describe("webchat channel", () => {
@@ -61,7 +61,7 @@ describe("webchat channel", () => {
       JSON.stringify([{ type: "text", content: "Plan drafted" }]),
     );
 
-    const history = await webchatChannel(repo).messages!.query({
+    const history = await webchatKind(repo).messages!.query({
       chatId: "sess-3" as ChatId,
       since: new Date(0),
     });
@@ -95,7 +95,7 @@ describe("webchat channel", () => {
       await repo.addMessage(id, "sess-4", "user", JSON.stringify([{ type: "text", content: id }]));
     }
 
-    const history = await webchatChannel(repo).messages!.query({
+    const history = await webchatKind(repo).messages!.query({
       chatId: "sess-4" as ChatId,
       limit: 2,
     });
@@ -123,14 +123,14 @@ describe("webchat channel", () => {
           JSON.stringify([{ type: "text", content: id }]),
         );
       }
-      const channel = webchatChannel(repo);
+      const kind = webchatKind(repo);
       const read = { chatId: "sess-5" as ChatId, since: new Date(0) };
-      const full = await channel.messages!.query({ ...read, limit: 10 });
+      const full = await kind.messages!.query({ ...read, limit: 10 });
 
       const walked: string[] = [];
       let after: ReturnType<typeof channelMessageOrder> | undefined;
       for (let page = 0; page < 10; page++) {
-        const [entry] = await channel.messages!.query({
+        const [entry] = await kind.messages!.query({
           ...read,
           ...(after ? { after } : {}),
           limit: 1,

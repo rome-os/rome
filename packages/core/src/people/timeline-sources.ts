@@ -25,13 +25,16 @@ import {
   type AddressBooks,
 } from "../chats/accounts/account-fold.js";
 import {
-  addressBooks,
   storedOn,
   type RecordedOn,
-  messageStores,
   type Channels,
   type PlatformOfChannel,
 } from "../chats/connected-accounts/connected-account.js";
+import {
+  addressBooks,
+  type ConnectionKinds,
+  messageStores,
+} from "../connections/connection-kind.js";
 import type { AccountMessages, MessageAccount } from "../chats/history/messages.js";
 import { chatsAgentMessages } from "../chats/history/messages-agent.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -42,26 +45,26 @@ import type { PeopleRepository } from "../db/repositories/people.js";
  * account — the list `assignAccounts` walks, for the page and for the listing
  * row alike.
  *
- * The order is a precedence: a channel's own store answers for the conversation
- * as the channel has it, so every one of them outranks Rome's transcript of
+ * The order is a precedence: a kind's own store answers for the conversation
+ * as the platform has it, so every one of them outranks Rome's transcript of
  * the same messages.
  *
  * The sentinel's triage record is not among them. It is what Rome checked
  * before deciding whether to answer, not a chat with the guardian.
  *
- * A channel joins by answering for a history, which is an entry in the channel list
- * (channel-list.ts). Rome's transcript belongs to no channel and answers for
- * every one, which is why it is named here and sits behind all of them.
+ * A kind joins by answering for a history (`ConnectionKind.messages`). Rome's
+ * transcript belongs to no kind and answers for every one, which is why it is
+ * named here and sits behind all of them.
  */
 export function personMessageStores(deps: {
   db: DrizzleDb;
-  channels: Channels;
+  kinds: ConnectionKinds;
   platformOfChannel: PlatformOfChannel;
   /** Rome's own account on a channel, or null while its record knows none. */
   accountOf?: (channel: string) => Account | null;
 }): AccountMessages[] {
   const transcript = chatsAgentMessages(deps.db, (channel) => deps.accountOf?.(channel) ?? null);
-  return [...messageStores(deps.channels), transcript];
+  return [...messageStores(deps.kinds), transcript];
 }
 
 /**
@@ -108,7 +111,10 @@ export async function guardianChannels(deps: {
  */
 export async function timelineAccounts(
   deps: {
+    /** The channels whose names an account's history is stored under. */
     channels: Channels;
+    /** The kinds whose address books fold the links. */
+    kinds: ConnectionKinds;
     platformOfChannel?: PlatformOfChannel;
     recordedOn?: RecordedOn;
     /** Which channels are the guardian's own (`guardianChannels`). Absent,
@@ -119,7 +125,7 @@ export async function timelineAccounts(
 ): Promise<MessageAccount[][]> {
   const links = groups.flat();
   const platformOfChannel = deps.platformOfChannel ?? platformOf;
-  const fold = await foldAccounts(booksNamed(deps.channels, platformOfChannel, links), {
+  const fold = await foldAccounts(booksNamed(deps.kinds, platformOfChannel, links), {
     stored: links,
   });
   const stored = new Map<string, string[]>();
@@ -140,13 +146,13 @@ export async function timelineAccounts(
  *  address book costs a full read, and a platform no link names folds nothing,
  *  so a person on one platform pays for one book rather than for the list. */
 function booksNamed(
-  channels: Channels,
+  kinds: ConnectionKinds,
   platformOfChannel: PlatformOfChannel,
   links: readonly Account[],
 ): AddressBooks {
   const named = new Set(links.map((link) => link.platform));
   return Object.fromEntries(
-    Object.entries(addressBooks(channels, platformOfChannel)).filter(([platform]) =>
+    Object.entries(addressBooks(kinds, platformOfChannel)).filter(([platform]) =>
       named.has(platform),
     ),
   );

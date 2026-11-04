@@ -13,6 +13,7 @@ import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../
 import type { AccountNames } from "../chats/accounts/account-names.js";
 import type { Channels, PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
 import type { MessageAccount } from "../chats/history/messages.js";
+import type { ConnectionKinds } from "../connections/connection-kind.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
@@ -24,6 +25,8 @@ export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
   peopleRepo: Pick<PeopleRepository, "all" | "byId">;
   channels: Channels;
+  /** The kinds whose address books and histories a person's timeline reads. */
+  kinds: ConnectionKinds;
   accountNames: Pick<AccountNames, "displayNames">;
   platformOfChannel: PlatformOfChannel;
   /** Rome's own account on a channel, to name a sender by. Absent, no sender

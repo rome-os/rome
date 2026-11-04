@@ -81,7 +81,7 @@ export interface BuiltinConnectionDeps {
   db: DrizzleDb;
   /** The personal WeChat client runtime, present only when config
    *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
-   *  the channel list's reader shares it, so the account is read through one
+   *  the kind's reader (`connectionKinds`) shares it, so the account is read through one
    *  client. */
   wechatUserRuntime?: WechatUserRuntime;
 }

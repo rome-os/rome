@@ -22,8 +22,6 @@ describe("backend turn delivery", () => {
       name: "webchat",
       send: { send, direct: null, activity: null },
       inbound: null,
-      accounts: null,
-      messages: null,
       directory: null,
     } as unknown as Channel;
     const emitted: Array<{ type: string; recorded?: boolean }> = [];
@@ -214,8 +212,6 @@ describe("backend turn delivery", () => {
         name,
         send: null,
         inbound: null,
-        accounts: null,
-        messages: null,
         directory: null,
       }),
       chats: { ensureChannelChat: async () => ({ id: "session-1" }) },
@@ -246,8 +242,6 @@ describe("backend turn delivery", () => {
       name: "wechat",
       send: { send, direct: null, activity: null },
       inbound: null,
-      accounts: null,
-      messages: null,
       directory: null,
     });
     const chats = {

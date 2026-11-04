@@ -19,6 +19,7 @@ import {
 } from "../helpers.js";
 import type { Channels } from "../../chats/connected-accounts/connected-account.js";
 import { channelList } from "../../chats/connected-accounts/connected-account-list.js";
+import { connectionKinds } from "../../connections/connection-kind.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
@@ -306,9 +307,7 @@ async function buildHarness(
   }
   const connections = createTestConnections(channelEndpoints);
   const channels = channelList({
-    db,
-    whatsAppAccounts: noAccounts,
-    linkedInAccounts: noAccounts,
+    kinds: connectionKinds({ db, whatsAppAccounts: noAccounts, linkedInAccounts: noAccounts }),
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 

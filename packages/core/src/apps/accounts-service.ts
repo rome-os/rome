@@ -23,6 +23,7 @@ import type {
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { platformOf } from "../connections/platform.js";
 import type { Connection } from "../connections/types.js";
+import { type ConnectionKinds, kindNamed } from "../connections/connection-kind.js";
 import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
 import { sendThrough, type ChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import type { ConnectionPacing } from "../participation/reply-delivery/connection-pacing.js";
@@ -45,8 +46,11 @@ export const REMOVED_SUMMARY_MEMBERS: Record<string, string> = {
 export interface ChannelsServiceDeps {
   /** The channel list, or undefined until it is built. It is built after the
    *  services that hand this one out, and until then `list` names only the
-   *  channels a Connection backs, `send` works, and nothing reads messages. */
+   *  channels a Connection backs, and `send` works. */
   channels: () => Channels | undefined;
+  /** The kinds whose history `query` reads, by the name the history is
+   *  stored under. Absent, nothing reads messages. */
+  kinds?: () => ConnectionKinds | undefined;
   /** The Connections that back sending. */
   registry: Pick<ConnectionRegistry, "all">;
   /** Names the channel each Connection backs. A Connection it answers null
@@ -102,7 +106,6 @@ export class AccountNotHeld extends Error {
 }
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
-  const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
   const accountOf = (connection: Connection) => deps.accounts?.accountOf(connection.id) ?? null;
 
   /** The Connection that reaches `account`, among those that can talk. */
@@ -129,7 +132,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     read: ChannelMessageQuery = {},
   ): Promise<ChannelMessage[]> {
     const { channel, account } = resolve(target);
-    const messages = find(channel)?.messages;
+    const messages = kindNamed(deps.kinds?.() ?? [], channel)?.messages;
     if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
     const { after: cursor, ...rest } = read;
     // Paging walks back through one chat; across every chat it has no use.

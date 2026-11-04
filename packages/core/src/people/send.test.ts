@@ -9,7 +9,7 @@ import { send } from "../connections/send.js";
 import { directPlace, readSendStates, resolveSendTarget } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
-  return { name, send, inbound: null, accounts: null, messages: null, directory: null };
+  return { name, send, inbound: null, directory: null };
 }
 
 function sending(talker: Pick<ChannelDirectMessaging, "chatFor"> | null): ChannelSend {

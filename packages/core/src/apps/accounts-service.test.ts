@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChannelsService, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ConnectionKinds } from "../connections/connection-kind.js";
 import type { Channels } from "../chats/connected-accounts/connected-account.js";
 import {
   AccountNotHeld,
@@ -60,6 +61,7 @@ function service(channels: unknown[] = []) {
   const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
   const channelsService = createChannelsService({
     channels: () => channels as Channels,
+    kinds: () => channels as ConnectionKinds,
     registry: registryOf(CONNECTIONS, send),
     channelOf: kindChannelOf,
     platformOf: (channel) => (channel === "whatsapp" ? "whatsapp" : null),
@@ -258,6 +260,7 @@ describe("ChannelsService — by account", () => {
     const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
     const channelsService = createChannelsService({
       channels: () => channels as Channels,
+    kinds: () => channels as ConnectionKinds,
       registry: registryOf(CONNECTIONS, send),
       channelOf: kindChannelOf,
       accounts,
@@ -320,9 +323,7 @@ describe("ChannelsService — a channel Rome serves itself", () => {
           own("webchat", chatId, message),
       },
       inbound: null,
-      accounts: null,
       directory: null,
-      messages: null,
     };
     const channelsService = createChannelsService({
       channels: () => undefined,

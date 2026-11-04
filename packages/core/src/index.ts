@@ -95,6 +95,7 @@ import {
 } from "./chats/accounts/own-account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./chats/accounts/agents-accounts.js";
+import { connectionKinds, type ConnectionKinds } from "./connections/connection-kind.js";
 import {
   channelList,
   joinLaterChannel,
@@ -103,6 +104,7 @@ import {
   WEBCHAT_CHANNEL,
   WEBCHAT_SURFACE,
   webchatChannel,
+  webchatKind,
 } from "./chats/dashboard/dashboard-account.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
@@ -379,7 +381,7 @@ async function main() {
   refreshLinkedInProfiles();
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
-  // The channel list and the Connection's Talk share this one client runtime.
+  // The kind's reads and the Connection's Talk share this one client runtime.
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
   // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
@@ -570,6 +572,7 @@ async function main() {
   // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
+  let builtKinds: ConnectionKinds | undefined;
   // The built channels, and each that joins later, recording what is sent on
   // them in Chats. An approval's card goes out on these, so it is on record as
   // the platform shows it.
@@ -595,6 +598,7 @@ async function main() {
   const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
     channels: () => builtChannels,
+    kinds: () => builtKinds,
     own: [webchat],
     registry: connectionRegistry,
     channelOf,
@@ -1560,11 +1564,21 @@ async function main() {
   });
   // Built after every descriptor is registered: each connection kind with a Talk backs
   // its channel's send and inbound ports.
+  // The kinds that answer a read: who their accounts can reach, and what was
+  // said there.
+  const kinds: ConnectionKinds = [
+    ...connectionKinds({
+      db,
+      whatsAppAccounts,
+      linkedInAccounts,
+      ...(wechatUserReader ? { wechatUserReader } : {}),
+      accounts: { [AGENTS_KIND]: agentsAccounts(listedAgents) },
+    }),
+    webchatKind(webchatRepo),
+  ];
+  builtKinds = kinds;
   const channels = channelList({
-    db,
-    whatsAppAccounts,
-    linkedInAccounts,
-    ...(wechatUserReader ? { wechatUserReader } : {}),
+    kinds,
     connections: {
       registry: connectionRegistry,
       admit,
@@ -1573,9 +1587,6 @@ async function main() {
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
       heard: (message) => accountProfiles.heard(message),
-    },
-    connectionAccounts: {
-      [AGENTS_KIND]: agentsAccounts(listedAgents),
     },
     laterChannels: channelRecords
       .all()
@@ -1594,7 +1605,7 @@ async function main() {
   builtChannels = channels;
   recordedChannels.push(...chatsWired.recordedSends(channels));
   const accountNames = createAccountNames({
-    channels,
+    kinds,
     sentinelLogRepo,
     platformOfChannel,
     profiles: accountProfiles,
@@ -1986,6 +1997,7 @@ async function main() {
       peopleRepo,
       guardianLinkCodes,
       channels,
+      kinds,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),

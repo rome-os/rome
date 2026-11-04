@@ -8,7 +8,7 @@ import { AccountNames, createAccountNames } from "./account-names.js";
 import type { Account } from "@rome-os/app-runtime";
 import type { AccountId } from "./accounts.js";
 import { LinkedInAccounts } from "./linkedin.js";
-import { channelList } from "../connected-accounts/connected-account-list.js";
+import { connectionKinds } from "../../connections/connection-kind.js";
 import { WhatsAppAccounts } from "./whatsapp.js";
 
 const PHONE = "15550007777@s.whatsapp.net";
@@ -42,7 +42,7 @@ describe("AccountNames", () => {
     linkedInStore = new LinkedInStoreRepository(testDb.db);
     sentinelLogRepo = new SentinelLogRepository(testDb.db, platformOf);
     names = createAccountNames({
-      channels: channelList({
+      kinds: connectionKinds({
         db: testDb.db,
         whatsAppAccounts: new WhatsAppAccounts(whatsAppStore),
         linkedInAccounts: new LinkedInAccounts(linkedInStore),

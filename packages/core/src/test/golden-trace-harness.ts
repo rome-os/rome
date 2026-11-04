@@ -22,6 +22,7 @@ import type { ChannelMessage } from "@rome-os/app-runtime";
 import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
+import { connectionKinds } from "../connections/connection-kind.js";
 import type { AgentEvent } from "../types.js";
 import {
   createTestConnections,
@@ -129,9 +130,11 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   }
   const channels = withInboundSpans(
     channelList({
-      db: testDb.db,
-      whatsAppAccounts: noAccounts,
-      linkedInAccounts: noAccounts,
+      kinds: connectionKinds({
+        db: testDb.db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+      }),
       connections: { registry: createTestConnections(transports), channelOf: kindChannelOf },
     }),
     "channel-message",

@@ -21,8 +21,9 @@ import type { Accounts } from "./accounts.js";
  * survives it: which addresses a channel hands out, which of them is
  * canonical, and what counts as an account at all are the channel's answers,
  * given once behind {@link Accounts}. So a caller's rules stay
- * channel-agnostic, and adding a channel is an entry in the channel list
- * (channel-list.ts) rather than another special case above.
+ * channel-agnostic, and adding an address book is a kind's `accounts`
+ * (`ConnectionKind`, connections/connection-kind.ts) rather than another
+ * special case above.
  */
 export interface FoldedAccount {
   /** The platform the account lives on, which its address book is filed

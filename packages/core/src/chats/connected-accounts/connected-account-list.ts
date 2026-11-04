@@ -1,61 +1,39 @@
 /**
  * The channels Rome uses, built once for every caller that uses all of them.
  * `Channel` (channel.ts) is what one entry is, and a provider joins the
- * address-book fold, the display-name read and a person's history at once by
- * taking an entry here. Vocabulary: docs/domains/chats.md.
+ * send and inbound paths at once by taking an entry here. Vocabulary:
+ * docs/domains/chats.md.
  */
 
 import type { Connection } from "../../connections/types.js";
-import type { DrizzleDb } from "../../db/index.js";
-import type { Accounts } from "../accounts/accounts.js";
+import type { ConnectionKinds } from "../../connections/connection-kind.js";
 import type { Channel, Channels } from "./connected-account.js";
 import { type ChannelOf, connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
-import { linkedInMessages } from "../history/linkedin-messages.js";
-import type { WechatUserReader } from "../../connections/kinds/wechat-user/wechat-user.js";
-import {
-  WECHAT_USER_CHANNEL,
-  wechatUserAccounts,
-  wechatUserMessages,
-} from "../history/wechat-user-messages.js";
-import { whatsAppMessages } from "../history/whatsapp-messages.js";
 
 /**
- * Every channel that can answer something, in the order they claim an account.
+ * Every channel that can send or hear, in the order they claim an account.
  *
  * Partial, and not by omission: channels are open — a Rome App brings its own —
  * so no list enumerates them. A channel that answers nothing holds no entry,
- * which is the same answer as an entry with four null ports.
+ * which is the same answer as an entry with only null ports.
  *
- * Where an answer comes from is the channel's business. WhatsApp's and
- * LinkedIn's address books and stores read tables a sync fills; every connection kind
- * with a Talk backs its channel's `send` and `inbound` through its Connection.
- * A channel a Connection backs has no `messages`: Rome does not read a
- * platform's own history.
- * A channel answering the same questions from a live API call implements the
- * same ports and joins the same way.
- *
- * The address books arrive built rather than made here: a channel that folds
- * its whole address book per call serves every caller from one read of it, and
- * two instances of one book is two folds of it.
+ * Every kind of connection with a Talk backs its channel's `send` and
+ * `inbound` through its Connection. Each kind that holds a history
+ * (`ConnectionKind.messages`) keeps a channel named after it whether or not
+ * anything backs it, so its name stays among the names an account's history
+ * on its platform is read under (`storedOn`).
  *
  * Build it once per registry: each build's inbound ports admit every message
  * the registry's Talks deliver (`connectionPorts`).
  */
 export function channelList(deps: {
-  db: DrizzleDb;
-  whatsAppAccounts: Accounts;
-  linkedInAccounts: Accounts;
-  /** The personal WeChat reader, present only when that connection is enabled.
-   *  It contributes a live store and an address book of the guardian's own
-   *  contacts, read straight from the client's database rather than a sync. */
-  wechatUserReader?: WechatUserReader;
+  /** The kinds that answer a read. Each one that holds a history keeps a
+   *  channel. */
+  kinds?: ConnectionKinds;
   /** The Connections that back `send`, `inbound` and `directory`. Every
    *  registered connection kind with a Talk contributes a channel; absent, no
    *  channel has those ports. */
   connections?: ConnectionPortsDeps;
-  /** Address books for channels a Connection backs, by connection kind. A connection kind
-   *  absent here has no address book. */
-  connectionAccounts?: Record<string, Accounts>;
   /** The later channels of a connection kind a Connection backs, such as a second
    *  Feishu bot. Each connection kind's first channel is named after it and is built
    *  whether or not anything backs it yet. */
@@ -63,19 +41,6 @@ export function channelList(deps: {
   /** Channels Rome serves itself, which no Connection backs, such as webchat. */
   own?: readonly Channel[];
 }): Channel[] {
-  const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
-    { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
-    { name: "linkedin", accounts: deps.linkedInAccounts, messages: linkedInMessages(deps.db) },
-    ...(deps.wechatUserReader
-      ? [
-          {
-            name: WECHAT_USER_CHANNEL,
-            accounts: wechatUserAccounts(deps.wechatUserReader),
-            messages: wechatUserMessages(deps.wechatUserReader),
-          },
-        ]
-      : []),
-  ];
   const connections = deps.connections;
   const ports = new Map(
     (connections?.registry.registeredKinds() ?? []).flatMap((connectionKind) => {
@@ -83,22 +48,21 @@ export function channelList(deps: {
       return backed ? [[connectionKind, backed] as const] : [];
     }),
   );
-  const channels: Channel[] = reads.map((read) => ({
-    ...read,
-    send: ports.get(read.name)?.send ?? null,
-    inbound: ports.get(read.name)?.inbound ?? null,
-    directory: ports.get(read.name)?.directory ?? null,
+  const own = deps.own ?? [];
+  const reading = (deps.kinds ?? []).filter(
+    (kind) => kind.messages !== null && !own.some((channel) => channel.name === kind.name),
+  );
+  const channels: Channel[] = reading.map(({ name }) => ({
+    name,
+    send: ports.get(name)?.send ?? null,
+    inbound: ports.get(name)?.inbound ?? null,
+    directory: ports.get(name)?.directory ?? null,
   }));
-  channels.push(...(deps.own ?? []));
+  channels.push(...own);
   for (const [name, backed] of ports) {
-    if (reads.some((read) => read.name === name)) continue;
+    if (reading.some((kind) => kind.name === name)) continue;
     if (!backed.send && !backed.inbound) continue;
-    channels.push({
-      name,
-      accounts: deps.connectionAccounts?.[name] ?? null,
-      messages: null,
-      ...backed,
-    });
+    channels.push({ name, ...backed });
   }
   if (connections) {
     for (const later of deps.laterChannels ?? []) {
@@ -112,8 +76,8 @@ export function channelList(deps: {
 
 /**
  * A later channel of `connectionKind`, named `name`, backed by its own Connection.
- * Null when the connection kind has no Talk. It has no address book or store of its
- * own: those a connection kind keeps are its first channel's.
+ * Null when the connection kind has no Talk. Its kind's address book and
+ * history are the kind's (`ConnectionKind`), not this channel's.
  *
  * Build it once per registry and name, as `channelList` does for the first
  * channel of each connection kind: its inbound port runs admission for every message.
@@ -125,7 +89,7 @@ export function laterChannel(
 ): Channel | null {
   const backed = connectionPorts(connections, connectionKind, name);
   if (!backed || (!backed.send && !backed.inbound)) return null;
-  return { name, accounts: null, messages: null, ...backed };
+  return { name, ...backed };
 }
 
 /**

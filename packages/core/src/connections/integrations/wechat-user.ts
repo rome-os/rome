@@ -386,8 +386,8 @@ function toConversationDescriptor(
 // ── descriptor ────────────────────────────────────────────────────────────
 
 export interface WechatUserDescriptorDeps {
-  /** The client runtime. Boot passes the one the channel list reads through,
-   *  so the channel and this Connection coordinate one client; built here when
+  /** The client runtime. Boot passes the one the kind's reads go through,
+   *  so those reads and this Connection coordinate one client; built here when
    *  absent (tests). The reader is a stateless wrapper over it. */
   runtime?: WechatUserRuntime;
   pollIntervalMs?: number;

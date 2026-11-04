@@ -15,6 +15,7 @@ import { createTestDb, kindChannelOf, type TestDb } from "../../test/helpers.js"
 import type { Accounts } from "../accounts/accounts.js";
 import { AccountNotConnected } from "./connected-account.js";
 import { channelList, joinLaterChannel } from "./connected-account-list.js";
+import { connectionKinds } from "../../connections/connection-kind.js";
 import type { ConnectionPortsDeps } from "./connection-ports.js";
 import { ConnectionPacing } from "../../participation/reply-delivery/connection-pacing.js";
 import { type DeliveryTransport, plainText } from "../../connections/sending.js";
@@ -90,7 +91,6 @@ describe("channelList", () => {
     admit = async (_id: string, _service: string, inbound: ChannelMessage) =>
       inbound.senderId === "guardian",
     admission?: { admissionTimeoutMs?: number },
-    connectionAccounts?: Record<string, Accounts>,
   ) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({
@@ -125,21 +125,22 @@ describe("channelList", () => {
       registeredKinds: () => registry.registeredKinds(),
     };
     const channels = channelList({
-      db: testDb.db,
-      whatsAppAccounts: noAccounts,
-      linkedInAccounts: noAccounts,
+      kinds: connectionKinds({
+        db: testDb.db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+      }),
       connections: {
         registry: watched,
         admit,
         channelOf: kindChannelOf,
         ...(admission ? { admission } : {}),
       },
-      ...(connectionAccounts ? { connectionAccounts } : {}),
     });
     return { registry, channels, subscribed };
   }
 
-  it("gives every service with a Talk a channel, beside the read-backed ones", () => {
+  it("gives every kind with a Talk a channel, beside the ones holding a history", () => {
     const actOnly: ConnectionDescriptor = {
       connectionKind: "github",
       grant: "user",
@@ -158,25 +159,11 @@ describe("channelList", () => {
 
     expect(channels.map((channel) => channel.name)).toEqual(["whatsapp", "linkedin", "telegram"]);
     const [whatsapp, linkedin, telegram] = channels;
-    expect(whatsapp).toMatchObject({ accounts: noAccounts });
     expect(whatsapp?.send).not.toBeNull();
     expect(whatsapp?.inbound).not.toBeNull();
     expect(linkedin?.send).not.toBeNull();
     expect(linkedin?.inbound).toBeNull();
-    expect(telegram).toMatchObject({ accounts: null, messages: null });
-  });
-
-  it("gives a Connection-backed channel the address book named for its service", () => {
-    const book: Accounts = { ...noAccounts };
-    const { channels } = setup(
-      [talkKind("agents").descriptor, talkKind("telegram").descriptor],
-      undefined,
-      undefined,
-      { agents: book },
-    );
-    const named = (name: string) => channels.find((channel) => channel.name === name);
-    expect(named("agents")?.accounts).toBe(book);
-    expect(named("telegram")?.accounts).toBeNull();
+    expect(telegram?.send).not.toBeNull();
   });
 
   it("rejects a send nothing backs, and sends through the Connection once one does", async () => {
@@ -529,9 +516,11 @@ describe("joinLaterChannel", () => {
       connection.id === first.id ? "telegram" : `later-${connection.id}`;
     const admit = async () => true;
     const channels = channelList({
-      db: testDb.db,
-      whatsAppAccounts: noAccounts,
-      linkedInAccounts: noAccounts,
+      kinds: connectionKinds({
+        db: testDb.db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+      }),
       connections: { registry, admit, channelOf },
     });
     // What index.ts does: every channel a chat unlock adds, the hook hears.

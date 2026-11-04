@@ -21,17 +21,14 @@ import {
 import type { Account } from "@rome-os/app-runtime";
 import type { AccountNames } from "../chats/accounts/account-names.js";
 import { foldAccounts } from "../chats/accounts/account-fold.js";
-import {
-  addressBooks,
-  type Channels,
-  type PlatformOfChannel,
-} from "../chats/connected-accounts/connected-account.js";
+import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
+import { addressBooks, type ConnectionKinds } from "../connections/connection-kind.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 
 export interface AccountDirectoryDeps {
-  /** Every channel Rome mirrors — the address books this folds. */
-  channels: Channels;
+  /** The kinds whose address books this folds. */
+  kinds: ConnectionKinds;
   peopleRepo: Pick<PeopleRepository, "all" | "dismissals">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
@@ -68,7 +65,7 @@ export async function readAccountDirectory(
   ]);
 
   const links = persons.flatMap((person) => person.links.map((link) => ({ ...link, person })));
-  const fold = await foldAccounts(addressBooks(deps.channels, deps.platformOfChannel), {
+  const fold = await foldAccounts(addressBooks(deps.kinds, deps.platformOfChannel), {
     stored: [...senders, ...links, ...dismissals],
   });
 
