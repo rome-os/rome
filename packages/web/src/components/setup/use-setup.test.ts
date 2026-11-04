@@ -97,6 +97,29 @@ describe("useSetup stale-state handling", () => {
     expect(toast).toHaveBeenCalledTimes(1);
   });
 
+  it("follows a setup whose card went away and says so when it ended the connection", async () => {
+    const toast = rs.spyOn(sonner, "toast").mockImplementation(() => "t");
+    let finished = false;
+    rs.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      const state = finished
+        ? { status: "done", grant: { connectionId: "c2", ended: "c1" } }
+        : { status: "presenting", view: { title: "Scan the code" } };
+      return new Response(JSON.stringify({ state }), { status: 200 });
+    });
+    const { result, unmount } = renderHook(() =>
+      useSetup({ idOrKind: "c1", grant: "session", activeCid: "cid-qr" }),
+    );
+    await waitFor(() => expect(result.current.state?.status).toBe("presenting"));
+
+    // The connections refresh drops the ended connection's card before the
+    // setup's own poll sees it finish.
+    unmount();
+    finished = true;
+
+    await waitFor(() => expect(toast).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(toast.mock.calls[0]![1]).toEqual({ id: "setup-ended:c1" });
+  });
+
   it("cancels a new account's live setup when the card goes away", async () => {
     const started = JSON.stringify({
       cid: "cid-new",

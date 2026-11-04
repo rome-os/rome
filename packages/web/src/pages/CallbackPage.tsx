@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { takeLoginReturn } from "@/lib/login-return";
-import { getSetupState, isTerminalSetup, submitSetupReturn } from "@/lib/setup-api";
-import { endedNoticeId } from "@/components/setup/use-setup";
+import { isTerminalSetup, submitSetupReturn } from "@/lib/setup-api";
+import { followSetupForEnded } from "@/components/setup/use-setup";
 
 interface OAuthRedeemPayload {
   nextPath?: string;
@@ -184,26 +184,6 @@ function handleOAuthReturnOnce(
 
   returnHandlers.set(key, run);
   return run;
-}
-
-// How often, and for how long, the callback follows a setup it handed off.
-const FOLLOW_POLL_MS = 1000;
-const FOLLOW_LIMIT = 120;
-
-/** Poll a setup until it finishes, and toast when it ended a connection. The
- *  toast shares its id with the one `useSetup` shows, so a detail page that
- *  re-attached to the same setup does not show it twice. */
-async function followSetupForEnded(cid: string, notice: string): Promise<void> {
-  for (let i = 0; i < FOLLOW_LIMIT; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
-    const state = await getSetupState(cid).catch(() => null);
-    if (!state) return;
-    if (!isTerminalSetup(state)) continue;
-    if (state.status === "done" && state.grant?.ended) {
-      toast(notice, { id: endedNoticeId(state.grant.ended) });
-    }
-    return;
-  }
 }
 
 async function redeemOAuthHandoff(

@@ -40,6 +40,27 @@ export function endedNoticeId(ended: string): string {
   return `setup-ended:${ended}`;
 }
 
+// How often, and for how long, a setup is followed once no card shows it.
+const FOLLOW_POLL_MS = 1000;
+const FOLLOW_LIMIT = 120;
+
+/** Poll a setup that no card shows any more until it finishes, and toast when
+ *  it ended a connection. The OAuth callback hands its setup here, and so does
+ *  a card that goes away mid-setup: a fix that reaches another account ends
+ *  the connection whose card was showing it. */
+export async function followSetupForEnded(cid: string, notice: string): Promise<void> {
+  for (let i = 0; i < FOLLOW_LIMIT; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
+    const state = await getSetupState(cid).catch(() => null);
+    if (!state) return;
+    if (!isTerminalSetup(state)) continue;
+    if (state.status === "done" && state.grant?.ended) {
+      toast(notice, { id: endedNoticeId(state.grant.ended) });
+    }
+    return;
+  }
+}
+
 // Poll interval while the setup awaits an external event.
 const POLL_MS = 2000;
 
@@ -219,6 +240,16 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
     if (!cancelOnLeave) return;
     return () => {
       if (liveCidRef.current) void cancelSetup(liveCidRef.current);
+    };
+  }, [cancelOnLeave]);
+  // A setup left running when the card goes away is followed to its end, so
+  // the guardian still hears that it ended a connection.
+  const endedNoticeRef = useRef("");
+  endedNoticeRef.current = t("connections.accounts.endedAnother");
+  useEffect(() => {
+    if (cancelOnLeave) return;
+    return () => {
+      if (liveCidRef.current) void followSetupForEnded(liveCidRef.current, endedNoticeRef.current);
     };
   }, [cancelOnLeave]);
   useEffect(() => {
