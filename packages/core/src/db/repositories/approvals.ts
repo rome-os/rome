@@ -1,4 +1,4 @@
-import { and, eq, or, desc, sql, ne } from "drizzle-orm";
+import { and, eq, or, desc } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
