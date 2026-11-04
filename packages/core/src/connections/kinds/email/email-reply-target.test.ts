@@ -177,13 +177,13 @@ describe("resolveEmailReplyTarget", () => {
     ]);
   });
 
-  it("rejects a missing thread and suggests an explicit provider message ID", async () => {
+  it("rejects a missing thread and points to the email field that names the email to answer", async () => {
     const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
       messages: [item("other")],
     }));
 
     await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toThrow(
-      "replyToMessageId",
+      "inReplyToMessageId",
     );
     expect(listMessages).toHaveBeenCalledTimes(1);
   });

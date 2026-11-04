@@ -12,6 +12,7 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../../../lib/rome-cloud-mail.js";
+import { MailProviderError } from "../../../lib/rome-cloud-mail.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 
@@ -250,13 +251,16 @@ describe("EmailAdapter.send", () => {
     expect(receipt).toEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
-  /** A mailbox holding one email, `<CAF123@mail.example.com>`, in thread t1. */
+  /** A mailbox holding one email, `<CAF123@mail.example.com>`, in thread t1,
+   *  that knows no other. */
   const holding = () =>
     makeProvider({
-      listMessages: rs.fn(async () => ({
-        messages: [{ threadId: "t1", providerMessageId: "<CAF123@mail.example.com>" }] as never,
-        nextPageToken: undefined,
-      })),
+      getMessage: rs.fn(async (messageId: string) => {
+        if (messageId !== "<CAF123@mail.example.com>") {
+          throw new MailProviderError("not found", 404);
+        }
+        return { threadId: "t1", providerMessageId: messageId } as never;
+      }),
     });
 
   it("answers the email a reply names, in In-Reply-To", async () => {
@@ -270,6 +274,24 @@ describe("EmailAdapter.send", () => {
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0].inReplyToMessageId).toBe("<CAF123@mail.example.com>");
+    expect(provider.listMessages).not.toHaveBeenCalled();
+  });
+
+  it("passes on a provider failure to look a quoted email up, and sends nothing", async () => {
+    const provider = makeProvider({
+      getMessage: rs.fn(async () => {
+        throw new MailProviderError("unavailable", 503);
+      }),
+    });
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("t1" as ChatId, {
+        text: "On it",
+        replyToMessageId: "<CAF123@mail.example.com>",
+      }),
+    ).rejects.toMatchObject({ name: "MailProviderError", status: 503 });
+    expect(provider.send).not.toHaveBeenCalled();
   });
 
   it("refuses a chat-style reply to an email outside the thread it goes to, and sends nothing", async () => {

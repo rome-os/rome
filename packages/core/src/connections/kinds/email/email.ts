@@ -22,7 +22,6 @@ import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
   type ResolvedEmailReplyTarget,
-  findEmailThread,
   resolveEmailReplyTarget,
 } from "./email-reply-target.js";
 import type {
@@ -32,6 +31,7 @@ import type {
   EmailAddress,
   EmailBodyPart,
 } from "../../../lib/rome-cloud-mail.js";
+import { MailProviderError } from "../../../lib/rome-cloud-mail.js";
 import {
   inboundBodyToMarkdown,
   markdownToEmailHtml,
@@ -470,8 +470,15 @@ export class EmailAdapter {
       throw refused("cannot be answered by a new email");
     }
     if (this.threadReplyTarget.get(threadId)?.messageId === quote) return;
-    const held = await findEmailThread(this.provider, quote);
-    if (held !== threadId) throw refused("is not in the thread this message goes to");
+    // An email the provider does not know is in no thread. Any other failure
+    // to look it up is the provider's, and passes on.
+    const quoted = await this.provider.getMessage(quote).catch((err: unknown) => {
+      if (err instanceof MailProviderError && err.status === 404) return undefined;
+      throw err;
+    });
+    if (quoted?.threadId !== threadId) {
+      throw refused("is not in the thread this message goes to");
+    }
   }
 
   private noRecipientMessage(to: string | string[]): string {

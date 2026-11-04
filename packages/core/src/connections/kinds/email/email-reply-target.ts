@@ -69,7 +69,7 @@ export async function resolveEmailReplyTarget(
       reject(
         new Error(
           `Looking up email thread "${threadId}" took longer than ${budgetMs / 1000}s. ` +
-            "No email was sent. Retry, or supply a provider message ID as `replyToMessageId`.",
+            "No email was sent. Retry, or name the email to answer in `inReplyToMessageId`.",
         ),
       );
     }, budgetMs);
@@ -129,61 +129,7 @@ async function scan(
   if (state.sentFallback) return { messageId: state.sentFallback, outbound: true, complete: true };
   throw new Error(
     `Cannot resolve email thread "${threadId}" within the reply lookup limits. ` +
-      "No email was sent. Supply a provider message ID as `replyToMessageId`, " +
+      "No email was sent. Name the email to answer in `inReplyToMessageId`, " +
       "or omit `threadId` and set `to` to start a new email.",
   );
-}
-
-/**
- * The thread holding the email the provider calls `messageId`, or undefined
- * when the lookup does not find it. It reads the same pages, within the same
- * bounds and time budget, as a thread's reply target. Running out of time or
- * pages is a miss. A failed page rejects.
- */
-export async function findEmailThread(
-  provider: Pick<MailProvider, "listMessages">,
-  messageId: string,
-  budgetMs: number = REPLY_LOOKUP_BUDGET_MS,
-): Promise<string | undefined> {
-  const state: ScanState = { expired: false };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => {
-      state.expired = true;
-      resolve(undefined);
-    }, budgetMs);
-  });
-  try {
-    return await Promise.race([findIn(provider, messageId, state), deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function findIn(
-  provider: Pick<MailProvider, "listMessages">,
-  messageId: string,
-  state: ScanState,
-): Promise<string | undefined> {
-  let pageToken: string | undefined;
-  let scanned = 0;
-  const visited = new Set<string>();
-  for (let pageIndex = 0; pageIndex < MAX_PAGES && scanned < MAX_MESSAGES; pageIndex += 1) {
-    if (state.expired) return undefined;
-    const page = await provider.listMessages({
-      ascending: false,
-      limit: Math.min(PAGE_SIZE, MAX_MESSAGES - scanned),
-      pageToken,
-    });
-    for (const item of page.messages) {
-      if (scanned >= MAX_MESSAGES) break;
-      scanned += 1;
-      if (item.providerMessageId?.trim() === messageId) return item.threadId;
-    }
-    const next = page.nextPageToken;
-    if (!next || visited.has(next)) break;
-    visited.add(next);
-    pageToken = next;
-  }
-  return undefined;
 }
