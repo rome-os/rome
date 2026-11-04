@@ -8,7 +8,7 @@ import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
-import { useToolFollowing, useToolTasks } from "./tool-tasks";
+import { useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
 import * as store from "./use-free-cells";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
@@ -17,9 +17,6 @@ rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
 // The panel is tested on its own; here it only has to be the tab's body.
 rs.mock("@/components/concierge/ConciergeTaskPanel", () => ({
   ConciergeTaskPanel: () => <p>Task panel body</p>,
-}));
-rs.mock("@/components/concierge/ConciergeFollowingPanel", () => ({
-  ConciergeFollowingPanel: () => <p>Following panel body</p>,
 }));
 
 let viewportWidth = 1200;
@@ -780,22 +777,6 @@ function TasksOwner() {
   );
 }
 
-// Stands in for the Concierge chat's Following pill.
-function FollowingOwner() {
-  const pane = useToolFollowing();
-  return (
-    <>
-      <button type="button" onClick={() => pane?.show()}>
-        Show following
-      </button>
-      <button type="button" onClick={() => pane?.hide()}>
-        Hide following
-      </button>
-      <output data-testid="following-host">{JSON.stringify({ active: pane?.active })}</output>
-    </>
-  );
-}
-
 function TasksHarness({
   initial = { activeId: "a", collapsed: false, unreadIds: [] },
   selectTool = rs.fn(),
@@ -833,59 +814,10 @@ function TasksHarness({
     >
       <input aria-label="Chat draft" />
       <TasksOwner />
-      <FollowingOwner />
       {withTrace && <TraceOwner />}
     </ToolWorkspace>
   );
 }
-
-describe("ToolWorkspace Following tab", () => {
-  it("sits beside Tasks, and selecting one deselects the other", async () => {
-    const user = userEvent.setup();
-    render(<TasksHarness />);
-    await user.click(screen.getByRole("button", { name: "Show tasks" }));
-    await user.click(screen.getByRole("button", { name: "Show following" }));
-    expect(tabNames()).toEqual(["Tasks", "Following", "desktop", "projects"]);
-    expect(screen.getByRole("tab", { name: "Following" }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
-    expect(screen.getByText("Following panel body")).toBeTruthy();
-    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).active).toBe(false);
-
-    await user.click(screen.getByRole("tab", { name: "Tasks" }));
-    expect(JSON.parse(screen.getByTestId("following-host").textContent!).active).toBe(false);
-    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).active).toBe(true);
-  });
-
-  it("goes by its own close button and leaves Tasks in place", async () => {
-    const user = userEvent.setup();
-    render(<TasksHarness />);
-    await user.click(screen.getByRole("button", { name: "Show tasks" }));
-    await user.click(screen.getByRole("button", { name: "Show following" }));
-    await user.click(screen.getByRole("button", { name: "Close Following" }));
-    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
-    expect(screen.queryByText("Following panel body")).toBeNull();
-  });
-
-  it("keeps a collapsed pane open while Tasks still shows after it goes", async () => {
-    const user = userEvent.setup();
-    const setCollapsed = rs.fn();
-    render(
-      <TasksHarness
-        initial={{ activeId: "a", collapsed: true, unreadIds: [] }}
-        setCollapsed={setCollapsed}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: "Show tasks" }));
-    await user.click(screen.getByRole("button", { name: "Show following" }));
-    await user.click(screen.getByRole("button", { name: "Hide following" }));
-    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
-    expect(screen.getByText("Task panel body")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Hide tasks" }));
-    expect(screen.queryByRole("tab", { name: "desktop" })).toBeNull();
-    expect(setCollapsed).not.toHaveBeenCalled();
-  });
-});
 
 describe("ToolWorkspace Tasks tab", () => {
   it("adds an ephemeral Tasks tab ahead of the apps and selects it, writing nothing to the layout", async () => {

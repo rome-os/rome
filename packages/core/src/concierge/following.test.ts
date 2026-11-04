@@ -173,7 +173,6 @@ function setup(
   const settings = new Map<string, unknown>();
   const actions: Action[] = [];
   const calls: [string, Record<string, unknown>][] = [];
-  const changes: number[] = [];
   const turns: string[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
@@ -304,7 +303,6 @@ function setup(
     runSystemTurn: async (_chatId: string, prompt: string) => {
       turns.push(prompt);
     },
-    followingChanged: () => void changes.push(1),
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
   const stop = startConciergeFollowing(service, deps);
@@ -313,7 +311,6 @@ function setup(
     routines,
     active,
     calls,
-    changes,
     settings,
     action,
     turns,
@@ -403,8 +400,6 @@ describe("follow", () => {
       options: { ignorePeople: ["dependabot"] },
       preference: "Only PRs that touch the billing code matter.",
     });
-    // Clients hear that something changed, and read the list again.
-    expect(s.changes.length).toBeGreaterThan(0);
     const ensures = s.calls.filter(([name]) => name === "connector_watch_ensure");
     expect(ensures.map(([, args]) => args.dryRun)).toEqual([true, false]);
     expect(keys(s)).toEqual([

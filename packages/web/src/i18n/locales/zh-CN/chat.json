@@ -75,25 +75,6 @@
         "email": "总结一下我的未读邮件",
         "task": "帮我做一个简单的习惯打卡 app"
       }
-    },
-    "following": {
-      "title": "关注",
-      "close": "关闭关注",
-      "pill_one": "关注，{{count}} 项",
-      "pill_other": "关注，{{count}} 项",
-      "pillIdle": "关注",
-      "emptyTitle": "还没有关注的内容",
-      "emptyDescription": "在聊天里让 Concierge 帮你关注一些东西，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
-      "sourceWithAccount": "{{source}} · {{account}}",
-      "notConnected": "{{source}} 未连接。请在 设置 → 连接 中连接。",
-      "state": {
-        "off": "所有类型都已关闭",
-        "unavailable": "来源恢复前暂停"
-      },
-      "yes": "是",
-      "no": "否",
-      "preferenceShown": "“{{preference}}”",
-      "changeInChat": "要关注别的或修改关注，在聊天里告诉 Concierge。"
     }
   },
   "reply": {

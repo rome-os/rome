@@ -75,25 +75,6 @@
         "email": "Summarize my unread email",
         "task": "Build me a simple habit tracker app"
       }
-    },
-    "following": {
-      "title": "Following",
-      "close": "Close following",
-      "pill_one": "Following, {{count}} item",
-      "pill_other": "Following, {{count}} items",
-      "pillIdle": "Following",
-      "emptyTitle": "Nothing followed yet",
-      "emptyDescription": "Ask the Concierge in chat to follow something, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
-      "sourceWithAccount": "{{source}} · {{account}}",
-      "notConnected": "{{source}} is not connected. Connect it in Settings → Connections.",
-      "state": {
-        "off": "Every kind is off",
-        "unavailable": "Paused until the source is ready again"
-      },
-      "yes": "yes",
-      "no": "no",
-      "preferenceShown": "“{{preference}}”",
-      "changeInChat": "To follow something else or change a follow, ask the Concierge in chat."
     }
   },
   "reply": {

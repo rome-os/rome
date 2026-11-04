@@ -194,7 +194,7 @@ export interface ConciergeFollowingDeps {
   now?: () => number;
 }
 
-/** What the Concierge's actions and the dashboard's Following panel reach. */
+/** What the Concierge's actions and the connectors route reach. */
 export interface ConciergeFollowing {
   /** Every service with its state, connect entry and capabilities (watch with its follows), and the rules. */
   list(): Promise<ConciergeConnectorsResponse>;
@@ -392,7 +392,6 @@ export function startConciergeFollowing(
   const writeStored = async (next: StoredFollowing) => {
     await deps.settings.set(CONCIERGE_FOLLOWING_SETTING_KEY, next);
     rules = parseFollowRules(next);
-    service.followingChanged();
   };
   void readStored()
     .then((stored) => {

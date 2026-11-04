@@ -40,7 +40,6 @@ import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { cn } from "@/lib/utils";
-import { ConciergeFollowingPill } from "@/components/concierge/ConciergeFollowingPill";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { useConciergeChatId } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
@@ -425,12 +424,7 @@ export function FreeGrid() {
                 <span className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}>
                   {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
-                {isConcierge ? (
-                  <>
-                    <ConciergeTasksPill />
-                    <ConciergeFollowingPill />
-                  </>
-                ) : null}
+                {isConcierge ? <ConciergeTasksPill /> : null}
                 {/* Same label as the desktop navbar, also none for the Concierge. */}
                 {!isConcierge && sessionName?.trim() && pinnedAgentMention && (
                   <span className="shrink-0 truncate text-aux text-muted-foreground">

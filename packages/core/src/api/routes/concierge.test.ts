@@ -213,7 +213,6 @@ describe("/concierge/connectors", () => {
   const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
   let testDb: TestDb;
   let enabled: boolean;
-  const calls: unknown[][] = [];
   const listing = {
     connectors: [
       {
@@ -247,18 +246,6 @@ describe("/concierge/connectors", () => {
   const app = () => {
     const following = {
       list: async () => listing,
-      configure: async (change: { source: string; target?: string }) => {
-        calls.push(["configure", change]);
-        return change.source === "gmail" ? { target: "me@example.com" } : null;
-      },
-      unfollow: async (source: string, target: string) => {
-        calls.push(["unfollow", source, target]);
-        return { removed: source === "gmail" };
-      },
-      setRules: async (change: unknown) => {
-        calls.push(["setRules", change]);
-        return { ...listing.rules, ...(change as object) };
-      },
     };
     const concierge = { isEnabled: async () => enabled, following } as unknown as ConciergeService;
     return new Hono().route(
@@ -266,17 +253,9 @@ describe("/concierge/connectors", () => {
       conciergeRoutes({ concierge, db: testDb.db, webchatRepo: new WebChatRepository(testDb.db) }),
     );
   };
-  const send = (path: string, method: string, body?: unknown) =>
-    app().request(path, {
-      method,
-      headers: { ...guardian.headers, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-
   beforeEach(() => {
     testDb = createTestDb();
     enabled = true;
-    calls.length = 0;
   });
 
   afterEach(() => {
@@ -290,52 +269,5 @@ describe("/concierge/connectors", () => {
     );
     enabled = false;
     expect((await app().request("/concierge/connectors", guardian)).status).toBe(404);
-  });
-
-  it("changes one follow by the names the list gives", async () => {
-    const response = await send("/concierge/connectors/follow", "PUT", {
-      source: "gmail",
-      options: { recipients: "to" },
-      kinds: { new_mail: true },
-      preference: "Only my team",
-    });
-    expect(response.status).toBe(200);
-    expect(calls).toEqual([
-      [
-        "configure",
-        {
-          source: "gmail",
-          options: { recipients: "to" },
-          kinds: { new_mail: true },
-          preference: "Only my team",
-        },
-      ],
-    ]);
-    expect(
-      (await send("/concierge/connectors/follow", "PUT", { source: "github", target: "x/y" }))
-        .status,
-    ).toBe(404);
-    expect((await send("/concierge/connectors/follow", "PUT", {})).status).toBe(400);
-  });
-
-  it("unfollows by source and target", async () => {
-    expect((await send("/concierge/connectors/follow?source=gmail", "DELETE")).status).toBe(200);
-    expect(
-      (await send("/concierge/connectors/follow?source=github&target=a/b", "DELETE")).status,
-    ).toBe(404);
-    expect(calls.at(-1)).toEqual(["unfollow", "github", "a/b"]);
-  });
-
-  it("changes the rules and refuses values out of bounds", async () => {
-    const response = await send("/concierge/connectors/rules", "PUT", { digestTimes: ["08:00"] });
-    await expect(response.json()).resolves.toEqual({
-      rules: { digestTimes: ["08:00"], quietHours: null },
-    });
-    expect(
-      (await send("/concierge/connectors/rules", "PUT", { digestTimes: ["8 am"] })).status,
-    ).toBe(400);
-    expect(
-      (await send("/concierge/connectors/rules", "PUT", { quietHours: { start: "22:00" } })).status,
-    ).toBe(400);
   });
 });

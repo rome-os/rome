@@ -148,7 +148,6 @@ describe("live events WebSocket", () => {
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
       subscribeConciergeTasks: (emit) => track(conciergeTasks.subscribe(emit)),
-      subscribeConciergeConnectors: () => () => {},
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();

@@ -349,8 +349,6 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
           subscribeConciergeTasks: (emit) =>
             deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
-          subscribeConciergeConnectors: (emit) =>
-            deps.concierge?.subscribeFollowing(emit) ?? (() => {}),
         },
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);

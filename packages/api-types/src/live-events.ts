@@ -6,12 +6,6 @@ import { z } from "zod";
 export const CHAT_STATUS_TOPIC = "chat.status";
 /** The Concierge task panel's rows. Its only event is `task_upsert`. */
 export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
-/**
- * The Concierge's connectors and what it follows through them. Its only event
- * is `connectors_changed`, with no payload: the client reads
- * `GET /api/concierge/connectors` again.
- */
-export const CONCIERGE_CONNECTORS_TOPIC = "concierge.connectors";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
 

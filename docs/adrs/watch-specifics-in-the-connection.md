@@ -25,12 +25,12 @@ Every service difference lives in the connection. The connector app declares a w
 
 ## Consequences
 
-A new service changes its connection only: its catalog entry, its subscription and its normalizer. Following, triage, delivery and the panel stay unchanged.
+A new service changes its connection only: its catalog entry, its subscription and its normalizer. Following, triage and delivery stay unchanged.
 
 The common shape has to carry enough for triage to judge an event without the raw payload. When a service needs a new fact, the fact is added to the shape as a plain value, never as a service field that core reads.
 
 Future diffs must respect:
 
-- No branch on a service name outside the connection, in following, triage, delivery or the UI.
+- No branch on a service name outside the connection, in following, triage, delivery or a client.
 - A watch provider names only its own app's actions.
 - The event bus keeps the raw event. A follower normalizes through the provider when it handles the event.

@@ -27,14 +27,3 @@ export const ToolTasksContext = createContext<ToolTasksHost | null>(null);
 export function useToolTasks(): ToolTasksHost | null {
   return useContext(ToolTasksContext);
 }
-
-/**
- * The tool pane's Following tab: the repos the Concierge follows for the
- * guardian. The same kind of tab as Tasks, with a host of its own.
- */
-export const ToolFollowingContext = createContext<ToolTasksHost | null>(null);
-
-/** The tool pane's Following tab, or null outside a tool workspace. */
-export function useToolFollowing(): ToolTasksHost | null {
-  return useContext(ToolFollowingContext);
-}

@@ -7,7 +7,6 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import { changeOf, validateRulesChange } from "../../concierge/following.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -87,7 +86,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
 
   // The Concierge's connectors: every tool it can act through or watch, with
   // what it follows there, and the rules. The same structure its following
-  // list returns, read by the web Following panel and native clients.
+  // list returns, read by native clients.
   // Guardian-only; 404 while off.
   const followingOf = async (c: Context) => {
     if (!(await resolveGuardianSession(c, deps.db))) {
@@ -108,77 +107,6 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
       return c.json((await following.list()) satisfies ConciergeConnectorsResponse);
     } catch (err) {
       return c.json({ error: messageOf(err) }, 502);
-    }
-  });
-
-  // The same `connectors_changed` events as the `concierge.connectors` topic of
-  // the live events socket, for a client that cannot open the socket.
-  app.get("/concierge/connectors/events", async (c) => {
-    const { error } = await followingOf(c);
-    if (error) return error;
-    const concierge = deps.concierge!;
-    return streamSSE(c, async (sse) => {
-      let close!: () => void;
-      let finished = false;
-      const closed = new Promise<void>((resolve) => {
-        close = resolve;
-      });
-      let unsubscribe = () => {};
-      const heartbeat = setInterval(() => {
-        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
-      }, 20_000);
-      function finish() {
-        if (finished) return;
-        finished = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-        close();
-      }
-      unsubscribe = concierge.subscribeFollowing((event, data) => {
-        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
-      });
-      sse.onAbort(finish);
-      await closed;
-    });
-  });
-
-  // Changes one follow: kinds on or off, options, the preference.
-  app.put("/concierge/connectors/follow", async (c) => {
-    const { following, error } = await followingOf(c);
-    if (error) return error;
-    const body = await c.req.json<Record<string, unknown>>().catch(() => null);
-    if (!body || typeof body !== "object") return c.json({ error: "Invalid request body" }, 400);
-    const change = changeOf(body);
-    if (!change.source) return c.json({ error: "source is required" }, 400);
-    try {
-      const follow = await following.configure(change);
-      if (!follow) return c.json({ error: "Not followed" }, 404);
-      return c.json({ follow });
-    } catch (err) {
-      return c.json({ error: messageOf(err) }, 400);
-    }
-  });
-
-  app.delete("/concierge/connectors/follow", async (c) => {
-    const { following, error } = await followingOf(c);
-    if (error) return error;
-    const source = c.req.query("source")?.trim();
-    const target = c.req.query("target")?.trim() ?? "";
-    if (!source) return c.json({ error: "source is required" }, 400);
-    const result = await following.unfollow(source, target);
-    if (!result.removed) return c.json({ error: "Not followed" }, 404);
-    return c.json(result);
-  });
-
-  app.put("/concierge/connectors/rules", async (c) => {
-    const { following, error } = await followingOf(c);
-    if (error) return error;
-    const body = await c.req.json<Record<string, unknown>>().catch(() => null);
-    if (!body || typeof body !== "object") return c.json({ error: "Invalid request body" }, 400);
-    try {
-      return c.json({ rules: await following.setRules(validateRulesChange(body)) });
-    } catch (err) {
-      return c.json({ error: messageOf(err) }, 400);
     }
   });
 

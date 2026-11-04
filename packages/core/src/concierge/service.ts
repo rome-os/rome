@@ -87,7 +87,6 @@ export class ConciergeService {
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
-  private followingListeners = new Set<(event: string, data: unknown) => void>();
 
   constructor(readonly deps: ConciergeDeps) {}
 
@@ -198,23 +197,6 @@ export class ConciergeService {
   /** What the Concierge follows, once {@link startConciergeFollowing} has started it. */
   attachFollowing(following: ConciergeFollowing | null): void {
     this.attachedFollowing = following;
-  }
-
-  /** Hears every change to what the Concierge follows, or its rules, until unsubscribed. */
-  subscribeFollowing(emit: (event: string, data: unknown) => void): () => void {
-    this.followingListeners.add(emit);
-    return () => this.followingListeners.delete(emit);
-  }
-
-  /** Tells every listener that what the Concierge follows changed. */
-  followingChanged(): void {
-    for (const emit of this.followingListeners) {
-      try {
-        emit("connectors_changed", {});
-      } catch {
-        // A closed listener drops out on its own unsubscribe.
-      }
-    }
   }
 
   get following(): ConciergeFollowing {

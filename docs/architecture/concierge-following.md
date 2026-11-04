@@ -65,7 +65,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 
 ### The connection owns every service difference
 
-- **Core never names a service.** Which events a service has, how to subscribe to them, what a raw event means, and how to reach the account all come from the connection's watch provider. Following, triage, delivery and the Following panel never branch on a service. A new service changes only its connection. [ADR](../adrs/watch-specifics-in-the-connection.md)
+- **Core never names a service.** Which events a service has, how to subscribe to them, what a raw event means, and how to reach the account all come from the connection's watch provider. Following, triage and delivery never branch on a service. A new service changes only its connection. [ADR](../adrs/watch-specifics-in-the-connection.md)
 - **Core finds watch providers from what apps declare, never by app name.** An app that declares no watch provider is not followed, and an app cannot declare another app's actions as its provider.
 - **The event bus carries the raw event.** The connection normalizes an event when a follow routine asks, with that follow's account and kinds. Other consumers of the same event, such as Code Review and `defer`, read it unchanged.
 - **The connection drops only what is not an event for the follower:** spam, trash, a kind the follow has off, a repeat. Whether an event matters is never decided by a rule in the connection or in core. [ADR](../adrs/model-triage-over-code-filters.md)
@@ -81,7 +81,7 @@ Solid lines carry an event. Dashed lines are calls: the follow routine asks the 
 ### Limits apply to Concierge turns, not to events
 
 - **Important turns have an hourly cap.** Past it, important items wait for the digest. Quiet hours hold important turns until the window ends.
-- **The guardian's words change the rules only through the Concierge.** Digest times, quiet hours, kinds, options and preferences change in chat. The Following panel shows the follows and changes nothing.
+- **The guardian changes following only through the Concierge in chat.** Follows, kinds, options, preferences, digest times and quiet hours have no other way to change.
 
 ### Text from outside Rome is data
 

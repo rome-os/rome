@@ -95,7 +95,6 @@ import {
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
-import { ConciergeFollowingPill } from "@/components/concierge/ConciergeFollowingPill";
 import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -1962,12 +1961,7 @@ export function Chat({
             <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
               {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
             </span>
-            {concierge ? (
-              <>
-                <ConciergeTasksPill />
-                <ConciergeFollowingPill />
-              </>
-            ) : null}
+            {concierge ? <ConciergeTasksPill /> : null}
             {/* The agent's app beside a titled chat. The Concierge's is always
                 Rome, so it shows none. */}
             {!concierge && sessionName?.trim() && pinnedAgentMention && (

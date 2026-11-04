@@ -1,5 +1,4 @@
 import {
-  BellRing,
   ChevronDown,
   ExternalLink,
   LayoutGrid,
@@ -40,8 +39,7 @@ import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { MIN_TAB_WIDTH, fitTabs } from "./tool-tab-fit";
 import { ConciergeTaskPanel } from "@/components/concierge/ConciergeTaskPanel";
-import { ConciergeFollowingPanel } from "@/components/concierge/ConciergeFollowingPanel";
-import { ToolFollowingContext, ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
+import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
 
@@ -52,11 +50,8 @@ const SEPARATOR_WIDTH = 1;
 export const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
 // Tab value of the Trace tab. Widget ids are generated, so it cannot collide.
 const TRACE_TAB_ID = "__trace__";
-// Tab values of the Tasks and Following tabs, likewise.
+// Tab value of the Tasks tab, likewise.
 const TASKS_TAB_ID = "__tasks__";
-const FOLLOWING_TAB_ID = "__following__";
-/** The pane's own panels the Concierge chat opens beside it. */
-type BuiltinPanel = "tasks" | "following";
 
 function readRatio() {
   try {
@@ -188,13 +183,13 @@ export function ToolWorkspace({
   //   the store, because the user has moved on to the pane. The flag is then
   //   redundant and clears, so the app stays visible after the trace closes.
   //
-  // The Tasks and Following tabs are the same kind of tab: view state, never
-  // saved, at most one of each. Selecting one built-in tab deselects the others. A built-in tab opened over
+  // The Tasks tab is the same kind of tab: view state, never saved, at most one.
+  // Selecting one built-in tab deselects the other. A built-in tab opened over
   // a collapsed pane holds it open with the same flag.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
   const [traceSelected, setTraceSelected] = useState(false);
-  const [panelsOpen, setPanelsOpen] = useState<ReadonlySet<BuiltinPanel>>(new Set());
-  const [panelSelected, setPanelSelected] = useState<BuiltinPanel | null>(null);
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [tasksSelected, setTasksSelected] = useState(false);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
@@ -204,7 +199,7 @@ export function ToolWorkspace({
   const reveal = useCallback(() => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
     setTraceSelected(true);
-    setPanelSelected(null);
+    setTasksSelected(false);
   }, []);
 
   const setTraceTab = useCallback(
@@ -241,13 +236,13 @@ export function ToolWorkspace({
   useEffect(() => {
     if (activations !== undefined) {
       setTraceSelected(false);
-      setPanelSelected(null);
+      setTasksSelected(false);
     }
   }, [activations]);
 
   function addAndShow(type: WidgetType, targetId?: string) {
     setTraceSelected(false);
-    setPanelSelected(null);
+    setTasksSelected(false);
     addWidget(type, targetId);
   }
 
@@ -256,55 +251,36 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const open = !view.collapsed || ((trace !== null || panelsOpen.size > 0) && holdsOpen);
+  const open = !view.collapsed || ((trace !== null || tasksOpen) && holdsOpen);
   const setPaneCollapsed = useCallback((collapsed: boolean) => {
     setHoldsOpen(false);
     latest.current.setCollapsed(collapsed);
   }, []);
 
   const traceActive = trace !== null && traceSelected;
-  const tasksOpen = panelsOpen.has("tasks");
-  const followingOpen = panelsOpen.has("following");
-  const tasksActive = tasksOpen && panelSelected === "tasks";
-  const followingActive = followingOpen && panelSelected === "following";
-  const builtinActive = traceActive || tasksActive || followingActive;
+  const tasksActive = tasksOpen && tasksSelected;
+  const builtinActive = traceActive || tasksActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const hasTabs = sorted.length > 0 || trace !== null || panelsOpen.size > 0;
+  const hasTabs = sorted.length > 0 || trace !== null || tasksOpen;
   const compact = width < COMPACT_WIDTH;
-  const showPanel = useCallback((panel: BuiltinPanel) => {
+  const showTasks = useCallback(() => {
     if (latest.current.view.collapsed) setHoldsOpen(true);
-    setPanelsOpen((prev) => new Set(prev).add(panel));
-    setPanelSelected(panel);
+    setTasksOpen(true);
+    setTasksSelected(true);
     setTraceSelected(false);
   }, []);
-  const hidePanel = useCallback((panel: BuiltinPanel) => {
-    setPanelsOpen((prev) => {
-      const next = new Set(prev);
-      next.delete(panel);
-      return next;
-    });
-    setPanelSelected((prev) => (prev === panel ? null : prev));
+  const hideTasks = useCallback(() => {
+    setTasksOpen(false);
+    setTasksSelected(false);
+    if (traceOwnerRef.current === null) setHoldsOpen(false);
   }, []);
-  // The hold keeps a collapsed pane open only while a built-in tab is in it.
-  const builtinOpen = trace !== null || panelsOpen.size > 0;
-  useEffect(() => {
-    if (!builtinOpen) setHoldsOpen(false);
-  }, [builtinOpen]);
-  const showTasks = useCallback(() => showPanel("tasks"), [showPanel]);
-  const hideTasks = useCallback(() => hidePanel("tasks"), [hidePanel]);
-  const showFollowing = useCallback(() => showPanel("following"), [showPanel]);
-  const hideFollowing = useCallback(() => hidePanel("following"), [hidePanel]);
   const tasksHost = useMemo<ToolTasksHost>(
     () => ({ active: tasksActive && open, compact, show: showTasks, hide: hideTasks }),
     [tasksActive, open, compact, showTasks, hideTasks],
-  );
-  const followingHost = useMemo<ToolTasksHost>(
-    () => ({ active: followingActive && open, compact, show: showFollowing, hide: hideFollowing }),
-    [followingActive, open, compact, showFollowing, hideFollowing],
   );
   const activeWidget = builtinActive
     ? undefined
@@ -346,16 +322,13 @@ export function ToolWorkspace({
   const tabIds = [
     ...(trace ? [TRACE_TAB_ID] : []),
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
-    ...(followingOpen ? [FOLLOWING_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
   const activeTabId = traceActive
     ? TRACE_TAB_ID
     : tasksActive
       ? TASKS_TAB_ID
-      : followingActive
-        ? FOLLOWING_TAB_ID
-        : (view.activeId ?? null);
+      : (view.activeId ?? null);
   const shownIds = new Set(fitTabs(tabIds, activeTabId, stripWidth));
   const hiddenCount = tabIds.length - shownIds.size;
   const allToolsLabel =
@@ -385,15 +358,6 @@ export function ToolWorkspace({
               icon={<ListChecks className="size-3.5" />}
               active={tasksActive}
               onClose={hideTasks}
-            />
-          )}
-          {followingOpen && shownIds.has(FOLLOWING_TAB_ID) && (
-            <ToolTab
-              id={FOLLOWING_TAB_ID}
-              label={t("chat.followingTab")}
-              icon={<BellRing className="size-3.5" />}
-              active={followingActive}
-              onClose={hideFollowing}
             />
           )}
           {sorted
@@ -463,12 +427,6 @@ export function ToolWorkspace({
                 {t("chat.tasksTab")}
               </DropdownMenuItem>
             )}
-            {followingOpen && (
-              <DropdownMenuItem onSelect={() => pickTab(FOLLOWING_TAB_ID)}>
-                <BellRing className="size-3.5" />
-                {t("chat.followingTab")}
-              </DropdownMenuItem>
-            )}
             {sorted.map((widget) => (
               <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
@@ -502,16 +460,16 @@ export function ToolWorkspace({
   function pickTab(id: string) {
     if (id === TRACE_TAB_ID) {
       setTraceSelected(true);
-      setPanelSelected(null);
+      setTasksSelected(false);
       return;
     }
-    if (id === TASKS_TAB_ID || id === FOLLOWING_TAB_ID) {
-      setPanelSelected(id === TASKS_TAB_ID ? "tasks" : "following");
+    if (id === TASKS_TAB_ID) {
+      setTasksSelected(true);
       setTraceSelected(false);
       return;
     }
     setTraceSelected(false);
-    setPanelSelected(null);
+    setTasksSelected(false);
     selectTool(id);
   }
 
@@ -556,11 +514,7 @@ export function ToolWorkspace({
             flexShrink: 0,
           }}
         >
-          <ToolTasksContext.Provider value={tasksHost}>
-            <ToolFollowingContext.Provider value={followingHost}>
-              {children}
-            </ToolFollowingContext.Provider>
-          </ToolTasksContext.Provider>
+          <ToolTasksContext.Provider value={tasksHost}>{children}</ToolTasksContext.Provider>
         </div>
         {open && !compact && (
           <div
@@ -608,7 +562,7 @@ export function ToolWorkspace({
           />
         )}
         <Tabs
-          value={activeTabId ?? ""}
+          value={traceActive ? TRACE_TAB_ID : tasksActive ? TASKS_TAB_ID : (view.activeId ?? "")}
           onValueChange={pickTab}
           activationMode="automatic"
           className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
@@ -695,18 +649,6 @@ export function ToolWorkspace({
                 className="absolute inset-0 overflow-hidden"
               >
                 <ConciergeTaskPanel />
-              </TabsContent>
-            )}
-            {followingOpen && (
-              <TabsContent
-                value={FOLLOWING_TAB_ID}
-                forceMount
-                inert={!followingActive}
-                aria-hidden={!followingActive}
-                style={{ display: followingActive ? undefined : "none" }}
-                className="absolute inset-0 overflow-hidden"
-              >
-                <ConciergeFollowingPanel />
               </TabsContent>
             )}
           </div>
