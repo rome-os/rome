@@ -290,16 +290,18 @@ describe("backend turn delivery", () => {
       expect(send).not.toHaveBeenCalled();
     });
 
-    it("refuses a reply no speaker can say, and sends nothing", async () => {
+    it("runs no turn whose reply no speaker can say, and sends nothing", async () => {
       const send = rs.fn<Send>(async (chatId) => ({ chatId }));
+      const agentRunner = answered();
       const runner = createBackendTurnRunner({
-        agentRunner: answered(),
+        agentRunner,
         channel: () => wechatWith(send),
       });
 
       await expect(runner.runAndDeliver(params)).rejects.toThrow(
         'No speaker can say a reply on "wechat", so it was not sent',
       );
+      expect(agentRunner.calls).toHaveLength(0);
       expect(send).not.toHaveBeenCalled();
     });
 
@@ -332,20 +334,6 @@ describe("backend turn delivery", () => {
         "Session session-1 stands in no chat",
       );
       expect(send).not.toHaveBeenCalled();
-    });
-
-    it("tells a caller delivering its own turn's reply that the speaker records it", () => {
-      const channel = () => wechatWith(rs.fn<Send>(async (chatId) => ({ chatId })));
-      const spoken = createBackendTurnRunner({
-        agentRunner: answered(),
-        channel,
-        chats,
-        replies: { send: async () => null },
-      });
-      const unspoken = createBackendTurnRunner({ agentRunner: answered(), channel });
-
-      expect(spoken.saysReplies).toBe(true);
-      expect(unspoken.saysReplies).toBe(false);
     });
   });
 });

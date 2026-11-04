@@ -94,9 +94,6 @@ export interface MainBackendTurnRunner extends BackendTurnRunner {
     reply: string,
     turnId?: string,
   ): Promise<void>;
-  /** True when `deliverMessagingReply` puts the reply on record as it says
-   * it, so the turn that produced the reply must not save its answer too. */
-  readonly saysReplies: boolean;
 }
 
 export interface BackendTurnRunnerDeps {
@@ -190,6 +187,14 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     await task({ emit: async () => {} });
   };
 
+  const assertSpeaker = (channel: string) => {
+    const { replies, chats } = deps;
+    if (!replies || !chats) {
+      throw new Error(`No speaker can say a reply on "${channel}", so it was not sent`);
+    }
+    return { replies, chats };
+  };
+
   const deliverMessagingReply = async (
     params: Pick<BackendTurnParams, "agentName" | "channel" | "threadId">,
     reply: string,
@@ -205,17 +210,15 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     const channel = deps.channel(params.channel);
     const send = channel?.send;
     if (!channel || !send) throw new Error(`Channel "${params.channel}" cannot send`);
-    if (!deps.replies || !deps.chats) {
-      throw new Error(`No speaker can say a reply on "${params.channel}", so it was not sent`);
-    }
+    const { replies, chats } = assertSpeaker(params.channel);
     // A delivery that succeeded and failed to record is logged, never
     // thrown, so the continuation never retries a sent reply.
-    const session = await deps.chats.ensureChannelChat({
+    const session = await chats.ensureChannelChat({
       channel: params.channel,
       threadId: params.threadId,
       agentName: params.agentName,
     });
-    const said = await deps.replies.send(
+    const said = await replies.send(
       session.id,
       channel,
       { text: reply },
@@ -276,14 +279,16 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         return;
       }
 
-      // Messaging channels: run the turn here in main, then deliver the reply
-      // on the channel's `send` port.
+      // Messaging channels: run the turn here in main, then say the reply
+      // through the session's speaker. Without one the reply could not be
+      // sent, so the turn is not run.
+      assertSpeaker(params.channel);
       let reply = "";
       let turnId: string | undefined;
       // A speaker puts the answer on record as it says it, so the trace keeps
       // the turn but writes no answer of its own: one that was never sent
       // must not read as said, and one that was must not be said twice.
-      const trace = deps.replies && deps.chats ? { persistAnswer: false } : {};
+      const trace = { persistAnswer: false };
       for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
@@ -292,7 +297,5 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     },
 
     deliverMessagingReply,
-
-    saysReplies: Boolean(deps.replies && deps.chats),
   };
 }
