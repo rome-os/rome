@@ -160,6 +160,9 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
+import { startConciergeAlerts } from "./concierge/alert-events.js";
+import { githubLoginReader } from "./concierge/github-alerts.js";
+import { readGithubAccessTokenFile } from "./lib/provider-token-files.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -1198,6 +1201,18 @@ async function main() {
   });
 
   startConciergeEvents(concierge, lifecycleDispatcher);
+  startConciergeAlerts(concierge, {
+    routines: routinesRepo,
+    routineEngine,
+    actions: actionRegistry,
+    // Subscribes at GitHub as the Concierge, like its own `defer` would.
+    prepareWait: (eventName, filter) =>
+      eventSources.prepareWait(eventName, filter, (name, args) =>
+        actionEngine.run(name, args, { initiator: "agent:core:concierge" }),
+      ),
+    settings: settingsRepo,
+    githubLogin: githubLoginReader(readGithubAccessTokenFile),
+  });
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,

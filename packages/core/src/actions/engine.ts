@@ -141,6 +141,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
+  // Queues an outside event for the Concierge. Its delivery timer starts the
+  // Concierge's turn outside the action's context (concierge/alert-events.ts).
+  "core:concierge_alert",
 ]);
 
 export interface ActionRunContext {
