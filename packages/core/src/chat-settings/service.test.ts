@@ -706,8 +706,9 @@ describe("ChatSettingsService", () => {
             : null,
       platformOfChannel: (name) => (name.startsWith("feishu") ? "feishu" : name),
     });
+    const repository = new ChatSettingsRepository(testDb.db, wired);
     const service = new ChatSettingsService({
-      repository: new ChatSettingsRepository(testDb.db, wired),
+      repository,
       connections: registry,
       channelOf,
       channels: () => [],
@@ -731,7 +732,7 @@ describe("ChatSettingsService", () => {
     const standIn = (channel: "feishu" | "feishu-2") =>
       openSpeaker(testDb!.db, { channel, threadId: "oc_group", agentName: "main" }, wired);
 
-    return { service, standIn, throughSales, throughSupport };
+    return { service, repository, wired, standIn, throughSales, throughSupport };
   }
 
   it("serializes writers through two of Rome's accounts in one group", async () => {
@@ -815,30 +816,21 @@ describe("ChatSettingsService", () => {
     });
   });
 
-  it("starts no group at an address neither a row nor its platform has named", async () => {
-    const { service, throughSales, throughSupport } = await twoAccountsInOneGroup([], false);
+  it("refuses a rule at an address whose kind neither a speaker, its platform nor the address names", async () => {
+    const { service, wired, throughSales } = await twoAccountsInOneGroup([], false);
 
-    await service.update({
-      ref: throughSales,
-      set: { session: { reset: { mode: "daily", atHour: 4 } } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-    await service.update({
-      ref: throughSupport,
-      set: { session: { reset: { mode: "none" } } },
-      clear: [],
-      actor: { kind: "guardian" },
-    });
-
-    expect((await service.get(throughSales)).effective.session.reset).toEqual({
-      mode: "daily",
-      atHour: 4,
-    });
-    expect((await service.get(throughSupport)).effective.session.reset).toEqual({ mode: "none" });
+    await expect(
+      service.update({
+        ref: throughSales,
+        set: { session: { reset: { mode: "daily", atHour: 4 } } },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+    ).rejects.toThrow("cannot tell whether it is a group or a direct message");
+    expect(wired.chats.list("feishu")).toEqual([]);
   });
 
-  it("reads no group's rule at an address an account has no row at and no kind for", async () => {
+  it("reads no group's rule at an address an account has no speaker at and no kind for", async () => {
     const { service, standIn, throughSales, throughSupport } = await twoAccountsInOneGroup(
       [],
       false,
@@ -852,16 +844,43 @@ describe("ChatSettingsService", () => {
     });
 
     expect((await service.get(throughSupport)).effective.enabled).toBe(true);
+    await expect(
+      service.update({
+        ref: throughSupport,
+        set: { session: { reset: { mode: "none" } } },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+    ).rejects.toThrow("cannot tell whether it is a group or a direct message");
+    expect((await service.get(throughSales)).effective.enabled).toBe(false);
+  });
+
+  it("starts the direct message an address names when a rule is set before anything is said", async () => {
+    const { service, repository, wired, throughSales } = await twoAccountsInOneGroup([], false);
+    const ref = { ...throughSales, chatId: "ou_ray" as ChatId };
+
     await service.update({
-      ref: throughSupport,
+      ref,
       set: { session: { reset: { mode: "none" } } },
       clear: [],
       actor: { kind: "guardian" },
     });
-    expect((await service.get(throughSupport)).overrides).toEqual({
-      session: { reset: { mode: "none" } },
+    const ruled = repository.find("feishu", "ou_ray" as ChatId);
+    expect(ruled).toMatchObject({ kind: "dm" });
+
+    // The first message from the other end finds the same speaker, in the
+    // same direct message.
+    const opened = await openSpeaker(
+      testDb!.db,
+      { channel: "feishu", threadId: "ou_ray", threadType: "private", agentName: "main" },
+      wired,
+    );
+    expect(opened.id).toBe(ruled!.id);
+    expect(repository.find("feishu", "ou_ray" as ChatId)).toMatchObject({
+      kind: "dm",
+      chatId: ruled!.chatId,
     });
-    expect((await service.get(throughSales)).effective.enabled).toBe(false);
+    expect((await service.get(ref)).overrides).toEqual({ session: { reset: { mode: "none" } } });
   });
 
   it("paginates beyond a bounded live directory first page", async () => {

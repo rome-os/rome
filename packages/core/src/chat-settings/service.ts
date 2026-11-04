@@ -293,7 +293,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Keep the rows intact so reconnecting the same account can recover them,
       // but do not let one orphaned row abort the cross-provider list.
       // A speaker whose account no channel is now is hidden the same way.
-      const rowChannel = this.deps.repository.channelOf(row);
+      const rowChannel = row.channel;
       if (rowChannel === null || this.connectionsOf(rowChannel).length === 0) {
         log.debug("conversation_settings.removed_connection_hidden", {
           channel: rowChannel,
@@ -535,7 +535,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): StoredChatSettings | null {
-    let channel = row ? this.deps.repository.channelOf(row) : null;
+    let channel = row?.channel ?? null;
     if (channel === null && this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
       channel = this.channelName(ref);
     }
@@ -610,7 +610,7 @@ export class ChatSettingsService implements ChatSettingsControl {
   private descriptorFromRow(row: StoredChatRow): ChatDescriptor {
     // The speaker's connection is the one behind its account on its chat's
     // platform.
-    const channel = this.deps.repository.channelOf(row);
+    const channel = row.channel;
     if (!row.address || !channel) {
       throw new Error(`Channel conversation "${row.id}" has no channel address`);
     }
