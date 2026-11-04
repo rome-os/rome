@@ -32,6 +32,8 @@ import {
 } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
+import { SetupManager } from "../../connections/setup/manager.js";
+import type { SetupFn } from "../../connections/setup/types.js";
 
 const openDbs: Array<() => void> = [];
 function makeLedger(): DrizzleConnectionsRepository {
@@ -404,6 +406,60 @@ describe("DELETE /connections/:id/grants/:name", () => {
 
     expect([first.status, second.status]).toEqual([200, 200]);
     expect((await second.json()).connection).toBeNull();
+    expect(registry.find("fake-telegram")).toEqual([]);
+  });
+
+  it("ends the connection a committing fix started when that fix reached another bot", async () => {
+    let releaseClear: () => void = () => {};
+    const clearing = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    const pasteBot: SetupFn = async (interact) => {
+      const { token, botId } = await interact.prompt({
+        fields: [
+          { name: "token", label: "Token", secret: true },
+          { name: "botId", label: "Bot id", secret: false },
+        ],
+      });
+      return { credential: { material: { token }, expiresAt: "never" }, profile: { botId } };
+    };
+    const fixture = makePasteTalk();
+    let clears = 0;
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    registry.register({
+      ...fixture.descriptor,
+      auth: { ...fixture.descriptor.auth, setup: pasteBot },
+      // The ended connection's custody clears slowly, so the fix is still
+      // committing when the disconnect arrives.
+      custody: {
+        sync: async () => {},
+        clear: () => (clears++ === 0 ? clearing : Promise.resolve()),
+      },
+    });
+    const setupManager = new SetupManager({
+      registry,
+      peopleRepo: {} as PeopleRepository,
+    });
+    const conn = await registry.connect("fake-telegram");
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential(), {
+      botId: "100",
+    });
+    const fix = await setupManager.start(
+      { connectionKind: conn.connectionKind, connectionId: conn.id },
+      "bot",
+    );
+    const fixed = setupManager.provideInput(fix.cid, { token: "t-9", botId: "900" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const disconnect = makeApp(registry, { setupManager }).request(
+      `/connections/${conn.id}/grants/bot`,
+      { method: "DELETE", headers: SAME_ORIGIN },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseClear();
+
+    expect((await disconnect).status).toBe(200);
+    expect((await fixed)?.state).toMatchObject({ status: "done", grant: { ended: conn.id } });
     expect(registry.find("fake-telegram")).toEqual([]);
   });
 

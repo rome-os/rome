@@ -134,7 +134,7 @@ export interface SetupDoneView {
    *  name the account it made. */
   connectionId?: string;
   /** The connection the setup ended, when it fixed a connection and the
-   *  sign-in reached another account. A connection's account never changes,
+   *  grant reached another account. A connection's account never changes,
    *  so Rome ended that connection and `connectionId` is a new one to the
    *  account that answered. */
   ended?: string;

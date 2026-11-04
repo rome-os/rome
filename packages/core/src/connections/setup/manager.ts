@@ -203,10 +203,12 @@ export class SetupManager {
 
   /** Cancel the live setup addressed by `(idOrKind, grant)`, if any, and wait
    *  for it to unwind. Teardown uses this so a revoke cannot be silently undone
-   *  by an in-flight setup's terminal write. No-op when nothing is active. */
-  async cancelActive(idOrKind: string, grant: string): Promise<void> {
+   *  by an in-flight setup's terminal write. Answers the state the setup ended
+   *  in, which is `done` when its write was already committing, or null when
+   *  nothing was active. */
+  async cancelActive(idOrKind: string, grant: string): Promise<SetupState | null> {
     const cid = this.activeFor(idOrKind, grant);
-    if (cid) await this.cancel(cid);
+    return cid ? ((await this.cancel(cid)) ?? null) : null;
   }
 
   /** Feed the guardian's answers to a setup awaiting input. */

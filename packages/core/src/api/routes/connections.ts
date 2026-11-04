@@ -375,8 +375,16 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // guardian-link unwinds with no write; one already committing runs to
     // `done` first, then the disconnect wins as the final state). The
     // disconnect itself runs inside that section.
-    await deps.setupManager?.cancelActive(conn.id, name);
-    await registry.disconnect(conn.id);
+    const settled = await deps.setupManager?.cancelActive(conn.id, name);
+    // A fix that was committing when the cancel landed may have reached
+    // another account: it ended this connection and started one to that
+    // account. The guardian asked to take away the access they were fixing,
+    // so the disconnect ends the connection the fix started.
+    const target =
+      settled?.status === "done" && settled.grant.ended === conn.id
+        ? settled.grant.connectionId
+        : conn.id;
+    if (target && findConnection(registry, target)) await registry.disconnect(target);
     c.header("Cache-Control", "no-store");
     return c.json({ ok: true, connection: null });
   });
