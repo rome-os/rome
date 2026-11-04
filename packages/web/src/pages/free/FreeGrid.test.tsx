@@ -188,8 +188,24 @@ describe("FreeGrid mobile header", () => {
               ? {}
               : url === "/api/concierge/following"
                 ? {
-                    items: [
-                      { source: "github", target: "acme/widgets", account: "octo-me", kinds: [] },
+                    sources: [
+                      {
+                        source: "github",
+                        label: "GitHub",
+                        status: "ready",
+                        target: null,
+                        kinds: [],
+                        options: [],
+                        follows: [
+                          {
+                            target: "acme/widgets",
+                            state: "active",
+                            kinds: [],
+                            options: {},
+                            preference: null,
+                          },
+                        ],
+                      },
                     ],
                     rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
                   }

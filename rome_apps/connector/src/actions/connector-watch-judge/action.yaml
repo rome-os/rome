@@ -1,0 +1,14 @@
+name: connector_watch_judge
+type: custom
+description: |
+  Judge one raw event from a watched source for a follow: answer the event
+  in a common shape (kind, actor, subject, url, a short excerpt, and facts
+  such as recipient to/cc, from a bot, about the guardian), or that it does
+  not concern the guardian and why. Applies the follow's kinds and options in
+  code. Changes nothing.
+entry: ./index.ts
+visibility: explicit
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

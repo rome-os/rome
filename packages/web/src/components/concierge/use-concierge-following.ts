@@ -1,30 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-  ConciergeFollowedItemDto,
+  ConciergeFollowChange,
+  ConciergeFollowDto,
   ConciergeFollowingResponse,
   ConciergeFollowRules,
-  ConciergeFollowSource,
 } from "@rome/api-types/concierge";
 import { fetchJson } from "@/lib/fetch-json";
 
 const CONCIERGE_FOLLOWING_QUERY_KEY = ["concierge-following"] as const;
 const REFETCH_MS = 30_000;
 
-/** One followed item as a request names it. */
-export interface FollowedRef {
-  source: ConciergeFollowSource;
+/** One follow as a request names it. */
+export interface FollowRef {
+  source: string;
   target: string;
 }
 
-const itemPath = ({ source, target }: FollowedRef, rest = "") =>
-  `/api/concierge/following/${source}${rest}?target=${encodeURIComponent(target)}`;
-
-const sameItem = (a: FollowedRef, b: FollowedRef) => a.source === b.source && a.target === b.target;
-
 /**
- * What the Concierge follows and the rules that bound its events. The
- * Concierge changes them from chat with no live event, so the list is read
- * again on focus and every half minute while something shows it.
+ * What the Concierge follows: every source the guardian's connections offer,
+ * the follows there, and the rules. The same structure the Concierge reads.
+ * It changes from chat with no live event, so it is read again on focus and
+ * every half minute while something shows it.
  */
 export function useConciergeFollowing() {
   const queryClient = useQueryClient();
@@ -33,40 +29,57 @@ export function useConciergeFollowing() {
     staleTime: 0,
     refetchInterval: REFETCH_MS,
     queryFn: ({ signal }) =>
-      fetchJson<ConciergeFollowingResponse>("/api/concierge/following", {
-        signal,
-        fallback: "",
-      }),
+      fetchJson<ConciergeFollowingResponse>("/api/concierge/following", { signal, fallback: "" }),
   });
   const update = (change: (prev: ConciergeFollowingResponse) => ConciergeFollowingResponse) =>
     queryClient.setQueryData<ConciergeFollowingResponse>(CONCIERGE_FOLLOWING_QUERY_KEY, (prev) =>
       prev ? change(prev) : prev,
     );
   const refresh = () => queryClient.invalidateQueries({ queryKey: CONCIERGE_FOLLOWING_QUERY_KEY });
+  const replaceFollow = (source: string, follow: ConciergeFollowDto) =>
+    update((prev) => ({
+      ...prev,
+      sources: prev.sources.map((entry) =>
+        entry.source === source
+          ? {
+              ...entry,
+              follows: entry.follows.map((f) => (f.target === follow.target ? follow : f)),
+            }
+          : entry,
+      ),
+    }));
 
-  const setKind = useMutation({
-    mutationFn: async (input: FollowedRef & { kind: string; enabled: boolean }) =>
+  const configure = useMutation({
+    mutationFn: async (change: ConciergeFollowChange & { target: string }) =>
       (
-        await fetchJson<{ item: ConciergeFollowedItemDto }>(
-          itemPath(input, `/kinds/${encodeURIComponent(input.kind)}`),
-          { method: "PUT", json: { enabled: input.enabled }, fallback: "" },
-        )
-      ).item,
-    onSuccess: (item) =>
-      update((prev) => ({
-        ...prev,
-        items: prev.items.map((entry) => (sameItem(entry, item) ? item : entry)),
-      })),
+        await fetchJson<{ follow: ConciergeFollowDto }>("/api/concierge/following/item", {
+          method: "PUT",
+          json: change,
+          fallback: "",
+        })
+      ).follow,
+    onSuccess: (follow, change) => replaceFollow(change.source, follow),
     onError: () => void refresh(),
   });
 
   const unfollow = useMutation({
-    mutationFn: async (ref: FollowedRef) => {
-      await fetchJson<unknown>(itemPath(ref), { method: "DELETE", fallback: "" });
+    mutationFn: async (ref: FollowRef) => {
+      const query = new URLSearchParams({ source: ref.source, target: ref.target });
+      await fetchJson<unknown>(`/api/concierge/following/item?${query}`, {
+        method: "DELETE",
+        fallback: "",
+      });
       return ref;
     },
     onSuccess: (ref) =>
-      update((prev) => ({ ...prev, items: prev.items.filter((entry) => !sameItem(entry, ref)) })),
+      update((prev) => ({
+        ...prev,
+        sources: prev.sources.map((entry) =>
+          entry.source === ref.source
+            ? { ...entry, follows: entry.follows.filter((f) => f.target !== ref.target) }
+            : entry,
+        ),
+      })),
     onError: () => void refresh(),
   });
 
@@ -83,5 +96,16 @@ export function useConciergeFollowing() {
     onError: () => void refresh(),
   });
 
-  return { data: query.data, loaded: query.isFetched, setKind, unfollow, setRules };
+  const followCount = (query.data?.sources ?? []).reduce(
+    (count, source) => count + (source.follows?.length ?? 0),
+    0,
+  );
+  return {
+    data: query.data,
+    loaded: query.isFetched,
+    followCount,
+    configure,
+    unfollow,
+    setRules,
+  };
 }

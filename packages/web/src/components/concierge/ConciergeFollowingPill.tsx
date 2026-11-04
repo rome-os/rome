@@ -17,8 +17,8 @@ import { useConciergeFollowing } from "./use-concierge-following";
 export function ConciergeFollowingPill() {
   const { t } = useTranslation("chat");
   const pane = useToolFollowing();
-  const { data } = useConciergeFollowing();
-  const count = data?.items?.length ?? 0;
+  const { followCount } = useConciergeFollowing();
+  const count = followCount;
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // The tab belongs to this chat: it goes when the chat does.

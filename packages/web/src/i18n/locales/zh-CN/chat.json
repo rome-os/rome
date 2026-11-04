@@ -83,8 +83,7 @@
       "pill_other": "关注，{{count}} 项",
       "pillIdle": "关注",
       "emptyTitle": "还没有关注的内容",
-      "emptyDescription": "让 Concierge 关注一个 GitHub 仓库或你的 Gmail，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
-      "asLogin": "按 @{{login}} 判断",
+      "emptyDescription": "让 Concierge 帮你关注一些东西，例如：“有人在 owner/repo 请我审 PR 时告诉我。”",
       "stopped": "已取消关注 {{target}}",
       "rules": "规则",
       "maxTurnsPerHour": "每小时最多消息数",
@@ -100,17 +99,66 @@
       },
       "kinds": {
         "github": {
-          "pull_request": "请你审查",
-          "pull_request_review": "你的 PR 收到审查",
-          "issue_comment": "评论和提及",
-          "pull_request_review_comment": "你的 PR 收到行内评论",
-          "workflow_run": "你的 CI 失败"
+          "review_requested": "请你或你的团队审查",
+          "review_on_your_pr": "你的 PR 收到审查",
+          "comment_or_mention": "你的 PR 和 issue 下的评论，以及提及你",
+          "your_ci_failed": "你的 CI 失败",
+          "your_pr_closed": "你的 PR 被合并或关闭",
+          "assigned_to_you": "分配给你的 issue 和 PR",
+          "new_pr_or_issue": "仓库里新的 PR 和 issue",
+          "default_branch_ci_failed": "默认分支 CI 失败"
         },
         "gmail": {
           "new_mail": "来自真人的新邮件"
         }
       },
-      "stopItem": "取消关注 {{target}}"
+      "stopItem": "取消关注 {{target}}",
+      "options": {
+        "github": {
+          "scope": {
+            "label": "关注范围",
+            "about_me": "只看和我有关的",
+            "whole_repo": "也看整个仓库"
+          },
+          "ignorePeople": {
+            "label": "忽略这些人"
+          },
+          "onlyPeople": {
+            "label": "只看这些人"
+          },
+          "includeBots": {
+            "label": "包括机器人"
+          }
+        },
+        "gmail": {
+          "recipients": {
+            "label": "邮件发送对象",
+            "to_and_cc": "发给我或抄送我",
+            "to": "直接发给我"
+          },
+          "includeUpdates": {
+            "label": "包括 Gmail 的「更新」标签页"
+          },
+          "vipSenders": {
+            "label": "这些发件人总是告诉我"
+          }
+        }
+      },
+      "sourceWithAccount": "{{source}} · {{account}}",
+      "state": {
+        "off": "所有类型都已关闭",
+        "unavailable": "来源恢复前暂停"
+      },
+      "preference": "你在意什么",
+      "preferenceHint": "用你自己的话说，Concierge 判断事件时会参考。",
+      "alsoFollow": "你还可以关注",
+      "readyHint": "可以关注。让 Concierge 帮你关注：{{kinds}}",
+      "status": {
+        "not_connected": "未连接",
+        "no_relay": "事件无法到达这个 Rome",
+        "not_supported": "暂不支持",
+        "error": "不可用"
+      }
     }
   },
   "reply": {

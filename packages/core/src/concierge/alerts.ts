@@ -42,6 +42,8 @@ export interface AlertEvent {
   fields: Record<string, string>;
   /** A short excerpt of outside text, such as a comment's body. */
   text?: string;
+  /** The followed target the event came through, for its preference. */
+  target?: string;
 }
 
 export interface AlertBatch {

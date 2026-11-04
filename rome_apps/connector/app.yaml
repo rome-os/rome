@@ -56,6 +56,10 @@ actions:
   - actions/connector-github-subscribe
   - actions/connector-github-unsubscribe
   - actions/connector-event-ensure
+  - actions/connector-watch-sources
+  - actions/connector-watch-ensure
+  - actions/connector-watch-judge
+  - actions/connector-watch-release
 
 # Events this app delivers on the bus. A `defer` on one of them calls
 # `ensureAction` to subscribe first, and `search_event_catalog` lists `types`

@@ -7,7 +7,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import { isFollowKind, isFollowSource, validateRulesChange } from "../../concierge/following.js";
+import { changeOf, validateRulesChange } from "../../concierge/following.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
@@ -85,11 +85,9 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     });
   });
 
-  // The Following panel: what the Concierge follows, by source, with each kind
-  // of event, and the rules that bound how often their events wake it. Read
-  // from the follow routines and the `conciergeFollowing` setting. A target
-  // is a query parameter, since a mailbox address does not fit a path
-  // segment. Guardian-only; 404 while off.
+  // The Following panel: every source the guardian's connections offer, what
+  // the Concierge follows there, and the rules. The same structure the
+  // Concierge's following list returns. Guardian-only; 404 while off.
   const followingOf = async (c: Context) => {
     if (!(await resolveGuardianSession(c, deps.db))) {
       return { error: c.json({ error: "Not authenticated" }, 401) };
@@ -100,49 +98,43 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     }
     return { following: concierge.following };
   };
-  const itemOf = (c: Context) => {
-    const source = c.req.param("source");
-    const target = c.req.query("target")?.trim();
-    if (!isFollowSource(source))
-      return { error: c.json({ error: `Unknown source ${source}` }, 400) };
-    if (!target) return { error: c.json({ error: "target is required" }, 400) };
-    return { source, target };
-  };
+  const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
   app.get("/concierge/following", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
-    return c.json({
-      items: await following.list(),
-      rules: await following.rules(),
-    } satisfies ConciergeFollowingResponse);
+    try {
+      return c.json((await following.list()) satisfies ConciergeFollowingResponse);
+    } catch (err) {
+      return c.json({ error: messageOf(err) }, 502);
+    }
   });
 
-  app.put("/concierge/following/:source/kinds/:kind", async (c) => {
+  // Changes one follow: kinds on or off, options, the preference.
+  app.put("/concierge/following/item", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
-    const item = itemOf(c);
-    if (item.error) return item.error;
-    const kind = c.req.param("kind");
-    if (!isFollowKind(item.source, kind)) {
-      return c.json({ error: `Unknown kind ${kind} for ${item.source}` }, 400);
+    const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ error: "Invalid request body" }, 400);
+    const change = changeOf(body);
+    if (!change.source) return c.json({ error: "source is required" }, 400);
+    try {
+      const follow = await following.configure(change);
+      if (!follow) return c.json({ error: "Not followed" }, 404);
+      return c.json({ follow });
+    } catch (err) {
+      return c.json({ error: messageOf(err) }, 400);
     }
-    const body = await c.req.json<{ enabled?: unknown }>().catch(() => null);
-    if (typeof body?.enabled !== "boolean") {
-      return c.json({ error: "enabled must be a boolean" }, 400);
-    }
-    const updated = await following.setKind(item.source, item.target, kind, body.enabled);
-    if (!updated) return c.json({ error: "Not followed" }, 404);
-    return c.json({ item: updated });
   });
 
-  app.delete("/concierge/following/:source", async (c) => {
+  app.delete("/concierge/following/item", async (c) => {
     const { following, error } = await followingOf(c);
     if (error) return error;
-    const item = itemOf(c);
-    if (item.error) return item.error;
-    const result = await following.unfollow(item.source, item.target);
-    if (result.removed === 0) return c.json({ error: "Not followed" }, 404);
+    const source = c.req.query("source")?.trim();
+    const target = c.req.query("target")?.trim() ?? "";
+    if (!source) return c.json({ error: "source is required" }, 400);
+    const result = await following.unfollow(source, target);
+    if (!result.removed) return c.json({ error: "Not followed" }, 404);
     return c.json(result);
   });
 
@@ -154,7 +146,7 @@ export function conciergeRoutes(deps: Pick<ApiDeps, "concierge" | "db" | "webcha
     try {
       return c.json({ rules: await following.setRules(validateRulesChange(body)) });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+      return c.json({ error: messageOf(err) }, 400);
     }
   });
 

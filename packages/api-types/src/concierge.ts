@@ -58,25 +58,6 @@ export interface ConciergeTaskUpsertEvent {
   task: ConciergeTaskDto;
 }
 
-/** Where a followed item lives. */
-export const CONCIERGE_FOLLOW_SOURCES = ["github", "gmail"] as const;
-export type ConciergeFollowSource = (typeof CONCIERGE_FOLLOW_SOURCES)[number];
-
-/** The kinds of event each source can tell the guardian about. */
-export const CONCIERGE_FOLLOW_KINDS = {
-  /** By GitHub's event name. */
-  github: [
-    "pull_request",
-    "pull_request_review",
-    "issue_comment",
-    "pull_request_review_comment",
-    "workflow_run",
-  ],
-  gmail: ["new_mail"],
-} as const satisfies Record<ConciergeFollowSource, readonly string[]>;
-export type ConciergeFollowKind<S extends ConciergeFollowSource = ConciergeFollowSource> =
-  (typeof CONCIERGE_FOLLOW_KINDS)[S][number];
-
 /** A daily window in the guardian's timezone, `HH:mm` to `HH:mm`; it may wrap midnight. */
 export interface ConciergeQuietHours {
   start: string;
@@ -98,19 +79,82 @@ export const CONCIERGE_FOLLOW_DEFAULT_RULES: ConciergeFollowRules = {
 };
 export const CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR = 12;
 export const CONCIERGE_FOLLOW_MAX_SPACING_MINUTES = 120;
+/** The longest free-text preference a follow keeps. */
+export const CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH = 500;
 
-/** One thing the Concierge follows: a GitHub repo, a mailbox. */
-export interface ConciergeFollowedItemDto {
-  source: ConciergeFollowSource;
-  /** What is followed at the source: `owner/repo`, a mailbox address. */
-  target: string;
-  /** Who the events are judged for: the guardian's GitHub login, their address. */
-  account: string;
-  kinds: { kind: ConciergeFollowKind; enabled: boolean }[];
+/**
+ * Whether a source can be followed now. The connection that owns the source
+ * decides it; `statusReason` says what is missing and how to fix it.
+ */
+export type ConciergeFollowSourceStatus =
+  | "ready"
+  | "not_connected"
+  | "no_relay"
+  | "not_supported"
+  | "error";
+
+/** One kind of event a source can tell of, in the guardian's words. */
+export interface ConciergeFollowKindDto {
+  kind: string;
+  label: string;
+  /** On when a follow names no kinds. */
+  default: boolean;
+  /** The kind applies only while an option has this value. */
+  requires?: { option: string; value: string };
 }
 
-/** `GET /concierge/following`. */
+/** One option that tunes a follow, run in code when an event is judged. */
+export interface ConciergeFollowOptionDto {
+  key: string;
+  label: string;
+  type: "enum" | "boolean" | "list";
+  values?: { value: string; label: string }[];
+  default: string | boolean | string[];
+  itemHint?: string;
+}
+
+/** One thing the Concierge follows at a source, with its settings as they are now. */
+export interface ConciergeFollowDto {
+  target: string;
+  /** `active`, `off` when every kind is off, or `unavailable` while its source is not ready. */
+  state: "active" | "off" | "unavailable";
+  kinds: { kind: string; on: boolean }[];
+  /** Every option of the source, with the value the follow uses. */
+  options: Record<string, string | boolean | string[]>;
+  /** The guardian's own words on what matters, read when an event is judged. */
+  preference: string | null;
+}
+
+/** One source, what it offers, and what is followed there. */
+export interface ConciergeFollowSourceDto {
+  source: string;
+  label: string;
+  status: ConciergeFollowSourceStatus;
+  statusReason?: string;
+  /** Who events are judged for: the GitHub login, the mailbox address. */
+  account?: string;
+  /** What a follow names, or null: the connected account itself. */
+  target: { format: string; example: string } | null;
+  kinds: ConciergeFollowKindDto[];
+  options: ConciergeFollowOptionDto[];
+  follows: ConciergeFollowDto[];
+}
+
+/**
+ * `GET /concierge/following`, and what the Concierge's following list returns:
+ * one structure for the panel and the agent.
+ */
 export interface ConciergeFollowingResponse {
-  items: ConciergeFollowedItemDto[];
+  sources: ConciergeFollowSourceDto[];
   rules: ConciergeFollowRules;
+}
+
+/** A change to one follow: kinds on or off by name, options by key, the preference. */
+export interface ConciergeFollowChange {
+  source: string;
+  target?: string;
+  kinds?: Record<string, boolean>;
+  options?: Record<string, unknown>;
+  /** Null clears it. */
+  preference?: string | null;
 }

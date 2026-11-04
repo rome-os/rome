@@ -83,8 +83,7 @@
       "pill_other": "Following, {{count}} items",
       "pillIdle": "Following",
       "emptyTitle": "Nothing followed yet",
-      "emptyDescription": "Ask the Concierge to follow a GitHub repo or your Gmail, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
-      "asLogin": "For @{{login}}",
+      "emptyDescription": "Ask the Concierge to follow something, for example: \"Tell me when someone asks me to review a PR in owner/repo.\"",
       "stopped": "Stopped following {{target}}",
       "rules": "Rules",
       "maxTurnsPerHour": "Most messages per hour",
@@ -100,17 +99,66 @@
       },
       "kinds": {
         "github": {
-          "pull_request": "Review requests for you",
-          "pull_request_review": "Reviews of your PRs",
-          "issue_comment": "Comments and mentions",
-          "pull_request_review_comment": "Review comments on your PRs",
-          "workflow_run": "Your failed CI runs"
+          "review_requested": "Review requested of you or your team",
+          "review_on_your_pr": "Reviews of your pull requests",
+          "comment_or_mention": "Comments on your pull requests and issues, and mentions of you",
+          "your_ci_failed": "Your CI runs that failed",
+          "your_pr_closed": "Your pull requests merged or closed",
+          "assigned_to_you": "Issues and pull requests assigned to you",
+          "new_pr_or_issue": "New pull requests and issues in the repository",
+          "default_branch_ci_failed": "CI failed on the default branch"
         },
         "gmail": {
           "new_mail": "New mail from people"
         }
       },
-      "stopItem": "Stop following {{target}}"
+      "stopItem": "Stop following {{target}}",
+      "options": {
+        "github": {
+          "scope": {
+            "label": "What to hear about",
+            "about_me": "Only what concerns me",
+            "whole_repo": "Also the whole repository"
+          },
+          "ignorePeople": {
+            "label": "Ignore these people"
+          },
+          "onlyPeople": {
+            "label": "Only these people"
+          },
+          "includeBots": {
+            "label": "Include bots"
+          }
+        },
+        "gmail": {
+          "recipients": {
+            "label": "Mail sent to",
+            "to_and_cc": "Me, or with me in cc",
+            "to": "Me directly"
+          },
+          "includeUpdates": {
+            "label": "Include Gmail's Updates tab"
+          },
+          "vipSenders": {
+            "label": "Always tell me about these senders"
+          }
+        }
+      },
+      "sourceWithAccount": "{{source}} · {{account}}",
+      "state": {
+        "off": "Every kind is off",
+        "unavailable": "Paused until the source is ready again"
+      },
+      "preference": "What matters to you",
+      "preferenceHint": "In your own words. The Concierge reads it when it judges an event.",
+      "alsoFollow": "You can also follow",
+      "readyHint": "Ready. Ask the Concierge to follow it: {{kinds}}",
+      "status": {
+        "not_connected": "Not connected",
+        "no_relay": "Events cannot reach this Rome",
+        "not_supported": "Not supported yet",
+        "error": "Unavailable"
+      }
     }
   },
   "reply": {

@@ -214,39 +214,36 @@ describe("/concierge/following", () => {
   let testDb: TestDb;
   let enabled: boolean;
   const calls: unknown[][] = [];
-  const github = {
-    source: "github",
-    target: "acme/widgets",
-    account: "octo-me",
-    kinds: [{ kind: "workflow_run", enabled: true }],
-  };
-  const gmail = {
-    source: "gmail",
-    target: "me@example.com",
-    account: "me@example.com",
-    kinds: [{ kind: "new_mail", enabled: true }],
+  const listing = {
+    sources: [
+      {
+        source: "gmail",
+        label: "Gmail",
+        status: "ready",
+        account: "me@example.com",
+        target: null,
+        kinds: [{ kind: "new_mail", label: "New mail from people", default: true }],
+        options: [],
+        follows: [],
+      },
+    ],
+    rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
   };
 
   const app = () => {
     const following = {
-      list: async () => [github, gmail],
-      rules: async () => ({ maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null }),
-      setKind: async (...args: unknown[]) => {
-        calls.push(["setKind", ...args]);
-        return args[1] === "acme/widgets" || args[1] === "me@example.com" ? github : null;
+      list: async () => listing,
+      configure: async (change: { source: string; target?: string }) => {
+        calls.push(["configure", change]);
+        return change.source === "gmail" ? { target: "me@example.com" } : null;
       },
       unfollow: async (source: string, target: string) => {
         calls.push(["unfollow", source, target]);
-        return { source, target, removed: target === "acme/widgets" ? 5 : 0 };
+        return { removed: source === "gmail" };
       },
       setRules: async (change: unknown) => {
         calls.push(["setRules", change]);
-        return {
-          maxTurnsPerHour: 2,
-          minSpacingMinutes: 15,
-          quietHours: null,
-          ...(change as object),
-        };
+        return { ...listing.rules, ...(change as object) };
       },
     };
     const concierge = { isEnabled: async () => enabled, following } as unknown as ConciergeService;
@@ -272,71 +269,52 @@ describe("/concierge/following", () => {
     testDb.close();
   });
 
-  it("lists what is followed and the rules for the guardian only, while the Concierge is on", async () => {
+  it("answers the same structure the Concierge reads, for the guardian only, while the Concierge is on", async () => {
     expect((await app().request("/concierge/following")).status).toBe(401);
-    const response = await app().request("/concierge/following", guardian);
-    await expect(response.json()).resolves.toEqual({
-      items: [github, gmail],
-      rules: { maxTurnsPerHour: 2, minSpacingMinutes: 15, quietHours: null },
-    });
+    await expect((await app().request("/concierge/following", guardian)).json()).resolves.toEqual(
+      listing,
+    );
     enabled = false;
     expect((await app().request("/concierge/following", guardian)).status).toBe(404);
   });
 
-  it("turns a kind on or off, naming the target in the query", async () => {
-    const target = encodeURIComponent("me@example.com");
+  it("changes one follow by the names the list gives", async () => {
+    const response = await send("/concierge/following/item", "PUT", {
+      source: "gmail",
+      options: { recipients: "to" },
+      kinds: { new_mail: true },
+      preference: "Only my team",
+    });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([
+      [
+        "configure",
+        {
+          source: "gmail",
+          options: { recipients: "to" },
+          kinds: { new_mail: true },
+          preference: "Only my team",
+        },
+      ],
+    ]);
     expect(
-      (
-        await send(`/concierge/following/gmail/kinds/new_mail?target=${target}`, "PUT", {
-          enabled: false,
-        })
-      ).status,
-    ).toBe(200);
-    expect(calls).toEqual([["setKind", "gmail", "me@example.com", "new_mail", false]]);
-    // A kind of another source, an unknown source, no target, an item not followed.
-    expect(
-      (
-        await send(`/concierge/following/gmail/kinds/workflow_run?target=${target}`, "PUT", {
-          enabled: false,
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (await send("/concierge/following/slack/kinds/new_mail?target=x", "PUT", { enabled: false }))
-        .status,
-    ).toBe(400);
-    expect(
-      (await send("/concierge/following/github/kinds/workflow_run", "PUT", { enabled: false }))
-        .status,
-    ).toBe(400);
-    expect(
-      (
-        await send("/concierge/following/github/kinds/workflow_run?target=acme/other", "PUT", {
-          enabled: true,
-        })
-      ).status,
+      (await send("/concierge/following/item", "PUT", { source: "github", target: "x/y" })).status,
     ).toBe(404);
+    expect((await send("/concierge/following/item", "PUT", {})).status).toBe(400);
   });
 
-  it("unfollows an item", async () => {
-    expect((await send("/concierge/following/github?target=acme/widgets", "DELETE")).status).toBe(
-      200,
-    );
-    expect((await send("/concierge/following/github?target=acme/other", "DELETE")).status).toBe(
-      404,
-    );
+  it("unfollows by source and target", async () => {
+    expect((await send("/concierge/following/item?source=gmail", "DELETE")).status).toBe(200);
+    expect(
+      (await send("/concierge/following/item?source=github&target=a/b", "DELETE")).status,
+    ).toBe(404);
+    expect(calls.at(-1)).toEqual(["unfollow", "github", "a/b"]);
   });
 
   it("changes the rules and refuses values out of bounds", async () => {
-    const response = await send("/concierge/following/rules", "PUT", {
-      quietHours: { start: "22:00", end: "08:00" },
-    });
+    const response = await send("/concierge/following/rules", "PUT", { minSpacingMinutes: 10 });
     await expect(response.json()).resolves.toEqual({
-      rules: {
-        maxTurnsPerHour: 2,
-        minSpacingMinutes: 15,
-        quietHours: { start: "22:00", end: "08:00" },
-      },
+      rules: { maxTurnsPerHour: 2, minSpacingMinutes: 10, quietHours: null },
     });
     expect((await send("/concierge/following/rules", "PUT", { maxTurnsPerHour: 99 })).status).toBe(
       400,

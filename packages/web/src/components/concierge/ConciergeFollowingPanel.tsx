@@ -6,9 +6,13 @@ import {
   CONCIERGE_FOLLOW_DEFAULT_RULES,
   CONCIERGE_FOLLOW_MAX_SPACING_MINUTES,
   CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR,
-  CONCIERGE_FOLLOW_SOURCES,
-  type ConciergeFollowedItemDto,
+  CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH,
+  type ConciergeFollowChange,
+  type ConciergeFollowDto,
+  type ConciergeFollowKindDto,
+  type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
+  type ConciergeFollowSourceDto,
 } from "@rome/api-types/concierge";
 import {
   EmptyState,
@@ -25,7 +29,9 @@ import {
   ListRowDescription,
   ListRowTitle,
 } from "@/components/ui/list-row";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useConciergeFollowing } from "./use-concierge-following";
 
 const DEFAULT_QUIET_HOURS = { start: "22:00", end: "08:00" };
@@ -35,32 +41,114 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h3 className="px-3 pb-1 pt-4 text-aux text-muted-foreground">{children}</h3>;
 }
 
-function ItemSection({
-  item,
-  onKind,
+/** A list option, edited as comma-separated text and saved when it loses focus. */
+function ListField({
+  id,
+  value,
+  placeholder,
+  onSave,
+}: {
+  id: string;
+  value: string[];
+  placeholder?: string;
+  onSave: (value: string[]) => void;
+}) {
+  const joined = value.join(", ");
+  const [draft, setDraft] = useState(joined);
+  useEffect(() => setDraft(joined), [joined]);
+  const commit = () => {
+    const next = [
+      ...new Set(
+        draft
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (next.join(", ") !== joined) onSave(next);
+  };
+  return (
+    <Input
+      id={id}
+      size="sm"
+      value={draft}
+      placeholder={placeholder}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") commit();
+      }}
+      className="w-full"
+    />
+  );
+}
+
+/** The guardian's own words for a follow, saved when the field loses focus. */
+function PreferenceField({
+  id,
+  value,
+  onSave,
+}: {
+  id: string;
+  value: string | null;
+  onSave: (value: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => setDraft(value ?? ""), [value]);
+  return (
+    <Textarea
+      id={id}
+      value={draft}
+      rows={2}
+      maxLength={CONCIERGE_FOLLOW_PREFERENCE_MAX_LENGTH}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        const next = draft.trim() || null;
+        if (next !== (value ?? null)) onSave(next);
+      }}
+      className="w-full"
+    />
+  );
+}
+
+/** Whether a kind applies under the follow's current options. */
+const applies = (kind: ConciergeFollowKindDto, follow: ConciergeFollowDto) =>
+  !kind.requires || follow.options[kind.requires.option] === kind.requires.value;
+
+function FollowSection({
+  source,
+  follow,
+  onChange,
   onStop,
 }: {
-  item: ConciergeFollowedItemDto;
-  onKind: (kind: string, enabled: boolean) => void;
+  source: ConciergeFollowSourceDto;
+  follow: ConciergeFollowDto;
+  onChange: (change: Omit<ConciergeFollowChange, "source" | "target">) => void;
   onStop: () => void;
 }) {
   const { t } = useTranslation("chat");
-  // A mailbox is followed for itself; a repo for the guardian's GitHub login.
-  const account = item.account && item.account !== item.target ? item.account : null;
+  const base = `following-${source.source}-${follow.target}`;
+  const kindLabel = (kind: ConciergeFollowKindDto) =>
+    t(`concierge.following.kinds.${source.source}.${kind.kind}`, { defaultValue: kind.label });
+  const optionLabel = (option: ConciergeFollowOptionDto) =>
+    t(`concierge.following.options.${source.source}.${option.key}.label`, {
+      defaultValue: option.label,
+    });
+  const on = new Set(follow.kinds.filter((k) => k.on).map((k) => k.kind));
   return (
-    <section data-following-item={`${item.source}:${item.target}`}>
+    <section data-following-item={`${source.source}:${follow.target}`}>
       <div className="flex items-center gap-2 pl-3 pr-2 pb-1 pt-3">
         <div className="min-w-0 flex-1">
-          <h4 className="truncate text-ui text-foreground">{item.target}</h4>
-          {account ? (
+          <h4 className="truncate text-ui text-foreground">{follow.target}</h4>
+          {follow.state !== "active" ? (
             <p className="truncate text-aux text-subtle-foreground">
-              {t("concierge.following.asLogin", { login: account })}
+              {t(`concierge.following.state.${follow.state}`)}
             </p>
           ) : null}
         </div>
         <IconButton
           size="xs"
-          label={t("concierge.following.stopItem", { target: item.target })}
+          label={t("concierge.following.stopItem", { target: follow.target })}
           icon={<X />}
           onClick={onStop}
           className="text-muted-foreground hover:text-foreground"
@@ -68,28 +156,105 @@ function ItemSection({
       </div>
       <List asChild>
         <ul>
-          {item.kinds.map(({ kind, enabled }) => {
-            const id = `following-${item.source}-${item.target}-${kind}`;
+          {source.kinds
+            .filter((kind) => applies(kind, follow))
+            .map((kind) => {
+              const id = `${base}-kind-${kind.kind}`;
+              return (
+                <ListRow key={kind.kind} asChild size="md">
+                  <li>
+                    <ListRowContent>
+                      <label htmlFor={id} className="block min-w-0">
+                        <ListRowTitle className="truncate">{kindLabel(kind)}</ListRowTitle>
+                      </label>
+                    </ListRowContent>
+                    <Switch
+                      id={id}
+                      size="sm"
+                      checked={on.has(kind.kind)}
+                      onCheckedChange={(checked) => onChange({ kinds: { [kind.kind]: checked } })}
+                    />
+                  </li>
+                </ListRow>
+              );
+            })}
+          {source.options.map((option) => {
+            const id = `${base}-option-${option.key}`;
+            const value = follow.options[option.key];
+            if (option.type === "boolean") {
+              return (
+                <ListRow key={option.key} asChild size="md">
+                  <li>
+                    <ListRowContent>
+                      <label htmlFor={id} className="block min-w-0">
+                        <ListRowTitle className="truncate">{optionLabel(option)}</ListRowTitle>
+                      </label>
+                    </ListRowContent>
+                    <Switch
+                      id={id}
+                      size="sm"
+                      checked={value === true}
+                      onCheckedChange={(checked) =>
+                        onChange({ options: { [option.key]: checked } })
+                      }
+                    />
+                  </li>
+                </ListRow>
+              );
+            }
+            if (option.type === "enum") {
+              return (
+                <ListRow key={option.key} asChild size="md">
+                  <li className="flex-wrap">
+                    <ListRowContent>
+                      <ListRowTitle className="truncate">{optionLabel(option)}</ListRowTitle>
+                    </ListRowContent>
+                    <SegmentedControl
+                      size="sm"
+                      aria-label={optionLabel(option)}
+                      value={String(value ?? option.default)}
+                      onValueChange={(next) => onChange({ options: { [option.key]: next } })}
+                      options={(option.values ?? []).map((v) => ({
+                        value: v.value,
+                        label: t(
+                          `concierge.following.options.${source.source}.${option.key}.${v.value}`,
+                          { defaultValue: v.label },
+                        ),
+                      }))}
+                    />
+                  </li>
+                </ListRow>
+              );
+            }
             return (
-              <ListRow key={kind} asChild size="md">
-                <li>
-                  <ListRowContent>
-                    <label htmlFor={id} className="block min-w-0">
-                      <ListRowTitle className="truncate">
-                        {t(`concierge.following.kinds.${item.source}.${kind}`)}
-                      </ListRowTitle>
-                    </label>
-                  </ListRowContent>
-                  <Switch
+              <ListRow key={option.key} asChild size="md">
+                <li className="flex-col items-stretch gap-1">
+                  <label htmlFor={id} className="block min-w-0">
+                    <ListRowTitle className="truncate">{optionLabel(option)}</ListRowTitle>
+                  </label>
+                  <ListField
                     id={id}
-                    size="sm"
-                    checked={enabled}
-                    onCheckedChange={(checked) => onKind(kind, checked)}
+                    value={Array.isArray(value) ? value : []}
+                    placeholder={option.itemHint}
+                    onSave={(next) => onChange({ options: { [option.key]: next } })}
                   />
                 </li>
               </ListRow>
             );
           })}
+          <ListRow asChild size="md">
+            <li className="flex-col items-stretch gap-1">
+              <label htmlFor={`${base}-preference`} className="block min-w-0">
+                <ListRowTitle>{t("concierge.following.preference")}</ListRowTitle>
+                <ListRowDescription>{t("concierge.following.preferenceHint")}</ListRowDescription>
+              </label>
+              <PreferenceField
+                id={`${base}-preference`}
+                value={follow.preference}
+                onSave={(preference) => onChange({ preference })}
+              />
+            </li>
+          </ListRow>
         </ul>
       </List>
     </section>
@@ -243,25 +408,24 @@ function RulesSection({
 }
 
 /**
- * What the Concierge follows for the guardian, grouped by source (GitHub
- * repos, the Gmail inbox), each kind of event on or off, and the rules that
- * bound how often their events wake it, shared by every source. The Concierge
- * starts a follow from chat; this panel tunes it.
+ * What the Concierge follows for the guardian, grouped by source, from the
+ * same structure the Concierge reads: each follow's kinds, options and
+ * preference, what else the guardian's connections let it follow (and why not,
+ * when they cannot), and the rules shared by every source. The Concierge starts
+ * a follow from chat; this panel tunes it.
  */
 export function ConciergeFollowingPanel() {
   const { t } = useTranslation("chat");
-  const { data, loaded, setKind, unfollow, setRules } = useConciergeFollowing();
+  const { data, loaded, followCount, configure, unfollow, setRules } = useConciergeFollowing();
   if (!loaded) return null;
-  const items = data?.items ?? [];
+  const sources = data?.sources ?? [];
   const rules = data?.rules ?? CONCIERGE_FOLLOW_DEFAULT_RULES;
   const failed = () => toast.error(t("concierge.following.saveFailed"));
-  const groups = CONCIERGE_FOLLOW_SOURCES.map((source) => ({
-    source,
-    items: items.filter((item) => item.source === source),
-  })).filter((group) => group.items.length > 0);
+  const followed = sources.filter((source) => (source.follows?.length ?? 0) > 0);
+  const offered = sources.filter((source) => (source.follows?.length ?? 0) === 0);
   return (
     <div className="flex h-full flex-col overflow-y-auto pb-safe">
-      {groups.length === 0 ? (
+      {followCount === 0 ? (
         <EmptyState className="py-8">
           <EmptyStateIcon>
             <BellRing />
@@ -270,25 +434,36 @@ export function ConciergeFollowingPanel() {
           <EmptyStateDescription>{t("concierge.following.emptyDescription")}</EmptyStateDescription>
         </EmptyState>
       ) : (
-        groups.map((group) => (
-          <section key={group.source} data-following-source={group.source}>
-            <SectionHeading>{t(`concierge.following.sources.${group.source}`)}</SectionHeading>
-            {group.items.map((item) => (
-              <ItemSection
-                key={item.target}
-                item={item}
-                onKind={(kind, enabled) =>
-                  setKind.mutate(
-                    { source: item.source, target: item.target, kind, enabled },
+        followed.map((source) => (
+          <section key={source.source} data-following-source={source.source}>
+            <SectionHeading>
+              {source.account
+                ? t("concierge.following.sourceWithAccount", {
+                    source: source.label,
+                    account: source.account,
+                  })
+                : source.label}
+            </SectionHeading>
+            {source.status !== "ready" && source.statusReason ? (
+              <p className="px-3 pb-1 text-aux text-warning-fg">{source.statusReason}</p>
+            ) : null}
+            {source.follows.map((follow) => (
+              <FollowSection
+                key={follow.target}
+                source={source}
+                follow={follow}
+                onChange={(change) =>
+                  configure.mutate(
+                    { source: source.source, target: follow.target, ...change },
                     { onError: failed },
                   )
                 }
                 onStop={() =>
                   unfollow.mutate(
-                    { source: item.source, target: item.target },
+                    { source: source.source, target: follow.target },
                     {
                       onSuccess: () =>
-                        toast.success(t("concierge.following.stopped", { target: item.target })),
+                        toast.success(t("concierge.following.stopped", { target: follow.target })),
                       onError: failed,
                     },
                   )
@@ -298,6 +473,39 @@ export function ConciergeFollowingPanel() {
           </section>
         ))
       )}
+      {offered.length > 0 ? (
+        <section data-following-offered>
+          <SectionHeading>{t("concierge.following.alsoFollow")}</SectionHeading>
+          <List asChild>
+            <ul>
+              {offered.map((source) => (
+                <ListRow key={source.source} asChild size="md">
+                  <li>
+                    <ListRowContent>
+                      <ListRowTitle className="truncate">{source.label}</ListRowTitle>
+                      <ListRowDescription>
+                        {source.status === "ready"
+                          ? t("concierge.following.readyHint", {
+                              kinds: source.kinds
+                                .filter((kind) => kind.default)
+                                .map((kind) =>
+                                  t(`concierge.following.kinds.${source.source}.${kind.kind}`, {
+                                    defaultValue: kind.label,
+                                  }),
+                                )
+                                .join(" · "),
+                            })
+                          : (source.statusReason ??
+                            t(`concierge.following.status.${source.status}`))}
+                      </ListRowDescription>
+                    </ListRowContent>
+                  </li>
+                </ListRow>
+              ))}
+            </ul>
+          </List>
+        </section>
+      ) : null}
       <RulesSection
         rules={rules}
         onChange={(change) => setRules.mutate(change, { onError: failed })}
