@@ -1,62 +1,66 @@
-// The Concierge's tools for what it follows (following.ts): one follow tool per
-// source, and list, unfollow and configure for every source.
+// The Concierge's tools for what it follows (following.ts). They name no
+// source: what each source needs and which kinds it has come back in
+// `following_list`, so a new source changes no tool definition.
 
 import {
   CONCIERGE_FOLLOW_MAX_SPACING_MINUTES,
   CONCIERGE_FOLLOW_MAX_TURNS_PER_HOUR,
-  CONCIERGE_FOLLOW_SOURCES,
 } from "@rome/api-types/concierge";
 import type { FacadeToolDef } from "../core/mcp-facade.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
-import { isFollowSource, validateRulesChange } from "./following.js";
+import { FOLLOW_SOURCE_INFO, isFollowSource, validateRulesChange } from "./following.js";
 import type { ConciergeService } from "./service.js";
+
+const optionalString = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
 
 export function buildFollowingTools(service: ConciergeService): FacadeToolDef[] {
   return [
     {
-      name: "follow_github_repo",
+      name: "follow",
       description:
-        "Follow a GitHub repo for the guardian: hear about events there that concern them, such as a review requested of them, a review or comment on their PR or issue, an @mention, or a CI run of theirs that failed. " +
-        "Events then arrive as <external_events> batches. Following a repo again is harmless. " +
-        "Their GitHub login is read off their connected GitHub account; pass login only when the result asks for it.",
+        "Follow something for the guardian, such as a code repo or their inbox, and hear about its events that concern them. " +
+        "Events then arrive as <external_events> batches. Following the same thing again is harmless. " +
+        "When unsure which sources exist or what one needs as target and options, check following_list first.",
       inputSchema: {
         type: "object",
-        required: ["repo"],
+        required: ["source"],
         properties: {
-          repo: { type: "string", description: "owner/name, spelled as GitHub spells it." },
-          login: {
+          source: { type: "string", description: "Where it lives, as following_list names it." },
+          target: {
             type: "string",
-            description:
-              "The guardian's GitHub username, only when no GitHub account is connected.",
+            description: "What to follow there, in the source's format. Some sources take none.",
+          },
+          options: {
+            type: "object",
+            description: "Inputs the source asks for, by name. Usually none.",
           },
         },
       },
       handler: (input) =>
-        runFacadeTool("follow_github_repo", input, async (args) =>
-          service.following.followGithubRepo({
-            repo: String(args.repo ?? ""),
-            ...(typeof args.login === "string" ? { login: args.login } : {}),
-          }),
-        ),
-    },
-    {
-      name: "follow_gmail",
-      description:
-        "Follow the guardian's connected Gmail inbox: hear about new mail from people. Bulk, automated and promotional mail is dropped before you see it. " +
-        "Events then arrive as <external_events> batches. Following it again is harmless.",
-      inputSchema: { type: "object", properties: {} },
-      handler: (input) =>
-        runFacadeTool("follow_gmail", input, async () => service.following.followGmail()),
+        runFacadeTool("follow", input, async (args) => {
+          const target = optionalString(args.target);
+          const options =
+            args.options && typeof args.options === "object" && !Array.isArray(args.options)
+              ? (args.options as Record<string, unknown>)
+              : undefined;
+          return service.following.follow({
+            source: String(args.source ?? "").trim(),
+            ...(target ? { target } : {}),
+            ...(options ? { options } : {}),
+          });
+        }),
     },
     {
       name: "following_list",
       description:
-        "List what you follow for the guardian, by source, with each kind of event on or off, and the rules (rate limit, quiet hours).",
+        "List what you follow for the guardian, with each kind of event on or off, the rules (rate limit, quiet hours), and the sources you can follow with what each needs.",
       inputSchema: { type: "object", properties: {} },
       handler: (input) =>
         runFacadeTool("following_list", input, async () => ({
           following: await service.following.list(),
           rules: await service.following.rules(),
+          sources: FOLLOW_SOURCE_INFO,
         })),
     },
     {
@@ -67,16 +71,19 @@ export function buildFollowingTools(service: ConciergeService): FacadeToolDef[] 
         type: "object",
         required: ["source", "target"],
         properties: {
-          source: { type: "string", enum: [...CONCIERGE_FOLLOW_SOURCES] },
-          target: { type: "string", description: "owner/name for GitHub, the address for Gmail." },
+          source: { type: "string" },
+          target: { type: "string" },
         },
       },
       handler: (input) =>
         runFacadeTool("unfollow", input, async (args) => {
-          if (!isFollowSource(args.source)) {
-            throw new Error(`source must be one of: ${CONCIERGE_FOLLOW_SOURCES.join(", ")}`);
+          const source = String(args.source ?? "").trim();
+          if (!isFollowSource(source)) {
+            throw new Error(
+              `Rome follows nothing at "${source}". Supported sources: ${FOLLOW_SOURCE_INFO.map((info) => info.source).join(", ")}.`,
+            );
           }
-          return service.following.unfollow(args.source, String(args.target ?? ""));
+          return service.following.unfollow(source, String(args.target ?? ""));
         }),
     },
     {

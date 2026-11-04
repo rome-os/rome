@@ -4,6 +4,7 @@ import type { Routine } from "../routines/types.js";
 import {
   type ConciergeFollowing,
   type ConciergeFollowingDeps,
+  FOLLOW_SOURCE_INFO,
   renderAlertBatch,
   startConciergeFollowing,
   validateRulesChange,
@@ -297,6 +298,45 @@ describe("What the Concierge follows", () => {
       quietHours: null,
       minSpacingMinutes: 0,
     });
+  });
+});
+
+describe("follow, for any source", () => {
+  it("answers an unknown source with the supported ones", async () => {
+    const s = setup();
+    await expect(s.following().follow({ source: "slack", target: "#general" })).rejects.toThrow(
+      'Rome cannot follow "slack". Supported sources: github, gmail.',
+    );
+    expect(s.routines.size).toBe(0);
+  });
+
+  it("follows a repo, taking the login fallback from options", async () => {
+    const s = setup({ login: null });
+    await expect(s.following().follow({ source: "github" })).rejects.toThrow(/owner\/name/);
+    const result = await s.following().follow({
+      source: "github",
+      target: "acme/widgets",
+      options: { login: "octo-me" },
+    });
+    expect(result).toMatchObject({ source: "github", account: "octo-me", accountFrom: "given" });
+  });
+
+  it("follows the connected mailbox with no target, and refuses another mailbox", async () => {
+    const s = setup();
+    expect((await s.following().follow({ source: "gmail" })).target).toBe("me@example.com");
+    await expect(
+      s.following().follow({ source: "gmail", target: "boss@example.com" }),
+    ).rejects.toThrow(/connected to Rome, me@example.com/);
+    expect((await s.following().follow({ source: "gmail", target: "ME@example.com" })).target).toBe(
+      "me@example.com",
+    );
+  });
+});
+
+describe("FOLLOW_SOURCE_INFO", () => {
+  it("describes every source with its kinds, so no tool definition names one", () => {
+    expect(FOLLOW_SOURCE_INFO.map((info) => info.source)).toEqual(["github", "gmail"]);
+    expect(FOLLOW_SOURCE_INFO.find((info) => info.source === "gmail")?.kinds).toEqual(["new_mail"]);
   });
 });
 

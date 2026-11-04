@@ -88,9 +88,47 @@ export interface FollowResult {
 }
 
 /** What the Concierge's tools and the dashboard's Following panel reach. */
+/** What one source needs to follow something, as the Concierge reads it. */
+export interface FollowSourceInfo {
+  source: ConciergeFollowSource;
+  /** What `target` is, or that it is left out. */
+  target: string;
+  /** Inputs the source reads from `options`, by name. */
+  options?: Record<string, string>;
+  kinds: readonly string[];
+}
+
+/** The sources the Concierge can follow, for its tool results. */
+export const FOLLOW_SOURCE_INFO: readonly FollowSourceInfo[] = [
+  {
+    source: "github",
+    target: 'A repo as "owner/name", spelled as GitHub spells it.',
+    options: {
+      login:
+        "The guardian's GitHub username. Only when the result says no GitHub account is connected.",
+    },
+    kinds: CONCIERGE_FOLLOW_KINDS.github,
+  },
+  {
+    source: "gmail",
+    target: "Leave it out: Gmail follows the inbox of the Gmail account connected to Rome.",
+    kinds: CONCIERGE_FOLLOW_KINDS.gmail,
+  },
+];
+
 export interface ConciergeFollowing {
+  /**
+   * Follows `target` at `source`. An unknown source, or a target or option the
+   * source cannot use, throws with what the source needs.
+   */
+  follow(input: {
+    source: string;
+    target?: string;
+    options?: Record<string, unknown>;
+  }): Promise<FollowResult>;
   followGithubRepo(input: { repo: string; login?: string }): Promise<FollowResult>;
-  followGmail(): Promise<FollowResult>;
+  /** Follows the connected Gmail inbox; a `target` that names another mailbox is refused. */
+  followGmail(target?: string): Promise<FollowResult>;
   /**
    * Deletes the item's routines. The subscription at the source stays: a
    * GitHub webhook or a Gmail trigger may serve other apps too.
@@ -415,6 +453,21 @@ export function startConciergeFollowing(
   };
 
   const following: ConciergeFollowing = {
+    async follow({ source, target, options }) {
+      const supported = FOLLOW_SOURCE_INFO.map((info) => info.source).join(", ");
+      if (!isFollowSource(source)) {
+        throw new Error(
+          `Rome cannot follow "${source}". Supported sources: ${supported}. following_list says what each one needs.`,
+        );
+      }
+      if (source === "github") {
+        if (!target?.trim()) throw new Error('github needs target: a repo as "owner/name"');
+        const login = typeof options?.login === "string" ? options.login : undefined;
+        return following.followGithubRepo({ repo: target, ...(login ? { login } : {}) });
+      }
+      return following.followGmail(target);
+    },
+
     async followGithubRepo({ repo: rawRepo, login: given }) {
       const repo = rawRepo.trim();
       if (!REPO_PATTERN.test(repo)) throw new Error(`repo must be owner/name, not "${rawRepo}"`);
@@ -430,14 +483,19 @@ export function startConciergeFollowing(
       login ??= given?.trim().replace(/^@/, "") || null;
       if (!login) {
         throw new Error(
-          "No GitHub account is connected, so I cannot tell which GitHub user the guardian is. Ask for their GitHub username once, remember it, and pass it as login.",
+          "No GitHub account is connected, so I cannot tell which GitHub user the guardian is. Ask for their GitHub username once, remember it, and pass it in options as login.",
         );
       }
       return follow("github", repo, login, accountFrom);
     },
 
-    async followGmail() {
+    async followGmail(target) {
       const address = (await deps.gmailAddress()).trim().toLowerCase();
+      if (target?.trim() && target.trim().toLowerCase() !== address) {
+        throw new Error(
+          `Gmail follows the account connected to Rome, ${address}, not ${target.trim()}. Leave target out.`,
+        );
+      }
       return follow("gmail", address, address, "connected");
     },
 
