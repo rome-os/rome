@@ -13,7 +13,7 @@ import type {
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
 import { ChannelNotConnected } from "../chats/connected-accounts/connected-account.js";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { SendRefused } from "@rome-os/app-runtime";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
@@ -346,7 +346,7 @@ describe("appChats", () => {
     it("hands a part only the host makes to the channel, which refuses it, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+        throw new SendRefused("part_unsupported", "telegram shows text only");
       };
       const forged = { type: "routine_draft_card", draft: {} } as never;
 
@@ -402,7 +402,7 @@ describe("appChats", () => {
     it("answers what the channel refuses as unsupported, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+        throw new SendRefused("part_unsupported", "telegram shows text only");
       };
 
       expect(

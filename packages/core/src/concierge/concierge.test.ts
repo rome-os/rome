@@ -18,7 +18,6 @@ import { MessageRepository as StoredMessages } from "../chats/storage/message-re
 import { placeIn } from "../chats/storage/place.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { readWebchatMessages } from "../chats/dashboard/webchat.js";
 import { startConciergeEvents } from "./events.js";
@@ -33,6 +32,7 @@ import {
 } from "./service.js";
 import { ConciergeTasks } from "./tasks.js";
 import { buildConciergeTools } from "./tools.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
 
@@ -124,7 +124,7 @@ function setup(
   });
   const tasks = new ConciergeTasks(taskRepo);
   /** The real chat rows the task rows link to. */
-  const storedChats = new WebChatRepository(testDb.db);
+  const storedChats = new ChatsWebChatRepository(testDb.db);
   const approvalListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
   let fake = false;

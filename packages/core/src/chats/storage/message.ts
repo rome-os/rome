@@ -51,7 +51,7 @@ export interface InboundMessage {
   readonly at: Date;
 }
 
-/** A message for {@link MessageRepository.record}. */
+/** A message for `MessageRepository.record` (message-repository.ts). */
 export type Message = InboundMessage;
 
 /** A message once it is on record: the id Chats gave it, and the id of the

@@ -1,4 +1,9 @@
-import { chatStopReceipt, createAppLogger, isStopCommand } from "@rome-os/app-runtime";
+import {
+  chatStopReceipt,
+  createAppLogger,
+  isSendRefused,
+  isStopCommand,
+} from "@rome-os/app-runtime";
 import type {
   ActionEngineLike,
   Channel,
@@ -334,7 +339,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
   /** Answers `message` in its chat on the channel it arrived on, where it can
    *  send. The channel sends through the Connection backing it, which is
    *  `ref`'s. Outside a direct message the answer replies to `message`, so it
-   *  stays in the message's thread. */
+   *  stays in the message's thread, unless the platform cannot quote. */
   private async reply(
     channel: Channel,
     message: InboundEvent["message"],
@@ -344,10 +349,17 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       log.warn("cannot answer on a channel that does not send", { service: channel.name });
       return;
     }
-    await channel.send.send(message.chatId, {
-      text,
-      ...(message.thread?.kind === "dm" ? {} : { replyToMessageId: message.messageId }),
-    });
+    if (message.thread?.kind === "dm") {
+      await channel.send.send(message.chatId, { text });
+      return;
+    }
+    try {
+      await channel.send.send(message.chatId, { text, replyToMessageId: message.messageId });
+    } catch (err) {
+      // Where the platform cannot quote, the answer goes again in place.
+      if (!isSendRefused(err) || err.reason !== "reply_unaddressable") throw err;
+      await channel.send.send(message.chatId, { text });
+    }
   }
 }
 

@@ -2,8 +2,13 @@ import "dotenv/config";
 import { eq, like } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import {
+  chatMessages,
+  romeAgentMessages,
+  romeAgentTraceBlocks,
+  romeSessions,
+} from "../db/schema.js";
 
 const DEMO_PREFIX = "demo:sessions:";
 
@@ -52,7 +57,7 @@ const profiles = [
 
 await runMigrations();
 const db = getDb();
-const repo = new WebChatRepository(db);
+const repo = new ChatsWebChatRepository(db);
 
 const existing = await db
   .select({ id: romeSessions.id })
@@ -115,7 +120,9 @@ for (let index = 0; index < 32; index += 1) {
   });
   await db
     .update(romeSessions)
-    .set({ createdAt: new Date(activityAt.getTime() - 45 * 60_000), activityAt })
+    // Before the first run: a chat's session reads only what was said after it
+    // started there.
+    .set({ createdAt: new Date(activityAt.getTime() - 3 * 36e5), activityAt })
     .where(eq(romeSessions.id, id));
 
   const runs = 1 + ((index * 7) % 5);
@@ -179,36 +186,43 @@ for (let index = 0; index < 32; index += 1) {
       },
     ]);
     if (runIndex === 0) {
-      await db.insert(romeAgentMessages).values([
+      // Through the repository, so a chat's prompt and answer are said in it
+      // and linked to the turn, then dated around the run.
+      const said = [
         {
-          id: `${id}:user:${runIndex + 1}`,
-          sessionId: id,
-          turnId: `${id}:turn:${runIndex + 1}`,
+          key: `${id}:user:${runIndex + 1}`,
           role: "user",
-          content: JSON.stringify([
-            {
-              type: "text",
-              content: "Review the latest state and summarize what needs attention.",
-            },
-          ]),
-          createdAt: new Date(createdAt.getTime() - 1_000),
+          text: "Review the latest state and summarize what needs attention.",
+          at: new Date(createdAt.getTime() - 1_000),
         },
         {
-          id: `${id}:assistant:${runIndex + 1}`,
-          sessionId: id,
-          turnId: `${id}:turn:${runIndex + 1}`,
+          key: `${id}:assistant:${runIndex + 1}`,
           role: "assistant",
-          content: JSON.stringify([
-            {
-              type: "text",
-              content: "I reviewed the latest state and recorded the result for this demo run.",
-            },
-          ]),
-          createdAt: new Date(createdAt.getTime() + 1_000),
+          text: "I reviewed the latest state and recorded the result for this demo run.",
+          at: new Date(createdAt.getTime() + 1_000),
         },
-      ]);
+      ];
+      for (const message of said) {
+        await repo.addMessage(
+          message.key,
+          id,
+          message.role,
+          JSON.stringify([{ type: "text", content: message.text }]),
+          turnId,
+        );
+        await db
+          .update(chatMessages)
+          .set({ saidAt: message.at })
+          .where(eq(chatMessages.key, message.key));
+        await db
+          .update(romeAgentMessages)
+          .set({ createdAt: message.at })
+          .where(eq(romeAgentMessages.id, message.key));
+      }
     }
   }
+  // Writing a message moves the session's activity to now; put it back.
+  await db.update(romeSessions).set({ activityAt }).where(eq(romeSessions.id, id));
 }
 
 console.log(

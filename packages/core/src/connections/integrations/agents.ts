@@ -13,7 +13,7 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import { type ChannelMessage, type ChatId, ChannelSendRefused } from "@rome-os/app-runtime";
+import { type ChannelMessage, type ChatId, SendRefused } from "@rome-os/app-runtime";
 import { messageAsText, refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
 import {
@@ -256,7 +256,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       // Cloud carries text and data only. Refusing here keeps a partial send
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
-        throw new ChannelSendRefused(
+        throw new SendRefused(
           "attachment_unsupported",
           "Agent messages carry text only; send the files another way.",
         );
@@ -266,7 +266,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
       const text = messageAsText(msg);
-      if (!text.trim()) throw new ChannelSendRefused("empty", "An agent message needs text.");
+      if (!text.trim()) throw new SendRefused("empty", "An agent message needs text.");
       try {
         const sent = await client.send({
           to: chatId,

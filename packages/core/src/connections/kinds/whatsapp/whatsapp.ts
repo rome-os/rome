@@ -32,6 +32,7 @@ import { createLogger } from "../../../logger.js";
 import {
   ALL_ATTACHMENT_TYPES,
   attachmentsToSend,
+  refuseReplies,
   textToSend,
 } from "../../outbound/send-refusals.js";
 
@@ -423,6 +424,7 @@ export class WhatsAppAdapter {
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
+    refuseReplies("whatsapp", message);
     const text = textToSend("whatsapp", message);
     const attachments = await attachmentsToSend("whatsapp", message, {
       types: ALL_ATTACHMENT_TYPES,

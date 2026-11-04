@@ -9,11 +9,13 @@ import type {
   PersonRecord,
   RunParams,
 } from "@rome-os/app-runtime";
+import { ActionInvocationError } from "@rome-os/app-runtime";
 import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
+  sendAnswer,
 } from "./index.js";
 
 const STRANGER_PERSON_ID = "__STRANGER__";
@@ -1324,5 +1326,42 @@ describe("a message the host recorded", () => {
     expect(agentRunner.calls).toEqual([]);
     expect(conversations.addMessage).not.toHaveBeenCalled();
     expect(conversations.promoteMessageToUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendAnswer", () => {
+  it("sends the answer again without its quote when the platform cannot quote", async () => {
+    const runAction = rs
+      .fn()
+      .mockRejectedValueOnce(
+        new ActionInvocationError(
+          "send_message",
+          "handler_error",
+          "no quote",
+          "reply_unaddressable",
+        ),
+      )
+      .mockResolvedValueOnce({ status: "ok" });
+
+    await sendAnswer({ appContext: { runAction } } as never, {
+      text: "hi",
+      replyToMessageId: "m-1",
+    });
+
+    expect(runAction).toHaveBeenNthCalledWith(1, "send_message", {
+      text: "hi",
+      replyToMessageId: "m-1",
+    });
+    expect(runAction).toHaveBeenNthCalledWith(2, "send_message", { text: "hi" });
+  });
+
+  it("lets any other failure through", async () => {
+    const failure = new ActionInvocationError("send_message", "handler_error", "boom");
+    const runAction = rs.fn().mockRejectedValue(failure);
+
+    await expect(
+      sendAnswer({ appContext: { runAction } } as never, { text: "hi", replyToMessageId: "m-1" }),
+    ).rejects.toBe(failure);
+    expect(runAction).toHaveBeenCalledTimes(1);
   });
 });

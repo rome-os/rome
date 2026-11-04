@@ -6,7 +6,6 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -22,6 +21,7 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("AgentSessionManager textPrivate", () => {
   let directory: string;
@@ -82,7 +82,7 @@ describe("AgentSessionManager textPrivate", () => {
         agentLoader: loader,
         sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
         sessionsRepo,
-        webchatRepo: new WebChatRepository(testDb.db),
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),

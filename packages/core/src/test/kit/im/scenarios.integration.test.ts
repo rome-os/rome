@@ -30,9 +30,10 @@ const TODAY: Record<
   }
 > = {
   telegram: { linksReply: true, longText: "message is too long", streams: true },
-  // In a DM the adapter sends a plain message; it threads replies only in guild channels.
-  discord: { linksReply: false, longText: [2000, 2000, 1000], streams: true },
-  // iLink has no reply reference, and documents no length limit for the peer to model.
+  // Discord quotes the message natively where no thread is opened on it, as in a DM.
+  discord: { linksReply: true, longText: [2000, 2000, 1000], streams: true },
+  // iLink has no reply reference, so a reply is refused, and it documents no
+  // length limit for the peer to model.
   wechat: { linksReply: false, longText: null, streams: false },
 };
 
@@ -77,9 +78,16 @@ describe.each(platforms)("%s", (platform) => {
     const channel = open();
     return runScenario(task, channel, async ({ step }) => {
       const inbound = await step("The user writes", () => channel.receive("hello"));
-      const receipt = await step("Rome answers", () =>
-        channel.send({ text: "hi there", replyToMessageId: inbound.messageId }),
-      );
+      const quoted = () => channel.send({ text: "hi there", replyToMessageId: inbound.messageId });
+      const receipt = TODAY[platform].linksReply
+        ? await step("Rome answers", quoted)
+        : await step("Rome answers without the quote the platform refuses", async () => {
+            await expect(quoted()).rejects.toMatchObject({
+              name: "ChannelSendRefused",
+              reason: "reply_unaddressable",
+            });
+            return channel.send({ text: "hi there" });
+          });
 
       await step("The user sees the answer after their message", () => {
         const [first, second, ...rest] = channel.peer.visible(channel.conversation);

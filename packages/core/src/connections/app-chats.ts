@@ -12,12 +12,7 @@
 // Nothing wires this to apps yet: the Chats switch does, once chats are
 // named by Chats' ids.
 
-import {
-  type Account,
-  type Channel,
-  type ChatId,
-  isChannelSendRefused,
-} from "@rome-os/app-runtime";
+import { type Account, type Channel, type ChatId, isSendRefused } from "@rome-os/app-runtime";
 import {
   type ChatMessage,
   type ChatRef as SdkChatRef,
@@ -167,7 +162,7 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
     return await deliver();
   } catch (error) {
     if (error instanceof SendError) throw error;
-    if (isChannelSendRefused(error)) throw new SendError("unsupported", error.message);
+    if (isSendRefused(error)) throw new SendError("unsupported", error.message);
     if (
       error instanceof ChannelNotConnected ||
       (error instanceof DeliveryFailure && error.kind === "unauthorized")

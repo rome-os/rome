@@ -428,9 +428,9 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   }
 
   private legacySourceSessions(): SourceSession[] {
-    // A guardian chat is stored either as a webchat row or as a webchat
-    // channel row addressed by its own id. Same rule as `isWebchatChat` in
-    // packages/core/src/db/session-kind.ts; keep the two in step.
+    // A host that offers no chat reads keeps no dashboard chats in Chats, so
+    // a guardian chat is told by the columns such a host writes: a webchat
+    // row, or a webchat channel row addressed by its own id.
     const rows = this.ctx.db.connection.all(sql`
       SELECT
         ws.id,
