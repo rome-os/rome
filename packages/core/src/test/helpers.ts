@@ -749,6 +749,8 @@ export async function buildTestDeps(
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    chats: webchatRepo,
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,

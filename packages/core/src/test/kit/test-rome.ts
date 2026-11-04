@@ -33,6 +33,8 @@ import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
 import { ApprovalHandler } from "../../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../../actions/backend-turn.js";
+import { chatsWiring } from "../../chats-wiring.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
 import { SessionManager } from "../../core/session-manager.js";
@@ -309,9 +311,23 @@ async function buildHarness(
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 
+  // Chats as production wires it, so a continuation's reply is said through
+  // its session's speaker. Each test channel is its own platform, and Rome's
+  // account on it is named like it.
+  const chatsWired = chatsWiring(db, {
+    accountOf: (channel) => ({ platform: channel, id: channel }),
+    platformOfChannel: (channel) => channel,
+    channelsOn: (platform) => [platform],
+  });
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    chats: new ChatsWebChatRepository(db, {
+      chats: chatsWired.chats,
+      lines: chatsWired.messages,
+      links: chatsWired.links,
+    }),
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,

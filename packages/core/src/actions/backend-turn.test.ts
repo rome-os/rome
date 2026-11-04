@@ -1,84 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChatId, ChatRepository } from "@rome-os/app-runtime";
+import type { ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
-import { chatKey, placeIn } from "../chats/place.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 describe("backend turn delivery", () => {
-  it("records the provider delivery id for a messaging-channel continuation", async () => {
-    const agentRunner = createMockAgentRunner([
-      [
-        {
-          type: "turn_start",
-          turnId: "turn-1",
-          sessionId: "agent-session-1",
-          userPrompt: "Time's up",
-        },
-        { type: "result", content: "The deferred check is complete." },
-      ],
-    ]);
-    const send = rs.fn(async (chatId) => ({
-      messageId: "wechat-message-1",
-      chatId,
-    }));
-    const wechat: Channel = {
-      name: "wechat",
-      send: { send, direct: null, activity: null },
-      inbound: null,
-      accounts: null,
-      messages: null,
-      directory: null,
-    };
-    const ensureChannelChat = rs.fn(async () => ({
-      id: "channel:wechat:wechat-thread-1",
-      agentName: null,
-    }));
-    const chats = { ensureChannelChat } as unknown as ChatRepository;
-    const recordSent = rs.fn(async () => {});
-    const place = placeIn(chatKey("wechat", "wechat-thread-1" as ChatId));
-    const runner = createBackendTurnRunner({
-      agentRunner,
-      channel: (name) => (name === "wechat" ? wechat : null),
-      chats,
-      messages: { recordSent },
-      places: {
-        placeOfRecord: (id) =>
-          id === "channel:wechat:wechat-thread-1" ? { place, channel: "wechat" } : null,
-      },
-    });
-
-    await runner.runAndDeliver({
-      agentName: "main",
-      sessionId: "agent-session-1",
-      channel: "wechat",
-      threadId: "wechat-thread-1",
-      channelUserId: "wechat-user-1",
-      prompt: "⏰ Time's up: check deployment",
-    });
-
-    expect(send).toHaveBeenCalledWith("wechat-thread-1", {
-      text: "The deferred check is complete.",
-      turnId: "turn-1",
-    });
-    expect(ensureChannelChat).toHaveBeenCalledWith({
-      channel: "wechat",
-      threadId: "wechat-thread-1",
-      agentName: "main",
-    });
-    expect(recordSent).toHaveBeenCalledWith(
-      {
-        direction: "fromRome",
-        place,
-        parts: [{ type: "text", content: "The deferred check is complete." }],
-        platformMessageId: "wechat-message-1",
-        turnId: "turn-1",
-        turnAnswer: true,
-      },
-      { channel: "wechat" },
-    );
-  });
   it("delivers a webchat continuation on the send port after showing it on the session stream", async () => {
     const agentRunner = createMockAgentRunner([
       [
@@ -344,13 +271,11 @@ describe("backend turn delivery", () => {
           landedIn: null,
         })),
       };
-      const recordSent = rs.fn(async () => {});
       const runner = createBackendTurnRunner({
         agentRunner: answered(),
         channel: (name) => (name === "wechat" ? wechat : null),
         chats,
         replies,
-        messages: { recordSent },
       });
 
       await runner.runAndDeliver(params);
@@ -363,7 +288,19 @@ describe("backend turn delivery", () => {
       );
       // The speaker's adapter sends it, not the runner.
       expect(send).not.toHaveBeenCalled();
-      expect(recordSent).not.toHaveBeenCalled();
+    });
+
+    it("refuses a reply no speaker can say, and sends nothing", async () => {
+      const send = rs.fn<Send>(async (chatId) => ({ chatId }));
+      const runner = createBackendTurnRunner({
+        agentRunner: answered(),
+        channel: () => wechatWith(send),
+      });
+
+      await expect(runner.runAndDeliver(params)).rejects.toThrow(
+        'No speaker can say a reply on "wechat", so it was not sent',
+      );
+      expect(send).not.toHaveBeenCalled();
     });
 
     it("keeps the turn's trace but leaves its answer for the speaker to record", async () => {
